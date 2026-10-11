@@ -14,10 +14,13 @@ REPORT_KINDS = ('stock', 'accumulation', 'market', 'follow_up')
 
 def generate_daily_social_reports(job_run_id, steps, trigger='scheduled', dry_run=False, opener=None, client=None):
     date = datetime.now(ZoneInfo('Africa/Cairo'))
+    from api.price_sync_policy import price_sync_usable
     latest = {s.get('step'): s.get('status') for s in steps}
+    sync_step = [s for s in steps if s.get('step') == 'sync_prices' and s.get('status') != 'started']
+    prices_usable = price_sync_usable(sync_step[-1]) if sync_step else False
     if dry_run or trigger != 'scheduled' or date.weekday() in (4, 5):
         return {'skipped': True, 'reason': 'Not a scheduled trading-day run'}
-    if any(latest.get(s) != 'success' for s in ('sync_prices', 'calculate_indicators')):
+    if not prices_usable or latest.get('calculate_indicators') != 'success':
         return {'skipped': True, 'reason': 'Essential data steps failed'}
     origin = (os.getenv('WEB_ORIGIN') or 'https://egxbots.com').rstrip('/')
     secret = os.getenv('REVALIDATE_SECRET') or os.getenv('ADMIN_SECRET_KEY')

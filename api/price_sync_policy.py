@@ -43,3 +43,26 @@ def sync_with_retries(fetch, symbol, *, max_retries, retry_delay, sleep, **kwarg
         if attempt < retries:
             sleep(delay)
     return False, f'Failed after {retries + 1} attempts. Last error: {last_error}'
+
+
+def price_sync_usable(step, min_coverage=None):
+    """True when prices are complete, or a provider gap leaves enough symbols.
+
+    A handful of EGX symbols (illiquid/suspended) routinely get no bar from the
+    provider. Dependent stages work on the symbols that do have fresh prices,
+    so a small gap must not be treated as a failed day. Never invents prices.
+    """
+    import re
+    step = step or {}
+    if step.get('status') == 'success':
+        return True
+    if min_coverage is None:
+        try:
+            min_coverage = float(os.getenv('PRICE_SYNC_MIN_COVERAGE', '0.8'))
+        except (TypeError, ValueError):
+            min_coverage = 0.8
+    match = re.search(r'Synced\s+(\d+)\s*/\s*(\d+)', str(step.get('details') or ''))
+    if not match:
+        return False
+    done, total = int(match.group(1)), int(match.group(2))
+    return total > 0 and done / total >= min_coverage

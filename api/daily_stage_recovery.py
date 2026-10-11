@@ -40,7 +40,10 @@ def plan_recovery(steps, phase):
               if s.get('status') in {'failed', 'started'} and name in allowed}
     # Refresh derived data after repairing incomplete prices; otherwise old
     # indicators can be tagged as fresh alongside the repaired price snapshot.
-    if 'sync_prices' in failed:
+    from api.price_sync_policy import price_sync_usable
+    # A small provider gap leaves dependents valid; only cascade when prices
+    # were unusable, otherwise successful stages would be falsely re-failed.
+    if 'sync_prices' in failed and not price_sync_usable(latest.get('sync_prices')):
         failed.update({'calculate_indicators', 'ml_scores_update', 'precompute_heatmap',
                        'refresh_market_status_for_gate', 'short_swings_daily'} & allowed)
         if phase == 'close':
@@ -210,7 +213,8 @@ def retry_failed_daily_stages(now):
                                            'attempts':0,'execution_started':False}, claim)
             raise
         # Market-data consumers must not run over a still-incomplete price sync or indicator calculation.
-        if name in REQUIRES_PRICES and latest.get('sync_prices', {}).get('status') != 'success':
+        from api.price_sync_policy import price_sync_usable
+        if name in REQUIRES_PRICES and not price_sync_usable(latest.get('sync_prices')):
             result = {'success': False, 'details': 'Price sync incomplete; dependent recovery withheld', 'count': 0}
         elif name in REQUIRES_INDICATORS and latest.get('calculate_indicators', {}).get('status') != 'success':
             result = {'success': False, 'details': 'Indicators incomplete; dependent recovery withheld', 'count': 0}
@@ -221,7 +225,10 @@ def retry_failed_daily_stages(now):
                 result = {'success': False, 'details': str(error)[:400], 'count': 0}
         status = 'success' if result.get('success') else 'failed'
         append_step(client, job, {'step': name, 'status': status, **{k: v for k, v in result.items() if k != 'success'}})
-        latest[name] = {'status': status}
+        if not (name == 'sync_prices' and status != 'success'):
+            # A failed one-symbol-subset recovery must not erase the original
+            # coverage figure that dependents are gated on.
+            latest[name] = {'status': status, 'details': result.get('details'), 'count': result.get('count')}
         if status == 'success':
             changed.append(name)
         replace_checkpoint(client, key, {'status': status, 'attempts': 1, 'stage': name, 'phase': phase}, claim)

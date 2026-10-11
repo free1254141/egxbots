@@ -3290,7 +3290,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 _record_step("short_swings_daily", False, str(error)[:200], 0)
             from api.cache_invalidation import invalidate_daily_cache
             invalidate_daily_cache(steps_log)
-            essential_ok = all(step.get("status") == "success" for step in steps_log
+            from api.price_sync_policy import price_sync_usable
+            essential_ok = all((price_sync_usable(step) if step.get("step") == "sync_prices" else step.get("status") == "success")
+                               for step in steps_log
                                if step.get("step") in {"sync_prices", "calculate_indicators"} and step.get("status") != "started")
             status = "completed" if essential_ok else "failed"
             _persist_job(status)
