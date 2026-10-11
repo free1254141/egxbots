@@ -1,4 +1,4 @@
-import { buildUserAnalytics, buildUserUsage } from "../../admin/user-analytics";
+import { buildDailyActiveUsage, buildUserAnalytics, buildUserUsage } from "../../admin/user-analytics";
 
 describe("admin user analytics", () => {
   const now = new Date("2026-09-23T12:00:00.000Z");
@@ -70,5 +70,51 @@ describe("admin user analytics", () => {
     expect(result.activeUsers30DaysRate).toBe(60);
     expect(result.activeUsers7DaysRate).toBe(40);
     expect(result.dauRate).toBe(20);
+  });
+
+  it("deduplicates daily usage across pages and chat and separates signup-day activity", () => {
+    const input = {
+      now: new Date("2026-10-11T19:00:00Z"),
+      profiles: [
+        { id: "new", created_at: "2026-10-10T21:01:00Z" },
+        { id: "old", created_at: "2026-10-10T20:59:00Z" },
+        { id: "registered-only", created_at: "2026-10-11T10:00:00Z" },
+        { id: "admin", created_at: "2026-09-01T00:00:00Z" },
+      ],
+      excludeUserIds: new Set(["admin"]),
+      events: [
+        { user_id: "new", event_name: "page_view", created_at: "2026-10-10T21:05:00Z" },
+        { user_id: "new", event_name: "page_view", created_at: "2026-10-11T10:00:00Z" },
+        { user_id: "old", event_name: "page_view", created_at: "2026-10-10T20:59:30Z" },
+        { user_id: "admin", event_name: "page_view", created_at: "2026-10-11T10:00:00Z" },
+        { user_id: "orphan", event_name: "page_view", created_at: "2026-10-11T10:00:00Z" },
+        { user_id: "registered-only", event_name: "login", created_at: "2026-10-11T10:00:00Z" },
+        { user_id: "old", event_name: "page_view", created_at: "2026-10-12T10:00:00Z" },
+      ],
+      chatMessages: [
+        { user_id: "new", role: "user", created_at: "2026-10-11T11:00:00Z" },
+        { user_id: "old", role: "user", created_at: "2026-10-11T11:00:00Z" },
+        { user_id: "registered-only", role: "assistant", created_at: "2026-10-11T11:00:00Z" },
+      ],
+    };
+    const rows = buildDailyActiveUsage(input);
+    expect(rows).toHaveLength(90);
+    expect(rows[0].fullDate).toBe("2026-07-14");
+    expect(rows.at(-1)).toMatchObject({ fullDate: "2026-10-11", activeUsers: 2, newActiveUsers: 1, returningActiveUsers: 1, unknownSignupUsers: 0 });
+    expect(rows.at(-2)).toMatchObject({ fullDate: "2026-10-10", activeUsers: 1, newActiveUsers: 1, returningActiveUsers: 0 });
+    expect(rows.at(-3)?.activeUsers).toBe(0);
+    const result = buildUserAnalytics({ ...input, subscriptions: [] });
+    expect(result.dau).toBe(2);
+    expect(result.activeUsers7Days).toBe(2);
+    expect(result.dailyActiveUsage).toEqual(rows);
+  });
+
+  it("uses Cairo winter midnight and does not guess an unavailable signup date", () => {
+    const rows = buildDailyActiveUsage({
+      now: new Date("2026-12-01T22:30:00Z"),
+      profiles: [{ id: "u1", created_at: "2026-12-01T22:05:00Z" }, { id: "unknown" }],
+      events: [{ user_id: "u1", created_at: "2026-12-01T22:10:00Z" }, { user_id: "unknown", created_at: "2026-12-01T22:10:00Z" }],
+    });
+    expect(rows.at(-1)).toMatchObject({ fullDate: "2026-12-02", activeUsers: 2, newActiveUsers: 1, returningActiveUsers: 0, unknownSignupUsers: 1 });
   });
 });

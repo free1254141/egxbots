@@ -253,6 +253,7 @@ export async function GET(req: NextRequest) {
       plans: planMap,
       botServices: serviceMap,
       signupGrowth: growthTimeline,
+      dailyActiveUsage: analytics.dailyActiveUsage,
       activeProUsers: analytics.activeProUsers,
       activeUsers30Days: analytics.activeUsers30Days,
       activeUsers7Days: analytics.activeUsers7Days,

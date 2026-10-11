@@ -9,6 +9,14 @@ export type AnalyticsEvent = {
 export type AnalyticsChatMessage = { user_id: string; role?: string | null; created_at?: string | null };
 export type AnalyticsChatSession = { id: string; user_id: string; created_at?: string | null; updated_at?: string | null };
 export type TopPage = { path: string; views: number; users: number };
+export type DailyActiveUsage = {
+  date: string;
+  fullDate: string;
+  activeUsers: number;
+  newActiveUsers: number;
+  returningActiveUsers: number;
+  unknownSignupUsers: number;
+};
 
 export type PaymentOrderRow = {
   user_id: string;
@@ -87,6 +95,60 @@ function percentOfTotal(count: number, total: number): number {
   return total ? Math.round((count / total) * 1000) / 10 : 0;
 }
 
+export function buildDailyActiveUsage(input: {
+  profiles: AnalyticsProfile[];
+  events?: AnalyticsEvent[];
+  chatMessages?: AnalyticsChatMessage[];
+  excludeUserIds?: Set<string>;
+  now: Date;
+}): DailyActiveUsage[] {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const dayKey = (time: number) => {
+    const parts = Object.fromEntries(formatter.formatToParts(time).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  const signupDays = new Map(input.profiles.map((profile) => [
+    String(profile.id), validDate(profile.created_at) ? dayKey(validDate(profile.created_at)) : null,
+  ]));
+  const today = dayKey(input.now.getTime());
+  const calendarDay = new Date(`${today}T12:00:00Z`);
+  const dailyUsers = new Map<string, Set<string>>();
+  // The existing route loads 90 days of activity; don't portray older history as zero.
+  for (let offset = 89; offset >= 0; offset -= 1) {
+    const date = new Date(calendarDay);
+    date.setUTCDate(date.getUTCDate() - offset);
+    dailyUsers.set(date.toISOString().slice(0, 10), new Set());
+  }
+  const addActivity = (userId: string, createdAt?: string | null) => {
+    const time = validDate(createdAt);
+    if (!signupDays.has(userId) || input.excludeUserIds?.has(userId) || !time || time > input.now.getTime()) return;
+    const date = dayKey(time);
+    const signupDay = signupDays.get(userId);
+    if (signupDay && signupDay > date) return;
+    dailyUsers.get(date)?.add(userId);
+  };
+  for (const event of input.events || []) {
+    if (!event.event_name || event.event_name === "page_view") addActivity(String(event.user_id || ""), event.created_at);
+  }
+  for (const message of input.chatMessages || []) {
+    if (!message.role || message.role === "user") addActivity(String(message.user_id || ""), message.created_at);
+  }
+  return [...dailyUsers].map(([fullDate, users]) => {
+    let newActiveUsers = 0;
+    let returningActiveUsers = 0;
+    let unknownSignupUsers = 0;
+    for (const id of users) {
+      const signupDay = signupDays.get(id);
+      if (!signupDay) unknownSignupUsers += 1;
+      else if (signupDay === fullDate) newActiveUsers += 1;
+      else returningActiveUsers += 1;
+    }
+    return { date: fullDate.slice(5), fullDate, activeUsers: users.size, newActiveUsers, returningActiveUsers, unknownSignupUsers };
+  });
+}
+
 export function buildUserAnalytics(input: {
   profiles: AnalyticsProfile[];
   totalProfileCount?: number;
@@ -117,7 +179,7 @@ export function buildUserAnalytics(input: {
   const userChatMessages = (input.chatMessages || []).filter((message) => !message.role || message.role === "user");
   const isCurrentActivity = (userId: string, createdAt?: string | null, since = 0) => {
     const time = validDate(createdAt);
-    return profileIds.has(userId) && time > 0 && time >= since && time <= now.getTime();
+    return profileIds.has(userId) && !excludedIds.has(userId) && time > 0 && time >= since && time <= now.getTime();
   };
   const pageUsers30 = unique(pageEvents.filter((event) => isCurrentActivity(String(event.user_id || ""), event.created_at, thirtyDaysAgo)).map((event) => String(event.user_id)));
   const chatUsers30 = unique(userChatMessages.filter((message) => isCurrentActivity(String(message.user_id || ""), message.created_at, thirtyDaysAgo)).map((message) => String(message.user_id)));
@@ -225,6 +287,7 @@ export function buildUserAnalytics(input: {
     .slice(0, 8);
 
   return {
+    dailyActiveUsage: buildDailyActiveUsage({ profiles, events: input.events, chatMessages: input.chatMessages, excludeUserIds: excludedIds, now }),
     activeProUsers: activeProIds.size,
     activeUsers30Days: activeUsers30.size,
     activeUsers7Days: activeUsers7.size,

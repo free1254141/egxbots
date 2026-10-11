@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import DailyUsageChart from "./DailyUsageChart";
+import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
 interface UserRow {
     id: string;
@@ -100,6 +102,7 @@ interface UserStats {
         recommendationsCount?: number;
         egx30?: number | null;
     }[];
+    dailyActiveUsage: DailyActiveUsage[];
     totalRecommendations?: number;
     currentEgx30?: number | null;
     activeProUsers: number;
@@ -591,6 +594,13 @@ export default function UsersTab() {
                         </div>
                     )}
                 </div>
+
+                <DailyUsageChart
+                    data={stats?.dailyActiveUsage || []}
+                    isAr={isAr}
+                    loading={statsLoading}
+                    complete={stats?.engagementDataComplete ?? true}
+                />
 
                 {/* Revenue & Payments + Activity & Engagement */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
