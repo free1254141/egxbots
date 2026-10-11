@@ -38,7 +38,7 @@ def resume_daily_social_reports(client, job_id):
         if payload.get('stage') is None and not any(
                 s.get('step') == 'cache_revalidation' for s in raw if isinstance(s, dict)):
             return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
-        reports = (client.table('daily_social_reports').select('id').eq('job_run_id', job_id)
+        reports = (client.table('daily_social_reports').select('session_date,kind').eq('job_run_id', job_id)
                    .limit(1).execute())
         if reports.data:
             return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
