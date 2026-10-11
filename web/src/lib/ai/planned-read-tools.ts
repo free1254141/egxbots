@@ -41,7 +41,7 @@ export async function executePlannedReadTool(name:string,args:any,db:any,today:s
   const peers=rows.filter((r:any)=>r.symbol!==symbol && r.data?.[basis]===target.data[basis] && r.data?.isListed!==false);
   return {status:'success',availability:'partial',symbol,classification_basis:basis,classification:target.data[basis],
    stocks:[{...fundamental(target,today),role:'target'},...peers.slice(0,max).map((r:any)=>({...fundamental(r,today),role:'peer'}))],
-   peers_found_in_snapshot:peers.length,displayed_peers:Math.min(peers.length,max),scan_complete:rows.length<501,
+   requested_peers:max,peers_found_in_snapshot:peers.length,displayed_peers:Math.min(peers.length,max),scan_complete:rows.length<501,
    limitations:['نظراء التصنيف المخزن وليسوا قائمة شراء أو ترتيب قيمة عادلة.','التغطية والتواريخ تخص المصدر المخزن؛ التصنيف القطاعي العام قد يجمع صناعات مختلفة.']};
  }
  if(name==='get_market_breadth') {
@@ -73,6 +73,7 @@ export function renderPlannedReadEvidence(name:string,data:any):string|null {
  return ['بيانات أساسية من اللقطة المخزنة، وليست تقييماً حديثاً أو قائمة شراء:',
   '| السهم | مضاعف الربحية | ربحية السهم | القيمة السوقية للشركة | تاريخ تحديث اللقطة | الصناعة |','|---|---:|---:|---:|---|---|',
   ...data.stocks.map((r:any)=>`| ${r.symbol} | ${show(r.pe_ratio)} | ${show(r.eps)} | ${show(r.market_cap)} | ${r.date||'غير متاح'} | ${r.industry||'غير متاح'} |`),
+  ...(name==='get_sector_peers'?[`عدد النظراء المعروض ${data.displayed_peers}؛ الأصل يضاف منفصلاً. التصنيف ${data.classification_basis==='industry'?'صناعة':'قطاع'}: ${data.classification||'غير متاح'}.`,...(data.displayed_peers < (data.requested_peers||0)?['المصدر لا يحتوي العدد المطلوب من النظراء ضمن التصنيف؛ لم نضف شركات من صناعة مختلفة.']:[])]:[]),
   'القيم النقدية بالجنيه. تاريخ تحديث السجل ليس فترة القوائم المالية؛ مضاعف الدفترية ونمو الإيرادات غير متاحين. اللقطات القديمة لا تصلح وحدها لتقييم اليوم.',
   ...(data.limitations||[])].join('\n');
 }

@@ -14,7 +14,7 @@ export interface AgenticEvidence {
     data_time: string | null;
     symbols: string[];
     availability: "available" | "missing" | "partial" | "error";
-    data_type: "historical" | "image-derived";
+    data_type: "historical" | "image-derived" | "provider-snapshot";
     captured_at?: string;
 }
 
@@ -80,7 +80,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
     const plannedPartial = ["get_fundamentals","get_sector_peers","get_market_breadth"].includes(tool) && data?.availability === "partial";
     const verifiedEmptyScreen = tool === "screen_stocks" && data?.status === "success" && Boolean(data.date)
         && Array.isArray(data.stocks) && typeof data.scan_complete === "boolean";
-    return { tool, arguments: args, data, source: tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
+    return { tool, arguments: args, data, source: tool === "get_live_quote" ? (rows.every(r=>r.live_quote_available) ? "tradingview:provider-snapshot" : rows.some(r=>r.live_quote_available) ? "mixed:tradingview+supabase" : "supabase:stored-fallback") : tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
         apply_chart_strategy: "stock_prices+deterministic-strategy-engine", compare_strategies_history: "stock_prices+deterministic-backtest", list_chart_strategies: "strategy-catalog",
         calculate_position: "stock_prices+stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_prices+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
         get_recommendations: "scan_results+stock_technical_indicators", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
@@ -90,7 +90,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         data_time: dates.length === 1 ? dates[0] : data?.date || data?.session_date || null, symbols,
         availability: data?.status === "error" ? "error" : data?.availability === "missing" || (!verifiedEmptyScreen && !rows.length && !data?.egx30?.close && !data?.persisted && !data?.strategies?.length)
             ? "missing" : plannedPartial || missing || data?.valuation_complete === false || data?.scan_complete === false
-                || data?.sector_concentration_complete === false || data?.industry_concentration_complete === false || data?.truncated ? "partial" : "available", data_type: "historical" };
+                || data?.sector_concentration_complete === false || data?.industry_concentration_complete === false || data?.truncated ? "partial" : "available", data_type: tool === "get_live_quote" ? "provider-snapshot" : "historical" };
 }
 
 export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
@@ -172,6 +172,10 @@ function cleanCellText(text: string): string {
 /** Metric labels describe generated evidence, never user intent routing. */
 function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     const text = label.replace(/[*_]/g, "");
+    // Specific financial labels take precedence over generic profit/currency words.
+    if (/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i.test(text)) return ["pe_ratio"];
+    if (/ربحية.*سهم|EPS/i.test(text)) return ["eps"];
+    if (/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i.test(text)) return ["market_cap"];
     if (/ربح|خسار/i.test(text) && /%|٪|نسب/i.test(text)) return ["profit_pct"];
     if (/ربح|خسار/i.test(text) && /جنيه|بالجنيه/i.test(text)) return ["profit_value"];
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
@@ -486,16 +490,36 @@ export function checkUserPositionInputs(reply: string, request: string): string[
 }
 
 /** This validates output evidence/protocol only. It never routes user intent. */
-export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], request = ""): string[] {
+export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], request = "", currentEvidence?: AgenticEvidence[]): string[] {
     const reasons: string[] = [];
+    // Check claims about execution, not user intent. Earlier evidence cannot prove a new fetch.
+    if (currentEvidence && !currentEvidence.some(e => e.availability !== "error" && e.availability !== "missing")) {
+        for (const line of reply.split(/\n/)) if (/أعدت\s+(?:قراءة|جلب|التحقق)|(?:جلبت|حدّثت)\s+(?:بيانات|اتساع|سعر)|(?:راجعت|تأكدت)\s+من\s+(?:البيانات|المصدر)/.test(line)
+            && !/لم\s+|دون\s+جلب|بدون\s+جلب|السابقة|السابق/.test(line)) reasons.push("claimed_refresh_without_current_tool");
+    }
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
     const deadEndOnly = substantive.replace(/[\s.!؟،,:;؛*_`-]+/g, " ").trim();
     if (/^(?:غير مكتمل|مسودة ناقصة|رد بعيد عن السؤال|تعذر التحليل|لم ينجز الطلب|الرد ناقص|الرد غير مكتمل|الإجابة غير مكتملة|المسودة ناقصة|لم أتمكن من إكمال الإجابة|تعذر إكمال الإجابة|لم تكتمل الإجابة|لا أستطيع رؤية الصورة المرفقة)$/.test(deadEndOnly)
         || /لم يكتمل التحقق من إجابة موثوقة/.test(substantive)) reasons.push("response_has_no_substantive_answer");
+    const quoteTimes = (currentEvidence || evidence).filter(e=>e.tool === "get_live_quote")
+        .flatMap(e=>evidenceRows(e.data)).filter(r=>r.live_quote_available && r.fetched_at)
+        .map(r=>new Date(r.fetched_at)).filter(d=>Number.isFinite(d.getTime()))
+        .map(d=>new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo",hour:"2-digit",minute:"2-digit",hour12:false}).format(d));
+    if (quoteTimes.length) for (const raw of reply.split("\n")) {
+        if (!/جلب|retriev|fetch/i.test(raw)) continue;
+        const line=normalizeEvidenceNumbers(raw);
+        const clocks=[...line.matchAll(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(ص|م)?\s*(?:بتوقيت|بالتوقيت|توقيت)?\s*(?:القاهرة|Cairo)/gi),
+            ...line.matchAll(/(?:القاهرة|Cairo)\s*[:：،,)]?\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*(ص|م)?/gi)];
+        for (const clock of clocks) {
+            let hour=Number(clock[1]);if(clock[3])hour=hour%12+(clock[3]==="م"?12:0);
+            const value=String(hour).padStart(2,"0")+":"+clock[2];
+            if(!quoteTimes.includes(value))reasons.push("quote_fetch_time_cairo_mismatch");
+        }
+    }
     if (/DSML|<\/?tool_call|<\/?function_call/i.test(reply)) reasons.push("internal_tool_protocol_in_response");
     evidence = evidence.map(compactEvidence);
     const facts = agenticFacts(evidence);
@@ -672,6 +696,13 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     let tableColSymbols: Array<string | null> = [];
     let isComparisonTable = false;
     let headers: string[] = [];
+    let marketSection = false;
+    const companyFields = (fields: FactRecord["field"][] | undefined, symbol: string) =>
+        fields?.length === 1 && fields[0] === "market_value"
+        && evidence.some(e => ["get_fundamentals","get_sector_peers"].includes(e.tool) && e.symbols.includes(symbol))
+        && facts.some(f => f.symbol === symbol && f.field === "market_cap")
+        && !facts.some(f => f.symbol === symbol && f.field === "market_value")
+            ? ["market_cap" as const] : fields;
 
     const matchesFact = (val: number, targetFacts: FactRecord[], precision?: number): boolean => {
         const candidateFacts = targetFacts;
@@ -693,11 +724,13 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         const lineSymbol = lineSymbols.length === 1 ? lineSymbols[0] : null;
         if (lineSymbol) {
             currentSymbol = lineSymbol;
+            marketSection = lineSymbol === "EGX";
         } else if (lineSymbols.length > 1) {
             currentSymbol = null;
         }
 
         if (!line.startsWith("|")) {
+            if (/اتساع|breadth/i.test(line) && evidence.some(e=>e.tool === "get_market_breadth")) marketSection = true;
             inTable = false;
             tableHadStockRow = false;
             tableColSymbols = [];
@@ -746,7 +779,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
                 if (!/\d/.test(cell)) continue;
                 const clean = cleanCellText(cell);
                 const matches = [...clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)];
-                const fields = tableMetricFields(cells[0]);
+                const fields = companyFields(tableMetricFields(cells[0]), colSymbol);
                 const targetFacts = facts.filter(f => f.symbol === colSymbol && (!fields || fields.includes(f.field)));
                 for (const match of matches) {
                     const n = Number(match[0]);
@@ -781,7 +814,12 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
 
         // Breadth metrics belong to the dated market sample, never the last peer row.
-        const breadthFields = tableMetricFields(cells[0]);
+        const marketEvidence = evidence.some(e => e.tool === "get_market_breadth" && e.symbols.includes("EGX"));
+        const marketScope = marketSection || currentSymbol === "EGX" || allSymbols.length === 1 && allSymbols[0] === "EGX";
+        const totalLabel = /إجمالي|مجموع|total/i.test(cells[0]) || /عدد.*(?:الأسهم|العينة)/.test(cells[0]);
+        const breadthFields = marketEvidence && marketScope && totalLabel && !/صاعد|هابط|ثابت/.test(cells[0])
+            ? ["breadth_total" as const] : tableMetricFields(cells[0]);
+        if (marketEvidence && marketSection && lineSymbols.length === 0) symbol = "EGX";
         if (lineSymbols.length === 0 && breadthFields?.some(f => f.startsWith("breadth_"))
             && evidence.some(e => e.tool === "get_market_breadth" && e.symbols.includes("EGX"))) symbol = "EGX";
         const scenarioRow = scenarioTableRow(evidence, cells, lineSymbols, headers);
@@ -824,7 +862,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const distanceColumn = /مساف|الموقع.*(?:إغلاق|اغلاق)|بعد.*(?:إغلاق|اغلاق)/i.test(headers[idx] || "");
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
-            const rowFields = !tableHadStockRow ? tableMetricFields(cells[0]) : undefined;
+            const rowFields = !tableHadStockRow ? (symbol === "EGX" ? breadthFields : tableMetricFields(cells[0])) : undefined;
             const verticalMetricValue = Boolean(rowFields?.length)
                 && (/^(?:السعر|سعر|القيمة|قيمة|price|value)$/i.test(header.replace(/[*_`]/g," ").trim())
                     || (rowFields?.some(f => f.startsWith("breadth_")) && /^(?:العدد|عدد|count)$/i.test(header.trim())));
@@ -920,7 +958,8 @@ export function advisoryTableRowCountConsistency(reply: string): string[] {
     for (let i = 0; i < lines.length; i++) {
         const heading = lines[i].trim();
         if (!heading || heading.startsWith("|")) continue;
-        const cleanHeading = normalizeEvidenceNumbers(heading).replace(/[*_`#]/g, "");
+        const cleanHeading = normalizeEvidenceNumbers(heading).replace(/[*_`#]/g, "")
+            .replace(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\b/g, "تاريخ");
         const entities = "(?:عناصر|عنصر|صفوف|صف|مراكز|مركز|أسهم|اسهم|سهم|صناديق|صندوق|استراتيجيات|استراتيجية|items?|rows?|holdings?|positions?|funds?|stocks?|strategies)";
         const before = new RegExp(`(${entities})\\s*[:：]?\\s*\\(?\\s*(\\d+)\\s*\\)?`, "i").exec(cleanHeading);
         const after = new RegExp(`(\\d+)\\s*${entities}(?![\\w\u0600-\u06ff])`, "i").exec(cleanHeading);

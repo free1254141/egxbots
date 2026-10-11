@@ -357,11 +357,12 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         return [...relevantPrevious, ...evidence, ...(imageEvidence ? [imageEvidence] : [])];
     };
     const reviewPayload = (reply: string) => ({ request: userMessage, draft_to_review:reply,
+        current_tool_calls:evidence.map(e=>({tool:e.tool,arguments:e.arguments,availability:e.availability})),
         available_tools:input.toolsSchema.map((tool:any)=>tool.function?.name).filter(Boolean),
         evidence:verificationEvidence().map(compactEvidence), previous_evidence:unsupersededEvidence(previousEvidence, evidence).filter(e => !usedSymbols.length || e.symbols.some(s => usedSymbols.includes(s))),
         dialogue:recentHistory.slice(-6), context:{platform:ARTORO_PLATFORM_CONTEXT,state:context.state,summary:context.summary,vision:context.vision,current_time_cairo:context.current_time_cairo} });
     const review = async (reply: string) => {
-        const deterministic = checkAgenticDraft(reply, verificationEvidence(), userMessage);
+        const deterministic = checkAgenticDraft(reply, verificationEvidence(), userMessage, evidence);
         options.diagnosticCapture?.("deterministic_review", {draft: reply, reasons: deterministic});
         const imageReviewGuidance = vision ? "\nقيم الصورة من الأدلة المرئية المرتبطة بها: أرقام image_vision دليل للصورة وليس سعراً حديثاً من السوق. افصل quantity وentry_price وprofit_pct عن price وchange_pct، واحتفظ بـ asset_type لكل مركز. لا تستنتج قطاعاً من رمز السهم أو اسم شائع؛ يلزم دليل قطاع من أداة بيانات الأسهم، وإلا اذكر أن التوزيع القطاعي غير متحقق. إذا سأل المستخدم صراحة هل يضيف صناديق نشطة، فهذا طلب رأي نوعي في ملاءمتها؛ لا تعتبر الإجابة العامة عليه توصية غير مطلوبة، مع تجنب أمر تنفيذ قطعي. في الرأي النوعي لا تشترط سيناريو رأس مال أو أداة مسح أسهم، ولا ترفض الإجابة بسبب عدم استدعائها. لا تقبل توصية بيع/شراء أخرى غير مطلوبة، ولا تصف مركزاً من نوع fund بأنه سهم مباشر. أدوات مسح الأسهم لا تمثل قاعدة بيانات صناديق الاستثمار المُدارة." : "";
         const reviewBody = { messages: [{ role: "system", content: AGENTIC_PUBLICATION_CONTRACT },
@@ -408,7 +409,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         let initial;
         try { initial = finishFailure === "incomplete_writer_draft" ? {passed:false,reasons:[finishFailure]} : simpleSocial ? { passed:true, reasons:[] } : await review(draft); }
         catch (error) {
-            const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage);
+            const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage, evidence);
             initial = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[error instanceof Error ? error.message : "review_unavailable"]};
         }
         firstPassed = initial.passed; finalPassed = initial.passed; reasons = initial.reasons;
@@ -443,7 +444,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             else {
                 try { second = await review(draft); }
                 catch (error) {
-                    const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage);
+                    const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage, evidence);
                     second = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[error instanceof Error ? error.message : "review_unavailable"]};
                 }
             }
@@ -453,7 +454,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     } catch (error) { reasons.push(error instanceof Error ? error.message : "review_unavailable"); finalPassed = false; }
     // Optional refinement must never destroy a checked answer. Recheck against
     // current evidence too: a refresh may invalidate the original numbers.
-    if (!finalPassed && acceptedDraft && checkAgenticDraft(acceptedDraft, verificationEvidence(), userMessage).length === 0) {
+    if (!finalPassed && acceptedDraft && checkAgenticDraft(acceptedDraft, verificationEvidence(), userMessage, evidence).length === 0) {
         options.diagnosticCapture?.("refinement_discarded", { reasons });
         advisoryIssues = [...advisoryIssues, ...reasons];
         draft = acceptedDraft;

@@ -62,7 +62,7 @@ live('replays quantity, average cost, quote verification and AJWA backtest with 
                 expect(done.response).not.toContain('لم يظهر معها');
             }
             if(prompt===prompts[1])expect(tools.find(e=>e.tool==='calculate_position')?.arguments).toMatchObject({symbol:'GTWL',quantity:2114,entry_price:73.82});
-            if(prompt===prompts[2])expect(tools.some(e=>e.tool==='get_stock'&&e.symbols.includes('GTWL'))).toBe(true);
+            if(prompt===prompts[2])expect(tools.some(e=>e.tool==='get_live_quote'&&e.symbols.includes('GTWL'))).toBe(true);
             if(prompt===prompts[3])expect(tools.some(e=>e.tool==='compare_strategies_history'&&e.symbols.includes('AJWA'))).toBe(true);
             state=done.session_update;
             summary={...summary,current_symbols:state.last_symbols,last_tool_evidence:evidenceMemory([...summary.last_tool_evidence,...tools])};

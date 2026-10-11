@@ -6,6 +6,11 @@ import {AGENTIC_SYSTEM_PROMPT} from '../agentic-pipeline';
 import {safeAgenticFallback} from '../agentic-publication';
 import * as fs from 'fs';
 import * as path from 'path';
+
+test('a snapshot date after the word rows is not an announced row count',()=>{
+ const reply='تاريخ تحديث اللقطة لكل الصفوف: 2026-07-05\n\n| السهم | القيمة |\n|---|---|\n| COMI | 7.02 |\n| ADIB | 5.02 |\n| CANA | 6.19 |';
+ expect(advisoryTableRowCountConsistency(reply)).toEqual([]);
+});
 jest.mock('../server-secrets',()=>({getDeepSeekApiKey:()=> 'offline-key'}));
 test('GTWL price column binds to each support or resistance row, independently of distance',()=>{
     const e=toAgenticEvidence('get_stock_levels',{symbols:['GTWL']},{levels:[{symbol:'GTWL',date:'2026-10-07',close:160,support:124.5,resistance:244}]});

@@ -707,6 +707,11 @@ export default function AIChatbotTab() {
                                                                             <Sparkles className="w-3 h-3 text-indigo-500" /> ARTORO:
                                                                         </span>
                                                                         <div className="flex items-center gap-1.5">
+                                                                            {log.dataSource === "provider_snapshot" && (
+                                                                                <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20" title="جلب من مزود الأسعار؛ وقت الجلب لا يثبت وقت الصفقة أو انعدام تأخير المصدر">
+                                                                                    لقطة من مزود الأسعار
+                                                                                </span>
+                                                                            )}
                                                                             {log.dataSource === "realtime" && (
                                                                                 <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 flex items-center gap-1" title="تم بناء الرد من بيانات السوق اللحظية">
                                                                                     <Zap className="w-3 h-3 text-amber-500" /> Real-time

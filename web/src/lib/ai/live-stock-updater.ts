@@ -79,7 +79,8 @@ export function getCairoTimeString(date?: Date): string {
  */
 export async function fetchLiveStockIndicators(
     symbol: string,
-    supabase?: any
+    supabase?: any,
+    options: { allowClosedMarket?: boolean; forceRefresh?: boolean } = {}
 ): Promise<{
     success: boolean;
     data?: LiveIndicatorsData;
@@ -101,7 +102,7 @@ export async function fetchLiveStockIndicators(
     // Market close alone is not enough to switch to Supabase. Keep the live
     // source during the post-close sync window until today's daily job has
     // completed successfully and the current session date is present.
-    if (!isEgxSessionOpen() && (!shouldPreferLiveBeforeSync() || await isDailySyncComplete(supabase))) {
+    if (!options.allowClosedMarket && !isEgxSessionOpen() && (!shouldPreferLiveBeforeSync() || await isDailySyncComplete(supabase))) {
         return { success: false, error: "جلسة EGX مغلقة حالياً؛ سيتم استخدام آخر إغلاق مسجل" };
     }
 
@@ -109,7 +110,7 @@ export async function fetchLiveStockIndicators(
 
     // 1. Check in-memory cache (5-minute TTL)
     const cached = LIVE_STOCK_CACHE.get(cleanSym);
-    if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
+    if (!options.forceRefresh && cached && (now - cached.timestamp < CACHE_TTL_MS)) {
         return { success: true, data: cached.data, from_cache: true };
     }
 

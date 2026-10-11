@@ -53,6 +53,49 @@ test('fundamental currency prose cannot borrow another field',async()=>{
  expect(checkAgenticDraft('COMI ربحية السهم 7.02 جنيه.',e).length).toBeGreaterThan(0);
 });
 
+test('EPS currency headers bind EPS before the generic portfolio profit label',async()=>{
+ const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI']},db(f).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI']},r)];
+ const vertical='COMI\n| المقياس | القيمة |\n|---|---|\n| ربحية السهم (جنيه) | 19.255 |';
+ const horizontal='| السهم | ربحية السهم (جنيه) |\n|---|---|\n| COMI | 19.255 |';
+ expect(checkAgenticDraft(vertical,e)).toEqual([]);expect(checkAgenticDraft(horizontal,e)).toEqual([]);
+ expect(checkAgenticDraft(horizontal.replace('19.255','7.02'),e)).toContain('table_value_not_grounded:COMI:7.02');
+});
+
+test('company market cap is also scoped in transposed comparison tables',async()=>{
+ const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI','ADIB']},db(f).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI','ADIB']},r)];
+ const peer=r.stocks.find((row:any)=>row.symbol==='ADIB');
+ const text=`| المؤشر | COMI | ADIB |\n|---|---|---|\n| القيمة السوقية (جنيه) | 449265492676 | ${peer.market_cap??'غير متاح'} |`;
+ expect(checkAgenticDraft(text,e)).toEqual([]);
+ expect(checkAgenticDraft(text.replace('449265492676','19.255'),e)).toContain('table_value_not_grounded:COMI:19.255');
+});
+
+test('short market cap currency prose is company evidence, not a quote',async()=>{
+ const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI']},db(f).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI']},r)];
+ expect(checkAgenticDraft('COMI القيمة السوقية 449265492676 جنيه.',e)).toEqual([]);
+ expect(checkAgenticDraft('COMI سعر السهم 449265492676 جنيه.',e).length).toBeGreaterThan(0);
+ expect(checkAgenticDraft('COMI قيمة محفظتي السوقية 449265492676 جنيه.',e).length).toBeGreaterThan(0);
+});
+
+test('the total in a market-only table belongs to EGX rather than PORTFOLIO',async()=>{
+ const r=await executePlannedReadTool('get_market_breadth',{},db([{symbol:'A',date:'2026-10-11',change_pct:1},{symbol:'B',date:'2026-10-11',change_pct:-1}]).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_market_breadth',{},r)];
+ const text='اتساع السوق\n| المقياس | القيمة |\n|---|---|\n| الإجمالي | 2 |\n| صاعدة | 1 |\n| هابطة | 1 |';
+ expect(checkAgenticDraft(text,e)).toEqual([]);
+ expect(checkAgenticDraft(text.replace('الإجمالي | 2','الإجمالي | 3'),e)).toContain('table_value_not_grounded:EGX:3');
+ expect(checkAgenticDraft('أعدت قراءة اتساع أحدث جلسة، الصاعدة 1.',e,'عيد القراءة',[])).toContain('claimed_refresh_without_current_tool');
+ expect(checkAgenticDraft('حسب القراءة السابقة للاتساع، الصاعدة 1.',e,'اشرح',[])).not.toContain('claimed_refresh_without_current_tool');
+ expect(checkAgenticDraft('أعدت قراءة اتساع أحدث جلسة، الصاعدة 1.',e,'عيد القراءة',e)).not.toContain('claimed_refresh_without_current_tool');
+});
+
+test.each(['العدد الإجمالي','عدد الأسهم (الإجمالي)','إجمالي العينة'])('market total label %s keeps count identity',async label=>{
+ const r=await executePlannedReadTool('get_market_breadth',{},db([{symbol:'A',date:'2026-10-11',change_pct:1},{symbol:'B',date:'2026-10-11',change_pct:-1}]).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_market_breadth',{},r)];
+ expect(checkAgenticDraft(`اتساع السوق\n| البند | العدد |\n|---|---|\n| ${label} | 2 |`,e)).toEqual([]);
+});
+
 test('verified new-tool evidence has a useful recovery with missing values, not fabricated zeroes',async()=>{
  const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI','ADIB']},db(f).client,'2026-10-11');const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI','ADIB']},r)];
  const reply=safeAgenticFallback(e,'ignored');expect(reply).toContain('19.255');expect(reply).toContain('غير متاح');expect(reply).not.toContain('تعذر إكمال');expect(checkAgenticDraft(reply,e)).toEqual([]);

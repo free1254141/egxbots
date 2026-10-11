@@ -203,11 +203,16 @@ function extractProvenanceFromToolResults(results: any[], tables?: any[]): Recor
     }
     let dataSource: string | null = null;
     let dataDate: string | null = null;
+    let quoteFetchedAt: string | null = null;
     const toolSources: Record<string, string> = {};
     for (const result of results || []) {
         if (!result || !result.tool) continue;
         const source = String(result.source || "unknown");
         toolSources[result.tool] = source;
+        if (result.tool === "get_live_quote" && result.data?.stocks?.some((row: any) => row.live_quote_available)) {
+            dataSource = "provider_snapshot";
+            for (const row of result.data.stocks) if (row.live_quote_available && row.fetched_at && (!quoteFetchedAt || row.fetched_at > quoteFetchedAt)) quoteFetchedAt = row.fetched_at;
+        }
         // TradingView live-session refresh marks the reply as real-time
         if (source === "live_session" && !dataSource) dataSource = "realtime";
         const time = String(result.data_time || "");
@@ -218,6 +223,7 @@ function extractProvenanceFromToolResults(results: any[], tables?: any[]): Recor
         data_source: dataSource,
         data_date: dataDate,
         tool_sources: toolSources,
+        ...(quoteFetchedAt ? { quote_fetched_at: quoteFetchedAt, quote_trade_time: null, provider_delay: "unknown" } : {}),
     };
     if (Array.isArray(tables) && tables.length > 0) {
         // Keep the payload bounded so pathological scans don't bloat the row

@@ -162,7 +162,7 @@ export interface ToolResult {
     data_time: string;
     symbols: string[];
     symbol_count?: number;
-    data_type: "live" | "cached" | "historical" | "image-derived";
+    data_type: "live" | "cached" | "historical" | "image-derived" | "provider-snapshot";
     data: any;
     error?: string;
     evidence?: Evidence[];

@@ -103,7 +103,7 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
             [/سعر\s*(?:حالي|الحالي|السهم|الاغلاق|الإغلاق)|بسعر|عند\s+سعر|اخر\s*سعر|آخر\s*سعر|الان\s*عند|الآن\s*عند/i, ["price", "close"]],
             [/دعم/i, ["support"]],
             [/مقاومه|مقاومة/i, ["resistance"]],
-            [/القيمه\s*السوقيه|القيمة\s*السوقية/i, ["market_value"]],
+            [/القيمه\s*السوقيه|القيمة\s*السوقية|قيمة.*(?:مركز|محفظ).*سوقي|قيمة\s*(?:المركز|محفظتي)/i, ["market_value"]],
             [/تكلفه|تكلفة|التكلفة|التكلفه/i, ["cost_basis"]],
             [/ربح|خسار/i, ["profit_value"]],
         ];
@@ -168,7 +168,13 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
                 }
             }
             for (const { value, prefix } of currencyClaims) {
-                const specific = metricFields(prefix, false);
+                let specific = metricFields(prefix, false);
+                // Company-only evidence gives the short label market cap meaning;
+                // a labeled center/portfolio value cannot borrow the company metric.
+                if (specific?.has("market_value") && /القيمة\s*السوقية/i.test(prefix)
+                    && !/مركز|محفظ/.test(prefix)
+                    && symbolFacts.some(f => f.field === "market_cap")
+                    && !symbolFacts.some(f => f.field === "market_value")) specific = new Set(["market_cap"]);
                 const fields = specific || (scenarioAllocation ? new Set([...currencyFields, "value"]) : currencyFields);
                 if (!matchesAny(value, fields)) {
                     reasons.push(`قيمة ${value} جنيه منسوبة للسهم ${symbol} لكنها لا تطابق أي سعر/مستوى مسجل لهذا السهم — استعمل أسعار ${symbol} الموثقة فقط أو احذف القيمة.`);
