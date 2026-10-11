@@ -183,7 +183,7 @@ def _refresh_egx_fundamentals_from_tradingview(symbols_raw: List[str], chunk_siz
 def _should_run_weekly_inventory(trigger: str = "manual") -> bool:
     if str(trigger or "").strip().lower() != "scheduled":
         return True
-    # Cairo time is UTC+2 or UTC+3. Let's add 2 hours as a safe approximation for day checks at 16:00
+    # Use the timezone database so Cairo DST/UTC offset changes are handled correctly.
     cairo_now = dt.datetime.now(ZoneInfo("Africa/Cairo"))
     cairo_weekday = cairo_now.weekday()
     print(f"[ADAPTIVE] Checking weekly inventory trigger. Cairo weekday: {cairo_weekday} (6 is Sunday)")
