@@ -14,7 +14,7 @@ export const metadata: Metadata = {
     canonical: 'https://egxbots.com',
   },
   title: {
-    default: "EGX BOTS | محلل الأسهم المصرية بالذكاء الاصطناعي | EGX AI Stock Analyzer",
+    default: "ARTORO | شات وتحليل البورصة المصرية | EGX BOTS",
     template: "%s | EGX BOTS"
   },
   description: "EGX BOTS منصة لتحليل أسهم البورصة المصرية: تقييمات ذكاء اصطناعي يومية، ماسح فني، نتائج تاريخية، ومساعد تفاعلي عربي وإنجليزي.",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "ar_EG",
     url: "https://egxbots.com",
-    title: "EGX BOTS | محلل الأسهم المصرية بالذكاء الاصطناعي | EGX AI Stock Analyzer",
+    title: "ARTORO | شات وتحليل البورصة المصرية | EGX BOTS",
     description: "منصة EGX BOTS (egxbots) لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي (EGX AI Analyzer)، الماسح الفني، المحاكاة التاريخية، ومساعد ذكي تفاعلي للسوق.",
     siteName: "EGX BOTS",
     images: [

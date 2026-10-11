@@ -2,8 +2,8 @@ import MarketClient from "./MarketClient";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "تحليل سوق البورصة المصرية ومؤشر EGX30 | EGX Market Analysis",
-  description: "تابع اتجاه البورصة المصرية ومؤشري EGX30 وEGX100، اتساع السوق وحركة السيولة وسعر الصرف وفق آخر تحديث بيانات محفوظ. راجع تاريخ التحديث وسياق توصيات الذكاء الاصطناعي.",
+  title: "تحليل البورصة المصرية ومؤشري EGX30 وEGX100",
+  description: "تابع اتجاه البورصة المصرية ومؤشري EGX30 وEGX100 واتساع السوق والسيولة وسعر الصرف وفق آخر بيانات محفوظة، مع توضيح تاريخ التحديث.",
   keywords: [
     "تحليل البورصة المصرية",
     "مؤشر EGX30",
