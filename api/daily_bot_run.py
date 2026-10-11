@@ -46,6 +46,10 @@ from api.intraday_downloader import _fetch_egx_symbols
 from api.routers.scan_ai_fast import fast_scan
 from api.market_status_gate import should_reject_new_buys
 from api.web_origin import get_web_origin
+from api.fundamentals_refresh import (
+    should_run_quarterly_fundamentals as _should_run_quarterly_fundamentals,
+    quarterly_fundamentals_due as _quarterly_fundamentals_due_for_client,
+)
 
 
 def _sync_latest_egx_inventory_from_eodhd() -> Tuple[bool, List[str], str]:
@@ -169,6 +173,8 @@ def _refresh_egx_fundamentals_from_tradingview(symbols_raw: List[str], chunk_siz
             result = fetch_tradingview_fundamentals_bulk(chunk)
             total_updated += len(result or {})
             time.sleep(1)
+        if total_updated <= 0:
+            return False, "TradingView returned no usable fundamentals", 0
         return True, f"Refreshed fundamentals for {total_updated} symbols from TradingView", total_updated
     except Exception as e:
         return False, str(e), 0
@@ -178,7 +184,7 @@ def _should_run_weekly_inventory(trigger: str = "manual") -> bool:
     if str(trigger or "").strip().lower() != "scheduled":
         return True
     # Cairo time is UTC+2 or UTC+3. Let's add 2 hours as a safe approximation for day checks at 16:00
-    cairo_now = dt.datetime.utcnow() + dt.timedelta(hours=2)
+    cairo_now = dt.datetime.now(ZoneInfo("Africa/Cairo"))
     cairo_weekday = cairo_now.weekday()
     print(f"[ADAPTIVE] Checking weekly inventory trigger. Cairo weekday: {cairo_weekday} (6 is Sunday)")
     return cairo_weekday == 6
@@ -188,7 +194,7 @@ def _should_send_weekly_report(trigger: str = "manual") -> bool:
     """Weekly Telegram report is scheduled-only and Sunday-only."""
     if str(trigger or "").strip().lower() != "scheduled":
         return False
-    cairo_now = dt.datetime.utcnow() + dt.timedelta(hours=2)
+    cairo_now = dt.datetime.now(ZoneInfo("Africa/Cairo"))
     return cairo_now.weekday() == 6
 
 
@@ -3099,6 +3105,27 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         else:
             _record_step("sync_inventory", True, "Skipped - weekly scheduled refresh only", 0)
             print("\n>>> STEP 0: Skipping EGX inventory refresh today (weekly scheduled run only).")
+
+        # Fundamentals move slower than prices and indicators. Refresh them
+        # once per quarter, in the Sunday close run, when the oldest persisted
+        # snapshot is at least 90 days old. A failed provider call never
+        # replaces the existing snapshot.
+        _start_step("quarterly_fundamentals", "Checking quarterly EGX fundamentals refresh")
+        if _should_run_quarterly_fundamentals(trigger, phase):
+            due, due_reason = _quarterly_fundamentals_due_for_client(supabase)
+            if due:
+                if not symbols_raw:
+                    symbols_raw = _fetch_egx_symbols()
+                    symbols_raw = _filter_active_symbols(symbols_raw)
+                try:
+                    fund_ok, fund_msg, fund_count = _refresh_egx_fundamentals_from_tradingview(symbols_raw)
+                    _record_step("quarterly_fundamentals", fund_ok, fund_msg, fund_count)
+                except Exception as fund_error:
+                    _record_step("quarterly_fundamentals", False, str(fund_error)[:200], 0)
+            else:
+                _record_step("quarterly_fundamentals", True, f"Skipped - {due_reason}", 0)
+        else:
+            _record_step("quarterly_fundamentals", True, "Skipped - scheduled Sunday close only", 0)
 
         # 1. Sync prices
         if not skip_sync:

@@ -2198,16 +2198,36 @@ def sync_data_to_supabase(ticker: str, data: dict) -> tuple[bool, str]:
         if sb_symbol.lower().startswith("fund_"):
             sb_symbol = sb_symbol[5:]  # Remove 'fund_' (5 chars)
 
+        # Providers can return sparse fundamentals (for example no EPS for a
+        # loss-making company). Merge only non-null fields so a partial refresh
+        # cannot erase a previously valid metric or listing metadata.
+        existing_data = {}
+        try:
+            existing = (
+                supabase.table("stock_fundamentals")
+                .select("data")
+                .eq("symbol", sb_symbol)
+                .eq("exchange", sb_exchange)
+                .limit(1)
+                .execute()
+            )
+            if existing.data and isinstance(existing.data[0].get("data"), dict):
+                existing_data = dict(existing.data[0]["data"])
+        except Exception as read_error:
+            print(f"[FUNDAMENTALS] Existing snapshot read failed for {sb_symbol}: {read_error}")
+        merged_data = dict(existing_data)
+        merged_data.update({key: value for key, value in data.items() if value is not None})
+
         row = {
             "symbol": sb_symbol,
             "exchange": sb_exchange,
-            "data": data,
+            "data": merged_data,
             "updated_at": dt.datetime.utcnow().isoformat()
         }
         
         # Populate optional columns if available in data
         # Check for case-insensitive keys just in case
-        clean_data = {k.lower(): v for k, v in data.items()}
+        clean_data = {k.lower(): v for k, v in merged_data.items()}
         if "name" in clean_data:
             row["name"] = clean_data["name"]
         if "country" in clean_data:
