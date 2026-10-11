@@ -3,6 +3,7 @@ import { getSupabaseServiceClient, toNumber } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
 import { paymentsEnabled } from "@/lib/ai/plan-gate";
+import { applyRecommendationQuotes } from "@/lib/recommendation-quotes";
 
 const FREE_ENCRYPTED_OPEN_RETURN_PCT = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,6 +45,18 @@ export async function GET(req: NextRequest) {
     if (error) throw error;
 
     let visibleData = data || [];
+    // Quote refresh is independent of trade evaluation. Never replace closed
+    // exit prices, and never infer a current quote from an old recommendation.
+    const openSymbols = [...new Set(visibleData.filter(row => row.status === "open").map(row => row.symbol))];
+    if (openSymbols.length) {
+      const since = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
+      const { data: quotes, error: quoteError } = await supabase.from("stock_prices")
+        .select("symbol,exchange,date,close,updated_at")
+        .in("symbol", openSymbols).gte("date", since)
+        .order("date", { ascending: false }).limit(6000);
+      if (quoteError) throw quoteError;
+      visibleData = applyRecommendationQuotes(visibleData, quotes || []);
+    }
     const closed = (row: Record<string, unknown>) => ["win", "loss"].includes(String(row.status || "").toLowerCase());
     const recommendationReturnPct = (row: Record<string, unknown>) => {
       if (closed(row)) return row.profit_loss_pct == null ? null : toNumber(row.profit_loss_pct, 0);
