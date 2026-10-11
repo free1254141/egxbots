@@ -32,8 +32,11 @@ def resume_daily_social_reports(client, job_id):
         # A failed cache refresh is safe to retry once because report generation
         # has not started and the report table is still empty. Never replay an
         # LLM/report attempt whose outcome could be ambiguous.
-        if (payload.get('status') != 'failed' or payload.get('stage') != 'cache_revalidation'
+        if (payload.get('status') != 'failed' or payload.get('stage') not in (None, 'cache_revalidation')
                 or payload.get('attempts') != 1 or reports_started):
+            return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
+        if payload.get('stage') is None and not any(
+                s.get('step') == 'cache_revalidation' for s in raw if isinstance(s, dict)):
             return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
         reports = (client.table('daily_social_reports').select('id').eq('job_run_id', job_id)
                    .limit(1).execute())

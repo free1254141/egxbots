@@ -54,7 +54,10 @@ def test_cache_failure_can_retry_once_before_any_report_starts(setup, monkeypatc
     reports_query.execute.return_value = SimpleNamespace(data=[])
     client.table = lambda name: run_query if name == 'daily_job_runs' else reports_query
     key = 'daily_social_resume_job'
-    ledger = {key: {'payload': {'status': 'failed', 'stage': 'cache_revalidation',
+    raw_steps = json.loads(job['steps'])
+    raw_steps.append({'step': 'cache_revalidation', 'status': 'started'})
+    job['steps'] = json.dumps(raw_steps)
+    ledger = {key: {'payload': {'status': 'failed', 'error': 'APIError',
                                 'attempts': 1, '_version': 'old'}}}
     monkeypatch.setattr(recovery, 'read_checkpoint', lambda *_: ledger[key])
     def claim(client, key, payload, expected):
