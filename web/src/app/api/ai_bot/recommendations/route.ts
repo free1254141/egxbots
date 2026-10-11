@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
       .limit(limit);
     if (error) throw error;
 
-    let visibleData = data || [];
+    let visibleData: any[] = data || [];
     // Quote refresh is independent of trade evaluation. Never replace closed
     // exit prices, and never infer a current quote from an old recommendation.
     const openSymbols = [...new Set(visibleData.filter(row => row.status === "open").map(row => row.symbol))];
