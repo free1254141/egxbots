@@ -35,3 +35,15 @@ test.each(['مع هبوط وسيط بلغ 42.33%','متوسط الهبوط 42.33
 test.each(['أقصى هبوط 42.33%','42.33% هو أقصى هبوط وليس متوسط الهبوط','متوسط الهبوط غير متاح، وأقصى هبوط 42.33%'])('qualified drawdown is accepted: %s', draft=>{
  expect(advisoryBacktestMetricMeaning(draft,true)).toEqual([]);
 });
+
+test('whole percent rounding of drawdown is accepted but another whole percent is not',()=>{
+ const draft='AJWA — الاتجاه وMACD\nهبوط بلغ نحو 42% من قمة سابقة إلى قاع لاحق.';
+ expect(checkAgenticDraft(draft,[e])).toEqual([]);
+ expect(checkAgenticDraft(draft.replace('42%','41%'),[e])).toContain('strategy_metric_mismatch:AJWA:trend_macd:maxDrawdownPct');
+});
+test('starting capital beside final equity is grounded separately without accepting a wrong amount',()=>{
+ const draft='AJWA — الاتجاه وMACD\n| المقياس | القيمة |\n|---|---|\n| رأس المال النهائي | 83,604.94 جنيه (من 100,000) |';
+ expect(checkAgenticDraft(draft,[e])).toEqual([]);
+ expect(checkAgenticDraft(draft.replace('100,000','110,000'),[e])).toContain('table_value_not_grounded:AJWA:110000');
+ expect(checkAgenticDraft(draft.replace('83,604.94','100,000'),[e])).toContain('table_value_not_grounded:AJWA:100000');
+});

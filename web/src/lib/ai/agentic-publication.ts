@@ -210,7 +210,7 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
                 const n = Number(cleanCellText(cell).replace(/[%٪]/g, "").trim());
                 if (!Number.isFinite(n) || !/\d/.test(cell)) return;
                 const expected = selected[0][key];
-                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.02, Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${selected[0].symbol}:${selected[0].strategy_id}:${key}`);
+                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.5 * 10 ** -(String(n).split(".")[1]?.length || 0), Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${selected[0].symbol}:${selected[0].strategy_id}:${key}`);
             });
         } else if (owner && selected.length <= 1) {
             for (const match of line.matchAll(/[-+]?\d+(?:\.\d+)?\s*(?:%|٪|جنيه)/g)) {
@@ -219,7 +219,7 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
                 if (!candidates.length) continue;
                 const key = candidates[0].key, n = Number(match[0].replace(/[%٪\s]|جنيه/g, "")), expected = owner[key];
                 if (["closedTrades", "profitFactor"].includes(key) && /[%٪]/.test(match[0])) continue;
-                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.02, Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${owner.symbol}:${owner.strategy_id}:${key}`);
+                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.5 * 10 ** -(String(n).split(".")[1]?.length || 0), Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${owner.symbol}:${owner.strategy_id}:${key}`);
             }
         }
     }
@@ -848,7 +848,14 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const cellFacts = combinedImageReturn
                 ? strategyRelevant.filter(f => fields?.includes(f.field) || f.field === "profit_value")
                 : targetFacts;
-            const clean = cleanCellText(cells[idx]);
+            let clean = cleanCellText(cells[idx]);
+            if (fields?.includes("backtest_final_equity")) {
+                // An explicitly labeled starting amount is a different fact from final equity.
+                const initial = evidence.filter(e => e.tool === "compare_strategies_history" && e.availability !== "error" && e.symbols.includes(symbol))
+                    .map(e => e.data?.assumptions?.initialCapital).filter(Number.isFinite);
+                clean = clean.replace(/\(\s*(?:من|رأس المال الابتدائي|رأس المال الأولي|initial capital)\s*([-+]?\d+(?:\.\d+)?)\s*(?:جنيه)?\s*\)/gi,
+                    (full, value) => initial.includes(Number(value)) ? " " : full);
+            }
             for (const match of clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)) {
                 const n = Number(match[0]);
                 if (!matchesFact(n, cellFacts, match[0].includes(".") ? match[0].split(".")[1].length : undefined) || (match[0].startsWith("+") && matchesFact(-n, cellFacts.filter(f => f.value < 0), match[0].includes(".") ? match[0].split(".")[1].length : undefined)))
