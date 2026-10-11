@@ -71,5 +71,6 @@ test('breadth table cannot inherit the last peer symbol',async()=>{
  const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI']},fdata),toAgenticEvidence('get_market_breadth',{},bdata)];
  const draft='| الرمز | P/E |\n|---|---|\n| COMI | 7.02 |\n\n## اتساع أحدث جلسة\n| البند | القيمة |\n|---|---|\n| إجمالي الأسهم ذات تغير صالح | 2 |\n| صاعدة | 1 |\n| هابطة | 1 |\n| ثابتة | 0 |\n| نسبة الصاعدة | 50% |\n| نسبة الصاعد إلى الهابط | 1 |';
  expect(checkAgenticDraft(draft,e)).toEqual([]);
+ expect(checkAgenticDraft(draft.replace('| البند | القيمة |','| البند | العدد |').replace('إجمالي الأسهم ذات تغير صالح','الإجمالي ذو تغير صالح'),e)).toEqual([]);
  expect(checkAgenticDraft(draft.replace('50%','7.02%'),e)).toContain('table_value_not_grounded:EGX:7.02');
 });
