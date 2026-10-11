@@ -7,6 +7,7 @@ jest.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language:
 jest.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "light" }) }));
 jest.mock("../../components/StockLogo", () => ({ __esModule: true, default: () => null }));
 jest.mock("@/lib/shariaStocks", () => ({ isShariaCompliant: () => false }));
+jest.mock("../../components/TradingViewChartDynamic", () => ({ __esModule: true, default: () => <div data-testid="short-trade-chart" /> }));
 
 test("saved session and real KPI sample are visible, and a missing return stays unavailable", async () => {
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({
@@ -65,4 +66,19 @@ test("a failed request shows an error instead of an empty portfolio", async () =
   expect(await view.findByRole("alert")).toBeTruthy();
   expect(view.queryByText("لا توجد صفقات تطابق البحث في الجلسة المعروضة.")).toBeNull();
   log.mockRestore();
+});
+
+test("closed archive opens the same chart details with exit data", async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ is_pro: true,
+    as_of: "2026-10-11", active_trades: [], closed_trades: [{ symbol: "AJWA", entry_date: "2026-10-07",
+      exit_date: "2026-10-11", entry_price: 100, exit_price: 110, return_pct: 10, sessions: 3, reason: "ema10_break" }]
+  }) } as Response));
+  const view = render(<ShortSwingsTab isPro />);
+  await view.findByRole("button", { name: /أرشيف الصفقات/ });
+  fireEvent.click(view.getByRole("button", { name: /أرشيف الصفقات/ }));
+  fireEvent.click(view.getByRole("button", { name: "التفاصيل والشارت" }));
+  expect(view.getByTestId("short-trade-chart")).toBeTruthy();
+  expect(view.getByText("110.000 ج.م")).toBeTruthy();
+  expect(within(view.getByRole("dialog")).getByText("تاريخ الخروج")).toBeTruthy();
+  expect(view.queryByText("قاعدة الخروج والوقف المتحرك (Trailing Stop EMA10)")).toBeNull();
 });

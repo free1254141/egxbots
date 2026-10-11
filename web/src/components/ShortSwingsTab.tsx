@@ -39,6 +39,7 @@ import {
   Activity
 } from "lucide-react";
 import StockLogo from "./StockLogo";
+import ShortSwingTradeChart from "./short-swings/TradeChart";
 import { formatShortSwingReturn, shortSwingQuote } from "@/lib/short-swings-view";
 import { isShariaCompliant } from "@/lib/shariaStocks";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -66,6 +67,7 @@ export interface ShortSwingTrade {
   status?: string;
   sessions?: number;
   reason?: string;
+  exit_reason?: string;
   is_locked?: boolean;
   is_pending_entry?: boolean;
   reference_close?: number | null;
@@ -1732,6 +1734,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                   <th className="p-3">المدة</th>
                   <th className="p-3">العائد</th>
                   <th className="p-3">سبب الخروج</th>
+                  <th className="p-3">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-bold">
@@ -1740,6 +1743,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                   return (
                     <tr
                       key={`${t.symbol}-${idx}`}
+                      onClick={() => setSelectedActiveTrade(t)}
                       className="hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors"
                     >
                       <td className="p-3">
@@ -1784,6 +1788,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                           ? "وقف خسارة -4%"
                           : t.reason || "انتهاء المدة"}
                       </td>
+                      <td className="p-3"><button onClick={(event) => { event.stopPropagation(); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button></td>
                     </tr>
                   );
                 })}
@@ -1906,6 +1911,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                   <th className="p-3">المدة</th>
                   <th className="p-3">العائد</th>
                   <th className="p-3">الاستراتيجية / السبب</th>
+                  <th className="p-3">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-bold">
@@ -1914,6 +1920,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                   return (
                     <tr
                       key={`${t.symbol}-${idx}-${t.is_active ? "active" : "closed"}`}
+                      onClick={() => setSelectedActiveTrade(t)}
                       className="hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors"
                     >
                       <td className="p-3">
@@ -1977,6 +1984,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                           ? "وقف خسارة -4%"
                           : t.reason || "انتهاء المدة"}
                       </td>
+                      <td className="p-3"><button onClick={(event) => { event.stopPropagation(); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button></td>
                     </tr>
                   );
                 })}
@@ -2015,7 +2023,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
         <div
           className="fixed inset-0 z-[2147483647] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setSelectedDayTrades(null)}
-          dir="rtl"
+          dir={isAr ? "rtl" : "ltr"}
         >
           <div
             className="w-full max-w-2xl border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] space-y-5 max-h-[85vh] overflow-y-auto"
@@ -2165,6 +2173,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                           </span>
                         </div>
                       </div>
+                      <button onClick={() => { setSelectedDayTrades(null); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button>
                     </div>
                   ))}
 
@@ -2235,6 +2244,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                             </span>
                           </div>
                         </div>
+                        <button onClick={() => { setSelectedDayTrades(null); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button>
                       </div>
                     );
                   })}
@@ -2255,16 +2265,19 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
         document.body
       )}
 
-      {/* ── 9. ACTIVE TRADE DETAILS MODAL (Neo-Brutalist Portal) ── */}
+      {/* Shared open/closed short-trade details */}
       {selectedActiveTrade && createPortal(
         <div
           onClick={() => setSelectedActiveTrade(null)}
           className="fixed inset-0 z-[2147483647] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in duration-150"
-          dir="rtl"
+          dir={isAr ? "rtl" : "ltr"}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-2xl border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] overflow-hidden my-auto max-h-[92vh] flex flex-col text-black dark:text-white"
+            role="dialog"
+            aria-modal="true"
+            aria-label={isAr ? "تفاصيل الصفقة القصيرة" : "Short trade details"}
+            className="relative w-full max-w-6xl border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] overflow-hidden my-auto max-h-[92vh] flex flex-col text-black dark:text-white"
           >
             {/* Header */}
             <div className="p-4 sm:p-5 border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-between gap-3">
@@ -2343,10 +2356,12 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
 
                   <div className="p-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900">
                     <span className="text-[10px] text-zinc-500 font-black uppercase block">
-                      {selectedActiveTrade.is_pending_entry ? "إغلاق اليوم (مرجعي)" : "السعر الحالي"}
+                      {selectedActiveTrade.exit_date ? "سعر الخروج" : selectedActiveTrade.is_pending_entry ? "إغلاق اليوم (مرجعي)" : "السعر الحالي"}
                     </span>
                     <span className="text-base font-black font-mono mt-0.5 block">
-                      {selectedActiveTrade.is_pending_entry
+                      {selectedActiveTrade.exit_date
+                        ? `${selectedActiveTrade.exit_price != null ? safeNum(selectedActiveTrade.exit_price).toFixed(2) : "—"} ج.م`
+                        : selectedActiveTrade.is_pending_entry
                         ? `${selectedActiveTrade.reference_close != null ? safeNum(selectedActiveTrade.reference_close).toFixed(2) : safeNum(selectedActiveTrade.current_price).toFixed(2)} ج.م`
                         : `${selectedActiveTrade.current_price != null ? safeNum(selectedActiveTrade.current_price).toFixed(2) : "—"} ج.م`}
                     </span>
@@ -2363,7 +2378,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
 
                   <div className={`p-3 border-2 border-black ${selectedActiveTrade.is_pending_entry ? "bg-amber-100 dark:bg-amber-950/40" : (safeNum(selectedActiveTrade.return_pct) >= 0 ? "bg-emerald-100 dark:bg-emerald-950/40" : "bg-rose-100 dark:bg-rose-950/40")}`}>
                     <span className="text-[10px] text-zinc-600 font-black uppercase block">
-                      {selectedActiveTrade.is_pending_entry ? "حالة الإشارة" : "العائد الحالي"}
+                      {selectedActiveTrade.exit_date ? "العائد النهائي" : selectedActiveTrade.is_pending_entry ? "حالة الإشارة" : "العائد الحالي"}
                     </span>
                     <span
                       dir="ltr"
@@ -2376,8 +2391,10 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                   </div>
                 </div>
 
+                <ShortSwingTradeChart key={`${selectedActiveTrade.symbol}-${selectedActiveTrade.entry_date}-${selectedActiveTrade.exit_date || "open"}`} trade={selectedActiveTrade} isAr={isAr} theme={theme === "dark" ? "dark" : "light"} computedAt={data?.computed_at} />
+
                 {/* Signal Breakdown Section */}
-                <div className="space-y-3">
+                {!selectedActiveTrade.exit_date && <div className="space-y-3">
                   {/* Card 1: Entry Signal Rationale */}
                   <div className="border-2 border-black bg-emerald-50 dark:bg-emerald-950/20 p-4 space-y-2">
                     <div className="flex items-center gap-2">
@@ -2444,8 +2461,7 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
                       )}
                     </p>
                   </div>
-                </div>
-
+                </div>}
                 {/* Footer Buttons */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t-2 border-black dark:border-white">
                   <Link
