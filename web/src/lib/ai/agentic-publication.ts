@@ -177,7 +177,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
         [/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i,["pe_ratio"]], [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i,["market_cap"]],
-        [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]], [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]],
+        [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]], [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]],
         [/صاعد|مرتفعة|advancing/i,["breadth_advancing"]], [/هابط|منخفضة|declining/i,["breadth_declining"]], [/ثابت|unchanged/i,["breadth_unchanged"]], [/الأسهم.*(?:صالحة|تغير صالح)|إجمالي.*أسهم|total.*stocks/i,["breadth_total"]],
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
@@ -780,6 +780,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             symbol = null;
         }
 
+        // Breadth metrics belong to the dated market sample, never the last peer row.
+        const breadthFields = tableMetricFields(cells[0]);
+        if (lineSymbols.length === 0 && breadthFields?.some(f => f.startsWith("breadth_"))
+            && evidence.some(e => e.tool === "get_market_breadth" && e.symbols.includes("EGX"))) symbol = "EGX";
         const scenarioRow = scenarioTableRow(evidence, cells, lineSymbols, headers);
         if (scenarioRow?.symbol === "PORTFOLIO") symbol = "PORTFOLIO";
         else if (!symbol && scenarioRow) symbol = scenarioRow.symbol || "PORTFOLIO";

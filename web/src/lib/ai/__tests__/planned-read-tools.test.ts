@@ -64,3 +64,12 @@ test('short market cap labels bind company snapshots',async()=>{
  expect(checkAgenticDraft('| الرمز | القيمة السوقية (جنيه) |\n|---|---|\n| COMI | 449,265,492,676 |',e)).toEqual([]);
  expect(checkAgenticDraft('| الرمز | القيمة السوقية |\n|---|---|\n| COMI | 19.255 |',e)).toContain('table_value_not_grounded:COMI:19.255');
 });
+
+test('breadth table cannot inherit the last peer symbol',async()=>{
+ const fdata=await executePlannedReadTool('get_fundamentals',{symbols:['COMI']},db(f).client,'2026-10-11');
+ const bdata=await executePlannedReadTool('get_market_breadth',{},db([{symbol:'A',date:'2026-10-07',change_pct:1},{symbol:'B',date:'2026-10-07',change_pct:-1}]).client,'2026-10-11');
+ const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI']},fdata),toAgenticEvidence('get_market_breadth',{},bdata)];
+ const draft='| الرمز | P/E |\n|---|---|\n| COMI | 7.02 |\n\n## اتساع أحدث جلسة\n| البند | القيمة |\n|---|---|\n| إجمالي الأسهم ذات تغير صالح | 2 |\n| صاعدة | 1 |\n| هابطة | 1 |\n| ثابتة | 0 |\n| نسبة الصاعدة | 50% |\n| نسبة الصاعد إلى الهابط | 1 |';
+ expect(checkAgenticDraft(draft,e)).toEqual([]);
+ expect(checkAgenticDraft(draft.replace('50%','7.02%'),e)).toContain('table_value_not_grounded:EGX:7.02');
+});
