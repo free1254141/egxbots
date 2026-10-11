@@ -109,7 +109,7 @@ export default function RootLayout({
                   "@id": "https://egxbots.com/#website",
                   "url": "https://egxbots.com",
                   "name": "EGX BOTS",
-                  "alternateName": ["EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية بالذكاء الاصطناعي"],
+                  "alternateName": ["ARTORO", "ARTORO AI", "EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية بالذكاء الاصطناعي"],
                   "description": "منصة تحليل الأسهم المصرية بتقييمات يومية، ماسح فني، ونتائج تاريخية.",
                   "inLanguage": "ar-EG",
                   "publisher": { "@id": "https://egxbots.com/#organization" }
@@ -134,7 +134,7 @@ export default function RootLayout({
                   "@type": "SoftwareApplication",
                   "@id": "https://egxbots.com/#software-application",
                   "name": "EGX BOTS - AI Stock Analyzer",
-                  "alternateName": ["egx ai analyzer", "محلل الأسهم المصرية"],
+                  "alternateName": ["ARTORO", "ARTORO AI", "egx ai analyzer", "محلل الأسهم المصرية"],
                   "operatingSystem": "Web",
                   "applicationCategory": "FinanceApplication",
                   "description": "EGX BOTS (egxbots) is an advanced AI-driven stock analyzer for the Egyptian Exchange (EGX) featuring daily AI scores, quantitative scanners, and market chatbot.",
