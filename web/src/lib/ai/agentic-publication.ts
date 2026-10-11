@@ -1,3 +1,5 @@
+import { normalizeEvidenceNumbers } from "./numeric-evidence";
+import { BACKTEST_METRICS, renderBacktestEvidence } from "./backtest-evidence";
 import { checkAttribution } from "./answer-gate";
 import { buildFactRecords, FactRecord } from "./facts";
 import { ToolResult } from "./types";
@@ -111,8 +113,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                 if (typeof value === "number" && Number.isFinite(value)) facts.push({ id: `${row.symbol}:${row.analysis?.strategyId}:${key}`, symbol: row.symbol, field, value, unit: "count", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
             for (const metrics of row.strategy_metrics || []) {
-                const fields: Array<[string, FactRecord["field"], FactRecord["unit"]]> = [["totalReturnPct", "backtest_return_pct", "percent"], ["maxDrawdownPct", "backtest_drawdown_pct", "percent"], ["winRatePct", "backtest_win_rate_pct", "percent"], ["profitFactor", "backtest_profit_factor", "ratio"], ["closedTrades", "backtest_closed_trades", "count"], ["finalEquity", "backtest_final_equity", "egp"]];
-                for (const [key, field, unit] of fields) if (typeof metrics[key] === "number" && Number.isFinite(metrics[key])) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:${key}`, symbol: row.symbol, field, value: metrics[key], unit, as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                for (const {key, field, unit} of BACKTEST_METRICS) if (typeof metrics[key] === "number" && Number.isFinite(metrics[key])) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:${key}`, symbol: row.symbol, field, value: metrics[key], unit, as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
             // Distances are derived only from a single dated quote/level row.
             if (row.symbol && Number.isFinite(row.close) && row.close > 0) {
@@ -145,10 +146,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
 }
 
 function cleanCellText(text: string): string {
-    return text
-        .replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
-        .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-        .replace(/٫/g, ".")
+    return normalizeEvidenceNumbers(text)
         // 1. Strip full dates FIRST (both YYYY-MM-DD and DD-MM-YYYY) before any dash/number normalization
         .replace(/(?:\b|\D)\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\b|\D)/g, " ")
         .replace(/(?:\b|\D)\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\b|\D)/g, " ")
@@ -175,7 +173,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
-        [/هبوط|drawdown/i,["backtest_drawdown_pct"]], [/فوز|نجاح|win.?rate|صفقات.*رابح|رابح/i,["backtest_win_rate_pct"]], [/معامل.*ربح|profit.?factor/i,["backtest_profit_factor"]], [/(?:عدد|إجمالي|مجموع)?\s*صفقات(?!.*(?:رابح|شراء|بيع))|trades/i,["backtest_closed_trades"]], [/قيمة.*نهاي|رأس.*مال.*نهاي|equity/i,["backtest_final_equity"]], [/عائد|total.?return/i,["profit_pct","backtest_return_pct"]],
+        ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
         [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]], [/تجميع/i,["acc_score"]], [/تصريف/i,["dist_score"]],
@@ -193,9 +191,10 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
     const latest = new Map<string, any>();
     for (const e of evidence.filter(e => e.availability !== "error")) for (const row of evidenceRows(e.data)) for (const m of row.strategy_metrics || []) latest.set(`${row.symbol}:${m.strategy_id}`, { ...m, symbol: row.symbol });
     const rows = [...latest.values()];
-    const labels: Array<[RegExp, string]> = [[/هبوط|drawdown/i, "maxDrawdownPct"], [/فوز|نجاح|win.?rate|صفقات.*رابح|رابح/i, "winRatePct"], [/معامل.*ربح|profit.?factor/i, "profitFactor"], [/(?:عدد|إجمالي|مجموع)?\s*صفقات(?!.*رابح)|trades/i, "closedTrades"], [/قيمة.*نهاي|رأس.*مال.*نهاي|equity/i, "finalEquity"], [/عائد|return/i, "totalReturnPct"]];
+    const labels: Array<[RegExp, string]> = BACKTEST_METRICS.map(({pattern,key}) => [pattern,key]);
     let headers: string[] = [], owner: any = null, stockOwner: string | null = null;
-    for (const line of reply.split("\n")) {
+    for (const rawLine of reply.split("\n")) {
+        const line = normalizeEvidenceNumbers(rawLine);
         const stockNames = [...new Set(rows.map(r => r.symbol))].filter(s => line.includes(s));
         if (stockNames.length === 1) stockOwner = stockNames[0];
         const selected = rows.filter((r: any) => (!stockOwner || r.symbol === stockOwner) && (line.includes(r.strategy_id) || line.includes(r.strategy_name)));
@@ -815,10 +814,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
             const rowFields = !tableHadStockRow ? tableMetricFields(cells[0]) : undefined;
-            const verticalLevelPrice = rowFields?.some(field => field === "support" || field === "resistance")
+            const verticalMetricValue = Boolean(rowFields?.length)
                 && /^(?:السعر|سعر|القيمة|قيمة|price|value)$/i.test(header.replace(/[*_`]/g," ").trim());
             const fields = screenRow && /مساف|بعد|قرب/.test(header) ? ["distance_from_resistance_pct" as const] : distanceColumn && levelField ? [levelField]
-                : verticalLevelPrice ? rowFields
+                : verticalMetricValue ? rowFields
                 : (scenarioRow ? scenarioMetricFields(headers[idx]) : tableMetricFields(headers[idx]))
                     || (currentSymbol ? tableMetricFields(cells[0]) : undefined);
             const allocationFacts = scenarioRow ? buildFactRecords([{ tool: "analyze_portfolio_risk", source: "scenario-calculation",
@@ -913,13 +912,17 @@ export function advisoryTableRowCountConsistency(reply: string): string[] {
     return [...new Set(issues)];
 }
 
-export function safeAgenticFallback(evidence: AgenticEvidence[], reason: string): string {
-    const lines = ["تعذر إكمال إجابة متحقَّق منها لكل أجزاء طلبك. " + reason];
+export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string): string {
+    const lines: string[] = [];
     // Evidence passed here should already be scoped to the current request. Keep
     // the first available rows only as a bounded fallback and never resurrect
     // unrelated symbols from an older turn.
     const rows = evidence.filter(e => e.availability !== "error").flatMap(e => evidenceRows(e.data));
     for (const e of evidence.filter(e => e.availability !== "error")) {
+        if (e.tool === "compare_strategies_history") {
+            const result = renderBacktestEvidence(e.data);
+            if (result) lines.push(result);
+        }
         if (e.tool === "get_comparison" && e.availability !== "error") {
             const comparisonRows = evidenceRows(e.data).filter(row => row.symbol && row.close != null);
             if (comparisonRows.length) {
@@ -988,6 +991,6 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], reason: string)
     for (const e of evidence) if (e.data?.persisted === true) lines.push(`عملية المحفظة ${e.data.operation} للسهم ${e.data.symbol}: تم تأكيد تعديل المركز؛ لا تكرر العملية تلقائياً.${e.data.cash_updated === false && e.data.operation === "sell" ? " لم يتغير الرصيد النقدي." : ""}`);
     if (evidence.some(e => e.availability === "error")) lines.push("تعذر تنفيذ بعض أدوات البيانات؛ لا تعتبر نتائجها فارغة أو عملياتها محفوظة.");
     if (evidence.some(e => e.availability === "missing" || e.availability === "partial")) lines.push("بعض البيانات المطلوبة غير متاحة أو غير مكتملة في المصدر.");
-    return lines.join("\n");
+    return lines.length ? lines.join("\n") : "لم تصل بيانات مؤكدة للإجابة عن الطلب الحالي. أعد المحاولة بعد قليل؛ لن أعرض أسعارًا أو نتائج اختبار غير محسوبة.";
 }
 

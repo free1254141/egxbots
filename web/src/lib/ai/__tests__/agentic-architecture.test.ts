@@ -37,6 +37,13 @@ async function run(messages: any[], overrides: any = {}) {
 const stockDb = () => db(q => ({ data: q.table === "stock_prices" ? [price] : q.table === "stocks" ? { symbol:"COMI",name:"Commercial Bank" } : [], error:null }));
 
 describe("Agentic architecture integration: current production path", () => {
+    test("a harmful optional refinement preserves the accepted original answer",async()=>{
+        const valid="COMI إغلاق 100 جنيه بتاريخ 2026-10-08، وهو إغلاق يومي لا سعر لحظي.";
+        const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]},{content:valid},verdict(false,["أضف خلاصة اختيارية"]),
+            {content:"COMI إغلاق 9999 جنيه"},verdict()],{db:stockDb(),userMessage:"هات إغلاق COMI"});
+        expect(r.done.publication_review.final_passed).toBe(true);
+        expect(r.done.response).toContain(valid);expect(r.done.response).not.toContain("9999");
+    });
     test("rejected portfolio image draft falls back to extracted facts instead of a generic image failure", () => {
         const reply=safePortfolioImageReply({image_type:"portfolio",symbols:[
             {symbol:"HRHO",name:"",asset_type:"stock",visible_values:{price:26.57,average_price:27.32,quantity:1046,market_value:27792.22,cost_basis:28576.72,profit_loss:-784.3,return_pct:-2.74,change_pct:null,cash_dividends:98.44}},
@@ -182,7 +189,8 @@ describe("Agentic architecture integration: current production path", () => {
     });
     test("a later failed call preserves the earlier billed tokens without claiming zero cost", async () => {
         const result = await run([{content: "حدد أفق الاستثمار قبل اختيار سهم."}]);
-        expect(result.done.response_origin).toBe("safe_fallback");
+        expect(result.done.response_origin).toBe("llm");
+        expect(result.done.response).toContain("حدد أفق الاستثمار");
         expect(result.done.usage.total_tokens).toBe(15);
         expect(result.done.usage.known_cost_usd).toBeGreaterThan(0);
         expect(result.done.usage.cost_usd).toBeNull();
@@ -286,7 +294,7 @@ describe("Agentic architecture integration: current production path", () => {
     test("false reviewer approval cannot authorize fabricated price", async () => {
         const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]}, {content:"سعر COMI الحالي 9999 جنيه"},verdict(),
             {content:"سعر COMI الحالي 9999 جنيه"},verdict()],{db:stockDb()});
-        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999"); expect(r.done.response).not.toContain("| السهم |");
+        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999"); expect(r.done.response).toContain("| COMI | 100 | 2026-10-08 |");
         expect(r.events.filter(e=>e.type === "token").every(e=>!String(e.data).includes("9999"))).toBe(true);
     });
     test("review rejection is repaired once and verified again", async () => {
@@ -308,8 +316,8 @@ describe("Agentic architecture integration: current production path", () => {
         const r=await run([{content:"<DSML invoke get_stock>"},verdict(),{content:"<DSML invoke get_stock>"},verdict()]);
         expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("DSML");
     });
-    test("malformed review JSON fails closed", async () => {
-        const r=await run([{content:"رد مبدئي"},{content:"invalid-json"}]); expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("رد مبدئي");
+    test("malformed advisory cannot discard a draft that passes deterministic checks", async () => {
+        const r=await run([{content:"حدد أفق الاستثمار قبل اختيار سهم."},{content:"invalid-json"}]); expect(r.done.publication_review.final_passed).toBe(true); expect(r.done.response).toContain("حدد أفق الاستثمار");
     });
     test("truncated provider response never becomes a published partial report", async () => {
         global.fetch=jest.fn().mockResolvedValue(response({content:"جزء ناقص"},"length")); const events:any[]=[];
