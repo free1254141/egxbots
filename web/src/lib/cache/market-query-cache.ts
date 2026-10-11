@@ -124,10 +124,23 @@ async function touch(q: Query) {
 }
 
 async function origin(q: Query, scope: Scope, fetcher: typeof fetch) {
-  return fetcher(q.url, {
-    headers: { ...q.headers, apikey: scope.key, authorization: `Bearer ${scope.key}` },
-    cache: "no-store", signal: AbortSignal.timeout(12000),
-  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetcher(q.url, {
+        headers: { ...q.headers, apikey: scope.key, authorization: `Bearer ${scope.key}` },
+        cache: "no-store", signal: AbortSignal.timeout(12000),
+      });
+      if (response.status < 500 || attempt === 1) return response;
+      lastError = new Error(`Supabase returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  const table = new URL(q.url).pathname.split("/").pop() || "unknown";
+  throw new Error(`Market refresh failed for ${table}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
 /** Inject only in cookie-free clients. A CDN miss must not become a DB miss. */

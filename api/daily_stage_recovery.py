@@ -119,31 +119,34 @@ def execute_stage(name, phase, job_id, previous):
 
 
 def append_step(client, job, step):
-    # Verify writes instead of reporting a recovery that was never recorded.
-    previous = job.get('steps')
-    if previous is None:
-        previous = '[]'
-    steps = json.loads(previous) if isinstance(previous, str) else list(previous)
-    steps.append({**step, 'sequence': len(steps)+1, 'timestamp': utc_now().isoformat(), 'recovery_attempt': 1})
-    encoded = json.dumps(steps)
-    health = summarise_daily_steps(steps)
-    updated = (client.table('daily_job_runs').update({'steps': encoded, 'error': health['error']})
-               .eq('id', job['id']).eq('steps', json.dumps(previous)).execute())
-    if not updated.data:
-        current = client.table('daily_job_runs').select('steps').eq('id', job['id']).single().execute()
-        current_steps_raw = (current.data or {}).get('steps')
-        if current_steps_raw is None:
-            current_steps_raw = '[]'
-        steps = json.loads(current_steps_raw) if isinstance(current_steps_raw, str) else list(current_steps_raw)
-        steps.append({**step, 'sequence': len(steps)+1, 'timestamp': utc_now().isoformat(), 'recovery_attempt': 1})
+    # Keep the completion time intact; JSONB equality creates a huge PostgREST
+    # URL. Durable stage checkpoints prevent duplicate workers, and read-back
+    # detects the rare concurrent audit append before one bounded retry.
+    for _ in range(2):
+        current = (client.table('daily_job_runs').select('steps')
+                   .eq('id', job['id']).limit(1).execute())
+        row = (current.data or [None])[0]
+        if not row:
+            raise RuntimeError('Daily recovery job disappeared')
+        raw = row.get('steps')
+        if raw is None:
+            raw = '[]'
+        steps = json.loads(raw) if isinstance(raw, str) else list(raw)
+        marker = {**step, 'sequence': len(steps)+1, 'timestamp': utc_now().isoformat(), 'recovery_attempt': 1}
+        steps.append(marker)
         encoded = json.dumps(steps)
         health = summarise_daily_steps(steps)
-        updated = (client.table('daily_job_runs').update({'steps': encoded, 'error': health['error']})
-                   .eq('id', job['id']).eq('steps', json.dumps(current_steps_raw)).execute())
-        if not updated.data:
-            raise RuntimeError('Daily recovery audit write lost to a concurrent update')
-    job['steps'] = encoded
-    return steps
+        client.table('daily_job_runs').update({'steps': encoded, 'error': health['error']}).eq('id', job['id']).execute()
+        verified = (client.table('daily_job_runs').select('steps')
+                    .eq('id', job['id']).limit(1).execute())
+        saved = (verified.data or [None])[0]
+        saved_raw = saved.get('steps') if saved else None
+        saved_steps = json.loads(saved_raw) if isinstance(saved_raw, str) else saved_raw or []
+        if any(isinstance(item, dict) and item.get('timestamp') == marker['timestamp'] for item in saved_steps):
+            job['steps'] = json.dumps(saved_steps)
+            job['error'] = health['error']
+            return saved_steps
+    raise RuntimeError('Daily recovery audit write lost to a concurrent update')
 
 
 def retry_failed_daily_stages(now):

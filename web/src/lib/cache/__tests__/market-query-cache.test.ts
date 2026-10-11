@@ -76,6 +76,17 @@ it("does not download the same unchanged payload chunk on daily refresh", async 
   expect(after).toEqual(before);
 });
 
+it("retries one transient network failure before abandoning the cache refresh", async () => {
+  const initial = jest.fn(async () => Response.json([{ symbol: "COMI", close: 10 }]));
+  await marketCachedFetch(scope, initial as typeof fetch)(query, options);
+  const refresh = jest.fn()
+    .mockRejectedValueOnce(new TypeError("fetch failed"))
+    .mockResolvedValueOnce(Response.json([{ symbol: "COMI", close: 11 }]));
+  const result = await refreshMarketQueries([DAILY_CACHE_TAGS.market], "2026-09-27T17:00:00.000Z", refresh as typeof fetch);
+  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(result.queries).toBe(1);
+});
+
 it("skips inactive stock queries during the next daily refresh", async () => {
   const origin = jest.fn(async () => Response.json([{ symbol: "COMI", close: 10 }]));
   await marketCachedFetch(scope, origin as typeof fetch)(query, options);

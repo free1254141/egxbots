@@ -6,21 +6,24 @@ from api.daily_stage_recovery import plan_recovery, retry_failed_daily_stages, O
 
 
 @pytest.mark.parametrize('stored', [json.dumps([]), []])
-def test_append_step_matches_jsonb_value_not_serialized_array(stored):
+def test_append_step_avoids_large_json_filter_and_preserves_completion_time(stored):
     from api.daily_stage_recovery import append_step
     from types import SimpleNamespace
-    row = {'id': 'cas-test', 'steps': stored}
+    row = {'id': 'cas-test', 'steps': stored, 'completed_at': '2026-10-11T14:26:13Z'}
 
     class Query:
         def __init__(self):
             self.filters = {}
             self.payload = None
         def update(self, payload): self.payload = payload; return self
+        def select(self, *args): return self
+        def limit(self, *args): return self
         def eq(self, key, value): self.filters[key] = value; return self
         def execute(self):
-            # PostgREST parses the filter as JSONB: strings and arrays differ.
-            assert json.loads(self.filters['steps']) == row['steps']
-            row.update(self.payload)
+            if self.payload is not None:
+                assert set(self.filters) == {'id'}
+                assert 'completed_at' not in self.payload
+                row.update(self.payload)
             return SimpleNamespace(data=[dict(row)])
 
     class Client:
@@ -30,6 +33,7 @@ def test_append_step_matches_jsonb_value_not_serialized_array(stored):
     result = append_step(Client(), job, {'step': 'sync_prices', 'status': 'started'})
     assert result[0]['recovery_attempt'] == 1
     assert json.loads(row['steps']) == result
+    assert row['completed_at'] == '2026-10-11T14:26:13Z'
 
 
 @pytest.mark.parametrize('lease_status,error,attempt,expected_calls', [
@@ -163,6 +167,7 @@ def test_recovery_withholds_stages_if_price_sync_incomplete(monkeypatch):
         def order(self, *args, **kwargs): return self
         def limit(self, *args): return self
         def single(self): return self
+        def is_(self, *args): return self
         def insert(self, row):
             checkpoints[row["checkpoint_key"]] = row
             return self
@@ -234,6 +239,7 @@ def test_recovery_withholds_stages_if_indicator_calc_incomplete(monkeypatch):
         def order(self, *args, **kwargs): return self
         def limit(self, *args): return self
         def single(self): return self
+        def is_(self, *args): return self
         def insert(self, row):
             checkpoints[row["checkpoint_key"]] = row
             return self

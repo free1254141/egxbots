@@ -24,9 +24,24 @@ def resume_daily_social_reports(client, job_id):
         raise ValueError('Report inputs are not ready')
     key = 'daily_social_resume_' + job_id
     existing = read_checkpoint(client, key)
+    attempts = 1
     if existing:
-        return {'status': 'already_claimed', 'checkpoint': existing.get('payload', {}).get('status')}
-    claim = replace_checkpoint(client, key, {'status': 'running', 'job_run_id': job_id, 'attempts': 1}, None)
+        payload = existing.get('payload') or {}
+        reports_started = any(s.get('step') == 'daily_social_reports' and s.get('status') == 'started'
+                              for s in raw if isinstance(s, dict))
+        # A failed cache refresh is safe to retry once because report generation
+        # has not started and the report table is still empty. Never replay an
+        # LLM/report attempt whose outcome could be ambiguous.
+        if (payload.get('status') != 'failed' or payload.get('stage') != 'cache_revalidation'
+                or payload.get('attempts') != 1 or reports_started):
+            return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
+        reports = (client.table('daily_social_reports').select('id').eq('job_run_id', job_id)
+                   .limit(1).execute())
+        if reports.data:
+            return {'status': 'already_claimed', 'checkpoint': payload.get('status')}
+        attempts = 2
+    claim = replace_checkpoint(client, key, {'status': 'running', 'stage': 'cache_revalidation',
+                                             'job_run_id': job_id, 'attempts': attempts}, existing)
     if not claim:
         return {'status': 'already_claimed'}
     try:
@@ -42,6 +57,10 @@ def resume_daily_social_reports(client, job_id):
             raise RuntimeError('Current-session cache refresh did not complete')
         append_step(client, job, {'step': 'cache_revalidation', 'status': 'success',
                                   'details': 'Refreshed tags: ' + ', '.join(cache.get('invalidated', []))})
+        claim = replace_checkpoint(client, key, {'status': 'running', 'stage': 'daily_social_reports',
+                                                  'job_run_id': job_id, 'attempts': attempts}, claim)
+        if not claim:
+            raise RuntimeError('Could not reserve the report-generation stage')
         append_step(client, job, {'step': 'daily_social_reports', 'status': 'started',
                                   'details': 'Resume missing reports only; original trading results retained'})
         from api.daily_social_reports import generate_daily_social_reports
@@ -50,10 +69,12 @@ def resume_daily_social_reports(client, job_id):
         append_step(client, job, {'step': 'daily_social_reports', 'status': 'success' if ok else 'failed',
                                   'details': message, 'count': count})
         status = 'completed' if ok and not cache.get('error') else 'partial'
-        saved = {'status': status, 'job_run_id': job_id, 'reports': reports, 'cache': cache, 'attempts': 1}
+        saved = {'status': status, 'stage': 'complete', 'job_run_id': job_id,
+                 'reports': reports, 'cache': cache, 'attempts': attempts}
         replace_checkpoint(client, key, saved, claim)
         return saved
     except Exception as error:
-        replace_checkpoint(client, key, {'status': 'failed', 'job_run_id': job_id,
-                                        'error': type(error).__name__, 'attempts': 1}, claim)
+        stage = (claim.get('payload') or {}).get('stage', 'cache_revalidation')
+        replace_checkpoint(client, key, {'status': 'failed', 'stage': stage, 'job_run_id': job_id,
+                                        'error': type(error).__name__, 'attempts': attempts}, claim)
         raise
