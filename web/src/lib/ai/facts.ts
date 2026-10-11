@@ -9,6 +9,8 @@
  */
 
 export type FactField =
+    "pe_ratio" | "eps" | "market_cap" | "breadth_total" | "breadth_advancing" | "breadth_declining" | "breadth_unchanged" | "breadth_advancing_pct" | "breadth_ad_ratio"
+
     | "chart_signal_count" | "chart_buy_signal_count" | "chart_sell_signal_count"
     | "backtest_return_pct" | "backtest_drawdown_pct" | "backtest_win_rate_pct" | "backtest_profit_factor" | "backtest_closed_trades" | "backtest_final_equity"
     | "price"
@@ -72,6 +74,7 @@ export interface FactRecord {
 }
 
 const FIELD_UNITS: Record<FactField, FactUnit> = {
+pe_ratio: "ratio", eps: "egp", market_cap: "egp", breadth_total: "count", breadth_advancing: "count", breadth_declining: "count", breadth_unchanged: "count", breadth_advancing_pct: "percent", breadth_ad_ratio: "ratio",
     chart_signal_count: "count", chart_buy_signal_count: "count", chart_sell_signal_count: "count",
     backtest_return_pct: "percent", backtest_drawdown_pct: "percent", backtest_win_rate_pct: "percent",
     backtest_profit_factor: "ratio", backtest_closed_trades: "count", backtest_final_equity: "egp",
@@ -120,6 +123,15 @@ const FIELD_UNITS: Record<FactField, FactUnit> = {
 };
 
 const VALUE_KEYS: Array<{ key: string; field: FactField }> = [
+{ key: "pe_ratio", field: "pe_ratio" },
+{ key: "eps", field: "eps" },
+{ key: "market_cap", field: "market_cap" },
+{ key: "breadth_total", field: "breadth_total" },
+{ key: "breadth_advancing", field: "breadth_advancing" },
+{ key: "breadth_declining", field: "breadth_declining" },
+{ key: "breadth_unchanged", field: "breadth_unchanged" },
+{ key: "breadth_advancing_pct", field: "breadth_advancing_pct" },
+{ key: "breadth_ad_ratio", field: "breadth_ad_ratio" },
     { key: "price", field: "price" },
     { key: "close", field: "close" },
     { key: "current_price", field: "price" },

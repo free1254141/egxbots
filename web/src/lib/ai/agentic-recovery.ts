@@ -45,7 +45,7 @@ export function safeImageEvidenceReply(vision: VisionContext | null, request: st
 }
 export function fallbackEvidence(evidence: AgenticEvidence[], activeSymbols?: string[]) {
     const matched = evidence.filter(e => e.data?.persisted === true || (e.data?.status === "success"
-        && ["screen_stocks", "analyze_portfolio_risk", "calculate_position", "get_comparison", "compare_strategies_history", "get_stock", "get_stock_levels", "get_market", "get_news", "get_recommendations"].includes(e.tool) && e.availability !== "error")
+        && ["get_fundamentals", "get_sector_peers", "get_market_breadth", "screen_stocks", "analyze_portfolio_risk", "calculate_position", "get_comparison", "compare_strategies_history", "get_stock", "get_stock_levels", "get_market", "get_news", "get_recommendations"].includes(e.tool) && e.availability !== "error")
         || (e.tool === "get_comparison" && e.availability !== "error" && evidenceRows(e.data).length > 0));
     if (activeSymbols && activeSymbols.length > 0) {
         const symbolSet = new Set(activeSymbols.map(s => String(s).toUpperCase()));

@@ -1,3 +1,4 @@
+import { renderPlannedReadEvidence } from "./planned-read-tools";
 import { normalizeEvidenceNumbers } from "./numeric-evidence";
 import { BACKTEST_METRICS, renderBacktestEvidence } from "./backtest-evidence";
 import { checkAttribution } from "./answer-gate";
@@ -19,6 +20,7 @@ export interface AgenticEvidence {
 
 const memoryTools = new Set(["get_stock", "get_stock_levels", "get_market", "get_technical_scan", "get_accumulation_stocks", "get_comparison", "get_news", "get_recommendations"]);
 memoryTools.add("apply_chart_strategy"); memoryTools.add("compare_strategies_history");
+memoryTools.add("get_fundamentals"); memoryTools.add("get_sector_peers"); memoryTools.add("get_market_breadth");
 memoryTools.add("screen_stocks"); memoryTools.add("analyze_portfolio_risk");
 /** Remove duplicate aliases/payload text, without removing source, dates, identity or unknown values. */
 export function compactEvidence(record: AgenticEvidence): AgenticEvidence {
@@ -75,6 +77,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         ? r.event_date || r.published_at || r.publication_date
         : r.date || r.scan_date || r.current_date || r.signal_date || r.published_at).filter(Boolean))];
     const missing = rows.some(r => r.error || r.availability === "missing");
+    const plannedPartial = ["get_fundamentals","get_sector_peers","get_market_breadth"].includes(tool) && data?.availability === "partial";
     const verifiedEmptyScreen = tool === "screen_stocks" && data?.status === "success" && Boolean(data.date)
         && Array.isArray(data.stocks) && typeof data.scan_complete === "boolean";
     return { tool, arguments: args, data, source: tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
@@ -82,10 +85,11 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         calculate_position: "stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
         get_recommendations: "scan_results+stock_technical_indicators", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_technical_indicators",
         get_technical_scan: args.preset === "smart_money_flow" ? "stock_scans_summary" : "stock_technical_indicators",
+        get_fundamentals: "stock_fundamentals", get_sector_peers: "stock_fundamentals", get_market_breadth: "stock_technical_indicators+deterministic-breadth",
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation" } as any)[tool],
         data_time: dates.length === 1 ? dates[0] : data?.date || data?.session_date || null, symbols,
         availability: data?.status === "error" ? "error" : data?.availability === "missing" || (!verifiedEmptyScreen && !rows.length && !data?.egx30?.close && !data?.persisted && !data?.strategies?.length)
-            ? "missing" : missing || data?.valuation_complete === false || data?.scan_complete === false
+            ? "missing" : plannedPartial || missing || data?.valuation_complete === false || data?.scan_complete === false
                 || data?.sector_concentration_complete === false || data?.industry_concentration_complete === false || data?.truncated ? "partial" : "available", data_type: "historical" };
 }
 
@@ -172,6 +176,9 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/ربح|خسار/i.test(text) && /جنيه|بالجنيه/i.test(text)) return ["profit_value"];
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
+        [/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i,["pe_ratio"]], [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i,["market_cap"]],
+        [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]], [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]],
+        [/صاعد|مرتفعة|advancing/i,["breadth_advancing"]], [/هابط|منخفضة|declining/i,["breadth_declining"]], [/ثابت|unchanged/i,["breadth_unchanged"]], [/الأسهم.*(?:صالحة|تغير صالح)|إجمالي.*أسهم|total.*stocks/i,["breadth_total"]],
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
@@ -482,7 +489,7 @@ export function checkUserPositionInputs(reply: string, request: string): string[
 export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], request = ""): string[] {
     const reasons: string[] = [];
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
@@ -930,6 +937,8 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     // unrelated symbols from an older turn.
     const rows = evidence.filter(e => e.availability !== "error").flatMap(e => evidenceRows(e.data));
     for (const e of evidence.filter(e => e.availability !== "error")) {
+        const planned = renderPlannedReadEvidence(e.tool, e.data);
+        if (planned) lines.push(planned);
         if (e.tool === "compare_strategies_history") {
             const result = renderBacktestEvidence(e.data);
             if (result) lines.push(result);

@@ -1,3 +1,4 @@
+import { PLANNED_READ_TOOL_NAMES, executePlannedReadTool } from "./planned-read-tools";
 import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
 import { sanitizeNewsRows } from "./news-evidence";
@@ -47,6 +48,7 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         if (args.symbols != null && (!Array.isArray(args.symbols) || args.symbols.length > 10 || args.symbols.some((s:any)=>typeof s !== "string" || !/^[A-Za-z0-9.]{2,12}$/.test(s.trim())))) throw new Error("الحد الأقصى 10 رموز موثقة لكل أداة");
         if (["get_stock","get_stock_levels","get_comparison"].includes(toolName) && !args.symbols?.length) throw new Error("رموز الأسهم مطلوبة");
         const normalized = {...args, ...(args.symbols ? {symbols:Array.from(new Set(args.symbols.map(normalizeSymbol)))} : {})};
+        if (PLANNED_READ_TOOL_NAMES.has(toolName)) return await executePlannedReadTool(toolName, normalized, checkedClient(executionSupabase(supabase)), todayInCairo());
         if (chartTool) return await executeChartStrategyTool(toolName, normalized, checkedClient(executionSupabase(supabase)), chartHistoryCache);
         return await executeRawTool(toolName,normalized,checkedClient(executionSupabase(supabase)),userId);
     } catch (error:any) { return {status:"error", availability:"error", persisted:false, message:error.message}; }

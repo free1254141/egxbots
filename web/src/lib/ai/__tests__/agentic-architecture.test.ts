@@ -264,7 +264,7 @@ describe("Agentic architecture integration: current production path", () => {
     });
     test("specialized screens and scenarios remain LLM selected", () => {
         const names=new Set(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name));
-        expect(names.size).toBe(15); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true);
+        expect(names.size).toBe(18); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true);
     });
     test("reviewer prompt distinguishes requested scenario holdings from saved positions",async()=>{
         const r=await run([{content:"تم تحليل السيناريو"},verdict()],{userMessage:"معايا 100 ألف ومحفظتي فيها COMI وSWDY"});
@@ -529,7 +529,7 @@ describe("Agentic architecture integration: current production path", () => {
 });
 
 describe("Agentic tool correctness and failure boundaries", () => {
-    test.each(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name).filter(name => !["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history", "screen_stocks", "analyze_portfolio_risk", "calculate_position"].includes(name)))("existing data tools: %s reads healthy bounded fixtures",async tool=>{
+    test.each(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name).filter(name => !["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history", "screen_stocks", "analyze_portfolio_risk", "calculate_position", "get_fundamentals", "get_sector_peers", "get_market_breadth"].includes(name)))("existing data tools: %s reads healthy bounded fixtures",async tool=>{
         const d=db(q=>({data:q.table === "stocks" ? [{id:1,symbol:"COMI",name:"Commercial Bank"}] : q.table === "stock_prices" ? [price]
             : q.table === "market_cache" ? {payload:{egx30:[{close:100,date:"2026-10-07"},{close:101,date:price.date}],regime:"sideways"}}
             : q.table === "stock_technical_indicators" ? [{symbol:"COMI",...price,change_pct:1,r_vol:2,rsi_14:55,macd:1,macd_signal:.5,macd_histogram:.5}]
