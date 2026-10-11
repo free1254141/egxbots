@@ -17,12 +17,14 @@ const data: DailyActiveUsage[] = Array.from({ length: 90 }, (_, i) => ({
 }));
 
 describe("daily site usage chart", () => {
-    it("shows one activity chart with total, new, and existing users and switches its period", () => {
+    it("shows only the daily active user count and switches its period", () => {
         render(<DailyUsageChart data={data} isAr loading={false} complete />);
         expect(screen.getAllByTestId("usage-series")).toHaveLength(1);
         expect(screen.getByTestId("usage-series").getAttribute("data-rows")).toBe("30");
-        for (const key of ["activeUsers", "newActiveUsers", "returningActiveUsers"]) expect(screen.getByTestId(key)).toBeTruthy();
-        expect(screen.getByText("نشطون قدامى")).toBeTruthy();
+        expect(screen.getByTestId("activeUsers")).toBeTruthy();
+        expect(screen.queryByTestId("newActiveUsers")).toBeNull();
+        expect(screen.queryByTestId("returningActiveUsers")).toBeNull();
+        expect(screen.queryByText("نشطون قدامى")).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: "90 يوم" }));
         expect(screen.getByTestId("usage-series").getAttribute("data-rows")).toBe("90");
         expect(screen.getByRole("button", { name: "90 يوم" }).getAttribute("aria-pressed")).toBe("true");
