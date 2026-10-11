@@ -2,6 +2,20 @@
 import React from "react";
 import { render, waitFor } from "@testing-library/react";
 import ShortSwingsTab from "../../components/ShortSwingsTab";
+import { invalidateShortSwingsRequest } from "@/lib/short-swings-client";
+
+beforeEach(() => invalidateShortSwingsRequest("anonymous"));
+
+test("waits for identity and does not refetch for a Pro prop change or unrelated storage event", async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ is_pro: true, active_trades: [], closed_trades: [] }) }) as Response);
+  const view = render(<ShortSwingsTab viewerReady={false} />);
+  expect(fetch).not.toHaveBeenCalled();
+  view.rerender(<ShortSwingsTab viewerReady isPro={false} />);
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  view.rerender(<ShortSwingsTab viewerReady isPro />);
+  fireEvent(window, new StorageEvent("storage", {key: "chart-preferences"}));
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 
 jest.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "ar" }) }));
 jest.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "light" }) }));

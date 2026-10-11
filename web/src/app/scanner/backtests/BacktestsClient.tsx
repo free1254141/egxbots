@@ -16,6 +16,7 @@ import { TradeTimeline } from "@/app/admin/components/TradeTimeline";
 import TradingViewChart from "@/components/TradingViewChartDynamic";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import RecommendationsTable from "@/components/RecommendationsTable";
+import { requestShortSwings } from "@/lib/short-swings-client";
 import TelegramServiceToggle from "@/components/TelegramServiceToggle";
 import { useNotification } from "@/contexts/NotificationContext";
 import { 
@@ -360,12 +361,19 @@ function TelegramNotificationCard() {
 }
 
 export default function AIScannerPage() {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { t, language } = useLanguage();
     const searchParams = useSearchParams();
 
     const tabParam = searchParams.get("tab");
     const activeTab = tabParam === "backtests" ? "backtests" : tabParam === "similarity" ? "similarity" : "bots";
+
+    // Start the selected short-trades request alongside page initialization.
+    useEffect(() => {
+        if (tabParam === "short_swings" && !authLoading) {
+            void requestShortSwings(user?.id || "anonymous").catch(() => {});
+        }
+    }, [tabParam, authLoading, user?.id]);
 
     // SaaS Subscription State
     const [isPro, setIsPro] = useState(false);

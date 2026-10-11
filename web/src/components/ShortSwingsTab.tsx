@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import StockLogo from "./StockLogo";
 import ShortSwingTradeChart from "./short-swings/TradeChart";
+import { requestShortSwings, invalidateShortSwingsRequest } from "@/lib/short-swings-client";
 import { formatShortSwingReturn, shortSwingQuote } from "@/lib/short-swings-view";
 import { isShariaCompliant } from "@/lib/shariaStocks";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -118,10 +119,12 @@ const DEFAULT_SHORT_SWING_KPIS: NonNullable<ShortSwingsData["kpis"]> = {
 
 interface ShortSwingsTabProps {
   isPro?: boolean;
+  viewerKey?: string;
+  viewerReady?: boolean;
   onSelectStock?: (stock: any) => void;
 }
 
-export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSwingsTabProps) {
+export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous", viewerReady = true, onSelectStock }: ShortSwingsTabProps) {
   const { language } = useLanguage();
   const isAr = language === "ar";
   const { theme } = useTheme();
@@ -130,6 +133,8 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const requestVersion = useRef(0);
+  const entitlementRefresh = useRef(false);
   const [viewMode, setViewMode] = useState<"active" | "closed" | "all" | "calendar">("active");
 
   // Helper for YYYY-MM-DD formatting
@@ -210,51 +215,56 @@ export default function ShortSwingsTab({ isPro = false, onSelectStock }: ShortSw
   const [allPage, setAllPage] = useState(1);
 
   const loadData = useCallback(async (isRefresh = false) => {
+    const version = ++requestVersion.current;
     try {
       setLoadError(false);
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
 
-      const res = await fetch("/api/short-swings", {
-        cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache"
-        }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        json.active_trades = (json.active_trades || []).map((trade: ShortSwingTrade) => {
-          if (trade.is_pending_entry) return trade;
-          const quote = shortSwingQuote(trade, json.as_of);
-          return { ...trade, current_price: quote.price, return_pct: quote.returnPct };
-        });
-        setData(json);
-      } else throw new Error(`Short swings HTTP ${res.status}`);
+      const response = await requestShortSwings(viewerKey, isRefresh);
+      if (version !== requestVersion.current) return;
+      const json = { ...response, active_trades: (response.active_trades || []).map((trade: ShortSwingTrade) => {
+        if (trade.is_pending_entry) return trade;
+        const quote = shortSwingQuote(trade, response.as_of);
+        return { ...trade, current_price: quote.price, return_pct: quote.returnPct };
+      }) };
+      setData(json);
     } catch (err) {
+      if (version !== requestVersion.current) return;
       setLoadError(true);
       console.error("Failed to load short swings data:", err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (version === requestVersion.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [isPro]);
+  }, [viewerKey]);
 
   useEffect(() => {
+    if (!viewerReady) return;
     loadData();
 
     // Listen to entitlement changes to unmask immediately on subscription
     const handleEntitlements = () => {
-      loadData();
+      if (entitlementRefresh.current) return;
+      entitlementRefresh.current = true;
+      setData(null);
+      invalidateShortSwingsRequest(viewerKey);
+      void loadData().finally(() => { entitlementRefresh.current = false; });
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "egx_entitlements_timestamp" || event.key === "egx_pro_active") handleEntitlements();
     };
     window.addEventListener("egx:entitlements-updated", handleEntitlements);
-    window.addEventListener("storage", handleEntitlements);
+    window.addEventListener("storage", handleStorage);
 
     return () => {
+      ++requestVersion.current;
       window.removeEventListener("egx:entitlements-updated", handleEntitlements);
-      window.removeEventListener("storage", handleEntitlements);
+      window.removeEventListener("storage", handleStorage);
     };
-  }, [loadData]);
+  }, [loadData, viewerKey, viewerReady]);
 
   const kpis = useMemo(() => {
     const raw = data?.kpis;

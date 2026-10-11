@@ -257,7 +257,7 @@ function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => 
 }
 
 function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, hideTelegramToggle = false, analyticsOnly = false }: RecommendationsTableProps) {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { language } = useLanguage();
     const { theme } = useTheme();
     const router = useRouter();
@@ -2324,7 +2324,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
 
             {/* ── Main View Switching ─────────────────────────────────────── */}
             {mainTab === "short_swings" ? (
-                <ShortSwingsTab isPro={isProView} onSelectStock={handleStockClick} />
+                <ShortSwingsTab key={user?.id || "anonymous"} viewerKey={user?.id || "anonymous"} viewerReady={!authLoading} isPro={isProView} onSelectStock={handleStockClick} />
             ) : mainTab === "comparison" ? (
                 <SystemsComparisonTab isAr={isAr} isPro={isProView} />
             ) : (
