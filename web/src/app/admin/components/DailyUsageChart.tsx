@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Activity } from "lucide-react";
 import { CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
 export default function DailyUsageChart({ data, isAr, loading, complete }: {
@@ -40,7 +41,7 @@ export default function DailyUsageChart({ data, isAr, loading, complete }: {
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#71717a" opacity={0.2} />
                                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#71717a" }} minTickGap={20} />
                                 <YAxis allowDecimals={false} domain={[0, "auto"]} axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#71717a" }} />
-                                <Tooltip contentStyle={{ backgroundColor: "#18181b", border: "2px solid #fff", fontSize: "11px" }} labelStyle={{ color: "#fbbf24" }} itemStyle={{ color: "#fff" }}
+                                <Tooltip<ValueType, NameType> contentStyle={{ backgroundColor: "#18181b", border: "2px solid #fff", fontSize: "11px" }} labelStyle={{ color: "#fbbf24" }} itemStyle={{ color: "#fff" }}
                                     labelFormatter={(_, payload) => payload?.[0]?.payload?.fullDate || ""}
                                     formatter={(value) => [complete ? value : `≥ ${value}`, isAr ? "عدد النشطين" : "Active users"]} />
                                 <Line type="linear" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
