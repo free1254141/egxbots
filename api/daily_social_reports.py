@@ -8,12 +8,14 @@ import os
 import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from api.daily_job_outcome import effective_daily_steps
 
 REPORT_KINDS = ('stock', 'accumulation', 'market', 'follow_up')
 
 
 def generate_daily_social_reports(job_run_id, steps, trigger='scheduled', dry_run=False, opener=None, client=None):
     date = datetime.now(ZoneInfo('Africa/Cairo'))
+    steps = effective_daily_steps(steps)
     from api.price_sync_policy import price_sync_usable
     latest = {s.get('step'): s.get('status') for s in steps}
     sync_step = [s for s in steps if s.get('step') == 'sync_prices' and s.get('status') != 'started']

@@ -1,8 +1,39 @@
 """Report execution health without changing the market-data completion contract."""
 
+WITHHELD_RECOVERY = {
+    'Price sync incomplete; dependent recovery withheld',
+    'Indicators incomplete; dependent recovery withheld',
+}
+
+
+def effective_daily_steps(steps):
+    """Preserve actual results when a recovery did not execute the operation.
+
+    Keep the full append-only audit separately. Failed subset price retries
+    cannot replace the original full-universe coverage used for readiness.
+    """
+    latest = {}
+    for step in steps:
+        if not isinstance(step, dict) or not step.get('step'):
+            continue
+        name = step['step']
+        previous = latest.get(name)
+        if step.get('recovery_attempt'):
+            if step.get('status') == 'started' and previous:
+                continue
+            if (step.get('status') == 'failed' and previous
+                    and step.get('details') in WITHHELD_RECOVERY):
+                continue
+            if (name == 'sync_prices' and step.get('status') == 'failed' and previous
+                    and str(step.get('details', '')).startswith('Recovered ')
+                    and str(previous.get('details', '')).startswith('Synced ')):
+                continue
+        latest[name] = step
+    return list(latest.values())
+
 
 def summarise_daily_steps(steps):
-    latest = {step.get('step'): step for step in steps if isinstance(step, dict)}
+    latest = {step.get('step'): step for step in effective_daily_steps(steps)}
     failed = [step for step in latest.values() if step.get('status') in ('failed', 'started')]
     return {
         'outcome': 'partial' if failed else 'completed',

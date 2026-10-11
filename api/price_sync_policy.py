@@ -56,6 +56,8 @@ def price_sync_usable(step, min_coverage=None):
     step = step or {}
     if step.get('status') == 'success':
         return True
+    if step.get('status') not in {'failed', 'partial'}:
+        return False
     if min_coverage is None:
         try:
             min_coverage = float(os.getenv('PRICE_SYNC_MIN_COVERAGE', '0.8'))
@@ -65,4 +67,4 @@ def price_sync_usable(step, min_coverage=None):
     if not match:
         return False
     done, total = int(match.group(1)), int(match.group(2))
-    return total > 0 and done / total >= min_coverage
+    return 0 < min_coverage <= 1 and total > 0 and 0 <= done <= total and done / total >= min_coverage

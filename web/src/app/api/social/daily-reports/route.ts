@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, getSupabaseServiceClient } from '@/lib/supabase/route-data';
 import { chooseLiquidStock, generateDailyReport, REPORT_KINDS, DailyReportVerificationError, type ReportKind } from '@/lib/social/daily-reports';
+import { socialJobReadiness } from '@/lib/social/job-readiness';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -29,11 +30,10 @@ export async function POST(req: NextRequest) {
   }
   const service = getSupabaseServiceClient();
   const { data: job, error: jobError } = await service.from('daily_job_runs').select('status,started_at,steps,job_type').eq('id', jobId).maybeSingle();
-  const steps = typeof job?.steps === 'string' ? JSON.parse(job.steps) : job?.steps || [];
-  const statuses = Object.fromEntries(steps.map((s: any) => [s.step, s.status]));
+  const { statuses, pricesUsable } = socialJobReadiness(job?.steps);
   const jobDate = job ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(job.started_at)) : '';
   if (jobError || job?.job_type !== 'daily_bot' || job.status !== 'completed' || jobDate !== date
-    || statuses.sync_prices !== 'success' || statuses.calculate_indicators !== 'success'
+    || !pricesUsable || statuses.calculate_indicators !== 'success'
     || (kind === 'accumulation' && statuses.accumulation_scan !== 'success')
     || (kind === 'market' && statuses.refresh_market_status !== 'success')) {
     return NextResponse.json({ error: 'Daily data job is not ready' }, { status: 409 });

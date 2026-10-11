@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from api.daily_recovery_state import read_checkpoint, replace_checkpoint, utc_now, parse_timestamp
-from api.daily_job_outcome import summarise_daily_steps
+from api.daily_job_outcome import summarise_daily_steps, effective_daily_steps
 
 _FINISHED = set()
 ORDER = ('sync_prices', 'calculate_indicators', 'ml_scores_update', 'precompute_heatmap',
@@ -34,7 +34,7 @@ def clear_egx_candle_cache():
 
 
 def plan_recovery(steps, phase):
-    latest = {s['step']: s for s in steps if isinstance(s, dict) and s.get('step')}
+    latest = {s['step']: s for s in effective_daily_steps(steps)}
     allowed = MIDDAY if phase == 'midday' else set(ORDER)
     failed = {name for name, s in latest.items()
               if s.get('status') in {'failed', 'started'} and name in allowed}
@@ -175,11 +175,12 @@ def retry_failed_daily_stages(now):
         _FINISHED.add(identity)
         return None
 
-    latest = {s.get('step'): s for s in steps if isinstance(s, dict) and s.get('step')}
+    latest = {s.get('step'): s for s in effective_daily_steps(steps)}
+    attempted_stages = {s.get('step') for s in steps if isinstance(s, dict) and s.get('recovery_attempt')}
     changed = []
     for name in planned:
         # Also survives restarts through both the job audit and durable CAS.
-        if latest.get(name, {}).get('recovery_attempt'):
+        if name in attempted_stages:
             continue
         key = f"daily_stage_retry_{job['id']}_{name}"
         existing = read_checkpoint(client, key)

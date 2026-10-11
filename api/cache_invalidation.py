@@ -57,10 +57,15 @@ def _latest_step_status(steps: Iterable[Dict[str, Any]]) -> Dict[str, str]:
 
 def select_cache_tags(steps: List[Dict[str, Any]], changed_steps=None) -> List[str]:
     """Return the cache tags that a completed run may safely invalidate."""
-    latest = _latest_step_status(steps)
+    from api.daily_job_outcome import effective_daily_steps
+    from api.price_sync_policy import price_sync_usable
+    effective = effective_daily_steps(steps)
+    latest = _latest_step_status(effective)
+    sync = next((s for s in effective if s.get('step') == 'sync_prices'), None)
+    prices_usable = price_sync_usable(sync)
 
     for step in ESSENTIAL_STEPS:
-        if latest.get(step) != "success":
+        if not (prices_usable if step == 'sync_prices' else latest.get(step) == 'success'):
             return []
 
     tags = []
@@ -70,7 +75,7 @@ def select_cache_tags(steps: List[Dict[str, Any]], changed_steps=None) -> List[s
             continue
         required_all = requirements.get("required_all", ())
         required_any = requirements.get("required_any", ())
-        all_ok = all(latest.get(step) in _SUCCESS_STATUSES for step in required_all)
+        all_ok = all(prices_usable if step == 'sync_prices' else latest.get(step) in _SUCCESS_STATUSES for step in required_all)
         any_ok = (not required_any) or any(latest.get(step) in _SUCCESS_STATUSES for step in required_any)
         if all_ok and any_ok:
             tags.append(tag)
