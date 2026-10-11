@@ -449,7 +449,8 @@ def fetch_tradingview_prices(
 
     try:
         # Initialize TvDatafeed
-        tv = TvDatafeed()
+        from api.price_sync_policy import configure_tradingview_client
+        tv = configure_tradingview_client(TvDatafeed())
         
         # Calculate how many bars we need
         if is_daily:
@@ -480,6 +481,7 @@ def fetch_tradingview_prices(
 
         # Fetch historical data
         df = None
+        tv_fetch_error = None
         try:
             df = tv.get_hist(
                 symbol=tv_symbol,
@@ -488,6 +490,7 @@ def fetch_tradingview_prices(
                 n_bars=n_bars
             )
         except Exception as tv_fetch_err:
+            tv_fetch_error = str(tv_fetch_err)
             print(f"tvDatafeed get_hist raised exception for {upper}: {tv_fetch_err}")
         
         if df is None or df.empty:
@@ -495,7 +498,8 @@ def fetch_tradingview_prices(
             if ok_fall:
                 return ok_fall, msg_fall
             
-            return False, f"No data found for {symbol} on {tv_exchange} at {timeframe} (Yahoo fallback: {msg_fall})"
+            reason = f"TradingView error: {tv_fetch_error}" if tv_fetch_error else f"No data found for {symbol} on {tv_exchange} at {timeframe}"
+            return False, f"{reason} (Yahoo fallback: {msg_fall})"
         
         # Prepare data
         df_new = df.reset_index()

@@ -13,6 +13,7 @@ export function applyRecommendationQuotes(rows: any[], quotes: any[]) {
     return { ...row, last_close: valid ? price : null,
       profit_loss_pct: valid && entry > 0 ? (price / entry - 1) * 100 : null,
       price_date: valid ? quote.date : null,
+      price_volume: valid && quote.volume != null ? Number(quote.volume) : null,
       price_updated_at: valid ? quote.updated_at : null };
   });
 }

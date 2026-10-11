@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     if (openSymbols.length) {
       const since = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
       const { data: quotes, error: quoteError } = await supabase.from("stock_prices")
-        .select("symbol,exchange,date,close,updated_at")
+        .select("symbol,exchange,date,close,volume,updated_at")
         .in("symbol", openSymbols).gte("date", since)
         .order("date", { ascending: false }).limit(6000);
       if (quoteError) throw quoteError;

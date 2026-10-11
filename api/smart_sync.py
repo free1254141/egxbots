@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from api.tradingview_integration import fetch_tradingview_prices, get_tradingview_exchange
 from api.stock_ai import sync_df_to_supabase, _init_supabase, supabase
+from api.price_sync_policy import sync_with_retries
 
 class SmartSync:
     def __init__(self, max_retries: int = 3, retry_delay: int = 10, throttle_delay: float = 1.5,
@@ -22,39 +23,12 @@ class SmartSync:
         """
         Syncs a single symbol from TradingView with retries and throttling.
         """
-        last_error = ""
-        for attempt in range(self.max_retries + 1):
-            try:
-                # We use the existing fetch_tradingview_prices which internally uses tvDatafeed
-                # But we might need to modify it if we want custom date ranges or stricter control
-                # For now, we'll wrap it with our retry/throttle logic.
-                
-                # If force_days is True, we might want to ensure we get EXACTLY that many days.
-                # The existing function is already incremental but we can pass max_days.
-                
-                success, msg = fetch_tradingview_prices(symbol, max_days=max_days, refresh_latest=refresh_latest)
-                
-                if success:
-                    return True, msg
-                
-                last_error = msg
-                msg_lower = msg.lower()
-                if "404" in msg_lower or "not found" in msg_lower or "delisted" in msg_lower:
-                    print(f"Attempt {attempt + 1} failed for {symbol} (Not Found): {msg}. Skipping retries.")
-                    return False, msg
-                elif "rate limit" in msg_lower or "error" in msg_lower:
-                    print(f"Attempt {attempt + 1} failed for {symbol}: {msg}. Retrying in {self.retry_delay}s...")
-                    time.sleep(self.retry_delay)
-                else:
-                    # Non-retryable error (e.g., symbol not found)
-                    return False, msg
-
-            except Exception as e:
-                last_error = str(e)
-                print(f"Exception on attempt {attempt + 1} for {symbol}: {e}")
-                time.sleep(self.retry_delay)
-
-        return False, f"Failed after {self.max_retries} retries. Last error: {last_error}"
+        result = sync_with_retries(fetch_tradingview_prices, symbol,
+            max_retries=self.max_retries, retry_delay=self.retry_delay, sleep=time.sleep,
+            max_days=max_days, refresh_latest=refresh_latest)
+        if not result[0]:
+            print(f"[SYNC] {symbol}: {result[1]}")
+        return result
 
     def _sync_one(self, symbol: str, max_days: int, semaphore: threading.Semaphore, refresh_latest: bool = False) -> Tuple[str, bool, str]:
         """Sync a single symbol with semaphore-based throttling for concurrent use."""

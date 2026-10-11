@@ -441,6 +441,7 @@ export default function OpenTradesDashboard({ isLandingPage = false }: { isLandi
                                                 {fmtPrice(r.last_close)}
                                                 {r.status === "open" && <span className="block text-[9px] text-zinc-500">
                                                     {r.price_date || (isAr ? "تاريخ السعر غير متاح" : "Quote date unavailable")}
+                                                    {r.price_volume === 0 ? (isAr ? " · حجم التداول صفر" : " · Zero volume") : ""}
                                                 </span>}
                                             </td>
                                             <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">

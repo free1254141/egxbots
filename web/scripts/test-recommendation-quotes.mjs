@@ -5,11 +5,12 @@ const rows = [{ symbol: 'A', exchange: 'EGX', status: 'open', entry_price: 10, l
   { symbol: 'B', exchange: 'EGX', status: 'open', entry_price: 5, last_close: 7 }];
 const result = applyRecommendationQuotes(rows, [
   {symbol:'A',exchange:'EGX',date:'2026-10-07',close:9},
-  {symbol:'A',exchange:'EGX',date:'2026-10-11',close:11},
+  {symbol:'A',exchange:'EGX',date:'2026-10-11',close:11,volume:0},
   {symbol:'A',exchange:'US',date:'2026-10-12',close:100}]);
 assert.equal(result[0].last_close, 11);
 assert.ok(Math.abs(result[0].profit_loss_pct - 10) < 1e-10);
 assert.equal(result[0].price_date, '2026-10-11');
+assert.equal(result[0].price_volume, 0);
 assert.equal(result[1], closed);
 assert.equal(result[2].last_close, null);
 assert.equal(result[2].profit_loss_pct, null);

@@ -1021,6 +1021,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     exchange: row.exchange || "EGX",
                     last_close: currentPrice,
                     price_date: row.price_date || null,
+                    price_volume: row.price_volume ?? null,
                     price_updated_at: row.price_updated_at || null,
                     target_price: openPosition?.target_price ? Number(openPosition.target_price) : (row.target_price ? Number(row.target_price) : undefined),
                     stop_loss: openPosition?.stop_price ? Number(openPosition.stop_price) : (row.stop_loss ? Number(row.stop_loss) : undefined),
