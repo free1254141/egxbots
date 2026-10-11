@@ -823,10 +823,15 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const rowFields = !tableHadStockRow ? tableMetricFields(cells[0]) : undefined;
             const verticalMetricValue = Boolean(rowFields?.length)
                 && /^(?:السعر|سعر|القيمة|قيمة|price|value)$/i.test(header.replace(/[*_`]/g," ").trim());
-            const fields = screenRow && /مساف|بعد|قرب/.test(header) ? ["distance_from_resistance_pct" as const] : distanceColumn && levelField ? [levelField]
+            let fields = screenRow && /مساف|بعد|قرب/.test(header) ? ["distance_from_resistance_pct" as const] : distanceColumn && levelField ? [levelField]
                 : verticalMetricValue ? rowFields
                 : (scenarioRow ? scenarioMetricFields(headers[idx]) : tableMetricFields(headers[idx]))
                     || (currentSymbol ? tableMetricFields(cells[0]) : undefined);
+            // Resolve the short shared label only with unambiguous company evidence.
+            if (fields?.length === 1 && fields[0] === "market_value"
+                && evidence.some(e => (e.tool === "get_fundamentals" || e.tool === "get_sector_peers") && e.symbols.includes(symbol!))
+                && facts.some(f => f.symbol === symbol && f.field === "market_cap")
+                && !facts.some(f => f.symbol === symbol && f.field === "market_value")) fields = ["market_cap"];
             const allocationFacts = scenarioRow ? buildFactRecords([{ tool: "analyze_portfolio_risk", source: "scenario-calculation",
                 data: [{ symbol, position_pct: scenarioRow.allocation_pct, value: scenarioRow.allocated_capital,
                     scenario_loss_pct: scenarioRow.scenario_loss_pct, scenario_loss_amount: scenarioRow.scenario_loss_amount }] }]) : [];

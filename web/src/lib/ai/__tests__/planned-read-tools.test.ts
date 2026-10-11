@@ -57,3 +57,10 @@ test('verified new-tool evidence has a useful recovery with missing values, not 
  const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI','ADIB']},db(f).client,'2026-10-11');const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI','ADIB']},r)];
  const reply=safeAgenticFallback(e,'ignored');expect(reply).toContain('19.255');expect(reply).toContain('غير متاح');expect(reply).not.toContain('تعذر إكمال');expect(checkAgenticDraft(reply,e)).toEqual([]);
 });
+
+test('short market cap labels bind company snapshots',async()=>{
+ const r=await executePlannedReadTool('get_fundamentals',{symbols:['COMI']},db(f).client,'2026-10-11');const e=[toAgenticEvidence('get_fundamentals',{symbols:['COMI']},r)];
+ expect(checkAgenticDraft('COMI\n| الحقل | القيمة |\n|---|---|\n| القيمة السوقية | 449,265,492,676 جنيه |',e)).toEqual([]);
+ expect(checkAgenticDraft('| الرمز | القيمة السوقية (جنيه) |\n|---|---|\n| COMI | 449,265,492,676 |',e)).toEqual([]);
+ expect(checkAgenticDraft('| الرمز | القيمة السوقية |\n|---|---|\n| COMI | 19.255 |',e)).toContain('table_value_not_grounded:COMI:19.255');
+});
