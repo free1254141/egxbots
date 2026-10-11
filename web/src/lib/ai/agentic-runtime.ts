@@ -1,3 +1,4 @@
+import { advisoryBacktestMetricMeaning } from "./backtest-evidence";
 import { reviewInstruction } from "./agentic-review-policy";
 import { fallbackEvidence, safeImageEvidenceReply } from "./agentic-recovery";
 export { fallbackEvidence, safeImageEvidenceReply, safePortfolioImageReply } from "./agentic-recovery";
@@ -393,7 +394,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             // replace an answer with raw evidence/boilerplate. Only deterministic
             // evidence and safety checks can reject unsupported claims.
             options.diagnosticCapture?.("publication_review_advisory", {reviewer_passed:verdict.passed, issues:failures, deterministic});
-            return { passed: deterministic.length === 0, reasons: deterministic, advisoryIssues: [...failures, ...advisoryImageConsistency(reply, verificationEvidence()), ...advisoryTableRowCountConsistency(reply)] };
+            return { passed: deterministic.length === 0, reasons: deterministic, advisoryIssues: [...failures, ...advisoryImageConsistency(reply, verificationEvidence()), ...advisoryTableRowCountConsistency(reply), ...advisoryBacktestMetricMeaning(reply, verificationEvidence().some(e => e.tool === "compare_strategies_history" && e.availability !== "error"))] };
         }
 
     };

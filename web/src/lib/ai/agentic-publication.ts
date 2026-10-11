@@ -888,7 +888,7 @@ export function advisoryImageConsistency(reply: string, evidence: AgenticEvidenc
 /**
  * Generic, non-blocking correction: a section heading that declares a count
  * (e.g. "عناصر (9)" or "9 مراكز") must match the number of data rows in the
- * table that follows it. No symbol, price or fixed vocabulary is assumed.
+ * table that follows it. Only explicit row/entity counts qualify; dates, candle windows and metric values do not.
  */
 export function advisoryTableRowCountConsistency(reply: string): string[] {
     const issues: string[] = [];
@@ -896,8 +896,12 @@ export function advisoryTableRowCountConsistency(reply: string): string[] {
     for (let i = 0; i < lines.length; i++) {
         const heading = lines[i].trim();
         if (!heading || heading.startsWith("|")) continue;
-        const declared = /(\d{1,3})\s*(?:\)|مركز|مراكز|سهم|أسهم|اسهم|صندوق|صناديق|holding|position|fund|stock)/i.exec(heading.replace(/[*_`#]/g, ""));
-        if (!declared) continue;
+        const cleanHeading = normalizeEvidenceNumbers(heading).replace(/[*_`#]/g, "");
+        const entities = "(?:عناصر|عنصر|صفوف|صف|مراكز|مركز|أسهم|اسهم|سهم|صناديق|صندوق|استراتيجيات|استراتيجية|items?|rows?|holdings?|positions?|funds?|stocks?|strategies)";
+        const before = new RegExp(`(${entities})\\s*[:：]?\\s*\\(?\\s*(\\d+)\\s*\\)?`, "i").exec(cleanHeading);
+        const after = new RegExp(`(\\d+)\\s*${entities}(?![\\w\u0600-\u06ff])`, "i").exec(cleanHeading);
+        const declaredCount = before?.[2] || after?.[1];
+        if (!declaredCount) continue;
         let j = i + 1;
         while (j < lines.length && lines[j].trim() === "") j++;
         if (!lines[j] || !lines[j].trim().startsWith("|")) continue;
@@ -906,8 +910,8 @@ export function advisoryTableRowCountConsistency(reply: string): string[] {
             if (/^\|[\s\-:|]+\|$/.test(lines[k].trim())) { separatorSeen = true; continue; }
             if (separatorSeen) rows++;
         }
-        if (separatorSeen && rows > 0 && rows !== Number(declared[1]))
-            issues.push(`عنوان القسم يذكر ${declared[1]} عنصراً بينما الجدول التالي يعرض ${rows} صفوف؛ وحّد العدد مع الصفوف المعروضة أو صحّح العنوان.`);
+        if (separatorSeen && rows > 0 && rows !== Number(declaredCount))
+            issues.push(`عنوان القسم يذكر ${declaredCount} عنصراً بينما الجدول التالي يعرض ${rows} صفوف؛ وحّد العدد مع الصفوف المعروضة أو صحّح العنوان.`);
     }
     return [...new Set(issues)];
 }

@@ -25,3 +25,14 @@ export function renderBacktestEvidence(data: any): string | null {
     if (metrics.some((m: any) => m.closedTrades < 10)) lines.push("عينة الصفقات المغلقة صغيرة؛ لا تكفي لتقدير نجاح موثوق.");
     return lines.join("\n");
 }
+
+/** Targeted, non-blocking correction of a mislabeled backtest statistic. */
+export function advisoryBacktestMetricMeaning(reply: string, hasBacktest: boolean): string[] {
+    if (!hasBacktest) return [];
+    const clauses = reply.split(/[\n،؛.!?]/);
+    const mislabeled = clauses.some(clause =>
+        /(?:هبوط|drawdown)\s*(?:ال)?(?:وسيط|متوسط|median|average|mean)|(?:وسيط|متوسط)\s*(?:ال)?هبوط|(?:median|average|mean)\s*drawdown/i.test(clause)
+        && /[0-9٠-٩۰-۹]/.test(clause)
+        && !/(?:ليس|ليست|لا يمثل|لا يُمثل|غير متاح|غير محسوب|not|unavailable)/i.test(clause));
+    return mislabeled ? ["مقياس الهبوط في الاختبار هو أقصى هبوط (maxDrawdownPct)، وليس متوسطاً أو وسيطاً. صحّح وصفه مع الاحتفاظ بالرقم وباقي الإجابة."] : [];
+}

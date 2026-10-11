@@ -1,6 +1,6 @@
 import {checkAgenticDraft,toAgenticEvidence,safeAgenticFallback} from '../agentic-publication';
 import {fallbackEvidence} from '../agentic-recovery';
-import {renderBacktestEvidence} from '../backtest-evidence';
+import {renderBacktestEvidence,advisoryBacktestMetricMeaning} from '../backtest-evidence';
 const data={status:'success',symbol:'AJWA',date:'2026-10-07',start_date:'2024-11-04',candle_count:473,assumptions:{initialCapital:100000,commissionBps:10,slippageBps:10},strategy_metrics:[{strategy_id:'trend_macd',strategy_name:'الاتجاه وMACD',winRatePct:22.22222222222222,finalEquity:83604.93978982033,closedTrades:18,profitFactor:0.5254711898103166,maxDrawdownPct:42.33177659044249,totalReturnPct:-16.39506021017967}]};
 const e=toAgenticEvidence('compare_strategies_history',{symbol:'AJWA',strategy_ids:['trend_macd']},data);
 test.each(['-16.40%','−16.40%','−١٦٫٤٠٪','－16.40%'])('negative backtest return keeps its sign for %s',n=>{
@@ -26,4 +26,12 @@ test.each([{ev:[]},{ev:[toAgenticEvidence('get_stock',{symbols:['AJWA']},{status
  const reply=safeAgenticFallback(fallbackEvidence(ev),'MODEL_HTTP_503');
  expect(reply).not.toContain('تعذر إكمال إجابة');expect(reply).not.toContain('MODEL_HTTP_503');expect(reply).not.toContain('22.22');
  expect(reply).toContain('بيانات');
+});
+
+test.each(['مع هبوط وسيط بلغ 42.33%','متوسط الهبوط 42.33%','average drawdown 42.33%'])('mislabeled drawdown requests correction: %s', draft=>{
+ expect(advisoryBacktestMetricMeaning(draft,true)).toHaveLength(1);
+ expect(advisoryBacktestMetricMeaning(draft,false)).toEqual([]);
+});
+test.each(['أقصى هبوط 42.33%','42.33% هو أقصى هبوط وليس متوسط الهبوط','متوسط الهبوط غير متاح، وأقصى هبوط 42.33%'])('qualified drawdown is accepted: %s', draft=>{
+ expect(advisoryBacktestMetricMeaning(draft,true)).toEqual([]);
 });

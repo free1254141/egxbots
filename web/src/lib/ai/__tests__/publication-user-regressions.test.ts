@@ -307,3 +307,10 @@ test('a section count that disagrees with the rendered rows is a non-blocking ad
     // A heading without a declared count is never flagged.
     expect(advisoryTableRowCountConsistency('## العناصر\n| الرمز |\n|---|\n| A1 |')).toEqual([]);
 });
+
+test.each(['الفترة: 473 شمعة فعلية من أصل حد (500)، رأس مال 100,000 جنيه.','## اختبار آخر ٥٠٠ شمعة','الفترة: 2024-10-23 إلى 2026-10-07 (500)'])('candle windows are not table row counts: %s', heading=>{
+ expect(advisoryTableRowCountConsistency(heading+'\n| المقياس | القيمة |\n|---|---|\n| العائد | -16.40% |\n| أقصى هبوط | 42.33% |')).toEqual([]);
+});
+test.each(['## العناصر (٣)','## 3 مراكز','## الاستراتيجيات (3)','## rows (3)'])('explicit entity count detects mismatch: %s',heading=>{
+ expect(advisoryTableRowCountConsistency(heading+'\n| الرمز | القيمة |\n|---|---|\n| A1 | 10 |\n| B2 | 20 |')).toHaveLength(1);
+});
