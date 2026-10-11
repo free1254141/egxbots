@@ -13,9 +13,13 @@ ORDER = ('sync_prices', 'calculate_indicators', 'ml_scores_update', 'precompute_
          'generate_recommendations', 'short_swings_daily')
 MIDDAY = set(ORDER) - {'update_positions', 'evaluate_recommendations', 'generate_recommendations'}
 
+# Short-swings can safely operate on the usable subset when a provider leaves
+# a few symbols without prices. It still requires a successful indicator pass;
+# gating it on an all-symbol price sync made valid intraday recommendations
+# disappear whenever a small provider subset failed.
 REQUIRES_PRICES = {'calculate_indicators', 'ml_scores_update', 'precompute_heatmap',
                    'refresh_market_status_for_gate', 'update_positions',
-                   'evaluate_recommendations', 'generate_recommendations', 'short_swings_daily'}
+                   'evaluate_recommendations', 'generate_recommendations'}
 REQUIRES_INDICATORS = {'ml_scores_update', 'precompute_heatmap', 'short_swings_daily',
                        'evaluate_recommendations', 'generate_recommendations'}
 

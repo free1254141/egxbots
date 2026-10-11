@@ -3276,10 +3276,15 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             _start_step("short_swings_daily", "Monitoring short positions during the session")
             try:
                 from api.short_swings_daily import run_daily_short_swings
-                prices_ok = all(step.get("status") == "success" for step in steps_log
-                                if step.get("step") == "sync_prices" and step.get("status") != "started")
-                swings_res = run_daily_short_swings(trigger="scheduled", dry_run=dry_run, phase="midday", job_run_id=job_run_id) if prices_ok else {
-                    "success": False, "message": "Price sync incomplete; intraday short monitoring withheld"}
+                prices_ok = any(step.get("status") == "success" for step in steps_log
+                                if step.get("step") == "sync_prices")
+                indicators_ok = any(step.get("status") == "success" for step in steps_log
+                                    if step.get("step") == "calculate_indicators")
+                # A partial provider sync must not hide valid short setups. The
+                # indicator pass already filters the usable price subset; only
+                # withhold the engine when neither prices nor indicators exist.
+                swings_res = run_daily_short_swings(trigger="scheduled", dry_run=dry_run, phase="midday", job_run_id=job_run_id) if (prices_ok or indicators_ok) else {
+                    "success": False, "message": "No usable price/indicator data; intraday short monitoring withheld"}
                 _record_step("short_swings_daily", swings_res.get("success", False), swings_res.get("message", ""), swings_res.get("count", 0))
             except Exception as error:
                 _record_step("short_swings_daily", False, str(error)[:200], 0)
