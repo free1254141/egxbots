@@ -80,10 +80,10 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
     const plannedPartial = ["get_fundamentals","get_sector_peers","get_market_breadth"].includes(tool) && data?.availability === "partial";
     const verifiedEmptyScreen = tool === "screen_stocks" && data?.status === "success" && Boolean(data.date)
         && Array.isArray(data.stocks) && typeof data.scan_complete === "boolean";
-    return { tool, arguments: args, data, source: tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
+    return { tool, arguments: args, data, source: tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
         apply_chart_strategy: "stock_prices+deterministic-strategy-engine", compare_strategies_history: "stock_prices+deterministic-backtest", list_chart_strategies: "strategy-catalog",
-        calculate_position: "stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
-        get_recommendations: "scan_results+stock_technical_indicators", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_technical_indicators",
+        calculate_position: "stock_prices+stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_prices+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
+        get_recommendations: "scan_results+stock_technical_indicators", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
         get_technical_scan: args.preset === "smart_money_flow" ? "stock_scans_summary" : "stock_technical_indicators",
         get_fundamentals: "stock_fundamentals", get_sector_peers: "stock_fundamentals", get_market_breadth: "stock_technical_indicators+deterministic-breadth",
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation" } as any)[tool],

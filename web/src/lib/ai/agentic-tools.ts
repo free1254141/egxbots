@@ -1,3 +1,4 @@
+import { reconcileStockQuote } from "./stock-quote";
 import { PLANNED_READ_TOOL_NAMES, executePlannedReadTool } from "./planned-read-tools";
 import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
@@ -82,7 +83,7 @@ async function executeRawTool(
             const { data } = await supabase.from("stock_technical_indicators")
                 .select("date,close").eq("exchange", "EGX").eq("symbol", symbol)
                 .order("date", { ascending: false }).limit(1);
-            const quote = data?.[0];
+            const quote = await reconcileStockQuote(supabase, symbol, data?.[0]);
             const close = finite(quote?.close);
             const priced = close != null && close > 0 && Boolean(quote?.date);
             const marketValue = priced && quantity != null ? quantity * close! : null;
@@ -91,7 +92,7 @@ async function executeRawTool(
             return { status: "success", mode: "temporary_position", persisted: false,
                 valuation_complete: priced && quantity != null, fees_included: false,
                 positions: [{ symbol, quantity, entry_price, cost: round(cost),
-                    close: priced ? close : null, date: priced ? quote.date : null,
+                    close: priced ? close : null, date: priced ? quote.date : null, quote_source: quote?.quote_source ?? null,
                     market_value: round(marketValue), profit_loss_val: round(profit),
                     profit_loss_pct: profit == null ? null : round(profit / cost * 100) }],
                 formulas: { cost: suppliedCost != null ? "user_supplied_total_cost" : "quantity * entry_price", market_value: "quantity * close",
@@ -124,7 +125,8 @@ async function executeRawTool(
                     .order("scan_date", { ascending: false })
                     .limit(1);
 
-                if (!indRows || indRows.length === 0) {
+                const ind = await reconcileStockQuote(supabase, sym, indRows?.[0]);
+                if (!ind) {
                     results.push({
                         symbol: sym,
                         found_in_main_market: false,
@@ -133,13 +135,16 @@ async function executeRawTool(
                         message: `السهم ${sym} لا تتوفر له مؤشرات في المصدر المطلوب؛ غياب البيانات لا يحدد سوق القيد.`
                     });
                 } else {
-                    const ind = indRows[0];
                     const wyckoff = wyckoffRows?.[0] || {};
                     results.push({
                         symbol: sym,
                         name: stockData.name_ar || stockData.name || sym,
                         found_in_main_market: true,
                         date: ind.date,
+                        quote_source: ind.quote_source,
+                        indicators_date: ind.indicators_date,
+                        indicators_stale: ind.indicators_stale,
+                        indicators_available: ind.indicators_available ?? true,
                         price_type: "daily_close",
                         wyckoff_date: wyckoff.scan_date ?? null,
                         close: ind.close,
@@ -246,15 +251,17 @@ async function executeRawTool(
                     const { data: indRows } = await supabase.from("stock_technical_indicators")
                         .select("close,change_pct,rsi_14,king_ai_score,egx_ai_score,date")
                         .eq("exchange", "EGX").eq("symbol", p.symbol).order("date", { ascending: false }).limit(1);
-                    const qty = finite(p.quantity), entry = finite(p.entry_price), latest = finite(indRows?.[0]?.close);
+                    const quote = await reconcileStockQuote(supabase, p.symbol, indRows?.[0]);
+                    const qty = finite(p.quantity), entry = finite(p.entry_price), latest = finite(quote?.close);
                     const cost = qty != null && entry != null ? qty * entry : null;
                     const value = qty != null && latest != null ? qty * latest : null;
                     enriched.push({ symbol: p.symbol, quantity: qty, entry_price: entry,
-                        current_price: latest, date: indRows?.[0]?.date ?? null, price_type: "daily_close",
+                        current_price: latest, date: quote?.date ?? null, quote_source: quote?.quote_source,
+                        indicators_date: quote?.indicators_date, indicators_stale: quote?.indicators_stale, price_type: "daily_close",
                         availability: latest == null ? "missing" : "available", cost: round(cost), market_value: round(value),
                         profit_loss_val: cost != null && value != null ? round(value - cost) : null,
                         profit_loss_pct: entry != null && entry > 0 && latest != null ? round((latest-entry)/entry*100) : null,
-                        rsi: indRows?.[0]?.rsi_14 ?? null, king_ai: indRows?.[0]?.king_ai_score ?? null, egx_ai: indRows?.[0]?.egx_ai_score ?? null });
+                        rsi: quote?.rsi_14 ?? null, king_ai: quote?.king_ai_score ?? null, egx_ai: quote?.egx_ai_score ?? null });
                 }
                 const complete = positions.length <= 100 && enriched.every(p => p.cost != null && p.market_value != null);
                 const invested = enriched.every(p => p.cost != null) ? enriched.reduce((n,p) => n + p.cost!, 0) : null;
@@ -689,8 +696,9 @@ async function executeRawTool(
                     .eq("exchange", "EGX").eq("symbol", sym)
                     .order("date", { ascending: false })
                     .limit(1);
-                if (indRows && indRows.length > 0) {
-                    data.push(indRows[0]);
+                const quote = await reconcileStockQuote(supabase, sym, indRows?.[0]);
+                if (quote) {
+                    data.push({symbol: sym, ...quote});
                 } else {
                     data.push({ symbol: sym, error: "Not found in active main market" });
                 }

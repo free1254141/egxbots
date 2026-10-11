@@ -17,7 +17,13 @@ jest.mock("../../../../../lib/supabase/route-data", () => ({
             calls.push(`from:${table}`);
             try {
               const res = await globalThis.fetch("https://example.supabase.co/rest/v1/x");
-              const data = await res.json();
+              const rows = await res.json();
+              // The endpoint now refreshes open quotes from stock_prices. Keep
+              // the fixture's recommendation and quote schemas independent.
+              const data = table === "stock_prices" ? rows.map((row: any) => ({
+                symbol: row.symbol, exchange: row.exchange, close: row.last_close,
+                date: new Date().toISOString().slice(0, 10), volume: 100,
+              })) : rows;
               return { data, error: null };
             } catch (err: any) {
               return { data: null, error: err };
@@ -30,6 +36,7 @@ jest.mock("../../../../../lib/supabase/route-data", () => ({
         select: () => builder,
         eq: () => builder,
         lt: () => builder,
+        gte: () => builder,
         in: () => builder,
         order: () => builder,
         limit: () => builder,

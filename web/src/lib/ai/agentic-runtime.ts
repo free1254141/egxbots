@@ -1,3 +1,4 @@
+import { presentReplyLabels } from "./reply-labels";
 import { advisoryBacktestMetricMeaning } from "./backtest-evidence";
 import { reviewInstruction } from "./agentic-review-policy";
 import { fallbackEvidence, safeImageEvidenceReply } from "./agentic-recovery";
@@ -107,7 +108,7 @@ export function unsupersededEvidence<T extends AgenticEvidence>(previous: T[], c
     return previous.filter(e => !refreshed.has(fingerprint(e)));
 }
 function decodeAnswer(message: any): { answer:string; social:boolean } {
-    const content = typeof message.content === "string" ? message.content : "";
+    const content = typeof message.content === "string" ? presentReplyLabels(message.content) : "";
     try { const json = JSON.parse(content); if (typeof json.answer === "string" && ["social","analysis"].includes(json.kind))
         return { answer: json.answer, social: json.kind === "social" }; } catch {}
     return { answer:content, social:false };
