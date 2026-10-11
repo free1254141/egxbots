@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { Send, User, Bot, Loader2, MessageSquare, Clock } from "lucide-react";
+import { Send, User, Bot, Loader2, MessageSquare, Clock, ChevronRight } from "lucide-react";
 
 type ChatSession = {
     session_id: string;
@@ -28,6 +28,7 @@ export default function SupportTab() {
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [input, setInput] = useState("");
     const [replying, setReplying] = useState(false);
+    const [mobilePane, setMobilePane] = useState<"sessions" | "conversation">("sessions");
 
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const supabase = React.useMemo(() => createSupabaseBrowserClient(), []);
@@ -196,9 +197,9 @@ export default function SupportTab() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-230px)] border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white overflow-hidden">
+        <div className="flex min-w-0 h-[85dvh] min-h-[480px] md:h-[calc(100dvh-230px)] border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white overflow-hidden">
             {/* Sidebar: Chat Sessions List */}
-            <div className="w-1/3 border-r-4 border-black dark:border-white flex flex-col h-full bg-zinc-50 dark:bg-zinc-900/40">
+            <div data-testid="support-session-list" className={`${mobilePane === "sessions" ? "flex" : "hidden"} md:flex w-full md:w-1/3 min-w-0 min-h-0 md:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40`}>
                 <div className="p-4 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center gap-2">
                     <MessageSquare className="h-4 w-4 text-pink-500" />
                     <span className="text-xs font-black uppercase tracking-wider">Customer Support Chats</span>
@@ -219,7 +220,7 @@ export default function SupportTab() {
                             return (
                                 <button
                                     key={sess.session_id}
-                                    onClick={() => setSelectedSessionId(sess.session_id)}
+                                    onClick={() => { setSelectedSessionId(sess.session_id); setMobilePane("conversation"); }}
                                     className={`w-full text-left p-4 transition-all flex flex-col gap-1 rounded-none hover:bg-zinc-100 dark:hover:bg-zinc-800/40 ${
                                         isSelected ? "bg-pink-500/10 dark:bg-pink-500/10 border-l-4 border-pink-500" : ""
                                     }`}
@@ -240,12 +241,15 @@ export default function SupportTab() {
             </div>
 
             {/* Chat Pane */}
-            <div className="flex-1 flex flex-col h-full bg-white dark:bg-zinc-950">
+            <div data-testid="support-conversation" className={`${mobilePane === "conversation" ? "flex" : "hidden"} md:flex flex-1 min-w-0 min-h-0 flex-col h-full bg-white dark:bg-zinc-950`}>
+                <button type="button" onClick={() => setMobilePane("sessions")} className="md:hidden min-h-11 shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 text-sm font-bold text-pink-600 dark:text-pink-400">
+                    <ChevronRight className="w-4 h-4" /> رجوع لمحادثات الدعم
+                </button>
                 {selectedSessionId ? (
                     <>
                         {/* Session Header */}
-                        <div className="p-4 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center justify-between">
-                            <div className="flex flex-col">
+                        <div className="p-4 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center justify-between shrink-0">
+                            <div className="flex flex-col min-w-0 [overflow-wrap:anywhere]">
                                 <span className="font-black text-xs text-black dark:text-white">
                                     Chatting with: {sessions.find(s => s.session_id === selectedSessionId)?.user_name || "Guest"}
                                 </span>
@@ -256,7 +260,7 @@ export default function SupportTab() {
                         {/* Messages Area */}
                         <div 
                             ref={messagesContainerRef}
-                            className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-white dark:bg-zinc-950"
+                            className="flex-1 min-h-0 min-w-0 overflow-y-auto p-3 sm:p-6 space-y-4 custom-scrollbar bg-white dark:bg-zinc-950"
                         >
                             {loadingMessages ? (
                                 <div className="flex items-center justify-center h-full">
@@ -275,7 +279,7 @@ export default function SupportTab() {
                                             {msg.sender === "admin" ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
                                         </div>
                                         <div className={`
-                                            max-w-[70%] p-3.5 border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,0.15)] dark:shadow-[2px_2px_0px_rgba(255,255,255,0.05)] font-mono text-xs
+                                            min-w-0 max-w-[calc(100%_-_44px)] sm:max-w-[70%] [overflow-wrap:anywhere] p-3.5 border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,0.15)] dark:shadow-[2px_2px_0px_rgba(255,255,255,0.05)] font-mono text-xs
                                             ${msg.sender === "admin"
                                                 ? "bg-pink-50 dark:bg-pink-500/10 border-pink-400 dark:border-pink-500 text-pink-900 dark:text-pink-200"
                                                 : "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border-zinc-300 dark:border-zinc-700"}
@@ -291,18 +295,19 @@ export default function SupportTab() {
                         </div>
 
                         {/* Input Area */}
-                        <form onSubmit={handleSendReply} className="p-4 border-t-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex gap-2">
+                        <form onSubmit={handleSendReply} className="p-2 sm:p-4 shrink-0 border-t-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex gap-2">
                             <input
                                 type="text"
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 placeholder="Type support reply..."
-                                className="flex-1 h-12 rounded-none bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-4 text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-pink-500 focus:outline-none transition-colors"
+                                className="flex-1 min-w-0 h-12 rounded-none bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-4 text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-pink-500 focus:outline-none transition-colors"
                             />
                             <button
                                 type="submit"
                                 disabled={replying || !input.trim()}
-                                className="h-12 w-12 rounded-none bg-pink-500 hover:bg-pink-400 border-2 border-black dark:border-zinc-700 text-black flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                aria-label="إرسال رد الدعم"
+                                className="shrink-0 h-12 w-12 rounded-none bg-pink-500 hover:bg-pink-400 border-2 border-black dark:border-zinc-700 text-black flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {replying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                             </button>
@@ -310,7 +315,8 @@ export default function SupportTab() {
                     </>
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-500 p-8">
-                        <MessageSquare className="h-12 w-12 text-zinc-300 dark:text-zinc-700 mb-2 animate-bounce" />
+                        <MessageSquare aria-label="إرسال رد الدعم"
+                                className="shrink-0 h-12 w-12 text-zinc-300 dark:text-zinc-700 mb-2 animate-bounce" />
                         <span className="font-black text-xs uppercase tracking-wider">Select a session to start chatting</span>
                     </div>
                 )}
