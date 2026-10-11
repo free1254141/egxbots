@@ -973,13 +973,15 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 const referencePrice = (row.status === "win" || row.status === "loss") && row.exit_price ? Number(row.exit_price) : Number(row.last_close);
                 const recoveredEntryPrice = rawPlPct && rawPlPct !== -100 ? (referencePrice / (1 + rawPlPct / 100)) : Number(row.last_close);
 
-                const currentPrice = openPosition
+                const currentPrice = row.price_date
+                    ? Number(row.last_close) || 0
+                    : openPosition
                     ? Number(openPosition.status_price || positionMeta.current_price || row.last_close) || 0
                     : Number(row.last_close) || 0;
                 const entryPrice = openPosition
                     ? Number(openPosition.entry_price || positionMeta.entry_price || row.entry_price || row.last_close) || 0
                     : (row.entry_price ? Number(row.entry_price) : (recoveredEntryPrice || undefined));
-                const positionChangePct = positionMeta.price_change_pct != null
+                const positionChangePct = !row.price_date && positionMeta.price_change_pct != null
                     ? Number(positionMeta.price_change_pct)
                     : (entryPrice && currentPrice ? ((currentPrice - entryPrice) / entryPrice) * 100 : null);
 
@@ -1018,6 +1020,8 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     precision: row.precision || 0.5,
                     exchange: row.exchange || "EGX",
                     last_close: currentPrice,
+                    price_date: row.price_date || null,
+                    price_updated_at: row.price_updated_at || null,
                     target_price: openPosition?.target_price ? Number(openPosition.target_price) : (row.target_price ? Number(row.target_price) : undefined),
                     stop_loss: openPosition?.stop_price ? Number(openPosition.stop_price) : (row.stop_loss ? Number(row.stop_loss) : undefined),
                     created_at: row.created_at,
