@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
@@ -376,11 +377,11 @@ export default function UsersTab() {
 
 
     return (
-        <div dir={isAr ? "rtl" : "ltr"} className="p-4 md:p-6 space-y-6">
+        <div dir={isAr ? "rtl" : "ltr"} className="min-w-0 p-3 md:p-6 space-y-6">
             {/* ─── SMART ANALYTICS DASHBOARD ─── */}
-            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)]">
-                <div className="flex items-center justify-between gap-4 mb-6">
-                    <h2 className="text-xl font-black uppercase tracking-widest flex items-center gap-3">
+            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 min-w-0 p-3 sm:p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                    <h2 className="text-base sm:text-xl font-black uppercase tracking-widest flex items-center gap-2 sm:gap-3">
                         <BarChart3 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                         {isAr ? "تحليلات المستخدمين والرؤى" : "USER ANALYTICS & INSIGHTS"}
                     </h2>
@@ -399,7 +400,7 @@ export default function UsersTab() {
                     </div>
                 ) : <>
                 {/* KPI Cards — Revenue · Pro · MAU · Growth */}
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
                     <div className="border-4 border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
                         <div className="flex items-center justify-between text-zinc-500 mb-1">
                             <span className="font-black text-[10px] uppercase tracking-wider">{isAr ? "صافي الإيرادات (بعد خصم 4%)" : "Net Revenue (-4% fee)"}</span>
@@ -654,7 +655,7 @@ export default function UsersTab() {
                                 {isAr ? "تنبيه: تعذر تحميل مصدر واحد للنشاط على الأقل؛ أرقام MAU/WAU/DAU المعروضة جزئية وقد تكون أقل من الحقيقة." : "Warning: at least one activity source could not be loaded; MAU/WAU/DAU are partial and may be understated."}
                             </div>
                         )}
-                        <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
                             {[
                                 ["MAU", stats?.activeUsers30Days || 0, stats?.activeUsers30DaysRate || 0, isAr ? "آخر 30 يومًا" : "Last 30 days"],
                                 ["WAU", stats?.activeUsers7Days || 0, stats?.activeUsers7DaysRate || 0, isAr ? "آخر 7 أيام" : "Last 7 days"],
@@ -836,23 +837,23 @@ export default function UsersTab() {
             </div>
 
             {/* ─── USER MANAGEMENT TABLE ─── */}
-            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)]">
+            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 min-w-0 p-3 sm:p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)]">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                    <h2 className="text-xl font-black uppercase tracking-widest flex items-center gap-3">
+                    <h2 className="text-base sm:text-xl font-black uppercase tracking-widest flex items-center gap-2 sm:gap-3">
                         <UsersIcon className="w-6 h-6" />
                         {isAr ? "قائمة المستخدمين" : "USER DIRECTORY"}
                     </h2>
 
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3 min-w-0">
                         {/* Search Bar */}
-                        <div className="relative">
+                        <div className="relative w-full sm:w-auto min-w-0">
                             <Search className={`absolute ${isAr ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400`} />
                             <input
                                 type="text"
                                 value={search}
                                 onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                                 placeholder={isAr ? "ابحث باسم المستخدم أو البريد..." : "Search users by name..."}
-                                className={`h-10 ${isAr ? "pr-9 pl-4" : "pl-9 pr-4"} w-60 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 font-bold text-xs uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                                className={`h-10 ${isAr ? "pr-9 pl-4" : "pl-9 pr-4"} w-full sm:w-60 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 font-bold text-xs uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-blue-500`}
                             />
                         </div>
 
@@ -895,8 +896,8 @@ export default function UsersTab() {
                         {isAr ? "لا يوجد مستخدمون مطابقون" : "No matching users found"}
                     </div>
                 ) : (
-                    <div className="overflow-x-auto -mx-2">
-                        <table className="w-full text-xs font-mono">
+                    <div className="min-w-0 overflow-x-auto sm:-mx-2">
+                        <table className={`${styles.userDirectory} w-full text-xs font-mono`}>
                             <thead>
                                 <tr className="border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
                                     <th className="px-4 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "المستخدم" : "User"}</th>
@@ -920,7 +921,7 @@ export default function UsersTab() {
                                             onClick={() => fetchDetail(u.id)}
                                         >
                                             {/* User Info */}
-                                            <td className="px-4 py-3">
+                                            <td data-label={isAr ? "المستخدم" : "User"} className="px-4 py-3">
                                                 <div className="flex items-center gap-3">
                                                     {u.avatar_url ? (
                                                         <img src={u.avatar_url} alt="" className="w-8 h-8 rounded-full border-2 border-black dark:border-white object-cover shrink-0" />
@@ -938,7 +939,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Plan & Cancel Action */}
-                                            <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <td data-label={isAr ? "خطة الاشتراك" : "Subscription"} className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                                                 <div className="flex flex-col gap-1.5 items-start">
                                                     {isUserPro ? (
                                                         <div className="flex items-center gap-2">
@@ -969,7 +970,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Bots Count */}
-                                            <td className="px-3 py-3">
+                                            <td data-label={isAr ? "البوتات" : "Bots"} className="px-3 py-3">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
                                                     <Bot className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                                                     <span className="font-black text-zinc-900 dark:text-zinc-100">{u.bot_count || (u.bot_subscriptions || []).length}</span>
@@ -982,7 +983,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Language */}
-                                            <td className="px-3 py-3">
+                                            <td data-label={isAr ? "اللغة" : "Language"} className="px-3 py-3">
                                                 <span className="inline-flex items-center gap-1 font-bold text-zinc-600 dark:text-zinc-300">
                                                     <Globe className="w-3 h-3 text-zinc-400 shrink-0" />
                                                     {(u.language || "ar").toUpperCase()}
@@ -990,7 +991,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Registration Date (Joined) */}
-                                            <td className="px-3 py-3 whitespace-nowrap">
+                                            <td data-label={isAr ? "التسجيل" : "Joined"} className="px-3 py-3 whitespace-nowrap">
                                                 <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300 font-bold">
                                                     <Calendar className="w-3 h-3 text-zinc-400 shrink-0" />
                                                     <span>{new Date(u.created_at).toLocaleDateString(isAr ? "ar-EG" : "en-US")}</span>
@@ -1001,7 +1002,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Subscription Expiration Date */}
-                                            <td className="px-3 py-3 whitespace-nowrap">
+                                            <td data-label={isAr ? "نهاية الاشتراك" : "Sub Expiry"} className="px-3 py-3 whitespace-nowrap">
                                                 {isUserPro && subEnd ? (
                                                     <div>
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
@@ -1024,7 +1025,7 @@ export default function UsersTab() {
                                             </td>
 
                                             {/* Actions */}
-                                            <td className="px-3 py-3 text-center">
+                                            <td data-label={isAr ? "إجراءات" : "Actions"} className="px-3 py-3 text-center">
                                                 <div className="flex items-center justify-center gap-1.5">
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); fetchDetail(u.id); }}
@@ -1058,11 +1059,11 @@ export default function UsersTab() {
                 )}
 
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t-2 border-zinc-200 dark:border-zinc-800">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t-2 border-zinc-200 dark:border-zinc-800">
                         <button
                             onClick={() => setPage(Math.max(0, page - 1))}
                             disabled={page === 0}
-                            className="h-8 px-3 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 font-black text-xs uppercase tracking-wider disabled:opacity-30 flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]"
+                            className="h-10 px-3 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 font-black text-xs uppercase tracking-wider disabled:opacity-30 flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]"
                         >
                             <ChevronLeft className="w-4 h-4" /> {isAr ? "السابق" : "Prev"}
                         </button>
@@ -1072,7 +1073,7 @@ export default function UsersTab() {
                         <button
                             onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
                             disabled={page >= totalPages - 1}
-                            className="h-8 px-3 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 font-black text-xs uppercase tracking-wider disabled:opacity-30 flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]"
+                            className="h-10 px-3 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 font-black text-xs uppercase tracking-wider disabled:opacity-30 flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]"
                         >
                             {isAr ? "التالي" : "Next"} <ChevronRight className="w-4 h-4" />
                         </button>
@@ -1083,12 +1084,12 @@ export default function UsersTab() {
             {/* ─── EDIT USER MODAL ─── */}
             {editingId && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[99999] p-4">
-                    <div className="bg-white dark:bg-zinc-950 border-4 border-black dark:border-white rounded-none shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                    <div className="bg-white dark:bg-zinc-950 border-4 border-black dark:border-white rounded-none shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[90vh]">
                         <div className="px-4 py-3 border-b-4 border-black dark:border-white bg-yellow-100 dark:bg-yellow-900/20 flex items-center justify-between shrink-0">
                             <span className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
                                 <Edit3 className="w-4 h-4" /> EDIT USER CONFIGURATION
                             </span>
-                            <button onClick={() => setEditingId(null)} className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800">
+                            <button onClick={() => setEditingId(null)} aria-label={isAr ? "إغلاق" : "Close"} className="min-h-10 min-w-10 p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
@@ -1183,12 +1184,12 @@ export default function UsersTab() {
             {/* ─── FIXED USER DETAIL MODAL ─── */}
             {selectedUser && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[99999] p-4">
-                    <div className="bg-white dark:bg-zinc-950 border-4 border-black dark:border-white rounded-none shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] w-full max-w-2xl overflow-hidden max-h-[85vh] flex flex-col">
+                    <div className="bg-white dark:bg-zinc-950 border-4 border-black dark:border-white rounded-none shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] w-full max-w-2xl overflow-hidden max-h-[calc(100dvh-2rem)] sm:max-h-[85vh] flex flex-col">
                         <div className="px-4 py-3 border-b-4 border-black dark:border-white bg-cyan-100 dark:bg-cyan-900/20 flex items-center justify-between shrink-0">
                             <span className="font-black text-xs uppercase tracking-widest flex items-center gap-2">
                                 <Shield className="w-4 h-4 text-cyan-600" /> USER DETAILS & PROFILE
                             </span>
-                            <button onClick={() => setSelectedUser(null)} className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800">
+                            <button onClick={() => setSelectedUser(null)} aria-label={isAr ? "إغلاق" : "Close"} className="min-h-10 min-w-10 p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
@@ -1198,7 +1199,7 @@ export default function UsersTab() {
                                 <RefreshCw className="w-5 h-5 animate-spin text-zinc-400" />
                             </div>
                         ) : (
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            <div className="flex-1 min-h-0 min-w-0 overflow-y-auto p-3 sm:p-4 space-y-4">
                                 {/* Profile Info */}
                                 <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 p-4">
                                     <h3 className="font-black text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-2">
@@ -1206,9 +1207,9 @@ export default function UsersTab() {
                                     </h3>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
                                         {Object.entries(selectedUser.profile || {}).map(([k, v]) => (
-                                            <div key={k} className="flex items-center justify-between p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+                                            <div key={k} className="min-w-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
                                                 <span className="font-black text-zinc-500 uppercase tracking-wider text-[10px]">{k}:</span>
-                                                <span className="text-black dark:text-white font-bold truncate max-w-[180px]">{String(v ?? "—")}</span>
+                                                <span className="min-w-0 text-black dark:text-white font-bold [overflow-wrap:anywhere]">{String(v ?? "—")}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -1221,7 +1222,7 @@ export default function UsersTab() {
                                     </h3>
                                     {selectedUser.subscription ? (
                                         <>
-                                            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono [overflow-wrap:anywhere]">
                                             {Object.entries(selectedUser.subscription).map(([k, v]) => (
                                                 <div key={k} className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
                                                     <span className="font-black text-zinc-500 uppercase text-[10px]">{k}: </span>

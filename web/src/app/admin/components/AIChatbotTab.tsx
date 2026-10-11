@@ -16,6 +16,7 @@ export default function AIChatbotTab() {
     const [logsLoading, setLogsLoading] = useState(true);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [mobilePane, setMobilePane] = useState<"users" | "conversation">("users");
 
     const [logs, setLogs] = useState<any[]>([]);
     const [loadedLimit, setLoadedLimit] = useState(1000);
@@ -291,11 +292,11 @@ export default function AIChatbotTab() {
     }, [selectedGroup, activeSession]);
 
     return (
-        <div className="max-w-[1920px] mx-auto px-4 md:px-8 py-8 space-y-8 animate-in fade-in duration-500">
+        <div className="min-w-0 max-w-[1920px] mx-auto px-3 md:px-8 py-4 md:py-8 space-y-4 md:space-y-8 animate-in fade-in duration-500">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-black uppercase tracking-tight text-black dark:text-white flex items-center gap-3">
+                    <h2 className="text-lg sm:text-2xl font-black uppercase tracking-tight text-black dark:text-white flex items-center gap-3">
                         <Sparkles className="w-8 h-8 text-indigo-500" />
                         ARTORO & Support Monitor
                     </h2>
@@ -305,31 +306,31 @@ export default function AIChatbotTab() {
             </div>
 
             {/* Sub-tab Navigation */}
-            <div className="flex items-center gap-3 border-b-2 border-zinc-200 dark:border-zinc-800 pb-3">
+            <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3 border-b-2 border-zinc-200 dark:border-zinc-800 pb-3">
                 <button
                     onClick={() => setViewMode("ai_config")}
-                    className={`px-4 py-2 text-xs md:text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${
+                    className={`min-w-0 min-h-11 px-2 sm:px-4 py-2 text-xs md:text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
                         viewMode === "ai_config"
                             ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
                             : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                     }`}
                 >
                     <Sparkles className="w-4 h-4" />
-                    <span>🤖 سجل محادثات الذكاء الاصطناعي (ARTORO)</span>
+                    <span className="sm:hidden">محادثات ARTORO</span><span className="hidden sm:inline">🤖 سجل محادثات الذكاء الاصطناعي (ARTORO)</span>
                     <span className="text-[10px] bg-black/20 dark:bg-white/20 px-2 py-0.5 rounded-full font-mono">
                         {userGroups.length}
                     </span>
                 </button>
                 <button
                     onClick={() => setViewMode("support_chats")}
-                    className={`px-4 py-2 text-xs md:text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${
+                    className={`min-w-0 min-h-11 px-2 sm:px-4 py-2 text-xs md:text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
                         viewMode === "support_chats"
                             ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
                             : "bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                     }`}
                 >
                     <MessageSquare className="w-4 h-4" />
-                    <span>💬 تذاكر ودعم العملاء المباشر (Human Support)</span>
+                    <span className="sm:hidden">دعم العملاء</span><span className="hidden sm:inline">💬 تذاكر ودعم العملاء المباشر (Human Support)</span>
                 </button>
             </div>
 
@@ -340,11 +341,11 @@ export default function AIChatbotTab() {
             ) : (
                 <div className="w-full">
                     <div className={isFullscreen 
-                        ? "fixed inset-0 z-[100] bg-white dark:bg-black flex flex-col overflow-hidden m-0 w-full h-full" 
-                        : "bg-white dark:bg-black border-4 border-black dark:border-white h-full min-h-[650px] shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col overflow-hidden"}>
+                        ? "fixed inset-0 z-[100] bg-white dark:bg-black flex flex-col overflow-hidden m-0 w-full h-dvh min-w-0"
+                        : "bg-white dark:bg-black border-4 border-black dark:border-white h-[85dvh] min-h-[680px] md:h-[800px] md:min-h-[650px] min-w-0 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col overflow-hidden"}>
                         
                         {/* Top Bar */}
-                        <div className="p-4 md:p-6 border-b-2 border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-black">
+                        <div className="p-3 md:p-6 border-b-2 border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 bg-zinc-50 dark:bg-black">
                             <div className="flex items-center gap-3">
                                 <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500">
                                     <User className="w-5 h-5" />
@@ -358,10 +359,10 @@ export default function AIChatbotTab() {
                                     </p>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     onClick={() => setProOnly((value) => !value)}
-                                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${proOnly ? "border-amber-500 bg-amber-500 text-black" : "border-zinc-300 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"}`}
+                                    className={`flex items-center gap-1.5 min-h-10 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${proOnly ? "border-amber-500 bg-amber-500 text-black" : "border-zinc-300 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"}`}
                                     title="تصفية المحادثات للمستخدمين المشتركين في Pro"
                                 >
                                     <Crown className="w-3.5 h-3.5" />
@@ -369,7 +370,7 @@ export default function AIChatbotTab() {
                                 </button>
                                 <button
                                     onClick={() => setIsFullscreen(!isFullscreen)}
-                                    className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500"
+                                    className="min-h-10 min-w-10 p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500"
                                     title={isFullscreen ? "تصغير الواجهة" : "تكبير الواجهة"}
                                 >
                                     {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
@@ -377,7 +378,7 @@ export default function AIChatbotTab() {
                                 <button
                                     onClick={() => fetchLogs()}
                                     disabled={logsLoading}
-                                    className="p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500"
+                                    className="min-h-10 min-w-10 p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500"
                                     title="تحديث المحادثات"
                                 >
                                     <RefreshCw className={`w-5 h-5 ${logsLoading ? "animate-spin" : ""}`} />
@@ -386,7 +387,7 @@ export default function AIChatbotTab() {
                                     <button
                                         onClick={() => fetchLogs(5000)}
                                         disabled={logsLoading}
-                                        className="rounded-lg border border-zinc-300 px-2 py-1 text-[10px] font-bold text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                                        className="min-h-10 rounded-lg border border-zinc-300 px-2 py-1 text-[10px] font-bold text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"
                                         title="تحميل السجل الموسع حتى 5000 رسالة"
                                     >
                                         LOAD 5000
@@ -404,10 +405,10 @@ export default function AIChatbotTab() {
                                 لا توجد محادثات مسجلة حتى الآن.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-4 flex-1 overflow-hidden min-h-[550px]">
+                            <div className="grid grid-cols-1 md:grid-cols-4 flex-1 overflow-hidden min-h-0 min-w-0">
                                 
                                 {/* Right Column: Users List */}
-                                <div className="md:col-span-1 border-l-2 border-zinc-200 dark:border-zinc-800 flex flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first md:order-last">
+                                <div data-testid="chat-user-list" className={`${mobilePane === "users" ? "flex" : "hidden"} md:flex min-h-0 min-w-0 md:col-span-1 md:border-l-2 border-zinc-200 dark:border-zinc-800 flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first md:order-last`}>
                                     {/* Search Filter & Date Quick Tabs */}
                                     <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 space-y-2">
                                         <div className="relative">
@@ -425,7 +426,7 @@ export default function AIChatbotTab() {
                                                 <button
                                                     key={filterKey}
                                                     onClick={() => setDateFilter(filterKey)}
-                                                    className={`flex-1 py-1 text-[11px] font-bold rounded-md transition-all text-center ${
+                                                    className={`flex-1 min-h-10 py-1 text-[11px] font-bold rounded-md transition-all text-center ${
                                                         dateFilter === filterKey
                                                             ? "bg-indigo-500 text-white shadow-sm"
                                                             : "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 hover:text-black dark:hover:text-white"
@@ -438,7 +439,7 @@ export default function AIChatbotTab() {
                                     </div>
 
                                     {/* Users Cards List */}
-                                    <div className="flex-1 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800">
+                                    <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800">
                                         {filteredUserGroups.map((group) => {
                                             const isSelected = selectedGroup?.user_id === group.user_id;
                                             const lastMsgTime = new Date(group.last_date).getTime();
@@ -450,6 +451,7 @@ export default function AIChatbotTab() {
                                                     key={group.user_id}
                                                     onClick={() => {
                                                         setSelectedUserId(group.user_id);
+                                                        setMobilePane("conversation");
                                                         setSelectedSessionId(null);
                                                     }}
                                                     className={`w-full text-left p-3.5 transition-all flex items-center justify-between gap-2 ${
@@ -473,10 +475,10 @@ export default function AIChatbotTab() {
                                                         </div>
                                                         <div className="min-w-0 flex-1">
                                                             <div className="font-bold text-xs text-black dark:text-white truncate flex items-center gap-1.5">
-                                                                <span>{group.user_name}</span>
+                                                                <span className="min-w-0 truncate">{group.user_name}</span>
                                                                 {group.is_pro && <span title="مستخدم Pro" aria-label="Pro user"><Crown className="w-3.5 h-3.5 shrink-0 text-amber-500" /></span>}
                                                                 {isUnread && (
-                                                                    <span className="text-[9px] bg-blue-500 text-white px-1.5 py-0.2 rounded-full font-bold">
+                                                                    <span className="shrink-0 text-[9px] bg-blue-500 text-white px-1.5 py-0.2 rounded-full font-bold">
                                                                         جديد
                                                                     </span>
                                                                 )}
@@ -505,19 +507,22 @@ export default function AIChatbotTab() {
                                 </div>
 
                                 {/* Main Area: Selected User Header, Rooms Bar, and Messages */}
-                                <div className="md:col-span-3 flex flex-col h-full bg-white dark:bg-black overflow-hidden order-last md:order-first">
+                                <div data-testid="chat-conversation" className={`${mobilePane === "conversation" ? "flex" : "hidden"} md:flex min-h-0 min-w-0 md:col-span-3 flex-col h-full bg-white dark:bg-black overflow-hidden order-last md:order-first`}>
+                                    <button type="button" onClick={() => setMobilePane("users")} className="md:hidden min-h-11 shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                                        <ChevronRight className="w-4 h-4" /> رجوع للمستخدمين
+                                    </button>
                                     {selectedGroup ? (
                                         <>
-                                            <div className="p-3 border-b border-zinc-200 dark:border-zinc-800"><UserChatCost summary={usageTotals?.users[selectedGroup.user_id]} complete={usageTotals?.complete === true} /></div>
+                                            <div className="p-3 shrink-0 min-w-0 border-b border-zinc-200 dark:border-zinc-800"><UserChatCost summary={usageTotals?.users[selectedGroup.user_id]} complete={usageTotals?.complete === true} /></div>
                                             {/* Top User Bar */}
-                                            <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-black flex items-center justify-between shrink-0">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold">
+                                            <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-black flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="shrink-0 w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs font-bold">
                                                         {selectedGroup.user_name.substring(0, 2).toUpperCase()}
                                                     </div>
-                                                    <div>
-                                                        <div className="font-bold text-sm text-black dark:text-white flex items-center gap-2">
-                                                            {selectedGroup.user_name}
+                                                    <div className="min-w-0">
+                                                        <div className="break-words font-bold text-sm text-black dark:text-white flex flex-wrap items-center gap-2">
+                                                            <span className="min-w-0 [overflow-wrap:anywhere]">{selectedGroup.user_name}</span>
                                                             {selectedGroup.is_pro && <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400"><Crown className="w-3 h-3" /> PRO</span>}
                                                             {selectedGroup.telegram_chat_id && (
                                                                 <span className="text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full font-normal flex items-center gap-1">
@@ -525,19 +530,19 @@ export default function AIChatbotTab() {
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        <div className="text-[11px] text-zinc-500 font-mono">
+                                                        <div className="text-[11px] text-zinc-500 font-mono break-all">
                                                             ID: {selectedGroup.user_id}
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
+                                                <div className="flex flex-wrap items-center gap-3">
                                                     <div className="text-xs text-zinc-500 font-medium">
                                                         الإجمالي: <span className="font-bold text-black dark:text-white">{selectedGroup.logs.length} رسالة</span>
                                                     </div>
                                                     <button
                                                         onClick={() => handleDeleteUserChats(selectedGroup.user_id, selectedGroup.user_name)}
                                                         disabled={isDeleting}
-                                                        className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                                                        className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white min-h-10 border border-red-500/20 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50"
                                                         title="مسح كافة محادثات هذا المستخدم"
                                                     >
                                                         {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
@@ -547,7 +552,7 @@ export default function AIChatbotTab() {
                                             </div>
 
                                             {/* Rooms / Sessions Bar */}
-                                            <div className="border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100/70 dark:bg-zinc-950 px-3 py-2 flex items-center gap-2 overflow-x-auto shrink-0">
+                                            <div className="border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100/70 dark:bg-zinc-950 px-3 py-2 flex items-center gap-2 min-w-0 max-w-full overflow-x-auto shrink-0">
                                                 <span className="text-xs font-bold text-zinc-500 shrink-0 flex items-center gap-1">
                                                     <Folder className="w-3.5 h-3.5 text-indigo-500" />
                                                     الغرف ({selectedGroup.sessions.length}):
@@ -601,8 +606,8 @@ export default function AIChatbotTab() {
                                             </div>
 
                                             {/* Action Bar inside Room: Unread jump & Mark as Read */}
-                                            <div className="px-4 py-2 bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between text-xs shrink-0">
-                                                <div className="flex items-center gap-2">
+                                            <div className="px-4 py-2 bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shrink-0">
+                                                <div className="flex flex-wrap items-center gap-2 min-w-0 [overflow-wrap:anywhere]">
                                                     <span className="font-bold text-black dark:text-white">
                                                         غرفة: {activeSession?.title || "العامة"}
                                                     </span>
@@ -614,11 +619,11 @@ export default function AIChatbotTab() {
                                                     )}
                                                 </div>
 
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex flex-wrap items-center gap-2">
                                                     {unreadMessagesCount > 0 ? (
                                                         <button
                                                             onClick={scrollToFirstUnread}
-                                                            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-xs font-black shadow-sm transition-all animate-bounce"
+                                                            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white min-h-10 px-3 py-1 rounded-md text-xs font-black shadow-sm transition-all animate-bounce"
                                                             title="الانتقال التلقائي للرسائل الجديدة غير المقروءة"
                                                         >
                                                             <ArrowDown className="w-3.5 h-3.5" />
@@ -632,7 +637,7 @@ export default function AIChatbotTab() {
                                                     )}
                                                     <button
                                                         onClick={markActiveSessionAsRead}
-                                                        className="px-2.5 py-1 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded transition-colors text-xs font-bold"
+                                                        className="min-h-10 px-2.5 py-1 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded transition-colors text-xs font-bold"
                                                         title="تعليم الغرفة كمقروءة الآن"
                                                     >
                                                         تعليم كمقروء
@@ -641,7 +646,7 @@ export default function AIChatbotTab() {
                                             </div>
 
                                             {/* Conversation Timeline */}
-                                            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 relative">
+                                            <div ref={messagesContainerRef} className="flex-1 min-h-0 min-w-0 overflow-y-auto p-2 sm:p-4 space-y-4 relative">
                                                 {activeMessages.map((log, index) => {
                                                     const msgTime = new Date(log.created_at).getTime();
                                                     const isMsgUnread = lastSessionReadTime > 0 && msgTime > lastSessionReadTime;
@@ -665,7 +670,7 @@ export default function AIChatbotTab() {
                                                                 </div>
                                                             )}
 
-                                                            <div className="text-[10px] font-mono text-zinc-400 text-center my-1 flex items-center justify-center gap-2">
+                                                            <div className="text-[10px] font-mono text-zinc-400 text-center my-1 flex flex-wrap items-center justify-center gap-2">
                                                                 <span>{new Date(log.created_at).toLocaleString()}</span>
                                                                 {log.session_title && (
                                                                     <span className="text-[9px] bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.2 rounded font-sans text-zinc-600 dark:text-zinc-400">
@@ -676,7 +681,7 @@ export default function AIChatbotTab() {
 
                                                             {/* User Message */}
                                                             <div className="flex items-start gap-2.5 justify-end">
-                                                                <div className="bg-zinc-100 dark:bg-zinc-900 border dark:border-zinc-800/80 text-black dark:text-zinc-100 p-3 rounded-2xl rounded-tr-none text-xs max-w-[85%] leading-relaxed">
+                                                                <div className="bg-zinc-100 dark:bg-zinc-900 border dark:border-zinc-800/80 text-black dark:text-zinc-100 p-3 rounded-2xl rounded-tr-none text-xs min-w-0 max-w-[calc(100%_-_38px)] sm:max-w-[85%] [overflow-wrap:anywhere] leading-relaxed">
                                                                     <span className="text-[10px] font-bold text-zinc-400 block mb-1">User:</span>
                                                                     {log.image_url && (
                                                                         <div className="mb-2">
@@ -684,7 +689,7 @@ export default function AIChatbotTab() {
                                                                                 <img 
                                                                                     src={log.image_url} 
                                                                                     alt="User Attached Image" 
-                                                                                    className="max-w-[220px] max-h-48 rounded-lg border border-zinc-300 dark:border-zinc-700 object-cover shadow-sm hover:opacity-90 transition-opacity cursor-pointer" 
+                                                                                    className="max-w-full sm:max-w-[220px] max-h-48 rounded-lg border border-zinc-300 dark:border-zinc-700 object-cover shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
                                                                                 />
                                                                             </a>
                                                                         </div>
@@ -701,12 +706,12 @@ export default function AIChatbotTab() {
                                                                 <div className="w-7 h-7 rounded-full bg-indigo-500 text-white flex items-center justify-center text-xs shrink-0">
                                                                     <Sparkles className="w-3.5 h-3.5" />
                                                                 </div>
-                                                                <div className="bg-indigo-50/70 dark:bg-zinc-950 border border-indigo-100 dark:border-zinc-800/80 text-black dark:text-zinc-100 p-3 rounded-2xl rounded-tl-none text-xs max-w-[85%] leading-relaxed">
-                                                                    <span className="text-[10px] font-bold text-indigo-500 block mb-1 flex items-center justify-between gap-1 w-full">
+                                                                <div className="bg-indigo-50/70 dark:bg-zinc-950 border border-indigo-100 dark:border-zinc-800/80 text-black dark:text-zinc-100 p-3 rounded-2xl rounded-tl-none text-xs min-w-0 max-w-[calc(100%_-_38px)] sm:max-w-[85%] [overflow-wrap:anywhere] leading-relaxed">
+                                                                    <span className="text-[10px] font-bold text-indigo-500 block mb-1 flex flex-wrap items-center justify-between gap-1 w-full">
                                                                         <span className="flex items-center gap-1">
                                                                             <Sparkles className="w-3 h-3 text-indigo-500" /> ARTORO:
                                                                         </span>
-                                                                        <div className="flex items-center gap-1.5">
+                                                                        <div className="flex flex-wrap items-center gap-1.5">
                                                                             {log.dataSource === "provider_snapshot" && (
                                                                                 <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20" title="جلب من مزود الأسعار؛ وقت الجلب لا يثبت وقت الصفقة أو انعدام تأخير المصدر">
                                                                                     لقطة من مزود الأسعار
@@ -735,7 +740,7 @@ export default function AIChatbotTab() {
                                                                         </div>
                                                                     </span>
                                                                     <ChatUsageDetails log={log} />
-                                                                    <div className="text-black dark:text-zinc-100">
+                                                                    <div className="min-w-0 max-w-full overflow-x-auto text-black dark:text-zinc-100">
                                                                         {log.reply && log.reply.trim().length > 0 ? (
                                                                             <FormattedChatMessage
                                                                                 content={log.reply}

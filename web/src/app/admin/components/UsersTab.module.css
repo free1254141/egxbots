@@ -1,0 +1,63 @@
+/* Keep the same cells and actions on both layouts. */
+@media (max-width: 639px) {
+  .userDirectory,
+  .userDirectory tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .userDirectory thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .userDirectory tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .userDirectory tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 2px solid currentColor;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .userDirectory td {
+    display: block;
+    min-width: 0;
+    padding: 4px;
+    text-align: start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .userDirectory td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 700;
+    opacity: 0.65;
+  }
+
+  .userDirectory td:first-child,
+  .userDirectory td:nth-child(2),
+  .userDirectory td:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .userDirectory td:last-child > div {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .userDirectory button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}

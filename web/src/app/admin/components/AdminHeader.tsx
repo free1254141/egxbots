@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Brain, Database, Bot, LineChart, History, Sparkles, Clock, Users, MessageSquare, Send, CreditCard } from "lucide-react";
 
 interface AdminHeaderProps {
@@ -8,6 +9,11 @@ interface AdminHeaderProps {
 }
 
 export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHeaderProps) {
+    const activeTabRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        activeTabRef.current?.scrollIntoView?.({ block: "nearest", inline: "center" });
+    }, [activeMainTab]);
+
     const tabs = [
         { id: "data", label: "DATA", icon: Database, color: "cyan" },
         { id: "ai", label: "AI AUTO", icon: Brain, color: "purple" },
@@ -74,8 +80,8 @@ export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHe
                 <div className="max-w-[1920px] mx-auto px-4 md:px-8 py-3">
                     
                     {/* Navigation Tabs */}
-                    <nav className="w-full overflow-x-auto pb-1 scrollbar-hide">
-                        <div className="flex flex-wrap items-center gap-2 max-w-full">
+                    <nav className="w-full overflow-x-auto pt-1 pb-2 scrollbar-hide">
+                        <div className="flex flex-nowrap md:flex-wrap items-center gap-2 max-w-full">
                             {tabs.map((tab) => {
                                 const isActive = activeMainTab === tab.id;
                                 const Icon = tab.icon;
@@ -84,9 +90,11 @@ export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHe
                                 return (
                                     <button
                                         key={tab.id}
+                                        ref={isActive ? activeTabRef : undefined}
+                                        aria-current={isActive ? "page" : undefined}
                                         onClick={() => setActiveMainTab(tab.id)}
                                         className={`
-                                            group relative px-3 md:px-4 py-2 border-2 md:border-4 border-black dark:border-white font-black text-[10px] md:text-xs uppercase tracking-wider md:tracking-widest shrink-0
+                                            group relative min-h-11 px-3 md:px-4 py-2 border-2 md:border-4 border-black dark:border-white font-black text-[10px] md:text-xs uppercase tracking-wider md:tracking-widest shrink-0
                                             transition-all duration-100
                                             ${isActive
                                                 ? `${bgClass} text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] md:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] dark:md:shadow-[4px_4px_0px_rgba(255,255,255,1)] translate-x-0 translate-y-0`

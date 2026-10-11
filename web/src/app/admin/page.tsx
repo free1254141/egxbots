@@ -516,7 +516,7 @@ export default function AdminPage() {
         <div className="min-h-screen bg-black text-zinc-100 flex flex-col selection:bg-indigo-500/30 pt-0">
             <AdminHeader activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
 
-            <main className="flex-1 w-full overflow-y-auto relative">
+            <main className="flex-1 w-full min-w-0 overflow-y-auto relative">
                 {activeMainTab === "data" ? (
                     !dataLoaded ? (
                         <section className="mx-auto mt-12 max-w-2xl border-4 border-white bg-zinc-950 p-8 text-center shadow-[8px_8px_0px_rgba(255,255,255,1)]">
