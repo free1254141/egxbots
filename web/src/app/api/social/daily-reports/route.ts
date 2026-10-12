@@ -38,10 +38,27 @@ export async function POST(req: NextRequest) {
     || (kind === 'market' && statuses.refresh_market_status !== 'success')) {
     return NextResponse.json({ error: 'Daily data job is not ready' }, { status: 409 });
   }
-  const { data: existing } = await service.from('daily_social_reports').select('status').eq('session_date', date).eq('kind', kind).maybeSingle();
-  if (existing) return NextResponse.json({ status: existing.status, duplicate: true });
-  const { error: claimError } = await service.from('daily_social_reports').insert({ session_date: date, kind, job_run_id: jobId, status: 'generating' });
-  if (claimError) return NextResponse.json({ error: 'Report already claimed or storage unavailable' }, { status: 409 });
+  const { data: existing, error: existingError } = await service.from('daily_social_reports')
+    .select('status,job_run_id,updated_at,error,validation').eq('session_date', date).eq('kind', kind).maybeSingle();
+  if (existingError) return NextResponse.json({ error: 'Report storage unavailable' }, { status: 503 });
+  let recovery: Record<string, unknown> = {};
+  if (existing) {
+    if (body.retry_failed !== true || existing.status !== 'failed' || existing.job_run_id !== jobId
+      || Number(existing.validation?.recovery_attempt || 0) >= 1 || !existing.updated_at) {
+      return NextResponse.json({ status: existing.status, duplicate: true });
+    }
+    // Explicit authenticated repair of a confirmed terminal failure, once.
+    // Date/status/version equality prevents concurrent or ambiguous replay.
+    recovery = { recovery_attempt: 1, previous_failure: { error: existing.error, validation: existing.validation } };
+    const { data: claim, error: claimError } = await service.from('daily_social_reports')
+      .update({ status: 'generating', validation: { ...existing.validation, ...recovery }, updated_at: new Date().toISOString() })
+      .eq('session_date', date).eq('kind', kind).eq('job_run_id', jobId)
+      .eq('status', 'failed').eq('updated_at', existing.updated_at).select('status').maybeSingle();
+    if (claimError || !claim) return NextResponse.json({ error: 'Report already claimed or storage unavailable' }, { status: 409 });
+  } else {
+    const { error: claimError } = await service.from('daily_social_reports').insert({ session_date: date, kind, job_run_id: jobId, status: 'generating' });
+    if (claimError) return NextResponse.json({ error: 'Report already claimed or storage unavailable' }, { status: 409 });
+  }
   try {
     const { data: previous, error: previousError } = await service.from('daily_social_reports')
       .select('session_date,symbol,content,evidence').eq('kind', 'stock').eq('status', 'ready').lt('session_date', date)
@@ -59,13 +76,15 @@ export async function POST(req: NextRequest) {
     const liquidSymbols = rows.filter((r: any) => r.date === date).sort((a: any, b: any) => b.last_close * b.volume - a.last_close * a.volume).slice(0, 20).map((r: any) => r.symbol);
     const report = await generateDailyReport(getSupabaseClient(), kind as ReportKind, date, symbol, liquidSymbols, kind === 'follow_up' ? previous : null);
     const { error } = await service.from('daily_social_reports').update({ ...report, source: undefined, symbol: ['stock','follow_up'].includes(kind) ? symbol : null,
-      status: 'ready', updated_at: new Date().toISOString() }).eq('session_date', date).eq('kind', kind);
+      status: 'ready', error: null, validation: { ...report.validation, ...recovery },
+      updated_at: new Date().toISOString() }).eq('session_date', date).eq('kind', kind);
     if (error) throw new Error('Report storage failed');
     return NextResponse.json({ status: 'ready', kind, symbol, date });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Report failed';
     await service.from('daily_social_reports').update({ status: 'failed', error: message,
-      ...(error instanceof DailyReportVerificationError ? { validation: error.validation } : {}),
+      validation: { ...(error instanceof DailyReportVerificationError ? error.validation : {}), ...recovery },
+      ...(error instanceof DailyReportVerificationError ? { content: error.draft, evidence: error.evidence } : {}),
       updated_at: new Date().toISOString() }).eq('session_date', date).eq('kind', kind);
     return NextResponse.json({ status: 'failed', error: message }, { status: 503 });
   }

@@ -43,7 +43,9 @@ def _current_quotes(client, symbols, session):
 
 
 def eligible_candidates(client, candidates, session):
-    from api.symbols_local import _find_latest_file
+    from api.symbols_local import _find_latest_file, _default_symbols_dir
+    from api.egx_inventory import restore_inventory
+    restore_inventory(_default_symbols_dir(), client)
     path=_find_latest_file('Egypt_all_symbols')
     inventory=json.loads(Path(path).read_text(encoding='utf-8')) if path else []
     listed={r['Symbol'] for r in inventory if r.get('InventorySource')=='EODHD'}

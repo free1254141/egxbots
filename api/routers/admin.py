@@ -3722,7 +3722,7 @@ async def update_symbols_inventory(
 
                             if c_name.lower() == 'egypt':
                                 from api.egx_inventory import refresh_egx_inventory
-                                inv_ok, _, inv_message = refresh_egx_inventory(base_dir, rows=syms)
+                                inv_ok, _, inv_message = refresh_egx_inventory(base_dir, rows=syms, client=stock_ai.supabase)
                                 if not inv_ok:
                                     print(inv_message)
                                     continue

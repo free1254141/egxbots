@@ -184,6 +184,11 @@ def _fetch_egx_symbols() -> List[str]:
     """
     try:
         from api.symbols_local import load_symbols_for_country, _find_latest_file, _safe_read_json
+        from api.egx_inventory import restore_inventory
+        if stock_ai.supabase is None:
+            stock_ai._init_supabase()
+        from api.symbols_local import _default_symbols_dir
+        restore_inventory(_default_symbols_dir(), stock_ai.supabase)
         # The weekly inventory is authoritative for the daily universe; stale
         # fundamentals must not shadow its newly updated JSON file.
         path = _find_latest_file('Egypt_all_symbols')

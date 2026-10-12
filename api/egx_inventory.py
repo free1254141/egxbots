@@ -3,8 +3,54 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+CACHE_KEY = 'egx_inventory_eodhd'
+_restored_at = {}
+
+
+def _validated_snapshot(snapshot):
+    metadata = snapshot['metadata']
+    rows = normalize_inventory(snapshot['rows'])
+    if metadata.get('source') != 'EODHD' or metadata.get('count') != len(rows):
+        raise ValueError('Invalid persisted inventory metadata')
+    observed = datetime.fromisoformat(metadata['fetched_at'])
+    if observed.tzinfo is None:
+        raise ValueError('Inventory timestamp must include timezone')
+    return rows, metadata, observed
+
+
+def restore_inventory(directory, client, *, force=False):
+    """Restore a newer weekly snapshot after HF rebuilds its ephemeral files."""
+    if client is None:
+        return
+    directory = Path(directory).resolve()
+    key = str(directory)
+    if not force and time.monotonic() - _restored_at.get(key, -3600) < 3600:
+        return
+    result = (client.table('market_cache').select('payload')
+              .eq('cache_key', CACHE_KEY).limit(1).execute()).data or []
+    if result:
+        rows, metadata, observed = _validated_snapshot(result[0]['payload'])
+        local = directory / 'Egypt_inventory_source.json'
+        current = None
+        try:
+            current = datetime.fromisoformat(json.loads(local.read_text(encoding='utf-8'))['fetched_at'])
+        except (OSError, ValueError, KeyError):
+            pass
+        if current is None or observed > current or not (directory / 'Egypt_all_symbols.json').exists():
+            _atomic_json(directory / 'Egypt_all_symbols.json', rows)
+            _atomic_json(local, metadata)
+    _restored_at[key] = time.monotonic()
+
+
+def persist_inventory(client, rows, metadata):
+    normalized, metadata, _ = _validated_snapshot({'rows': rows, 'metadata': metadata})
+    client.table('market_cache').upsert({'cache_key': CACHE_KEY, 'country': 'Egypt',
+        'payload': {'metadata': metadata, 'rows': normalized},
+        'computed_at': datetime.now(ZoneInfo('UTC')).isoformat()}).execute()
 
 
 def normalize_inventory(rows):
@@ -37,13 +83,14 @@ def _atomic_json(path, value):
             os.remove(name)
 
 
-def refresh_egx_inventory(directory, *, trigger='manual', rows=None):
+def refresh_egx_inventory(directory, *, trigger='manual', rows=None, client=None):
     directory=Path(directory).resolve()
     target=directory/'Egypt_all_symbols.json'
     metadata_path=directory/'Egypt_inventory_source.json'
     now=datetime.now(ZoneInfo('Africa/Cairo'))
     week=(now.date()-timedelta(days=(now.weekday()+1)%7)).isoformat()
     try:
+        restore_inventory(directory, client, force=True)
         if trigger=='scheduled' and target.exists() and metadata_path.exists():
             metadata=json.loads(metadata_path.read_text(encoding='utf-8'))
             if metadata.get('source')=='EODHD' and metadata.get('week_start')==week:
@@ -64,9 +111,14 @@ def refresh_egx_inventory(directory, *, trigger='manual', rows=None):
             old=json.loads(target.read_text(encoding='utf-8'))
             if len(normalized)<len(old)*0.7:
                 return False,[],'Unexpected inventory shrink; existing inventory retained for review'
+        metadata = dict(source='EODHD',exchange='EGX',delisted=0,count=len(normalized),
+                        fetched_at=now.isoformat(),week_start=week)
+        if client is not None:
+            # Save before replacing the files: a failed durable write retains
+            # the previous valid list and cannot falsely claim weekly success.
+            persist_inventory(client, normalized, metadata)
         _atomic_json(target,normalized)
-        _atomic_json(metadata_path,dict(source='EODHD',exchange='EGX',delisted=0,count=len(normalized),
-                                      fetched_at=now.isoformat(),week_start=week))
+        _atomic_json(metadata_path,metadata)
         return True,[r['Symbol'] for r in normalized],f'Updated EODHD EGX inventory with {len(normalized)} symbols'
     except Exception as error:
         # Request exception strings may contain the API token; only report type.

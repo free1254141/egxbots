@@ -54,7 +54,7 @@ from api.fundamentals_refresh import (
 
 def _sync_latest_egx_inventory_from_eodhd() -> Tuple[bool, List[str], str]:
     from api.egx_inventory import refresh_egx_inventory
-    return refresh_egx_inventory(os.path.join(project_root, "symbols_data"), trigger="scheduled")
+    return refresh_egx_inventory(os.path.join(project_root, "symbols_data"), trigger="scheduled", client=stock_ai.supabase)
 
 
 def _mark_non_listed_egx_symbols(active_symbols: List[str]) -> Tuple[bool, str, int]:

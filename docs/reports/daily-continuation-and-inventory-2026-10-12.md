@@ -140,3 +140,94 @@ with `Daily data job is not ready`, before report creation.
 Next.js production build passed (including type checks). Existing prerender/cache
 notices did not fail the build. HF JSON contents match local SHA-256 hashes.
 
+
+Git final runtime/test commit: `47fceb07889ac83e2c7ab30f9d3b4ab2cbdfb18f`.
+HF is RUNNING at `c9a3390406894489424a183f2d544af7d8f7f022` and /health is 200.
+The final evaluation audit correction restores 9 evaluated of 9 / 7 closed,
+using the verified initial summary: the only late review had zero updates/exits
+and one unchanged result. The append-only original late review and overcount
+remain visible. No recommendation operation or notification was replayed.
+
+The Vercel MCP credential could not access the project scope; the existing CLI
+credential succeeded with the same explicit team/project. Git automatic release
+had not created a new deployment, so production deployment
+`dpl_23ZLgZsnXYCq1SW2gZZ7XtK6EcZP` was requested from the exact tested Git SHA,
+not from the working directory. Its actual readiness/alias is verified before
+continuing report generation.
+
+Vercel production `dpl_23ZLgZsnXYCq1SW2gZZ7XtK6EcZP` reached READY with
+`egxbots.com` assigned and the tested full SHA `47fceb07889ac83e2c7ab30f9d3b4ab2cbdfb18f`.
+The report table for October 12 was still empty before a single canonical
+`resume_daily_social_reports` call. It uses the durable original-job checkpoint,
+refreshes only validated daily tags, then requests the missing report kinds once.
+No full daily run, trading pass, image-generation model or new notification was
+invoked as a test. Report cards use the existing deterministic renderer.
+
+### Current weekly inventory path
+
+```mermaid
+flowchart TD
+    A[Scheduled close job / Cairo time] --> B{Sunday?}
+    B -->|No| K[Use last valid JSON]
+    B -->|Yes| C{Successful EODHD snapshot this week?}
+    C -->|Yes| K
+    C -->|No| D[One EODHD EGX active-list request / 30s timeout]
+    D --> E{Valid names/codes/count and acceptable change?}
+    E -->|No| K
+    E -->|Yes| F[Atomically replace inventory JSON and source manifest]
+    F --> G[Reconcile listing metadata without asserting delisting]
+    G --> H[Daily provider universe reads updated JSON]
+    H --> I[New recommendation gate: listed + current verified quote + volume + current indicators]
+```
+
+The snapshot published October 12 belongs to the week starting October 11.
+The next normal scheduled inventory update is Sunday October 18 close. Manual
+admin refresh uses the same validation/writer and is independent of this schedule.
+
+
+## Report continuation and a reproduced false rejection
+
+The single social continuation refreshed validated cache tags successfully.
+Stock (KORA), accumulation and follow-up (COMI) reports became ready with ready
+image cards; market failed terminally with LLM report failed verification.
+Its reason attributed -13.04% to CPME as unsupported. A one-symbol October 12
+indicator read confirms change_pct=-13.0435 and close=40. The offline fixture
+`هبوط CPME بنسبة -13.04% في الجلسة` reproduces exactly that rejection: the gate
+mapped any nominal هبوط to backtest drawdown, despite a sourced daily change.
+
+The gate now reserves drawdown for an explicit أقصى هبوط / drawdown label and
+recognizes ordinary daily decline/rise wording as daily change. Markdown and
+whitespace labels normalize before metric classification. Fixtures still reject
+invented -20% and borrowing a daily percentage for explicit maximum drawdown.
+No numeric tolerance, attribution ownership, source verification or auth gate
+was weakened. This is metric-label interpretation, not a regex intent router.
+
+Failed verified report drafts/evidence are retained for diagnosis. An explicitly
+authenticated retry_failed=true may claim a confirmed failed same-job report
+once, via status + updated_at version equality. Generating/ready or already
+retried reports remain duplicates; ambiguous timeouts are never replayed. The
+previous failure remains in validation.previous_failure across repair results.
+Tests prove the one-claim repair cannot bypass validation or consume more than
+one new LLM call. The existing daily caller still never retries automatically.
+
+51 relevant Jest tests passed, including readiness, new mover-label cases,
+report failure/lease/attempt gates, chart strategies and backtest regression cases.
+Only the terminally failed market report may receive one explicit repair after
+this fix is deployed. The three ready reports/cards must be reused.
+
+
+## Weekly inventory durability
+
+HF rebuilds COPY the Git snapshot into ephemeral /app files. A weekly list written
+only there would disappear after the next runtime deployment. The validated
+inventory/manifest now also persists to the existing public market_cache row
+`egx_inventory_eodhd`. A newer persisted snapshot restores the JSON atomically on
+startup/daily symbol reads (bounded select payload / limit 1, deduplicated per
+process for one hour), and before weekly refresh. A successful snapshot for the
+same week still prevents another EODHD request after a rebuild. A durable-write
+failure retains the previous files and does not claim refresh success; malformed
+or older stored snapshots cannot overwrite a newer valid local list.
+No per-visitor refresh/provider job or new table was introduced. The existing
+manually refreshed October 12 response seeds that row once, without another
+EODHD inventory call. Admin, daily universe and candidate eligibility share this
+path. Offline fixtures simulate ephemeral rebuild, older data and storage failure.

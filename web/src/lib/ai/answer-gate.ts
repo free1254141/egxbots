@@ -86,12 +86,13 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
         "bb_upper", "bb_lower", "highest_price", "market_value", "cost_basis", "profit_value", "entry_price",
     ]);
     const metricFields = (prefix: string, percentage: boolean): Set<string> | null => {
+        prefix = prefix.replace(/[*_`]/g, '').replace(/\s+/g, ' ');
         const labels: Array<[RegExp, string[]]> = percentage ? [
             [/نسبة.*صاعد|الصاعدة/i,["breadth_advancing_pct"]],
-            [/هبوط|drawdown/i, ["backtest_drawdown_pct"]],
+            [/(?:أقصى|اقصى)\s+هبوط|drawdown/i, ["backtest_drawdown_pct"]],
             [/فوز|نجاح|win.?rate/i, ["backtest_win_rate_pct"]],
             [/ربح|خسار|عائد|مكسب/i, ["profit_pct", "backtest_return_pct"]],
-            [/ارتفع|صعد|هبط|انخفض|نزل|تغير|تراجع/i, ["change_pct"]],
+            [/ارتفع|ارتفاع|صعد|هبط|(?<!أقصى\s)(?<!اقصى\s)هبوط|انخفض|نزل|تغير|تراجع/i, ["change_pct"]],
             [/علاوه|علاوة/i, ["premium_pct"]],
         ] : [
             [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|market.?cap/i,["market_cap"]],
