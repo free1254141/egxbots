@@ -21,7 +21,7 @@ const logs = [
 
 beforeEach(() => {
     Object.defineProperty(window, "matchMedia", { writable: true, value: jest.fn(() => ({
-        matches: true, media: "(max-width: 767px)", addEventListener: jest.fn(), removeEventListener: jest.fn(),
+        matches: true, media: "(max-width: 1023px)", addEventListener: jest.fn(), removeEventListener: jest.fn(),
     })) });
     localStorage.clear();
     global.fetch = jest.fn(async (input: any) => ({

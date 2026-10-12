@@ -12,7 +12,7 @@ jest.mock("@/lib/supabase/browser", () => ({
 
 it("opens support on phones and returns without discarding the selected room or draft", async () => {
     Object.defineProperty(window, "matchMedia", { writable: true, value: jest.fn(() => ({
-        matches: true, media: "(max-width: 767px)", addEventListener: jest.fn(), removeEventListener: jest.fn(),
+        matches: true, media: "(max-width: 1023px)", addEventListener: jest.fn(), removeEventListener: jest.fn(),
     })) });
     global.fetch = jest.fn(async (input: any) => ({
         ok: true,
@@ -33,7 +33,7 @@ it("opens support on phones and returns without discarding the selected room or 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(customer);
     expect(await screen.findByDisplayValue("مسودة رد")).toBeTruthy();
-    expect(list.classList.contains("md:flex")).toBe(true);
+    expect(list.classList.contains("lg:flex")).toBe(true);
 
     expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
 });

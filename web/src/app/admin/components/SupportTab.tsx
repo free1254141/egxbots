@@ -200,7 +200,7 @@ export default function SupportTab() {
     return (
         <div className="flex min-w-0 h-[85dvh] min-h-[480px] md:h-[calc(100dvh-230px)] border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white overflow-hidden">
             {/* Sidebar: Chat Sessions List */}
-            <div data-testid="support-session-list" className={`flex md:flex w-full md:w-1/3 min-w-0 min-h-0 md:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40`}>
+            <div data-testid="support-session-list" className={`flex lg:flex w-full lg:w-1/3 min-w-0 min-h-0 lg:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40`}>
                 <div className="p-4 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center gap-2">
                     <MessageSquare className="h-4 w-4 text-pink-500" />
                     <span className="text-xs font-black uppercase tracking-wider">Customer Support Chats</span>

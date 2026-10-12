@@ -944,8 +944,8 @@ export default function UsersTab() {
                                                         </div>
                                                     )}
                                                     <div className="min-w-0">
-                                                        <div className="font-bold text-black dark:text-white text-sm md:text-xs md:truncate md:max-w-[180px] [overflow-wrap:anywhere]">{u.display_name || u.username || "—"}</div>
-                                                        <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 md:truncate md:max-w-[200px] [overflow-wrap:anywhere]">{u.email || u.username || "—"}</div>
+                                                        <div className="font-bold text-black dark:text-white text-sm lg:text-xs lg:truncate lg:max-w-[180px] [overflow-wrap:anywhere]">{u.display_name || u.username || "—"}</div>
+                                                        <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 lg:truncate lg:max-w-[200px] [overflow-wrap:anywhere]">{u.email || u.username || "—"}</div>
                                                         <div className="text-[9px] text-zinc-400 truncate font-mono">{u.id.slice(0, 10)}...</div>
                                                     </div>
                                                 </div>

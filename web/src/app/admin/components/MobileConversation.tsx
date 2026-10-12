@@ -17,7 +17,7 @@ export default function MobileConversation({ open, onClose, title, closeLabel, c
     const returnFocus = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
-        const media = window.matchMedia("(max-width: 767px)");
+        const media = window.matchMedia("(max-width: 1023px)");
         const update = () => setMobile(media.matches);
         update();
         media.addEventListener("change", update);
@@ -25,7 +25,7 @@ export default function MobileConversation({ open, onClose, title, closeLabel, c
     }, []);
 
     if (!mobile) {
-        return <div data-testid={testId} className={`hidden md:flex ${className}`}>{children}</div>;
+        return <div data-testid={testId} className={`hidden lg:flex ${className}`}>{children}</div>;
     }
 
     return (

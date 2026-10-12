@@ -8,6 +8,7 @@ it("keeps the conversation inline on desktop without a modal", () => {
         matches: false, addEventListener: jest.fn(), removeEventListener: jest.fn(),
     })) });
     render(<MobileConversation open onClose={jest.fn()} title="Customer" closeLabel="Close" className="flex-1" testId="conversation">Messages</MobileConversation>);
+    expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 1023px)");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByTestId("conversation").textContent).toBe("Messages");
 });

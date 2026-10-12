@@ -406,10 +406,10 @@ export default function AIChatbotTab() {
                                 لا توجد محادثات مسجلة حتى الآن.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-4 flex-1 overflow-hidden min-h-0 min-w-0">
+                            <div className="grid grid-cols-1 lg:grid-cols-4 flex-1 overflow-hidden min-h-0 min-w-0">
                                 
                                 {/* Right Column: Users List */}
-                                <div data-testid="chat-user-list" className={`flex md:flex min-h-0 min-w-0 md:col-span-1 md:border-l-2 border-zinc-200 dark:border-zinc-800 flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first md:order-last`}>
+                                <div data-testid="chat-user-list" className={`flex lg:flex min-h-0 min-w-0 lg:col-span-1 lg:border-l-2 border-zinc-200 dark:border-zinc-800 flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first lg:order-last`}>
                                     {/* Search Filter & Date Quick Tabs */}
                                     <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 space-y-2">
                                         <div className="relative">
@@ -510,9 +510,10 @@ export default function AIChatbotTab() {
                                 {/* Main Area: Selected User Header, Rooms Bar, and Messages */}
                                 <MobileConversation open={mobilePane === "conversation"} onClose={() => setMobilePane("users")}
                                     title={selectedGroup?.user_name || "محادثة المستخدم"} closeLabel="رجوع للمستخدمين"
-                                    testId="chat-conversation" className="min-h-0 min-w-0 md:col-span-3 flex-col h-full bg-white dark:bg-black overflow-hidden order-last md:order-first">
+                                    testId="chat-conversation" className="min-h-0 min-w-0 lg:col-span-3 flex-col h-full bg-white dark:bg-black overflow-hidden order-last lg:order-first">
                                     {selectedGroup ? (
                                         <>
+                                            <div className="max-h-[40dvh] shrink-0 overflow-y-auto lg:max-h-none">
                                             <details className="p-2 shrink-0 min-w-0 border-b border-zinc-200 dark:border-zinc-800"><summary className="cursor-pointer text-xs font-bold">تفاصيل تكلفة المحادثة</summary><UserChatCost summary={usageTotals?.users[selectedGroup.user_id]} complete={usageTotals?.complete === true} /></details>
                                             {/* Top User Bar */}
                                             <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-black flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
@@ -645,6 +646,7 @@ export default function AIChatbotTab() {
                                                 </div>
                                             </div>
 
+                                            </div>
                                             {/* Conversation Timeline */}
                                             <div ref={messagesContainerRef} className="flex-1 min-h-0 min-w-0 overflow-y-auto p-2 sm:p-4 space-y-4 relative">
                                                 {activeMessages.map((log, index) => {
