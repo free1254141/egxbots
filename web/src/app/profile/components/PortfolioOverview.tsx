@@ -56,7 +56,10 @@ export default function PortfolioOverview({
                 ? "إيه اللي اتغيّر في أسهمك؟"
                 : "What changed in your holdings?"}
             </h3>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p
+              dir="ltr"
+              className={`mt-1 text-xs text-zinc-500 ${isAr ? "text-right" : ""}`}
+            >
               {daily?.previousDate || "—"} → {daily?.date || "—"}
             </p>
           </div>
@@ -122,8 +125,9 @@ export default function PortfolioOverview({
                           : "text-emerald-600 dark:text-emerald-400"
                       }
                     >
-                      {money(p.change)} {isAr ? "ج.م" : "EGP"} ·{" "}
-                      {money(p.changePct)}%
+                      <bdi dir="ltr">{money(p.change)}</bdi>{" "}
+                      <bdi>{isAr ? "ج.م" : "EGP"}</bdi> ·{" "}
+                      <bdi dir="ltr">{money(p.changePct)}%</bdi>
                     </span>
                   </div>
                 ))}

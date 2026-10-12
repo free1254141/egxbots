@@ -147,3 +147,30 @@ it("does not convert missing snapshot prices or cost into a green zero profit", 
   expect(screen.queryByText("+—")).toBeNull();
   expect(screen.queryByText("+0.00")).toBeNull();
 });
+
+it("keeps cash edit, cancel and save usable without changing displayed equity", async () => {
+  render(<MyPortfolioSection />);
+  fireEvent.click(screen.getByTitle("اضغط للتعديل"));
+  fireEvent.change(screen.getByLabelText("مبلغ السيولة — ج.م"), {
+    target: { value: "٢٥٠.٥" },
+  });
+  expect(
+    (screen.getByLabelText("مبلغ السيولة — ج.م") as HTMLInputElement).value,
+  ).toBe("250.5");
+  expect(screen.getByText("310.00").getAttribute("dir")).toBe("ltr");
+  fireEvent.click(screen.getByRole("button", { name: "إلغاء تعديل السيولة" }));
+  expect(screen.queryByLabelText("مبلغ السيولة — ج.م")).toBeNull();
+  expect(global.fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByTitle("اضغط للتعديل"));
+  expect(
+    (screen.getByLabelText("مبلغ السيولة — ج.م") as HTMLInputElement).value,
+  ).toBe("200");
+  fireEvent.change(screen.getByLabelText("مبلغ السيولة — ج.م"), {
+    target: { value: "250.5" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "حفظ القيمة" }));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+  expect(JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body)).toEqual(
+    { action: "cash_set", quantity: 250.5 },
+  );
+});

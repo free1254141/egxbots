@@ -240,45 +240,49 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "القيمة السوقية" : "Market Value"}</span>
-                    <span className="text-lg font-black text-black dark:text-white font-mono">{money(totals?.market_value)}</span>
+                    <span dir="ltr" className={`${styles.amount} text-lg font-black text-black dark:text-white font-mono`}>{money(totals?.market_value)}</span>
                     <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "ج.م" : "EGP"}</span>
                 </div>
                 <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "الربح / الخسارة" : "P / L"}</span>
                     <span className={`text-lg font-black font-mono flex items-center gap-1.5 ${profitTone}`}>
                         {totalProfit === null ? null : totalProfit >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        {money(totalProfit)}
+                        <bdi dir="ltr" className={styles.amount}>{money(totalProfit)}</bdi>
                     </span>
-                    <span className={`text-[9px] font-black font-mono block ${profitTone}`}>
+                    <span dir="ltr" className={`text-[9px] font-black font-mono block ${profitTone}`}>
                         {totals?.profit_pct != null && totals.profit_pct >= 0 ? "+" : ""}{money(totals?.profit_pct)}%
                     </span>
                 </div>
-                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
+                <div className={`${editingCash ? styles.cashEditing : ""} min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3`}>
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "السيولة" : "Cash"}</span>
                     {editingCash ? (
-                        <div className="flex items-center gap-1.5">
+                        <div className={styles.cashEditor}>
                             <input
+                                aria-label={isAr ? "مبلغ السيولة — ج.م" : "Cash amount — EGP"}
+                                dir="ltr"
                                 value={cashDraft}
                                 onChange={(e) => setCashDraft(numericOnly(e.target.value))}
                                 inputMode="decimal"
-                                className="h-8 w-24 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-black font-mono text-black dark:text-white outline-none"
+                                className={`${styles.cashInput} border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 font-black font-mono text-black dark:text-white outline-none`}
                             />
-                            <button onClick={() => void handleSaveCash()} disabled={busy} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" title={isAr ? "حفظ القيمة" : "Save value"}>
-                                <Check className="h-4 w-4" />
-                            </button>
-                            <button onClick={() => void handleDepositCash()} disabled={busy} className="h-8 flex items-center gap-1 px-2 border-2 border-black dark:border-white bg-amber-400 text-black" title={isAr ? "إيداع المبلغ على السيولة الحالية" : "Deposit amount on top of current cash"}>
-                                <Plus className="h-4 w-4" />
-                                <span className="text-[10px] font-black">{isAr ? "إيداع" : "Deposit"}</span>
-                            </button>
-                            <button onClick={() => { setEditingCash(false); setCashDraft(snapshot?.cash_balance ? String(Math.round(snapshot.cash_balance)) : "0"); }} className="h-8 w-8 flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" title="Cancel">
-                                <X className="h-4 w-4" />
-                            </button>
+                            <div className={styles.cashActions}>
+                                <button onClick={() => void handleSaveCash()} disabled={busy} className="flex items-center justify-center border-2 border-black dark:border-white bg-emerald-400 text-black" aria-label={isAr ? "حفظ القيمة" : "Save value"} title={isAr ? "حفظ القيمة" : "Save value"}>
+                                    <Check className="h-4 w-4" />
+                                </button>
+                                <button onClick={() => void handleDepositCash()} disabled={busy} className="flex items-center gap-1 px-2 border-2 border-black dark:border-white bg-amber-400 text-black" title={isAr ? "إيداع المبلغ على السيولة الحالية" : "Deposit amount on top of current cash"}>
+                                    <Plus className="h-4 w-4" />
+                                    <span className="text-[10px] font-black">{isAr ? "إيداع" : "Deposit"}</span>
+                                </button>
+                                <button onClick={() => { setEditingCash(false); setCashDraft(snapshot?.cash_balance ? String(Math.round(snapshot.cash_balance)) : "0"); }} className="flex items-center justify-center border-2 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white" aria-label={isAr ? "إلغاء تعديل السيولة" : "Cancel cash edit"} title={isAr ? "إلغاء" : "Cancel"}>
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
                     ) : (
                         <button onClick={() => setEditingCash(true)} className="text-left group" title={isAr ? "اضغط للتعديل" : "Click to edit"}>
                             <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5 group-hover:text-amber-500 transition-colors">
                                 <Coins className="w-4 h-4 text-amber-500" />
-                                {money(snapshot?.cash_balance)}
+                                <bdi dir="ltr" className={styles.amount}>{money(snapshot?.cash_balance)}</bdi>
                             </span>
                             <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "اضغط للتعديل" : "Click to edit"}</span>
                         </button>
@@ -288,7 +292,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "إجمالي المحفظة" : "Total Equity"}</span>
                     <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5">
                         <BadgeDollarSign className="w-4 h-4 text-indigo-500" />
-                        {money(totals?.equity)}
+                        <bdi dir="ltr" className={styles.amount}>{money(totals?.equity)}</bdi>
                     </span>
                     <span className="text-[9px] text-zinc-500 font-bold block">{positions.length} {isAr ? "سهم" : "stocks"}</span>
                 </div>
