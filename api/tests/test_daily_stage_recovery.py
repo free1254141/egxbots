@@ -147,7 +147,7 @@ def test_recovery_withholds_stages_if_price_sync_incomplete(monkeypatch):
     ]
     job_row = {
         "id": "job-test-price-fail",
-        "status": "failed",
+        "status": "completed",  # Finished phase with a failed stage, not an interrupted runner.
         "steps": json.dumps(recorded_steps),
         "started_at": "2026-10-08T09:15:00+00:00",
     }

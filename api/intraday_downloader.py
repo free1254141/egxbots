@@ -183,8 +183,13 @@ def _fetch_egx_symbols() -> List[str]:
     Fallback Strategy: Fetch from stock_fundamentals and stock_prices from Supabase.
     """
     try:
-        from api.symbols_local import load_symbols_for_country
-        data = load_symbols_for_country("Egypt")
+        from api.symbols_local import load_symbols_for_country, _find_latest_file, _safe_read_json
+        # The weekly inventory is authoritative for the daily universe; stale
+        # fundamentals must not shadow its newly updated JSON file.
+        path = _find_latest_file('Egypt_all_symbols')
+        data = _safe_read_json(path) if path else None
+        if not isinstance(data, list) or not data:
+            data = load_symbols_for_country("Egypt")
         symbols = []
         for item in data:
             sym = item.get("Symbol") or item.get("symbol") or item.get("Code")
@@ -208,7 +213,7 @@ def _fetch_egx_symbols() -> List[str]:
             stock_ai.supabase.table("stock_fundamentals")
             .select("symbol")
             .eq("exchange", "EGX")
-            .execute()
+            .limit(1000).execute()
         )
         if res.data:
             syms = sorted(list(set(row["symbol"] for row in res.data if row.get("symbol"))))

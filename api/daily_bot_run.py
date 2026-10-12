@@ -53,53 +53,8 @@ from api.fundamentals_refresh import (
 
 
 def _sync_latest_egx_inventory_from_eodhd() -> Tuple[bool, List[str], str]:
-    """
-    Fetch EGX symbols using free data providers (yfinance).
-    No API key required anymore!
-    """
-    from api.free_data_provider import fetch_egx_symbols_free
-    
-    # Use free provider instead of EODHD
-    ok, active_symbols, msg = fetch_egx_symbols_free()
-    
-    if not ok:
-        return False, [], msg
-
-    base_dir = os.path.join(project_root, "symbols_data")
-    os.makedirs(base_dir, exist_ok=True)
-
-    try:
-        # Normalize symbols to standard format
-        normalized_syms = []
-        for sym in active_symbols:
-            base_sym = sym.split(".")[0].upper()
-            normalized_syms.append({
-                "Symbol": base_sym,
-                "Name": f"EGX Stock {base_sym}",
-                "Exchange": "EGX",
-                "Country": "Egypt",
-                "Type": "Stock",
-                "Currency": "EGP",
-                "Isin": None,
-            })
-
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Remove old symbol files
-        for name in os.listdir(base_dir):
-            if name.startswith("Egypt_all_symbols_") and name.endswith(".json"):
-                try:
-                    os.remove(os.path.join(base_dir, name))
-                except Exception:
-                    pass
-
-        out_path = os.path.join(base_dir, f"Egypt_all_symbols_{timestamp}.json")
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(normalized_syms, f, indent=2, ensure_ascii=False)
-
-        return True, active_symbols, f"Updated Egypt inventory with {len(active_symbols)} symbols (yfinance - FREE)"
-    except Exception as e:
-        return False, [], str(e)
+    from api.egx_inventory import refresh_egx_inventory
+    return refresh_egx_inventory(os.path.join(project_root, "symbols_data"), trigger="scheduled")
 
 
 def _mark_non_listed_egx_symbols(active_symbols: List[str]) -> Tuple[bool, str, int]:
@@ -132,13 +87,14 @@ def _mark_non_listed_egx_symbols(active_symbols: List[str]) -> Tuple[bool, str, 
                 data = row.get("data") if isinstance(row.get("data"), dict) else {}
                 prev_listed = data.get("isListed")
                 prev_status = data.get("listingStatus")
-                next_status = "listed" if is_listed else "delisted"
+                next_status = "listed" if is_listed else "not_in_eodhd_inventory"
                 if prev_listed is is_listed and prev_status == next_status:
                     continue
                 new_data = dict(data)
                 new_data["isListed"] = is_listed
                 new_data["listingStatus"] = next_status
-                new_data["listingCheckedAt"] = dt.datetime.utcnow().isoformat()
+                new_data["listingCheckedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                new_data["listingSource"] = "EODHD"
                 updates.append({
                     "symbol": symbol,
                     "exchange": "EGX",
@@ -1473,7 +1429,7 @@ def _profit_protection_policy():
                 minimum_distance_pct=3, trigger_pct=5)
 
 
-def evaluate_old_recommendations(batch_id=None, return_report=False):
+def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=None):
     """
     Evaluate public EGX recommendations using the versioned bar policy.
     Legacy rows preserve their published barriers and do not receive a newly
@@ -1486,7 +1442,11 @@ def evaluate_old_recommendations(batch_id=None, return_report=False):
     ).eq("status", "open").eq("is_public", True).eq("exchange", "EGX")
     if batch_id is not None:
         query = query.eq("batch_id", batch_id)
-    res = query.execute()
+    if symbols is not None:
+        if not symbols:
+            return dict(total=0,evaluated=0,updated=0,closed=0,adjusted=0,unchanged=0,blocked=0,errors=0,blocked_symbols=[]) if return_report else 0
+        query = query.in_('symbol', list(symbols))
+    res = query.limit(500).execute()
     open_recs = res.data
     report = dict(total=len(open_recs or []), evaluated=0, updated=0, closed=0,
                   adjusted=0, unchanged=0, blocked=0, errors=0, blocked_symbols=[])
@@ -1594,7 +1554,7 @@ def evaluate_old_recommendations(batch_id=None, return_report=False):
             .eq("exchange", exchange)
             .gte("date", (dt.date.fromisoformat(created_at_date) - dt.timedelta(days=60)).isoformat())
             .order("date", desc=False)
-            .execute()
+            .limit(5000).execute()
         )
 
         archived = archived_by_symbol.get(str(symbol).upper())
@@ -1618,6 +1578,9 @@ def evaluate_old_recommendations(batch_id=None, return_report=False):
         if not prices:
             block(rec, "missing_price_history", details)
             continue
+
+        from api.recommendation_freshness import expected_session, quote_health
+        health = quote_health(prices[-1], expected_session())
 
         # 🚫 Handle delisted/suspended stocks by closing them
         latest_close = float(prices[-1]["close"])
@@ -1674,6 +1637,11 @@ def evaluate_old_recommendations(batch_id=None, return_report=False):
         except (ValueError, TypeError) as error:
             print(f"[EVALUATE] Invalid data for {symbol}: {error}; leaving checkpoint unchanged.")
             block(rec, "invalid_ohlc", details)
+            continue
+        if health != 'verified' and outcome['status'] == 'open':
+            # Verified historical exits remain executable on their actual bar;
+            # an open recommendation cannot advance on an old current quote.
+            block(rec, health, details)
             continue
         if is_delisted_or_stale and outcome["status"] == "open":
             # Lack of fresh quotes does not prove an executable sale or delisting.
@@ -2445,6 +2413,11 @@ async def generate_daily_recommendations(
     )
     
     results = scan_resp.get("results", [])
+    from api.recommendation_freshness import eligible_candidates, expected_session
+    try:
+        results, audit['data_rejected'] = eligible_candidates(supabase, results, expected_session())
+    except Exception as eligibility_error:
+        return no_buy('data_health_unavailable', f'تعذر التحقق من حداثة بيانات المرشحين: {type(eligibility_error).__name__}')
     from api.recommendation_policy import candidate_assessment
     audit.update(model=resolved_model, candidates=[{**candidate_assessment(item), "council_score": item.get("council_score")} for item in results])
     if not results:
@@ -2990,7 +2963,7 @@ def update_market_heatmap():
         return False, str(e)
 
 
-async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sync: bool = False, trigger: str = "manual", phase: str = "close"):
+async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sync: bool = False, trigger: str = "manual", phase: str = "close", resume_job_id: str = None):
     if phase not in {"midday", "close"}:
         raise ValueError("Invalid daily job phase")
     print(f"--- Daily Bot Run Job Started: {dt.datetime.now()} ---")
@@ -3012,11 +2985,32 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
     active_steps = {}
     symbols_raw = []
     total_symbols = 0
-    market_gate_context: Dict[str, Any] = {"blocked": False, "reason": "Market gate allowed new BUY recommendations."}
+    market_gate_context: Dict[str, Any] = {"blocked": True, "reason": "Awaiting current-session market assessment."}
     generated_count = 0
+    critical_lane = None
+    evaluation = None
     daily_bulk_prices: Dict[str, pd.DataFrame] = {}
     daily_bulk_cache_ttl = 2 * 60 * 60
     job_status = "running"
+
+    if resume_job_id:
+        saved = (stock_ai.supabase.table('daily_job_runs').select('id,job_type,status,started_at,steps,total_symbols')
+                 .eq('id', resume_job_id).limit(1).execute()).data or []
+        if not saved:
+            raise ValueError('Continuation job not found')
+        original = saved[0]
+        session_date = dt.datetime.fromisoformat(original['started_at'].replace('Z', '+00:00')).astimezone(ZoneInfo('Africa/Cairo')).date()
+        if (original['status'] == 'running' or session_date != dt.datetime.now(ZoneInfo('Africa/Cairo')).date()
+                or original['job_type'] != ('daily_midday' if phase == 'midday' else 'daily_bot')):
+            raise ValueError('Only the stopped current-session matching phase may continue')
+        job_run_id, job_start_time = original['id'], original['started_at']
+        steps_log = json.loads(original['steps']) if isinstance(original['steps'], str) else list(original['steps'] or [])
+        from api.daily_job_outcome import effective_daily_steps
+        from api.price_sync_policy import price_sync_coverage
+        prior_prices = next((s for s in effective_daily_steps(steps_log) if s['step'] == 'sync_prices'), {})
+        total_symbols = (price_sync_coverage(prior_prices) or (0, original.get('total_symbols') or 0))[1]
+        prior_generation = next((s for s in effective_daily_steps(steps_log) if s['step'] == 'generate_recommendations'), {})
+        generated_count = int(prior_generation.get('count') or 0)
 
     def _persist_job(status: str):
         nonlocal job_status
@@ -3050,12 +3044,24 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         }
         if extra:
             payload.update(extra)
+        if resume_job_id:
+            payload['continuation_attempt'] = 1
         steps_log.append(payload)
         _persist_job(job_status)
 
     def _start_step(step_name: str, details: str = ""):
         active_steps[step_name] = time.time()
         _append_step_log(step_name, "started", details, 0)
+
+    def _stage_needed(step_name):
+        if not resume_job_id:
+            return True
+        from api.daily_continuation import stage_decision
+        action, reason = stage_decision(steps_log, step_name)
+        if action == 'blocked':
+            _append_step_log(step_name, 'blocked', reason, 0, {'execution_started': False})
+        print(f'[DAILY-CONTINUATION] {step_name}: {action} — {reason}')
+        return action == 'execute'
 
     def _record_step(step_name: str, success: bool, details: str = "", count: int = 0, failed_symbols=None):
         started_at = active_steps.pop(step_name, None)
@@ -3082,26 +3088,63 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             # except Exception as e_alert:
             #     print(f"[TELEGRAM_ALERT] Failed to send immediate step failure alert: {e_alert}")
 
+    def _finish_critical_prices():
+        nonlocal critical_lane, evaluation
+        if critical_lane is None:
+            return
+        results = critical_lane.finish()
+        critical_lane = None
+        repaired = [sym for sym, result in results.items() if result['verified'] and result['fetched']]
+        unresolved = [sym for sym, result in results.items() if not result['verified']]
+        _record_step('critical_recommendation_prices', not unresolved,
+                     json.dumps(results, ensure_ascii=False), len(results) - len(unresolved), failed_symbols=unresolved)
+        if repaired:
+            try:
+                stock_ai.clear_exchange_bulk_cache('EGX')
+                bulk = stock_ai._get_exchange_bulk_data('EGX', bypass_min_limit=True, cache_ttl_seconds=daily_bulk_cache_ttl)
+                records = []
+                for sym in repaired:
+                    records.extend(calculate_indicators_for_symbol(sym, 'EGX', bulk.get(sym)) or [])
+                if records:
+                    _batch_upsert_indicators(records, batch_size=200)
+            except Exception as repair_error:
+                _record_step('critical_recommendation_indicators', False, type(repair_error).__name__)
+            if phase == 'close' and _stage_needed('evaluate_recommendations_late'):
+                _start_step('evaluate_recommendations_late', 'Review only repaired open recommendations')
+                try:
+                    late = evaluate_old_recommendations(return_report=True, symbols=repaired)
+                except Exception as repair_error:
+                    _record_step('evaluate_recommendations_late', False, type(repair_error).__name__)
+                    return
+                _record_step('evaluate_recommendations_late', not (late['blocked'] or late['errors']), json.dumps(late), late['evaluated'])
+                if evaluation is not None:
+                    evaluation['blocked_symbols'] = [r for r in evaluation['blocked_symbols'] if r['symbol'] not in repaired] + late['blocked_symbols']
+                    evaluation['blocked'] = len(evaluation['blocked_symbols'])
+                    for field in ('evaluated', 'updated', 'closed', 'adjusted', 'unchanged', 'errors'):
+                        evaluation[field] += late[field]
+                    _record_step('evaluate_recommendations', not (evaluation['blocked'] or evaluation['errors']), json.dumps(evaluation), evaluation['evaluated'])
+
     try:
         # Initial status insert
         _persist_job("running")
         # 0. Refresh EGX inventory weekly only for scheduled runs
         if phase == "close" and _should_run_weekly_inventory(trigger):
             print("\n>>> STEP 0: Refreshing EGX listed symbols inventory from EODHD...")
-            _start_step("sync_inventory", "Refreshing EGX listed symbols inventory from EODHD")
-            try:
-                inv_ok, inv_symbols, inv_msg = _sync_latest_egx_inventory_from_eodhd()
-                _record_step("sync_inventory", inv_ok, inv_msg, len(inv_symbols))
-                print(f"[INVENTORY] {inv_msg}")
+            if _stage_needed('sync_inventory'):
+                _start_step("sync_inventory", "Refreshing EGX listed symbols inventory from EODHD")
+                try:
+                    inv_ok, inv_symbols, inv_msg = _sync_latest_egx_inventory_from_eodhd()
+                    _record_step("sync_inventory", inv_ok, inv_msg, len(inv_symbols))
+                    print(f"[INVENTORY] {inv_msg}")
 
-                if inv_ok and inv_symbols:
-                    _start_step("mark_non_listed", "Marking symbols not present in latest EGX inventory")
-                    mark_ok, mark_msg, mark_count = _mark_non_listed_egx_symbols(inv_symbols)
-                    _record_step("mark_non_listed", mark_ok, mark_msg, mark_count)
-                    print(f"[LISTING] {mark_msg}")
-            except Exception as e:
-                _record_step("sync_inventory", False, str(e)[:200], 0)
-                print(f"[INVENTORY] Error: {e}")
+                    if inv_ok and inv_symbols and not inv_msg.startswith("Skipped"):
+                        _start_step("mark_non_listed", "Marking symbols not present in latest EGX inventory")
+                        mark_ok, mark_msg, mark_count = _mark_non_listed_egx_symbols(inv_symbols)
+                        _record_step("mark_non_listed", mark_ok, mark_msg, mark_count)
+                        print(f"[LISTING] {mark_msg}")
+                except Exception as e:
+                    _record_step("sync_inventory", False, str(e)[:200], 0)
+                    print(f"[INVENTORY] Error: {e}")
         else:
             _record_step("sync_inventory", True, "Skipped - weekly scheduled refresh only", 0)
             print("\n>>> STEP 0: Skipping EGX inventory refresh today (weekly scheduled run only).")
@@ -3110,199 +3153,217 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         # once per quarter, in the Sunday close run, when the oldest persisted
         # snapshot is at least 90 days old. A failed provider call never
         # replaces the existing snapshot.
-        _start_step("quarterly_fundamentals", "Checking quarterly EGX fundamentals refresh")
-        if _should_run_quarterly_fundamentals(trigger, phase):
-            due, due_reason = _quarterly_fundamentals_due_for_client(supabase)
-            if due:
-                if not symbols_raw:
-                    symbols_raw = _fetch_egx_symbols()
-                    symbols_raw = _filter_active_symbols(symbols_raw)
-                try:
-                    fund_ok, fund_msg, fund_count = _refresh_egx_fundamentals_from_tradingview(symbols_raw)
-                    _record_step("quarterly_fundamentals", fund_ok, fund_msg, fund_count)
-                except Exception as fund_error:
-                    _record_step("quarterly_fundamentals", False, str(fund_error)[:200], 0)
+        if _stage_needed('quarterly_fundamentals'):
+            _start_step("quarterly_fundamentals", "Checking quarterly EGX fundamentals refresh")
+            if _should_run_quarterly_fundamentals(trigger, phase):
+                due, due_reason = _quarterly_fundamentals_due_for_client(supabase)
+                if due:
+                    if not symbols_raw:
+                        symbols_raw = _fetch_egx_symbols()
+                        symbols_raw = _filter_active_symbols(symbols_raw)
+                    try:
+                        fund_ok, fund_msg, fund_count = _refresh_egx_fundamentals_from_tradingview(symbols_raw)
+                        _record_step("quarterly_fundamentals", fund_ok, fund_msg, fund_count)
+                    except Exception as fund_error:
+                        _record_step("quarterly_fundamentals", False, str(fund_error)[:200], 0)
+                else:
+                    _record_step("quarterly_fundamentals", True, f"Skipped - {due_reason}", 0)
             else:
-                _record_step("quarterly_fundamentals", True, f"Skipped - {due_reason}", 0)
-        else:
-            _record_step("quarterly_fundamentals", True, "Skipped - scheduled Sunday close only", 0)
+                _record_step("quarterly_fundamentals", True, "Skipped - scheduled Sunday close only", 0)
 
         # 1. Sync prices
         if not skip_sync:
             print("\n>>> STEP 1: Syncing daily prices from TradingView...")
-            _start_step("sync_prices", "Syncing EGX daily prices from TradingView")
-            try:
-                if not symbols_raw:
-                    symbols_raw = _fetch_egx_symbols()  # PERF: cached — reused across steps 1, 2, 2.5
-                    symbols_raw = _filter_active_symbols(symbols_raw)
-                symbols = [f"{sym}.EGX" for sym in symbols_raw if sym]
-                total_symbols = len(symbols)
-                print(f"[SYNC] Found {total_symbols} symbols to sync.")
-                syncer = get_smart_sync()
+            if _stage_needed('sync_prices'):
+                _start_step("sync_prices", "Syncing EGX daily prices from TradingView")
+                try:
+                    if not symbols_raw:
+                        symbols_raw = _fetch_egx_symbols()  # PERF: cached — reused across steps 1, 2, 2.5
+                        symbols_raw = _filter_active_symbols(symbols_raw)
+                    symbols = [f"{sym}.EGX" for sym in symbols_raw if sym]
+                    total_symbols = len(symbols)
+                    print(f"[SYNC] Found {total_symbols} symbols to sync.")
+                    syncer = get_smart_sync()
 
-                def _price_progress(progress):
-                    # Update the existing started entry instead of growing the
-                    # audit on every stock. This is a heartbeat, never success.
-                    entry = next(step for step in reversed(steps_log)
-                                 if step['step'] == 'sync_prices' and step['status'] == 'started')
-                    entry.update({
-                        'details': f"Processing {progress['processed']}/{progress['total']} symbols; {progress['success']} synced",
-                        'count': progress['processed'],
-                        'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
-                        'progress': progress,
-                    })
-                    _persist_job('running')
+                    def _price_progress(progress):
+                        # Update the existing started entry instead of growing the
+                        # audit on every stock. This is a heartbeat, never success.
+                        entry = next(step for step in reversed(steps_log)
+                                     if step['step'] == 'sync_prices' and step['status'] == 'started')
+                        entry.update({
+                            'details': f"Processing {progress['processed']}/{progress['total']} symbols; {progress['success']} synced",
+                            'count': progress['processed'],
+                            'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
+                            'progress': progress,
+                        })
+                        _persist_job('running')
 
-                sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True,
-                                                         on_progress=_price_progress)
-                # The writer has finished: discard stale scanner data before the
-                # job preloads its one shared EGX snapshot below.
-                stock_ai.clear_exchange_bulk_cache("EGX")
-                from api.daily_stage_recovery import clear_egx_candle_cache
-                clear_egx_candle_cache()
-                _record_step("sync_prices", sync_result.get("success", 0) == total_symbols and total_symbols > 0,
-                             f"Synced {sync_result.get('success', 0)}/{total_symbols} symbols", total_symbols,
-                             failed_symbols=[sym for sym, outcome in sync_result.get('results', {}).items()
-                                             if not outcome.get('success')])
-            except Exception as e:
-                _record_step("sync_prices", False, str(e)[:200], 0)
-                print(f"[SYNC] Error: {e}")
+                    sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True,
+                                                             on_progress=_price_progress)
+                    # The writer has finished: discard stale scanner data before the
+                    # job preloads its one shared EGX snapshot below.
+                    stock_ai.clear_exchange_bulk_cache("EGX")
+                    from api.daily_stage_recovery import clear_egx_candle_cache
+                    clear_egx_candle_cache()
+                    _record_step("sync_prices", sync_result.get("success", 0) == total_symbols and total_symbols > 0,
+                                 f"Synced {sync_result.get('success', 0)}/{total_symbols} symbols", total_symbols,
+                                 failed_symbols=[sym for sym, outcome in sync_result.get('results', {}).items()
+                                                 if not outcome.get('success')])
+                except Exception as e:
+                    _record_step("sync_prices", False, str(e)[:200], 0)
+                    print(f"[SYNC] Error: {e}")
         else:
             print("\n>>> STEP 1: Skipping price sync (--skip-sync).")
             _record_step("sync_prices", True, "Skipped", 0)
 
+        if not dry_run and _stage_needed('critical_recommendation_prices'):
+            _start_step('critical_recommendation_prices', 'Verify and repair open-recommendation quotes in a parallel bounded lane')
+            try:
+                from api.recommendation_freshness import CriticalPriceLane, expected_session
+                critical_lane = CriticalPriceLane(stock_ai.supabase, job_run_id, expected_session())
+            except Exception as critical_error:
+                _record_step('critical_recommendation_prices', False, str(critical_error)[:300])
+
         # 2. Calculate technical indicators (parallel + batch upsert)
         print("\n>>> STEP 2: Calculating technical indicators (parallel)...")
-        _start_step("calculate_indicators", "Calculating technical indicators in parallel and upserting results")
-        if not symbols_raw:
-            symbols_raw = _fetch_egx_symbols()
-            symbols_raw = _filter_active_symbols(symbols_raw)
-            if not total_symbols:
-                total_symbols = len(symbols_raw)
-        ind_success = 0
-        ind_fail = 0
-        all_indicator_records = []
-        try:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            # One exchange-level load replaces one Supabase request per symbol.
-            # It is also reused by both ML scans and historical similarity.
-            daily_bulk_prices = stock_ai._get_exchange_bulk_data(
-                "EGX",
-                bypass_min_limit=True,
-                cache_ttl_seconds=daily_bulk_cache_ttl,
-            )
-            
-            def _calc_one(sym):
-                try:
-                    return sym, calculate_indicators_for_symbol(
-                        sym,
-                        "EGX",
-                        daily_bulk_prices.get(sym.upper()),
-                    ), None
-                except Exception as e:
-                    return sym, [], e
-
-            with ThreadPoolExecutor(max_workers=15) as executor:
-                futures = {executor.submit(_calc_one, sym): sym for sym in symbols_raw}
-                for future in as_completed(futures):
-                    sym, records, err = future.result()
-                    if err:
-                        ind_fail += 1
-                        print(f"[INDICATORS] Error for {sym}: {err}")
-                    else:
-                        ind_success += 1
-                        all_indicator_records.extend(records)
-            
-            # Batch upsert all records at once
-            if all_indicator_records:
-                print(f"[INDICATORS] Batch upserting {len(all_indicator_records)} records...")
-                _batch_upsert_indicators(all_indicator_records, batch_size=200)
-            
-            _record_step("calculate_indicators", ind_fail == 0, f"{ind_success} success, {ind_fail} failed, {len(all_indicator_records)} records", ind_success + ind_fail)
-        except Exception as e:
-            _record_step("calculate_indicators", False, str(e)[:200], 0)
-            print(f"[INDICATORS] Error: {e}")
-
-        # 2.2 Update AI Scores for all symbols in stock_technical_indicators
-        print("\n>>> STEP 2.2: Updating AI ML Scores for all stocks in DB...")
-        _start_step("ml_scores_update", "Calculating KING and EGX model scores for all stocks")
-        try:
-            from api.update_ml_scores import update_all_scores
-            update_all_scores(bulk_cache_ttl_seconds=daily_bulk_cache_ttl)
-            _record_step("ml_scores_update", True, "Successfully updated AI ML Scores in DB", 1)
-        except Exception as e:
-            _record_step("ml_scores_update", False, str(e)[:200], 0)
-            print(f"[ML_SCORES] Error updating scores: {e}")
-
-        # 2.5 Fetch & Analyze News Sentiment
-        print("\n>>> STEP 2.5: Fetching and analyzing news sentiment...")
-        _start_step("news_sentiment", "Fetching and analyzing news sentiment from Google News RSS")
-        try:
-            from api.news_sentiment_engine import process_exchange_news
+        if _stage_needed('calculate_indicators'):
+            _start_step("calculate_indicators", "Calculating technical indicators in parallel and upserting results")
             if not symbols_raw:
                 symbols_raw = _fetch_egx_symbols()
                 symbols_raw = _filter_active_symbols(symbols_raw)
+                if not total_symbols:
+                    total_symbols = len(symbols_raw)
+            ind_success = 0
+            ind_fail = 0
+            all_indicator_records = []
+            try:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                # One exchange-level load replaces one Supabase request per symbol.
+                # It is also reused by both ML scans and historical similarity.
+                daily_bulk_prices = stock_ai._get_exchange_bulk_data(
+                    "EGX",
+                    bypass_min_limit=True,
+                    cache_ttl_seconds=daily_bulk_cache_ttl,
+                )
             
-            # Fetch and process news sentiment for all active EGX symbols
-            ok, count = process_exchange_news("EGX", symbols_raw)
-            _record_step("news_sentiment", ok, f"Processed news for {count} symbols", count)
-        except Exception as e:
-            _record_step("news_sentiment", False, str(e)[:200], 0)
-            print(f"[NEWS_SENTIMENT] Error: {e}")
+                def _calc_one(sym):
+                    try:
+                        return sym, calculate_indicators_for_symbol(
+                            sym,
+                            "EGX",
+                            daily_bulk_prices.get(sym.upper()),
+                        ), None
+                    except Exception as e:
+                        return sym, [], e
+
+                with ThreadPoolExecutor(max_workers=15) as executor:
+                    futures = {executor.submit(_calc_one, sym): sym for sym in symbols_raw}
+                    for future in as_completed(futures):
+                        sym, records, err = future.result()
+                        if err:
+                            ind_fail += 1
+                            print(f"[INDICATORS] Error for {sym}: {err}")
+                        else:
+                            ind_success += 1
+                            all_indicator_records.extend(records)
+            
+                # Batch upsert all records at once
+                if all_indicator_records:
+                    print(f"[INDICATORS] Batch upserting {len(all_indicator_records)} records...")
+                    _batch_upsert_indicators(all_indicator_records, batch_size=200)
+            
+                _record_step("calculate_indicators", ind_fail == 0, f"{ind_success} success, {ind_fail} failed, {len(all_indicator_records)} records", ind_success + ind_fail)
+            except Exception as e:
+                _record_step("calculate_indicators", False, str(e)[:200], 0)
+                print(f"[INDICATORS] Error: {e}")
+
+        # 2.2 Update AI Scores for all symbols in stock_technical_indicators
+        print("\n>>> STEP 2.2: Updating AI ML Scores for all stocks in DB...")
+        if _stage_needed('ml_scores_update'):
+            _start_step("ml_scores_update", "Calculating KING and EGX model scores for all stocks")
+            try:
+                from api.update_ml_scores import update_all_scores
+                update_all_scores(bulk_cache_ttl_seconds=daily_bulk_cache_ttl)
+                _record_step("ml_scores_update", True, "Successfully updated AI ML Scores in DB", 1)
+            except Exception as e:
+                _record_step("ml_scores_update", False, str(e)[:200], 0)
+                print(f"[ML_SCORES] Error updating scores: {e}")
+
+        # 2.5 Fetch & Analyze News Sentiment
+        print("\n>>> STEP 2.5: Fetching and analyzing news sentiment...")
+        if _stage_needed('news_sentiment'):
+            _start_step("news_sentiment", "Fetching and analyzing news sentiment from Google News RSS")
+            try:
+                from api.news_sentiment_engine import process_exchange_news
+                if not symbols_raw:
+                    symbols_raw = _fetch_egx_symbols()
+                    symbols_raw = _filter_active_symbols(symbols_raw)
+            
+                # Fetch and process news sentiment for all active EGX symbols
+                ok, count = process_exchange_news("EGX", symbols_raw)
+                _record_step("news_sentiment", ok, f"Processed news for {count} symbols", count)
+            except Exception as e:
+                _record_step("news_sentiment", False, str(e)[:200], 0)
+                print(f"[NEWS_SENTIMENT] Error: {e}")
 
         # 2.6 Corporate Actions Sweep (rights issues / splits / dividends / bonus
         # shares) — targeted Google News RSS queries. Runs ONCE per day here;
         # the chat pipeline never invokes this (it only reads the table and
         # caches its own keyless web findings with origin = 'chat_cache').
         print("\n>>> STEP 2.6: Fetching corporate actions (اكتتابات/توزيعات/تجزئة/منح)...")
-        _start_step("corporate_actions", "Fetching and classifying corporate actions from Google News RSS")
-        try:
-            from api.corporate_actions_engine import process_exchange_corporate_actions
-            if not symbols_raw:
-                symbols_raw = _fetch_egx_symbols()
-                symbols_raw = _filter_active_symbols(symbols_raw)
+        if _stage_needed('corporate_actions'):
+            _start_step("corporate_actions", "Fetching and classifying corporate actions from Google News RSS")
+            try:
+                from api.corporate_actions_engine import process_exchange_corporate_actions
+                if not symbols_raw:
+                    symbols_raw = _fetch_egx_symbols()
+                    symbols_raw = _filter_active_symbols(symbols_raw)
 
-            ok_ca, ca_count = process_exchange_corporate_actions("EGX", symbols_raw, days_back=30)
-            _record_step("corporate_actions", ok_ca, f"Stored/refreshed {ca_count} corporate actions", ca_count)
-        except Exception as e:
-            _record_step("corporate_actions", False, str(e)[:200], 0)
-            print(f"[CORPORATE_ACTIONS] Error: {e}")
+                ok_ca, ca_count = process_exchange_corporate_actions("EGX", symbols_raw, days_back=30)
+                _record_step("corporate_actions", ok_ca, f"Stored/refreshed {ca_count} corporate actions", ca_count)
+            except Exception as e:
+                _record_step("corporate_actions", False, str(e)[:200], 0)
+                print(f"[CORPORATE_ACTIONS] Error: {e}")
 
         # 2.7 Pre-compute and save Sector Heatmap
         print("\n>>> STEP 2.7: Pre-computing and saving Sector Heatmap...")
-        _start_step("precompute_heatmap", "Pre-computing and saving Sector Heatmap to Supabase")
-        try:
-            ok_h, msg_h = update_market_heatmap()
-            _record_step("precompute_heatmap", ok_h, msg_h, 0)
-        except Exception as e:
-            _record_step("precompute_heatmap", False, str(e)[:200], 0)
-            print(f"[HEATMAP] Error pre-computing heatmap: {e}")
+        if _stage_needed('precompute_heatmap'):
+            _start_step("precompute_heatmap", "Pre-computing and saving Sector Heatmap to Supabase")
+            try:
+                ok_h, msg_h = update_market_heatmap()
+                _record_step("precompute_heatmap", ok_h, msg_h, 0)
+            except Exception as e:
+                _record_step("precompute_heatmap", False, str(e)[:200], 0)
+                print(f"[HEATMAP] Error pre-computing heatmap: {e}")
 
         if phase == "midday":
             # Only shared site data and short-position monitoring run intraday.
             # Ordinary portfolio/recommendation lifecycle and LLM reports stay EOD.
-            _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
-            try:
-                ok_status, status_message = _refresh_market_status_cache()
-                _record_step("refresh_market_status_for_gate", ok_status, status_message, 0)
-            except Exception as error:
-                _record_step("refresh_market_status_for_gate", False, str(error)[:200], 0)
-            _start_step("short_swings_daily", "Monitoring short positions during the session")
-            try:
-                from api.short_swings_daily import run_daily_short_swings
-                prices_ok = any(step.get("status") == "success" for step in steps_log
-                                if step.get("step") == "sync_prices")
-                indicators_ok = any(step.get("status") == "success" for step in steps_log
-                                    if step.get("step") == "calculate_indicators")
-                # A partial provider sync must not hide valid short setups. The
-                # indicator pass already filters the usable price subset; only
-                # withhold the engine when neither prices nor indicators exist.
-                swings_res = run_daily_short_swings(trigger="scheduled", dry_run=dry_run, phase="midday", job_run_id=job_run_id) if (prices_ok or indicators_ok) else {
-                    "success": False, "message": "No usable price/indicator data; intraday short monitoring withheld"}
-                _record_step("short_swings_daily", swings_res.get("success", False), swings_res.get("message", ""), swings_res.get("count", 0))
-            except Exception as error:
-                _record_step("short_swings_daily", False, str(error)[:200], 0)
+            if _stage_needed('refresh_market_status_for_gate'):
+                _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
+                try:
+                    ok_status, status_message = _refresh_market_status_cache()
+                    _record_step("refresh_market_status_for_gate", ok_status, status_message, 0)
+                except Exception as error:
+                    _record_step("refresh_market_status_for_gate", False, str(error)[:200], 0)
+            if _stage_needed('short_swings_daily'):
+                _start_step("short_swings_daily", "Monitoring short positions during the session")
+                try:
+                    from api.short_swings_daily import run_daily_short_swings
+                    prices_ok = any(step.get("status") == "success" for step in steps_log
+                                    if step.get("step") == "sync_prices")
+                    indicators_ok = any(step.get("status") == "success" for step in steps_log
+                                        if step.get("step") == "calculate_indicators")
+                    # A partial provider sync must not hide valid short setups. The
+                    # indicator pass already filters the usable price subset; only
+                    # withhold the engine when neither prices nor indicators exist.
+                    swings_res = run_daily_short_swings(trigger="scheduled", dry_run=dry_run, phase="midday", job_run_id=job_run_id) if (prices_ok or indicators_ok) else {
+                        "success": False, "message": "No usable price/indicator data; intraday short monitoring withheld"}
+                    _record_step("short_swings_daily", swings_res.get("success", False), swings_res.get("message", ""), swings_res.get("count", 0))
+                except Exception as error:
+                    _record_step("short_swings_daily", False, str(error)[:200], 0)
+            _finish_critical_prices()
             from api.cache_invalidation import invalidate_daily_cache
             invalidate_daily_cache(steps_log)
             from api.price_sync_policy import price_sync_usable
@@ -3315,148 +3376,157 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
 
         # 3. Update open portfolio positions
         print("\n>>> STEP 3: Updating open portfolio positions...")
-        _start_step("update_positions", "Updating open portfolio positions")
-        try:
-            update_open_portfolio_positions()
-            _record_step("update_positions", True, "Positions updated", 0)
-        except Exception as e:
-            _record_step("update_positions", False, str(e)[:200], 0)
-            print(f"[POSITIONS] Error: {e}")
+        if _stage_needed('update_positions'):
+            _start_step("update_positions", "Updating open portfolio positions")
+            try:
+                update_open_portfolio_positions()
+                _record_step("update_positions", True, "Positions updated", 0)
+            except Exception as e:
+                _record_step("update_positions", False, str(e)[:200], 0)
+                print(f"[POSITIONS] Error: {e}")
 
         # 4. Evaluate old recommendations
         print("\n>>> STEP 4: Evaluating old recommendations...")
-        _start_step("evaluate_recommendations", "Evaluating open/old recommendations")
-        try:
-            evaluation = evaluate_old_recommendations(return_report=True)
-            _record_step("evaluate_recommendations", not (evaluation["blocked"] or evaluation["errors"]),
-                         json.dumps(evaluation, ensure_ascii=False), evaluation["evaluated"])
-        except Exception as e:
-            _record_step("evaluate_recommendations", False, str(e)[:200], 0)
-            print(f"[EVALUATE] Error: {e}")
+        if _stage_needed('evaluate_recommendations'):
+            _start_step("evaluate_recommendations", "Evaluating open/old recommendations")
+            try:
+                evaluation = evaluate_old_recommendations(return_report=True)
+                _record_step("evaluate_recommendations", not (evaluation["blocked"] or evaluation["errors"]),
+                             json.dumps(evaluation, ensure_ascii=False), evaluation["evaluated"])
+            except Exception as e:
+                _record_step("evaluate_recommendations", False, str(e)[:200], 0)
+                print(f"[EVALUATE] Error: {e}")
 
         # Retry Telegram notifications only after all recommendation state
         # updates are durable in Supabase.
         print("\n>>> STEP 4.1: Retrying failed recommendation notifications...")
-        _start_step("recommendation_telegram_retries", "Retrying failed recommendation Telegram events")
-        try:
-            retry_count = retry_pending_recommendation_telegram_events(limit=10)
-            _record_step("recommendation_telegram_retries", True, f"Retried {retry_count} Telegram events", retry_count)
-        except Exception as e:
-            _record_step("recommendation_telegram_retries", False, str(e)[:200], 0)
-            print(f"[RECOMMENDATION_RETRY] Error: {e}")
+        if _stage_needed('recommendation_telegram_retries'):
+            _start_step("recommendation_telegram_retries", "Retrying failed recommendation Telegram events")
+            try:
+                retry_count = retry_pending_recommendation_telegram_events(limit=10)
+                _record_step("recommendation_telegram_retries", True, f"Retried {retry_count} Telegram events", retry_count)
+            except Exception as e:
+                _record_step("recommendation_telegram_retries", False, str(e)[:200], 0)
+                print(f"[RECOMMENDATION_RETRY] Error: {e}")
 
         # 4.5 Refresh Market Status so Step 5 gate uses today's data, not yesterday's cache
         print("\n>>> STEP 4.5: Refreshing Market Status cache before recommendation gate...")
-        _start_step("refresh_market_status_for_gate", "Refreshing market status for buy gate")
-        try:
-            ok_gate_refresh, msg_gate_refresh = _refresh_market_status_cache()
-            _record_step("refresh_market_status_for_gate", ok_gate_refresh, (msg_gate_refresh or "")[:200], 0)
-        except Exception as e:
-            _record_step("refresh_market_status_for_gate", False, str(e)[:200], 0)
-            print(f"[MARKET_GATE] Could not refresh market status before gate: {e}")
+        if _stage_needed('refresh_market_status_for_gate'):
+            _start_step("refresh_market_status_for_gate", "Refreshing market status for buy gate")
+            try:
+                ok_gate_refresh, msg_gate_refresh = _refresh_market_status_cache()
+                _record_step("refresh_market_status_for_gate", ok_gate_refresh, (msg_gate_refresh or "")[:200], 0)
+            except Exception as e:
+                _record_step("refresh_market_status_for_gate", False, str(e)[:200], 0)
+                print(f"[MARKET_GATE] Could not refresh market status before gate: {e}")
 
         # 5. Generate new recommendations
         print("\n>>> STEP 5: Generating new speculative recommendations...")
-        _start_step("generate_recommendations", f"Generating recommendations using {model_filter or 'default'} model")
-        try:
-            market_gate = should_reject_new_buys()
-            market_gate_context = dict(market_gate or {})
-            if 'evaluation' in locals():
-                market_gate_context["active_recommendations"] = max(0, evaluation["total"] - evaluation["closed"])
-            if market_gate.get("blocked"):
-                msg = f"Skipped - {market_gate.get('reason')}"
-                print(f"[MARKET_GATE] {msg}")
-                _mark_daily_cache_payload("recommendation_decision_audit", dict(
-                    date=dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(),
-                    reason_code="market_gate", reason=market_gate.get("reason"), published=0))
-                _record_step("generate_recommendations", True, msg[:200], 0)
-            else:
-                generated_count = await generate_daily_recommendations(
-                    model_name=model_filter,
-                    bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
-                    run_context=market_gate_context,
-                )
-                decision_details = market_gate_context.get("no_buy_reason") or f"Generated {generated_count} recommendations using {model_filter or 'default'}"
-                _record_step("generate_recommendations", True, decision_details[:1000], int(generated_count or 0))
-            if not generated_count:
-                market_gate_context.setdefault("no_buy_reason", "لم يجتز أي مرشح جميع ضوابط النماذج والمخاطر والسيولة اليوم.")
-                _send_market_buy_hold(
-                    market_gate_context,
-                    dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(),
-                )
-        except Exception as e:
-            _record_step("generate_recommendations", False, str(e)[:200], 0)
-            print(f"[RECOMMENDATIONS] Error: {e}")
-            _send_market_buy_hold({"no_buy_reason": "تعذر استكمال فحص المرشحين بسبب خطأ تقني؛ لم تُنشأ توصيات شراء، ولا يعني ذلك ضعفًا مؤكدًا في السوق."}, dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat())
+        if _stage_needed('generate_recommendations'):
+            _start_step("generate_recommendations", f"Generating recommendations using {model_filter or 'default'} model")
+            try:
+                market_gate = should_reject_new_buys()
+                market_gate_context = dict(market_gate or {})
+                if evaluation is not None:
+                    market_gate_context["active_recommendations"] = max(0, evaluation["total"] - evaluation["closed"])
+                if market_gate.get("blocked"):
+                    msg = f"Skipped - {market_gate.get('reason')}"
+                    print(f"[MARKET_GATE] {msg}")
+                    _mark_daily_cache_payload("recommendation_decision_audit", dict(
+                        date=dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(),
+                        reason_code="market_gate", reason=market_gate.get("reason"), published=0))
+                    _record_step("generate_recommendations", True, msg[:200], 0)
+                else:
+                    generated_count = await generate_daily_recommendations(
+                        model_name=model_filter,
+                        bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
+                        run_context=market_gate_context,
+                    )
+                    decision_details = market_gate_context.get("no_buy_reason") or f"Generated {generated_count} recommendations using {model_filter or 'default'}"
+                    _record_step("generate_recommendations", True, decision_details[:1000], int(generated_count or 0))
+                if not generated_count:
+                    market_gate_context.setdefault("no_buy_reason", "لم يجتز أي مرشح جميع ضوابط النماذج والمخاطر والسيولة اليوم.")
+                    _send_market_buy_hold(
+                        market_gate_context,
+                        dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(),
+                    )
+            except Exception as e:
+                _record_step("generate_recommendations", False, str(e)[:200], 0)
+                print(f"[RECOMMENDATIONS] Error: {e}")
+                _send_market_buy_hold({"no_buy_reason": "تعذر استكمال فحص المرشحين بسبب خطأ تقني؛ لم تُنشأ توصيات شراء، ولا يعني ذلك ضعفًا مؤكدًا في السوق."}, dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat())
 
         # 5.5 Run Short Swings Engine & Dispatch Telegram Alerts
         print("\n>>> STEP 5.5: Running Short Swings engine & Telegram dispatch (الصفقات القصيرة)...")
-        _start_step("short_swings_daily", "Running short swings engine and sending VIP/Free telegram alerts")
-        try:
-            from api.short_swings_daily import run_daily_short_swings
-            swings_res = run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase="close", job_run_id=job_run_id)
-            _record_step("short_swings_daily", swings_res.get("success", True), swings_res.get("message", "Done"), swings_res.get("count", 0))
-        except Exception as e_swings:
-            _record_step("short_swings_daily", False, str(e_swings)[:200], 0)
-            print(f"[SHORT_SWINGS] Error running daily short swings: {e_swings}")
+        if _stage_needed('short_swings_daily'):
+            _start_step("short_swings_daily", "Running short swings engine and sending VIP/Free telegram alerts")
+            try:
+                from api.short_swings_daily import run_daily_short_swings
+                swings_res = run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase="close", job_run_id=job_run_id)
+                _record_step("short_swings_daily", swings_res.get("success", True), swings_res.get("message", "Done"), swings_res.get("count", 0))
+            except Exception as e_swings:
+                _record_step("short_swings_daily", False, str(e_swings)[:200], 0)
+                print(f"[SHORT_SWINGS] Error running daily short swings: {e_swings}")
 
         # 6. Run Historical Similarity Scan
         print("\n>>> STEP 6: Running Historical Similarity market scan...")
-        _start_step("historical_similarity", "Running market-wide historical similarity scan")
-        try:
-            from api.historical_similarity import run_market_wide_similarity_scan, publish_similarity_report
-            results = run_market_wide_similarity_scan(
-                k=10,
-                forward_days=20,
-                target_return=0.05,
-                stop_loss=-0.03,
-                search_scope="same_symbol",
-                max_workers=15
-            )
-            if results:
-                # Prune old similarity reports (older than 7 days) to prevent db bloat
-                try:
-                    seven_days_ago = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)).isoformat()
-                    supabase.table("similarity_reports").delete().lt("updated_at", seven_days_ago).execute()
-                    print("[SIMILARITY] Pruned similarity reports older than 7 days.")
-                except Exception as del_err:
-                    print(f"[SIMILARITY] Failed to prune old similarity reports: {del_err}")
+        if _stage_needed('historical_similarity'):
+            _start_step("historical_similarity", "Running market-wide historical similarity scan")
+            try:
+                from api.historical_similarity import run_market_wide_similarity_scan, publish_similarity_report
+                results = run_market_wide_similarity_scan(
+                    k=10,
+                    forward_days=20,
+                    target_return=0.05,
+                    stop_loss=-0.03,
+                    search_scope="same_symbol",
+                    max_workers=15
+                )
+                if results:
+                    # Prune old similarity reports (older than 7 days) to prevent db bloat
+                    try:
+                        seven_days_ago = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)).isoformat()
+                        supabase.table("similarity_reports").delete().lt("updated_at", seven_days_ago).execute()
+                        print("[SIMILARITY] Pruned similarity reports older than 7 days.")
+                    except Exception as del_err:
+                        print(f"[SIMILARITY] Failed to prune old similarity reports: {del_err}")
 
-                published = publish_similarity_report({
-                    "name": f"Daily Similarity Scan - {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                    "scans": results,
-                    "k": 10,
-                    "forward_days": 20,
-                    "target_return": 0.05,
-                    "stop_loss": -0.03
-                }, invalidate_web=False)
-            _record_step("historical_similarity", True, f"{len(results)} symbols scanned", len(results))
-        except Exception as e:
-            _record_step("historical_similarity", False, str(e)[:200], 0)
-            print(f"[SIMILARITY] Error: {e}")
+                    published = publish_similarity_report({
+                        "name": f"Daily Similarity Scan - {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                        "scans": results,
+                        "k": 10,
+                        "forward_days": 20,
+                        "target_return": 0.05,
+                        "stop_loss": -0.03
+                    }, invalidate_web=False)
+                _record_step("historical_similarity", True, f"{len(results)} symbols scanned", len(results))
+            except Exception as e:
+                _record_step("historical_similarity", False, str(e)[:200], 0)
+                print(f"[SIMILARITY] Error: {e}")
 
         # 7. Run Weekly Performance Report (on Sunday)
         if _should_send_weekly_report(trigger):
             print("\n>>> STEP 7: Running Weekly Performance Report...")
-            _start_step("weekly_performance_report", "Generating weekly performance report")
-            try:
-                generate_weekly_performance_report(trigger=trigger)
-                _record_step("weekly_performance_report", True, "Weekly performance report generated and sent", 0)
-            except Exception as e:
-                _record_step("weekly_performance_report", False, str(e)[:200], 0)
-                print(f"[WEEKLY_REPORT] Error: {e}")
+            if _stage_needed('weekly_performance_report'):
+                _start_step("weekly_performance_report", "Generating weekly performance report")
+                try:
+                    generate_weekly_performance_report(trigger=trigger)
+                    _record_step("weekly_performance_report", True, "Weekly performance report generated and sent", 0)
+                except Exception as e:
+                    _record_step("weekly_performance_report", False, str(e)[:200], 0)
+                    print(f"[WEEKLY_REPORT] Error: {e}")
         else:
             _record_step("weekly_performance_report", True, "Skipped - scheduled Sunday only", 0)
 
         # 8. Refresh Market Status (EGX30, EGX100, USD/EGP indices) from EODHD
         print("\n>>> STEP 8: Prefetching and refreshing Market Status cache from EODHD...")
-        _start_step("refresh_market_status", "Refreshing Market Status cache from EODHD")
-        try:
-            ok, msg = _refresh_market_status_cache()
-            _record_step("refresh_market_status", ok, msg, 0)
-        except Exception as e:
-            _record_step("refresh_market_status", False, str(e)[:200], 0)
-            print(f"[MARKET_STATUS] Error: {e}")
+        if _stage_needed('refresh_market_status'):
+            _start_step("refresh_market_status", "Refreshing Market Status cache from EODHD")
+            try:
+                ok, msg = _refresh_market_status_cache()
+                _record_step("refresh_market_status", ok, msg, 0)
+            except Exception as e:
+                _record_step("refresh_market_status", False, str(e)[:200], 0)
+                print(f"[MARKET_STATUS] Error: {e}")
 
         # 9.1 Rebase the immutable history archive infrequently. The scanner
         # already combines this archive with a 45-day live Supabase tail, so a
@@ -3464,110 +3534,121 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         # storage into another high-frequency operational database.
         if trigger == "scheduled" and daily_bulk_prices:
             print("\n>>> STEP 9.1: Checking private HF history snapshot rebase...")
-            _start_step("hf_history_rebase", "Checking whether the EGX history archive needs a monthly rebase")
-            try:
-                from api.hf_history_cache import (
-                    frame_from_symbol_map,
-                    publish_history_snapshot,
-                    should_rebase_snapshot,
-                )
-                rebase_days = int(os.getenv("HF_HISTORY_REBASE_DAYS", "30"))
-                if should_rebase_snapshot("EGX", days=rebase_days):
-                    snapshot_frame = frame_from_symbol_map("EGX", daily_bulk_prices)
-                    metadata = publish_history_snapshot("EGX", snapshot_frame)
-                    _record_step(
-                        "hf_history_rebase",
-                        True,
-                        f"Published {metadata.get('rows', 0)} rows through {metadata.get('last_date')}",
-                        int(metadata.get("rows", 0)),
+            if _stage_needed('hf_history_rebase'):
+                _start_step("hf_history_rebase", "Checking whether the EGX history archive needs a monthly rebase")
+                try:
+                    from api.hf_history_cache import (
+                        frame_from_symbol_map,
+                        publish_history_snapshot,
+                        should_rebase_snapshot,
                     )
-                else:
-                    _record_step("hf_history_rebase", True, "Skipped - current archive is within rebase window", 0)
-            except Exception as history_err:
-                # HF is an optimization layer; a failed archive refresh must
-                # never invalidate the daily prices stored in Supabase.
-                _record_step("hf_history_rebase", False, str(history_err)[:200], 0)
-                print(f"[HF-HISTORY] Rebase failed: {history_err}")
+                    rebase_days = int(os.getenv("HF_HISTORY_REBASE_DAYS", "30"))
+                    if should_rebase_snapshot("EGX", days=rebase_days):
+                        snapshot_frame = frame_from_symbol_map("EGX", daily_bulk_prices)
+                        metadata = publish_history_snapshot("EGX", snapshot_frame)
+                        _record_step(
+                            "hf_history_rebase",
+                            True,
+                            f"Published {metadata.get('rows', 0)} rows through {metadata.get('last_date')}",
+                            int(metadata.get("rows", 0)),
+                        )
+                    else:
+                        _record_step("hf_history_rebase", True, "Skipped - current archive is within rebase window", 0)
+                except Exception as history_err:
+                    # HF is an optimization layer; a failed archive refresh must
+                    # never invalidate the daily prices stored in Supabase.
+                    _record_step("hf_history_rebase", False, str(history_err)[:200], 0)
+                    print(f"[HF-HISTORY] Rebase failed: {history_err}")
 
         # ── STEP: Accumulation / Distribution Scan ──────────────────────────
         # يُشغَّل يومياً بعد الإغلاق لتحديث stock_scans_summary بإشارات Wyckoff
         print("\n>>> STEP: Running Accumulation & Distribution Scan...")
-        _start_step("accumulation_scan", "Wyckoff accumulation/distribution scanner — updates stock_scans_summary")
-        try:
-            import sys as _sys
-            import os as _os
-            _scripts_dir = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "scripts"))
-            if not _os.path.isdir(_scripts_dir):
-                _cwd_scripts = _os.path.abspath(_os.path.join(_os.getcwd(), "scripts"))
-                if _os.path.isdir(_cwd_scripts):
-                    _scripts_dir = _cwd_scripts
-            if _scripts_dir not in _sys.path:
-                _sys.path.insert(0, _scripts_dir)
-            from accumulation_scanner import (
-                get_supabase as _acc_get_supabase,
-                fetch_all_symbols as _acc_fetch_symbols,
-                fetch_recent_technicals as _acc_fetch_tech,
-                analyze_symbol as _acc_analyze,
-                upsert_results as _acc_upsert,
-            )
-            _acc_sb = _acc_get_supabase()
-            _acc_symbols = _acc_fetch_symbols(_acc_sb)
-            _acc_tech = _acc_fetch_tech(_acc_sb, _acc_symbols, 30)
-            _acc_results = []
-            for _sym, _rows in _acc_tech.items():
-                _analysis = _acc_analyze(_rows)
-                if _analysis is not None:
-                    _analysis["symbol"] = _sym
-                    _acc_results.append(_analysis)
-            _acc_saved = _acc_upsert(_acc_sb, _acc_results)
-            _acc_acc_count = sum(1 for r in _acc_results if r.get("signal") == "accumulation")
-            _acc_dist_count = sum(1 for r in _acc_results if r.get("signal") == "distribution")
-            print(f"   ✅ Scan complete: {_acc_saved} records saved | acc={_acc_acc_count} dist={_acc_dist_count}")
-            _record_step("accumulation_scan", True, f"Saved {_acc_saved} records (acc={_acc_acc_count}, dist={_acc_dist_count})", _acc_saved)
-        except Exception as e_scan:
-            print(f"   ⚠️  Accumulation scan failed: {e_scan}")
-            _record_step("accumulation_scan", False, str(e_scan)[:300])
+        if _stage_needed('accumulation_scan'):
+            _start_step("accumulation_scan", "Wyckoff accumulation/distribution scanner — updates stock_scans_summary")
+            try:
+                import sys as _sys
+                import os as _os
+                _scripts_dir = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "scripts"))
+                if not _os.path.isdir(_scripts_dir):
+                    _cwd_scripts = _os.path.abspath(_os.path.join(_os.getcwd(), "scripts"))
+                    if _os.path.isdir(_cwd_scripts):
+                        _scripts_dir = _cwd_scripts
+                if _scripts_dir not in _sys.path:
+                    _sys.path.insert(0, _scripts_dir)
+                from accumulation_scanner import (
+                    get_supabase as _acc_get_supabase,
+                    fetch_all_symbols as _acc_fetch_symbols,
+                    fetch_recent_technicals as _acc_fetch_tech,
+                    analyze_symbol as _acc_analyze,
+                    upsert_results as _acc_upsert,
+                )
+                _acc_sb = _acc_get_supabase()
+                _acc_symbols = _acc_fetch_symbols(_acc_sb)
+                _acc_tech = _acc_fetch_tech(_acc_sb, _acc_symbols, 30)
+                _acc_results = []
+                for _sym, _rows in _acc_tech.items():
+                    _analysis = _acc_analyze(_rows)
+                    if _analysis is not None:
+                        _analysis["symbol"] = _sym
+                        _acc_results.append(_analysis)
+                _acc_saved = _acc_upsert(_acc_sb, _acc_results)
+                _acc_acc_count = sum(1 for r in _acc_results if r.get("signal") == "accumulation")
+                _acc_dist_count = sum(1 for r in _acc_results if r.get("signal") == "distribution")
+                print(f"   ✅ Scan complete: {_acc_saved} records saved | acc={_acc_acc_count} dist={_acc_dist_count}")
+                _record_step("accumulation_scan", True, f"Saved {_acc_saved} records (acc={_acc_acc_count}, dist={_acc_dist_count})", _acc_saved)
+            except Exception as e_scan:
+                print(f"   ⚠️  Accumulation scan failed: {e_scan}")
+                _record_step("accumulation_scan", False, str(e_scan)[:300])
 
-        try:
-            from api.cache_invalidation import invalidate_daily_cache
-
-            invalidate_daily_cache(steps_log)
-        except Exception as e_cache:
-            print(f"[CACHE] Daily cache invalidation skipped: {e_cache}")
+        _finish_critical_prices()
+        if _stage_needed('cache_revalidation'):
+            _start_step('cache_revalidation', 'Refresh only successfully completed daily datasets')
+            try:
+                from api.cache_invalidation import invalidate_daily_cache
+                cache_result = invalidate_daily_cache(steps_log)
+                _record_step('cache_revalidation', not cache_result.get('error'),
+                             ('Skipped - cache refresh not configured/eligible' if cache_result.get('skipped') else json.dumps(cache_result)), 0)
+            except Exception as e_cache:
+                _record_step('cache_revalidation', False, str(e_cache)[:300])
         # This is deliberately the final channel post in the daily run, after
         # closures, adjustments, new recommendations, and other scheduled reports.
         if trigger == "scheduled":
             outlook_date = dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
-            _start_step("daily_market_outlook", "Composing the DeepSeek market outlook after all daily trade notifications")
-            try:
-                outlook_sent = _send_daily_market_outlook(outlook_date, market_gate_context, generated_count)
-                _record_step(
-                    "daily_market_outlook",
-                    outlook_sent,
-                    "DeepSeek market outlook delivered to both Telegram channels" if outlook_sent else "Not delivered (disabled, duplicate, composer failure, or channel delivery failure)",
-                    1 if outlook_sent else 0,
-                )
-            except Exception as outlook_error:
-                _record_step("daily_market_outlook", False, str(outlook_error)[:300], 0)
-                print(f"[DAILY_OUTLOOK] Error: {outlook_error}")
+            if _stage_needed('daily_market_outlook'):
+                _start_step("daily_market_outlook", "Composing the DeepSeek market outlook after all daily trade notifications")
+                try:
+                    outlook_sent = _send_daily_market_outlook(outlook_date, market_gate_context, generated_count)
+                    _record_step(
+                        "daily_market_outlook",
+                        outlook_sent,
+                        "DeepSeek market outlook delivered to both Telegram channels" if outlook_sent else "Not delivered (disabled, duplicate, composer failure, or channel delivery failure)",
+                        1 if outlook_sent else 0,
+                    )
+                except Exception as outlook_error:
+                    _record_step("daily_market_outlook", False, str(outlook_error)[:300], 0)
+                    print(f"[DAILY_OUTLOOK] Error: {outlook_error}")
         _persist_job("completed")
         # Reports are generated only after the market job has been committed as
         # completed; a report/provider failure never invalidates market data.
-        try:
-            from api.daily_social_reports import generate_daily_social_reports
-            social_reports = await asyncio.to_thread(
-                generate_daily_social_reports, job_run_id, steps_log, trigger, dry_run, client=supabase
-            )
-            reports_ok, reports_message, reports_count = social_reports_outcome(social_reports)
-            _record_step("daily_social_reports", reports_ok, reports_message, reports_count)
-            print(f"[SOCIAL_REPORTS] {social_reports}")
-        except Exception as social_error:
-            _record_step("daily_social_reports", False, type(social_error).__name__, 0)
-            print(f"[SOCIAL_REPORTS] Generation unavailable: {type(social_error).__name__}")
+        if _stage_needed('daily_social_reports'):
+            _start_step('daily_social_reports', 'Generate reports after the completed market-data job')
+            try:
+                from api.daily_social_reports import generate_daily_social_reports
+                social_reports = await asyncio.to_thread(
+                    generate_daily_social_reports, job_run_id, steps_log, trigger, dry_run, client=supabase
+                )
+                reports_ok, reports_message, reports_count = social_reports_outcome(social_reports)
+                _record_step("daily_social_reports", reports_ok, reports_message, reports_count)
+                print(f"[SOCIAL_REPORTS] {social_reports}")
+            except Exception as social_error:
+                _record_step("daily_social_reports", False, type(social_error).__name__, 0)
+                print(f"[SOCIAL_REPORTS] Generation unavailable: {type(social_error).__name__}")
         print(f"\n--- Daily Bot Run Job Completed: {dt.datetime.now()} ---")
         return {"status": "completed", "job_run_id": job_run_id, **summarise_daily_steps(steps_log)}
 
     except Exception as e:
+        if critical_lane is not None:
+            _finish_critical_prices()
         _record_step("job", False, str(e)[:500], total_symbols)
         _persist_job("failed")
         print(f"\n--- Daily Bot Run Job FAILED: {dt.datetime.now()} — {e} ---")

@@ -619,12 +619,8 @@ def fetch_tradingview_fundamentals_bulk(
     
     # Aliases for known mismatches (Local -> TradingView)
     TV_SYMBOL_ALIASES = {
-        "AIND": "ADPC",  # Arab Dairy
-        "AIND.EGX": "ADPC",
         "EKHOA": "EKHO", # Egyptian Kuwaiti Holding (USD/EGP variant)
         "EKHOA.EGX": "EKHO",
-        "AIVCB": "AIFI", # Atlas Investment
-        "AIVCB.EGX": "AIFI",
         "ODHN": "ODIN",  # Odin Investments
         "ODHN.EGX": "ODIN",
         # Add more as discovered

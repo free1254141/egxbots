@@ -134,6 +134,9 @@ def test_daily_evaluator_closes_using_hf_archive_when_supabase_has_no_prices(
         def gte(self, *_args):
             return self
 
+        def limit(self, *_args):
+            return self
+
         def order(self, *_args, **_kwargs):
             return self
 

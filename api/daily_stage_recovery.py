@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from api.daily_recovery_state import read_checkpoint, replace_checkpoint, utc_now, parse_timestamp
-from api.daily_job_outcome import summarise_daily_steps, effective_daily_steps
+from api.daily_job_outcome import summarise_daily_steps, effective_daily_steps, executed_recovery_stages, is_withheld_recovery
 
 _FINISHED = set()
 ORDER = ('sync_prices', 'calculate_indicators', 'ml_scores_update', 'precompute_heatmap',
@@ -173,13 +173,34 @@ def retry_failed_daily_stages(now):
         return None
 
     steps = json.loads(job['steps']) if isinstance(job.get('steps'), str) else job.get('steps') or []
+    from api.daily_continuation import interrupted_job
+    if interrupted_job(job, steps, phase):
+        key = 'daily_continuation_' + job['id']
+        existing = read_checkpoint(client, key)
+        if existing:
+            return {'phase': phase, 'continuation': 'already_claimed'}
+        claim = replace_checkpoint(client, key, {'status': 'running', 'phase': phase, 'attempts': 1}, None)
+        if not claim:
+            return None
+        from api.daily_bot_run import run_daily_job
+        from api.daily_job_scheduler import get_scheduler_state
+        try:
+            result = asyncio.run(run_daily_job(trigger='scheduled', phase=phase,
+                model_filter=get_scheduler_state().get('model_filter', 'adaptive'), resume_job_id=job['id']))
+            replace_checkpoint(client, key, {'status': result.get('status', 'failed'), 'phase': phase, 'attempts': 1}, claim)
+            _FINISHED.add(identity)
+            return {'phase': phase, 'continuation': result}
+        except Exception as error:
+            replace_checkpoint(client, key, {'status': 'failed', 'phase': phase, 'attempts': 1,
+                                           'error': type(error).__name__}, claim)
+            raise
     planned = plan_recovery(steps, phase)
     if not planned:
         _FINISHED.add(identity)
         return None
 
     latest = {s.get('step'): s for s in effective_daily_steps(steps)}
-    attempted_stages = {s.get('step') for s in steps if isinstance(s, dict) and s.get('recovery_attempt')}
+    attempted_stages = executed_recovery_stages(steps)
     changed = []
     for name in planned:
         # Also survives restarts through both the job audit and durable CAS.
@@ -192,10 +213,10 @@ def retry_failed_daily_stages(now):
             # Older workers claimed a lease then failed before recording the
             # started step (JSONB/string CAS bug). No operation was executed:
             # repair that lease without spending the user's one actual retry.
-            repair_audit = existing_payload.get('status') == 'audit_failed' or (
+            repair_audit = is_withheld_recovery(latest.get(name)) or existing_payload.get('status') == 'blocked' or existing_payload.get('status') == 'audit_failed' or (
                 existing_payload.get('status') == 'failed'
                 and existing_payload.get('error') == 'Stale recovery checkpoint')
-            if repair_audit and not latest.get(name, {}).get('recovery_attempt'):
+            if repair_audit and name not in attempted_stages:
                 claim = replace_checkpoint(client, key,
                     {'status':'running','stage':name,'phase':phase,'attempts':1,'audit_repaired':True}, existing)
                 if not claim:
@@ -229,7 +250,7 @@ def retry_failed_daily_stages(now):
                 result = {'success': False, 'details': str(error)[:400], 'count': 0}
         status = 'success' if result.get('success') else 'failed'
         append_step(client, job, {'step': name, 'status': status, **{k: v for k, v in result.items() if k != 'success'}})
-        if not (name == 'sync_prices' and status != 'success'):
+        if not (name == 'sync_prices' and status != 'success') or price_sync_usable({'status': status, **result}):
             # A failed one-symbol-subset recovery must not erase the original
             # coverage figure that dependents are gated on.
             latest[name] = {'status': status, 'details': result.get('details'), 'count': result.get('count')}

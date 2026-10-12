@@ -3720,16 +3720,19 @@ async def update_symbols_inventory(
                                 }
                                 normalized_syms.append(n)
 
-                            # Cleanup old version of this country's file
-                            _cleanup_old_files(f"{c_name}_all_symbols")
-
-                            # Save individual country file
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            ex_file = os.path.join(
-                                base_dir, f"{c_name}_all_symbols_{timestamp}.json"
-                            )
-                            with open(ex_file, "w", encoding="utf-8") as f:
-                                json.dump(normalized_syms, f, indent=2)
+                            if c_name.lower() == 'egypt':
+                                from api.egx_inventory import refresh_egx_inventory
+                                inv_ok, _, inv_message = refresh_egx_inventory(base_dir, rows=syms)
+                                if not inv_ok:
+                                    print(inv_message)
+                                    continue
+                            else:
+                                # Other country inventories keep their existing naming convention.
+                                _cleanup_old_files(f"{c_name}_all_symbols")
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                ex_file = os.path.join(base_dir, f"{c_name}_all_symbols_{timestamp}.json")
+                                with open(ex_file, "w", encoding="utf-8") as f:
+                                    json.dump(normalized_syms, f, indent=2)
 
                             # Update counts in summary
                             if c_name not in country_summary:

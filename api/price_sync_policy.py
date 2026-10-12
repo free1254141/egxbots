@@ -129,6 +129,24 @@ def sync_with_retries(fetch, symbol, *, max_retries, retry_delay, sleep, **kwarg
     return False, f'Failed after {retries + 1} attempts. Last error: {last_error}'
 
 
+def price_sync_coverage(step):
+    """Read full-universe coverage; audit wording must not change readiness."""
+    import re
+    step = step or {}
+    coverage = step.get('coverage')
+    if isinstance(coverage, dict) and coverage.get('scope') == 'exchange':
+        try:
+            done, total = int(coverage['success']), int(coverage['total'])
+            return (done, total) if 0 <= done <= total and total > 0 else None
+        except (KeyError, TypeError, ValueError):
+            return None
+    match = re.search(r'(?:Synced|Recovered)\s+(\d+)\s*/\s*(\d+)', str(step.get('details') or ''))
+    if match:
+        done, total = int(match[1]), int(match[2])
+        return (done, total) if total > 0 and 0 <= done <= total else None
+    return None
+
+
 def price_sync_usable(step, min_coverage=None):
     """True when prices are complete, or a provider gap leaves enough symbols.
 
@@ -136,7 +154,6 @@ def price_sync_usable(step, min_coverage=None):
     provider. Dependent stages work on the symbols that do have fresh prices,
     so a small gap must not be treated as a failed day. Never invents prices.
     """
-    import re
     step = step or {}
     if step.get('status') == 'success':
         return True
@@ -147,8 +164,8 @@ def price_sync_usable(step, min_coverage=None):
             min_coverage = float(os.getenv('PRICE_SYNC_MIN_COVERAGE', '0.8'))
         except (TypeError, ValueError):
             min_coverage = 0.8
-    match = re.search(r'Synced\s+(\d+)\s*/\s*(\d+)', str(step.get('details') or ''))
-    if not match:
+    coverage = price_sync_coverage(step)
+    if not coverage:
         return False
-    done, total = int(match.group(1)), int(match.group(2))
+    done, total = coverage
     return 0 < min_coverage <= 1 and total > 0 and 0 <= done <= total and done / total >= min_coverage

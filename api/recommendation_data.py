@@ -19,7 +19,8 @@ def repair_history(client, rec, current, today):
     report = {'date': today, 'symbol': symbol, 'source': 'TradingView', 'status': 'failed', 'rows_added': 0, 'repair_version': 1}
     try:
         from tvDatafeed import TvDatafeed, Interval
-        raw = TvDatafeed().get_hist(symbol=symbol, exchange=rec.get('exchange', 'EGX'),
+        from api.price_sync_policy import configure_tradingview_client, fetch_tradingview_history
+        raw = fetch_tradingview_history(configure_tradingview_client(TvDatafeed()), symbol=symbol, exchange=rec.get('exchange', 'EGX'),
                                   interval=Interval.in_daily, n_bars=150)
         if raw is None or raw.empty:
             raise ValueError('source_returned_no_history')

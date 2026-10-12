@@ -3,6 +3,10 @@
 Latest price-sync incident, runtime limits, tests, HF revisions and rollback:
 [12 October speed update](reports/daily-price-sync-speed-2026-10-12.md).
 
+Interrupted-job continuation, parallel open-recommendation quote verification and
+the corrected weekly EODHD inventory are documented in the
+[12 October continuation update](reports/daily-continuation-and-inventory-2026-10-12.md).
+
 This extends the existing HF scheduler and daily pipeline. It does not change
 ordinary recommendation strategy, council threshold (55%), chatbot architecture,
 or social publishing protocol.
