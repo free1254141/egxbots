@@ -1,5 +1,5 @@
 /* Keep the same cells and actions on both layouts. */
-@media (max-width: 639px) {
+@media (max-width: 767px) {
   .userDirectory,
   .userDirectory tbody {
     display: block;
@@ -23,7 +23,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     border: 2px solid currentColor;
-    padding: 8px;
+    padding: 12px;
     gap: 8px;
   }
 
@@ -35,6 +35,10 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+
+  .userDirectory td { font-size: 12px; line-height: 1.6; }
+
+  .userDirectory td:first-child > div > div:last-child { flex: 1; min-width: 0; }
 
   .userDirectory td::before {
     content: attr(data-label);

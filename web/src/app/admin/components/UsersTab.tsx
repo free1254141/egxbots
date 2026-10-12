@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
+import { withDailyActiveUsers } from "./user-chart-data";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
 interface UserRow {
@@ -195,6 +196,7 @@ export default function UsersTab() {
 
     // Chart Series Visibility Toggles
     const [showSignups, setShowSignups] = useState(true);
+    const [showActiveUsers, setShowActiveUsers] = useState(true);
     const [showPro, setShowPro] = useState(true);
     const [showEgx30, setShowEgx30] = useState(true);
     const [showRecommendations, setShowRecommendations] = useState(true);
@@ -373,6 +375,7 @@ export default function UsersTab() {
     const filteredUsers = users;
 
     const totalPages = Math.ceil(total / pageSize);
+    const growthChartData = withDailyActiveUsers(stats?.signupGrowth || [], stats?.dailyActiveUsage || []);
 
 
 
@@ -396,7 +399,7 @@ export default function UsersTab() {
 
                 {!analyticsLoaded ? (
                     <div className="mb-6 border-2 border-dashed border-zinc-400 p-4 text-sm text-zinc-500">
-                        {isAr ? "لا تُحمّل التحليلات المتقدمة إلا عند الطلب لتجنب استعلامات كبيرة للمستخدمين والمحادثات والنشاط والمدفوعات في كل زيارة للأدمن." : "Advanced analytics is loaded only when requested to avoid large user, chat, activity, and payment queries on every Admin visit."}
+                        {isAr ? "اضغط «تحميل التحليلات» لعرض رسم المستخدمين النشطين والإحصائيات." : "Select “Load analytics” to see daily active users and statistics."}
                     </div>
                 ) : <>
                 {/* KPI Cards — Revenue · Pro · MAU · Growth */}
@@ -470,10 +473,10 @@ export default function UsersTab() {
                         <div>
                             <h3 className="font-black text-xs uppercase tracking-widest flex items-center gap-2 text-black dark:text-white">
                                 <Activity className="w-4 h-4 text-blue-500" />
-                                {isAr ? "تحليلات النمو ومؤشر السوق والتوصيات" : "GROWTH, MARKET INDEX & RECOMMENDATIONS"}
+                                {isAr ? "النشاط والنمو ومؤشر السوق والتوصيات" : "ACTIVITY, GROWTH, MARKET & RECOMMENDATIONS"}
                             </h3>
                             <p className="text-[10px] text-zinc-500 font-bold mt-0.5">
-                                {isAr ? "مقارنة مباشرة بين التسجيلات، مشتركي Pro، مؤشر الثلاثيني EGX 30، والتوصيات الصادرة" : "Compare signups, Pro subscriptions, EGX 30 index movements, and platform recommendations"}
+                                {isAr ? "مقارنة النشطين يوميًا بالتسجيلات ومشتركي Pro ومؤشر EGX 30 والتوصيات؛ النشط هو من فتح صفحة أو أرسل رسالة، مع استبعاد الأدمن." : "Compare daily active users (page views or messages, excluding admins), signups, Pro subscriptions, EGX 30, and recommendations"}
                             </p>
                         </div>
 
@@ -489,6 +492,12 @@ export default function UsersTab() {
                                 />
                                 <span className="w-2.5 h-2.5 rounded-xs bg-blue-500 border border-black dark:border-white" />
                                 <span>{isAr ? "المسجلون الجدد" : "New Signups"}</span>
+                            </label>
+
+                            <label className="flex min-h-11 items-center gap-2 cursor-pointer px-2.5 py-1 border-2 border-black dark:border-white text-cyan-700 dark:text-cyan-400">
+                                <input type="checkbox" checked={showActiveUsers} onChange={(event) => setShowActiveUsers(event.target.checked)} className="w-4 h-4 accent-cyan-500" />
+                                <Activity className="w-4 h-4" />
+                                <span>{isAr ? "المستخدمون النشطون يوميًا" : "Daily active users"}</span>
                             </label>
 
                             {/* Pro Checkbox */}
@@ -534,9 +543,9 @@ export default function UsersTab() {
                     {statsLoading ? (
                         <div className="h-56 flex items-center justify-center text-xs font-bold text-zinc-400">Loading chart...</div>
                     ) : (
-                        <div className="h-56 w-full pt-2">
+                        <div className="h-64 sm:h-56 min-w-0 w-full pt-2" dir="ltr">
                             <ResponsiveContainer width="100%" height="100%">
-                                <ComposedChart data={stats?.signupGrowth || []} margin={{ top: 10, right: showEgx30 ? 25 : 10, left: -20, bottom: 0 }}>
+                                <ComposedChart data={growthChartData} margin={{ top: 10, right: showEgx30 ? 25 : 10, left: -20, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
@@ -571,6 +580,7 @@ export default function UsersTab() {
                                         labelStyle={{ color: '#fbbf24', marginBottom: '4px' }} 
                                         cursor={{ stroke: '#52525b', strokeWidth: 1, strokeDasharray: '3 3' }}
                                         formatter={(value: any, name: any) => {
+                                            if (name === "activeUsers") return [markPartial(value), isAr ? "المستخدمون النشطون" : "Active users"];
                                             if (name === "proCount") return [value, isAr ? "مشتركون Pro جدد" : "New Pro"];
                                             if (name === "totalPro") return [value, isAr ? "إجمالي المشتركين Pro" : "Total Pro"];
                                             if (name === "recommendationsCount") return [value, isAr ? "توصيات صادرة" : "Recommendations"];
@@ -586,6 +596,9 @@ export default function UsersTab() {
                                     )}
                                     {showRecommendations && (
                                         <Area yAxisId="left" type="monotone" dataKey="recommendationsCount" name="recommendationsCount" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#colorRecs)" activeDot={{ r: 5, strokeWidth: 0, fill: '#a855f7' }} />
+                                    )}
+                                    {showActiveUsers && (
+                                        <Line yAxisId="left" type="linear" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={false} connectNulls={false} activeDot={{ r: 4 }} isAnimationActive={false} />
                                     )}
                                     {showEgx30 && (
                                         <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 4, strokeWidth: 0, fill: '#10b981' }} />
@@ -931,8 +944,8 @@ export default function UsersTab() {
                                                         </div>
                                                     )}
                                                     <div className="min-w-0">
-                                                        <div className="font-bold text-black dark:text-white text-xs truncate max-w-[180px]">{u.display_name || u.username || "—"}</div>
-                                                        <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 truncate max-w-[200px]">{u.email || u.username || "—"}</div>
+                                                        <div className="font-bold text-black dark:text-white text-sm md:text-xs md:truncate md:max-w-[180px] [overflow-wrap:anywhere]">{u.display_name || u.username || "—"}</div>
+                                                        <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 md:truncate md:max-w-[200px] [overflow-wrap:anywhere]">{u.email || u.username || "—"}</div>
                                                         <div className="text-[9px] text-zinc-400 truncate font-mono">{u.id.slice(0, 10)}...</div>
                                                     </div>
                                                 </div>

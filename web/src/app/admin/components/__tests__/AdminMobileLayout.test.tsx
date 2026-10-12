@@ -20,6 +20,9 @@ const logs = [
 ];
 
 beforeEach(() => {
+    Object.defineProperty(window, "matchMedia", { writable: true, value: jest.fn(() => ({
+        matches: true, media: "(max-width: 767px)", addEventListener: jest.fn(), removeEventListener: jest.fn(),
+    })) });
     localStorage.clear();
     global.fetch = jest.fn(async (input: any) => ({
         ok: true,
@@ -30,24 +33,24 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-it("opens the chosen chat on phones, returns to the list, and keeps filtering and desktop panes", async () => {
+it("opens the chosen user in a phone dialog, closes it, and keeps the list filters", async () => {
     render(<AIChatbotTab />);
     const list = await screen.findByTestId("chat-user-list");
-    const conversation = screen.getByTestId("chat-conversation");
-    expect(list.classList.contains("flex")).toBe(true);
-    expect(conversation.classList.contains("hidden")).toBe(true);
-    fireEvent.click(within(list).getByRole("button", { name: /عميل آخر/ }));
-    expect(list.classList.contains("hidden")).toBe(true);
-    expect(conversation.classList.contains("flex")).toBe(true);
-    expect(within(conversation).getByText("نتيجة المقارنة")).toBeTruthy();
-    expect(list.classList.contains("md:flex")).toBe(true);
-    expect(conversation.classList.contains("md:flex")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "رجوع للمستخدمين" }));
-    expect(list.classList.contains("flex")).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const customer = within(list).getByRole("button", { name: /عميل آخر/ });
+    customer.focus();
+    fireEvent.click(customer);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("نتيجة المقارنة")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "رجوع للمستخدمين" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(customer));
     fireEvent.change(screen.getByPlaceholderText("بحث باسم العميل، الإيميل، أو نص..."), { target: { value: "الاختبار" } });
     expect(within(list).queryByRole("button", { name: /عميل آخر/ })).toBeNull();
     fireEvent.click(within(list).getByRole("button", { name: /عميل الاختبار/ }));
-    expect(within(conversation).getByText("نتيجة التحليل")).toBeTruthy();
+    expect(within(await screen.findByRole("dialog")).getByText("نتيجة التحليل")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 it("keeps directory cell labels and edit/search/pagination actions on the mobile cards", async () => {

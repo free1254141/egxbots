@@ -3,12 +3,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { 
     Loader2, Sparkles, MessageSquare, Link as LinkIcon, User, RefreshCw, 
-    Search, Clock, ChevronRight, Trash2, Maximize, Minimize, Database, 
+    Search, Clock, Trash2, Maximize, Minimize, Database, 
     Zap, Crown, ArrowDown, Folder, Archive, CheckCircle2 
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatUsageDetails, UserChatCost } from "./ChatUsageDetails";
 import SupportTab from "./SupportTab";
+import MobileConversation from "./MobileConversation";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 
 export default function AIChatbotTab() {
@@ -342,7 +343,7 @@ export default function AIChatbotTab() {
                 <div className="w-full">
                     <div className={isFullscreen 
                         ? "fixed inset-0 z-[100] bg-white dark:bg-black flex flex-col overflow-hidden m-0 w-full h-dvh min-w-0"
-                        : "bg-white dark:bg-black border-4 border-black dark:border-white h-[85dvh] min-h-[680px] md:h-[800px] md:min-h-[650px] min-w-0 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col overflow-hidden"}>
+                        : "bg-white dark:bg-black border-4 border-black dark:border-white h-[75dvh] min-h-[420px] md:h-[800px] md:min-h-[650px] min-w-0 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col overflow-hidden"}>
                         
                         {/* Top Bar */}
                         <div className="p-3 md:p-6 border-b-2 border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 bg-zinc-50 dark:bg-black">
@@ -408,7 +409,7 @@ export default function AIChatbotTab() {
                             <div className="grid grid-cols-1 md:grid-cols-4 flex-1 overflow-hidden min-h-0 min-w-0">
                                 
                                 {/* Right Column: Users List */}
-                                <div data-testid="chat-user-list" className={`${mobilePane === "users" ? "flex" : "hidden"} md:flex min-h-0 min-w-0 md:col-span-1 md:border-l-2 border-zinc-200 dark:border-zinc-800 flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first md:order-last`}>
+                                <div data-testid="chat-user-list" className={`flex md:flex min-h-0 min-w-0 md:col-span-1 md:border-l-2 border-zinc-200 dark:border-zinc-800 flex-col bg-zinc-50/50 dark:bg-black overflow-hidden order-first md:order-last`}>
                                     {/* Search Filter & Date Quick Tabs */}
                                     <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 space-y-2">
                                         <div className="relative">
@@ -507,13 +508,12 @@ export default function AIChatbotTab() {
                                 </div>
 
                                 {/* Main Area: Selected User Header, Rooms Bar, and Messages */}
-                                <div data-testid="chat-conversation" className={`${mobilePane === "conversation" ? "flex" : "hidden"} md:flex min-h-0 min-w-0 md:col-span-3 flex-col h-full bg-white dark:bg-black overflow-hidden order-last md:order-first`}>
-                                    <button type="button" onClick={() => setMobilePane("users")} className="md:hidden min-h-11 shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 text-sm font-bold text-indigo-600 dark:text-indigo-400">
-                                        <ChevronRight className="w-4 h-4" /> رجوع للمستخدمين
-                                    </button>
+                                <MobileConversation open={mobilePane === "conversation"} onClose={() => setMobilePane("users")}
+                                    title={selectedGroup?.user_name || "محادثة المستخدم"} closeLabel="رجوع للمستخدمين"
+                                    testId="chat-conversation" className="min-h-0 min-w-0 md:col-span-3 flex-col h-full bg-white dark:bg-black overflow-hidden order-last md:order-first">
                                     {selectedGroup ? (
                                         <>
-                                            <div className="p-3 shrink-0 min-w-0 border-b border-zinc-200 dark:border-zinc-800"><UserChatCost summary={usageTotals?.users[selectedGroup.user_id]} complete={usageTotals?.complete === true} /></div>
+                                            <details className="p-2 shrink-0 min-w-0 border-b border-zinc-200 dark:border-zinc-800"><summary className="cursor-pointer text-xs font-bold">تفاصيل تكلفة المحادثة</summary><UserChatCost summary={usageTotals?.users[selectedGroup.user_id]} complete={usageTotals?.complete === true} /></details>
                                             {/* Top User Bar */}
                                             <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-black flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
                                                 <div className="flex items-center gap-3 min-w-0">
@@ -769,7 +769,7 @@ export default function AIChatbotTab() {
                                             <p className="text-sm font-medium">اختر مستخدماً لعرض غرفه ومحادثاته مع المساعد الذكي.</p>
                                         </div>
                                     )}
-                                </div>
+                                </MobileConversation>
                             </div>
                         )}
                     </div>

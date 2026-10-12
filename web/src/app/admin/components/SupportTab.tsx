@@ -1,8 +1,9 @@
 "use client";
 
+import MobileConversation from "./MobileConversation";
 import React, { useState, useEffect, useRef } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { Send, User, Bot, Loader2, MessageSquare, Clock, ChevronRight } from "lucide-react";
+import { Send, User, Bot, Loader2, MessageSquare, Clock } from "lucide-react";
 
 type ChatSession = {
     session_id: string;
@@ -199,7 +200,7 @@ export default function SupportTab() {
     return (
         <div className="flex min-w-0 h-[85dvh] min-h-[480px] md:h-[calc(100dvh-230px)] border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white overflow-hidden">
             {/* Sidebar: Chat Sessions List */}
-            <div data-testid="support-session-list" className={`${mobilePane === "sessions" ? "flex" : "hidden"} md:flex w-full md:w-1/3 min-w-0 min-h-0 md:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40`}>
+            <div data-testid="support-session-list" className={`flex md:flex w-full md:w-1/3 min-w-0 min-h-0 md:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40`}>
                 <div className="p-4 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center gap-2">
                     <MessageSquare className="h-4 w-4 text-pink-500" />
                     <span className="text-xs font-black uppercase tracking-wider">Customer Support Chats</span>
@@ -241,10 +242,10 @@ export default function SupportTab() {
             </div>
 
             {/* Chat Pane */}
-            <div data-testid="support-conversation" className={`${mobilePane === "conversation" ? "flex" : "hidden"} md:flex flex-1 min-w-0 min-h-0 flex-col h-full bg-white dark:bg-zinc-950`}>
-                <button type="button" onClick={() => setMobilePane("sessions")} className="md:hidden min-h-11 shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 text-sm font-bold text-pink-600 dark:text-pink-400">
-                    <ChevronRight className="w-4 h-4" /> رجوع لمحادثات الدعم
-                </button>
+            <MobileConversation open={mobilePane === "conversation"} onClose={() => setMobilePane("sessions")}
+                title={sessions.find((session) => session.session_id === selectedSessionId)?.user_name || "محادثة الدعم"}
+                closeLabel="رجوع لمحادثات الدعم" testId="support-conversation"
+                className="flex-1 min-w-0 min-h-0 flex-col h-full bg-white dark:bg-zinc-950">
                 {selectedSessionId ? (
                     <>
                         {/* Session Header */}
@@ -320,7 +321,7 @@ export default function SupportTab() {
                         <span className="font-black text-xs uppercase tracking-wider">Select a session to start chatting</span>
                     </div>
                 )}
-            </div>
+            </MobileConversation>
         </div>
     );
 }
