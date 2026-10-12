@@ -9,7 +9,7 @@ function getSupabaseAdminClient() {
 }
 
 const SELECT_COLS =
-  "pro_price_egp,pro_6m_price_egp,pro_1y_price_egp,discount_enabled,discount_price_egp,discount_ends_at,discount_label_ar,discount_label_en,updated_at";
+  "pro_price_egp,pro_6m_price_egp,pro_1y_price_egp,discount_enabled,discount_price_egp,discount_ends_at,discount_label_ar,discount_label_en,updated_at,founders_offer_enabled,founders_limit";
 
 export async function GET(request: Request) {
   const auth = await requireAdmin(request);

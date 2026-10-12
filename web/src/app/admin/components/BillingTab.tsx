@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface BillingSettings {
+    founders_offer_enabled?: boolean;
     pro_price_egp: number | null;
     pro_6m_price_egp: number | null;
     pro_1y_price_egp: number | null;
@@ -19,7 +20,7 @@ interface LivePlan {
     id: string;
     amount_egp: number;
     days: number;
-    discount?: { active: boolean; ends_at: string; original_amount_egp: number };
+    discount?: { active: boolean; ends_at: string | null; original_amount_egp: number };
 }
 
 interface PlanLimits {
@@ -46,6 +47,7 @@ export default function BillingTab() {
     const [pro6mPrice, setPro6mPrice] = useState("");
     const [pro1yPrice, setPro1yPrice] = useState("");
     const [discountEnabled, setDiscountEnabled] = useState(false);
+    const [foundersOffer, setFoundersOffer] = useState(false);
     const [discountPrice, setDiscountPrice] = useState("");
     const [discountEndsAt, setDiscountEndsAt] = useState("");
     const [labelAr, setLabelAr] = useState("عرض محدود");
@@ -66,6 +68,7 @@ export default function BillingTab() {
             setPro6mPrice(data.pro_6m_price_egp != null ? String(data.pro_6m_price_egp) : "");
             setPro1yPrice(data.pro_1y_price_egp != null ? String(data.pro_1y_price_egp) : "");
             setDiscountEnabled(Boolean(data.discount_enabled));
+            setFoundersOffer(Boolean(data.founders_offer_enabled));
             setDiscountPrice(data.discount_price_egp != null ? String(data.discount_price_egp) : "");
             setDiscountEndsAt(toLocalInput(data.discount_ends_at ?? null));
             setLabelAr(data.discount_label_ar || "عرض محدود");
@@ -161,10 +164,11 @@ export default function BillingTab() {
                         {/* Plan prices */}
                         <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 space-y-4 shadow-[6px_6px_0px_rgba(0,0,0,1)]">
                             <h3 className="text-sm font-black uppercase tracking-widest text-emerald-600">أسعار الباقات (ج.م)</h3>
+                            {foundersOffer && <p className="text-sm font-bold">عرض الشهر بـ50 ج.م مستمر حتى اكتمال أول 100 مشترك، بدون تاريخ انتهاء. بعدها يصبح سعر الشهر 200 ج.م.</p>}
                             <div className="grid sm:grid-cols-3 gap-4">
                                 <label>
                                     <span className={labelClass}>شهر واحد</span>
-                                    <input type="number" min="0" value={proPrice} onChange={(e) => setProPrice(e.target.value)} placeholder="200" className={inputClass} dir="ltr" />
+                                    <input type="number" min="0" value={proPrice} disabled={foundersOffer} onChange={(e) => setProPrice(e.target.value)} placeholder="200" className={inputClass} dir="ltr" />
                                 </label>
                                 <label>
                                     <span className={labelClass}>6 شهور</span>
@@ -184,6 +188,7 @@ export default function BillingTab() {
                                 <button
                                     type="button"
                                     onClick={() => setDiscountEnabled(!discountEnabled)}
+                                    disabled={foundersOffer}
                                     className={`border-2 border-black px-4 py-1.5 text-xs font-black uppercase ${discountEnabled ? "bg-emerald-500 text-white" : "bg-zinc-100 text-zinc-600"}`}
                                 >
                                     {discountEnabled ? "مُفعّل" : "متوقف"}
@@ -247,7 +252,7 @@ export default function BillingTab() {
                                     ))}
                                 </ul>
                             )}
-                            {liveMonthly?.discount?.active && (
+                            {liveMonthly?.discount?.active && liveMonthly.discount.ends_at && (
                                 <p className="text-[10px] font-bold text-zinc-500">
                                     العرض ينتهي: <span className="font-mono text-zinc-300" dir="ltr">{new Date(liveMonthly.discount.ends_at).toLocaleString("ar-EG")}</span> — بعدها يرجع السعر الأساسي تلقائياً.
                                 </p>

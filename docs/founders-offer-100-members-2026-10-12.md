@@ -1,0 +1,11 @@
+# Monthly founders offer: 100 distinct subscribers
+
+The monthly price is 50 EGP while fewer than 100 distinct accounts have activated a qualifying Pro subscription, with no time-based expiry. The normal price becomes 200 EGP at the hundredth activation. Existing active accounts seed the previous public founders count. A unique member ledger prevents renewals from consuming another seat and keeps a cancellation/deletion from reopening the offer. Trials do not count. Previously canceled accounts absent from the original active counter are not added retrospectively.
+
+The policy lives in PostgreSQL, so the currently deployed HF payment reader immediately uses the same effective price for public config and checkout, without needing an HF rebuild. The settings trigger clears the former timed discount and maintains the effective monthly quote. A locked activation trigger admits no more than 100 cohort rows. A checkout insertion trigger rejects stale cached prices before a hosted payment call; previously issued quotes retain their agreed amounts. Already-issued pending payment quotes may settle after enrollment closes; successful paid orders are honored rather than repriced. Six-month/year/lifetime prices and existing entitlements remain unchanged.
+
+A public aggregate-only RPC returns count, remaining seats, effective/normal price and no end date. Cohort identities have RLS enabled and no anonymous/authenticated access. Trigger functions have an empty search_path, fully qualified tables, and no public EXECUTE grants. Existing subscription/payment policies are unchanged.
+
+The Next.js payment config aliases share one reader and replace the legacy active-only counter using that RPC. The discount carries a null end date. The admin panel displays the enrollment rule and locks monthly/timed-discount editing while it is active; other plan controls remain available.
+
+Offline validation: PGlite exercises 13/99/100 seats, duplicate renewal, cancellation, expiry/date override, old/new quotes, other plans, and anonymous permission denials. Five Jest checks cover pricing projection, normal price at 100, disabled policy, failed authoritative reads and existing entitlement refresh. TypeScript and a production build use offline database fixtures. No real checkout/payment is submitted during verification.

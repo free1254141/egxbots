@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withFoundersOffer } from "@/lib/founders-offer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,7 +8,8 @@ const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNA
 export async function GET() {
   try {
     const response = await fetch(`${BACKEND_URL}/payment/easykash/config`, { cache: "no-store" });
-    return NextResponse.json(await response.json().catch(() => ({ enabled: false })), { status: response.status });
+    const config = await response.json().catch(() => ({ enabled: false }));
+    return NextResponse.json(response.ok ? await withFoundersOffer(config) : config, { status: response.status });
   } catch {
     return NextResponse.json({ enabled: false, mode: "disabled", provider: "easykash" }, { status: 503 });
   }
