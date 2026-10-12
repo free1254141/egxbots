@@ -3139,7 +3139,22 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 total_symbols = len(symbols)
                 print(f"[SYNC] Found {total_symbols} symbols to sync.")
                 syncer = get_smart_sync()
-                sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True)
+
+                def _price_progress(progress):
+                    # Update the existing started entry instead of growing the
+                    # audit on every stock. This is a heartbeat, never success.
+                    entry = next(step for step in reversed(steps_log)
+                                 if step['step'] == 'sync_prices' and step['status'] == 'started')
+                    entry.update({
+                        'details': f"Processing {progress['processed']}/{progress['total']} symbols; {progress['success']} synced",
+                        'count': progress['processed'],
+                        'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
+                        'progress': progress,
+                    })
+                    _persist_job('running')
+
+                sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True,
+                                                         on_progress=_price_progress)
                 # The writer has finished: discard stale scanner data before the
                 # job preloads its one shared EGX snapshot below.
                 stock_ai.clear_exchange_bulk_cache("EGX")

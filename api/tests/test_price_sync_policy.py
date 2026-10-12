@@ -20,8 +20,8 @@ def test_empty_response_is_bounded_and_no_final_sleep():
         calls.append(1)
         return False, 'No data found for APPC'
     ok, reason = sync_with_retries(fetch, 'APPC', max_retries=999, retry_delay=999, sleep=sleeps.append)
-    assert not ok and '4 attempts' in reason
-    assert len(calls) == 4 and sleeps == [30, 30, 30]
+    assert not ok and '2 attempts' in reason
+    assert len(calls) == 2 and sleeps == [30]
 
 
 def test_terminal_failure_does_not_retry():

@@ -1,5 +1,8 @@
 # Two-phase daily operation and short-swing recovery — 7 October 2026
 
+Latest price-sync incident, runtime limits, tests, HF revisions and rollback:
+[12 October speed update](reports/daily-price-sync-speed-2026-10-12.md).
+
 This extends the existing HF scheduler and daily pipeline. It does not change
 ordinary recommendation strategy, council threshold (55%), chatbot architecture,
 or social publishing protocol.

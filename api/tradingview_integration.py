@@ -178,12 +178,43 @@ def get_tradingview_exchange(symbol: str) -> str:
 
 
 # ── Yahoo Proxy Circuit Breaker ──────────────────────────────────────
-# After N consecutive proxy failures, skip the proxy entirely for
-# the rest of this process to avoid wasting minutes on SSL errors.
+# Transport failures trigger a short cooldown. Symbol-specific 404s are
+# remembered briefly without blocking TradingView or other symbols.
 _yahoo_proxy_fail_count = 0
 _YAHOO_PROXY_FAIL_THRESHOLD = 3
 _yahoo_proxy_tripped = False
 _yahoo_proxy_retry_after = 0.0
+_yahoo_state_lock = threading.Lock()
+_yahoo_missing_until = {}
+
+
+def _remember_yahoo_missing(ticker):
+    with _yahoo_state_lock:
+        now = time.monotonic()
+        for key in list(_yahoo_missing_until):
+            if _yahoo_missing_until[key] <= now:
+                del _yahoo_missing_until[key]
+        if len(_yahoo_missing_until) >= 1024:
+            del _yahoo_missing_until[next(iter(_yahoo_missing_until))]
+        _yahoo_missing_until[ticker] = now + 900
+
+
+def _yahoo_proxy_success():
+    global _yahoo_proxy_fail_count, _yahoo_proxy_tripped, _yahoo_proxy_retry_after
+    with _yahoo_state_lock:
+        _yahoo_proxy_fail_count = 0
+        _yahoo_proxy_tripped = False
+        _yahoo_proxy_retry_after = 0.0
+
+
+def _yahoo_proxy_failure():
+    global _yahoo_proxy_fail_count, _yahoo_proxy_tripped, _yahoo_proxy_retry_after
+    with _yahoo_state_lock:
+        _yahoo_proxy_fail_count += 1
+        if _yahoo_proxy_fail_count >= _YAHOO_PROXY_FAIL_THRESHOLD:
+            _yahoo_proxy_tripped = True
+            _yahoo_proxy_retry_after = time.monotonic() + 60
+            print(f'[CIRCUIT BREAKER] Yahoo proxy cooldown for 60s after {_yahoo_proxy_fail_count} failures')
 
 
 def _try_yahoo_direct_fallback(
@@ -208,6 +239,10 @@ def _try_yahoo_direct_fallback(
         yf_ticker = upper.replace(".US", "")
     elif upper.endswith(".EGX"):
         yf_ticker = f"{base_symbol}.CA"
+
+    with _yahoo_state_lock:
+        if _yahoo_missing_until.get(yf_ticker, 0) > time.monotonic():
+            return False, 'Yahoo API returned HTTP 404 (cached for 15 minutes; TradingView remains eligible)'
         
     try:
         import pandas as pd
@@ -232,8 +267,8 @@ def _try_yahoo_direct_fallback(
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?range={r_range}&interval=1d"
         
         cf_proxy = os.getenv("CF_PROXY_URL")
-        now = time.time()
-        proxy_available = bool(cf_proxy) and (not _yahoo_proxy_tripped or now >= _yahoo_proxy_retry_after)
+        with _yahoo_state_lock:
+            proxy_available = bool(cf_proxy) and (not _yahoo_proxy_tripped or time.monotonic() >= _yahoo_proxy_retry_after)
         if proxy_available:
             import urllib.parse
             url = f"{cf_proxy}?url={urllib.parse.quote(url)}"
@@ -247,6 +282,10 @@ def _try_yahoo_direct_fallback(
             r = session.get(url, timeout=8)
             if r.status_code != 200:
                 print(f"PROXY HTTP ERROR: {r.status_code} - {r.text[:200]}")
+                if r.status_code == 404:
+                    _remember_yahoo_missing(yf_ticker)
+                elif cf_proxy and r.status_code >= 500:
+                    _yahoo_proxy_failure()
                 return False, f"Yahoo API returned HTTP {r.status_code}"
                 
             chart_res = r.json().get("chart", {}).get("result")
@@ -254,19 +293,14 @@ def _try_yahoo_direct_fallback(
                 print(f"PROXY EMPTY RESULT: {r.text[:200]}")
                 return False, "Yahoo API returned empty result"
             # Reset circuit breaker on success
-            _yahoo_proxy_fail_count = 0
-            _yahoo_proxy_tripped = False
-            _yahoo_proxy_retry_after = 0.0
+            if cf_proxy:
+                _yahoo_proxy_success()
         except Exception as e:
             print(f"PROXY EXCEPTION: {str(e)}")
             # A proxy failure is transient. Do not disable it for the whole
             # 284-symbol sync; give it a short cooldown and try Yahoo direct.
             if cf_proxy and ("SSL" in str(e) or "ConnectionError" in str(e) or "Max retries" in str(e) or "timed out" in str(e).lower()):
-                _yahoo_proxy_fail_count += 1
-                if _yahoo_proxy_fail_count >= _YAHOO_PROXY_FAIL_THRESHOLD:
-                    _yahoo_proxy_tripped = True
-                    _yahoo_proxy_retry_after = time.time() + 60
-                    print(f"[CIRCUIT BREAKER] Yahoo proxy cooldown for 60s after {_yahoo_proxy_fail_count} failures")
+                _yahoo_proxy_failure()
             # One direct attempt prevents a temporary Worker/TLS issue from
             # turning into a failed stock update.
             if cf_proxy:
@@ -275,11 +309,12 @@ def _try_yahoo_direct_fallback(
                     direct = session.get(direct_url, timeout=8)
                     direct.raise_for_status()
                     chart_res = direct.json().get("chart", {}).get("result")
-                    if chart_res:
-                        _yahoo_proxy_fail_count = 0
-                    else:
+                    # Direct success does not prove the proxy recovered.
+                    if not chart_res:
                         return False, "Yahoo API returned empty result"
                 except Exception as direct_error:
+                    if getattr(getattr(direct_error, 'response', None), 'status_code', None) == 404:
+                        _remember_yahoo_missing(yf_ticker)
                     return False, f"Yahoo proxy/direct request failed: {direct_error}"
             else:
                 return False, f"Yahoo request failed: {str(e)}"
@@ -483,7 +518,8 @@ def fetch_tradingview_prices(
         df = None
         tv_fetch_error = None
         try:
-            df = tv.get_hist(
+            from api.price_sync_policy import fetch_tradingview_history
+            df = fetch_tradingview_history(tv,
                 symbol=tv_symbol,
                 exchange=tv_exchange,
                 interval=tv_interval,

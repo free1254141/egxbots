@@ -1,23 +1,18 @@
-import os
 import time
-import threading
-import pandas as pd
-import numpy as np
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from datetime import date, timedelta
+from typing import List, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from api.tradingview_integration import fetch_tradingview_prices, get_tradingview_exchange
-from api.stock_ai import sync_df_to_supabase, _init_supabase, supabase
-from api.price_sync_policy import sync_with_retries
+from api.tradingview_integration import fetch_tradingview_prices
+from api.price_sync_policy import sync_with_retries, bounded_setting
 
 class SmartSync:
-    def __init__(self, max_retries: int = 3, retry_delay: int = 10, throttle_delay: float = 1.5,
-                 max_workers: int = 2):
+    def __init__(self, max_retries: int = 1, retry_delay: int = 2, throttle_delay: float = 0.3,
+                 max_workers: int = 4):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.throttle_delay = throttle_delay
         self.max_bars_per_request = 5000
-        self.max_workers = int(os.getenv("SMART_SYNC_MAX_WORKERS", str(max_workers)))
+        self.max_workers = int(bounded_setting('SMART_SYNC_MAX_WORKERS', max_workers, 1, 6))
 
     def sync_symbol_prices(self, symbol: str, max_days: int = 365, force_days: bool = False, refresh_latest: bool = False) -> Tuple[bool, str]:
         """
@@ -30,52 +25,51 @@ class SmartSync:
             print(f"[SYNC] {symbol}: {result[1]}")
         return result
 
-    def _sync_one(self, symbol: str, max_days: int, semaphore: threading.Semaphore, refresh_latest: bool = False) -> Tuple[str, bool, str]:
-        """Sync a single symbol with semaphore-based throttling for concurrent use."""
-        with semaphore:
-            # Small stagger to avoid thundering herd
+    def _sync_one(self, symbol: str, max_days: int, refresh_latest: bool = False) -> Tuple[str, bool, str]:
+        """The executor is the concurrency bound; no second semaphore is needed."""
+        try:
             time.sleep(self.throttle_delay)
             success, msg = self.sync_symbol_prices(symbol, max_days=max_days, refresh_latest=refresh_latest)
             return symbol, success, msg
+        except Exception as error:
+            print(f'[SYNC] {symbol}: {type(error).__name__}: {error}')
+            return symbol, False, f'{type(error).__name__}: {error}'
 
-    def sync_exchange_prices(self, exchange: str, symbols: List[str], max_days: int = 365, unified_dates: bool = False, refresh_latest: bool = False) -> Dict[str, Any]:
+    def sync_exchange_prices(self, exchange: str, symbols: List[str], max_days: int = 365, unified_dates: bool = False, refresh_latest: bool = False, on_progress=None) -> Dict[str, Any]:
         """
         Syncs multiple symbols for an exchange using concurrent threads.
-        Uses ThreadPoolExecutor with a semaphore to control parallelism.
+        Executor bounds parallelism; progress is reported on the caller thread.
         """
+        symbols = list(dict.fromkeys(symbols))
         results = {}
         processed_count = 0
         success_count = 0
-        lock = threading.Lock()
-        semaphore = threading.Semaphore(self.max_workers)
+        started = time.monotonic()
+        last_report = started
         
         print(f"Starting Smart Sync for {exchange} ({len(symbols)} symbols, workers={self.max_workers}, unified_dates={unified_dates})")
         
-        def _on_done(future):
-            nonlocal processed_count, success_count
-            try:
-                sym, ok, msg = future.result()
-                with lock:
-                    results[sym] = {"success": ok, "message": msg}
-                    if ok:
-                        success_count += 1
-                    processed_count += 1
-                    if processed_count % 20 == 0 or processed_count == len(symbols):
-                        print(f"Progress: {processed_count}/{len(symbols)} symbols synced ({success_count} ok)...")
-            except Exception as e:
-                with lock:
-                    processed_count += 1
-                    print(f"[SYNC] Unhandled error in future: {e}")
+        def report_progress():
+            if on_progress:
+                try:
+                    on_progress({'processed': processed_count, 'success': success_count,
+                                 'total': len(symbols), 'elapsed_seconds': round(time.monotonic() - started, 2)})
+                except Exception as error:
+                    print(f'[SYNC] Progress persistence failed: {error}')
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
-            for symbol in symbols:
-                fut = executor.submit(self._sync_one, symbol, max_days, semaphore, refresh_latest)
-                fut.add_done_callback(_on_done)
-                futures.append(fut)
-            # Wait for all futures to complete
-            for fut in futures:
-                fut.result()  # propagate any uncaught exceptions
+            report_progress()
+            futures = [executor.submit(self._sync_one, symbol, max_days, refresh_latest) for symbol in symbols]
+            for future in as_completed(futures):
+                sym, ok, msg = future.result()
+                results[sym] = {'success': ok, 'message': msg}
+                success_count += int(ok)
+                processed_count += 1
+                now = time.monotonic()
+                if processed_count % 20 == 0 or processed_count == len(symbols) or now - last_report >= 60:
+                    print(f'Progress: {processed_count}/{len(symbols)} symbols processed ({success_count} ok)...')
+                    report_progress()
+                    last_report = now
 
         return {
             "exchange": exchange,
@@ -90,7 +84,9 @@ class SmartSync:
         Ensures all symbols in an exchange have the same date range coverage.
         Padding missing dates with NaN or previous values if necessary.
         """
-        _init_supabase()
+        from api import stock_ai
+        stock_ai._init_supabase()
+        supabase = stock_ai.supabase
         if not supabase:
             return False, "Supabase not initialized"
 

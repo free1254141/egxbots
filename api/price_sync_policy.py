@@ -1,5 +1,89 @@
 """Bounded recovery for provider failures; never invent missing market bars."""
 import os
+import time
+
+
+def bounded_setting(name, default, minimum, maximum):
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = float(default)
+    if not minimum <= value <= maximum:
+        value = min(maximum, max(minimum, value)) if value == value else float(default)
+    return value
+
+
+class _DeadlineSocket:
+    """Bound the whole response, including an endless stream of heartbeats."""
+    def __init__(self, socket, deadline, clock, socket_timeout):
+        self.socket = socket
+        self.deadline = deadline
+        self.clock = clock
+        self.socket_timeout = socket_timeout
+        self.expired = False
+
+    def _remaining(self):
+        remaining = self.deadline - self.clock()
+        if remaining <= 0:
+            self.expired = True
+            raise TimeoutError('TradingView total request deadline exceeded')
+        self.socket.settimeout(min(self.socket_timeout, remaining))
+
+    def recv(self, *args, **kwargs):
+        self._remaining()
+        result = self.socket.recv(*args, **kwargs)
+        # tvDatafeed catches receive errors and may parse partial bars. Mark a
+        # deadline reached inside recv too, so those bars cannot be published.
+        if self.clock() >= self.deadline:
+            self.expired = True
+            raise TimeoutError('TradingView total request deadline exceeded')
+        return result
+
+    def send(self, *args, **kwargs):
+        self._remaining()
+        return self.socket.send(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.socket, name)
+
+
+def fetch_tradingview_history(client, *, clock=time.monotonic, **kwargs):
+    """Per-client deadline; no global monkeypatches or abandoned worker threads."""
+    budget = bounded_setting('TRADINGVIEW_REQUEST_BUDGET', 20, 5, 45)
+    deadline = clock() + budget
+    original_connect = client._TvDatafeed__create_connection
+    original_timeout = client._TvDatafeed__ws_timeout
+    guarded = None
+
+    def connect():
+        nonlocal guarded
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError('TradingView total request deadline exceeded')
+        client._TvDatafeed__ws_timeout = min(original_timeout, remaining)
+        original_connect()
+        # Also bound low-level frame reads: fragmented frames must not reset
+        # the overall budget inside websocket-client's recv loop.
+        if getattr(client.ws, 'sock', None) is not None:
+            client.ws.sock = _DeadlineSocket(client.ws.sock, deadline, clock, original_timeout)
+        guarded = _DeadlineSocket(client.ws, deadline, clock, original_timeout)
+        client.ws = guarded
+
+    client._TvDatafeed__create_connection = connect
+    try:
+        result = client.get_hist(**kwargs)
+        if clock() >= deadline or (guarded and guarded.expired):
+            raise TimeoutError('TradingView total request deadline exceeded')
+        return result
+    finally:
+        client._TvDatafeed__create_connection = original_connect
+        client._TvDatafeed__ws_timeout = original_timeout
+        socket = guarded or getattr(client, 'ws', None)
+        if socket:
+            try:
+                socket.close(timeout=0)
+            except Exception:
+                pass
 
 
 def configure_tradingview_client(client):
@@ -28,7 +112,7 @@ def retryable_price_failure(message):
 def sync_with_retries(fetch, symbol, *, max_retries, retry_delay, sleep, **kwargs):
     last_error = ''
     # Even an accidental configuration override cannot trigger unbounded retries.
-    retries = min(3, max(0, int(max_retries)))
+    retries = min(1, max(0, int(max_retries)))
     delay = min(30, max(0, float(retry_delay)))
     for attempt in range(retries + 1):
         try:
