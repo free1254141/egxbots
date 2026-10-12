@@ -231,3 +231,32 @@ No per-visitor refresh/provider job or new table was introduced. The existing
 manually refreshed October 12 response seeds that row once, without another
 EODHD inventory call. Admin, daily universe and candidate eligibility share this
 path. Offline fixtures simulate ephemeral rebuild, older data and storage failure.
+
+## Final publication result
+
+Runtime and web publication completed successfully:
+
+- Git runtime/web revision: `9d2d9088c7b8e1ba2873a39eb0833d9c885554a3`.
+- Vercel production: `dpl_8SV1DY7hA3qnYGRwYiXfAfjiruwz`, READY, with
+  `egxbots.com` assigned to that exact revision.
+- HF runtime: `ffbc888012b420716c6f6fa13e6219ff8e54a9bc`, RUNNING; `/health`
+  returned HTTP 200.
+- The durable `egx_inventory_eodhd` snapshot contains the verified 276-symbol
+  EODHD active EGX list for the week beginning October 11. The next scheduled
+  inventory refresh is Sunday October 18 close.
+
+The one bounded social continuation initially completed stock (KORA),
+accumulation and follow-up (COMI) reports with images. Market failed validation
+before publishing because the gate incorrectly treated CPME's sourced -13.0435%
+daily change as maximum historical drawdown. After the metric-label repair was
+deployed, a single authenticated, version-guarded `retry_failed` attempt created
+the market report and its image. All four October 12 reports are now `ready` with
+ready images. The market report stores `recovery_attempt: 1` and the original
+rejection in `previous_failure`; no report may be replayed again through this
+repair path. The close job's trading, recommendation, notification and cache
+stages were not run again.
+
+Verification at completion: 101 targeted Python tests and 51 targeted Jest tests
+passed; the Next.js production build passed. Build-time market-data unavailability
+messages occurred while statically rendering and did not fail the build or replace
+production market data.
