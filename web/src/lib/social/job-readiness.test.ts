@@ -20,3 +20,23 @@ test('does not hide executed failures, malformed input or low coverage', () => {
   expect(socialJobReadiness([{step:'sync_prices',status:'failed',details:'Synced 100/284 symbols'}]).pricesUsable).toBe(false);
   expect(socialJobReadiness([...original, {step:'calculate_indicators',status:'failed',details:'Database failure',recovery_attempt:1}]).statuses.calculate_indicators).toBe('failed');
 });
+
+test('accepts full exchange recovered coverage after interrupted close run', () => {
+  expect(socialJobReadiness([{step:'sync_prices',status:'failed',details:'Recovered 236/284 prices'}]).pricesUsable).toBe(true);
+  expect(socialJobReadiness([{step:'sync_prices',status:'partial',coverage:{scope:'exchange',success:236,total:284}}]).pricesUsable).toBe(true);
+  expect(socialJobReadiness([{step:'sync_prices',status:'partial',coverage:{scope:'exchange',success:300,total:284}}]).pricesUsable).toBe(false);
+});
+
+test('blocked recovery does not consume or fabricate an actual result', () => {
+  const blocked = {step:'calculate_indicators',status:'failed',details:'Indicators incomplete; dependent recovery withheld',recovery_attempt:1};
+  expect(effectiveDailySteps([blocked])[0].status).toBe('blocked');
+  expect(effectiveDailySteps([{step:'calculate_indicators',status:'started',recovery_attempt:1}, blocked])[0].status).toBe('blocked');
+  expect(effectiveDailySteps([{step:'calculate_indicators',status:'success'}, blocked])[0].status).toBe('success');
+});
+
+test('subset recovery cannot masquerade as full coverage, structured exchange coverage can replace it', () => {
+  const full = {step:'sync_prices',status:'failed',details:'Synced 100/284 symbols'};
+  const subset = {step:'sync_prices',status:'success',details:'Recovered 1/1 prices',recovery_attempt:1};
+  expect(socialJobReadiness([full, subset]).pricesUsable).toBe(false);
+  expect(socialJobReadiness([full, {...subset,status:'partial',coverage:{scope:'exchange',success:236,total:284}}]).pricesUsable).toBe(true);
+});

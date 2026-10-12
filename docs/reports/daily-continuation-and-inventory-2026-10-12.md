@@ -89,3 +89,54 @@ Previous HF revision: `81d0ac7ec5c90a0509ea86edf60e1763e9e224bf`.
 Rollback restores only the runtime/inventory paths changed in this task from that
 revision; it cannot undo already saved prices, completed recommendation events or
 reports. Do not include unrelated local short-swings cache changes in deployment.
+
+
+## Actual continuation and final hardening (October 12)
+
+Git `c4025209` / HF `5c765518883d97d58594e6b9915c57337dfcb683`
+resumed the original close job at 19:26:08 Cairo, preserving its ID and 284-symbol
+coverage audit. The canonical continuation reached completion at 19:47:33 Cairo:
+indicators, ML, news, corporate actions, recommendations evaluation, market
+refresh, accumulation, affected cache tags and the delivered daily market outlook
+finished. No new BUYs were generated: the market regime gate reported panic.
+236/284 price coverage remains partial; no claim that all symbols have quotes.
+EPPK was repaired by one current-session EODHD response (close 9.78, volume zero),
+not by an invented or forward-filled candle. Existing positions may be verified
+on a zero-volume actual bar; new recommendations still require trading volume.
+
+Follow-up changes reject TV/Yahoo histories lacking the expected EGX session even
+when an earlier midday candle is cached. Failed close-refresh symbols enter the
+parallel critical lane despite a cached same-date candle; unsuccessful current
+source confirmation prevents evaluation from advancing on that cached candle.
+Late evaluation now targets only recommendations actually blocked in the first
+pass. The live old version double-counted unchanged EPPK (evaluated 10 of total
+9); the regression fixture now asserts exactly one evaluation when repair already
+completed before the primary pass. Trading outcomes must not be replayed to fix
+an audit count.
+
+All four social report requests were rejected before a report row was claimed.
+The website readiness helper recognized only Synced, rejecting the actual
+Recovered 236/284 description that Python accepts. It now mirrors the Python
+full-exchange coverage/withheld audit policy. Authentication, date/phase gates,
+report uniqueness and selected-evidence verification are retained. Python records
+HTTP status and allowlisted rejection messages, without logging URLs/secrets.
+Reports will be continued separately, only after the corrected site is live.
+
+HF upload prevalidation silently ignored both inventory JSONs under its existing
+symbols_data/*.json rule. The final runtime upload includes narrow exceptions
+for exactly Egypt_all_symbols.json and Egypt_inventory_source.json, preserving
+all other remote ignores. Publication must verify both remote paths and runtime
+health; a successful upload response alone is insufficient.
+
+Final offline verification: 98 Python tests and 7 Jest tests passed. The canonical
+runner fixture includes the no-duplicate late review regression. Actual report
+results and final deployment revisions are recorded below after verification.
+
+HF final runtime/inventory revision: `c9a3390406894489424a183f2d544af7d8f7f022`.
+All seven deployment paths, including both formerly ignored JSONs, were confirmed
+at this revision. One production POST against the old site confirmed HTTP 409
+with `Daily data job is not ready`, before report creation.
+
+Next.js production build passed (including type checks). Existing prerender/cache
+notices did not fail the build. HF JSON contents match local SHA-256 hashes.
+

@@ -39,7 +39,8 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
     for name in ('update_market_heatmap','_refresh_market_status_cache'):
         monkeypatch.setattr(bot,name,lambda:(True,'updated'))
     monkeypatch.setattr(bot,'update_open_portfolio_positions',lambda:None)
-    monkeypatch.setattr(bot,'evaluate_old_recommendations',lambda **kwargs:dict(total=0,evaluated=0,updated=0,closed=0,adjusted=0,unchanged=0,blocked=0,errors=0,blocked_symbols=[]))
+    evaluator=Mock(return_value=dict(total=1,evaluated=1,updated=0,closed=0,adjusted=0,unchanged=1,blocked=0,errors=0,blocked_symbols=[]))
+    monkeypatch.setattr(bot,'evaluate_old_recommendations',evaluator)
     monkeypatch.setattr(bot,'retry_pending_recommendation_telegram_events',lambda **kwargs:0)
     monkeypatch.setattr(bot,'should_reject_new_buys',lambda:{'blocked':True,'reason':'Test market gate'})
     monkeypatch.setattr(bot,'_mark_daily_cache_payload',lambda *args:None)
@@ -58,7 +59,7 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
     monkeypatch.setattr('api.cache_invalidation.invalidate_daily_cache',lambda *args:{'invalidated':['daily-market-data']})
     reports=Mock(return_value={'reports':{name:{'status':'ready'} for name in ('stock','accumulation','market','follow_up')}})
     monkeypatch.setattr('api.daily_social_reports.generate_daily_social_reports',reports)
-    lane=SimpleNamespace(finish=lambda:{})
+    lane=SimpleNamespace(finish=lambda:{'COMI':{'verified':True,'fetched':True}},unverified_symbols=[])
     monkeypatch.setattr('api.recommendation_freshness.CriticalPriceLane',lambda *args:lane)
     result=asyncio.run(bot.run_daily_job(trigger='scheduled',phase='close',resume_job_id=job['id']))
     assert result['status']=='completed' and job['status']=='completed'
@@ -72,3 +73,7 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
         assert latest[name]['status']=='success', (name,latest[name])
     assert latest['generate_recommendations']['status']=='skipped'
     reports.assert_called_once(); prices.assert_not_called()
+    # A parallel repair that finished before evaluation must not evaluate the
+    # same unchanged recommendation again and inflate the aggregate count.
+    evaluator.assert_called_once()
+    assert 'evaluate_recommendations_late' not in latest

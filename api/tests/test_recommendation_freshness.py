@@ -77,3 +77,18 @@ def test_eodhd_fallback_only_writes_a_valid_actual_current_session(monkeypatch):
     assert freshness._eodhd_session_quote(client,'A','2026-10-12')=='EODHD_current_session_saved'
     written=q.upsert.call_args[0][0]
     assert written['date']=='2026-10-12' and written['volume']==10 and written['symbol']=='A'
+
+
+def test_failed_close_refresh_cannot_reuse_cached_midday_quote(monkeypatch):
+    q=Mock(); q.select.return_value=q; q.eq.return_value=q; q.limit.return_value=q
+    q.execute.return_value=SimpleNamespace(data=[{'symbol':'A'}])
+    monkeypatch.setattr(freshness,'_current_quotes',lambda *args:{'A':bar()})
+    monkeypatch.setattr(freshness,'read_checkpoint',lambda *args:None)
+    monkeypatch.setattr(freshness,'replace_checkpoint',lambda *args:{'payload':{}})
+    monkeypatch.setattr(freshness,'_eodhd_session_quote',lambda *args:'EODHD_missing_current_session')
+    calls=[]
+    monkeypatch.setattr('api.tradingview_integration.fetch_tradingview_prices',lambda *args,**kwargs:calls.append(1) or (False,'No current session bar'))
+    lane=freshness.CriticalPriceLane(SimpleNamespace(table=lambda _:q),'job','2026-10-12',['A.EGX'])
+    result=lane.finish()
+    assert len(calls)==1 and not result['A']['verified']
+    assert result['A']['reason']=='current_session_source_unconfirmed'

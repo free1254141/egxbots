@@ -100,3 +100,19 @@ def test_proxy_cooldown_survives_direct_success(monkeypatch, isolated_provider):
         assert provider._try_yahoo_direct_fallback(f'{symbol}.EGX', symbol, '1d', 365, None, None)[0]
     assert sum(url.startswith('https://proxy.example') for url in calls) == 3
     assert provider._yahoo_proxy_tripped and len(isolated_provider) == 4
+
+
+def test_daily_refresh_rejects_old_provider_bars_even_if_cloud_has_today(monkeypatch, isolated_provider):
+    class TvDatafeed:
+        _TvDatafeed__ws_timeout=15
+    names=['in_1_minute','in_5_minute','in_15_minute','in_30_minute','in_1_hour','in_4_hour','in_daily']
+    monkeypatch.setitem(sys.modules,'tvDatafeed',types.SimpleNamespace(
+        TvDatafeed=TvDatafeed,Interval=types.SimpleNamespace(**{n:n for n in names})))
+    previous=datetime.date.today()-datetime.timedelta(days=1)
+    frame=pd.DataFrame({'open':[10],'high':[12],'low':[9],'close':[11],'volume':[10]},
+                       index=pd.DatetimeIndex([str(previous)],name='datetime'))
+    monkeypatch.setattr(policy,'fetch_tradingview_history',lambda *args,**kwargs:frame)
+    calls=[]
+    monkeypatch.setattr(provider,'_try_yahoo_direct_fallback',lambda *args:calls.append(args) or (False,'Yahoo returned no current session'))
+    result=provider.fetch_tradingview_prices('COMI.EGX',refresh_latest=True)
+    assert not result[0] and len(calls)==1 and isolated_provider==[]

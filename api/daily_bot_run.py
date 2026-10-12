@@ -1429,7 +1429,7 @@ def _profit_protection_policy():
                 minimum_distance_pct=3, trigger_pct=5)
 
 
-def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=None):
+def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=None, unverified_symbols=None):
     """
     Evaluate public EGX recommendations using the versioned bar policy.
     Legacy rows preserve their published barriers and do not receive a newly
@@ -1578,6 +1578,14 @@ def evaluate_old_recommendations(batch_id=None, return_report=False, symbols=Non
         if not prices:
             block(rec, "missing_price_history", details)
             continue
+
+        if symbol in (unverified_symbols or []):
+            # A failed close refresh must not reuse a cached midday candle as EOD.
+            from api.recommendation_freshness import expected_session
+            prices = [row for row in prices if str(row['date'])[:10] < expected_session()]
+            if not prices:
+                block(rec, 'awaiting_verified_session_price', details)
+                continue
 
         from api.recommendation_freshness import expected_session, quote_health
         health = quote_health(prices[-1], expected_session())
@@ -3109,16 +3117,18 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     _batch_upsert_indicators(records, batch_size=200)
             except Exception as repair_error:
                 _record_step('critical_recommendation_indicators', False, type(repair_error).__name__)
-            if phase == 'close' and _stage_needed('evaluate_recommendations_late'):
+            pending = [sym for sym in repaired if evaluation is not None
+                       and sym in {row['symbol'] for row in evaluation['blocked_symbols']}]
+            if pending and phase == 'close' and _stage_needed('evaluate_recommendations_late'):
                 _start_step('evaluate_recommendations_late', 'Review only repaired open recommendations')
                 try:
-                    late = evaluate_old_recommendations(return_report=True, symbols=repaired)
+                    late = evaluate_old_recommendations(return_report=True, symbols=pending)
                 except Exception as repair_error:
                     _record_step('evaluate_recommendations_late', False, type(repair_error).__name__)
                     return
                 _record_step('evaluate_recommendations_late', not (late['blocked'] or late['errors']), json.dumps(late), late['evaluated'])
                 if evaluation is not None:
-                    evaluation['blocked_symbols'] = [r for r in evaluation['blocked_symbols'] if r['symbol'] not in repaired] + late['blocked_symbols']
+                    evaluation['blocked_symbols'] = [r for r in evaluation['blocked_symbols'] if r['symbol'] not in pending] + late['blocked_symbols']
                     evaluation['blocked'] = len(evaluation['blocked_symbols'])
                     for field in ('evaluated', 'updated', 'closed', 'adjusted', 'unchanged', 'errors'):
                         evaluation[field] += late[field]
@@ -3220,7 +3230,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             _start_step('critical_recommendation_prices', 'Verify and repair open-recommendation quotes in a parallel bounded lane')
             try:
                 from api.recommendation_freshness import CriticalPriceLane, expected_session
-                critical_lane = CriticalPriceLane(stock_ai.supabase, job_run_id, expected_session())
+                from api.daily_job_outcome import effective_daily_steps
+                price_result = next((s for s in effective_daily_steps(steps_log) if s['step']=='sync_prices'), {})
+                critical_lane = CriticalPriceLane(stock_ai.supabase, job_run_id, expected_session(), price_result.get('failed_symbols'))
             except Exception as critical_error:
                 _record_step('critical_recommendation_prices', False, str(critical_error)[:300])
 
@@ -3390,7 +3402,8 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         if _stage_needed('evaluate_recommendations'):
             _start_step("evaluate_recommendations", "Evaluating open/old recommendations")
             try:
-                evaluation = evaluate_old_recommendations(return_report=True)
+                evaluation = evaluate_old_recommendations(return_report=True,
+                    unverified_symbols=critical_lane.unverified_symbols if critical_lane is not None else [])
                 _record_step("evaluate_recommendations", not (evaluation["blocked"] or evaluation["errors"]),
                              json.dumps(evaluation, ensure_ascii=False), evaluation["evaluated"])
             except Exception as e:

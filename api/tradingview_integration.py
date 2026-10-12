@@ -223,7 +223,8 @@ def _try_yahoo_direct_fallback(
     timeframe: str,
     max_days: int,
     start_date: Any,
-    end_date: Any
+    end_date: Any,
+    required_session: Optional[str] = None
 ) -> Tuple[bool, str]:
     """
     Direct Yahoo Finance API fallback. Fetches the raw JSON from Yahoo Finance
@@ -353,6 +354,8 @@ def _try_yahoo_direct_fallback(
         # Drop rows where critical price fields are None before forward-filling,
         # to avoid propagating previous day's prices into today's empty/placeholder candles.
         df_new = df_new.dropna(subset=["close", "open", "high", "low"], how="any")
+        if required_session and not (df_new['ts'].dt.strftime('%Y-%m-%d') == required_session).any():
+            return False, 'Yahoo returned no current EGX session bar'
         df_new = df_new.ffill().bfill()
         
         if start_date or end_date:
@@ -468,6 +471,12 @@ def fetch_tradingview_prices(
     # Intraday check is different, but for now we skip strict up-to-date check for intraday
     # to always allow fetching new bars.
     is_daily = timeframe.lower() in ["1d", "1day", "daily"]
+    required_session = None
+    if is_daily and tv_exchange == 'EGX' and refresh_latest:
+        from api.recommendation_freshness import expected_session
+        required_session = expected_session()
+        if end_date and str(end_date)[:10] < required_session:
+            required_session = None
     is_up_to_date = last_date and last_date >= _last_trading_day(today) if is_daily else False
     has_enough_history = current_count >= max_days
     
@@ -512,7 +521,7 @@ def fetch_tradingview_prices(
         # Fetch historical data
         # Define Yahoo Finance fallback function inside the fetch function
         def try_yahoo_fallback() -> Tuple[bool, str]:
-            return _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date)
+            return _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session)
 
         # Fetch historical data
         df = None
@@ -528,6 +537,11 @@ def fetch_tradingview_prices(
         except Exception as tv_fetch_err:
             tv_fetch_error = str(tv_fetch_err)
             print(f"tvDatafeed get_hist raised exception for {upper}: {tv_fetch_err}")
+
+        if df is not None and not df.empty and required_session:
+            if not (pd.to_datetime(df.index).strftime('%Y-%m-%d') == required_session).any():
+                tv_fetch_error = 'No current EGX session bar returned'
+                df = None
         
         if df is None or df.empty:
             ok_fall, msg_fall = try_yahoo_fallback()
@@ -562,7 +576,7 @@ def fetch_tradingview_prices(
         # Fallback helper function is defined inside try, but if initialization fails:
         # we can define/call a simple fallback here too.
         try:
-            ok_fall, msg_fall = _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date)
+            ok_fall, msg_fall = _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session)
             if ok_fall:
                 return ok_fall, msg_fall
             error_msg += f" (Yahoo fallback: {msg_fall})"

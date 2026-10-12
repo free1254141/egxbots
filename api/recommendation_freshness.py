@@ -93,7 +93,7 @@ def _eodhd_session_quote(client, symbol, session):
 
 
 class CriticalPriceLane:
-    def __init__(self, client, job_id, session):
+    def __init__(self, client, job_id, session, failed_symbols=None):
         self.client, self.session = client, session
         rows = (client.table('scan_results').select('symbol,exchange').eq('status', 'open')
                 .eq('is_public', True).eq('exchange', 'EGX').limit(100).execute()).data or []
@@ -101,8 +101,9 @@ class CriticalPriceLane:
         quotes = _current_quotes(client, symbols, session)
         self.results, self.futures = {}, {}
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='critical-quotes')
+        failed = {s.split('.')[0] for s in (failed_symbols or [])}
         for symbol in symbols:
-            if quote_health(quotes.get(symbol), session) == 'verified':
+            if quote_health(quotes.get(symbol), session) == 'verified' and symbol not in failed:
                 self.results[symbol] = {'verified': True, 'fetched': False}
             else:
                 self.futures[symbol] = self.pool.submit(self._repair, symbol, job_id)
@@ -120,9 +121,12 @@ class CriticalPriceLane:
             # Exactly one provider attempt, including its bounded Yahoo fallback.
             ok, message = fetch_tradingview_prices(f'{symbol}.EGX', max_days=150, refresh_latest=True)
             reason = quote_health(_current_quotes(self.client, [symbol], self.session).get(symbol), self.session)
-            if reason!='verified':
+            if reason!='verified' or not ok:
                 alternate=_eodhd_session_quote(self.client,symbol,self.session)
-                reason=quote_health(_current_quotes(self.client,[symbol],self.session).get(symbol),self.session)
+                if alternate=='EODHD_current_session_saved':
+                    reason=quote_health(_current_quotes(self.client,[symbol],self.session).get(symbol),self.session)
+                elif reason=='verified':
+                    reason='current_session_source_unconfirmed'
                 ok=ok or alternate=='EODHD_current_session_saved'
                 message=f'{message}; {alternate}'
             result = {'verified': reason == 'verified', 'fetched': bool(ok), 'reason': reason,
@@ -141,3 +145,8 @@ class CriticalPriceLane:
             self.results[symbol] = future.result()
         self.pool.shutdown(wait=False)
         return self.results
+
+    @property
+    def unverified_symbols(self):
+        return [symbol for symbol,future in self.futures.items()
+                if not future.done() or not future.result()['verified']]

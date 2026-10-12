@@ -81,6 +81,8 @@ api/models/*.bin
 !api/models/vhagar.pkl
 scratch/
 symbols_data/*.json
+!symbols_data/Egypt_all_symbols.json
+!symbols_data/Egypt_inventory_source.json
 .vercel
 .agent/
 .agents/

@@ -6,6 +6,7 @@ LLM keys are duplicated here; reports are persisted once per session/type.
 import json
 import os
 import urllib.request
+import urllib.error
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from api.daily_job_outcome import effective_daily_steps
@@ -43,6 +44,19 @@ def generate_daily_social_reports(job_run_id, steps, trigger='scheduled', dry_ru
         try:
             with (opener or urllib.request.urlopen)(request, timeout=130) as response:
                 results[kind] = json.loads(response.read().decode())
+        except urllib.error.HTTPError as error:
+            # Keep status and a known rejection reason; never log provider text,
+            # response HTML, credentials or request URLs.
+            reason = ''
+            try:
+                message = json.loads(error.read(2048).decode()).get('error')
+                if message in {'Unauthorized', 'Invalid report request', 'Daily data job is not ready',
+                               'Report already claimed or storage unavailable'}:
+                    reason = ': ' + message
+            except Exception:
+                pass
+            results[kind] = {'status': 'failed', 'http_status': error.code,
+                             'error': f'HTTP {error.code}{reason}'}
         except Exception as error:
             # Never retry an ambiguous timeout: the server may still be generating.
             results[kind] = {'status': 'failed', 'error': type(error).__name__}
