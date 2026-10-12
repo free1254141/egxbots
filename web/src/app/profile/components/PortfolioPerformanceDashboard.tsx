@@ -10,10 +10,11 @@ import type { PortfolioSnapshot } from "@/contexts/PortfolioContext";
 const Chart = dynamic(() => import("./PortfolioPerformanceChart"), { ssr: false });
 const money = (value: number | null) => value === null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 const pct = (value: number | null) => value === null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
-const tile = "border-2 border-black dark:border-white bg-white dark:bg-zinc-900 p-4 shadow-[3px_3px_0px_#000] dark:shadow-[3px_3px_0px_#fff]";
+const tile = "rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4";
 
-export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr }: {
+export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr, supplied }: {
   userId: string | null; snapshot: PortfolioSnapshot | null; isAr: boolean;
+  supplied?: {report: PortfolioPerformance | null;loading:boolean;error:boolean;refresh:()=>void};
 }) {
   const [expanded, setExpanded] = useState(false);
   const [period, setPeriod] = useState(90);
@@ -23,10 +24,12 @@ export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr }
   const [result, setResult] = useState<{ key: string; report: PortfolioPerformance } | null>(null);
   const fingerprint = JSON.stringify((snapshot?.positions || []).map(row => [row.id, row.symbol, row.quantity, row.entry_price]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
   const key = `${userId}:${fingerprint}:${revision}`;
-  const report = result?.key === key && userId ? result.report : null;
+  const report = supplied ? supplied.report : result?.key === key && userId ? result.report : null;
+  const reportLoading = supplied ? supplied.loading : loading;
+  const reportError = supplied ? supplied.error : error;
 
   useEffect(() => {
-    if (!expanded || !userId || !snapshot || result?.key === key) return;
+    if (supplied || !expanded || !userId || !snapshot || result?.key === key) return;
     const controller = new AbortController();
     setLoading(true);
     setError(false);
@@ -38,7 +41,7 @@ export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr }
     return () => controller.abort();
     // Snapshot price refreshes do not trigger a second daily-history read; holdings edits do.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, userId, key, Boolean(snapshot)]);
+  }, [expanded, userId, key, Boolean(snapshot), Boolean(supplied)]);
 
   const comparison = report?.comparisons.find(item => item.days === period);
   const ranking = useMemo(() => report ? [...report.holdings].sort((a, b) => (b.profitPct ?? -Infinity) - (a.profitPct ?? -Infinity)) : [], [report]);
@@ -48,19 +51,19 @@ export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr }
   if (!userId) return null;
   return <div className="space-y-4" dir={isAr ? "rtl" : "ltr"}>
     <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-controls="portfolio-performance-details"
-      className="flex w-full items-center justify-between gap-3 border-4 border-black bg-[#FFDC58] p-4 text-black shadow-[3px_3px_0px_#000] dark:border-white dark:shadow-[3px_3px_0px_#fff] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-indigo-500">
+      className="flex w-full items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-black dark:text-white dark:border-zinc-700 dark:bg-zinc-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-indigo-500">
       <span className="flex items-center gap-2 text-sm font-black"><Activity className="h-5 w-5" />{isAr ? "لوحة أداء المحفظة" : "Portfolio performance"}</span>
       {expanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
     </button>
-    {expanded && <div id="portfolio-performance-details" className="space-y-5 border-2 border-black bg-zinc-50 p-4 text-black dark:border-white dark:bg-zinc-950/35 dark:text-white sm:p-5">
+    {expanded && <div id="portfolio-performance-details" className="space-y-5 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-black dark:border-zinc-700 dark:bg-zinc-950/35 dark:text-white sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{isAr ? "إغلاق يومي من كاش السوق · بدون تشغيل AI جديد" : "Daily closes from the market cache · no new AI run"}</p>
-        <button type="button" disabled={loading} onClick={() => setRevision(value => value + 1)} className="flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black text-black disabled:opacity-50 dark:border-white dark:bg-zinc-900 dark:text-white">
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />{isAr ? "تحديث" : "Refresh"}
+        <button type="button" disabled={reportLoading} onClick={() => supplied ? supplied.refresh() : setRevision(value => value + 1)} className="flex items-center gap-2 border-2 border-black bg-white px-3 py-2 text-xs font-black text-black disabled:opacity-50 dark:border-white dark:bg-zinc-900 dark:text-white">
+          <RefreshCw className={`h-3.5 w-3.5 ${reportLoading ? "animate-spin" : ""}`} />{isAr ? "تحديث" : "Refresh"}
         </button>
       </div>
-      {loading && !report && <p role="status" className="flex items-center gap-2 py-6 text-sm font-bold"><Loader2 className="h-4 w-4 animate-spin" />{isAr ? "تحميل سجل المحفظة والمقارنة…" : "Loading portfolio history and comparison…"}</p>}
-      {error && <p role="alert" className="border-s-4 border-rose-500 bg-rose-500/10 p-4 text-sm">{isAr ? "تعذر تحميل الأداء. اضغط تحديث للمحاولة مرة أخرى." : "Performance could not be loaded. Press Refresh to retry."}</p>}
+      {reportLoading && !report && <p role="status" className="flex items-center gap-2 py-6 text-sm font-bold"><Loader2 className="h-4 w-4 animate-spin" />{isAr ? "تحميل سجل المحفظة والمقارنة…" : "Loading portfolio history and comparison…"}</p>}
+      {reportError && <p role="alert" className="border-s-4 border-rose-500 bg-rose-500/10 p-4 text-sm">{isAr ? "تعذر تحميل الأداء. اضغط تحديث للمحاولة مرة أخرى." : "Performance could not be loaded. Press Refresh to retry."}</p>}
       {report && <>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className={tile}><h4 className="text-xs font-black text-zinc-500 dark:text-zinc-400">{isAr ? "ربح / خسارة غير محققة — إغلاق يومي" : "Unrealized P/L — daily closes"}</h4><p className="mt-2 font-mono text-xl font-black" dir="ltr">{money(report.unrealized)} <span className="text-xs">{isAr ? "ج.م" : "EGP"}</span></p></div>
@@ -94,7 +97,7 @@ export default function PortfolioPerformanceDashboard({ userId, snapshot, isAr }
             {ranking.map(row => <tr key={row.symbol} className="border-t border-zinc-200 dark:border-white/10"><td className="p-3 font-black"><a href={`/stocks/${row.symbol.toLowerCase()}`} className="hover:underline">{row.symbol}</a><span className="mt-1 block text-[10px] font-normal text-zinc-500">{row.priceDate || "—"}</span></td><td className="p-3 font-mono">{money(row.value)}</td><td className="p-3 font-mono">{completeValues && knownValue > 0 && row.value !== null ? pct(row.value / knownValue * 100) : "—"}</td><td className={`p-3 font-mono ${row.profit !== null && row.profit < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>{money(row.profit)}<span className="block text-[10px]">{pct(row.profitPct)}</span></td></tr>)}
           </tbody></table>
         </div>}
-        <p className="text-[11px] leading-relaxed text-zinc-500">{isAr ? "سجل البيع خاص بحسابك ولا يُخزّن في كاش عام. مقارنة السوق محسوبة من الأسعار اليومية المخزّنة؛ تغيير الفترة لا يرسل طلباً جديداً. الأرقام قبل الرسوم والضرائب، وليست توصية استثمارية." : "Your sale history is private and never publicly cached. Comparisons use cached daily market prices; changing periods sends no new request. Figures exclude fees and taxes, and are not investment advice."}</p>
+        <p className="text-[11px] leading-relaxed text-zinc-500">{isAr ? "سجل البيع خاص بحسابك ولا يُخزّن في كاش عام. مقارنة السوق محسوبة من الأسعار اليومية المخزّنة؛ تغيير الفترة لا يرسل طلباً جديداً. أرباح البيع تشمل العمولات المسجلة فقط؛ المقارنة تستبعد الرسوم والضرائب." : "Your sale history is private and never publicly cached. Comparisons use cached daily market prices; changing periods sends no new request. Recorded sale profits include saved fees only; the comparison excludes fees and taxes."}</p>
       </>}
     </div>}
   </div>;

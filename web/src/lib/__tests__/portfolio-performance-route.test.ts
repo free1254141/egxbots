@@ -40,3 +40,11 @@ it("fails closed and preserves private cache policy on upstream errors", async (
   expect(await response.json()).toEqual({ error: "Portfolio performance unavailable" });
   log.mockRestore();
 });
+
+it('serves the full performance report to a verified Free account without a Pro gate', async () => {
+  (getViewerContext as jest.Mock).mockResolvedValue({userId:'free-owner',isPro:false});
+  (loadPortfolioPerformance as jest.Mock).mockResolvedValue({daily:{change:10},transactions:[]});
+  const response=await GET(new NextRequest('http://localhost/api/portfolio/performance'));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({daily:{change:10},transactions:[]});
+});

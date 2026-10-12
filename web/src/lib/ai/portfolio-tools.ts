@@ -48,10 +48,10 @@ export interface PortfolioSnapshot {
     totals: {
         positions_count: number;
         cost_basis: number | null;
-        market_value: number;
+        market_value: number | null;
         profit_value: number | null;
         profit_pct: number | null;
-        equity: number;
+        equity: number | null;
     };
     analysis?: {
         top_symbol: string | null;
@@ -96,6 +96,7 @@ async function canAddPortfolioPositions(supabase: any, userId: string, additiona
 }
 
 const num = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
 };
@@ -218,6 +219,7 @@ export async function getPortfolioSnapshot(supabase: any, userId: string): Promi
     const positions = allPositions.filter(isRealHolding);
     const cash = await fetchCashBalance(supabase, userId);
     const latestPrices = new Map<string, number | null>();
+    const priceDates = new Map<string, string | null>();
 
     if (positions.length > 0) {
         try {
@@ -243,6 +245,7 @@ export async function getPortfolioSnapshot(supabase: any, userId: string): Promi
                 const symbol = String(row.symbol || "").toUpperCase();
                 if (symbol && !latestPrices.has(symbol)) {
                     latestPrices.set(symbol, num(row.close));
+                    priceDates.set(symbol, latestDate);
                 }
             }
         } catch {
@@ -252,12 +255,13 @@ export async function getPortfolioSnapshot(supabase: any, userId: string): Promi
                 try {
                     const { data: priceRow } = await supabase
                         .from("stock_prices")
-                        .select("close")
+                        .select("close,date")
                         .eq("symbol", pos.symbol)
                         .eq("exchange", "EGX")
                         .order("date", { ascending: false })
                         .limit(1);
                     latestPrices.set(pos.symbol, num(priceRow?.[0]?.close));
+                    priceDates.set(pos.symbol, priceRow?.[0]?.date || null);
                 } catch {
                     latestPrices.set(pos.symbol, null);
                 }
@@ -285,21 +289,23 @@ export async function getPortfolioSnapshot(supabase: any, userId: string): Promi
         const profitValue = costBasis !== null && marketValue !== null ? marketValue - costBasis : null;
         const profitPct = costBasis && costBasis > 0 && profitValue !== null ? (profitValue / costBasis) * 100 : null;
 
-        enriched.push({ ...pos, last_price: lastPrice, market_value: marketValue, cost_basis: costBasis, profit_pct: profitPct, profit_value: profitValue, price_source: live?.success ? "live" : lastPrice !== null ? "stock_prices" : "unavailable", price_updated_at: live?.data?.updated_at || null });
+        enriched.push({ ...pos, last_price: lastPrice, market_value: marketValue, cost_basis: costBasis, profit_pct: profitPct, profit_value: profitValue, price_source: live?.success ? "live" : lastPrice !== null ? "stock_prices" : "unavailable", price_updated_at: live?.data?.updated_at || priceDates.get(pos.symbol) || null });
     }
 
     const hasUnknownCost = enriched.some((p) => p.cost_basis === null);
     const totalCost = hasUnknownCost ? null : enriched.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
-    const totalValue = enriched.reduce((sum, p) => sum + (p.market_value || 0), 0);
-    const totalProfit = totalCost === null ? null : totalValue - totalCost;
-    const equity = totalValue + cash;
+    const hasUnknownValue = enriched.some(p => p.market_value === null);
+    const knownValue = enriched.reduce((sum, p) => sum + (p.market_value || 0), 0);
+    const totalValue = hasUnknownValue ? null : knownValue;
+    const totalProfit = totalCost === null || totalValue === null ? null : totalValue - totalCost;
+    const equity = totalValue === null ? null : totalValue + cash;
     const topPosition = [...enriched].sort((a, b) => (b.market_value || 0) - (a.market_value || 0))[0];
-    const topPositionPct = equity > 0 ? ((topPosition?.market_value || 0) / equity) * 100 : 0;
-    const cashPct = equity > 0 ? (cash / equity) * 100 : 0;
+    const topPositionPct = equity !== null && equity > 0 ? ((topPosition?.market_value || 0) / equity) * 100 : 0;
+    const cashPct = equity !== null && equity > 0 ? (cash / equity) * 100 : 0;
     const diversification = enriched.length >= 5 && topPositionPct < 40 ? "جيد" : enriched.length >= 3 && topPositionPct < 60 ? "متوسط" : "منخفض";
     const suggestions: string[] = [];
     if (topPositionPct >= 50 && topPosition?.symbol) suggestions.push(`مركز ${topPosition.symbol} يمثل ${fmt(topPositionPct, 1)}% من قيمة المحفظة؛ راجع التركيز قبل زيادة المركز.`);
-    if (cashPct < 10 && equity > 0) suggestions.push("السيولة أقل من 10% من قيمة المحفظة؛ احتفظ باحتياطي مناسب حسب خطتك.");
+    if (cashPct < 10 && equity !== null && equity > 0) suggestions.push("السيولة أقل من 10% من قيمة المحفظة؛ احتفظ باحتياطي مناسب حسب خطتك.");
     if (enriched.length < 3 && enriched.length > 0) suggestions.push("عدد المراكز قليل؛ التنويع بين أكثر من سهم وقطاع قد يقلل أثر هبوط سهم واحد.");
 
     return {
@@ -318,7 +324,7 @@ export async function getPortfolioSnapshot(supabase: any, userId: string): Promi
             market_value: totalValue,
             profit_value: totalProfit,
             profit_pct: totalCost && totalCost > 0 && totalProfit !== null ? (totalProfit / totalCost) * 100 : null,
-            equity: totalValue + cash,
+            equity,
         },
         analysis: {
             top_symbol: topPosition?.symbol || null,

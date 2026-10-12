@@ -15,7 +15,8 @@
     "test:live": "node scripts/verify-chat-production.cjs",
     "test:planner-compare": "node scripts/run-planner-compare.js",
     "test:production-chat": "node scripts/verify-chat-production.cjs",
-    "test:provider": "node scripts/run-live-tests.js"
+    "test:provider": "node scripts/run-live-tests.js",
+    "test:portfolio-db": "node scripts/test-portfolio-ledger.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -56,6 +57,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",

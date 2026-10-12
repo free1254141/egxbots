@@ -433,3 +433,12 @@ describe("Portfolio intent with attached pronouns and fund wording", () => {
         expect(detectPortfolioIntent("تحليل سهم COMI")).toBeNull();
     });
 });
+
+it('does not turn a missing holding price into a zero valuation, false loss or known equity', async () => {
+    const sb = makeSupabaseMock({ positions: [{user_id:'user_1',symbol:'COMI',quantity:10,entry_price:8}], prices: {}, profile:{cash_balance:200} });
+    const snapshot = await getPortfolioSnapshot(sb,'user_1');
+    expect(snapshot.positions[0].last_price).toBeNull();
+    expect(snapshot.totals.market_value).toBeNull();
+    expect(snapshot.totals.profit_value).toBeNull();
+    expect(snapshot.totals.equity).toBeNull();
+});

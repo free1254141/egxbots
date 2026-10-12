@@ -67,6 +67,7 @@ function clientMock(dataByTable: Record<string, any[]>) {
     const call: (typeof calls)[number] = { table, filters: {} }; calls.push(call);
     const chain: any = {
       select: (columns: string) => { call.columns = columns; return chain; },
+      in: () => chain,
       eq: (key: string, value: unknown) => { call.filters[key] = value; return chain; },
       order: () => chain, limit: (value: number) => { call.limit = value; return chain; },
       range: (from: number, to: number) => { call.range = [from, to]; return chain; },
@@ -81,16 +82,16 @@ describe("private/public data separation", () => {
     const publicClient = clientMock({ stock_prices: prices([100, 110]) });
     await loadPortfolioPerformance(privateClient, publicClient, "owner-A");
     expect(privateClient.calls.every(call => call.filters.user_id === "owner-A")).toBe(true);
-    expect(publicClient.calls.every(call => call.table === "stock_prices" && !Object.hasOwn(call.filters, "user_id"))).toBe(true);
+    expect(publicClient.calls.every(call => ["stock_prices","stocks"].includes(call.table) && !Object.hasOwn(call.filters, "user_id"))).toBe(true);
     expect(publicClient.calls.map(call => call.filters)).toContainEqual({ symbol: "EGX30", exchange: "INDX" });
-    expect(publicClient.calls[0].limit).toBe(300);
+    expect(publicClient.calls.find(call=>call.table==="stock_prices")?.limit).toBe(300);
   });
   it("paginates sale history beyond the default 1,000-row result limit", async () => {
     const privateClient = clientMock({ positions: [], position_events: Array.from({ length: 1001 }, (_, i) => ({ ...sale({ quantity: 1, entry_price: 10, sell_price: 11 }), id: String(i) })) });
     const result = await loadPortfolioPerformance(privateClient, clientMock({ stock_prices: prices([100, 110]) }), "owner-A");
     expect(result.knownSales).toBe(1001);
     expect(result.realized).toBe(1001);
-    expect(privateClient.calls.filter(call => call.table === "position_events")).toHaveLength(2);
+    expect(privateClient.calls.filter(call => call.table === "position_events" && call.range)).toHaveLength(2);
   });
   it("rejects upstream errors instead of presenting a successful zero-profit report", async () => {
     const market = { from: () => {

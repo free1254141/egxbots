@@ -7,9 +7,12 @@ import { Wallet, TrendingUp, TrendingDown } from "lucide-react";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 
 const compact = (value: number | undefined | null): string => {
-  if (value === undefined || value === null || !Number.isFinite(value)) return "0";
-  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}M`;
-  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}K`;
+  if (value === undefined || value === null || !Number.isFinite(value))
+    return "—";
+  if (Math.abs(value) >= 1_000_000)
+    return `${(value / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 2 })}M`;
+  if (Math.abs(value) >= 1_000)
+    return `${(value / 1_000).toLocaleString("en-US", { maximumFractionDigits: 1 })}K`;
   return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
 };
 
@@ -25,16 +28,17 @@ export default function PortfolioHeaderChip() {
 
   if (!user) return null;
 
-  const hasHoldings = Array.isArray(snapshot?.positions) && snapshot.positions.length > 0;
+  const hasHoldings =
+    Array.isArray(snapshot?.positions) && snapshot.positions.length > 0;
   const hasCash = (snapshot?.cash_balance || 0) > 0;
-  const equity = snapshot?.totals?.equity ?? 0;
-  const profit = snapshot?.totals?.profit_value ?? 0;
-  const profitPct = snapshot?.totals?.profit_pct ?? 0;
+  const equity = snapshot?.totals?.equity ?? null;
+  const profit = snapshot?.totals?.profit_value ?? null;
+  const profitPct = snapshot?.totals?.profit_pct ?? null;
 
   // Nothing configured yet → keep the navbar clean
   if (!hasHoldings && !hasCash) return null;
 
-  const isProfit = profit >= 0;
+  const isProfit = profit !== null && profit >= 0;
 
   return (
     <Link
@@ -44,13 +48,17 @@ export default function PortfolioHeaderChip() {
     >
       <Wallet className="w-3.5 h-3.5 shrink-0" />
       <span className="font-mono">{compact(equity)}</span>
-      {isProfit ? (
+      {profit === null ? null : isProfit ? (
         <TrendingUp className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
       ) : (
         <TrendingDown className="w-3 h-3 text-rose-600 dark:text-rose-400 shrink-0" />
       )}
-      <span className={`font-mono ${isProfit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-        {isProfit ? "+" : ""}{profitPct.toFixed(1)}%
+      <span
+        className={`font-mono ${profitPct === null ? "text-zinc-500" : isProfit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+      >
+        {profitPct === null
+          ? "—"
+          : `${isProfit ? "+" : ""}${profitPct.toFixed(1)}%`}
       </span>
     </Link>
   );

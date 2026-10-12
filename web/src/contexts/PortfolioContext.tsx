@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAuth } from "./AuthContext";
 
 export type PortfolioRow = {
@@ -14,13 +22,22 @@ export type PortfolioRow = {
   cost_basis: number | null;
   profit_pct: number | null;
   profit_value: number | null;
+  price_updated_at?: string | null;
+  price_source?: "live" | "stock_prices" | "unavailable";
 };
 
 export type PortfolioSnapshot = {
   ok: boolean;
   positions: PortfolioRow[];
   cash_balance: number;
-  totals: { positions_count: number; cost_basis: number; market_value: number; profit_value: number; profit_pct: number; equity: number };
+  totals: {
+    positions_count: number;
+    cost_basis: number | null;
+    market_value: number | null;
+    profit_value: number | null;
+    profit_pct: number | null;
+    equity: number | null;
+  };
   market_symbols?: Array<{ symbol: string; name: string | null }>;
   portfolio_limit?: number | null;
   is_pro?: boolean;
@@ -36,26 +53,50 @@ const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [stored, setStored] = useState<{
+    owner: string;
+    snapshot: PortfolioSnapshot;
+  } | null>(null);
+  const snapshot = stored && stored.owner === user?.id ? stored.snapshot : null;
+  const generation = useRef(0);
   const [loading, setLoading] = useState(false);
 
-  const refresh = useCallback(async (force = false) => {
-    if (!user) { setSnapshot(null); return; }
-    setLoading(true);
-    try {
-      const response = await fetch("/api/portfolio", { cache: "no-store" });
-      if (response.ok) setSnapshot(await response.json());
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => { void refresh(); }, [refresh]);
+  const refresh = useCallback(
+    async (force = false) => {
+      const version = ++generation.current;
+      if (!user) {
+        setStored(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const response = await fetch("/api/portfolio", { cache: "no-store" });
+        if (response.ok) {
+          const next = await response.json();
+          if (generation.current === version)
+            setStored({ owner: user.id, snapshot: next });
+        }
+      } finally {
+        if (generation.current === version) setLoading(false);
+      }
+    },
+    [user?.id],
+  );
 
   useEffect(() => {
-    const handleUpdated = () => { void refresh(true); };
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const handleUpdated = () => {
+      void refresh(true);
+    };
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
+      if (
+        e.key === "egx_entitlements_timestamp" ||
+        e.key === "egx_pro_active"
+      ) {
         void refresh(true);
       }
     };
@@ -69,11 +110,16 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
-  return <PortfolioContext.Provider value={{ snapshot, loading, refresh }}>{children}</PortfolioContext.Provider>;
+  return (
+    <PortfolioContext.Provider value={{ snapshot, loading, refresh }}>
+      {children}
+    </PortfolioContext.Provider>
+  );
 }
 
 export function usePortfolio() {
   const context = useContext(PortfolioContext);
-  if (!context) throw new Error("usePortfolio must be used inside PortfolioProvider");
+  if (!context)
+    throw new Error("usePortfolio must be used inside PortfolioProvider");
   return context;
 }

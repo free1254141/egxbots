@@ -10,6 +10,10 @@ import {
 import { toast } from "sonner";
 import { usePortfolio, type PortfolioRow, type PortfolioSnapshot } from "@/contexts/PortfolioContext";
 import PortfolioPerformanceDashboard from "./PortfolioPerformanceDashboard";
+import PortfolioOverview from "./PortfolioOverview";
+import PortfolioTransactions from "./PortfolioTransactions";
+import { usePortfolioReport } from "./usePortfolioReport";
+import styles from "./MyPortfolioSection.module.css";
 
 
 const money = (v: number | null | undefined, digits = 2) => {
@@ -34,6 +38,8 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
 
     const { snapshot, loading, refresh: load } = usePortfolio();
     const [busy, setBusy] = useState(false);
+    const reportState = usePortfolioReport(user?.id || null, snapshot);
+    const [saleDraft,setSaleDraft] = useState<{symbol:string;quantity:number|null;key:number}|null>(null);
 
     // add form (multi-row bulk add)
     interface AddRow {
@@ -141,9 +147,8 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
         if (ok) setEditingId(null);
     };
 
-    const handleSell = async (row: PortfolioRow) => {
-        if (!window.confirm(isAr ? `تسجيل بيع كل أسهم ${row.symbol} بسعر آخر إغلاق؟` : `Sell all ${row.symbol} at last close?`)) return;
-        await api({ action: "sell", symbol: row.symbol, quantity: null, price: null });
+    const handleSell = (row: PortfolioRow) => {
+        setSaleDraft({symbol:row.symbol,quantity:row.quantity,key:Date.now()});
     };
 
     const handleRemove = async (row: PortfolioRow) => {
@@ -182,11 +187,12 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
 
     const totals = snapshot?.totals;
     const positions = snapshot?.positions || [];
-    const totalProfit = totals?.profit_value ?? 0;
+    const totalProfit = totals?.profit_value ?? null;
+    const profitTone = totalProfit === null ? "text-zinc-500" : totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
 
     return (
-        <section className="relative z-10 neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)]">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b-4 border-black dark:border-zinc-800 pb-5">
+        <section className="relative z-10 min-w-0 rounded-2xl p-3 sm:p-6 space-y-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-zinc-200 dark:border-zinc-800 pb-5">
                 <div>
                     <div className="flex items-center gap-3 mb-2">
                         <div className="h-10 w-10 border-4 border-black dark:border-white bg-emerald-500 text-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
@@ -202,7 +208,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                             : "Your holdings and cash — edit here or just tell the chatbot"}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <button
                         onClick={() => void load()}
                         className="h-10 w-10 flex items-center justify-center border-4 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
@@ -215,7 +221,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                         className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
                     >
                         <Plus className="h-4 w-4" />
-                        {isAr ? "إضافة سهم" : "Add Stock"}
+                        {isAr ? "إضافة حيازة" : "Add Holding"}
                     </button>
                     <button
                         onClick={() => {
@@ -231,23 +237,23 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
             </div>
 
             {/* Summary tiles */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950/35 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "القيمة السوقية" : "Market Value"}</span>
                     <span className="text-lg font-black text-black dark:text-white font-mono">{money(totals?.market_value)}</span>
                     <span className="text-[9px] text-zinc-500 font-bold block">{isAr ? "ج.م" : "EGP"}</span>
                 </div>
-                <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950/35 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "الربح / الخسارة" : "P / L"}</span>
-                    <span className={`text-lg font-black font-mono flex items-center gap-1.5 ${totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                        {totalProfit >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                    <span className={`text-lg font-black font-mono flex items-center gap-1.5 ${profitTone}`}>
+                        {totalProfit === null ? null : totalProfit >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                         {money(totalProfit)}
                     </span>
-                    <span className={`text-[9px] font-black font-mono block ${totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                        {(totals?.profit_pct ?? 0) >= 0 ? "+" : ""}{money(totals?.profit_pct)}%
+                    <span className={`text-[9px] font-black font-mono block ${profitTone}`}>
+                        {totals?.profit_pct != null && totals.profit_pct >= 0 ? "+" : ""}{money(totals?.profit_pct)}%
                     </span>
                 </div>
-                <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950/35 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "السيولة" : "Cash"}</span>
                     {editingCash ? (
                         <div className="flex items-center gap-1.5">
@@ -278,7 +284,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                         </button>
                     )}
                 </div>
-                <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950/35 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
+                <div className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/35 p-3">
                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mb-1">{isAr ? "إجمالي المحفظة" : "Total Equity"}</span>
                     <span className="text-lg font-black text-black dark:text-white font-mono flex items-center gap-1.5">
                         <BadgeDollarSign className="w-4 h-4 text-indigo-500" />
@@ -288,17 +294,20 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                 </div>
             </div>
 
-            <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} />
+            <PortfolioOverview report={reportState.report} snapshot={snapshot} isAr={isAr} loading={reportState.loading} error={reportState.error} onRefresh={reportState.refresh} />
+            <PortfolioPerformanceDashboard userId={user?.id || null} snapshot={snapshot} isAr={isAr} supplied={reportState} />
+            <PortfolioTransactions snapshot={snapshot} events={reportState.report?.transactions || []} isAr={isAr} initialSale={saleDraft}
+                onSaved={async()=>{ await load(true); reportState.refresh(); onPortfolioUpdated?.(); }} />
 
             {/* Add form — Multi-stock bulk add */}
             {showAdd && (
                 <div className="border-4 border-dashed border-black/50 dark:border-white/40 bg-emerald-50 dark:bg-emerald-950/20 p-4 sm:p-5 space-y-4">
                     <div className="flex items-center justify-between border-b-2 border-emerald-200 dark:border-emerald-800 pb-2">
                         <span className="font-black text-xs uppercase tracking-widest text-emerald-800 dark:text-emerald-300">
-                            {isAr ? "إضافة أسهمك دفعة واحدة" : "Bulk Add Portfolio Stocks"}
+                            {isAr ? "إضافة حيازاتك الحالية" : "Import current holdings"}
                         </span>
                         <span className="text-[11px] font-bold text-zinc-500">
-                            {isAr ? "أضف كل أسهمك واضغط حفظ مرة واحدة" : "Add all your stocks and save once"}
+                            {isAr ? "تسجيل حيازات موجودة؛ لا يخصم ثمن شراء من السيولة" : "Record existing holdings; no purchase cost is deducted from cash"}
                         </span>
                     </div>
 
@@ -426,9 +435,9 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                 </div>
             ) : (
                 <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className={`${styles.holdings} w-full text-sm`}>
                         <thead>
-                            <tr className="border-b-4 border-black dark:border-zinc-800 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                            <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-500 uppercase tracking-widest">
                                 <th className="py-3 pr-3 text-right">{isAr ? "السهم" : "Stock"}</th>
                                 <th className="py-3 px-2 text-right">{isAr ? "العدد" : "Qty"}</th>
                                 <th className="py-3 px-2 text-right">{isAr ? "متوسط الشراء" : "Avg Cost"}</th>
@@ -444,37 +453,38 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                                 const profitPositive = (row.profit_value ?? 0) >= 0;
                                 return (
                                     <tr key={row.id} className="border-b-2 border-zinc-200 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-950/40 transition-colors">
-                                        <td className="py-3 pr-3">
+                                        <td data-label={isAr ? "السهم" : "Stock"} className="py-3 pr-3">
                                             <div className="flex items-center gap-2">
                                                 <span className="font-black text-black dark:text-white uppercase">{row.symbol}</span>
                                                 {row.name && <span className="text-[10px] text-zinc-500 font-bold truncate max-w-[140px] hidden sm:block">{row.name}</span>}
                                             </div>
                                         </td>
-                                        <td className="py-3 px-2 font-mono font-bold text-black dark:text-white">
+                                        <td data-label={isAr ? "العدد" : "Quantity"} className="py-3 px-2 font-mono font-bold text-black dark:text-white">
                                             {isEditing ? (
                                                 <input value={editQty} onChange={(e) => setEditQty(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.quantity ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
                                             ) : (
                                                 money(row.quantity, 0)
                                             )}
                                         </td>
-                                        <td className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">
+                                        <td data-label={isAr ? "متوسط الشراء" : "Average cost"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">
                                             {isEditing ? (
                                                 <input value={editPrice} onChange={(e) => setEditPrice(numericOnly(e.target.value))} inputMode="decimal" placeholder={String(row.entry_price ?? "")} className="h-8 w-20 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-2 text-xs font-mono outline-none" />
                                             ) : (
                                                 money(row.entry_price)
                                             )}
                                         </td>
-                                        <td className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">{money(row.last_price)}</td>
-                                        <td className="py-3 px-2 font-mono font-black text-black dark:text-white">{money(row.market_value)}</td>
-                                        <td className="py-3 px-2">
-                                            <div className={`font-mono font-black ${profitPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                                                {profitPositive ? "+" : ""}{money(row.profit_value)}
+                                        <td data-label={isAr ? "آخر سعر" : "Last price"} className="py-3 px-2 font-mono text-zinc-600 dark:text-zinc-300">{money(row.last_price)}
+                                            <span className="mt-1 block text-[11px] text-zinc-500">{row.price_updated_at ? row.price_updated_at.slice(0,10) : (isAr ? "تاريخ السعر غير متاح" : "Price date unavailable")}</span></td>
+                                        <td data-label={isAr ? "القيمة" : "Value"} className="py-3 px-2 font-mono font-black text-black dark:text-white">{money(row.market_value)}</td>
+                                        <td data-label={isAr ? "الربح/الخسارة" : "P/L"} className="py-3 px-2">
+                                            <div className={`font-mono font-black ${row.profit_value === null ? "text-zinc-500" : profitPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                                {row.profit_value !== null && profitPositive ? "+" : ""}{money(row.profit_value)}
                                             </div>
-                                            <div className={`text-[10px] font-bold font-mono ${profitPositive ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-rose-600/80 dark:text-rose-400/80"}`}>
-                                                {(row.profit_pct ?? 0) >= 0 ? "+" : ""}{money(row.profit_pct)}%
+                                            <div className={`text-[10px] font-bold font-mono ${row.profit_pct === null ? "text-zinc-500" : profitPositive ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-rose-600/80 dark:text-rose-400/80"}`}>
+                                                {row.profit_pct !== null && row.profit_pct >= 0 ? "+" : ""}{money(row.profit_pct)}%
                                             </div>
                                         </td>
-                                        <td className="py-3 pl-3">
+                                        <td data-label={isAr ? "إجراءات" : "Actions"} className="py-3 pl-3">
                                             <div className="flex items-center justify-end gap-1.5">
                                                 {isEditing ? (
                                                     <>
