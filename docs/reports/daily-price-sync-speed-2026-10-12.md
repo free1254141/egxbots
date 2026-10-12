@@ -62,6 +62,7 @@ performed as a test.
 
 Previous HF: `50d033b0cdc6ba4393f4279dbe33270f061b174d`.
 Uploaded HF: `81d0ac7ec5c90a0509ea86edf60e1763e9e224bf`.
+Git runtime/tests commit: `3d5ad0d759eeecd9d4a0f3069f75ca977cac36f6` (pushed to main).
 Only the four runtime Python files above were uploaded in one commit. Models,
 cache snapshots, secrets and development tests were excluded.
 
@@ -70,6 +71,13 @@ run. Upload success alone does not confirm runtime readiness. Later stages of th
 run must not be claimed complete: existing recovery of a started price stage does
 not guarantee all never-started stages will execute. No manual ledger rewrite or
 full replay was issued.
+
+Post-deployment verification at approximately 18:32 Cairo: HF runtime and runtime
+SHA matched the uploaded revision, stage was `RUNNING`, domain was `READY`, and
+`/health` returned HTTP 200 with `{"status":"ok"}`. The interrupted old run was
+marked `failed`, completed_at 18:31:25 Cairo; this is not successful completion
+of today's full daily pipeline. No production duration/coverage improvement has
+yet been measured with the new code.
 
 Rollback restores the same four paths from the previous HF revision in one commit.
 It restores former retries/deadlines/concurrency/progress behavior; it does not undo
