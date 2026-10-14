@@ -108,8 +108,8 @@ describe("Agentic architecture integration: current production path", () => {
             {content:"get_comparison"},verdict(),{content:"get_comparison"},verdict()], {
             userMessage:"قارن COMI وSWDY",db:d,summary:{last_tool_evidence:[{...previous,captured_at:new Date().toISOString()}]}});
         expect(r.done.response_origin).toBe("safe_fallback");
-        expect(r.done.response).toContain("| البند | COMI | SWDY |");
-        expect(r.done.response).toContain("| RSI(14) | 45 | 45 |");
+        expect(r.done.response).toContain("**COMI**");expect(r.done.response).toContain("**SWDY**");expect(r.done.response).not.toContain("| البند |");
+        expect(r.done.response.match(/القوة النسبية 45/g)).toHaveLength(2);
         expect(r.done.response).not.toContain("TMGH");
         const repair = JSON.parse(r.fetchMock.mock.calls[3][1].body);
         expect(repair.messages.at(-1).content).toContain('"current_request":"قارن COMI وSWDY"');
@@ -294,7 +294,7 @@ describe("Agentic architecture integration: current production path", () => {
     test("false reviewer approval cannot authorize fabricated price", async () => {
         const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]}, {content:"سعر COMI الحالي 9999 جنيه"},verdict(),
             {content:"سعر COMI الحالي 9999 جنيه"},verdict()],{db:stockDb()});
-        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999"); expect(r.done.response).toContain("| COMI | 100 | 2026-10-08 |");
+        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999"); expect(r.done.response).toContain("آخر إغلاق متاح 100 جنيه بتاريخ 2026-10-08");expect(r.done.response).not.toContain("| السهم |");
         expect(r.events.filter(e=>e.type === "token").every(e=>!String(e.data).includes("9999"))).toBe(true);
     });
     test("review rejection is repaired once and verified again", async () => {

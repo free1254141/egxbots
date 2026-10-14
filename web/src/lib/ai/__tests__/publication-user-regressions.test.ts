@@ -186,16 +186,16 @@ test('current comparison supersedes stale symbol snapshots and lowest RSI is not
     expect(checkAgenticDraft('الأقرب إلى حد RSI 30 هو ADIB.',[current])).toContain('rsi_oversold_proximity_ranking_contradiction:ADIB');
 });
 
-test('comparison fallback keeps validated daily metrics instead of dropping them',()=>{
+test('comparison recovery explains verified snapshots instead of dumping indicator tables',()=>{
     const comparison=toAgenticEvidence('get_comparison',{}, {status:'success',comparison:[
         {symbol:'ORAS',date:'2026-10-07',close:877.02,change_pct:4.0368,rsi_14:49.5735,macd:7.37147,macd_signal:6.272861,macd_histogram:1.098609,ema_50:802.155491,ema_200:661.690728,r_vol:1.2},
         {symbol:'ETEL',date:'2026-10-07',close:148,change_pct:-1.2543,rsi_14:69.685,macd:7.404529,macd_signal:6.445679,macd_histogram:0.958849,ema_50:125.288723,ema_200:98.198074,r_vol:0.8},
     ]});
     const fallback=safeAgenticFallback([comparison],'تعذر التحقق من الصياغة.');
-    expect(fallback).toContain('| الإغلاق | 877.02 جنيه | 148 جنيه |');
-    expect(fallback).toContain('| خط الإشارة | 6.272861 | 6.445679 |');
+    expect(fallback).toContain('آخر إغلاق متاح 877.02 جنيه');expect(fallback).toContain('آخر إغلاق متاح 148 جنيه');
+    expect(fallback).toContain('MACD فوق خط إشارته');expect(fallback).toContain('القوة النسبية 49.57');expect(fallback).not.toContain('| البند |');
     expect(fallback).toContain('2026-10-07');
-    expect(fallback).toContain('ليست أسعاراً لحظية');
+    expect(fallback).toContain('ليست أسعارًا لحظية');
 });
 
 test.each(['ABUK,ADIB,CIEB','ABUK,CIEB,ADIB','ADIB,ABUK,CIEB','ADIB,CIEB,ABUK','CIEB,ABUK,ADIB','CIEB,ADIB,ABUK'])

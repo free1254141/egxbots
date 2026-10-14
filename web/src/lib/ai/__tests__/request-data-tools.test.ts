@@ -115,7 +115,7 @@ test('distribution score 30 is grounded in its own field, not portfolio allocati
  expect(checkAgenticDraft(draft.replace('| 30 |','| 31 |'),[e])).toContain('table_value_not_grounded:ABUK:31');
  const fallback=safeAgenticFallback([toAgenticEvidence('get_stock',{}, {stocks:[{symbol:'ABUK',close:84.33,date:'2026-10-13',rsi_14:31.06,macd:0.093,macd_signal:0.997}]}),
   toAgenticEvidence('get_stock_levels',{}, {levels:[{symbol:'ABUK',close:84.33,date:'2026-10-13',support:83,resistance:96.29}]})],'');
- expect(fallback).toContain('RSI = 31.06');expect(fallback).toContain('الدعم = 83');
+ expect(fallback).toContain('القوة النسبية 31.06');expect(fallback).toContain('الدعم عند 83');expect(fallback).toContain('MACD تحت خط إشارته');expect(fallback).not.toContain('RSI =');
 });
 
 test('closed classic identity remains locked for Free within the settlement delay',()=>{
