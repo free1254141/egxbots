@@ -77,3 +77,30 @@ the inventory contains ambiguous duplicates, so an automatic merge would risk
 mixing instruments/share classes. Exact original-symbol EODHD fallback avoids
 that substitution. Preserve explicit missing-data states when both sources lack
 a session bar.
+
+## Deployment ledger
+
+- Local implementation commit: 2d910eb0a321f854d5c18126ecfbe9f4595c4bee.
+- First isolated HF patch: de1db3d961730b53087a7580daea006ee6ad0924;
+  all5 uploaded file hashes matched the tested isolated bundle.
+- The user then explicitly requested the latest complete HF runtime. Compared
+  tracked Python/config/runtime files with the HF snapshot, normalized line endings
+  before comparing, and excluded frontend, models, secrets and scratch/manual
+  send utilities.19 file operations were submitted in one atomic commit:
+  c859ebb90faacdec54310407be0d40af5a4b5478.
+- This second deployment supersedes the isolated-bundle boundary: it includes
+  the latest RSS budgets/progress, early short monitoring, observed entry quotes,
+  flat nontrading quote handling and liquidity protections from local Git.
+- All18 production runtime/config files were read back at the exact revision and
+  matched the staged bytes. HF ignored scripts/check_secrets.py under its upload
+  ignore rules; this development-only scanner is not a runtime dependency and was
+  executed locally before publishing. No ignore rule was weakened to upload it.
+- 118 additional targeted offline RSS/liquidity/continuation/inventory tests and
+  17 social/outcome tests passed:204 local tests total with the original69.
+  Credential scan and Python compilation passed; runtime file bytes matched HEAD
+  before upload. Concurrent frontend commit c4b9d94c did not change these files.
+- Runtime readiness: HF reported revision c859ebb90faacdec54310407be0d40af5a4b5478
+  RUNNING after the build. GET https://weeasdwee-ai-bot.hf.space/health returned
+  HTTP200 and {"status":"ok"}. This proves startup/health of the deployed service;
+  the next scheduled cycle is still required to measure actual provider coverage.
+  No full production cycle was replayed for verification.
