@@ -246,7 +246,7 @@ export default function Header() {
         router.push(`/stocks/${baseSym}`);
     };
 
-    if (pathname === "/antigrafity" || pathname?.startsWith("/antigrafity")) {
+    if (pathname === "/antigrafity" || pathname?.startsWith("/antigrafity") || pathname === "/chat" || pathname?.startsWith("/chat")) {
         return null;
     }
 

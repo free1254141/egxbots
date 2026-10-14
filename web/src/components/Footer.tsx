@@ -10,7 +10,7 @@ export default function Footer() {
   const isAr = language === "ar";
   const pathname = usePathname();
 
-  if (pathname === "/antigrafity" || pathname?.startsWith("/antigrafity")) {
+  if (pathname === "/antigrafity" || pathname?.startsWith("/antigrafity") || pathname === "/chat" || pathname?.startsWith("/chat")) {
     return null;
   }
 

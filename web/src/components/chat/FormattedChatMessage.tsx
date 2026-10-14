@@ -440,7 +440,7 @@ function renderTableCell(cellText: string) {
     const isTicker = /^[A-Za-z]{2,6}$|^[A-Za-z]+[0-9]+[A-Za-z]*$/.test(clean) && !/^(RSI|MACD|EMA|SMA|EGX|AI|KING|VOL|EGP|BUY|SELL|HOLD)$/i.test(clean);
     if (isTicker) {
         return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-black text-[11px] sm:text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-950 dark:text-zinc-50 border border-zinc-200 dark:border-zinc-700 shadow-sm">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-black text-[11px] sm:text-xs bg-zinc-100 dark:bg-black text-zinc-950 dark:text-white border border-zinc-200 dark:border-white/30 shadow-sm">
                 {clean.toUpperCase()}
             </span>
         );
@@ -458,8 +458,8 @@ function renderTableCell(cellText: string) {
 function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
     const [copied, setCopied] = useState(false);
     return (
-        <div className="my-3.5 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-950 shadow-md max-w-full">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-gradient-to-r from-zinc-50 to-zinc-100 dark:from-zinc-900/90 dark:to-zinc-900/60 border-b border-zinc-200 dark:border-zinc-800 min-w-0">
+        <div className="my-3.5 border border-zinc-200 dark:border-white/20 rounded-xl overflow-hidden bg-white dark:bg-black shadow-md max-w-full">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-gradient-to-r from-zinc-50 to-zinc-100 dark:from-black dark:to-zinc-950 border-b border-zinc-200 dark:border-white/20 min-w-0">
                 <div className="flex items-center gap-2">
                     <div className="p-1 rounded-md bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
                         <FileSpreadsheet className="w-4 h-4" />
@@ -467,7 +467,7 @@ function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][
                     <span className="text-xs font-black text-zinc-900 dark:text-zinc-100">
                         جدول البيانات والتحليل
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-zinc-200 dark:bg-black text-zinc-600 dark:text-zinc-200 dark:border dark:border-white/20 font-bold">
                         {rows.length} {rows.length === 1 ? "صف" : rows.length === 2 ? "صفين" : rows.length <= 10 ? "صفوف" : "صف"}
                     </span>
                 </div>
@@ -488,27 +488,27 @@ function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][
             <div className="w-full max-w-full overflow-x-auto scrollbar-thin">
                 <table className="w-full text-right border-collapse text-xs">
                     <thead>
-                        <tr className="bg-zinc-100/90 dark:bg-zinc-900/90 text-zinc-900 dark:text-zinc-200 border-b border-zinc-200 dark:border-zinc-800">
+                        <tr className="bg-zinc-100/90 dark:bg-black text-zinc-900 dark:text-white border-b border-zinc-200 dark:border-white/20">
                             {headers.map((h, i) => (
                                 <th
                                     key={i}
-                                    className="px-3 py-2.5 text-[11px] sm:text-xs font-extrabold whitespace-nowrap text-zinc-700 dark:text-zinc-300 border-l border-zinc-200/80 dark:border-zinc-800/80 last:border-l-0"
+                                    className="px-3 py-2.5 text-[11px] sm:text-xs font-extrabold whitespace-nowrap text-zinc-700 dark:text-zinc-200 border-l border-zinc-200/80 dark:border-white/15 last:border-l-0"
                                 >
                                     {h.replace(/\*\*/g, "").trim()}
                                 </th>
                             ))}
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-zinc-200/70 dark:divide-zinc-800/70">
+                    <tbody className="divide-y divide-zinc-200/70 dark:divide-white/10">
                         {rows.map((row, rIdx) => (
                             <tr
                                 key={rIdx}
-                                className="even:bg-zinc-50/60 dark:even:bg-zinc-900/30 hover:bg-amber-500/5 dark:hover:bg-amber-500/10 transition-colors"
+                                className="even:bg-zinc-50/60 dark:even:bg-zinc-950/70 hover:bg-amber-500/5 dark:hover:bg-zinc-900/60 transition-colors"
                             >
                                 {row.map((cell, cIdx) => (
                                     <td
                                         key={cIdx}
-                                        className="px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap border-l border-zinc-200/60 dark:border-zinc-800/60 last:border-l-0"
+                                        className="px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap border-l border-zinc-200/60 dark:border-white/10 last:border-l-0"
                                     >
                                         {renderTableCell(cell)}
                                     </td>
@@ -577,7 +577,7 @@ export function FormattedChatMessage({
                             setCopiedText(true);
                             setTimeout(() => setCopiedText(false), 2000);
                         }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-black dark:hover:bg-zinc-900 text-zinc-500 dark:text-zinc-200 dark:border dark:border-white/20 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
                         title="نسخ رسالتك"
                     >
                         {copiedText ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
@@ -631,9 +631,9 @@ export function FormattedChatMessage({
 
             if (isHeading) {
                 const headingClass = headingLevel === 1 
-                    ? "text-base sm:text-lg font-extrabold text-zinc-950 dark:text-zinc-50 my-3 border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                    ? "text-base sm:text-lg font-extrabold text-zinc-950 dark:text-white my-3 border-b border-zinc-200 dark:border-white/20 pb-1"
                     : headingLevel === 2
-                    ? "text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 my-2"
+                    ? "text-sm sm:text-base font-bold text-zinc-900 dark:text-white my-2"
                     : "text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 my-2";
                 
                 const HeadingTag = `h${headingLevel}` as "h1" | "h2" | "h3" | "h4";
@@ -720,7 +720,7 @@ export function FormattedChatMessage({
                                     <span 
                                         key={sIdx} 
                                         dir="ltr" 
-                                        className="inline-block px-1.5 py-0.5 font-mono font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 dark:bg-zinc-800/80 border border-amber-500/20 dark:border-zinc-700 rounded text-[11px] sm:text-xs mx-0.5"
+                                        className="inline-block px-1.5 py-0.5 font-mono font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 dark:bg-black border border-amber-500/20 dark:border-white/30 rounded text-[11px] sm:text-xs mx-0.5"
                                         style={{ unicodeBidi: "isolate" }}
                                     >
                                         {sub}
@@ -731,7 +731,7 @@ export function FormattedChatMessage({
                                     <span 
                                         key={sIdx} 
                                         dir="ltr" 
-                                        className="inline-block px-1 py-0.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-zinc-800/80 rounded text-[11px] sm:text-xs mx-0.5"
+                                        className="inline-block px-1 py-0.5 font-mono font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 dark:bg-black dark:border dark:border-emerald-500/30 rounded text-[11px] sm:text-xs mx-0.5"
                                         style={{ unicodeBidi: "isolate" }}
                                     >
                                         {sub}
@@ -752,7 +752,7 @@ export function FormattedChatMessage({
             return (
                 <div 
                     key={idx} 
-                    className={`leading-relaxed text-xs sm:text-sm break-words overflow-wrap-anywhere my-1 dir-auto text-zinc-900 dark:text-zinc-100 ${isBullet ? 'flex items-start gap-2 pr-2' : ''} ${isTableLine ? 'font-mono text-[11px] bg-zinc-100/80 dark:bg-zinc-900/80 p-1 rounded overflow-x-auto' : ''}`}
+                    className={`leading-relaxed text-xs sm:text-sm break-words overflow-wrap-anywhere my-1 dir-auto text-zinc-900 dark:text-zinc-100 ${isBullet ? 'flex items-start gap-2 pr-2' : ''} ${isTableLine ? 'font-mono text-[11px] bg-zinc-100/80 dark:bg-black dark:border dark:border-white/20 p-1 rounded overflow-x-auto' : ''}`}
                 >
                     {isBullet && <span className="text-emerald-600 dark:text-emerald-400 font-bold mt-1">•</span>}
                     <span className="flex-1">
@@ -853,7 +853,7 @@ export function FormattedChatMessage({
             })}
 
             {mermaidCode && (
-                <div className="my-4 p-4 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-x-auto shadow-sm max-w-full">
+                <div className="my-4 p-4 bg-zinc-100 dark:bg-black border border-zinc-200 dark:border-white/20 rounded-xl overflow-x-auto shadow-sm max-w-full">
                     <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-2 flex items-center gap-1">
                         📊 رسم بياني تفاعلي (Diagram)
                     </div>
@@ -875,7 +875,7 @@ export function FormattedChatMessage({
                             setCopiedText(true);
                             setTimeout(() => setCopiedText(false), 2000);
                         }}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-black dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-white/20 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
                         title="نسخ الرد"
                     >
                         {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -910,7 +910,7 @@ export function FormattedChatMessage({
                             key={bIdx}
                             type="button"
                             onClick={() => onButtonClick(btnText)}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 dark:bg-black dark:hover:bg-zinc-900 text-amber-700 dark:text-amber-300 border border-amber-500/30 dark:border-amber-400/40 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
                         >
                             <Sparkles className="w-3 h-3 text-amber-500" />
                             <span>{btnText}</span>

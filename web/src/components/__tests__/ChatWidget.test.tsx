@@ -6,7 +6,7 @@ const chat = {isOpen: true, setIsOpen: jest.fn(), messages: [], sendMessage, sto
 jest.mock("@/contexts/ChatContext", () => ({useChat: () => chat, AVAILABLE_AI_MODELS: [{id: "deepseek-chat", name: "DeepSeek"}]}));
 jest.mock("@/contexts/AuthContext", () => ({useAuth: () => ({user: {id: "user", email: "test@example.com"}})}));
 jest.mock("@/contexts/LanguageContext", () => ({useLanguage: () => ({language: "ar"})}));
-jest.mock("next/navigation", () => ({useRouter: () => ({push: jest.fn()})}));
+jest.mock("next/navigation", () => ({useRouter: () => ({push: jest.fn()}), usePathname: () => "/"}));
 jest.mock("next/image", () => ({__esModule: true, default: ({priority: _priority, ...props}: any) => <img {...props} />}));
 jest.mock("@/components/chat/ChatSidebar", () => ({ChatSidebar: () => null}));
 jest.mock("@/components/chat/FormattedChatMessage", () => ({FormattedChatMessage: () => null}));

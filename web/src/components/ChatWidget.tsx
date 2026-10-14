@@ -3,7 +3,7 @@
 import { useChat, AVAILABLE_AI_MODELS } from "@/contexts/ChatContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
 import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, Check, PanelLeft, Square, Download, ZoomIn } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -50,6 +50,13 @@ export default function ChatWidget() {
     const { language } = useLanguage();
     const { user } = useAuth();
     const router = useRouter();
+    let pathname = "";
+    try {
+        pathname = typeof usePathname === "function" ? (usePathname() || "") : "";
+    } catch {
+        pathname = "";
+    }
+    const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat");
     const [input, setInput] = useState("");
     const [isExpanded, setIsExpanded] = useState(false);
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
@@ -296,7 +303,7 @@ export default function ChatWidget() {
         await sendMessage(textToSend, currentPreviews.length ? currentPreviews : undefined);
     };
 
-    if (!isOpen) {
+    if (!isOpen && !isChatRoute) {
         return (
             <button
                 onClick={() => setIsOpen(true)}
@@ -311,7 +318,7 @@ export default function ChatWidget() {
 
     return (
         <div 
-            className={`
+            className={isChatRoute ? "fixed inset-0 z-[9999] flex h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0" : `
                 fixed z-[9999] flex gap-1 bg-transparent transition-all duration-300
                 max-md:inset-0 max-md:w-full max-md:h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
                 md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
@@ -336,14 +343,14 @@ export default function ChatWidget() {
             )}
 
             {/* Main Chat Container */}
-            <div className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden rounded-none border-0 bg-[#fffdf2] shadow-none dark:bg-[#09090b] md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/10 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.42)]">
+            <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${isChatRoute ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/80 dark:border-white/10 bg-white/75 dark:bg-slate-950/65 shrink-0">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/80 dark:border-white/20 bg-white/75 dark:bg-black shrink-0">
                     <div className="flex items-center gap-2 text-black font-black uppercase tracking-tight">
                         {user && !isSidebarOpen && (
                             <button
                                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                                 title="فتح سجل المحادثات"
                                 aria-label="فتح سجل المحادثات"
                             >
@@ -351,28 +358,30 @@ export default function ChatWidget() {
                             </button>
                         )}
                         <ArtoroBrandMark size="header" />
-                        <span className="text-[15px] font-extrabold tracking-[0.12em] text-slate-800 dark:text-slate-100">ARTORO</span>
+                        <span className="text-[15px] font-extrabold tracking-[0.12em] text-slate-800 dark:text-white">ARTORO</span>
                         <span className="rounded-md bg-gradient-to-r from-amber-300 via-sky-300 to-indigo-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-slate-900 shadow-sm">V3</span>
                     </div>
                     <div className="flex items-center gap-2">
                         {user && (
-                            <div className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 uppercase">
+                            <div className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 dark:bg-black dark:text-white dark:border dark:border-white/20 uppercase">
                                 {remainingQuota >= 99 ? "Unlimited ♾️" : `${remainingQuota}/5 Left`}
                             </div>
                         )}
+                        {!isChatRoute && (
+                            <button
+                                onClick={() => setIsExpanded(!isExpanded)}
+                                className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                                title={isExpanded ? "تعديل الحجم الافتراضي" : "تكبير النافذة"}
+                                aria-label={isExpanded ? "استعادة حجم النافذة" : "تكبير النافذة"}
+                            >
+                                {isExpanded ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}
+                            </button>
+                        )}
                         <button
-                            onClick={() => setIsExpanded(!isExpanded)}
-                            className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                            title={isExpanded ? "تعديل الحجم الافتراضي" : "تكبير النافذة"}
-                            aria-label={isExpanded ? "استعادة حجم النافذة" : "تكبير النافذة"}
-                        >
-                            {isExpanded ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}
-                        </button>
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-rose-950/40"
-                            title="إغلاق"
-                            aria-label="إغلاق الشات"
+                            onClick={() => isChatRoute ? router.push("/") : setIsOpen(false)}
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-rose-950/40"
+                            title={isChatRoute ? "الرئيسية" : "إغلاق"}
+                            aria-label={isChatRoute ? "الذهاب للرئيسية" : "إغلاق الشات"}
                         >
                             <X className="h-[18px] w-[18px]" />
                         </button>
@@ -380,7 +389,7 @@ export default function ChatWidget() {
                 </div>
 
                 {/* Messages Body */}
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg" onScroll={handleScroll}>
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg dark:bg-black" onScroll={handleScroll}>
                     {!user ? (
                         <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 my-auto min-h-[300px]">
                             <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
@@ -395,8 +404,8 @@ export default function ChatWidget() {
                             <div className="flex flex-col w-full gap-2 pt-2 max-w-[240px]">
                                 <button
                                     onClick={() => {
-                                        setIsOpen(false);
-                                        router.push("/login?redirect=/chart");
+                                        if (!isChatRoute) setIsOpen(false);
+                                        router.push(isChatRoute ? "/login?redirect=/chat" : "/login?redirect=/chart");
                                     }}
                                     className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition-all shadow-md active:scale-95"
                                 >
@@ -405,8 +414,8 @@ export default function ChatWidget() {
                                 </button>
                                 <button
                                     onClick={() => {
-                                        setIsOpen(false);
-                                        router.push("/signup");
+                                        if (!isChatRoute) setIsOpen(false);
+                                        router.push(isChatRoute ? "/signup?redirect=/chat" : "/signup");
                                     }}
                                     className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-black dark:text-white text-xs font-medium transition-all"
                                 >
@@ -471,25 +480,25 @@ export default function ChatWidget() {
                                     {/* Portfolio Image Upload Hero Card */}
                                     <div 
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="group relative cursor-pointer border-3 border-dashed border-black dark:border-[#FFE600] bg-[#FFE600]/10 hover:bg-[#FFE600]/25 dark:bg-[#FFE600]/5 dark:hover:bg-[#FFE600]/15 p-4 sm:p-5 transition-all shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#FFE600] hover:-translate-y-0.5 active:translate-y-0 text-right"
+                                        className="group relative cursor-pointer rounded-2xl border border-dashed border-amber-500/40 dark:border-white/20 bg-amber-500/5 hover:bg-amber-500/10 dark:bg-black dark:hover:bg-zinc-950 p-4 sm:p-5 transition-all shadow-xs text-right"
                                     >
                                         <div className="flex items-start sm:items-center justify-between gap-3">
                                             <div className="space-y-1 flex-1">
                                                 <div className="flex items-center gap-2">
-                                                    <span className="px-2 py-0.5 bg-[#FFE600] text-black text-[10px] font-black uppercase border-2 border-black">
+                                                    <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
                                                         جديد وحصري 📸
                                                     </span>
-                                                    <h4 className="font-black text-sm sm:text-base text-black dark:text-white">
+                                                    <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
                                                         حلل محفظتك الاستثمارية من صورة
                                                     </h4>
                                                 </div>
-                                                <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium">
+                                                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
                                                     ارفع سكرين شوت لمحفظتك من (ثندر أو تطبيق وسيطك)، وسيقوم المساعد فوراً بقراءة الأسهم، حساب نسب السيولة، وتحليل المخاطر والأهداف الفنية لكل سهم.
                                                 </p>
                                             </div>
                                             <button 
                                                 type="button"
-                                                className="shrink-0 px-3 py-2 bg-[#FFE600] text-black font-black text-xs border-2 border-black shadow-[2px_2px_0_0_#000] group-hover:bg-amber-300 active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center gap-1.5"
+                                                className="shrink-0 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs active:translate-x-0.5 transition-all flex items-center gap-1.5"
                                             >
                                                 <ImagePlus className="w-4 h-4" />
                                                 <span className="hidden sm:inline">رفع لقطة شاشة</span>
@@ -545,16 +554,16 @@ export default function ChatWidget() {
                                                     key={qIdx}
                                                     type="button"
                                                     onClick={() => sendMessage(q.text)}
-                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-zinc-900 border-2 border-black dark:border-white/80 shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#fff] hover:bg-amber-50 dark:hover:bg-zinc-800 hover:-translate-y-0.5 active:translate-y-0 active:shadow-none transition-all group cursor-pointer"
+                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-xl shadow-xs dark:shadow-[3px_3px_0_0_#fff] hover:border-amber-500/40 hover:bg-amber-50/40 dark:hover:bg-zinc-950 hover:-translate-y-0.5 active:translate-y-0 transition-all group cursor-pointer"
                                                 >
-                                                    <span className="text-base shrink-0 p-1 bg-zinc-100 dark:bg-zinc-800 border border-black/20 dark:border-white/20">
+                                                    <span className="text-base shrink-0 p-1.5 rounded-lg bg-slate-100 dark:bg-black border border-slate-200 dark:border-white/30">
                                                         {q.icon}
                                                     </span>
                                                     <div className="flex flex-col min-w-0 flex-1">
-                                                        <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 mb-0.5">
+                                                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">
                                                             {q.tag}
                                                         </span>
-                                                        <span className="text-xs font-bold text-black dark:text-zinc-100 group-hover:text-amber-700 dark:group-hover:text-amber-300 leading-snug">
+                                                        <span className="text-xs font-bold text-slate-800 dark:text-white group-hover:text-amber-700 dark:group-hover:text-amber-300 leading-snug">
                                                             {q.text}
                                                         </span>
                                                     </div>
@@ -572,16 +581,16 @@ export default function ChatWidget() {
                                     className="flex gap-2 sm:gap-4 w-full max-w-3xl mx-auto min-w-0"
                                 >
                                     <div className={`
-                                        h-9 w-9 border-2 border-black dark:border-white flex items-center justify-center shrink-0 mt-1 shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#fff] p-1
-                                        ${msg.role === "user" ? "bg-white dark:bg-zinc-800 text-black dark:text-white" : "bg-white dark:bg-zinc-900"}
+                                        h-9 w-9 rounded-full border border-slate-200 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
+                                        ${msg.role === "user" ? "bg-slate-100 dark:bg-black text-slate-700 dark:text-white" : "bg-white dark:bg-black"}
                                     `}>
-                                        {msg.role === "user" ? <User className="h-5 w-5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
+                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
                                     </div>
                                     <div className={`
-                                        flex-1 border-2 border-black dark:border-white p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#fff]
+                                        flex-1 rounded-2xl border p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
                                         ${msg.role === "user"
-                                            ? "bg-[#67E8F9] dark:bg-cyan-950 text-black dark:text-zinc-100"
-                                            : "bg-white dark:bg-zinc-900 text-black dark:text-zinc-100"}
+                                            ? "bg-slate-100 dark:bg-black border-slate-200 dark:border-cyan-400/50 text-slate-900 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
+                                            : "bg-white dark:bg-black border-slate-200 dark:border-white/20 text-slate-900 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
                                     `}>
                                         {/* Show image thumbnails if present */}
                                         {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
@@ -625,8 +634,8 @@ export default function ChatWidget() {
                             ))}
 
                             {isLoading && !messages[messages.length - 1]?.content && (
-                                <div className="flex gap-3 w-full max-w-3xl mx-auto items-center p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 dark:bg-amber-500/5 transition-all duration-300">
-                                    <div className="h-8 w-8 rounded-none border-2 border-black bg-white flex items-center justify-center shrink-0 shadow-md p-1">
+                                <div className="flex gap-3 w-full max-w-3xl mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300">
+                                    <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
                                         <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" />
                                     </div>
                                     <div className="flex-1 flex flex-col gap-0.5 overflow-hidden">
@@ -665,7 +674,7 @@ export default function ChatWidget() {
                 </div>
 
                 {/* Input Form */}
-                <div className="p-2 border-t-2 border-black dark:border-white bg-[#FFE600] shrink-0 min-w-0 overflow-hidden">
+                <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
                     {user ? (
                         <>
                         <form onSubmit={handleSubmit} className="space-y-2">
@@ -696,7 +705,7 @@ export default function ChatWidget() {
                             )}
 
                             {/* Textarea + Action buttons box */}
-                            <div className="relative flex items-end gap-2 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white p-2 focus-within:bg-[#fffce0] dark:focus-within:bg-zinc-900 transition-colors shadow-[4px_4px_0_0_#000]">
+                            <div className="relative flex items-end gap-2 bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-2xl p-2 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-xs dark:shadow-[4px_4px_0_0_#fff]">
                                 <input
                                     ref={fileInputRef}
                                     type="file"
@@ -710,7 +719,7 @@ export default function ChatWidget() {
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={isLoading}
-                                    className="h-9 w-9 shrink-0 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 flex items-center justify-center transition-all disabled:opacity-50 relative mb-0.5"
+                                    className="h-9 w-9 shrink-0 rounded-xl bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 text-slate-600 dark:text-white flex items-center justify-center transition-all disabled:opacity-50 relative mb-0.5"
                                     title={language === "ar" ? "إرفاق صور للتحليل" : "Attach images for analysis"}
                                 >
                                     <ImagePlus className="h-4 w-4" />
@@ -735,19 +744,19 @@ export default function ChatWidget() {
                                     placeholder={
                                         imagePreviews.length > 0
                                             ? (language === "ar" ? `أضف وصفاً لـ (${imagePreviews.length}) صور (اختياري)...` : `Add description for (${imagePreviews.length}) images (optional)...`) 
-                                            : (language === "ar" ? "اسأل ARTORO..." : "Ask ARTORO...")
+                                             : (language === "ar" ? "اسأل ARTORO..." : "Ask ARTORO...")
                                     }
-                                    className="flex-1 min-w-0 h-10 min-h-[40px] max-h-[160px] py-2 px-3 bg-transparent text-base md:text-sm text-black dark:text-zinc-100 placeholder:text-zinc-500 focus:outline-none resize-none leading-6 overflow-y-auto"
+                                    className="flex-1 min-w-0 h-10 min-h-[40px] max-h-[160px] py-2 px-3 bg-transparent text-base md:text-sm text-slate-900 dark:text-white placeholder:text-zinc-400 focus:outline-none resize-none leading-6 overflow-y-auto"
                                 />
 
                                 <button
                                     type={isLoading ? "button" : "submit"}
                                     onClick={isLoading ? () => stopResponding() : undefined}
                                     disabled={!isLoading && (!input.trim() && imagePreviews.length === 0)}
-                                    className={`h-10 w-10 shrink-0 border-2 border-black flex items-center justify-center transition-all mb-0.5 ${
+                                    className={`h-10 w-10 shrink-0 rounded-xl border border-transparent dark:border-white/20 flex items-center justify-center transition-all mb-0.5 ${
                                         isLoading
                                             ? "bg-red-500 hover:bg-red-600 text-white cursor-pointer shadow-sm active:scale-95"
-                                            : "bg-black hover:bg-zinc-800 disabled:opacity-50 text-white"
+                                            : "bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
                                     }`}
                                     title={isLoading ? (language === "ar" ? "إيقاف الرد" : "Stop generation") : (language === "ar" ? "إرسال" : "Send")}
                                 >
@@ -774,7 +783,7 @@ export default function ChatWidget() {
                                                     }
                                                     setModelMenuOpen(!modelMenuOpen);
                                                 }}
-                                                className="flex items-center gap-1.5 bg-zinc-200/80 dark:bg-zinc-800/90 hover:bg-zinc-300/80 dark:hover:bg-zinc-700/80 border border-zinc-300 dark:border-zinc-700/80 rounded-xl px-2.5 py-1 text-[11px] text-black dark:text-white font-bold transition-all shadow-sm active:scale-95"
+                                                className="flex items-center gap-1.5 bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 rounded-xl px-2.5 py-1 text-[11px] text-slate-700 dark:text-white font-bold transition-all shadow-xs active:scale-95"
                                             >
                                                 <Cpu className="h-3 w-3 text-amber-500 shrink-0" />
                                                 <span className="flex items-center gap-1">
@@ -797,7 +806,7 @@ export default function ChatWidget() {
                                                         width: modelMenuPos.width,
                                                         zIndex: 99999
                                                     }}
-                                                    className="bg-white/98 dark:bg-zinc-900/98 backdrop-blur-xl border border-zinc-200 dark:border-zinc-700 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
+                                                    className="bg-white/98 dark:bg-black backdrop-blur-xl border border-zinc-200 dark:border-white/20 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
                                                 >
                                                     <div className="px-2.5 py-1.5 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 mb-1">
                                                         {language === "ar" ? "🤖 اختر موديل الذكاء الاصطناعي" : "🤖 Select AI Model"}
@@ -815,8 +824,8 @@ export default function ChatWidget() {
                                                                 className={`
                                                                     w-full text-left flex items-start justify-between p-2.5 rounded-xl text-xs transition-all
                                                                     ${isSelected
-                                                                        ? "bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/40 text-black dark:text-white"
-                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 border border-transparent"}
+                                                                        ? "bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/40 text-black dark:text-white"
+                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-transparent"}
                                                                 `}
                                                             >
                                                                 <div className="flex flex-col gap-0.5 min-w-0 pr-2">
@@ -868,7 +877,7 @@ export default function ChatWidget() {
                     onClick={() => setShowUpgradeModal(false)}
                 >
                     <div 
-                        className="max-w-md w-full border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 sm:p-7 space-y-5 shadow-[8px_8px_0_0_#FFE600] text-right"
+                        className="max-w-md w-full border-4 border-black dark:border-white bg-white dark:bg-black p-6 sm:p-7 space-y-5 shadow-[8px_8px_0_0_#FFE600] text-right"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Modal Header */}
@@ -880,7 +889,7 @@ export default function ChatWidget() {
                             </div>
                             <button
                                 onClick={() => setShowUpgradeModal(false)}
-                                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-black dark:text-white border-2 border-black dark:border-white transition-all cursor-pointer"
+                                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white transition-all cursor-pointer"
                             >
                                 <X className="w-5 h-5 stroke-[2.5]" />
                             </button>

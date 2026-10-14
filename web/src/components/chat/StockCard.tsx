@@ -124,7 +124,7 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
     return (
         <div 
             dir="rtl"
-            className={`my-4 relative overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/80 backdrop-blur-xl p-4 md:p-5 text-right shadow-2xl transition-all duration-300 hover:border-amber-500/40 hover:shadow-amber-500/5 group ${className}`}
+            className={`my-4 relative overflow-hidden rounded-2xl border border-zinc-200 dark:border-white/20 bg-white dark:bg-black p-4 md:p-5 text-right shadow-2xl transition-all duration-300 hover:border-amber-500/40 hover:shadow-amber-500/5 group ${className}`}
         >
             {/* Top ambient color glow */}
             <div 
@@ -137,16 +137,16 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
             <div className="flex items-start justify-between gap-3 relative z-10">
                 <div className="flex items-center gap-3">
                     {/* Symbol Avatar Badge */}
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 via-zinc-800 to-zinc-900 border border-amber-500/30 text-amber-400 font-mono font-black text-sm shadow-md group-hover:scale-105 transition-transform">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 dark:bg-black border border-amber-500/40 dark:border-white/20 text-amber-500 dark:text-amber-400 font-mono font-black text-sm shadow-md group-hover:scale-105 transition-transform">
                         {symbol.substring(0, 4)}
                     </div>
                     <div>
                         <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-lg md:text-xl text-zinc-100 tracking-wide">
+                            <h3 className="font-bold text-lg md:text-xl text-zinc-900 dark:text-white tracking-wide">
                                 {nameAr}
                             </h3>
                             {nameEn && nameEn !== nameAr && (
-                                <span className="text-xs text-zinc-400 font-mono font-medium hidden sm:inline-block">
+                                <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono font-medium hidden sm:inline-block">
                                     ({nameEn})
                                 </span>
                             )}
@@ -154,14 +154,14 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                         <div className="flex items-center gap-2 mt-0.5">
                             <span 
                                 onClick={() => onSymbolClick && onSymbolClick(symbol)}
-                                className="font-mono text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 cursor-pointer hover:bg-amber-500/20 transition-colors"
+                                className="font-mono text-xs font-bold text-amber-500 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 cursor-pointer hover:bg-amber-500/20 transition-colors"
                             >
                                 {symbol}
                             </span>
                             <button
                                 type="button"
                                 onClick={handleCopySymbol}
-                                className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5 rounded"
+                                className="text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors p-0.5 rounded"
                                 title="نسخ رمز السهم"
                             >
                                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
@@ -171,7 +171,7 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                 </div>
 
                 {/* Live Badge */}
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-800/80 border border-zinc-700/80 text-[11px] font-bold text-zinc-300 shadow-sm">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-black border border-zinc-200 dark:border-white/20 text-[11px] font-bold text-zinc-700 dark:text-zinc-200 shadow-sm">
                     <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -181,12 +181,12 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
             </div>
 
             {/* Price & Change Row */}
-            <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-wrap items-baseline justify-between gap-2 relative z-10">
+            <div className="mt-4 pt-3 border-t border-zinc-200 dark:border-white/15 flex flex-wrap items-baseline justify-between gap-2 relative z-10">
                 <div className="flex items-baseline gap-2">
-                    <span className="font-mono font-extrabold text-3xl md:text-4xl text-white tracking-tight">
+                    <span className="font-mono font-extrabold text-3xl md:text-4xl text-zinc-950 dark:text-white tracking-tight">
                         {formattedPrice}
                     </span>
-                    <span className="text-xs font-bold text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                    <span className="text-xs font-bold text-amber-500 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
                         {currency}
                     </span>
                 </div>
@@ -194,14 +194,14 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                 {/* Change Percent Badge */}
                 <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-sm md:text-base font-extrabold shadow-sm border ${
                     isPositive 
-                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" 
+                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400" 
                         : isNegative 
-                            ? "bg-rose-500/15 border-rose-500/30 text-rose-400" 
-                            : "bg-zinc-800 border-zinc-700 text-zinc-300"
+                            ? "bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400" 
+                            : "bg-zinc-100 dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-700 dark:text-zinc-200"
                 }`}>
-                    {isPositive && <TrendingUp className="w-4 h-4 text-emerald-400 stroke-[2.5]" />}
-                    {isNegative && <TrendingDown className="w-4 h-4 text-rose-400 stroke-[2.5]" />}
-                    {!isPositive && !isNegative && <Minus className="w-4 h-4 text-zinc-400 stroke-[2.5]" />}
+                    {isPositive && <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />}
+                    {isNegative && <TrendingDown className="w-4 h-4 text-rose-600 dark:text-rose-400 stroke-[2.5]" />}
+                    {!isPositive && !isNegative && <Minus className="w-4 h-4 text-zinc-500 dark:text-zinc-400 stroke-[2.5]" />}
                     <span dir="ltr">{formattedChangePct}</span>
                 </div>
             </div>
@@ -209,10 +209,10 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
             {/* Indicators Grid (RSI & MACD) */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
                 {/* RSI Card */}
-                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80 flex flex-col justify-between gap-2">
+                <div className="p-3 rounded-xl bg-zinc-50 dark:bg-black border border-zinc-200 dark:border-white/20 flex flex-col justify-between gap-2">
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
-                            <Activity className="w-3.5 h-3.5 text-amber-400" />
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                            <Activity className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                             <span>مؤشر القوة النسبية (RSI)</span>
                         </div>
                         {rsiVal !== undefined && !isNaN(rsiVal) && (
@@ -223,11 +223,11 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                     </div>
 
                     <div className="flex items-center justify-between mt-1">
-                        <span className="font-mono text-lg font-bold text-zinc-100">
+                        <span className="font-mono text-lg font-bold text-zinc-900 dark:text-zinc-100">
                             {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "غير متوفر"}
                         </span>
                         {rsiVal !== undefined && !isNaN(rsiVal) && (
-                            <div className="w-24 bg-zinc-800 h-2 rounded-full overflow-hidden border border-zinc-700/50">
+                            <div className="w-24 bg-zinc-200 dark:bg-zinc-900 h-2 rounded-full overflow-hidden border border-zinc-300 dark:border-white/10">
                                 <div 
                                     className={`h-full rounded-full transition-all duration-500 ${rsiProgressColor}`}
                                     style={{ width: `${Math.min(Math.max(rsiVal, 0), 100)}%` }}
@@ -238,10 +238,10 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                 </div>
 
                 {/* MACD Card */}
-                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80 flex flex-col justify-between gap-2">
+                <div className="p-3 rounded-xl bg-zinc-50 dark:bg-black border border-zinc-200 dark:border-white/20 flex flex-col justify-between gap-2">
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-400">
-                            <BarChart2 className="w-3.5 h-3.5 text-cyan-400" />
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                            <BarChart2 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
                             <span>إشارة الماكدي (MACD)</span>
                         </div>
                     </div>
@@ -249,14 +249,14 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
                     <div className="flex items-center justify-between mt-1">
                         <div className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs md:text-sm font-bold border ${
                             isMacdBuy 
-                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" 
+                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40" 
                                 : isMacdSell 
-                                    ? "bg-rose-500/20 text-rose-300 border-rose-500/40" 
-                                    : "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                    ? "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40" 
+                                    : "bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40"
                         }`}>
-                            {isMacdBuy && <Zap className="w-3.5 h-3.5 text-emerald-400" />}
-                            {isMacdSell && <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />}
-                            {!isMacdBuy && !isMacdSell && <BarChart2 className="w-3.5 h-3.5 text-amber-400" />}
+                            {isMacdBuy && <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                            {isMacdSell && <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />}
+                            {!isMacdBuy && !isMacdSell && <BarChart2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
                             <span>{macdText}</span>
                         </div>
                     </div>
@@ -265,23 +265,23 @@ export function StockCard({ stock, data, className = "", onSymbolClick }: StockC
 
             {/* Optional Extra Stats Row (Volume, High, Low) */}
             {(stockData.volume || stockData.high || stockData.low) && (
-                <div className="mt-3 pt-3 border-t border-zinc-800/60 grid grid-cols-3 gap-2 text-center text-xs relative z-10">
+                <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/15 grid grid-cols-3 gap-2 text-center text-xs relative z-10">
                     {stockData.volume && (
-                        <div className="bg-zinc-950/40 p-2 rounded-lg border border-zinc-800/50">
-                            <div className="text-zinc-500 text-[11px] font-medium">الحجم</div>
-                            <div className="font-mono font-bold text-zinc-200 mt-0.5">{String(stockData.volume)}</div>
+                        <div className="bg-zinc-50 dark:bg-black p-2 rounded-lg border border-zinc-200 dark:border-white/20">
+                            <div className="text-zinc-500 dark:text-zinc-400 text-[11px] font-medium">الحجم</div>
+                            <div className="font-mono font-bold text-zinc-900 dark:text-zinc-200 mt-0.5">{String(stockData.volume)}</div>
                         </div>
                     )}
                     {stockData.high && (
-                        <div className="bg-zinc-950/40 p-2 rounded-lg border border-zinc-800/50">
-                            <div className="text-zinc-500 text-[11px] font-medium">الأعلى</div>
-                            <div className="font-mono font-bold text-emerald-400 mt-0.5">{String(stockData.high)}</div>
+                        <div className="bg-zinc-50 dark:bg-black p-2 rounded-lg border border-zinc-200 dark:border-white/20">
+                            <div className="text-zinc-500 dark:text-zinc-400 text-[11px] font-medium">الأعلى</div>
+                            <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{String(stockData.high)}</div>
                         </div>
                     )}
                     {stockData.low && (
-                        <div className="bg-zinc-950/40 p-2 rounded-lg border border-zinc-800/50">
-                            <div className="text-zinc-500 text-[11px] font-medium">الأدنى</div>
-                            <div className="font-mono font-bold text-rose-400 mt-0.5">{String(stockData.low)}</div>
+                        <div className="bg-zinc-50 dark:bg-black p-2 rounded-lg border border-zinc-200 dark:border-white/20">
+                            <div className="text-zinc-500 dark:text-zinc-400 text-[11px] font-medium">الأدنى</div>
+                            <div className="font-mono font-bold text-rose-600 dark:text-rose-400 mt-0.5">{String(stockData.low)}</div>
                         </div>
                     )}
                 </div>

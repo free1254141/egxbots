@@ -61,13 +61,13 @@ export function ChatSidebar({
             )}
             <aside aria-label="سجل المحادثات" className={`
                 flex h-full min-h-0 shrink-0 flex-col select-none text-right text-slate-900 transition-all duration-200 dark:text-slate-100
-                rounded-none border-0 bg-[#fffdf2] shadow-[-18px_0_45px_rgba(2,6,23,0.22)]
+                rounded-none border-0 bg-white shadow-[-18px_0_45px_rgba(2,6,23,0.22)]
                 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:w-[290px] max-md:max-w-[88vw] max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
-                dark:bg-[#09090b]
-                md:relative md:w-[250px] md:rounded-[22px] md:border md:border-slate-200/80 md:bg-[#fffdf2] md:shadow-[0_18px_55px_rgba(2,6,23,0.16)] dark:md:border-white/10 dark:md:bg-[#09090b] dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.34)] md:z-auto
+                dark:bg-black
+                md:relative md:w-[250px] md:rounded-[22px] md:border md:border-slate-200/80 md:bg-white md:shadow-[0_18px_55px_rgba(2,6,23,0.16)] dark:md:border-white/20 dark:md:bg-black dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)] md:z-auto
             `}>
                 {/* Top Header & New Chat Button */}
-                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 p-3 dark:border-white/10">
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 p-3 dark:border-white/20">
                     <button
                         onClick={() => {
                             onNewChat();
@@ -83,7 +83,7 @@ export function ChatSidebar({
                     </button>
                     <button
                         onClick={onToggle}
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                         title="إغلاق سجل المحادثات"
                         aria-label="إغلاق سجل المحادثات"
                     >
@@ -92,12 +92,12 @@ export function ChatSidebar({
                 </div>
 
                 {/* Sub-header title */}
-                <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3 text-[11px] font-bold uppercase text-slate-500 dark:border-white/10 dark:text-slate-400">
+                <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3 text-[11px] font-bold uppercase text-slate-500 dark:border-white/20 dark:text-zinc-300">
                     <span className="flex items-center gap-1.5">
                         <Sparkles className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
                         سجل المحادثات
                     </span>
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-black dark:border dark:border-white/20 dark:text-white">
                         {sessions.length}
                     </span>
                 </div>
@@ -105,7 +105,7 @@ export function ChatSidebar({
                 {/* Sessions List */}
                 <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-3">
                     {sessions.length === 0 ? (
-                            <div className="my-4 flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-4 text-center dark:border-white/15 dark:bg-slate-900/50">
+                        <div className="my-4 flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-4 text-center dark:border-white/20 dark:bg-black">
                             <div className="my-1 grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-amber-200 to-sky-200 text-slate-700 dark:text-slate-900">
                                 <MessageSquare className="h-5 w-5" />
                             </div>
@@ -138,12 +138,12 @@ export function ChatSidebar({
                                     }}
                                     className={`group flex items-center justify-between rounded-xl border p-2.5 text-xs font-semibold transition-all ${
                                         isActive
-                                            ? "border-sky-300 bg-sky-50 text-slate-900 shadow-sm dark:border-sky-400/40 dark:bg-sky-950/40 dark:text-white"
-                                            : "border-slate-200 bg-white/75 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-slate-900/65 dark:text-slate-200 dark:hover:bg-slate-800"
+                                            ? "border-sky-300 bg-sky-50 text-slate-900 shadow-sm dark:border-[#FFE600] dark:bg-[#FFE600]/15 dark:text-white"
+                                            : "border-slate-200 bg-white/75 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                                     }`}
                                 >
                                     <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                                        <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${isActive ? "text-sky-700 dark:text-sky-300" : "text-slate-400"}`} />
+                                        <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${isActive ? "text-sky-700 dark:text-[#FFE600]" : "text-slate-400"}`} />
 
                                         {isEditing ? (
                                             <input
@@ -158,7 +158,7 @@ export function ChatSidebar({
                                                     }
                                                 }}
                                                 onClick={(e) => e.stopPropagation()}
-                                                className="bg-white text-black border-2 border-black px-1.5 py-0.5 text-xs font-black w-full outline-none shadow-[2px_2px_0_0_#000]"
+                                                className="bg-white dark:bg-black text-black dark:text-white border-2 border-black dark:border-white px-1.5 py-0.5 text-xs font-black w-full outline-none shadow-[2px_2px_0_0_#000] dark:shadow-[2px_2px_0_0_#fff]"
                                                 autoFocus
                                             />
                                         ) : (
@@ -192,7 +192,7 @@ export function ChatSidebar({
                                             <>
                                                 <button
                                                     onClick={(e) => handleStartRename(s, e)}
-                                                    className="p-1 bg-white dark:bg-zinc-800 border border-black dark:border-zinc-600 text-black dark:text-white shadow-[1px_1px_0_0_#000] dark:shadow-[1px_1px_0_0_#fff] hover:bg-amber-300 dark:hover:bg-amber-500 transition-colors"
+                                                    className="p-1 bg-white dark:bg-black border border-black dark:border-white/30 text-black dark:text-white shadow-[1px_1px_0_0_#000] dark:shadow-[1px_1px_0_0_#fff] hover:bg-amber-300 dark:hover:bg-zinc-800 transition-colors"
                                                     title="تعديل الاسم"
                                                 >
                                                     <Edit2 className="w-3 h-3 stroke-[2.5]" />
@@ -202,7 +202,7 @@ export function ChatSidebar({
                                                         e.stopPropagation();
                                                         onDeleteSession(s.id);
                                                     }}
-                                                    className="p-1 bg-white dark:bg-zinc-800 border border-black dark:border-zinc-600 text-black dark:text-white shadow-[1px_1px_0_0_#000] dark:shadow-[1px_1px_0_0_#fff] hover:bg-rose-500 hover:text-white transition-colors"
+                                                    className="p-1 bg-white dark:bg-black border border-black dark:border-white/30 text-black dark:text-white shadow-[1px_1px_0_0_#000] dark:shadow-[1px_1px_0_0_#fff] hover:bg-rose-500 hover:text-white transition-colors"
                                                     title="حذف المحادثة"
                                                 >
                                                     <Trash2 className="w-3 h-3 stroke-[2.5]" />

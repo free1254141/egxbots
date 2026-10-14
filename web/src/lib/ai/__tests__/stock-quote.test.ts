@@ -2,6 +2,12 @@ import {executeAgenticTool} from '../agentic-tools';
 import {reconcileStockQuote} from '../stock-quote';
 import {presentReplyLabels} from '../reply-labels';
 
+jest.mock('../live-stock-updater', () => ({
+    ...jest.requireActual('../live-stock-updater'),
+    fetchLiveStockIndicators: jest.fn().mockResolvedValue({ success: false, error: 'offline' }),
+    isEgxSessionOpen: jest.fn().mockReturnValue(false)
+}));
+
 function db(rows: Record<string, any[]>) {
     const queries: any[] = [];
     const client = {from(table: string) {
@@ -43,17 +49,17 @@ test('saved portfolio and temporary positions use the same freshest close',async
 
 test('an older price table does not replace a newer indicator close',async()=>{
     const d=db({stock_prices:[{date:'2026-10-07',close:160}]});
-    expect(await reconcileStockQuote(d.client,'GTWL',snapshot)).toMatchObject({close:153.2,date:'2026-10-11',indicators_stale:false});
+    expect(await reconcileStockQuote(d.client,'GTWL',snapshot,{preferLive:false})).toMatchObject({close:153.2,date:'2026-10-11',indicators_stale:false});
 });
 
 test('a current matching indicator snapshot retains its indicators',async()=>{
     const d=db({stock_prices:prices});
-    expect(await reconcileStockQuote(d.client,'GTWL',{...snapshot,close:146.9})).toMatchObject({rsi_14:24.64,indicators_stale:false,close:146.9});
+    expect(await reconcileStockQuote(d.client,'GTWL',{...snapshot,close:146.9},{preferLive:false})).toMatchObject({rsi_14:24.64,indicators_stale:false,close:146.9});
 });
 
 test('prices still return when indicators have not been calculated',async()=>{
     const d=db({stock_prices:prices});
-    const row=await reconcileStockQuote(d.client,'GTWL',null);
+    const row=await reconcileStockQuote(d.client,'GTWL',null,{preferLive:false});
     expect(row).toMatchObject({close:146.9,indicators_available:false,indicators_date:null});
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Smartphone, Download, X } from "lucide-react";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -9,6 +10,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function PwaInstallPrompt() {
+  const pathname = usePathname();
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
@@ -52,7 +54,7 @@ export default function PwaInstallPrompt() {
     localStorage.setItem("artoro_pwa_dismissed", String(Date.now()));
   };
 
-  if (isStandalone || isDismissed) {
+  if (isStandalone || isDismissed || pathname === "/chat" || pathname?.startsWith("/chat")) {
     return null;
   }
 
