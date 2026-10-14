@@ -23,6 +23,7 @@ def test_new_candidates_without_current_prices_are_rejected(monkeypatch,tmp_path
     path.write_text(json.dumps([{'Symbol':s,'InventorySource':'EODHD'} for s in ('A','B','MISSING')]),encoding='utf-8')
     monkeypatch.setattr('api.symbols_local._find_latest_file',lambda _:str(path))
     monkeypatch.setattr(freshness, '_current_quotes', lambda *args: {'A': bar(), 'B': bar('B', volume=0)})
+    monkeypatch.setattr('api.trade_liquidity.candidate_liquidity', lambda *args: {s: {'eligible': True} for s in ('A','B','MISSING')})
     q=Mock(); q.select.return_value=q; q.eq.return_value=q; q.in_.return_value=q; q.limit.return_value=q
     q.execute.return_value=SimpleNamespace(data=[])
     rows=[{'symbol':x,'date':'2026-10-12'} for x in ('A','B','MISSING')]
