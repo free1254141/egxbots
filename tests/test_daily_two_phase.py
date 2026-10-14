@@ -236,7 +236,7 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
         raise AssertionError('Ordinary recommendation operation executed at midday')
     replacements = {
         'api.update_ml_scores': types.SimpleNamespace(update_all_scores=lambda **_: None),
-        'api.news_sentiment_engine': types.SimpleNamespace(process_exchange_news=lambda *_: (True,1)),
+        'api.news_sentiment_engine': types.SimpleNamespace(process_exchange_news=lambda *_, **kwargs: (True,1)),
         'api.corporate_actions_engine': types.SimpleNamespace(process_exchange_corporate_actions=lambda *a, **k: (True,1)),
         'api.short_swings_daily': types.SimpleNamespace(run_daily_short_swings=lambda **_: {'success': True}),
         'api.cache_invalidation': types.SimpleNamespace(invalidate_daily_cache=lambda steps: invalidations.append(copy.deepcopy(steps))),
@@ -248,6 +248,7 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
         'pd': types.SimpleNamespace(DataFrame=object), 'stock_ai': stock, 'ZoneInfo': ZoneInfo,
         '_init_supabase': lambda: None, 'summarise_daily_steps': summarise_daily_steps,
         'Optional': Optional, 'Dict': Dict, 'Any': Any, '_should_run_weekly_inventory': lambda *_: False,
+        '_should_run_quarterly_fundamentals': lambda *_: False,
         '_fetch_egx_symbols': lambda: ['TEST'], '_filter_active_symbols': lambda values: values,
         'get_smart_sync': lambda: types.SimpleNamespace(sync_exchange_prices=lambda *a, **k: {'success': 1}),
         'calculate_indicators_for_symbol': lambda *_: [], '_batch_upsert_indicators': lambda *a, **k: None,
@@ -256,9 +257,12 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
         'generate_daily_recommendations': prohibited, 'retry_pending_recommendation_telegram_events': prohibited,
         '_send_daily_market_outlook': prohibited, 'generate_weekly_performance_report': prohibited}
     exec(compile(ast.fix_missing_locations(ast.Module(body=[job],type_ignores=[])), '<actual-daily-job>', 'exec'), namespace)
-    result = asyncio.run(namespace['run_daily_job'](trigger='scheduled', phase='midday'))
+    result = asyncio.run(namespace['run_daily_job'](trigger='scheduled', phase='midday', dry_run=True))
     assert result['outcome'] == 'completed' and saved[-1]['job_type'] == 'daily_midday'
     assert invalidations and not forbidden
+    stage_names = [step['step'] for step in json.loads(saved[-1]['steps']) if step['status'] == 'started']
+    assert stage_names.index('short_swings_daily') < stage_names.index('news_sentiment')
+    assert stage_names.index('short_swings_daily') < stage_names.index('corporate_actions')
     assert not {'evaluate_recommendations','generate_recommendations','daily_social_reports','daily_market_outlook'} & {
         step['step'] for step in json.loads(saved[-1]['steps'])}
 
