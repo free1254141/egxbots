@@ -1,5 +1,5 @@
 import { Metadata } from "next";
-import { getPublicMarketClient } from "@/lib/supabase/route-data";
+import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
 import StocksClient from "./StocksClient";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 
@@ -45,45 +45,8 @@ export const metadata: Metadata = {
   },
 };
 
-async function getStocks() {
-  try {
-    const supabase = getPublicMarketClient();
-    const { data, error } = await supabase
-      .from("stock_fundamentals")
-      .select("symbol, exchange, data")
-      .eq("exchange", "EGX");
-
-    if (error || !data) {
-      console.error("Error fetching stocks list:", error);
-      return [];
-    }
-
-    const uniqueMap = new Map<string, any>();
-    data.forEach((row: any) => {
-      const sym = (row.symbol || "").toUpperCase();
-      if (!sym) return;
-      if (!uniqueMap.has(sym)) {
-        const d = row.data || {};
-        uniqueMap.set(sym, {
-          symbol: sym,
-          name: d.name || d.Name || sym,
-          sector: d.sector || d.Sector || "",
-          marketCap: d.marketCap || null,
-        });
-      }
-    });
-
-    return Array.from(uniqueMap.values()).sort((a, b) =>
-      a.symbol.localeCompare(b.symbol)
-    );
-  } catch (err) {
-    console.error("Failed to load stocks:", err);
-    return [];
-  }
-}
-
 export default async function StocksPage() {
-  const stocks = await getStocks();
+  const stocks = await getPublicStockDirectory();
 
   const structuredData = {
     "@context": "https://schema.org",

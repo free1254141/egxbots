@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
 import { cache } from "react";
+import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
+import { selectStockLinks } from "@/lib/seo/sitemap-entries";
+
+export const revalidate = 3600;
+export async function generateStaticParams() { return []; }
 
 interface PageProps {
   params: Promise<{
@@ -13,7 +18,8 @@ interface PageProps {
 // Metadata and page rendering share the same request-scoped fundamentals read.
 const getFundamentals = cache(async (symbol: string) => {
   const supabase = getPublicMarketClient();
-  const { data } = await supabase.from("stock_fundamentals").select("*").eq("symbol", symbol);
+  const { data, error } = await supabase.from("stock_fundamentals").select("symbol,exchange,data,updated_at").eq("exchange", "EGX").eq("symbol", symbol).limit(1);
+  if (error) throw new Error("Unable to load public stock fundamentals");
   return data as any[] | null;
 });
 
@@ -73,18 +79,19 @@ export default async function StockDetailPage({ params }: PageProps) {
   const fundRow = fundData?.find((r: any) => r.exchange === "EGX") || fundData?.[0] || null;
 
   // If no fundamentals, check if we have any price records to verify stock existence
-  const priceCheck = fundRow ? null : (await supabase
+  const priceCheck = fundRow ? null : await supabase
     .from("stock_prices")
     .select("symbol, exchange")
-    .eq("symbol", symbol)
-    .limit(1)).data;
+    .eq("symbol", symbol).eq("exchange", "EGX")
+    .limit(1);
+  if (priceCheck?.error) throw new Error("Unable to verify public stock existence");
 
   // If no trace of this stock exists in fundamentals or prices, return 404
-  if (!fundRow && (!priceCheck || priceCheck.length === 0)) {
+  if (!fundRow && (!priceCheck?.data || priceCheck.data.length === 0)) {
     notFound();
   }
 
-  const exchange = fundRow?.exchange || (priceCheck as any)?.[0]?.exchange || "EGX";
+  const exchange = fundRow?.exchange || priceCheck?.data?.[0]?.exchange || "EGX";
 
   // 2. Fetch Latest Price
   const { data: priceRows } = await supabase
@@ -129,6 +136,7 @@ export default async function StockDetailPage({ params }: PageProps) {
 
   const fund = fundRow?.data || {};
   const companyName = fund.name || fund.Name || symbol;
+  const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || ""));
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
   // Describe the actual dataset, without inventing a second hidden buy/sell score.
   const structuredDataGraph = {
@@ -154,6 +162,8 @@ export default async function StockDetailPage({ params }: PageProps) {
         latestTech={latestTech}
         historicalPrices={historicalPrices}
         latestScan={latestScan}
+        relatedStocks={related.stocks}
+        relatedBasis={related.basis}
       />
     </>
   );

@@ -40,6 +40,8 @@ interface StockDetailClientProps {
   latestTech: any;
   historicalPrices: HistoricalPrice[];
   latestScan: any;
+  relatedStocks?: Array<{ symbol: string; name: string }>;
+  relatedBasis?: "sector" | "directory";
 }
 
 const localDict = {
@@ -168,7 +170,9 @@ export default function StockDetailClient({
   latestPrice,
   latestTech,
   historicalPrices,
-  latestScan
+  latestScan,
+  relatedStocks = [],
+  relatedBasis = "directory"
 }: StockDetailClientProps) {
   const { language } = useLanguage();
   const t = localDict[language] || localDict.en;
@@ -975,29 +979,20 @@ export default function StockDetailClient({
       <div className="app-panel p-6 bg-[var(--app-surface)] rounded-none border-2 border-black shadow-[4px_4px_0px_0px_#000]">
         <h2 className="text-xl font-extrabold mb-4 tracking-tight flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-green-400" />
-          {language === "ar" ? "أسهم مشابهة" : "Similar Stocks"}
+          {relatedBasis === "sector" ? (language === "ar" ? "أسهم من نفس القطاع" : "Stocks in the same sector") : (language === "ar" ? "أسهم أخرى من الدليل" : "Explore the stock directory")}
         </h2>
+        <Link href="/stocks" className="mb-4 inline-block text-sm underline underline-offset-4">{language === "ar" ? "تصفح دليل الأسهم بالكامل" : "Browse all published stocks"}</Link>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-          {[
-            { sym: "COMI", name: "البنك التجاري الدولي", nameEn: "Commercial International Bank" },
-            { sym: "FWRY", name: "فوري لتكنولوجيا البنوك", nameEn: "Fawry for Banking Technology" },
-            { sym: "EAST", name: "الشرقية - إيسترن كومباني", nameEn: "Eastern Company" },
-            { sym: "AALR", name: "الألومنيوم العربية", nameEn: "Arab Aluminum" },
-            { sym: "CSAG", name: "القاهرة للإسكان والتعمير", nameEn: "Cairo Housing" },
-            { sym: "SPIN", name: "الإسكندرية للغزل والنسيج", nameEn: "Alexandria Spinning" },
-            { sym: "UTOP", name: "يوتوبيا للاستثمار العقاري", nameEn: "Utopia Real Estate" },
-          ].map((stock) => {
-            // Avoid showing current stock in similar list
-            if (stock.sym.toUpperCase() === symbol.toUpperCase()) return null;
+          {relatedStocks.map((stock) => {
             return (
               <Link
-                key={stock.sym}
-                href={`/stocks/${stock.sym.toLowerCase()}`}
+                key={stock.symbol}
+                href={`/stocks/${stock.symbol.toLowerCase()}`}
                 className="p-3 border-2 border-black bg-[var(--app-surface-strong)] hover:bg-yellow-400 dark:hover:bg-yellow-500 hover:text-black font-mono transition-all text-center flex flex-col justify-center items-center gap-1 cursor-pointer active:translate-x-[2px] active:translate-y-[2px]"
               >
-                <span className="font-extrabold text-base tracking-wide">{stock.sym}</span>
+                <span className="font-extrabold text-base tracking-wide">{stock.symbol}</span>
                 <span className="text-[10px] text-zinc-500 font-sans truncate w-full">
-                  {language === "ar" ? stock.name : stock.nameEn}
+                  {stock.name}
                 </span>
               </Link>
             );
