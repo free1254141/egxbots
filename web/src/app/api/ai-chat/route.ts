@@ -674,7 +674,7 @@ export async function POST(req: NextRequest) {
                             activeSessionId,
                             messageId,
                             userRequestedModel,
-                            { isPro: userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
+                            { isPro: !billingOn || userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
                         );
 
                         // Keep only a bounded rolling window for safety checks.
@@ -951,7 +951,7 @@ export async function POST(req: NextRequest) {
             activeSessionId,
             messageId,
             userRequestedModel,
-            { isPro: userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
+            { isPro: !billingOn || userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
         );
 
         const replyText = filterOutput(pipelineResult.response);

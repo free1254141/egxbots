@@ -264,7 +264,7 @@ describe("Agentic architecture integration: current production path", () => {
     });
     test("specialized screens and scenarios remain LLM selected", () => {
         const names=new Set(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name));
-        expect(names.size).toBe(19); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true);
+        expect(names.size).toBe(20); expect(names.has("get_corporate_actions")).toBe(true); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true);
     });
     test("reviewer prompt distinguishes requested scenario holdings from saved positions",async()=>{
         const r=await run([{content:"تم تحليل السيناريو"},verdict()],{userMessage:"معايا 100 ألف ومحفظتي فيها COMI وSWDY"});

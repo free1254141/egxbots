@@ -76,14 +76,14 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
     const dates = [...new Set<string>(rows.map(r => tool === "get_news"
         ? r.event_date || r.published_at || r.publication_date
         : r.date || r.scan_date || r.current_date || r.signal_date || r.published_at).filter(Boolean))];
-    const missing = rows.some(r => r.error || r.availability === "missing");
-    const plannedPartial = ["get_fundamentals","get_sector_peers","get_market_breadth"].includes(tool) && data?.availability === "partial";
+    const missing = data?.availability === "missing" || rows.some(r => r.error || r.availability === "missing");
+    const plannedPartial = data?.availability === "partial";
     const verifiedEmptyScreen = tool === "screen_stocks" && data?.status === "success" && Boolean(data.date)
         && Array.isArray(data.stocks) && typeof data.scan_complete === "boolean";
     return { tool, arguments: args, data, source: tool === "get_live_quote" ? (rows.every(r=>r.live_quote_available) ? "tradingview:provider-snapshot" : rows.some(r=>r.live_quote_available) ? "mixed:tradingview+supabase" : "supabase:stored-fallback") : tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
         apply_chart_strategy: "stock_prices+deterministic-strategy-engine", compare_strategies_history: "stock_prices+deterministic-backtest", list_chart_strategies: "strategy-catalog",
         calculate_position: "stock_prices+stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_prices+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
-        get_recommendations: "scan_results+stock_technical_indicators", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
+        get_recommendations: "scan_results+stock_technical_indicators+short_swing_checkpoints", get_corporate_actions: "corporate_actions", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
         get_technical_scan: args.preset === "smart_money_flow" ? "stock_scans_summary" : "stock_technical_indicators",
         get_fundamentals: "stock_fundamentals", get_sector_peers: "stock_fundamentals", get_market_breadth: "stock_technical_indicators+deterministic-breadth",
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation" } as any)[tool],
@@ -187,7 +187,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
-        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]], [/تجميع/i,["acc_score"]], [/تصريف/i,["dist_score"]],
+        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]], [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
         [/متوسط.*شراء|سعر.*(?:شراء|دخول)|الدخول/i,["entry_price"]], [/وقف/i,["stop_loss"]], [/هدف|مستهدف/i,["target_price"]], [/مسافة.*دعم|بعد.*دعم|القرب.*دعم/i,["distance_from_support_pct"]], [/دعم/i,["support"]], [/مسافة.*مقاوم|بعد.*مقاوم|القرب.*مقاوم/i,["distance_from_resistance_pct"]], [/مقاوم/i,["resistance"]],
         [/توزيعات\s*(?:نقدية)?|cash dividends/i,["cash_dividends"]], [/تكلف/i,["cost_basis"]], [/توزيع|وزن|نسبة.*المحفظة|تركيز.*قطاع/i,["position_pct"]], [/مبلغ.*مخصص|قيمة.*مخصصة|رأس.*مال.*موزع/i,["value"]], [/قيمة.*(?:سوق|مركز)|القيمة السوقية/i,["market_value"]], [/ربح|خسار|عائد|النسبة/i,["profit_pct","profit_value","backtest_return_pct"]],
         [/خسارة.*افتراضية|خسارة.*سيناريو|هبوط.*مفترض/i,["scenario_loss_amount","scenario_loss_pct"]], [/رأس.*مال|إجمالي.*رأس المال/i,["scenario_capital"]],
@@ -498,7 +498,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             && !/لم\s+|دون\s+جلب|بدون\s+جلب|السابقة|السابق/.test(line)) reasons.push("claimed_refresh_without_current_tool");
     }
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
@@ -1052,10 +1052,18 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     const quotes = new Map<string, any>();
     const comparisonSymbols = new Set(evidence.filter(e => e.tool === "get_comparison" && e.availability !== "error")
         .flatMap(e => evidenceRows(e.data).map(row => row.symbol).filter(Boolean)));
-    for (const row of rows) if (row.symbol && !comparisonSymbols.has(row.symbol) && (row.close != null || row.current_price != null)) quotes.set(row.symbol, row);
+    for (const row of rows) if (row.symbol && !comparisonSymbols.has(row.symbol) && (row.close != null || row.current_price != null)) {
+        const prior = quotes.get(row.symbol), date = String(row.date || row.current_date || ''), priorDate = String(prior?.date || prior?.current_date || '');
+        if (!prior || date >= priorDate) quotes.set(row.symbol, date === priorDate ? { ...prior, ...row } : row);
+    }
     if (quotes.size) {
         lines.push("\nالبيانات المتاحة من المصدر (إغلاقات يومية، وليست أسعاراً لحظية):", "| السهم | الإغلاق | التاريخ |", "|---|---|---|");
         for (const row of [...quotes.values()].slice(0, 10)) lines.push(`| ${row.symbol} | ${row.close ?? row.current_price} | ${row.date ?? row.current_date ?? "غير متاح"} |`);
+        for (const row of [...quotes.values()].slice(0, 10)) {
+            const values = [['RSI',row.rsi_14],['MACD',row.macd],['خط الإشارة',row.macd_signal],['EMA 50',row.ema_50],['EMA 200',row.ema_200],['الدعم',row.support],['المقاومة',row.resistance]]
+                .filter(([,v]) => typeof v === 'number' && Number.isFinite(v));
+            if (values.length) lines.push(`${row.symbol}: ${values.map(([label,v]) => `${label} = ${v}`).join('؛ ')}.`);
+        }
     }
     for (const e of evidence) if (e.data?.persisted === true) lines.push(`عملية المحفظة ${e.data.operation} للسهم ${e.data.symbol}: تم تأكيد تعديل المركز؛ لا تكرر العملية تلقائياً.${e.data.cash_updated === false && e.data.operation === "sell" ? " لم يتغير الرصيد النقدي." : ""}`);
     if (evidence.some(e => e.availability === "error")) lines.push("تعذر تنفيذ بعض أدوات البيانات؛ لا تعتبر نتائجها فارغة أو عملياتها محفوظة.");

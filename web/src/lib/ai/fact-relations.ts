@@ -34,9 +34,16 @@ export function advisoryFactRelations(reply: string, evidence: AgenticEvidence[]
                 ? /(?:أحدث|أقدم)/.test(clause) ? local.sort((a, b) => clause.toUpperCase().indexOf(a) - clause.toUpperCase().indexOf(b))[0] : null
                 : owner;
             // Conditional/negated interpretations are not asserted observations.
-            const uncertain = /(?:لا|ليس|ليست|مش|لم|غير|دون|بدون|لو|إذا|اذا|هل|قد|ربما|لازم\s+نتحقق|لا\s+يمكن)/.test(clause);
+            const uncertain = /(?:^|[\s،؛:])(?:لا|ليس|ليست|مش|لم|غير|دون|بدون|لو|إذا|اذا|هل|قد|ربما|لازم\s+نتحقق)(?=$|[\s،؛:])/.test(clause);
             if (!subject || uncertain) continue;
             const row = latest.get(subject);
+            const close = number(row.close ?? row.current_price), support = number(row.support), resistance = number(row.resistance);
+            const closer = /أقرب\s*(?:نسبياً\s*)?(?:(?:إلى|الى)\s*|ل)?\s*(?:ال|ل)?(دعم|مقاوم[ةه])/.exec(clause);
+            if (closer && close !== null && support !== null && resistance !== null) {
+                const ds = Math.abs(close-support), dr = Math.abs(resistance-close);
+                if ((closer[1] === 'دعم' && dr < ds-1e-8) || (closer[1] !== 'دعم' && ds < dr-1e-8))
+                    add(clause, `المسافة من الإغلاق ${close} للدعم ${support} هي ${ds.toFixed(4)}، وللمقاومة ${resistance} هي ${dr.toFixed(4)}؛ السعر أقرب ${ds < dr ? 'للدعم' : 'للمقاومة'} حسابياً.`);
+            }
             const macd = number(row.macd), signal = number(row.macd_signal);
             const relation = /MACD\s*(?:(?:حالي[ًاا]*|هو|حالياً)\s*)?(فوق|تحت|أعلى\s+من|أدنى\s+من|اعلى\s+من|ادنى\s+من|يساوي|مساو[ٍي]*)\s*(?:خط\s*)?(?:ال)?(?:إشار|اشار|signal)/i.exec(clause);
             if (relation && macd !== null && signal !== null) {

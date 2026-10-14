@@ -47,7 +47,7 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         if (!args || Array.isArray(args) || typeof args !== "object") throw new Error("مدخلات الأداة يجب أن تكون كائناً");
         const chartTool = ["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history"].includes(toolName);
         for (const [key,values] of Object.entries(enums)) if (!(chartTool && key === "timeframe") && args[key] != null && !values.includes(String(args[key]).toLowerCase())) throw new Error("قيمة مدخل الأداة غير مدعومة: "+key);
-        if (args.symbols != null && (!Array.isArray(args.symbols) || args.symbols.length > 10 || args.symbols.some((s:any)=>typeof s !== "string" || !/^[A-Za-z0-9.]{2,12}$/.test(s.trim())))) throw new Error("الحد الأقصى 10 رموز موثقة لكل أداة");
+        if (args.symbols != null && (!Array.isArray(args.symbols) || args.symbols.length > (toolName === "analyze_portfolio_risk" ? 30 : 10) || args.symbols.some((s:any)=>typeof s !== "string" || !/^[A-Za-z0-9.]{2,12}$/.test(s.trim())))) throw new Error("الحد الأقصى 10 رموز موثقة لكل أداة");
         if (["get_stock","get_stock_levels","get_comparison"].includes(toolName) && !args.symbols?.length) throw new Error("رموز الأسهم مطلوبة");
         const normalized = {...args, ...(args.symbols ? {symbols:Array.from(new Set(args.symbols.map(normalizeSymbol)))} : {})};
         if (toolName === "get_live_quote") return await executeLiveQuoteTool(normalized,checkedClient(executionSupabase(supabase)));
@@ -399,6 +399,28 @@ async function executeRawTool(
             };
         }
 
+    if (toolName === 'get_corporate_actions') {
+        if (!Array.isArray(args.symbols) || !args.symbols.length || args.symbols.length > 10
+            || args.symbols.some((s: any) => typeof s !== 'string' || !/^[A-Za-z0-9.]{2,12}$/.test(s)))
+            return { status: 'error', availability: 'error', message: 'أدخل من 1 إلى 10 رموز موثقة' };
+        const symbols = args.symbols.map((s: string) => s.toUpperCase().replace(/\.CA$/, ''));
+        let query = supabase.from('corporate_actions').select('symbol,action_type,title,action_date,published_at,url,source,details,confidence,origin')
+            .eq('exchange', 'EGX').in('symbol', symbols);
+        if (args.action_type && args.action_type !== 'all') query = args.action_type === 'rights_issue'
+            ? query.in('action_type', ['rights_issue', 'capital_increase']) : query.eq('action_type', args.action_type);
+        const { data, error } = await query.order('published_at', { ascending: false }).limit(30);
+        if (error) throw new Error('تعذر قراءة سجل الإجراءات الرأسمالية');
+        const events = (data || []).map((r: any) => {
+            let official = false;
+            try { const host = new URL(r.url).hostname.toLowerCase(); official = host === 'egx.com.eg' || host.endsWith('.egx.com.eg'); } catch {}
+            return { ...r, title: String(r.title || '').slice(0, 500), official_source: official,
+                date_kind: r.action_date ? 'event_date' : 'publication_only' };
+        });
+        return { status: 'success', availability: events.length ? 'partial' : 'missing',
+            stocks: symbols.map((symbol: string) => ({ symbol, events: events.filter((r: any) => r.symbol === symbol) })),
+            coverage_complete: events.length < 30,
+            note: 'السجل يجمع أحداثًا وأخبارًا مؤرخة؛ الرابط الرسمي يختلف عن خبر ناقل. تاريخ النشر ليس تاريخ بدء أو انتهاء الحق، وغياب حدث لا ينفيه. لا تستنتج اكتتابًا أو تعديل سعر من هبوط السهم وحده.' };
+    }
         if (toolName === "get_recommendations") {
             const statusFilter = args.status || "all";
             const timeframe = args.timeframe || "all";
@@ -407,9 +429,10 @@ async function executeRawTool(
 
             // "Open" is a bounded, decision-relevant set: return all of it, not a
             // page, so the reply never reports a smaller open count than exists.
-            const limit = statusFilter === "open" ? 50 : 20;
+            const limit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : statusFilter === "open" ? 50 : 20;
             const applyFilters = (query: any) => {
                 let out = query;
+                out = out.eq("is_public", true).eq("exchange", "EGX");
                 if (args.symbols?.length) out = out.in("symbol", args.symbols);
                 if (statusFilter === "open") out = out.in("status", ["open", "active"]);
                 else if (statusFilter === "closed") out = out.in("status", ["win", "loss", "closed"]);
@@ -420,7 +443,7 @@ async function executeRawTool(
 
             const { data: rows } = await applyFilters(supabase
                 .from("scan_results")
-                .select("symbol, signal, entry_price, target_price, stop_loss, exit_price, profit_loss_pct, status, created_at")
+                .select("id,symbol,signal,entry_price,target_price,stop_loss,exit_price,profit_loss_pct,status,created_at,updated_at")
                 .order("created_at", { ascending: false })).limit(limit);
 
             // Exact total for the same filter so the answer states "shown of total".
@@ -432,6 +455,7 @@ async function executeRawTool(
             const { data: latestRow } = await supabase
                 .from("scan_results")
                 .select("created_at")
+                .eq("is_public", true).eq("exchange", "EGX")
                 .order("created_at", { ascending: false })
                 .limit(1);
             const latestDateInDb = latestRow?.[0]?.created_at ? String(latestRow[0].created_at).slice(0, 10) : null;
@@ -469,6 +493,7 @@ async function executeRawTool(
                 }
 
                 enrichedRecs.push({
+                    id: r.id,
                     symbol: sym,
                     signal: r.signal || "BUY",
                     entry_price: entry,
@@ -477,6 +502,7 @@ async function executeRawTool(
                     exit_price: r.exit_price,
                     status: r.status,
                     signal_date: String(r.created_at || "").slice(0, 10),
+                    closed_date: isClosed ? String(r.updated_at || "").slice(0, 10) : null,
                     current_price: currPrice,
                     current_date: quoteDate,
                     realized_return_pct: realizedReturnPct,
@@ -614,7 +640,7 @@ async function executeRawTool(
             if (!userId) throw new Error("يلزم مستخدم مصادق عليه لتحليل السيناريو");
             const capital = positive(args.capital);
             const symbols: string[] = [...new Set<string>((args.symbols as unknown[]).map((value:any)=>normalizeSymbol(value)))];
-            if (symbols.length < 2 || symbols.length > 10) throw new Error("أدخل من سهمين إلى عشرة أسهم لتحليل السيناريو");
+            if (symbols.length < 2 || symbols.length > 30) throw new Error("أدخل من سهمين إلى 30 سهمًا لتحليل السيناريو");
             let weights: Map<string,number>;
             if (args.allocation_mode !== "equal" && Array.isArray(args.allocations) && args.allocations.length) {
                 weights = new Map<string,number>();
@@ -627,8 +653,8 @@ async function executeRawTool(
                     throw new Error("يجب توزيع 100% على جميع الأسهم المذكورة");
             } else weights = new Map<string,number>(symbols.map((sym:string)=>[sym,100/symbols.length]));
             const [{data:savedRows},{data:fundRows}] = await Promise.all([
-                supabase.from("positions").select("symbol").eq("user_id",userId).eq("status","open").in("symbol",symbols).limit(10),
-                supabase.from("stock_fundamentals").select("symbol,data").eq("exchange","EGX").in("symbol",symbols).limit(10)
+                supabase.from("positions").select("symbol").eq("user_id",userId).eq("status","open").in("symbol",symbols).limit(symbols.length),
+                supabase.from("stock_fundamentals").select("symbol,data").eq("exchange","EGX").in("symbol",symbols).limit(symbols.length)
             ]);
             const saved = new Set((savedRows||[]).map((r:any)=>normalizeSymbol(r.symbol)));
             const fundamentals = new Map((fundRows||[]).map((r:any)=>[normalizeSymbol(r.symbol),r.data]));
