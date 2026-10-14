@@ -710,8 +710,11 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         const newsText = heading
             ? plain.slice(heading.index + heading[0].length).split(/\n\s*(?:#{1,6}\s+|(?:السعر اللحظي|الخلاصة|المتاح وغير المتاح)\s*[:：]?)/i)[0]
             : plain;
-        for (const symbol of requestedNewsSymbols)
-            if (!new RegExp(`(?<![A-Z0-9])${symbol}(?![A-Z0-9])`, "i").test(newsText)) reasons.push(`requested_news_symbol_omitted:${symbol}`);
+        for (const symbol of requestedNewsSymbols) {
+            const hasSymbol = new RegExp(`(?<![A-Z0-9])${symbol}(?![A-Z0-9])`, "i").test(newsText);
+            const hasNoNewsClaim = /(?:لا\s+توجد|غياب|عدم\s+وجود|دون|مفيش)\s+(?:أخبار|اخبار|إفصاحات|افصاحات|بيانات\s+إخبارية)/i.test(plain) || /(?:أخبار|اخبار).{0,35}(?:غير\s+متاح|مفقود|لا\s+تتوفر|لم\s+تسجل|فارغ)/i.test(plain);
+            if (!hasSymbol && !hasNoNewsClaim) reasons.push(`requested_news_symbol_omitted:${symbol}`);
+        }
     }
     // Verify comparative distance statements from the same dated comparison,
     // independently of whether all quoted values themselves are grounded.
@@ -936,7 +939,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         if (!symbol) continue;
         for (const date of line.match(/\b\d{4}-\d{2}-\d{2}\b/g) || []) {
             const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
-                .flatMap(r => [r.date, r.current_date, r.scan_date, r.signal_date]);
+                .flatMap(r => [
+                    r.date, r.current_date, r.scan_date, r.signal_date, r.indicators_date,
+                    ...(Array.isArray(r.recent_sessions) ? r.recent_sessions.map((s: any) => s.date) : [])
+                ]);
             if (!dates.some(d => String(d || "").slice(0,10) === date)) reasons.push(`table_date_not_grounded:${symbol}:${date}`);
         }
 
@@ -1162,6 +1168,20 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
                 lines.push(`\n${d.note}`);
             }
         }
+        if (e.tool === "get_news") {
+            const d = e.data;
+            if (d?.news?.length) {
+                lines.push("\nعناوين الأخبار الموثقة من المصدر:");
+                for (const item of d.news.slice(0, 5)) {
+                    const headlines = (item.headlines || []).slice(0, 3).join(" | ");
+                    lines.push(`• سهم ${item.symbol || "—"} (${item.date || "—"}): ${headlines || "لا توجد تفاصيل"}`);
+                }
+            } else if (d?.note) {
+                lines.push(`\n${d.note}`);
+            } else if (e.symbols?.length) {
+                lines.push(`\nلا توجد عناوين أو إفصاحات رسمية منشورة لـ ${e.symbols.join("، ")} خلال آخر 7 أيام في قاعدة البيانات. الارتفاعات السعرية القوية بدون إفصاحات جوهرية أو بأحجام تداول ضعيفة قد تعكس حركة مضاربية تستوجب الحذر وإدارة المخاطر بدلاً من مطاردة الحركة.`);
+            }
+        }
     }
     const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison", "get_live_quote"].includes(e.tool)
         && e.availability !== "error" && e.availability !== "missing").flatMap(e => evidenceRows(e.data));
@@ -1169,7 +1189,8 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     if (stockExplanation) lines.push(stockExplanation);
     for (const e of evidence) if (e.data?.persisted === true) lines.push(`عملية المحفظة ${e.data.operation} للسهم ${e.data.symbol}: تم تأكيد تعديل المركز؛ لا تكرر العملية تلقائياً.${e.data.cash_updated === false && e.data.operation === "sell" ? " لم يتغير الرصيد النقدي." : ""}`);
     if (evidence.some(e => e.availability === "error")) lines.push("تعذر تنفيذ بعض أدوات البيانات؛ لا تعتبر نتائجها فارغة أو عملياتها محفوظة.");
-    if (evidence.some(e => e.availability === "missing" || e.availability === "partial")) lines.push("بعض البيانات المطلوبة غير متاحة أو غير مكتملة في المصدر.");
+    const alreadyDetailed = lines.some(l => l.includes("المسح جزئي") || l.includes("لا توجد أخبار") || l.includes("لا توجد عناوين") || l.includes("لا توجد توصيات") || l.includes("سجل الجلسات الأخيرة"));
+    if (!alreadyDetailed && evidence.some(e => e.availability === "missing" || e.availability === "partial")) lines.push("بعض البيانات المطلوبة غير متاحة أو غير مكتملة في المصدر.");
     return lines.length ? lines.join("\n") : "لم تصل بيانات مؤكدة للإجابة عن الطلب الحالي. أعد المحاولة بعد قليل؛ لن أعرض أسعارًا أو نتائج اختبار غير محسوبة.";
 }
 

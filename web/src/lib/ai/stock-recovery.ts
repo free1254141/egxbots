@@ -50,6 +50,12 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         // Levels describe their own dated snapshot, not a replacement live quote.
         if (finite(row.support) && row.support < close) comments.push(`الدعم عند ${number(row.support)}: كسره يضعف السيناريو.`);
         if (finite(row.resistance) && row.resistance > close) comments.push(`المقاومة عند ${number(row.resistance)}: تجاوزها والثبات فوقها شرط لتأكيد تحسن الحركة.`);
+        if (Array.isArray(row.recent_sessions) && row.recent_sessions.length > 1) {
+            const historyItems = row.recent_sessions.slice(0, 5).map((s: any) =>
+                `• جلسة ${s.date}: إغلاق ${number(s.close)} جنيه${s.change_pct != null ? ` (${s.change_pct >= 0 ? "+" : ""}${number(s.change_pct)}%)` : ""}`
+            );
+            comments.push(`سجل الجلسات الأخيرة:\n${historyItems.join("\n")}`);
+        }
         if (!comments.length) comments.push("السعر وحده لا يكفي لترجيح الدخول؛ يلزم تأكيد الزخم والمستويات الفنية.");
         lines.push(comments.join(" "), "");
     }

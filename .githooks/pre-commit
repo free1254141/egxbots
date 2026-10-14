@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+allowed='acursour@gmail.com'
+actual="$(git config --get user.email || true)"
+if [ "$actual" != "$allowed" ]; then
+  echo "ERROR: commits require user.email=$allowed (got: ${actual:-<unset>})" >&2
+  exit 1
+fi
+
+last="$(git log -1 --format='%an <%ae>' 2>/dev/null || true)"
+echo "Git identity: $actual"
+echo "Previous commit: ${last:-<none>}"

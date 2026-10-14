@@ -170,6 +170,47 @@ async function executeRawTool(
                     .order("scan_date", { ascending: false })
                     .limit(1);
 
+                const { data: pRows } = await supabase
+                    .from("stock_prices")
+                    .select("high, low, close, date")
+                    .eq("exchange", "EGX").eq("symbol", sym)
+                    .order("date", { ascending: false })
+                    .limit(25);
+
+                const recentSessions = (pRows || []).slice(0, 10).map((r: any, idx: number) => {
+                    const nextSession = (pRows || [])[idx + 1];
+                    const prevClose = nextSession ? finite(nextSession.close) : null;
+                    const curClose = finite(r.close);
+                    const changePct = curClose != null && prevClose != null && prevClose > 0
+                        ? Number((((curClose - prevClose) / prevClose) * 100).toFixed(2))
+                        : null;
+                    return {
+                        date: r.date,
+                        close: curClose,
+                        change_pct: changePct,
+                        high: finite(r.high),
+                        low: finite(r.low)
+                    };
+                });
+
+                const bounds = cairoTimeframeBounds();
+                const lastWeekStartDate = bounds.lastWeekStartIso.slice(0, 10);
+                const thisWeekStartDate = bounds.thisWeekStartIso.slice(0, 10);
+                const lastWeekSessions = (pRows || []).filter((r: any) => r.date >= lastWeekStartDate && r.date < thisWeekStartDate);
+                let lastWeekChangePct: number | null = null;
+                let lastWeekEndClose: number | null = null;
+                let lastWeekStartClose: number | null = null;
+                if (lastWeekSessions.length > 0) {
+                    lastWeekEndClose = finite(lastWeekSessions[0].close);
+                    const firstSessionDate = lastWeekSessions[lastWeekSessions.length - 1].date;
+                    lastWeekStartClose = finite(lastWeekSessions[lastWeekSessions.length - 1].close);
+                    const sessionBeforeWeek = (pRows || []).find((r: any) => r.date < firstSessionDate);
+                    const baseClose = sessionBeforeWeek ? finite(sessionBeforeWeek.close) : lastWeekStartClose;
+                    if (lastWeekEndClose != null && baseClose != null && baseClose > 0) {
+                        lastWeekChangePct = Number((((lastWeekEndClose - baseClose) / baseClose) * 100).toFixed(2));
+                    }
+                }
+
                 const ind = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 if (!ind) {
                     return {
@@ -209,7 +250,16 @@ async function executeRawTool(
                         accumulation_score: wyckoff.acc_score,
                         distribution_score: wyckoff.dist_score,
                         consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
-                        consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null
+                        consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
+                        recent_sessions: recentSessions,
+                        last_week_summary: lastWeekSessions.length > 0 ? {
+                            sessions_count: lastWeekSessions.length,
+                            start_date: lastWeekSessions[lastWeekSessions.length - 1].date,
+                            end_date: lastWeekSessions[0].date,
+                            start_close: lastWeekStartClose,
+                            end_close: lastWeekEndClose,
+                            change_pct: lastWeekChangePct
+                        } : null
                     };
                 }
             });
