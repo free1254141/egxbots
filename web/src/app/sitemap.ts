@@ -84,10 +84,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // about today's close. Do not manufacture timestamps for unknown updates.
     lastModified: validLastModified(stock.updatedAt), changeFrequency: 'daily', priority: .7,
   }));
-  const { data: posts, error } = await getPublicMarketClient().from('shared_chat_posts')
-    .select('slug,is_published,updated_at,created_at').eq('is_published', true)
+  const { data: posts, error, count } = await getPublicMarketClient().from('shared_chat_posts')
+    .select('slug,is_published,updated_at,created_at', { count: 'exact' }).eq('is_published', true)
     .order('slug', { ascending: true }).limit(2001);
-  if (error || !Array.isArray(posts) || posts.length > 2000)
+  if (error || !Array.isArray(posts) || posts.length > 2000 || typeof count === 'number' && count > posts.length)
     throw new Error('Unable to load complete published blog sitemap');
   return canonicalSitemap([...staticPages, ...stockPages, ...publishedBlogEntries(posts, baseUrl), ...reportPages]);
 }

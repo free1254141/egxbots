@@ -1,5 +1,7 @@
 import StockPage, { generateMetadata } from '@/app/stocks/[symbol]/page';
 import { getPublicMarketClient } from '@/lib/supabase/route-data';
+jest.mock('server-only', () => ({}));
+jest.mock('next/cache', () => ({ unstable_cache: (fn: any) => fn }));
 jest.mock('@/app/stocks/[symbol]/StockDetailClient', () => () => null);
 jest.mock('@/lib/supabase/route-data', () => ({ getPublicMarketClient: jest.fn() }));
 jest.mock('../stock-directory', () => ({ getPublicStockDirectory: async () => [] }));
