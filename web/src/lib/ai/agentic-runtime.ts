@@ -12,7 +12,7 @@ import { getDeepSeekApiKey } from "./server-secrets";
 import { AI_CONFIG } from "./config";
 import { analyzeImage, reconcileVisionWithMarket } from "./vision";
 import { createExecutionScope, awaitExecution, executionFetch, executionSupabase, remainingExecutionMs } from "./execution";
-import { executeAgenticTool } from "./agentic-tools";
+import { executeRequestTool, knownSymbolHints, requestToolCost } from "./request-data-tools";
 import { isUuid } from "./session";
 import { sanitizeChartContext, type ChartHistoryCache, type ChartAction } from "./chart-strategy-tools";
 import { AgenticEvidence, toAgenticEvidence, checkAgenticDraft, safeAgenticFallback, compactEvidence, evidenceMemory, evidenceRows, advisoryImageConsistency, advisoryTableRowCountConsistency } from "./agentic-publication";
@@ -183,7 +183,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const compactVision = vision ? { image_type:vision.image_type, symbols:vision.symbols,
         confidence:vision.confidence, uncertainties:vision.uncertainties, technical_observations:vision.technical_observations?.slice(0,10),
         market_depth:vision.market_depth, user_relevant_summary:vision.user_relevant_summary?.slice(0,600) } : null;
-    const context = { state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
+    const context = { symbol_hints: knownSymbolHints(userMessage), state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
         current_symbols:sessionSummary.current_symbols, last_topic:sessionSummary.last_topic?.slice(0,600),
         open_references:sessionSummary.open_references, last_image_symbols:sessionSummary.last_image_symbols,
         last_vision_context: sessionSummary.last_vision_context ? {
@@ -234,8 +234,9 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const usedSymbols: string[] = [];
     const emitData = (): Event => ({ type: "tools_data", data: { results: [...evidence], formattedText: JSON.stringify(evidence) } });
     const executeCalls = async (calls: AgenticToolCall[]) => {
-        if (++executedRounds > AGENTIC_BUDGET.toolRounds || toolCalls + calls.length > AGENTIC_BUDGET.toolCalls) throw new Error("TOOL_CALL_BUDGET_EXHAUSTED");
-        toolCalls += calls.length;
+        const cost = calls.reduce((sum, c) => { try { return sum + requestToolCost(c.function.name, JSON.parse(c.function.arguments)); } catch { return sum + 1; } }, 0);
+        if (++executedRounds > AGENTIC_BUDGET.toolRounds || toolCalls + cost > AGENTIC_BUDGET.toolCalls) throw new Error("TOOL_CALL_BUDGET_EXHAUSTED");
+        toolCalls += cost;
         const writes = calls.filter(c => c.function.name === "manage_portfolio" && (() => {
             try { return String(JSON.parse(c.function.arguments).operation || "view").toLowerCase() !== "view"; } catch { return false; }
         })());
@@ -271,7 +272,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 const activeCache = isWrite ? writeCache : cache;
                 if (activeCache.has(fingerprint)) output = activeCache.get(fingerprint);
                 else {
-                    output = await executeAgenticTool(call.function.name, args, client, input.userId, chartHistoryCache);
+                    output = await executeRequestTool(call.function.name, args, client, input.userId, chartHistoryCache, { isPro: options.isPro === true });
                     if (isWrite) cache.clear();
                     activeCache.set(fingerprint, output);
                 }
@@ -507,6 +508,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         session_update: sessionUpdate,
         usage: accounting.summary(toolCalls),
         publication_review: { passed: firstPassed, final_passed: finalPassed, repaired, reasons, advisory_issues: advisoryIssues,
+            data_coverage: evidence.some(e => e.availability !== 'available') ? 'partial' : 'complete',
             completion: finalPassed ? "complete" : "partial", reviewer: "llm_advisory_deterministic_evidence_gate" } } };
 }
 
