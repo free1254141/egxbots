@@ -27,73 +27,63 @@ export async function GET() {
 
     const clientForData = serviceClient || supabase;
 
-    // 1. Fetch user active subscriptions
-    const { data: subRows, error: subErr } = await clientForData
-      .from("subscriptions")
-      .select("id, plan_id, status, current_period_end, created_at")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .order("current_period_end", { ascending: false })
-      .limit(5);
-
-    if (subErr) {
-      console.warn("[api/user/quota] subscriptions query error:", subErr);
-    }
-
-    const pro = hasActiveProSubscription(subRows || []);
-    const activeSub = subRows?.[0];
-    const planName = pro ? (activeSub?.plan_id === "lifetime" ? "lifetime" : "pro") : "free";
-    const limits = planLimits(planName);
-
-    // 2. Chatbot messages used — read from the permanent ledger (ai_chatbot_limits).
-    //    This table is write-once: consume_ai_chat_quota() increments it each request.
-    //    Deleting a chat session removes rows from ai_chat_messages but NEVER touches
-    //    ai_chatbot_limits, so the usage count here is always accurate regardless of
-    //    whether the user deletes old conversations.
+    // Run the first three independent queries in parallel to cut latency.
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
     const monthStartStr = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
 
+    const [subResult, limitRowsRes, posResult] = await Promise.all([
+      // 1. Active subscriptions
+      clientForData
+        .from("subscriptions")
+        .select("id, plan_id, status, current_period_end, created_at")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .order("current_period_end", { ascending: false })
+        .limit(5),
 
-    // Fetch ai_chatbot_limits rows — MUST include "date" so we can find today's row.
-    const limitRowsRes = await serviceClient
-      .from("ai_chatbot_limits")
-      .select("date, chat_count")
-      .eq("user_id", user.id)
-      .gte("date", monthStartStr);
+      // 2. Chat quota ledger for this month
+      serviceClient
+        .from("ai_chatbot_limits")
+        .select("date, chat_count")
+        .eq("user_id", user.id)
+        .gte("date", monthStartStr),
 
-    if (limitRowsRes.error) {
-      console.warn("[api/user/quota] limits count error:", limitRowsRes.error);
-    }
+      // 3. Open portfolio positions
+      supabase
+        .from("positions")
+        .select("symbol")
+        .eq("user_id", user.id)
+        .eq("status", "open"),
+    ]);
 
+    const subRows = subResult.data;
+    const subErr = subResult.error;
+    if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
+    if (limitRowsRes.error) console.warn("[api/user/quota] limits count error:", limitRowsRes.error);
+    if (posResult.error) console.warn("[api/user/quota] positions query error:", posResult.error);
+
+    // Derive plan status
+    const pro = hasActiveProSubscription(subRows || []);
+    const activeSub = subRows?.[0];
+    const planName = pro ? (activeSub?.plan_id === "lifetime" ? "lifetime" : "pro") : "free";
+    const limits = planLimits(planName);
+
+    // Derive chat quota
     const today = new Date().toISOString().split("T")[0];
     const todayLimitRow = (limitRowsRes.data || []).find((r: any) => r.date === today);
     const todayChatCount = Number(todayLimitRow?.chat_count || 0);
-
-    // Monthly total: sum all days in this month from the permanent ledger.
     const monthlyLimitsCount = (limitRowsRes.data || []).reduce(
       (acc: number, row: any) => acc + (Number(row.chat_count) || 0),
       0
     );
-
-    // For Pro: monthly sum from ledger.
-    // For Free: today's count from ledger (daily limit = 5).
     const chatUsed = pro ? monthlyLimitsCount : todayChatCount;
     const chatLimit = pro ? limits.chat_messages_per_month : 5;
     const quotaPeriod = pro ? "monthly" : "daily";
 
-    // 3. Portfolio stocks currently open
-    const { data: positionRows, error: posErr } = await supabase
-      .from("positions")
-      .select("symbol")
-      .eq("user_id", user.id)
-      .eq("status", "open");
-
-    if (posErr) {
-      console.warn("[api/user/quota] positions query error:", posErr);
-    }
-
+    // Derive portfolio count
+    const positionRows = posResult.data;
     const uniqueSymbols = new Set(
       (positionRows || []).map((p: any) => String(p.symbol || "").toUpperCase().trim())
     );

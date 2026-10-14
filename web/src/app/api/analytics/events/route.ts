@@ -30,18 +30,17 @@ export async function POST(request: NextRequest) {
     const path = String(body?.path || "").slice(0, 180);
     if (!path.startsWith("/")) return NextResponse.json({ ok: false }, { status: 400 });
     const service = getSupabaseServiceClient();
-    const { error } = await service.from("user_activity_events").insert({
+    // Fire-and-forget: respond immediately, let DB write happen in background.
+    // Telemetry does not need to block the client.
+    service.from("user_activity_events").insert({
       user_id: user.id,
       session_id: String(body?.session_id || "").slice(0, 100) || null,
       event_name: eventName,
       path,
       metadata: cleanMetadata(body?.metadata),
+    }).then(({ error }: { error: { code?: string; message: string } | null }) => {
+      if (error) console.warn("[activity] event insert skipped:", error.code || error.message);
     });
-    if (error) {
-      // Keep telemetry non-blocking during rollout if the migration has not run yet.
-      console.warn("[activity] event insert skipped:", error.code || error.message);
-      return NextResponse.json({ ok: false, unavailable: true }, { status: 202 });
-    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.warn("[activity] event route failed:", error);

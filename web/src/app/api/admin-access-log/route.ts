@@ -22,12 +22,15 @@ export async function POST(req: NextRequest) {
         const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown";
         const userAgent = req.headers.get("user-agent") || "unknown";
 
-        await supabaseAdmin.from("admin_access_logs").insert({
+        // Fire-and-forget: return immediately, write happens in background.
+        supabaseAdmin.from("admin_access_logs").insert({
             user_id: userId || null,
             user_email: userEmail || null,
             event_type: eventType,
             ip_address: ip,
             user_agent: userAgent,
+        }).then(({ error }) => {
+            if (error) console.warn("[admin-access-log] insert warn:", error.code || error.message);
         });
 
         return NextResponse.json({ ok: true });

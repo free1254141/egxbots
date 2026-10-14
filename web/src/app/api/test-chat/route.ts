@@ -12,6 +12,14 @@ export const maxDuration = 120;
 // the live database without auth/quota/idempotency so fix verification is
 // reproducible via a local client.
 export async function POST(req: NextRequest) {
+    // Guard: only accessible in development or with a valid internal token.
+    const internalToken = req.headers.get("x-internal-token");
+    const isAllowed =
+        process.env.NODE_ENV === "development" ||
+        (internalToken && internalToken === process.env.INTERNAL_TEST_TOKEN);
+    if (!isAllowed) {
+        return NextResponse.json({ detail: "Not available in production" }, { status: 403 });
+    }
     try {
         const body = await req.json();
         const message = typeof body.message === "string" ? body.message.trim() : "";

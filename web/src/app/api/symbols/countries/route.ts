@@ -3,7 +3,9 @@ import { getSupabaseClient } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+// Intentionally no `dynamic = "force-dynamic"` — daily cache headers below are sufficient.
+// Countries list is updated once per day by the daily pipeline.
+export const revalidate = 3600;
 
 const PUBLIC_CACHE_HEADERS = dailyCacheHeaders(DAILY_CACHE_TAGS.symbols);
 
