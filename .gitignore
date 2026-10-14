@@ -19,6 +19,7 @@ out/
 build/
 
 # Application Data & Cache (Local only)
+.cache/
 api/data_cache/
 api/cache/
 api/.pytest_cache/
