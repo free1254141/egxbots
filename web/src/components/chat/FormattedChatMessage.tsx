@@ -875,19 +875,19 @@ export function FormattedChatMessage({
                             setCopiedText(true);
                             setTimeout(() => setCopiedText(false), 2000);
                         }}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-black dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-white/20 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-black dark:hover:bg-zinc-900 text-zinc-900 dark:text-zinc-200 border border-zinc-300 dark:border-white/20 font-bold text-xs transition-all shadow-xs active:scale-95 cursor-pointer"
                         title="نسخ الرد"
                     >
-                        {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         <span className="font-sans">{copiedText ? "Copied!" : "Copy"}</span>
                     </button>
 
                     {typeof latencyMs === "number" && latencyMs > 0 && (
                         <span
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-mono font-bold text-xs shadow-xs"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs"
                             title={`زمن الرد الإجمالي: ${latencyMs} ملي ثانية (${(latencyMs / 1000).toFixed(2)} ثانية)`}
                         >
-                            <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                            <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             <span>{(latencyMs / 1000).toFixed(2)}s</span>
                         </span>
                     )}
@@ -910,9 +910,9 @@ export function FormattedChatMessage({
                             key={bIdx}
                             type="button"
                             onClick={() => onButtonClick(btnText)}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 dark:bg-black dark:hover:bg-zinc-900 text-amber-700 dark:text-amber-300 border border-amber-500/30 dark:border-amber-400/40 font-bold text-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/90 text-amber-950 border-2 border-amber-400 font-black text-xs transition-all shadow-xs active:scale-95 cursor-pointer dark:bg-black dark:hover:bg-zinc-900 dark:text-amber-300 dark:border-amber-400/40"
                         >
-                            <Sparkles className="w-3 h-3 text-amber-500" />
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                             <span>{btnText}</span>
                         </button>
                     ))}

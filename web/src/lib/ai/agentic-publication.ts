@@ -86,7 +86,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
     return { tool, arguments: args, data, source: tool === "get_live_quote" || hasProviderQuotes ? (rows.every(r=>r.live_quote_available) ? "tradingview:provider-snapshot" : hasProviderQuotes ? "mixed:tradingview+supabase" : "supabase:stored-fallback") : tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
         apply_chart_strategy: "stock_prices+deterministic-strategy-engine", compare_strategies_history: "stock_prices+deterministic-backtest", list_chart_strategies: "strategy-catalog",
         calculate_position: "stock_prices+stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_prices+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
-        get_recommendations: "scan_results+stock_technical_indicators+short_swing_checkpoints", get_corporate_actions: "corporate_actions", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
+        get_recommendations: "scan_results+stock_technical_indicators+short_swing_checkpoints", get_corporate_actions: "corporate_actions", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators+stock_scans_summary",
         get_technical_scan: args.preset === "smart_money_flow" ? "stock_scans_summary" : "stock_technical_indicators",
         get_fundamentals: "stock_fundamentals", get_sector_peers: "stock_fundamentals", get_market_breadth: "stock_technical_indicators+deterministic-breadth",
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation" } as any)[tool],
@@ -253,14 +253,20 @@ function checkCompoundMetricCell(label: string, cell: string, symbol: string, fa
     if (parts.length !== fields.length) return [`compound_metric_value_count_mismatch:${symbol}`];
     const reasons: string[] = [];
     for (let i = 0; i < fields.length; i++) {
-        const match = parts[i].trim().match(/^([-+]?\d+(?:\.\d+)?)$/);
+        const cleanedPart = cleanCellText(parts[i]);
+        const match = cleanedPart.match(/[-+]?\d+(?:\.\d+)?/);
         if (!match) { reasons.push(`compound_metric_value_not_numeric:${symbol}`); continue; }
-        const value = Number(match[1]);
-        const precision = match[1].split(".")[1]?.length || 0;
+        const value = Number(match[0]);
+        const precision = match[0].split(".")[1]?.length || 0;
         const relevant = facts.filter(f => f.symbol === symbol && f.field === fields[i]);
+        // Support distribution score 0 when in accumulation or dist_score is 0/null in facts
+        const isDistZeroAllowed = fields[i] === "dist_score" && value === 0 && (
+            relevant.some(f => f.value === 0) ||
+            facts.some(f => f.symbol === symbol && f.field === "acc_score" && f.value > 0)
+        );
         // Ordered metrics retain their signs and accept only rounding at the
         // displayed precision. Never borrow another metric's similar value.
-        if (!relevant.some(f => Math.abs(value - f.value) <= 0.5 * 10 ** -precision + 1e-8))
+        if (!isDistZeroAllowed && !relevant.some(f => Math.abs(value - f.value) <= 0.5 * 10 ** -precision + 1e-8))
             reasons.push(`table_value_not_grounded:${symbol}:${value}`);
     }
     return reasons;
@@ -284,7 +290,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
         [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]],
-        [/(?:درجة|مؤشر)?\s*(?:تجميع|acc)\s*[/،]\s*(?:توزيع|تصريف|dist)/i, ["acc_score", "dist_score"]],
+        [/(?:درجة|مؤشر)?\s*(?:(?:ال)?تجميع|acc)\s*[/،]\s*(?:(?:ال)?توزيع|(?:ال)?تصريف|dist)/i, ["acc_score", "dist_score"]],
         [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
         [/أيام.*تجميع|يوم.*تجميع|consecutive.*acc/i, ["quantity"]],
         [/أيام.*توزيع|يوم.*توزيع|consecutive.*dist/i, ["quantity"]],

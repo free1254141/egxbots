@@ -53,10 +53,13 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         if (!comments.length) comments.push("السعر وحده لا يكفي لترجيح الدخول؛ يلزم تأكيد الزخم والمستويات الفنية.");
         lines.push(comments.join(" "), "");
     }
+    const allLive = [...snapshots.values()].every(r => r.live_quote_available === true);
     const hasLiveQuotes = [...snapshots.values()].some(r => r.live_quote_available === true);
-    const quoteDescription = hasLiveQuotes
-        ? "تاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة."
-        : "هذه قراءات من إغلاق يومي مخزن وليست أسعارًا لحظية، وتاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة.";
+    const quoteDescription = allLive
+        ? "جميع الأسعار المعروضة لقطات مباشرة من مزود البيانات TradingView وليست إغلاقات يومية مخزنة، وتاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة."
+        : hasLiveQuotes
+            ? "تاريخ ومصدر كل قراءة موضحان (تشمل لقطات مباشرة من TradingView وأخرى من إغلاقات يومية مخزنة)، والمستويات سيناريوهات فنية غير مضمونة."
+            : "هذه قراءات من إغلاق يومي مخزن وليست أسعارًا لحظية، وتاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة.";
     lines.push(`الخلاصة: اربط قرارك بتأكيد الحركة وحدود المخاطرة؛ قرب الدعم أو التشبع البيعي وحده لا يكفي للدخول. ${quoteDescription}`);
     return lines.join("\n");
 }

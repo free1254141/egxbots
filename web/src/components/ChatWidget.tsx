@@ -345,12 +345,12 @@ export default function ChatWidget() {
             {/* Main Chat Container */}
             <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${isChatRoute ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/80 dark:border-white/20 bg-white/75 dark:bg-black shrink-0">
-                    <div className="flex items-center gap-2 text-black font-black uppercase tracking-tight">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0">
+                    <div className="flex items-center gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight">
                         {user && !isSidebarOpen && (
                             <button
                                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                                className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                                 title="فتح سجل المحادثات"
                                 aria-label="فتح سجل المحادثات"
                             >
@@ -358,19 +358,19 @@ export default function ChatWidget() {
                             </button>
                         )}
                         <ArtoroBrandMark size="header" />
-                        <span className="text-[15px] font-extrabold tracking-[0.12em] text-slate-800 dark:text-white">ARTORO</span>
-                        <span className="rounded-md bg-gradient-to-r from-amber-300 via-sky-300 to-indigo-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-slate-900 shadow-sm">V3</span>
+                        <span className="text-[15px] font-black tracking-[0.12em] text-zinc-950 dark:text-white">ARTORO</span>
+                        <span className="rounded-md bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950 border border-amber-500/50 shadow-xs">V3</span>
                     </div>
                     <div className="flex items-center gap-2">
                         {user && (
-                            <div className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 dark:bg-black dark:text-white dark:border dark:border-white/20 uppercase">
+                            <div className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs">
                                 {remainingQuota >= 99 ? "Unlimited ♾️" : `${remainingQuota}/5 Left`}
                             </div>
                         )}
                         {!isChatRoute && (
                             <button
                                 onClick={() => setIsExpanded(!isExpanded)}
-                                className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                                className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                                 title={isExpanded ? "تعديل الحجم الافتراضي" : "تكبير النافذة"}
                                 aria-label={isExpanded ? "استعادة حجم النافذة" : "تكبير النافذة"}
                             >
@@ -379,7 +379,7 @@ export default function ChatWidget() {
                         )}
                         <button
                             onClick={() => isChatRoute ? router.push("/") : setIsOpen(false)}
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-rose-950/40"
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-rose-950/40"
                             title={isChatRoute ? "الرئيسية" : "إغلاق"}
                             aria-label={isChatRoute ? "الذهاب للرئيسية" : "إغلاق الشات"}
                         >
@@ -554,16 +554,16 @@ export default function ChatWidget() {
                                                     key={qIdx}
                                                     type="button"
                                                     onClick={() => sendMessage(q.text)}
-                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-xl shadow-xs dark:shadow-[3px_3px_0_0_#fff] hover:border-amber-500/40 hover:bg-amber-50/40 dark:hover:bg-zinc-950 hover:-translate-y-0.5 active:translate-y-0 transition-all group cursor-pointer"
+                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-black border border-zinc-300 dark:border-white/20 rounded-xl shadow-xs dark:shadow-[3px_3px_0_0_#fff] hover:border-amber-500 hover:bg-amber-50/60 dark:hover:bg-zinc-950 hover:-translate-y-0.5 active:translate-y-0 transition-all group cursor-pointer"
                                                 >
-                                                    <span className="text-base shrink-0 p-1.5 rounded-lg bg-slate-100 dark:bg-black border border-slate-200 dark:border-white/30">
+                                                    <span className="text-base shrink-0 p-1.5 rounded-lg bg-zinc-100 dark:bg-black border border-zinc-300 dark:border-white/30">
                                                         {q.icon}
                                                     </span>
                                                     <div className="flex flex-col min-w-0 flex-1">
-                                                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">
+                                                        <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 mb-0.5">
                                                             {q.tag}
                                                         </span>
-                                                        <span className="text-xs font-bold text-slate-800 dark:text-white group-hover:text-amber-700 dark:group-hover:text-amber-300 leading-snug">
+                                                        <span className="text-xs font-bold text-zinc-950 dark:text-white group-hover:text-amber-800 dark:group-hover:text-amber-300 leading-snug">
                                                             {q.text}
                                                         </span>
                                                     </div>
@@ -581,16 +581,16 @@ export default function ChatWidget() {
                                     className="flex gap-2 sm:gap-4 w-full max-w-3xl mx-auto min-w-0"
                                 >
                                     <div className={`
-                                        h-9 w-9 rounded-full border border-slate-200 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
-                                        ${msg.role === "user" ? "bg-slate-100 dark:bg-black text-slate-700 dark:text-white" : "bg-white dark:bg-black"}
+                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
+                                        ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
                                     `}>
                                         {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
                                     </div>
                                     <div className={`
                                         flex-1 rounded-2xl border p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
                                         ${msg.role === "user"
-                                            ? "bg-slate-100 dark:bg-black border-slate-200 dark:border-cyan-400/50 text-slate-900 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
-                                            : "bg-white dark:bg-black border-slate-200 dark:border-white/20 text-slate-900 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
+                                            ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
+                                            : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
                                     `}>
                                         {/* Show image thumbnails if present */}
                                         {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
@@ -783,16 +783,16 @@ export default function ChatWidget() {
                                                     }
                                                     setModelMenuOpen(!modelMenuOpen);
                                                 }}
-                                                className="flex items-center gap-1.5 bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 rounded-xl px-2.5 py-1 text-[11px] text-slate-700 dark:text-white font-bold transition-all shadow-xs active:scale-95"
+                                                className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black hover:bg-zinc-200 dark:hover:bg-zinc-900 border border-zinc-300 dark:border-white/30 rounded-xl px-2.5 py-1 text-[11px] text-zinc-900 dark:text-white font-black transition-all shadow-xs active:scale-95"
                                             >
-                                                <Cpu className="h-3 w-3 text-amber-500 shrink-0" />
+                                                <Cpu className="h-3 w-3 text-amber-600 dark:text-amber-400 shrink-0" />
                                                 <span className="flex items-center gap-1">
                                                     <span>{currentModelObj?.name}</span>
-                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold">
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-400 font-black">
                                                         {language === "ar" ? currentModelObj?.badgeAr : currentModelObj?.badgeEn}
                                                     </span>
                                                 </span>
-                                                <ChevronDown className={`h-3 w-3 text-zinc-500 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
+                                                <ChevronDown className={`h-3 w-3 text-zinc-600 dark:text-zinc-400 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
                                             </button>
 
                                             {/* Model dropdown rendered as portal to escape overflow:hidden */}
@@ -806,9 +806,9 @@ export default function ChatWidget() {
                                                         width: modelMenuPos.width,
                                                         zIndex: 99999
                                                     }}
-                                                    className="bg-white/98 dark:bg-black backdrop-blur-xl border border-zinc-200 dark:border-white/20 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
+                                                    className="bg-white dark:bg-black backdrop-blur-xl border border-zinc-300 dark:border-white/20 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
                                                 >
-                                                    <div className="px-2.5 py-1.5 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800 mb-1">
+                                                    <div className="px-2.5 py-1.5 text-[10px] font-black uppercase text-zinc-700 dark:text-zinc-400 tracking-wider border-b border-zinc-200 dark:border-zinc-800 mb-1">
                                                         {language === "ar" ? "🤖 اختر موديل الذكاء الاصطناعي" : "🤖 Select AI Model"}
                                                     </div>
                                                     {AVAILABLE_AI_MODELS.map((m) => {
@@ -824,23 +824,23 @@ export default function ChatWidget() {
                                                                 className={`
                                                                     w-full text-left flex items-start justify-between p-2.5 rounded-xl text-xs transition-all
                                                                     ${isSelected
-                                                                        ? "bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/40 text-black dark:text-white"
-                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-transparent"}
+                                                                        ? "bg-amber-500/15 dark:bg-amber-500/20 border border-amber-500/50 text-zinc-950 dark:text-white"
+                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border border-transparent"}
                                                                 `}
                                                             >
                                                                 <div className="flex flex-col gap-0.5 min-w-0 pr-2">
-                                                                    <div className="flex items-center gap-1.5 font-bold text-black dark:text-white">
+                                                                    <div className="flex items-center gap-1.5 font-bold text-zinc-950 dark:text-white">
                                                                         <span>{m.name}</span>
-                                                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold">
+                                                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold">
                                                                             {language === "ar" ? m.badgeAr : m.badgeEn}
                                                                         </span>
-                                                                        {isSelected && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold">✓ نشط</span>}
+                                                                        {isSelected && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-bold">✓ نشط</span>}
                                                                     </div>
-                                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-normal leading-tight">
+                                                                    <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-normal leading-tight">
                                                                         {language === "ar" ? m.descAr : m.descEn}
                                                                     </span>
                                                                 </div>
-                                                                {isSelected && <Check className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />}
+                                                                {isSelected && <Check className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />}
                                                             </button>
                                                         );
                                                     })}
@@ -851,12 +851,12 @@ export default function ChatWidget() {
                                     );
                                 })()}
 
-                                <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium">
+                                <span className="text-[10px] text-zinc-600 dark:text-zinc-500 font-semibold">
                                     {language === "ar" ? "Shift+Enter لسطر جديد" : "Shift+Enter for newline"}
                                 </span>
                             </div>
                         </form>
-                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 text-center pt-1 font-semibold leading-tight">
+                        <div className="text-[10px] text-zinc-600 dark:text-zinc-400 text-center pt-1 font-semibold leading-tight">
                             {language === "ar"
                                 ? "ℹ️ مخرجات المساعد لأغراض التحليل الفني والتعليم فقط وليست استشارة مالية ملزمة."
                                 : "ℹ️ AI outputs are for educational technical analysis only and not financial advice."}

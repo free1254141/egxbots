@@ -876,9 +876,27 @@ async function executeRawTool(
                     .eq("exchange", "EGX").eq("symbol", sym)
                     .order("date", { ascending: false })
                     .limit(1);
+                const { data: wyckoffRows } = await supabase
+                    .from("stock_scans_summary")
+                    .select("scan_date, acc_score, dist_score, wyckoff_phase, vol_ratio, signal, consecutive_acc_days, consecutive_dist_days")
+                    .eq("symbol", sym)
+                    .order("scan_date", { ascending: false })
+                    .limit(1);
                 const quote = await reconcileStockQuote(supabase, sym, indRows?.[0]);
+                const wyckoff = wyckoffRows?.[0] || {};
                 if (quote) {
-                    return {symbol: sym, ...quote};
+                    return {
+                        symbol: sym,
+                        ...quote,
+                        wyckoff_date: wyckoff.scan_date ?? null,
+                        wyckoff_phase: wyckoff.wyckoff_phase ?? null,
+                        accumulation_score: wyckoff.acc_score ?? null,
+                        distribution_score: wyckoff.dist_score ?? null,
+                        acc_score: wyckoff.acc_score ?? null,
+                        dist_score: wyckoff.dist_score ?? null,
+                        consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
+                        consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
+                    };
                 } else {
                     return { symbol: sym, error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب" };
                 }

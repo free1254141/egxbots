@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { ShieldCheck, Lock, Smartphone, ExternalLink } from "lucide-react";
+import { ShieldCheck, Lock, Smartphone, ExternalLink, Download } from "lucide-react";
 
 export default function Footer() {
   const { t, language } = useLanguage();
@@ -30,6 +30,17 @@ export default function Footer() {
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                 <span>{isAr ? "مدفوعات مشفرة ومعتمدة عبر EasyKash" : "Secured by EasyKash Payment Gateway"}</span>
               </span>
+
+              <a
+                href="/artoro.apk"
+                download="artoro.apk"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded transition-colors shadow-2xs"
+                title="تحميل تطبيق أندرويد APK"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
+                <span>{isAr ? "تطبيق أندرويد APK (3.5 MB)" : "Android App APK (3.5 MB)"}</span>
+                <Download className="w-3 h-3" />
+              </a>
             </div>
           </div>
 
@@ -85,6 +96,16 @@ export default function Footer() {
                 >
                   {t("nav.scanner.backtests")}
                 </Link>
+              </li>
+              <li>
+                <a
+                  href="/artoro.apk"
+                  download="artoro.apk"
+                  className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:underline transition-colors"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>{isAr ? "تحميل تطبيق أندرويد (APK)" : "Download Android App (APK)"}</span>
+                </a>
               </li>
             </ul>
           </div>

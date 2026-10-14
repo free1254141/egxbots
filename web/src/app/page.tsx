@@ -461,6 +461,20 @@ export default function HomePage() {
                             <ArrowRight className={`w-6 h-6 transition-transform ${isAr ? "rotate-180" : ""}`} />
                         </Link>
                     </div>
+
+                    {/* Android App Download Banner in Hero */}
+                    <div className="landing-fade-up landing-delay-4 mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+                        <a
+                            href="/artoro.apk"
+                            download="artoro.apk"
+                            className="inline-flex items-center gap-3 px-6 py-3.5 border-4 border-black dark:border-white bg-emerald-400 hover:bg-emerald-300 text-black font-black uppercase tracking-wider text-sm sm:text-base shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer"
+                            title="تحميل تطبيق أندرويد APK"
+                        >
+                            <Smartphone className="w-5 h-5 text-black shrink-0" />
+                            <span>{isAr ? "📱 تحميل تطبيق ARTORO للأندرويد (APK مباشر)" : "📱 Download ARTORO Android App (Direct APK)"}</span>
+                            <span className="text-xs bg-black text-emerald-300 px-2 py-0.5 rounded font-mono font-bold">3.5 MB</span>
+                        </a>
+                    </div>
                 </div>
 
             </section>
@@ -1280,6 +1294,16 @@ export default function HomePage() {
                                 {isAr ? "ابدأ الآن مجاناً" : "Start Now For Free"}
                                 <ArrowRight className={`w-5 h-5 transition-transform ${isAr ? "rotate-180" : ""}`} />
                             </Link>
+
+                            <a
+                                href="/artoro.apk"
+                                download="artoro.apk"
+                                className="h-16 px-8 border-4 border-black bg-emerald-400 hover:bg-emerald-300 text-black font-black text-base sm:text-lg shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer inline-flex items-center justify-center gap-3"
+                                title="تحميل تطبيق أندرويد APK"
+                            >
+                                <Smartphone className="w-5 h-5 text-black" />
+                                <span>{isAr ? "تحميل تطبيق الأندرويد (APK)" : "Download Android App (APK)"}</span>
+                            </a>
                         </div>
                     </div>
                 </div>

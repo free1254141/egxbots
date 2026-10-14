@@ -100,6 +100,18 @@ export default function PwaInstallPrompt() {
                 <li>اختر <span className="font-bold text-white">&quot;تثبيت التطبيق&quot; (Install app)</span> أو <span className="font-bold text-white">&quot;الإضافة إلى الشاشة الرئيسية&quot;</span>.</li>
                 <li>سيتم تثبيت التطبيق فوراً والعمل كتطبيق أصلي فائق الخفة والسرعة.</li>
               </ol>
+
+              <div className="pt-2 border-t border-zinc-800/80">
+                <p className="text-[11px] text-zinc-400 mb-2">أو تحميل ملف التطبيق المباشر (APK):</p>
+                <a
+                  href="/artoro.apk"
+                  download="artoro.apk"
+                  className="flex items-center justify-center gap-1.5 w-full rounded-xl bg-emerald-500/15 border border-emerald-500/30 py-2 text-xs font-bold text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  تحميل ملف APK مباشرة (3.5 MB)
+                </a>
+              </div>
             </div>
             <button
               onClick={() => setShowModal(false)}

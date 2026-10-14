@@ -67,7 +67,7 @@ export function ChatSidebar({
                 md:relative md:w-[250px] md:rounded-[22px] md:border md:border-slate-200/80 md:bg-white md:shadow-[0_18px_55px_rgba(2,6,23,0.16)] dark:md:border-white/20 dark:md:bg-black dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)] md:z-auto
             `}>
                 {/* Top Header & New Chat Button */}
-                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 p-3 dark:border-white/20">
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-200/80 p-3 dark:border-white/20">
                     <button
                         onClick={() => {
                             onNewChat();
@@ -75,15 +75,15 @@ export function ChatSidebar({
                                 onToggle();
                             }
                         }}
-                        className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-200 to-sky-200 px-3 py-2.5 text-xs font-extrabold text-slate-900 shadow-sm transition hover:brightness-[1.03] active:scale-[0.98]"
+                        className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-3 py-2.5 text-xs font-black text-zinc-950 border border-amber-500/40 shadow-xs transition hover:brightness-105 active:scale-[0.98]"
                         aria-label="محادثة جديدة"
                     >
-                        <Plus className="h-4 w-4" />
+                        <Plus className="h-4 w-4 stroke-[2.5]" />
                         <span>محادثة جديدة</span>
                     </button>
                     <button
                         onClick={onToggle}
-                        className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                        className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-700 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
                         title="إغلاق سجل المحادثات"
                         aria-label="إغلاق سجل المحادثات"
                     >
@@ -92,12 +92,12 @@ export function ChatSidebar({
                 </div>
 
                 {/* Sub-header title */}
-                <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3 text-[11px] font-bold uppercase text-slate-500 dark:border-white/20 dark:text-zinc-300">
+                <div className="flex items-center justify-between border-b border-zinc-200/80 px-4 py-3 text-[11px] font-bold uppercase text-zinc-700 dark:border-white/20 dark:text-zinc-300">
                     <span className="flex items-center gap-1.5">
-                        <Sparkles className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                        <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-sky-400" />
                         سجل المحادثات
                     </span>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:bg-black dark:border dark:border-white/20 dark:text-white">
+                    <span className="rounded-full bg-zinc-100 border border-zinc-300 px-2 py-0.5 font-mono text-[10px] font-bold text-zinc-900 dark:bg-black dark:border-white/20 dark:text-white">
                         {sessions.length}
                     </span>
                 </div>
@@ -105,19 +105,19 @@ export function ChatSidebar({
                 {/* Sessions List */}
                 <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-3">
                     {sessions.length === 0 ? (
-                        <div className="my-4 flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-4 text-center dark:border-white/20 dark:bg-black">
-                            <div className="my-1 grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-amber-200 to-sky-200 text-slate-700 dark:text-slate-900">
+                        <div className="my-4 flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/60 p-4 text-center dark:border-white/20 dark:bg-black">
+                            <div className="my-1 grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-amber-200 to-sky-200 text-zinc-800 dark:text-slate-900">
                                 <MessageSquare className="h-5 w-5" />
                             </div>
-                            <span className="font-black text-xs text-black dark:text-white">
+                            <span className="font-black text-xs text-zinc-950 dark:text-white">
                                 لا توجد محادثات سابقة
                             </span>
-                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold leading-relaxed">
+                            <p className="text-[10px] text-zinc-600 dark:text-zinc-400 font-semibold leading-relaxed">
                                 اضغط على زر "محادثة جديدة" للبدء في استفسار جديد.
                             </p>
                                 <button
                                 onClick={onNewChat}
-                                className="mt-2 rounded-lg bg-gradient-to-r from-amber-300 to-sky-200 px-3 py-1.5 text-[11px] font-extrabold text-slate-900 shadow-sm transition hover:brightness-[1.03] active:scale-[0.98]"
+                                className="mt-2 rounded-lg bg-gradient-to-r from-amber-400 to-yellow-300 px-3 py-1.5 text-[11px] font-black text-zinc-950 border border-amber-500/40 shadow-xs transition hover:brightness-105 active:scale-[0.98]"
                             >
                                 + بدء محادثة
                             </button>
@@ -136,10 +136,10 @@ export function ChatSidebar({
                                             onToggle();
                                         }
                                     }}
-                                    className={`group flex items-center justify-between rounded-xl border p-2.5 text-xs font-semibold transition-all ${
+                                    className={`group flex items-center justify-between rounded-xl border p-2.5 text-xs font-bold transition-all ${
                                         isActive
-                                            ? "border-sky-300 bg-sky-50 text-slate-900 shadow-sm dark:border-[#FFE600] dark:bg-[#FFE600]/15 dark:text-white"
-                                            : "border-slate-200 bg-white/75 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                                            ? "border-amber-400 bg-amber-50/90 text-zinc-950 shadow-xs dark:border-[#FFE600] dark:bg-[#FFE600]/15 dark:text-white"
+                                            : "border-zinc-300 bg-white text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 dark:border-white/20 dark:bg-black dark:text-zinc-200 dark:hover:bg-zinc-900"
                                     }`}
                                 >
                                     <div className="flex items-center gap-2 truncate flex-1 min-w-0">

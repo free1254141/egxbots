@@ -745,19 +745,7 @@ html.light .btn-banner-action,
 html.light .btn-banner-action *,
 html.light .btn-banner-action span,
 html.light a.btn-banner-action,
-html.light a.btn-banner-action span,
-html.light .backtests-shell a[class*="bg-black"],
-html.light .backtests-shell a[class*="bg-black"] *,
-html.light .backtests-shell a[class*="bg-black"] span,
-html.light .backtests-shell button[class*="bg-black"],
-html.light .backtests-shell button[class*="bg-black"] *,
-html.light a[class*="bg-black"],
-html.light a[class*="bg-black"] *,
-html.light a[class*="bg-black"] span,
-html.light button[class*="bg-black"],
-html.light button[class*="bg-black"] *,
-html.light [class*="bg-black"],
-html.light [class*="bg-black"] * {
+html.light a.btn-banner-action span {
   color: #ffffff !important;
 }
 
