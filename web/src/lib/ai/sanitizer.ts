@@ -425,7 +425,7 @@ export function sanitizeReply(reply: string, liveDataString?: string): string {
     // 🚨 Remove garbled non-table lines that look like "BIOC  محايد  SIDEWAYS  محايد ⚪  STOCK  تجميع |"
     // These are malformed table rows without proper markdown table pipes
     cleanReply = cleanReply
-      .replace(/^[A-Z]{2,6}\s+[^|]+?\s+\|[^\n]*$/gm, "")
+      .replace(/^[A-Z]{2,6}[ \t]+[^|\r\n]+?[ \t]+\|[^\r\n]*$/gm, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
