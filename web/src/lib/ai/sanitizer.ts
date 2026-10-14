@@ -207,6 +207,8 @@ export function sanitizeReply(reply: string, liveDataString?: string): string {
                 if (/^https?:\/\//i.test(t)) return true;          // source URLs from web search
                 if (/^المصدر[:：]/.test(t)) return true;           // source attribution lines
                 const ar = countAr(t), en = countEn(t);
+                // A numbered strategy/ticker metric is data, not English deliberation.
+                if (/^\d+[.)][ \t]+[A-Z]{2,10}[ \t]*[-—–:][ \t]*[+−-]?\d+(?:\.\d+)?[ \t]*%$/.test(t.replace(/\*/g, ''))) return true;
                 if (ar > 0 && ar >= en) return true;                 // Arabic-dominant line
                 if (ar === 0 && en === 0) return t.length <= 40;     // numbers/symbols only
                 return t.length <= 40 && isStructural(t);            // short ASCII headings
