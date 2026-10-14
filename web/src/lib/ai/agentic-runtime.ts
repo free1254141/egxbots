@@ -1,5 +1,6 @@
 import { presentReplyLabels } from "./reply-labels";
 import { advisoryBacktestMetricMeaning } from "./backtest-evidence";
+import { advisoryFactRelations } from "./fact-relations";
 import { reviewInstruction } from "./agentic-review-policy";
 import { fallbackEvidence, safeImageEvidenceReply } from "./agentic-recovery";
 export { fallbackEvidence, safeImageEvidenceReply, safePortfolioImageReply } from "./agentic-recovery";
@@ -396,7 +397,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             // replace an answer with raw evidence/boilerplate. Only deterministic
             // evidence and safety checks can reject unsupported claims.
             options.diagnosticCapture?.("publication_review_advisory", {reviewer_passed:verdict.passed, issues:failures, deterministic});
-            return { passed: deterministic.length === 0, reasons: deterministic, advisoryIssues: [...failures, ...advisoryImageConsistency(reply, verificationEvidence()), ...advisoryTableRowCountConsistency(reply), ...advisoryBacktestMetricMeaning(reply, verificationEvidence().some(e => e.tool === "compare_strategies_history" && e.availability !== "error"))] };
+            return { passed: deterministic.length === 0, reasons: deterministic, advisoryIssues: [...failures, ...advisoryFactRelations(reply, verificationEvidence()), ...advisoryImageConsistency(reply, verificationEvidence()), ...advisoryTableRowCountConsistency(reply), ...advisoryBacktestMetricMeaning(reply, verificationEvidence().some(e => e.tool === "compare_strategies_history" && e.availability !== "error"))] };
         }
 
     };
@@ -410,7 +411,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         try { initial = finishFailure === "incomplete_writer_draft" ? {passed:false,reasons:[finishFailure]} : simpleSocial ? { passed:true, reasons:[] } : await review(draft); }
         catch (error) {
             const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage, evidence);
-            initial = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[error instanceof Error ? error.message : "review_unavailable"]};
+            initial = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[...advisoryFactRelations(draft, verificationEvidence()), error instanceof Error ? error.message : "review_unavailable"]};
         }
         firstPassed = initial.passed; finalPassed = initial.passed; reasons = initial.reasons;
         if (initial.passed) acceptedDraft = draft;
@@ -445,7 +446,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 try { second = await review(draft); }
                 catch (error) {
                     const deterministic = checkAgenticDraft(draft, verificationEvidence(), userMessage, evidence);
-                    second = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[error instanceof Error ? error.message : "review_unavailable"]};
+                    second = {passed:deterministic.length === 0,reasons:deterministic,advisoryIssues:[...advisoryFactRelations(draft, verificationEvidence()), error instanceof Error ? error.message : "review_unavailable"]};
                 }
             }
             finalPassed = second.passed; reasons = second.reasons;
