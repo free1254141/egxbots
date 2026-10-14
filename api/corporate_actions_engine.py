@@ -18,6 +18,7 @@ Two entry points:
        (fetch + classify + save), used by run_corporate_actions_update.py.
 """
 
+from api.rss_budget import RSSBudget, RSSUnavailable
 import re
 import hashlib
 import datetime as dt
@@ -300,7 +301,7 @@ def process_news_list_for_corporate_actions(
         return 0
 
 
-def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: int = 30) -> List[Dict[str, Any]]:
+def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: int = 30, rss_budget=None) -> List[Dict[str, Any]]:
     """
     Fetch news likely to contain corporate actions for a symbol using
     keyless Google News RSS with targeted bilingual queries.
@@ -310,6 +311,8 @@ def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: 
     import xml.etree.ElementTree as ET
     import email.utils
 
+    rss_budget = rss_budget or RSSBudget(seconds=30)
+    successful_before = rss_budget.succeeded
     clean_sym = symbol.split(".")[0].upper()
     subject = company_name or clean_sym
     queries = [
@@ -321,6 +324,8 @@ def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: 
     cutoff_date = dt.date.today() - dt.timedelta(days=days_back)
 
     for query in queries:
+        if rss_budget.stopped:
+            break
         try:
             hl = "ar" if any("\u0600" <= ch <= "\u06FF" for ch in query) else "en"
             url = (
@@ -328,8 +333,7 @@ def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: 
                 + urllib.parse.quote(query) + f"&hl={hl}&gl=EG&ceid=EG:{hl}"
             )
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=12) as response:
-                root = ET.fromstring(response.read())
+            root = rss_budget.fetch(req)
 
             for item_el in root.findall(".//item"):
                 title_el = item_el.find("title")
@@ -357,10 +361,12 @@ def fetch_corporate_action_news(symbol: str, company_name: str = "", days_back: 
         except Exception as e:
             print(f"[CA-ENGINE] Query '{query}' failed: {e}")
 
+    if rss_budget.succeeded == successful_before:
+        raise RSSUnavailable("No valid corporate-action RSS response for this symbol")
     return list(items.values())
 
 
-def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_back: int = 30) -> Tuple[bool, int]:
+def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_back: int = 30, progress_callback=None) -> Tuple[bool, int]:
     """
     Full standalone pass: fetch targeted CA news per symbol, classify, save.
     """
@@ -394,11 +400,15 @@ def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_b
 
     saved_total = 0
     print(f"[CA-ENGINE] Processing corporate actions for {len(symbols)} symbols...")
-    for symbol in symbols:
+    budget = RSSBudget()
+    processed = 0
+    for index, symbol in enumerate(symbols):
+        if budget.stopped:
+            break
         try:
             clean_sym = symbol.split(".")[0].upper()
             news = fetch_corporate_action_news(
-                symbol, subject_map.get(clean_sym, ""), days_back=days_back
+                symbol, subject_map.get(clean_sym, ""), days_back=days_back, rss_budget=budget
             )
             saved_total += process_news_list_for_corporate_actions(
                 clean_sym,
@@ -407,9 +417,13 @@ def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_b
                 supabase=supabase,
                 company_name=name_map.get(clean_sym, ""),
             )
+            processed += 1
             time.sleep(0.3)
         except Exception as e:
             print(f"[CA-ENGINE] Error processing {symbol}: {e}")
+        finally:
+            if progress_callback and (index % 5 == 0 or budget.stopped or index == len(symbols)-1):
+                progress_callback({"processed": index+1, "total": len(symbols), "saved": saved_total, **budget.summary()})
 
     print(f"[CA-ENGINE] Done — {saved_total} corporate actions stored/refreshed.")
-    return True, saved_total
+    return not budget.stopped and processed == len(symbols), saved_total

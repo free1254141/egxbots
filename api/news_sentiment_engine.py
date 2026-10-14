@@ -12,6 +12,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import email.utils
 from typing import List, Dict, Tuple, Any
+from api.rss_budget import RSSBudget, RSSUnavailable
 
 # Financial Sentiment Dictionary (Bilingual Arabic & English)
 FINANCIAL_LEXICON = {
@@ -325,6 +326,7 @@ def fetch_google_news(
     symbol: str,
     days_back: int = 3,
     company_names: List[str] = None,
+    rss_budget=None,
 ) -> List[Dict[str, Any]]:
     """
     Fetches news from Google News RSS using both Arabic and English queries.
@@ -335,6 +337,8 @@ def fetch_google_news(
     most Egyptian outlets publish the Arabic name and never the Latin ticker,
     so without them Arabic coverage is silently dropped.
     """
+    rss_budget = rss_budget or RSSBudget(seconds=30)
+    successful_before = rss_budget.succeeded
     clean_sym = symbol.split(".")[0].upper()
     names = [str(n).strip() for n in (company_names or []) if str(n or "").strip()]
     company_name = ", ".join(names)
@@ -355,6 +359,8 @@ def fetch_google_news(
     raw_item_count = 0
 
     for query in queries:
+        if rss_budget.stopped:
+            break
         try:
             encoded_query = urllib.parse.quote(query)
             # Use hl=ar for Arabic query and hl=en for English query
@@ -363,10 +369,7 @@ def fetch_google_news(
             url = f"https://news.google.com/rss/search?q={encoded_query}&hl={hl}&gl={gl}&ceid={gl}:{hl}"
 
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=12) as response:
-                xml_data = response.read()
-
-            root = ET.fromstring(xml_data)
+            root = rss_budget.fetch(req)
 
             for item in root.findall(".//item"):
                 title_elem = item.find("title")
@@ -403,6 +406,9 @@ def fetch_google_news(
                     continue
         except Exception as e:
             print(f"[NEWS_ENGINE] Error fetching news query '{query}': {e}")
+
+    if rss_budget.succeeded == successful_before:
+        raise RSSUnavailable("No valid RSS response for this symbol")
 
     # Keep only headlines that are relevant to the requested symbol
     relevant_items = [
@@ -543,6 +549,7 @@ def process_exchange_news(
     exchange: str,
     symbols: List[str],
     name_map: Dict[str, List[str]] = None,
+    progress_callback=None,
 ) -> Tuple[bool, int]:
     """
     Fetches, analyzes, and saves news sentiment for symbols to Supabase.
@@ -569,12 +576,15 @@ def process_exchange_news(
     
     print(f"[NEWS_ENGINE] Processing news for {len(symbols)} symbols in {exchange}...")
     
-    for symbol in symbols:
+    budget = RSSBudget()
+    for index, symbol in enumerate(symbols):
+        if budget.stopped:
+            break
         try:
             clean_symbol = symbol.split(".")[0].upper()
             aliases = name_map.get(clean_symbol, [])
             # 1. Fetch news
-            news = fetch_google_news(symbol, days_back=3, company_names=aliases)
+            news = fetch_google_news(symbol, days_back=3, company_names=aliases, rss_budget=budget)
             # 2. Analyze
             sentiment = analyze_sentiment(news)
             if sentiment["news_count"] > 0:
@@ -619,9 +629,12 @@ def process_exchange_news(
             time.sleep(0.3)
         except Exception as e:
             print(f"[NEWS_ENGINE] Error processing news for {symbol}: {e}")
+        finally:
+            if progress_callback and (index % 5 == 0 or budget.stopped or index == len(symbols)-1):
+                progress_callback({"processed": index+1, "total": len(symbols), "saved": processed_count, **budget.summary()})
             
     print(
         f"[NEWS_ENGINE] Saved {processed_count} rows for {exchange}; "
         f"{symbols_with_news} symbols had news ({total_headlines} headlines total)."
     )
-    return symbols_with_news > 0, symbols_with_news
+    return symbols_with_news > 0 and not budget.stopped and processed_count == len(symbols), symbols_with_news
