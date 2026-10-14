@@ -13,8 +13,8 @@
   "backgroundColor": "#09090b",
   "enableNotifications": true,
   "startUrl": "/chat?source=twa",
-  "iconUrl": "http://localhost:3000/icon-512.png",
-  "maskableIconUrl": "http://localhost:3000/icon-512.png",
+  "iconUrl": "https://egxbots.com/icon-512.png",
+  "maskableIconUrl": "https://egxbots.com/icon-512.png",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "./android.keystore",
@@ -27,17 +27,17 @@
       "name": "شات ARTORO",
       "shortName": "الشات",
       "url": "/chat",
-      "chosenIconUrl": "http://localhost:3000/icon-192.png"
+      "chosenIconUrl": "https://egxbots.com/icon-192.png"
     },
     {
       "name": "معمل الاستراتيجيات",
       "shortName": "الاستراتيجيات",
       "url": "/strategy-lab",
-      "chosenIconUrl": "http://localhost:3000/icon-192.png"
+      "chosenIconUrl": "https://egxbots.com/icon-192.png"
     }
   ],
   "generatorApp": "bubblewrap-cli",
-  "webManifestUrl": "http://localhost:3000/manifest.json",
+  "webManifestUrl": "https://egxbots.com/manifest.json",
   "fallbackType": "customtabs",
   "features": {
     "locationDelegation": {

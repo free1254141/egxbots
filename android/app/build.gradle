@@ -51,12 +51,12 @@ def twaManifest = [
 ]
 
 android {
-    compileSdkVersion 36
+    compileSdkVersion 34
     namespace "com.egxbots.artoro"
     defaultConfig {
         applicationId "com.egxbots.artoro"
         minSdkVersion 24
-        targetSdkVersion 36
+        targetSdkVersion 34
         versionCode 1
         versionName "1.0.0"
 
@@ -71,12 +71,8 @@ android {
         resValue "string", "launchUrl", launchUrl
 
         
-
-        
-            // The URL the Web Manifest for the Progressive Web App that the TWA points to. This
-            // is used by Chrome OS and Meta Quest to open the Web version of the PWA instead of
-            // the TWA, as it will probably give a better user experience for non-mobile devices.
-            resValue "string", "webManifestUrl", 'http://localhost:3000/manifest.json'
+            // The URL the Web Manifest for the Progressive Web App that the TWA points to.
+            resValue "string", "webManifestUrl", 'https://' + twaManifest.hostName + '/manifest.json'
         
 
         
@@ -149,7 +145,20 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled true
+            minifyEnabled false
+        }
+    }
+    packagingOptions {
+        resources {
+            excludes += [
+                '/META-INF/{AL2.0,LGPL2.1}',
+                '/META-INF/*.version',
+                '/META-INF/versions/**',
+                '/META-INF/LICENSE*',
+                '/META-INF/NOTICE*',
+                'DebugProbesKt.bin',
+                'kotlin/**'
+            ]
         }
     }
     compileOptions {

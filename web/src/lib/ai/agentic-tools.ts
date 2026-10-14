@@ -165,7 +165,7 @@ async function executeRawTool(
 
                 const { data: wyckoffRows } = await supabase
                     .from("stock_scans_summary")
-                    .select("scan_date, acc_score, dist_score, wyckoff_phase, vol_ratio, signal")
+                    .select("scan_date, acc_score, dist_score, wyckoff_phase, vol_ratio, signal, consecutive_acc_days, consecutive_dist_days")
                     .eq("symbol", sym)
                     .order("scan_date", { ascending: false })
                     .limit(1);
@@ -207,7 +207,9 @@ async function executeRawTool(
                         egx_ai_score: ind.egx_ai_score,
                         wyckoff_phase: wyckoff.wyckoff_phase,
                         accumulation_score: wyckoff.acc_score,
-                        distribution_score: wyckoff.dist_score
+                        distribution_score: wyckoff.dist_score,
+                        consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
+                        consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null
                     };
                 }
             });
@@ -257,6 +259,40 @@ async function executeRawTool(
                         tradingZone = "عند منطقة المقاومة تماماً (منطقة جني أرباح ومقاومة بيعية)";
                     }
 
+                    const recentSessions = pRows.slice(0, 10).map((r: any, idx: number) => {
+                        const nextSession = pRows[idx + 1];
+                        const prevClose = nextSession ? finite(nextSession.close) : null;
+                        const curClose = finite(r.close);
+                        const changePct = curClose != null && prevClose != null && prevClose > 0
+                            ? Number((((curClose - prevClose) / prevClose) * 100).toFixed(2))
+                            : null;
+                        return {
+                            date: r.date,
+                            close: curClose,
+                            change_pct: changePct,
+                            high: finite(r.high),
+                            low: finite(r.low)
+                        };
+                    });
+
+                    const bounds = cairoTimeframeBounds();
+                    const lastWeekStartDate = bounds.lastWeekStartIso.slice(0, 10);
+                    const thisWeekStartDate = bounds.thisWeekStartIso.slice(0, 10);
+                    const lastWeekSessions = pRows.filter((r: any) => r.date >= lastWeekStartDate && r.date < thisWeekStartDate);
+                    let lastWeekChangePct: number | null = null;
+                    let lastWeekEndClose: number | null = null;
+                    let lastWeekStartClose: number | null = null;
+                    if (lastWeekSessions.length > 0) {
+                        lastWeekEndClose = finite(lastWeekSessions[0].close);
+                        const firstSessionDate = lastWeekSessions[lastWeekSessions.length - 1].date;
+                        lastWeekStartClose = finite(lastWeekSessions[lastWeekSessions.length - 1].close);
+                        const sessionBeforeWeek = pRows.find((r: any) => r.date < firstSessionDate);
+                        const baseClose = sessionBeforeWeek ? finite(sessionBeforeWeek.close) : lastWeekStartClose;
+                        if (lastWeekEndClose != null && baseClose != null && baseClose > 0) {
+                            lastWeekChangePct = Number((((lastWeekEndClose - baseClose) / baseClose) * 100).toFixed(2));
+                        }
+                    }
+
                     levels.push({
                         symbol: sym,
                         close,
@@ -271,6 +307,15 @@ async function executeRawTool(
                         take_profit_2: target2,
                         trading_zone: tradingZone,
                         date: pRows[0].date,
+                        recent_sessions: recentSessions,
+                        last_week_summary: lastWeekSessions.length > 0 ? {
+                            sessions_count: lastWeekSessions.length,
+                            start_date: lastWeekSessions[lastWeekSessions.length - 1].date,
+                            end_date: lastWeekSessions[0].date,
+                            start_close: lastWeekStartClose,
+                            end_close: lastWeekEndClose,
+                            change_pct: lastWeekChangePct
+                        } : null,
                         methodology: "20-session range; stop=98% support; target2=60-session high or 105% resistance",
                         observations: pRows.length, ...stockPricePresentation(pRows[0].date)
                     });
@@ -647,7 +692,7 @@ async function executeRawTool(
             const date = dates?.[0]?.[dateField] ?? null;
             if (!date) return { status:"success", availability:"missing", preset, date:null, stocks:[] };
             let query = supabase.from(table).select(table === "stock_scans_summary"
-                ? "symbol,scan_date,acc_score,dist_score,vol_ratio,wyckoff_phase,signal"
+                ? "symbol,scan_date,acc_score,dist_score,vol_ratio,wyckoff_phase,signal,consecutive_acc_days,consecutive_dist_days"
                 : "symbol,date,close,change_pct,r_vol,rsi_14,macd,macd_signal,macd_histogram,ema_50,ema_200,king_ai_score,egx_ai_score")
                 .eq(dateField,date);
             if (table === "stock_technical_indicators") query = query.eq("exchange","EGX");

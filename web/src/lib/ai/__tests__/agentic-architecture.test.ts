@@ -3,6 +3,7 @@ import { cairoWeekBounds } from "../agentic-tools";
 import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts } from "../agentic-publication";
 import { groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
+import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
 import { analyzeImage } from "../vision";
 jest.mock("../server-secrets", () => ({ getDeepSeekApiKey: () => "offline-fake-key" }));
@@ -1015,6 +1016,90 @@ describe("Agentic tool correctness and failure boundaries", () => {
         ];
         const table = "| السهم | نقاط التجميع | نقاط التصريف | الحجم النسبي |\n|---|---|---|---|\n| SIPC | 70.5 | 12.3 | 1.4 |\n| DAPH | 65.0 | 5.18 | 3.07 |";
         expect(checkAgenticDraft(table, e)).toEqual([]);
+    });
+
+    test("compound accumulation/distribution row in comparison table grounds acc_score and dist_score", () => {
+        const e = [
+            toAgenticEvidence("get_stock", { symbols: ["ZEOT", "MOSC"] }, {
+                stocks: [
+                    { symbol: "ZEOT", close: 11.11, date: "2026-10-14", accumulation_score: 85, distribution_score: 0, consecutive_acc_days: 1 },
+                    { symbol: "MOSC", close: 274, date: "2026-10-14", accumulation_score: 85, distribution_score: 0, consecutive_acc_days: 1 }
+                ]
+            })
+        ];
+        const table = "| وجه المقارنة | ZEOT | MOSC |\n|---|---|---|\n| الإغلاق | 11.11 | 274 |\n| درجة التجميع / التوزيع | 85 / 0 | 85 / 0 |";
+        expect(checkAgenticDraft(table, e)).toEqual([]);
+
+        // Fabricated score in compound cell is rejected
+        const invalidTable = "| وجه المقارنة | ZEOT | MOSC |\n|---|---|---|\n| الإغلاق | 11.11 | 274 |\n| درجة التجميع / التوزيع | 85 / 99 | 85 / 0 |";
+        expect(checkAgenticDraft(invalidTable, e)).toContain("table_value_not_grounded:ZEOT:99");
+    });
+
+    test("RSI threshold constants 30 and 70 are stripped and not rejected as ungrounded indicator values", () => {
+        const e = [
+            toAgenticEvidence("get_stock", { symbols: ["ZEOT"] }, {
+                stocks: [
+                    { symbol: "ZEOT", close: 11.11, date: "2026-10-14", rsi_14: 39.42 }
+                ]
+            })
+        ];
+        const table = "| المؤشر | القيمة | الحالة الفنية |\n|---|---|---|\n| RSI (14) | 39.42 | محايد مائل للضعف، فوق حد التشبع البيعي (30) |";
+        expect(checkAgenticDraft(table, e)).toEqual([]);
+    });
+
+    test("consecutive_acc_days and recent_sessions closes and change_pcts are grounded facts", () => {
+        const e = [
+            toAgenticEvidence("get_stock_levels", { symbols: ["ZEOT"] }, {
+                levels: [
+                    {
+                        symbol: "ZEOT",
+                        close: 11.11,
+                        date: "2026-10-14",
+                        support: 10.17,
+                        resistance: 13.10,
+                        recent_sessions: [
+                            { date: "2026-10-14", close: 11.11, change_pct: 9.24 },
+                            { date: "2026-10-13", close: 10.17, change_pct: -7.71 },
+                            { date: "2026-10-12", close: 11.02, change_pct: -8.85 }
+                        ],
+                        last_week_summary: {
+                            sessions_count: 4,
+                            start_date: "2026-10-04",
+                            end_date: "2026-10-07",
+                            start_close: 13.04,
+                            end_close: 12.60,
+                            change_pct: -3.37
+                        }
+                    }
+                ]
+            }),
+            toAgenticEvidence("get_stock", { symbols: ["ZEOT"] }, {
+                stocks: [
+                    { symbol: "ZEOT", close: 11.11, date: "2026-10-14", consecutive_acc_days: 1 }
+                ]
+            })
+        ];
+        const facts = agenticFacts(e);
+        expect(facts.some(f => f.symbol === "ZEOT" && f.field === "quantity" && f.value === 1)).toBe(true);
+        expect(facts.some(f => f.symbol === "ZEOT" && f.field === "close" && f.value === 10.17)).toBe(true);
+        expect(facts.some(f => f.symbol === "ZEOT" && f.field === "change_pct" && f.value === -7.71)).toBe(true);
+        expect(facts.some(f => f.symbol === "ZEOT" && f.field === "change_pct" && f.value === -3.37)).toBe(true);
+    });
+
+    test("renderStockRecovery adjusts summary footer dynamically based on live_quote_available", () => {
+        const liveSnapshot = [
+            { symbol: "ZEOT", name_ar: "زيوت", close: 11.11, live_quote_available: true, fetched_at: "2026-10-14 14:00" }
+        ];
+        const liveResult = renderStockRecovery(liveSnapshot);
+        expect(liveResult).toContain("TradingView");
+        expect(liveResult).not.toContain("هذه قراءات من إغلاق يومي مخزن");
+        expect(liveResult).toContain("تاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة.");
+
+        const storedSnapshot = [
+            { symbol: "ZEOT", name_ar: "زيوت", close: 11.11, live_quote_available: false, date: "2026-10-14" }
+        ];
+        const storedResult = renderStockRecovery(storedSnapshot);
+        expect(storedResult).toContain("هذه قراءات من إغلاق يومي مخزن وليست أسعارًا لحظية");
     });
 });
 

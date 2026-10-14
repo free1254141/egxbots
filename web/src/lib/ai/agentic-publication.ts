@@ -138,6 +138,26 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                 facts.push({ id: `${row.symbol}:entry:${value}`, symbol: row.symbol, field: "entry_price", value: Number(value), unit: "egp",
                     as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
+            if (row.symbol && typeof row.consecutive_acc_days === "number" && Number.isFinite(row.consecutive_acc_days)) {
+                facts.push({ id: `${row.symbol}:consecutive_acc_days`, symbol: row.symbol, field: "quantity", value: row.consecutive_acc_days, unit: "count", as_of: row.date ?? row.scan_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            }
+            if (row.symbol && typeof row.consecutive_dist_days === "number" && Number.isFinite(row.consecutive_dist_days)) {
+                facts.push({ id: `${row.symbol}:consecutive_dist_days`, symbol: row.symbol, field: "quantity", value: row.consecutive_dist_days, unit: "count", as_of: row.date ?? row.scan_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            }
+            if (row.symbol && Array.isArray(row.recent_sessions)) {
+                for (const s of row.recent_sessions) {
+                    const sDate = s.date ? String(s.date).slice(0, 10) : null;
+                    if (s.close != null && Number.isFinite(s.close)) {
+                        facts.push({ id: `${row.symbol}:close:${sDate}`, symbol: row.symbol, field: "close", value: s.close, unit: "egp", as_of: sDate, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                    }
+                    if (s.change_pct != null && Number.isFinite(s.change_pct)) {
+                        facts.push({ id: `${row.symbol}:change_pct:${sDate}`, symbol: row.symbol, field: "change_pct", value: s.change_pct, unit: "percent", as_of: sDate, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                    }
+                }
+            }
+            if (row.symbol && row.last_week_summary?.change_pct != null && Number.isFinite(row.last_week_summary.change_pct)) {
+                facts.push({ id: `${row.symbol}:last_week_change_pct`, symbol: row.symbol, field: "change_pct", value: row.last_week_summary.change_pct, unit: "percent", as_of: row.last_week_summary.end_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            }
         }
         if (e.tool === "manage_portfolio" && e.data?.summary) {
             const sum = e.data.summary;
@@ -180,6 +200,8 @@ function cleanCellText(text: string): string {
         // 3. Strip ordinal targets, rank markers, and indicator parameters
         .replace(/(?:(?:ال)?هدف|(?:ال)?مستهدف|(?:ال)?دعم|(?:ال)?مقاوم[ةه]|(?:ال)?مركز|(?:ال)?ترتيب|(?:ال)?أولوية|(?:ال)?أفضلية|(?:ال)?خيار|(?:ال)?مستوى|(?:ال)?فئ[ةه]|target|tp|t|rank)\s*\(?\s*[1-9]\s*\)?/gi, " ")
         .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\s*[-_]?\s*(?:\(\s*\d+(?:[\s,]+\d+)*\s*\)|\d+)/gi, " ")
+        .replace(/(?:(?:حد|مستوى|منطقة)\s*)?(?:(?:ال)?تشبع\s*(?:ال)?(?:بيعي|شرائي)|oversold|overbought)\s*\(?\s*(?:30|70)\s*\)?/gi, " ")
+        .replace(/(?:(?:حد|مستوى)\s*(?:RSI\s*)?)\(?\s*(?:30|70)\s*\)?/gi, " ")
         .replace(/(?:مؤشر\s*(?:القوة\s*النسبية)?|فترة|إعداد)\s*\(?\s*14\s*\)?/gi, " ")
         .replace(/(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)\s*\(?\s*(?:14|20|50|100|200)\s*\)?(?:\s*يوم)?/gi, " ")
         .replace(/(?:فوق|تحت|أعلى\s*من|أسفل\s*من|مخترق|كسر)\s*(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)?\s*(?:14|20|50|100|200)/gi, " ")
@@ -188,17 +210,44 @@ function cleanCellText(text: string): string {
 }
 
 /** Metric labels describe generated evidence, never user intent routing. */
-function compoundMacdFields(label: string): FactRecord["field"][] | null {
+function compoundMetricFields(label: string): FactRecord["field"][] | null {
     const parts = label.replace(/[*_`]/g, "").split(/\s*[/،]\s*/);
     if (parts.length < 2) return null;
-    const fields = parts.map(part => /هيست|hist/i.test(part) ? "macd_hist"
+
+    // 1. MACD
+    const macdFields = parts.map(part => /هيست|hist/i.test(part) ? "macd_hist"
         : /إشار|اشار|signal/i.test(part) ? "macd_signal"
             : /^\s*MACD\s*$/i.test(part) ? "macd" : null);
-    return fields.every(Boolean) && new Set(fields).size === fields.length ? fields as FactRecord["field"][] : null;
+    if (macdFields.every(Boolean) && new Set(macdFields).size === macdFields.length) {
+        return macdFields as FactRecord["field"][];
+    }
+
+    // 2. Accumulation / Distribution (e.g. "درجة التجميع / التوزيع", "تجميع / تصريف")
+    const accDistFields = parts.map(part => /تجميع|accumulation|acc/i.test(part) ? "acc_score"
+        : /توزيع|تصريف|distribution|dist/i.test(part) ? "dist_score" : null);
+    if (accDistFields.every(Boolean) && new Set(accDistFields).size === accDistFields.length) {
+        return accDistFields as FactRecord["field"][];
+    }
+
+    // 3. Support / Resistance
+    const supResFields = parts.map(part => /دعم|support/i.test(part) ? "support"
+        : /مقاوم|resistance/i.test(part) ? "resistance" : null);
+    if (supResFields.every(Boolean) && new Set(supResFields).size === supResFields.length) {
+        return supResFields as FactRecord["field"][];
+    }
+
+    // 4. EMA 50 / 200
+    const emaFields = parts.map(part => /EMA\s*50|50/i.test(part) ? "ema_50"
+        : /EMA\s*200|200/i.test(part) ? "ema_200" : null);
+    if (emaFields.every(Boolean) && new Set(emaFields).size === emaFields.length) {
+        return emaFields as FactRecord["field"][];
+    }
+
+    return null;
 }
 
-function checkCompoundMacdCell(label: string, cell: string, symbol: string, facts: FactRecord[]): string[] | null {
-    const fields = compoundMacdFields(label);
+function checkCompoundMetricCell(label: string, cell: string, symbol: string, facts: FactRecord[]): string[] | null {
+    const fields = compoundMetricFields(label);
     if (!fields) return null;
     const parts = normalizeEvidenceNumbers(cell.replace(/[*_`]/g, "")).split(/\s*[/،]\s*/);
     if (parts.length !== fields.length) return [`compound_metric_value_count_mismatch:${symbol}`];
@@ -234,7 +283,11 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
-        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]], [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
+        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]],
+        [/(?:درجة|مؤشر)?\s*(?:تجميع|acc)\s*[/،]\s*(?:توزيع|تصريف|dist)/i, ["acc_score", "dist_score"]],
+        [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
+        [/أيام.*تجميع|يوم.*تجميع|consecutive.*acc/i, ["quantity"]],
+        [/أيام.*توزيع|يوم.*توزيع|consecutive.*dist/i, ["quantity"]],
         [/متوسط.*شراء|سعر.*(?:شراء|دخول)|الدخول/i,["entry_price"]], [/وقف/i,["stop_loss"]], [/هدف|مستهدف/i,["target_price"]], [/مسافة.*دعم|بعد.*دعم|القرب.*دعم/i,["distance_from_support_pct"]], [/دعم/i,["support"]], [/مسافة.*مقاوم|بعد.*مقاوم|القرب.*مقاوم/i,["distance_from_resistance_pct"]], [/مقاوم/i,["resistance"]],
         [/توزيعات\s*(?:نقدية)?|cash dividends/i,["cash_dividends"]], [/تكلف/i,["cost_basis"]], [/توزيع|وزن|نسبة.*المحفظة|تركيز.*قطاع/i,["position_pct"]], [/مبلغ.*مخصص|قيمة.*مخصصة|رأس.*مال.*موزع/i,["value"]], [/قيمة.*(?:سوق|مركز)|القيمة السوقية/i,["market_value"]], [/ربح|خسار|عائد|النسبة/i,["profit_pct","profit_value","backtest_return_pct"]],
         [/خسارة.*افتراضية|خسارة.*سيناريو|هبوط.*مفترض/i,["scenario_loss_amount","scenario_loss_pct"]], [/رأس.*مال|إجمالي.*رأس المال/i,["scenario_capital"]],
@@ -824,7 +877,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
                 if (!colSymbol) continue;
                 const cell = cells[colIdx];
                 if (!/\d/.test(cell)) continue;
-                const compoundReasons = checkCompoundMacdCell(cells[0], cell, colSymbol, facts);
+                const compoundReasons = checkCompoundMetricCell(cells[0], cell, colSymbol, facts);
                 if (compoundReasons) { reasons.push(...compoundReasons); continue; }
                 const clean = cleanCellText(cell);
                 const matches = [...clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)];
@@ -885,8 +938,8 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             if (idx === rankColIdx || cells[idx].includes(symbol)) continue;
             const screenRow = evidence.filter(e => e.tool === "screen_stocks").flatMap(e => evidenceRows(e.data)).find(row => row.symbol === symbol);
             const header = headers[idx] || "";
-            const compoundReasons = checkCompoundMacdCell(header, cells[idx], symbol, facts)
-                ?? (!tableHadStockRow ? checkCompoundMacdCell(cells[0], cells[idx], symbol, facts) : null);
+            const compoundReasons = checkCompoundMetricCell(header, cells[idx], symbol, facts)
+                ?? (!tableHadStockRow ? checkCompoundMetricCell(cells[0], cells[idx], symbol, facts) : null);
             if (compoundReasons) { reasons.push(...compoundReasons); continue; }
             const explicitDenominator = /(?:أساس|على|مقام|÷)/.test(header) && /الإغلاق|الاغلاق|المقاومة/.test(header)
                 ? /الإغلاق|الاغلاق/.test(header) ? "close" : "resistance" : null;
