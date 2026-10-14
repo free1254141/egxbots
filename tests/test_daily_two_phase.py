@@ -237,6 +237,7 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
         raise AssertionError('Ordinary recommendation operation executed at midday')
     replacements = {
         'api.update_ml_scores': types.SimpleNamespace(update_all_scores=lambda **_: None),
+        'api.daily_price_verification': types.SimpleNamespace(verify_daily_prices=lambda client, result, *a, **k: result),
         'api.news_sentiment_engine': types.SimpleNamespace(process_exchange_news=lambda *_, **kwargs: (True,1)),
         'api.corporate_actions_engine': types.SimpleNamespace(process_exchange_corporate_actions=lambda *a, **k: (True,1)),
         'api.short_swings_daily': types.SimpleNamespace(run_daily_short_swings=lambda **_: {'success': True}),

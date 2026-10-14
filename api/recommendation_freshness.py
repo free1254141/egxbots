@@ -103,7 +103,9 @@ def _eodhd_session_quote(client, symbol, session):
         if current is None:
             return 'EODHD_missing_current_session'
         row={k:current[k] for k in ('date','open','high','low','close')}
-        row.update(symbol=symbol,exchange='EGX',volume=int(current.get('volume') or 0))
+        row.update(symbol=symbol,exchange='EGX',volume=int(current.get('volume') or 0),
+                   adjusted_close=current.get('adjusted_close', current['close']),
+                   updated_at=datetime.now(ZoneInfo('UTC')).isoformat())
         client.table('stock_prices').upsert(row,on_conflict='symbol,exchange,date').execute()
         return 'EODHD_current_session_saved'
     except Exception as error:

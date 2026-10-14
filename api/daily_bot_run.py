@@ -3094,7 +3094,8 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         print(f'[DAILY-CONTINUATION] {step_name}: {action} — {reason}')
         return action == 'execute'
 
-    def _record_step(step_name: str, success: bool, details: str = "", count: int = 0, failed_symbols=None):
+    def _record_step(step_name: str, success: bool, details: str = "", count: int = 0, failed_symbols=None,
+                     coverage=None, provider_success=None, failure_details=None):
         started_at = active_steps.pop(step_name, None)
         status = "success" if success else "failed"
         if success and str(details or "").strip().lower().startswith("skipped"):
@@ -3102,6 +3103,10 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         extra = {}
         if failed_symbols is not None:
             extra['failed_symbols'] = failed_symbols
+        for field, value in (('coverage', coverage), ('provider_success', provider_success),
+                             ('failure_details', failure_details)):
+            if value is not None:
+                extra[field] = value
         if started_at is not None:
             extra["duration_ms"] = int((time.time() - started_at) * 1000)
         _append_step_log(step_name, status, details, count, extra)
@@ -3232,8 +3237,13 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                         })
                         _persist_job('running')
 
+                    verification_start = dt.datetime.now(dt.timezone.utc)
                     sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True,
                                                              on_progress=_price_progress)
+                    from api.daily_price_verification import verify_daily_prices
+                    from api.recommendation_freshness import expected_session
+                    sync_result = verify_daily_prices(stock_ai.supabase, sync_result, expected_session(), verification_start,
+                                                      fallback=not dry_run)
                     # The sync provider must positively verify quote observation
                     # timestamps. Never turn a daily OHLC date into a live quote.
                     observed_quotes = sync_result.get('observed_quotes')
@@ -3245,7 +3255,10 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     _record_step("sync_prices", sync_result.get("success", 0) == total_symbols and total_symbols > 0,
                                  f"Synced {sync_result.get('success', 0)}/{total_symbols} symbols", total_symbols,
                                  failed_symbols=[sym for sym, outcome in sync_result.get('results', {}).items()
-                                                 if not outcome.get('success')])
+                                                 if not outcome.get('success')],
+                                 coverage=sync_result.get('coverage'),
+                                 provider_success=sync_result.get('provider_success'),
+                                 failure_details=sync_result.get('failure_details'))
                 except Exception as e:
                     _record_step("sync_prices", False, str(e)[:200], 0)
                     print(f"[SYNC] Error: {e}")

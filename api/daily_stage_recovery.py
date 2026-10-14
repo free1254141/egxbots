@@ -38,6 +38,10 @@ def plan_recovery(steps, phase):
     allowed = MIDDAY if phase == 'midday' else set(ORDER)
     failed = {name for name, s in latest.items()
               if s.get('status') in {'failed', 'started'} and name in allowed}
+    price_failures = latest.get('sync_prices', {}).get('failure_details')
+    if isinstance(price_failures, dict) and price_failures and not any(
+            failure.get('retryable', True) for failure in price_failures.values()):
+        failed.discard('sync_prices')  # Both sources exhausted for this phase.
     # Refresh derived data after repairing incomplete prices; otherwise old
     # indicators can be tagged as fresh alongside the repaired price snapshot.
     from api.price_sync_policy import price_sync_usable
@@ -61,13 +65,26 @@ def execute_stage(name, phase, job_id, previous):
     if name == 'sync_prices':
         symbols = bot._filter_active_symbols(bot._fetch_egx_symbols())
         selected = previous.get('failed_symbols') or [f'{s}.EGX' for s in symbols]
+        failures = previous.get('failure_details')
+        if isinstance(failures, dict):
+            selected = [symbol for symbol in selected if failures.get(symbol, {}).get('retryable', True)]
+        if not selected:
+            return {'success': False, 'count': 0,
+                    'details': 'Recovery withheld: alternate source confirmed no current bar; revisit next phase',
+                    'execution_started': False, 'withheld': True,
+                    'failed_symbols': previous.get('failed_symbols', [])}
+        verification_start = datetime.now(timezone.utc)
         result = bot.get_smart_sync().sync_exchange_prices('EGX', selected, max_days=365, refresh_latest=True)
+        from api.daily_price_verification import verify_daily_prices
+        from api.recommendation_freshness import expected_session
+        # The original stage already tried EODHD; don't repeat alternate calls.
+        result = verify_daily_prices(bot.supabase, result, expected_session(), verification_start, fallback=False)
         bot.stock_ai.clear_exchange_bulk_cache('EGX')
         clear_egx_candle_cache()
         failed = [sym for sym, res in result.get('results', {}).items() if not res.get('success')]
         return {'success': bool(selected) and result.get('success') == len(selected),
                 'count': result.get('success', 0), 'details': f"Recovered {result.get('success',0)}/{len(selected)} prices",
-                'failed_symbols': failed}
+                'failed_symbols': failed, 'failure_details': result.get('failure_details', {})}
     if name == 'calculate_indicators':
         from concurrent.futures import ThreadPoolExecutor
         symbols = bot._filter_active_symbols(bot._fetch_egx_symbols())

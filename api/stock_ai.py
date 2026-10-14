@@ -2107,6 +2107,13 @@ def sync_df_to_supabase(ticker: str, df: pd.DataFrame, timeframe: str = "1d") ->
             else:
                 record["date"] = row[time_col].strftime('%Y-%m-%d')
                 record["adjusted_close"] = _finite_float(adj_close)
+                # Refresh time must advance on conflict updates as well as inserts.
+                # This is a provider fetch time, not proof of an exchange close.
+                record["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                if sb_exchange.upper() == 'EGX':
+                    from api.recommendation_freshness import quote_health
+                    if quote_health(record, record['date']) != 'verified':
+                        continue
             
             rows.append(record)
         
