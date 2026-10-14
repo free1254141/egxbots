@@ -1,8 +1,12 @@
-import { getPublicMarketClient } from "@/lib/supabase/route-data";
+import { getPublicStockSnapshot } from "@/lib/seo/stock-snapshot";
 import { notFound } from "next/navigation";
 import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
-import { cache } from "react";
+import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
+import { selectStockLinks } from "@/lib/seo/sitemap-entries";
+
+export const revalidate = 3600;
+export async function generateStaticParams() { return []; }
 
 interface PageProps {
   params: Promise<{
@@ -10,19 +14,12 @@ interface PageProps {
   }>;
 }
 
-// Metadata and page rendering share the same request-scoped fundamentals read.
-const getFundamentals = cache(async (symbol: string) => {
-  const supabase = getPublicMarketClient();
-  const { data } = await supabase.from("stock_fundamentals").select("*").eq("symbol", symbol);
-  return data as any[] | null;
-});
-
 // Generate dynamic metadata for SEO search indexers
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const symbol = (await params).symbol.toUpperCase();
-  const fundData = await getFundamentals(symbol);
-
-  const fundRow = fundData?.find((r: any) => r.exchange === "EGX") || fundData?.[0] || null;
+  const snapshot = await getPublicStockSnapshot(symbol);
+  if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
+  const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
   const companyName = fund.name || fund.Name || symbol;
   const sector = fund.sector || fund.Sector || "";
@@ -65,70 +62,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function StockDetailPage({ params }: PageProps) {
   const symbol = (await params).symbol.toUpperCase();
-  const supabase = getPublicMarketClient();
-
-  // 1. Fetch Fundamentals
-  const fundData = await getFundamentals(symbol);
-
-  const fundRow = fundData?.find((r: any) => r.exchange === "EGX") || fundData?.[0] || null;
-
-  // If no fundamentals, check if we have any price records to verify stock existence
-  const priceCheck = fundRow ? null : (await supabase
-    .from("stock_prices")
-    .select("symbol, exchange")
-    .eq("symbol", symbol)
-    .limit(1)).data;
-
-  // If no trace of this stock exists in fundamentals or prices, return 404
-  if (!fundRow && (!priceCheck || priceCheck.length === 0)) {
-    notFound();
-  }
-
-  const exchange = fundRow?.exchange || (priceCheck as any)?.[0]?.exchange || "EGX";
-
-  // 2. Fetch Latest Price
-  const { data: priceRows } = await supabase
-    .from("stock_prices")
-    .select("*")
-    .eq("symbol", symbol)
-    .eq("exchange", exchange)
-    .order("date", { ascending: false })
-    .limit(1);
-  const latestPrice = priceRows?.[0] || null;
-
-  // 3. Fetch Latest Technical Indicators
-  const { data: techRows } = await supabase
-    .from("stock_technical_indicators")
-    .select("*")
-    .eq("symbol", symbol)
-    .eq("exchange", exchange)
-    .order("date", { ascending: false })
-    .limit(1);
-  const latestTech = techRows?.[0] || null;
-
-  // 4. Fetch 30-Day Historical Prices for Sparkline/Chart
-  const { data: histRows } = await supabase
-    .from("stock_prices")
-    .select("date, open, high, low, close, volume")
-    .eq("symbol", symbol)
-    .eq("exchange", exchange)
-    .order("date", { ascending: false })
-    .limit(30);
-
-  const historicalPrices = histRows ? [...histRows].reverse() : [];
-
-  // 5. Fetch Latest Scan Result (AI Score / Recommendation)
-  const { data: scanRows } = await supabase
-    .from("scan_results")
-    .select("*")
-    .eq("symbol", symbol)
-    .eq("exchange", exchange)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  const latestScan = scanRows?.[0] || null;
+  const snapshot = await getPublicStockSnapshot(symbol);
+  const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
+  if (!fundRow && !latestPrice) notFound();
+  const exchange = 'EGX';
 
   const fund = fundRow?.data || {};
   const companyName = fund.name || fund.Name || symbol;
+  const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || ""));
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
   // Describe the actual dataset, without inventing a second hidden buy/sell score.
   const structuredDataGraph = {
@@ -154,6 +95,8 @@ export default async function StockDetailPage({ params }: PageProps) {
         latestTech={latestTech}
         historicalPrices={historicalPrices}
         latestScan={latestScan}
+        relatedStocks={related.stocks}
+        relatedBasis={related.basis}
       />
     </>
   );

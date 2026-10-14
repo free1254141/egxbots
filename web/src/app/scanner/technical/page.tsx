@@ -1,9 +1,10 @@
 import TechnicalScannerLoader from "./TechnicalScannerLoader";
+import TechnicalScannerGuide from "./TechnicalScannerGuide";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "الماسح الفني للأسهم المصرية | Technical Stock Screener",
-  description: "ماسح فني مباشر لأسهم البورصة المصرية (EGX Screener): فحص مؤشرات RSI، MACD، التقاطع الذهبي للمتوسطات المتحركة EMA، أحجام التداول، ومستويات الدعم والمقاومة.",
+  description: "فحص أسهم البورصة المصرية بمؤشرات RSI وMACD والمتوسطات المتحركة والحجم، وفق البيانات المحفوظة وتاريخ تحديثها، مع فلاتر قابلة للتخصيص.",
   keywords: [
     "الماسح الفني للأسهم المصرية",
     "فحص فني للأسهم",
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "الماسح الفني للأسهم المصرية | Technical Screener | EGX BOTS",
-    description: "ماسح فني مباشر لأسهم البورصة المصرية: مؤشرات RSI، MACD، المتوسطات المتحركة والسيولة.",
+    description: "فحص فني لأسهم البورصة المصرية بالمؤشرات والسيولة، وفق آخر بيانات محفوظة وتاريخها.",
     type: "website",
     url: "https://egxbots.com/scanner/technical",
     images: [
@@ -52,7 +53,7 @@ const structuredData = {
       "alternateName": "الماسح الفني للبورصة المصرية",
       "applicationCategory": "FinanceApplication",
       "operatingSystem": "Web",
-      "description": "ماسح فني فوري لأسهم البورصة المصرية يعتمد على مؤشرات التحليل الفني الكلاسيكية والكمية.",
+      "description": "ماسح فني للأسهم المصرية بمؤشرات التحليل الفني وفلاتر السيولة، وفق آخر بيانات محفوظة وتاريخها.",
       "url": "https://egxbots.com/scanner/technical"
     },
     {
@@ -82,6 +83,7 @@ export default function TechnicalScannerPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
+      <TechnicalScannerGuide />
       <TechnicalScannerLoader />
     </>
   );

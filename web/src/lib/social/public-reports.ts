@@ -13,15 +13,16 @@ export type PublicReport = {
 // A single shared daily cache, not one private-table query per visitor or URL.
 export const getPublicReports = unstable_cache(async (): Promise<PublicReport[]> => {
   const client = getSupabaseServiceClient();
-  const { data, error } = await client.from('daily_social_reports')
-    .select('session_date,kind,content,created_at,updated_at,evidence,job_run_id')
+  const { data, error, count } = await client.from('daily_social_reports')
+    .select('session_date,kind,content,created_at,updated_at,evidence,job_run_id', { count: 'exact' })
     .in('kind', ['market', 'accumulation']).eq('status', 'ready')
     .eq('validation->>ok', 'true').gte('session_date', '2026-10-04')
-    .order('session_date', { ascending: false });
+    .order('session_date', { ascending: false }).limit(2001);
   if (error) throw new Error('Unable to load public reports');
+  if (data?.length > 2000 || typeof count === 'number' && count > (data?.length || 0)) throw new Error('Public report archive requires pagination before expanding further');
   if (!data?.length) return [];
   const { data: jobs, error: jobError } = await client.from('daily_job_runs')
-    .select('id,status,job_type,started_at,steps').in('id', [...new Set(data.map((r: any) => r.job_run_id))]);
+    .select('id,status,job_type,started_at,steps').in('id', [...new Set(data.map((r: any) => r.job_run_id))]).limit(2000);
   if (jobError) throw new Error('Unable to validate report jobs');
   return data.filter((r: any) => {
     const job = jobs?.find((j: any) => j.id === r.job_run_id);
