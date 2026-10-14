@@ -48,7 +48,7 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
     prices=Mock(side_effect=AssertionError('Usable exchange prices must not be replayed'))
     monkeypatch.setattr(bot,'get_smart_sync',prices)
     monkeypatch.setattr('api.update_ml_scores.update_all_scores',lambda **kwargs:None)
-    monkeypatch.setattr('api.news_sentiment_engine.process_exchange_news',lambda *args:(True,1))
+    monkeypatch.setattr('api.news_sentiment_engine.process_exchange_news',lambda *args,**kwargs:(True,1))
     monkeypatch.setattr('api.corporate_actions_engine.process_exchange_corporate_actions',lambda *args,**kwargs:(True,1))
     monkeypatch.setattr('api.short_swings_daily.run_daily_short_swings',lambda **kwargs:{'success':True,'message':'done','count':1})
     monkeypatch.setattr('api.historical_similarity.run_market_wide_similarity_scan',lambda **kwargs:[])
