@@ -485,6 +485,8 @@ async function executeRawTool(
             }
 
             const total = typeof totalCount === "number" ? totalCount : enrichedRecs.length;
+            const latestQuoteDate = enrichedRecs.map(r => r.current_date).filter(Boolean).sort().at(-1) ?? null;
+            const latestObservedDate = [latestDateInDb, latestQuoteDate].filter(Boolean).sort().at(-1) ?? null;
             return {
                 status: "success",
                 timeframe,
@@ -494,7 +496,10 @@ async function executeRawTool(
                 total_count: total,
                 recommendations: enrichedRecs,
                 truncated: enrichedRecs.length < total,
-                latest_available_date_in_system: latestDateInDb,
+                latest_available_date_in_system: latestObservedDate,
+                latest_recommendation_date: latestDateInDb,
+                latest_returned_quote_date: latestQuoteDate,
+                date_scope: "تاريخ التوصيات من scan_results؛ تواريخ آخر الأسعار من المؤشرات لكل سهم وقد تكون أحدث. أحدث تاريخ هنا يخص المصادر المعروضة، ولا يثبت تحديث كل بيانات المنصة.",
                 note: enrichedRecs.length === 0
                     ? `لا توجد توصيات مسجلة خلال الفترة المطلوبة (${timeframe === "this_week" ? "الأسبوع الحالي" : timeframe === "last_week" ? "الأسبوع الماضي" : timeframe}). ${latestDateInDb ? `أحدث توصيات مسجلة تعود لتاريخ ${latestDateInDb}.` : "لا يوجد تاريخ توصيات موثق متاح."}`
                     : enrichedRecs.length < total
