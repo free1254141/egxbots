@@ -14,22 +14,24 @@ class SmartSync:
         self.max_bars_per_request = 5000
         self.max_workers = int(bounded_setting('SMART_SYNC_MAX_WORKERS', max_workers, 1, 6))
 
-    def sync_symbol_prices(self, symbol: str, max_days: int = 365, force_days: bool = False, refresh_latest: bool = False) -> Tuple[bool, str]:
+    def sync_symbol_prices(self, symbol: str, max_days: int = 365, force_days: bool = False, refresh_latest: bool = False, on_observed_quote=None) -> Tuple[bool, str]:
         """
         Syncs a single symbol from TradingView with retries and throttling.
         """
+        observation_options = {'on_observed_quote': on_observed_quote} if on_observed_quote else {}
         result = sync_with_retries(fetch_tradingview_prices, symbol,
             max_retries=self.max_retries, retry_delay=self.retry_delay, sleep=time.sleep,
-            max_days=max_days, refresh_latest=refresh_latest)
+            max_days=max_days, refresh_latest=refresh_latest, **observation_options)
         if not result[0]:
             print(f"[SYNC] {symbol}: {result[1]}")
         return result
 
-    def _sync_one(self, symbol: str, max_days: int, refresh_latest: bool = False) -> Tuple[str, bool, str]:
+    def _sync_one(self, symbol: str, max_days: int, refresh_latest: bool = False, on_observed_quote=None) -> Tuple[str, bool, str]:
         """The executor is the concurrency bound; no second semaphore is needed."""
         try:
             time.sleep(self.throttle_delay)
-            success, msg = self.sync_symbol_prices(symbol, max_days=max_days, refresh_latest=refresh_latest)
+            observation_options = {'on_observed_quote': on_observed_quote} if on_observed_quote else {}
+            success, msg = self.sync_symbol_prices(symbol, max_days=max_days, refresh_latest=refresh_latest, **observation_options)
             return symbol, success, msg
         except Exception as error:
             print(f'[SYNC] {symbol}: {type(error).__name__}: {error}')
@@ -42,6 +44,9 @@ class SmartSync:
         """
         symbols = list(dict.fromkeys(symbols))
         results = {}
+        observed_quotes = {}
+        def capture(symbol, quote):
+            observed_quotes[symbol.split('.')[0].upper()] = quote
         processed_count = 0
         success_count = 0
         started = time.monotonic()
@@ -59,7 +64,9 @@ class SmartSync:
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             report_progress()
-            futures = [executor.submit(self._sync_one, symbol, max_days, refresh_latest) for symbol in symbols]
+            futures = [executor.submit(self._sync_one, symbol, max_days, refresh_latest,
+                       (lambda quote, symbol=symbol: capture(symbol, quote)) if refresh_latest else None)
+                       for symbol in symbols]
             for future in as_completed(futures):
                 sym, ok, msg = future.result()
                 results[sym] = {'success': ok, 'message': msg}
@@ -76,7 +83,10 @@ class SmartSync:
             "total": len(symbols),
             "success": success_count,
             "results": results,
-            "unified": unified_dates
+            "unified": unified_dates,
+            "observed_quotes": {symbol.split('.')[0].upper(): observed_quotes[symbol.split('.')[0].upper()]
+                                for symbol, outcome in results.items()
+                                if outcome['success'] and symbol.split('.')[0].upper() in observed_quotes}
         }
 
     def enforce_unified_dates(self, exchange: str, target_days: int = 365):

@@ -40,7 +40,7 @@ def effective_daily_steps(steps):
             continue
         name = step['step']
         previous = latest.get(name)
-        if step.get('recovery_attempt'):
+        if step.get('recovery_attempt') or step.get('continuation_attempt'):
             if step.get('status') == 'started' and previous:
                 continue
             if is_withheld_recovery(step):

@@ -12,6 +12,7 @@ test('a snapshot date after the word rows is not an announced row count',()=>{
  expect(advisoryTableRowCountConsistency(reply)).toEqual([]);
 });
 jest.mock('../server-secrets',()=>({getDeepSeekApiKey:()=> 'offline-key'}));
+jest.mock('../live-stock-updater',()=>({fetchLiveStockIndicators:jest.fn().mockResolvedValue({success:false,error:'offline_test'}),isEgxSessionOpen:jest.fn().mockReturnValue(false)}));
 test('GTWL price column binds to each support or resistance row, independently of distance',()=>{
     const e=toAgenticEvidence('get_stock_levels',{symbols:['GTWL']},{levels:[{symbol:'GTWL',date:'2026-10-07',close:160,support:124.5,resistance:244}]});
     const draft='# GTWL — الدعوم والمقاومات\n| المستوى | السعر | المسافة من الإغلاق |\n|---|---|---|\n| مقاومة | 244 | +52.5% |\n| دعم | 124.5 | −22.19% |';

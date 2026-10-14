@@ -217,6 +217,30 @@ def _yahoo_proxy_failure():
             print(f'[CIRCUIT BREAKER] Yahoo proxy cooldown for 60s after {_yahoo_proxy_fail_count} failures')
 
 
+def _emit_observed_quote(frame, required_session, callback, source):
+    """Pass an actual provider observation, never a cached or filled daily bar."""
+    if not callback or not required_session or frame.empty:
+        return
+    from datetime import datetime, timezone
+    import math
+    observed_at = datetime.now(timezone.utc)
+    from zoneinfo import ZoneInfo
+    if observed_at.astimezone(ZoneInfo('Africa/Cairo')).date().isoformat() != required_session:
+        return
+    rows = frame[pd.to_datetime(frame['ts']).dt.strftime('%Y-%m-%d') == required_session]
+    if rows.empty:
+        return
+    row = rows.iloc[-1]
+    try:
+        price, volume = float(row['close']), float(row['volume'])
+        if not math.isfinite(price) or not math.isfinite(volume) or price <= 0 or volume <= 0:
+            return
+        callback({'price': price, 'volume': volume, 'date': required_session,
+                  'observed_at': observed_at.isoformat(), 'verified': True, 'source': source})
+    except (ValueError, TypeError, KeyError):
+        return
+
+
 def _try_yahoo_direct_fallback(
     upper: str,
     base_symbol: str,
@@ -224,7 +248,8 @@ def _try_yahoo_direct_fallback(
     max_days: int,
     start_date: Any,
     end_date: Any,
-    required_session: Optional[str] = None
+    required_session: Optional[str] = None,
+    on_observed_quote=None
 ) -> Tuple[bool, str]:
     """
     Direct Yahoo Finance API fallback. Fetches the raw JSON from Yahoo Finance
@@ -350,12 +375,16 @@ def _try_yahoo_direct_fallback(
             "close": closes,
             "volume": volumes
         })
+        # Entry observations are traded prices, never split-adjusted history.
+        observed_frame = df_new.copy()
+        observed_frame['close'] = quote.get('close', [])
         
         # Drop rows where critical price fields are None before forward-filling,
         # to avoid propagating previous day's prices into today's empty/placeholder candles.
         df_new = df_new.dropna(subset=["close", "open", "high", "low"], how="any")
         if required_session and not (df_new['ts'].dt.strftime('%Y-%m-%d') == required_session).any():
             return False, 'Yahoo returned no current EGX session bar'
+        observed_frame = observed_frame.dropna(subset=['close', 'volume'])
         df_new = df_new.ffill().bfill()
         
         if start_date or end_date:
@@ -369,6 +398,8 @@ def _try_yahoo_direct_fallback(
             return True, f"No new data on Yahoo within the filtered range ({start_date} to {end_date})"
             
         ok_sync, sync_msg = sync_df_to_supabase(upper, df_new, timeframe=timeframe)
+        if ok_sync:
+            _emit_observed_quote(observed_frame, required_session, on_observed_quote, 'yahoo')
         return ok_sync, f"OK (yahoo fallback) - {sync_msg}"
         
     except Exception as err:
@@ -381,7 +412,8 @@ def fetch_tradingview_prices(
     timeframe: str = "1d",
     start_date: Any = None,
     end_date: Any = None,
-    refresh_latest: bool = False
+    refresh_latest: bool = False,
+    on_observed_quote=None
 ) -> Tuple[bool, str]:
     """
     Fetch historical price data from TradingView and sync to Supabase.
@@ -521,7 +553,7 @@ def fetch_tradingview_prices(
         # Fetch historical data
         # Define Yahoo Finance fallback function inside the fetch function
         def try_yahoo_fallback() -> Tuple[bool, str]:
-            return _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session)
+            return _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session, on_observed_quote)
 
         # Fetch historical data
         df = None
@@ -569,6 +601,8 @@ def fetch_tradingview_prices(
 
         # Sync Directly
         ok, sync_msg = sync_df_to_supabase(upper, df_new, timeframe=timeframe)
+        if ok:
+            _emit_observed_quote(df_new, required_session, on_observed_quote, 'tradingview')
         return ok, f"OK (tradingview) - {sync_msg}"
         
     except Exception as e:
@@ -576,7 +610,7 @@ def fetch_tradingview_prices(
         # Fallback helper function is defined inside try, but if initialization fails:
         # we can define/call a simple fallback here too.
         try:
-            ok_fall, msg_fall = _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session)
+            ok_fall, msg_fall = _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session, on_observed_quote)
             if ok_fall:
                 return ok_fall, msg_fall
             error_msg += f" (Yahoo fallback: {msg_fall})"

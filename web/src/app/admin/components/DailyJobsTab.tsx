@@ -19,7 +19,7 @@ import { useRefreshOnVisibility } from "@/hooks/useRealtimeRefresh";
 
 interface StepLog {
     step: string;
-    status: "success" | "failed";
+    status: "success" | "failed" | "blocked" | "skipped" | "started";
     details: string;
     count: number;
     timestamp: string;
@@ -46,6 +46,8 @@ interface JobRun {
     started_at: string;
     completed_at: string | null;
     steps: StepLog[];
+    effective_steps?: StepLog[];
+    outcome?: "completed" | "partial" | "failed";
     total_symbols: number;
     error: string | null;
     trigger: "manual" | "scheduled" | "cron";
@@ -620,9 +622,10 @@ export default function DailyJobsTab() {
                         {jobRuns.map((run) => {
                             const isExpanded = expandedRun === run.id;
                             const steps = normalizeSteps(run.steps);
-                            const successSteps = steps.filter((s) => s.status === "success");
-                            const failedSteps = steps.filter((s) => s.status === "failed");
-                            const hasPartialFailure = run.status === "completed" && failedSteps.length > 0;
+                            const effectiveSteps = run.effective_steps ? normalizeSteps(run.effective_steps) : steps;
+                            const successSteps = effectiveSteps.filter((s) => s.status === "success");
+                            const failedSteps = effectiveSteps.filter((s) => s.status === "failed" || s.status === "blocked");
+                            const hasPartialFailure = run.status === "completed" && (run.outcome === "partial" || failedSteps.length > 0);
 
                             return (
                                 <div key={run.id} className="border-2 border-zinc-800 rounded-none overflow-hidden">

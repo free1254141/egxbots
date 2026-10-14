@@ -124,8 +124,10 @@ def load_country_summary() -> Dict[str, Any]:
         _init_supabase()
         if supabase:
             res = supabase.table("market_cache").select("payload").eq("cache_key", "country_summary").maybe_single().execute()
-            if res.data and res.data.get("payload"):
-                return res.data["payload"]
+            row = getattr(res, "data", None)
+            payload = row.get("payload") if isinstance(row, dict) else None
+            if isinstance(payload, dict) and payload:
+                return payload
     except Exception as e:
         print(f"WARNING: Failed to load country_summary from Supabase: {e}")
 

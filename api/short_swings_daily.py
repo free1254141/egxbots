@@ -72,6 +72,16 @@ def _get_sent_cache_state(sb, as_of_date: str) -> Dict[str, Any]:
 
 
 def build_vip_entry_message(trades: List[Dict[str, Any]], as_of_date: str, web_origin: str) -> str:
+    if trades and all(t.get('entry_kind') == 'intraday_observed' for t in trades):
+        lines = ['⚡ *دخول مضاربة قصيرة أثناء الجلسة*', f'📅 `{as_of_date}`']
+        for trade in trades:
+            lines.extend([f"🔹 *{trade.get('name_ar') or trade['symbol']}* (`{trade['symbol']}`)",
+                          f"• سعر الدخول المرصود: `{float(trade['entry_price']):.3f}` ج.م",
+                          f"• وقت الرصد: `{trade['observed_at']}`",
+                          f"• الوقف المبدئي: `{float(trade.get('stop_loss') or 0):.3f}` ج.م",
+                          '• المتابعة تبدأ من وقت الرصد؛ لا نستخدم أعلى أو أدنى اليوم السابق للرصد كتنفيذ.'])
+        lines.append(f'{web_origin}/scanner/backtests?tab=short_swings')
+        return '\n'.join(lines)
     """Format full, unmasked swing signals for the VIP channel ready for tomorrow's open."""
     lines = [
         "⚡ *إشارات مضاربة قصيرة جديدة (نظام الزخم ⚡ PRO)*",
@@ -114,6 +124,10 @@ def build_vip_entry_message(trades: List[Dict[str, Any]], as_of_date: str, web_o
 
 
 def build_free_entry_message(trades: List[Dict[str, Any]], as_of_date: str, web_origin: str) -> str:
+    if trades and all(t.get('entry_kind') == 'intraday_observed' for t in trades):
+        return '\n'.join(['رصد فرص مضاربة قصيرة أثناء الجلسة', f'{as_of_date}',
+                          'الدخول بسعر مرصود وقت إصدار الإشارة وليس بافتتاح سابق لها.',
+                          f'{web_origin}/scanner/backtests?tab=short_swings'])
     """Format masked teaser signals for the Free channel."""
     lines = [
         "⚡ *إشارات مضاربة قصيرة جديدة تم رصدها الآن! (نظام ⚡ PRO)*",
@@ -288,7 +302,11 @@ def _dispatch_trade(sb, trade, kind, channel, as_of, legacy_state, phase="close"
     return status
 
 
-def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None):
+def _snapshot_matches(swings, as_of, phase):
+    return bool(swings and swings.get('status') == 'ok' and swings.get('as_of') == as_of and swings.get('phase') == phase)
+
+
+def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None):
     from api.daily_recovery_state import read_checkpoint, replace_checkpoint, utc_now, parse_timestamp
     from api.daily_bot_run import _telegram_recommendation_writes_enabled
     if phase not in {"midday", "close"}:
@@ -321,22 +339,24 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
             return {"success": False, "status": "already_running", "message": "Another short-swings worker owns the attempt"}
     try:
         swings = payload.get("swings")
+        if swings and not _snapshot_matches(swings, as_of, phase):
+            swings = None
         if not swings:
             latest_row = read_checkpoint(sb, "short_swings_latest")
             latest_swings = ((latest_row or {}).get("payload") or {}).get("swings")
-            if latest_swings and latest_swings.get("status") == "ok" and latest_swings.get("phase") == phase:
+            if _snapshot_matches(latest_swings, as_of, phase):
                 swings = latest_swings
             else:
-                swings = compute_short_swings(phase=phase)
-        if swings.get("status") != "ok":
+                swings = compute_short_swings(phase=phase, observed_quotes=observed_quotes)
+        if not _snapshot_matches(swings, as_of, phase):
             raise ValueError("Current-session short-swings snapshot failed to compute")
         if swings.get("as_of"):
             as_of = swings["as_of"]
         entries = [trade for trade in swings.get("active_trades", [])
-                   if trade.get("is_pending_entry") and trade.get("signal_date") == as_of]
+                   if trade.get("signal_date") == as_of and ((phase == 'close' and trade.get('is_pending_entry')) or (phase == 'midday' and trade.get('is_new_entry') and trade.get('entry_kind') == 'intraday_observed'))]
         updates = [trade for trade in swings.get("active_trades", [])
                    if not trade.get("is_pending_entry") and trade.get("price_date") == as_of
-                   and trade.get("current_price") is not None]
+                   and trade.get("current_price") is not None and not trade.get('is_new_entry')]
         exits = [trade for trade in swings.get("closed_trades", []) if trade.get("exit_date") == as_of]
         if dry_run:
             return {"success": True, "status": "dry_run", "message": "Dry run; no delivery", "count": len(entries) + len(exits)}
@@ -396,12 +416,12 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
         return {"success": False, "status": "failed", "message": str(error)[:400], "report": {"failures": [str(error)[:400]]}}
 
 
-def run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None):
+def run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None):
     """A phase must complete durably; known failures resume on bounded retries."""
     if not _DELIVERY_LOCK.acquire(blocking=False):
         return {"success": False, "status": "already_running", "message": "Short swings already running"}
     try:
-        return _run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase=phase, job_run_id=job_run_id)
+        return _run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase=phase, job_run_id=job_run_id, observed_quotes=observed_quotes)
     except Exception as error:
         return {"success": False, "status": "checkpoint_unavailable", "message": type(error).__name__}
     finally:

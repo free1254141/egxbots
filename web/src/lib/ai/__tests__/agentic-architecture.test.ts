@@ -7,6 +7,7 @@ import { runAnswerGate } from "../answer-gate";
 import { analyzeImage } from "../vision";
 jest.mock("../server-secrets", () => ({ getDeepSeekApiKey: () => "offline-fake-key" }));
 jest.mock("../vision", () => ({ analyzeImage: jest.fn(), reconcileVisionWithMarket: jest.fn() }));
+jest.mock("../live-stock-updater", () => ({ fetchLiveStockIndicators: jest.fn().mockResolvedValue({ success: false, error: "offline_test" }), isEgxSessionOpen: jest.fn().mockReturnValue(false) }));
 
 type Query = { table: string; ops: Array<[string, ...any[]]> };
 function db(resolve: (q: Query) => any = () => ({ data: [], error: null })) {
@@ -37,6 +38,15 @@ async function run(messages: any[], overrides: any = {}) {
 const stockDb = () => db(q => ({ data: q.table === "stock_prices" ? [price] : q.table === "stocks" ? { symbol:"COMI",name:"Commercial Bank" } : [], error:null }));
 
 describe("Agentic architecture integration: current production path", () => {
+    test("market meaning advice requests one improvement even after approval and preserves a grounded original",async()=>{
+        const d=db(q=>({data:q.table === "stocks" ? [{symbol:"COMI",name:"COMI"}] : q.table === "stock_technical_indicators" ? [{symbol:"COMI",date:price.date,close:100,rsi_14:26.72,macd:-1,macd_signal:-2}] : q.table === "stock_prices" ? [price] : q.table === "stock_scans_summary" ? [{scan_date:price.date,acc_score:70}] : [],error:null}));
+        const valid="COMI: درجة التجميع تشير إلى تجميع مؤسسي.";
+        const r=await run([{tool_calls:[call("get_stock",{symbols:["COMI"]})]},{content:valid},verdict(),{content:"COMI سعر 9999 جنيه"},verdict()],{db:d,userMessage:"حلل COMI"});
+        expect(r.done.publication_review.final_passed).toBe(true);expect(r.done.publication_review.repaired).toBe(true);
+        expect(r.done.response).toContain(valid);expect(r.done.response).not.toContain("9999");
+        expect(r.done.response_origin).toBe("llm");expect(r.fetchMock).toHaveBeenCalledTimes(5);
+        expect(JSON.stringify(JSON.parse(r.fetchMock.mock.calls[3][1].body).messages)).toContain("ليست إثباتاً");
+    });
     test("a harmful optional refinement preserves the accepted original answer",async()=>{
         const valid="COMI إغلاق 100 جنيه بتاريخ 2026-10-08، وهو إغلاق يومي لا سعر لحظي.";
         const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]},{content:valid},verdict(false,["أضف خلاصة اختيارية"]),

@@ -43,6 +43,10 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
     monkeypatch.setattr(bot,'evaluate_old_recommendations',evaluator)
     monkeypatch.setattr(bot,'retry_pending_recommendation_telegram_events',lambda **kwargs:0)
     monkeypatch.setattr(bot,'should_reject_new_buys',lambda:{'blocked':True,'reason':'Test market gate'})
+    buy_hold_mock=Mock(return_value=True)
+    monkeypatch.setattr(bot,'_send_market_buy_hold',buy_hold_mock)
+    monkeypatch.setattr(bot,'_notify_vip_telegram',Mock(return_value=True))
+    monkeypatch.setattr(bot,'_notify_free_telegram',Mock(return_value=True))
     monkeypatch.setattr(bot,'_mark_daily_cache_payload',lambda *args:None)
     monkeypatch.setattr(bot,'_send_daily_market_outlook',lambda *args:True)
     prices=Mock(side_effect=AssertionError('Usable exchange prices must not be replayed'))
@@ -72,8 +76,13 @@ def test_real_runner_completes_missing_close_stages_without_replaying_prices(mon
                  'cache_revalidation','daily_market_outlook','daily_social_reports'):
         assert latest[name]['status']=='success', (name,latest[name])
     assert latest['generate_recommendations']['status']=='skipped'
-    reports.assert_called_once(); prices.assert_not_called()
+    reports.assert_called_once(); prices.assert_not_called(); buy_hold_mock.assert_called_once()
     # A parallel repair that finished before evaluation must not evaluate the
     # same unchanged recommendation again and inflate the aggregate count.
     evaluator.assert_called_once()
     assert 'evaluate_recommendations_late' not in latest
+    # Position protection runs before slow scoring/news, once indicators exist.
+    started = [row['step'] for row in rows if row['status'] == 'started' and row.get('continuation_attempt')]
+    assert started.index('calculate_indicators') < started.index('short_swings_daily')
+    assert started.index('short_swings_daily') < started.index('ml_scores_update')
+    assert started.index('short_swings_daily') < started.index('news_sentiment')

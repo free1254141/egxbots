@@ -2076,7 +2076,13 @@ def sync_df_to_supabase(ticker: str, df: pd.DataFrame, timeframe: str = "1d") ->
             if sb_exchange.upper() != "INDX" and volume_val is not None and pd.notna(volume_val):
                 try:
                     if int(volume_val) == 0:
-                        continue
+                        # EGX may publish a dated unchanged quote without any
+                        # trades (e.g. illiquid Nile stocks). Retain only a
+                        # finite, positive, flat daily bar; execution policies
+                        # still exclude zero-volume bars from trading sessions.
+                        from api.recommendation_freshness import is_nontrading_quote
+                        if is_intraday or sb_exchange.upper() != 'EGX' or not is_nontrading_quote(row):
+                            continue
                 except Exception:
                     pass
 

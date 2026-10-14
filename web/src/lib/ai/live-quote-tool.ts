@@ -1,5 +1,5 @@
 import {fetchLiveStockIndicators,isEgxSessionOpen} from './live-stock-updater';
-import {reconcileStockQuote} from './stock-quote';
+import {reconcileStockQuote, stockQuoteMetadata} from './stock-quote';
 
 export const LIVE_QUOTE_TOOL_SCHEMA = {type:'function',function:{
     name:'get_live_quote',
@@ -25,9 +25,9 @@ export async function executeLiveQuoteTool(args:any,client:any){
         }
         const {data}=await client.from('stock_technical_indicators').select('date,close')
             .eq('exchange','EGX').eq('symbol',symbol).order('date',{ascending:false}).limit(1);
-        const saved=await reconcileStockQuote(client,symbol,data?.[0]);
+        const saved=await reconcileStockQuote(client,symbol,data?.[0], { preferLive: false });
         return {symbol,close:saved?.close??null,date:saved?.date??null,quote_source:saved?.quote_source??null,
-            price_type:'daily_close',live_quote_available:false,availability:saved?'partial':'missing',
+            ...stockQuoteMetadata(saved),price_type:saved?.price_type || 'daily_close',live_quote_available:false,availability:saved?'partial':'missing',
             quote_time:null,fetched_at:null,provider_delay:'unknown',
             message:fetched.unsupported?'لا تتوفر تغذية لهذا الرمز لدى المصدر.':'تعذر جلب سعر جديد من المزود؛ البديل إغلاق مخزن وليس سعراً لحظياً.',
             limitations:['هذه القيمة بديل من قاعدة البيانات؛ لم يؤكدها المزود في هذا الطلب.']};

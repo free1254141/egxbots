@@ -77,7 +77,7 @@ export function getCairoTimeString(date?: Date): string {
  * Fetches real-time price & indicators for a single stock from TradingView scanner.
  * Maximum 1 attempt with a 3.0-second hard timeout.
  */
-export async function fetchLiveStockIndicators(
+async function fetchLiveStockIndicatorsOnce(
     symbol: string,
     supabase?: any,
     options: { allowClosedMarket?: boolean; forceRefresh?: boolean } = {}
@@ -102,7 +102,7 @@ export async function fetchLiveStockIndicators(
     // Market close alone is not enough to switch to Supabase. Keep the live
     // source during the post-close sync window until today's daily job has
     // completed successfully and the current session date is present.
-    if (!options.allowClosedMarket && !isEgxSessionOpen() && (!shouldPreferLiveBeforeSync() || await isDailySyncComplete(supabase))) {
+    if (!options.allowClosedMarket && !isEgxSessionOpen() && (!shouldPreferLiveBeforeSync() || await isDailySyncComplete(supabase, undefined, cleanSym))) {
         return { success: false, error: "جلسة EGX مغلقة حالياً؛ سيتم استخدام آخر إغلاق مسجل" };
     }
 
@@ -216,4 +216,17 @@ export async function fetchLiveStockIndicators(
         const errMsg = err?.name === "AbortError" ? "انتهت مهلة جلب السعر المباشر (3 ثوانٍ)" : (err?.message || "فشل الاتصال");
         return { success: false, error: errMsg };
     }
+}
+
+// Public market reads share only an in-flight provider request, never account data.
+const pendingLiveQuotes = new Map<string, ReturnType<typeof fetchLiveStockIndicatorsOnce>>();
+export async function fetchLiveStockIndicators(symbol: string, supabase?: any,
+    options: { allowClosedMarket?: boolean; forceRefresh?: boolean } = {}) {
+    const key = symbol.trim().toUpperCase().replace(/^(EGX:|CA:)/, "");
+    const pending = pendingLiveQuotes.get(key);
+    if (pending) return pending;
+    const request = fetchLiveStockIndicatorsOnce(symbol, supabase, options);
+    pendingLiveQuotes.set(key, request);
+    try { return await request; }
+    finally { if (pendingLiveQuotes.get(key) === request) pendingLiveQuotes.delete(key); }
 }

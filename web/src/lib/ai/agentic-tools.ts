@@ -1,5 +1,5 @@
 import { executeLiveQuoteTool } from "./live-quote-tool";
-import { reconcileStockQuote } from "./stock-quote";
+import { reconcileStockQuote, stockPricePresentation, stockQuoteMetadata } from "./stock-quote";
 import { PLANNED_READ_TOOL_NAMES, executePlannedReadTool } from "./planned-read-tools";
 import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
@@ -57,6 +57,13 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
     } catch (error:any) { return {status:"error", availability:"error", persisted:false, message:error.message}; }
 }
 
+async function mapStockReads<T>(symbols: string[], read: (symbol: string) => Promise<T>): Promise<T[]> {
+    const result: T[] = [];
+    for (let offset = 0; offset < symbols.length; offset += 3)
+        result.push(...await Promise.all(symbols.slice(offset, offset + 3).map(read)));
+    return result;
+}
+
 function lockPosition(query:any, existing:any) {
     return existing.updated_at == null ? query.is("updated_at",null) : query.eq("updated_at",existing.updated_at);
 }
@@ -87,7 +94,7 @@ async function executeRawTool(
                 .order("date", { ascending: false }).limit(1);
             const quote = await reconcileStockQuote(supabase, symbol, data?.[0]);
             const close = finite(quote?.close);
-            const priced = close != null && close > 0 && Boolean(quote?.date);
+            const priced = close != null && close > 0 && Boolean(quote?.date || quote?.live_quote_available && quote?.fetched_at);
             const marketValue = priced && quantity != null ? quantity * close! : null;
             const profit = marketValue == null ? null : marketValue - cost;
             if (marketValue != null && !Number.isFinite(marketValue)) throw new Error("قيمة المركز تتجاوز حدود الحساب");
@@ -95,6 +102,7 @@ async function executeRawTool(
                 valuation_complete: priced && quantity != null, fees_included: false,
                 positions: [{ symbol, quantity, entry_price, cost: round(cost),
                     close: priced ? close : null, date: priced ? quote.date : null, quote_source: quote?.quote_source ?? null,
+                    ...stockQuoteMetadata(quote),
                     market_value: round(marketValue), profit_loss_val: round(profit),
                     profit_loss_pct: profit == null ? null : round(profit / cost * 100) }],
                 formulas: { cost: suppliedCost != null ? "user_supplied_total_cost" : "quantity * entry_price", market_value: "quantity * close",
@@ -104,8 +112,7 @@ async function executeRawTool(
             const symbols: string[] = Array.isArray(args.symbols)
                 ? args.symbols.map(normalizeSymbol)
                 : [];
-            const results = [];
-            for (const sym of symbols) {
+            const results = await mapStockReads(symbols, async sym => {
                 const { data: stockRows } = await supabase
                     .from("stocks")
                     .select("symbol, name, name_ar")
@@ -129,16 +136,16 @@ async function executeRawTool(
 
                 const ind = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 if (!ind) {
-                    results.push({
+                    return {
                         symbol: sym,
                         found_in_main_market: false,
                         availability: "missing",
                         market_type: null,
                         message: `السهم ${sym} لا تتوفر له مؤشرات في المصدر المطلوب؛ غياب البيانات لا يحدد سوق القيد.`
-                    });
+                    };
                 } else {
                     const wyckoff = wyckoffRows?.[0] || {};
-                    results.push({
+                    return {
                         symbol: sym,
                         name: stockData.name_ar || stockData.name || sym,
                         found_in_main_market: true,
@@ -147,7 +154,7 @@ async function executeRawTool(
                         indicators_date: ind.indicators_date,
                         indicators_stale: ind.indicators_stale,
                         indicators_available: ind.indicators_available ?? true,
-                        price_type: "daily_close",
+                        ...stockQuoteMetadata(ind),
                         wyckoff_date: wyckoff.scan_date ?? null,
                         close: ind.close,
                         change_pct: ind.change_pct != null ? Number(ind.change_pct.toFixed(2)) : null,
@@ -165,9 +172,9 @@ async function executeRawTool(
                         wyckoff_phase: wyckoff.wyckoff_phase,
                         accumulation_score: wyckoff.acc_score,
                         distribution_score: wyckoff.dist_score
-                    });
+                    };
                 }
-            }
+            });
             return { status: "success", stocks: results };
         }
 
@@ -229,7 +236,7 @@ async function executeRawTool(
                         trading_zone: tradingZone,
                         date: pRows[0].date,
                         methodology: "20-session range; stop=98% support; target2=60-session high or 105% resistance",
-                        observations: pRows.length, price_type: "daily_close"
+                        observations: pRows.length, ...stockPricePresentation(pRows[0].date)
                     });
                 } else {
                     levels.push({ symbol: sym, availability: "missing", error: "لا يوجد تاريخ أسعار متاح؛ سوق القيد غير محدد" });
@@ -253,13 +260,13 @@ async function executeRawTool(
                     const { data: indRows } = await supabase.from("stock_technical_indicators")
                         .select("close,change_pct,rsi_14,king_ai_score,egx_ai_score,date")
                         .eq("exchange", "EGX").eq("symbol", p.symbol).order("date", { ascending: false }).limit(1);
-                    const quote = await reconcileStockQuote(supabase, p.symbol, indRows?.[0]);
+                    const quote = await reconcileStockQuote(supabase, p.symbol, indRows?.[0], { preferLive: false });
                     const qty = finite(p.quantity), entry = finite(p.entry_price), latest = finite(quote?.close);
                     const cost = qty != null && entry != null ? qty * entry : null;
                     const value = qty != null && latest != null ? qty * latest : null;
                     enriched.push({ symbol: p.symbol, quantity: qty, entry_price: entry,
                         current_price: latest, date: quote?.date ?? null, quote_source: quote?.quote_source,
-                        indicators_date: quote?.indicators_date, indicators_stale: quote?.indicators_stale, price_type: "daily_close",
+                        indicators_date: quote?.indicators_date, indicators_stale: quote?.indicators_stale, ...stockQuoteMetadata(quote),
                         availability: latest == null ? "missing" : "available", cost: round(cost), market_value: round(value),
                         profit_loss_val: cost != null && value != null ? round(value - cost) : null,
                         profit_loss_pct: entry != null && entry > 0 && latest != null ? round((latest-entry)/entry*100) : null,
@@ -627,7 +634,7 @@ async function executeRawTool(
                 return [{ symbol:row.symbol, date:row.date, close, change_pct:finite(row.change_pct), r_vol:finite(row.r_vol),
                     rsi_14:finite(row.rsi_14), resistance:Number(resistance.toFixed(6)), distance_from_resistance_pct:round(distance),
                     resistance_relation:close === resistance ? "at" : "below",
-                    price_type:"daily_close", resistance_sessions:20 }];
+                    ...stockPricePresentation(row.date), resistance_sessions:20 }];
             }).sort((a:any,b:any)=>(a.distance_from_resistance_pct-b.distance_from_resistance_pct)||(b.r_vol-a.r_vol)).slice(0,maxResults);
             return { status:"success", date, filters:{rsi_min:rsiMin,rsi_max:rsiMax,relative_volume_min:volumeMin,
                 relative_volume_inclusive:volumeInclusive,max_resistance_distance_pct:distanceMax,resistance_distance_inclusive:distanceInclusive}, stocks, scan_complete:!truncated && insufficientHistory.length===0,
@@ -721,8 +728,7 @@ async function executeRawTool(
             const symbols: string[] = Array.isArray(args.symbols)
                 ? args.symbols.map(normalizeSymbol)
                 : [];
-            const data = [];
-            for (const sym of symbols) {
+            const data = await mapStockReads(symbols, async sym => {
                 const { data: indRows } = await supabase
                     .from("stock_technical_indicators")
                     .select("symbol, close, change_pct, r_vol, rsi_14, macd, macd_signal, macd_histogram, ema_50, ema_200, bb_upper, bb_lower, king_ai_score, egx_ai_score, date")
@@ -731,11 +737,11 @@ async function executeRawTool(
                     .limit(1);
                 const quote = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 if (quote) {
-                    data.push({symbol: sym, ...quote});
+                    return {symbol: sym, ...quote};
                 } else {
-                    data.push({ symbol: sym, error: "Not found in active main market" });
+                    return { symbol: sym, error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب" };
                 }
-            }
+            });
             return { status: "success", comparison: data, comparisons: data };
         }
 

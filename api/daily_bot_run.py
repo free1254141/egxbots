@@ -1307,6 +1307,9 @@ def _mark_daily_cache_payload(cache_key: str, payload: Dict[str, Any]) -> None:
         print(f"[DAILY_TELEGRAM] Could not persist {cache_key}: {exc}")
 
 
+_SENT_MARKET_BUY_HOLD_DATES: set[str] = set()
+
+
 def _send_market_buy_hold(gate: Dict[str, Any], market_date: str) -> bool:
     if not gate.get("blocked") and not gate.get("no_buy_reason"):
         return True
@@ -1315,10 +1318,15 @@ def _send_market_buy_hold(gate: Dict[str, Any], market_date: str) -> bool:
         print("[MARKET_GATE] Buy-hold Telegram notice disabled pending approval of the message format.")
         return False
 
+    if market_date in _SENT_MARKET_BUY_HOLD_DATES:
+        print(f"[MARKET_GATE] Buy-hold notice already delivered in memory for {market_date}; skipping duplicate.")
+        return True
+
     cache_key = "telegram_market_buy_hold_sent"
     payload = _daily_cache_payload(cache_key)
     if market_date in payload.get("sent_dates", []):
         print(f"[MARKET_GATE] Buy-hold notice already delivered for {market_date}; skipping duplicate.")
+        _SENT_MARKET_BUY_HOLD_DATES.add(market_date)
         return True
     deliveries = payload.setdefault("deliveries", {})
     day_delivery = deliveries.setdefault(market_date, {})
@@ -1346,6 +1354,7 @@ def _send_market_buy_hold(gate: Dict[str, Any], market_date: str) -> bool:
         _mark_daily_cache_payload(cache_key, payload)
     delivered = bool(day_delivery.get("vip") and day_delivery.get("free"))
     if delivered:
+        _SENT_MARKET_BUY_HOLD_DATES.add(market_date)
         sent_dates = list(payload.get("sent_dates", []))
         if market_date not in sent_dates:
             sent_dates.append(market_date)
@@ -3002,6 +3011,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
     evaluation = None
     daily_bulk_prices: Dict[str, pd.DataFrame] = {}
     daily_bulk_cache_ttl = 2 * 60 * 60
+    observed_quotes = None
     job_status = "running"
 
     if resume_job_id:
@@ -3169,7 +3179,8 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     _record_step("sync_inventory", False, str(e)[:200], 0)
                     print(f"[INVENTORY] Error: {e}")
         else:
-            _record_step("sync_inventory", True, "Skipped - weekly scheduled refresh only", 0)
+            if _stage_needed('sync_inventory'):
+                _record_step("sync_inventory", True, "Skipped - weekly scheduled refresh only", 0)
             print("\n>>> STEP 0: Skipping EGX inventory refresh today (weekly scheduled run only).")
 
         # Fundamentals move slower than prices and indicators. Refresh them
@@ -3223,6 +3234,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
 
                     sync_result = syncer.sync_exchange_prices("EGX", symbols, max_days=365, refresh_latest=True,
                                                              on_progress=_price_progress)
+                    # The sync provider must positively verify quote observation
+                    # timestamps. Never turn a daily OHLC date into a live quote.
+                    observed_quotes = sync_result.get('observed_quotes')
                     # The writer has finished: discard stale scanner data before the
                     # job preloads its one shared EGX snapshot below.
                     stock_ai.clear_exchange_bulk_cache("EGX")
@@ -3237,7 +3251,8 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     print(f"[SYNC] Error: {e}")
         else:
             print("\n>>> STEP 1: Skipping price sync (--skip-sync).")
-            _record_step("sync_prices", True, "Skipped", 0)
+            if _stage_needed('sync_prices'):
+                _record_step("sync_prices", True, "Skipped", 0)
 
         if not dry_run and _stage_needed('critical_recommendation_prices'):
             _start_step('critical_recommendation_prices', 'Verify and repair open-recommendation quotes in a parallel bounded lane')
@@ -3302,6 +3317,35 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as e:
                 _record_step("calculate_indicators", False, str(e)[:200], 0)
                 print(f"[INDICATORS] Error: {e}")
+
+        # Protect/monitor short positions promptly after prices and indicators;
+        # heavy ML/news stages must not delay the trading lifecycle.
+        if phase == "midday" and _stage_needed('refresh_market_status_for_gate'):
+            _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
+            try:
+                ok_status, status_message = _refresh_market_status_cache()
+                _record_step("refresh_market_status_for_gate", ok_status, status_message, 0)
+            except Exception as error:
+                _record_step("refresh_market_status_for_gate", False, str(error)[:200], 0)
+        if _stage_needed('short_swings_daily'):
+            _start_step("short_swings_daily", "Monitoring short positions after the price/indicator stages")
+            try:
+                from api.short_swings_daily import run_daily_short_swings
+                from api.daily_job_outcome import effective_daily_steps
+                effective_steps = effective_daily_steps(steps_log)
+                prices_ok = any(step.get("status") == "success" for step in effective_steps
+                                if step.get("step") == "sync_prices")
+                indicators_ok = any(step.get("status") == "success" for step in effective_steps
+                                    if step.get("step") == "calculate_indicators")
+                swings_res = run_daily_short_swings(
+                    trigger=trigger, dry_run=dry_run, phase=phase, job_run_id=job_run_id,
+                    observed_quotes=observed_quotes,
+                ) if (phase == "close" or prices_ok or indicators_ok) else {
+                    "success": False, "message": "No usable price/indicator data; intraday short monitoring withheld"}
+                _record_step("short_swings_daily", swings_res.get("success", False),
+                             swings_res.get("message", ""), swings_res.get("count", 0))
+            except Exception as error:
+                _record_step("short_swings_daily", False, str(error)[:200], 0)
 
         # 2.2 Update AI Scores for all symbols in stock_technical_indicators
         print("\n>>> STEP 2.2: Updating AI ML Scores for all stocks in DB...")
@@ -3392,11 +3436,19 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             # Only shared site data and short-position monitoring run intraday.
             # Ordinary portfolio/recommendation lifecycle and LLM reports stay EOD.
             _finish_critical_prices()
-            from api.cache_invalidation import invalidate_daily_cache
-            invalidate_daily_cache(steps_log)
+            if _stage_needed('cache_revalidation'):
+                _start_step('cache_revalidation', 'Refresh successful intraday datasets')
+                try:
+                    from api.cache_invalidation import invalidate_daily_cache
+                    cache_result = invalidate_daily_cache(steps_log) or {}
+                    _record_step('cache_revalidation', not cache_result.get('error'),
+                                 ('Skipped - cache refresh not configured/eligible' if cache_result.get('skipped') else (json.dumps(cache_result) if cache_result else 'Done')), 0)
+                except Exception as cache_error:
+                    _record_step('cache_revalidation', False, str(cache_error)[:300])
             from api.price_sync_policy import price_sync_usable
+            from api.daily_job_outcome import effective_daily_steps
             essential_ok = all((price_sync_usable(step) if step.get("step") == "sync_prices" else step.get("status") == "success")
-                               for step in steps_log
+                               for step in effective_daily_steps(steps_log)
                                if step.get("step") in {"sync_prices", "calculate_indicators"} and step.get("status") != "started")
             status = "completed" if essential_ok else "failed"
             _persist_job(status)
@@ -3484,18 +3536,6 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 print(f"[RECOMMENDATIONS] Error: {e}")
                 _send_market_buy_hold({"no_buy_reason": "تعذر استكمال فحص المرشحين بسبب خطأ تقني؛ لم تُنشأ توصيات شراء، ولا يعني ذلك ضعفًا مؤكدًا في السوق."}, dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat())
 
-        # 5.5 Run Short Swings Engine & Dispatch Telegram Alerts
-        print("\n>>> STEP 5.5: Running Short Swings engine & Telegram dispatch (الصفقات القصيرة)...")
-        if _stage_needed('short_swings_daily'):
-            _start_step("short_swings_daily", "Running short swings engine and sending VIP/Free telegram alerts")
-            try:
-                from api.short_swings_daily import run_daily_short_swings
-                swings_res = run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase="close", job_run_id=job_run_id)
-                _record_step("short_swings_daily", swings_res.get("success", True), swings_res.get("message", "Done"), swings_res.get("count", 0))
-            except Exception as e_swings:
-                _record_step("short_swings_daily", False, str(e_swings)[:200], 0)
-                print(f"[SHORT_SWINGS] Error running daily short swings: {e_swings}")
-
         # 6. Run Historical Similarity Scan
         print("\n>>> STEP 6: Running Historical Similarity market scan...")
         if _stage_needed('historical_similarity'):
@@ -3544,7 +3584,8 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     _record_step("weekly_performance_report", False, str(e)[:200], 0)
                     print(f"[WEEKLY_REPORT] Error: {e}")
         else:
-            _record_step("weekly_performance_report", True, "Skipped - scheduled Sunday only", 0)
+            if _stage_needed('weekly_performance_report'):
+                _record_step("weekly_performance_report", True, "Skipped - scheduled Sunday only", 0)
 
         # 8. Refresh Market Status (EGX30, EGX100, USD/EGP indices) from EODHD
         print("\n>>> STEP 8: Prefetching and refreshing Market Status cache from EODHD...")
@@ -3634,9 +3675,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             _start_step('cache_revalidation', 'Refresh only successfully completed daily datasets')
             try:
                 from api.cache_invalidation import invalidate_daily_cache
-                cache_result = invalidate_daily_cache(steps_log)
+                cache_result = invalidate_daily_cache(steps_log) or {}
                 _record_step('cache_revalidation', not cache_result.get('error'),
-                             ('Skipped - cache refresh not configured/eligible' if cache_result.get('skipped') else json.dumps(cache_result)), 0)
+                             ('Skipped - cache refresh not configured/eligible' if cache_result.get('skipped') else (json.dumps(cache_result) if cache_result else 'Done')), 0)
             except Exception as e_cache:
                 _record_step('cache_revalidation', False, str(e_cache)[:300])
         # This is deliberately the final channel post in the daily run, after

@@ -51,8 +51,10 @@ def fetch_tradingview_history(client, *, clock=time.monotonic, **kwargs):
     """Per-client deadline; no global monkeypatches or abandoned worker threads."""
     budget = bounded_setting('TRADINGVIEW_REQUEST_BUDGET', 20, 5, 45)
     deadline = clock() + budget
-    original_connect = client._TvDatafeed__create_connection
-    original_timeout = client._TvDatafeed__ws_timeout
+    original_connect = getattr(client, '_TvDatafeed__create_connection', None)
+    if original_connect is None:
+        return client.get_hist(**kwargs)
+    original_timeout = getattr(client, '_TvDatafeed__ws_timeout', 15)
     guarded = None
 
     def connect():

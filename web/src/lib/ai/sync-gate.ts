@@ -11,23 +11,26 @@ function cairoDate(value: unknown): string | null {
  * Supabase is authoritative only after the daily job actually completed and
  * wrote the current session's daily prices. The clock alone is not evidence.
  */
-export async function isDailySyncComplete(supabase: any, expectedDate?: string): Promise<boolean> {
+export async function isDailySyncComplete(supabase: any, expectedDate?: string, symbol?: string): Promise<boolean> {
     if (!supabase) return false;
     try {
         const jobQuery = await supabase
             .from("daily_job_runs")
             .select("status,started_at,completed_at,steps")
             .eq("job_type", "daily_bot")
-            .eq("status", "completed")
-            .order("completed_at", { ascending: false })
+            .order("started_at", { ascending: false })
             .limit(1);
         const job = jobQuery?.data?.[0];
-        if (!job) return false;
+        if (jobQuery.error || !job || job.status !== "completed") return false;
 
         let steps: any[] = [];
         if (Array.isArray(job.steps)) steps = job.steps;
         else if (typeof job.steps === "string") {
-            try { steps = JSON.parse(job.steps); } catch { steps = []; }
+            try {
+                let decoded = JSON.parse(job.steps);
+                if (typeof decoded === "string") decoded = JSON.parse(decoded);
+                steps = Array.isArray(decoded) ? decoded : [];
+            } catch { steps = []; }
         }
         const priceSteps = steps.filter((step) => step?.name === "sync_prices" || step?.step === "sync_prices");
         if (!priceSteps.length) return false;
@@ -43,12 +46,15 @@ export async function isDailySyncComplete(supabase: any, expectedDate?: string):
         const targetDate = expectedDate || todayInCairo();
         if (targetDate && runDate !== targetDate) return false;
 
-        const latestQuery = await supabase
+        let prices = supabase
             .from("stock_prices")
             .select("date")
-            .eq("exchange", "EGX")
+            .eq("exchange", "EGX");
+        if (symbol) prices = prices.eq("symbol", symbol);
+        const latestQuery = await prices
             .order("date", { ascending: false })
             .limit(1);
+        if (latestQuery.error) return false;
         const latestDate = String(latestQuery?.data?.[0]?.date || "").slice(0, 10);
         return Boolean(latestDate && latestDate === runDate);
     } catch (error) {
@@ -69,6 +75,6 @@ export function shouldPreferLiveBeforeSync(now = new Date()): boolean {
     const weekday = parts.weekday;
     if (weekday === "Fri" || weekday === "Sat") return false;
     const minutes = Number(parts.hour) * 60 + Number(parts.minute);
-    return minutes >= 10 * 60 && minutes <= 18 * 60;
+    return minutes >= 10 * 60;
 }
 

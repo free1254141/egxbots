@@ -1,4 +1,5 @@
 /** Explain verified stock snapshots without dumping raw indicator records. */
+import { stockPricePresentation } from './stock-quote';
 type StockSnapshot = Record<string, any>;
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -10,18 +11,25 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         const date = String(row.date || row.current_date || "").slice(0, 10);
         const old = snapshots.get(row.symbol);
         const oldDate = String(old?.date || old?.current_date || "").slice(0, 10);
-        if (!old || date > oldDate) snapshots.set(row.symbol, { ...row });
-        else if (date === oldDate) snapshots.set(row.symbol, { ...old, ...row });
+        const provider = row.live_quote_available === true;
+        const oldProvider = old?.live_quote_available === true;
+        if (!old || provider && !oldProvider || provider === oldProvider && date > oldDate) snapshots.set(row.symbol, { ...row });
+        else if (provider === oldProvider && date === oldDate && (row.close ?? row.current_price) === (old.close ?? old.current_price))
+            snapshots.set(row.symbol, { ...old, ...row });
     }
     if (!snapshots.size) return "";
     const lines: string[] = [];
     for (const row of [...snapshots.values()].slice(0, 10)) {
         const close = row.close ?? row.current_price;
         const date = String(row.date || row.current_date || "").slice(0, 10);
-        lines.push(`**${row.name_ar || row.name || row.symbol}${row.name_ar || row.name ? ` (${row.symbol})` : ""}** — آخر إغلاق متاح ${number(close)} جنيه${date ? ` بتاريخ ${date}` : ""}.`);
+        const presentation = row.price_label || stockPricePresentation(date, row.final_close_confirmed === true).price_label;
+        lines.push(`**${row.name_ar || row.name || row.symbol}${row.name_ar || row.name ? ` (${row.symbol})` : ""}** — ${presentation} ${number(close)} جنيه${date ? ` بتاريخ ${date}` : ""}.`);
+        if (row.live_quote_available) lines.push(`المصدر TradingView؛ وقت الجلب ${row.fetched_at_cairo || row.fetched_at || 'غير موثق'}. وقت آخر صفقة وتأخير المصدر غير موثقين؛ ليست شهادة إغلاق نهائي.`);
+        else if (row.live_quote_available === false) lines.push('تعذر التحقق من سعر جديد؛ المعروض سعر مخزن بالتاريخ المذكور، وليس سعراً لحظياً.');
         const comments: string[] = [];
         const indicatorsDate = String(row.indicators_date || date).slice(0, 10);
-        const indicatorsUsable = !row.indicators_stale && row.indicators_available !== false && indicatorsDate === date;
+        const indicatorsUsable = !row.indicators_stale && row.indicators_available !== false
+            && (indicatorsDate === date || row.indicators_source === 'tradingview' && row.indicators_observed_at === row.fetched_at);
         if (indicatorsUsable) {
             if (finite(row.ema_50) && finite(row.ema_200)) comments.push(close > row.ema_50 && close > row.ema_200
                 ? "السعر فوق متوسطاته القصيرة والطويلة؛ موقعه الحالي أقوى، لكنه وحده لا يثبت استمرار الصعود."
@@ -45,6 +53,6 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         if (!comments.length) comments.push("السعر وحده لا يكفي لترجيح الدخول؛ يلزم تأكيد الزخم والمستويات الفنية.");
         lines.push(comments.join(" "), "");
     }
-    lines.push("الخلاصة: اربط قرارك بتأكيد الحركة وحدود المخاطرة؛ قرب الدعم أو التشبع البيعي وحده لا يكفي للدخول. هذه إغلاقات مخزنة وليست أسعارًا لحظية، والمستويات سيناريوهات فنية غير مضمونة.");
+    lines.push("الخلاصة: اربط قرارك بتأكيد الحركة وحدود المخاطرة؛ قرب الدعم أو التشبع البيعي وحده لا يكفي للدخول. هذه قراءات من إغلاق يومي مخزن وليست أسعارًا لحظية، وتاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة.");
     return lines.join("\n");
 }

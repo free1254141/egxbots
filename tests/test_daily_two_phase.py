@@ -84,7 +84,7 @@ def runtime(monkeypatch):
                                    'is_pending_entry': True, 'reference_close': 100, 'trailing_stop': 96}],
                 'closed_trades': []}
     computed = []
-    def compute(*, phase): computed.append(phase); return copy.deepcopy(snapshot)
+    def compute(*, phase, **kwargs): computed.append(phase); return copy.deepcopy(snapshot)
     monkeypatch.setattr(shorts, 'compute_short_swings', compute)
     return db, calls, outcomes, snapshot, computed
 
@@ -228,7 +228,8 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
     saved, forbidden, invalidations = [], [], []
     class Persist:
         def upsert(self, row): saved.append(copy.deepcopy(row)); return self
-        def execute(self): return None
+        def execute(self): return types.SimpleNamespace(data=[])
+        def __getattr__(self, name): return lambda *a, **k: self
     stock = types.SimpleNamespace(supabase=types.SimpleNamespace(table=lambda *_: Persist()),
         clear_exchange_bulk_cache=lambda *_: None, _get_exchange_bulk_data=lambda *a, **k: {})
     def prohibited(*args, **kwargs):
@@ -252,7 +253,7 @@ def test_actual_midday_job_never_touches_ordinary_recommendations(monkeypatch):
         '_fetch_egx_symbols': lambda: ['TEST'], '_filter_active_symbols': lambda values: values,
         'get_smart_sync': lambda: types.SimpleNamespace(sync_exchange_prices=lambda *a, **k: {'success': 1}),
         'calculate_indicators_for_symbol': lambda *_: [], '_batch_upsert_indicators': lambda *a, **k: None,
-        'update_market_heatmap': lambda: (True,'ok'), '_refresh_market_status_cache': lambda: (True,'ok'),
+        'update_market_heatmap': lambda: (True,'ok'), '_refresh_market_status_cache': lambda: (True,'ok'), '_should_run_quarterly_fundamentals': lambda *_: False,
         'update_open_portfolio_positions': prohibited, 'evaluate_old_recommendations': prohibited,
         'generate_daily_recommendations': prohibited, 'retry_pending_recommendation_telegram_events': prohibited,
         '_send_daily_market_outlook': prohibited, 'generate_weekly_performance_report': prohibited}

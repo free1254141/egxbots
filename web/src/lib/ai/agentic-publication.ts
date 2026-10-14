@@ -2,6 +2,7 @@ import { renderPlannedReadEvidence } from "./planned-read-tools";
 import { normalizeEvidenceNumbers } from "./numeric-evidence";
 import { BACKTEST_METRICS, renderBacktestEvidence } from "./backtest-evidence";
 import { checkAttribution } from "./answer-gate";
+import { stockPricePresentation } from "./stock-quote";
 import { buildFactRecords, FactRecord } from "./facts";
 import { ToolResult } from "./types";
 import { newsEventDate } from "./news-evidence";
@@ -81,7 +82,8 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
     const plannedPartial = data?.availability === "partial";
     const verifiedEmptyScreen = tool === "screen_stocks" && data?.status === "success" && Boolean(data.date)
         && Array.isArray(data.stocks) && typeof data.scan_complete === "boolean";
-    return { tool, arguments: args, data, source: tool === "get_live_quote" ? (rows.every(r=>r.live_quote_available) ? "tradingview:provider-snapshot" : rows.some(r=>r.live_quote_available) ? "mixed:tradingview+supabase" : "supabase:stored-fallback") : tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
+    const hasProviderQuotes = rows.some(row => row.live_quote_available === true);
+    return { tool, arguments: args, data, source: tool === "get_live_quote" || hasProviderQuotes ? (rows.every(r=>r.live_quote_available) ? "tradingview:provider-snapshot" : hasProviderQuotes ? "mixed:tradingview+supabase" : "supabase:stored-fallback") : tool === "list_chart_strategies" ? "deterministic:strategy-catalog" : "supabase:" + ({ get_stock: "stock_prices+stock_technical_indicators+stocks+stock_scans_summary", get_stock_levels: "stock_prices",
         apply_chart_strategy: "stock_prices+deterministic-strategy-engine", compare_strategies_history: "stock_prices+deterministic-backtest", list_chart_strategies: "strategy-catalog",
         calculate_position: "stock_prices+stock_technical_indicators+position-calculation", manage_portfolio: "positions+stock_prices+stock_technical_indicators", get_market: "market_cache+stock_technical_indicators", get_news: "stock_news_sentiment+stocks",
         get_recommendations: "scan_results+stock_technical_indicators+short_swing_checkpoints", get_corporate_actions: "corporate_actions", get_accumulation_stocks: "stock_scans_summary", get_comparison: "stock_prices+stock_technical_indicators",
@@ -91,7 +93,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         data_time: dates.length === 1 ? dates[0] : data?.date || data?.session_date || null, symbols,
         availability: data?.status === "error" ? "error" : data?.availability === "missing" || (!verifiedEmptyScreen && !rows.length && !data?.egx30?.close && !data?.persisted && !data?.strategies?.length)
             ? "missing" : plannedPartial || missing || data?.valuation_complete === false || data?.scan_complete === false
-                || data?.sector_concentration_complete === false || data?.industry_concentration_complete === false || data?.truncated ? "partial" : "available", data_type: tool === "get_live_quote" ? "provider-snapshot" : "historical" };
+                || data?.sector_concentration_complete === false || data?.industry_concentration_complete === false || data?.truncated ? "partial" : "available", data_type: tool === "get_live_quote" || hasProviderQuotes ? "provider-snapshot" : "historical" };
 }
 
 export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
@@ -535,7 +537,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     const deadEndOnly = substantive.replace(/[\s.!؟،,:;؛*_`-]+/g, " ").trim();
     if (/^(?:غير مكتمل|مسودة ناقصة|رد بعيد عن السؤال|تعذر التحليل|لم ينجز الطلب|الرد ناقص|الرد غير مكتمل|الإجابة غير مكتملة|المسودة ناقصة|لم أتمكن من إكمال الإجابة|تعذر إكمال الإجابة|لم تكتمل الإجابة|لا أستطيع رؤية الصورة المرفقة)$/.test(deadEndOnly)
         || /لم يكتمل التحقق من إجابة موثوقة/.test(substantive)) reasons.push("response_has_no_substantive_answer");
-    const quoteTimes = (currentEvidence || evidence).filter(e=>e.tool === "get_live_quote")
+    const quoteTimes = (currentEvidence || evidence)
         .flatMap(e=>evidenceRows(e.data)).filter(r=>r.live_quote_available && r.fetched_at)
         .map(r=>new Date(r.fetched_at)).filter(d=>Number.isFinite(d.getTime()))
         .map(d=>new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo",hour:"2-digit",minute:"2-digit",hour12:false}).format(d));
@@ -1031,8 +1033,10 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             if (d.date && d.filters) {
                 lines.push(`\nشاشة فنية بتاريخ ${d.date}: الشروط RSI بين ${d.filters.rsi_min} و${d.filters.rsi_max}، والحجم النسبي ${d.filters.relative_volume_inclusive === false ? ">" : "≥"} ${d.filters.relative_volume_min}، والمسافة من مقاومة أعلى 20 جلسة ${d.filters.resistance_distance_inclusive === false ? "<" : "≤"} ${d.filters.max_resistance_distance_pct}%.`);
                 if (d.stocks?.length) {
-                    lines.push("| السهم | الإغلاق | RSI | الحجم النسبي | المقاومة | البعد عنها % |","|---|---:|---:|---:|---:|---:|");
+                    const hasSessionSnapshot = stockPricePresentation(d.date).price_type === "current_session_snapshot";
+                    lines.push(hasSessionSnapshot ? "| السهم | السعر المسجل | RSI | الحجم النسبي | المقاومة | البعد عنها % |" : "| السهم | الإغلاق | RSI | الحجم النسبي | المقاومة | البعد عنها % |","|---|---:|---:|---:|---:|---:|");
                     for(const r of d.stocks.slice(0,10)) lines.push(`| ${r.symbol} | ${r.close} | ${r.rsi_14} | ${r.r_vol} | ${r.resistance} | ${r.distance_from_resistance_pct} |`);
+                    if (hasSessionSnapshot) lines.push("أسعار اليوم لقطات جلسة متاحة؛ اكتمال الجلسة والإغلاق النهائي غير مؤكدين.");
                 } else lines.push("لم تظهر أسهم تطابق الشروط في البيانات المتاحة لهذه الجلسة.");
                 lines.push("المساوي للمقاومة عندها، والأقل تحتها؛ أعلى 20 جلسة يشمل جلسة اللقطة، فلا يثبت قرب السعر أو مساواته اختراق مقاومة سابقة.");
                 if(d.scan_complete===false) lines.push("المسح جزئي: بعض المرشحين تجاوزوا حد الفحص أو لا يتوفر لهم تاريخ 20 جلسة.");
@@ -1066,7 +1070,7 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             lines.push(`اختبار حساسية حسابي فقط، وليس توقعاً: هبوط افتراضي 5% = ${d.stress_scenarios_not_forecasts[0].loss} جنيه، و10% = ${d.stress_scenarios_not_forecasts[1].loss} جنيه.`);
         }
     }
-    const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison"].includes(e.tool)
+    const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison", "get_live_quote"].includes(e.tool)
         && e.availability !== "error" && e.availability !== "missing").flatMap(e => evidenceRows(e.data));
     const stockExplanation = renderStockRecovery(stockRows);
     if (stockExplanation) lines.push(stockExplanation);

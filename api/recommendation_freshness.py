@@ -34,6 +34,15 @@ def quote_health(row, session, *, require_trading=False):
     return 'verified'
 
 
+def is_nontrading_quote(row):
+    """Recognize a provider's flat, valid quote; never invent a session bar."""
+    try:
+        prices = [float(row[k]) for k in ('open', 'high', 'low', 'close')]
+        return float(row.get('volume')) == 0 and all(isfinite(p) and p > 0 for p in prices) and len(set(prices)) == 1
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
 def _current_quotes(client, symbols, session):
     if not symbols:
         return {}

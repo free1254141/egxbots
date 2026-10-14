@@ -262,7 +262,29 @@ def load_stock_metadata() -> Dict[str, Dict[str, Any]]:
     _METADATA_CACHE = meta_map
     return meta_map
 
-def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
+def _verified_intraday_quote(quote, now_cairo):
+    """Only an audited, fresh current-session observation can initiate a live entry."""
+    if not isinstance(quote, dict) or quote.get('verified') is not True:
+        return None
+    if now_cairo.weekday() in (4, 5) or not 600 <= now_cairo.hour * 60 + now_cairo.minute < 870:
+        return None
+    try:
+        observed = dt.datetime.fromisoformat(str(quote.get('observed_at') or '').replace('Z', '+00:00'))
+        price, volume = float(quote.get('price') or 0), float(quote.get('volume') or 0)
+        if observed.tzinfo is None or not np.isfinite(price) or not np.isfinite(volume) or price <= 0 or volume <= 0:
+            return None
+        observed_cairo = observed.astimezone(now_cairo.tzinfo)
+        if quote.get('date') != now_cairo.date().isoformat() or observed_cairo.date() != now_cairo.date():
+            return None
+        age = (now_cairo - observed_cairo).total_seconds()
+        if not 0 <= age <= 900:
+            return None
+        return {'entry_price': price, 'observed_at': observed.isoformat()}
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str, Any]:
     """Generates the latest active and closed short swings with dynamic performance stats."""
     from zoneinfo import ZoneInfo
     now_cairo = dt.datetime.now(ZoneInfo("Africa/Cairo"))
@@ -511,9 +533,13 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
     published_signals = _load_published_signals(supabase) if supabase else []
     for published in published_signals:
         signal_date = published['signal_date']
-        nxt = next_date_map.get(signal_date)
-        if not nxt:
+        observed_entry = published.get('entry_kind') == 'intraday_observed' or published.get('entry_mode') == 'intraday'
+        nxt = published.get('entry_date') if observed_entry else next_date_map.get(signal_date)
+        if not nxt or nxt > session_date:
             continue
+        if observed_entry and nxt not in dates:
+            dates.append(nxt)
+            dates.sort()
         symbol = published['symbol']
         prior_bar = market.get((symbol, signal_date))
         sig_map[nxt] = [s for s in sig_map[nxt] if s['symbol'] != symbol]
@@ -523,7 +549,21 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
             'turnover': prior_bar.turnover if prior_bar else 0,
             'sig_type': published.get('trigger_type') or 'إشارة منشورة محفوظة',
             'published': True,
+            **({'entry_kind': 'intraday_observed', 'entry_price': published['entry_price'],
+                'observed_at': published['observed_at']} if observed_entry else {}),
         })
+
+    # A day's open/low predates a midday publication and cannot fill a new trade.
+    sig_map[session_date] = [signal for signal in sig_map[session_date]
+                             if signal.get('entry_kind') == 'intraday_observed' or signal.get('published')]
+    if phase == 'midday':
+        for _, row in df[(df['date'] == session_date) & df['signal'] & (df['volume'] > 0)].iterrows():
+            quotes = observed_quotes or {}
+            quote = _verified_intraday_quote(quotes.get(row['symbol']) or quotes.get(row['symbol'].upper().split('.')[0]), now_cairo)
+            if quote and not any(s['symbol'] == row['symbol'] for s in sig_map[session_date]):
+                sig_map[session_date].append({'symbol': row['symbol'], 'signal_date': session_date,
+                    'date': session_date, 'close': row['close'], 'turnover': row['turnover'],
+                    'sig_type': row['sig_type'], 'entry_kind': 'intraday_observed', **quote})
 
     # Run execution simulation
     positions = {}
@@ -565,7 +605,8 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
                     "holding_days": age,
                     "reason": reason_code,
                     "exit_reason": EXIT_REASON_LABELS.get(reason_code, "إغلاق حسب الخطة"),
-                    "trigger_type": p["sig_type"]
+                    "trigger_type": p["sig_type"],
+                    "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
                 })
                 del positions[sym]
 
@@ -575,21 +616,24 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
             if (len(positions) >= 15 and not s.get('published')) or s["symbol"] in positions:
                 continue
             b = market.get((s["symbol"], day))
-            if not b or b.volume <= 0 or b.high == b.low:
+            preserved_observed = s.get('published') and s.get('entry_kind') == 'intraday_observed'
+            if not preserved_observed and (not b or b.volume <= 0 or (b.high == b.low and s.get('entry_kind') != 'intraday_observed')):
                 continue
             if str(day)[:10] >= EFFECTIVE_DATE and not b.entry_liquid:
                 continue
 
             limit_price = s["close"]
             # Max opening gap allowed: +2.0% (consistent with Telegram alerts & strategy docs)
-            if b.open <= limit_price * 1.02:
+            if s.get('entry_kind') == 'intraday_observed':
+                exec_price = s['entry_price']
+            elif b.open <= limit_price * 1.02:
                 exec_price = b.open
             elif b.low <= limit_price:
                 exec_price = limit_price
             else:
                 continue
 
-            fill = exec_price * (1 + 0.0015)
+            fill = exec_price if s.get('entry_kind') == 'intraday_observed' else exec_price * (1 + 0.0015)
             positions[s["symbol"]] = {
                 "symbol": s["symbol"],
                 "date": day,
@@ -602,9 +646,12 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
                 "max_gain": 0.0,
                 "be_active": False,
                 "be_pending_activation": False,
-                "last": b.close,
+                "last": b.close if b else fill,
                 "sig_type": s["sig_type"],
-                "pending": None
+                "pending": None,
+                "entry_kind": s.get('entry_kind'), "observed_at": s.get('observed_at'),
+                "entry_mode": 'intraday' if s.get('entry_kind') == 'intraday_observed' else None,
+                "is_new_entry": s.get('entry_kind') == 'intraday_observed' and not s.get('published')
             }
 
         # 4. Intraday defensive stop checks & state updates (Strictly Causal Sequence)
@@ -615,6 +662,10 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
                 continue
             p["last"] = b.close
             age = i - p["index"]
+            if p.get('entry_kind') == 'intraday_observed' and age == 0:
+                # Daily high/low include time before observation. No inferred
+                # stop, peak or breakeven from that ambiguous entry-day candle.
+                continue
 
             # First: Evaluate defensive stop loss against current session's low
             # For positions entered in earlier sessions (age >= 1)
@@ -646,7 +697,8 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
                     "holding_days": age,
                     "reason": reason_code,
                     "exit_reason": EXIT_REASON_LABELS.get(reason_code, "وقف خسارة"),
-                    "trigger_type": p["sig_type"]
+                    "trigger_type": p["sig_type"],
+                    "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
                 })
                 del positions[sym]
                 continue
@@ -683,12 +735,14 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
     seen_symbols = set()
     today_rows = []
     for published in published_signals:
-        if published['signal_date'] == last_date:
+        if published['signal_date'] == last_date and published.get('entry_kind') != 'intraday_observed':
             bar = market.get((published['symbol'], last_date))
             today_rows.append({'symbol': published['symbol'], 'close': published['reference_close'],
                                'ema10': bar.ema10 if bar else published['reference_close'],
                                'sig_type': published.get('trigger_type') or 'إشارة منشورة محفوظة'})
     today_rows.extend(today_signals_df.head(15).to_dict('records'))
+    if phase != 'close' or last_date != session_date:
+        today_rows = []
     for s_row in today_rows:
         sym = s_row["symbol"]
         if sym in positions or sym in seen_symbols:
@@ -728,6 +782,10 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
     for sym, p in positions.items():
         b = market.get((sym, last_date))
         curr_price = b.close if b else p["entry_price"]
+        if phase == 'midday' and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
+            quotes = observed_quotes or {}
+            current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo)
+            curr_price = current_observation['entry_price'] if current_observation else p['entry_price']
         curr_gain = (curr_price / p["entry_price"] - 1) * 100
         active_stop = p["sl_price"]
         m_info = meta.get(sym.upper().split(".")[0], {})
@@ -741,6 +799,9 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
             "entry_date": p["date"],
             "signal_date": p.get("signal_date", p["date"]),
             "published": bool(p.get('published')),
+            "entry_kind": p.get('entry_kind'), "observed_at": p.get('observed_at'),
+            "entry_mode": p.get('entry_mode'),
+            "is_new_entry": bool(p.get('is_new_entry')),
             "entry_price": round(p["entry_price"], 3),
             "current_price": round(curr_price, 3) if b else None,
             "price_date": b.date if b else None,

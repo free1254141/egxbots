@@ -4061,6 +4061,9 @@ def get_daily_job_history(
         data = res.data or []
         for row in data:
             row["steps"] = _parse_steps(row.get("steps"))
+            from api.daily_job_outcome import summarise_daily_steps, effective_daily_steps
+            row.update(summarise_daily_steps(row["steps"]))
+            row["effective_steps"] = effective_daily_steps(row["steps"])
         return {"status": "success", "total": len(data), "runs": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -4093,6 +4096,9 @@ def get_daily_job_status():
                     latest["steps"] = []
             else:
                 latest["steps"] = []
+            from api.daily_job_outcome import summarise_daily_steps, effective_daily_steps
+            latest.update(summarise_daily_steps(latest["steps"]))
+            latest["effective_steps"] = effective_daily_steps(latest["steps"])
         return {"status": "success", "latest_run": latest}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
