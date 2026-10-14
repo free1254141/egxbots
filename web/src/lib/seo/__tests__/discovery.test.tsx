@@ -45,7 +45,7 @@ test.each(['ar', 'en'])('scanner introduction has useful raw HTML and links befo
     mockLanguage = language;
     const html = renderToStaticMarkup(<TechnicalScannerGuide />);
     expect(html.match(/<h1\b/g)).toHaveLength(1);
-    for (const path of ['/stocks', '/reports', '/scanner/comparison', '/scanner/backtests']) expect(html).toContain(`href="${path}"`);
+    for (const path of ['/stocks', '/reports', '/scanner/backtests']) expect(html).toContain(`href="${path}"`);
     expect(html).toContain('RSI'); expect(html).toContain('MACD');
     expect(html).toContain(language === 'ar' ? 'طريقة الاستخدام' : 'How to use');
     expect(html).toContain(language === 'ar' ? 'وليست أسعاراً لحظية' : 'not live quotes');

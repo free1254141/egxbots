@@ -27,7 +27,6 @@ export default function robots(): MetadataRoute.Robots {
           '/scanner/technical',
           '/scanner/market',
           '/scanner/backtests',
-          '/scanner/comparison',
           '/faq',
           '/news',
           '/blogs',
