@@ -27,6 +27,10 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from api.short_swing_published import load_published_signals as _load_published_signals
+from api.trade_liquidity import (EFFECTIVE_DATE, MIN_AVERAGE_TURNOVER,
+                                MIN_MEDIAN_TURNOVER, MIN_CURRENT_TURNOVER,
+                                MIN_ACTIVE_SESSIONS, POLICY_VERSION,
+                                assess_entry_liquidity, recent_sessions)
 
 CACHE_PATHS = [
     Path(__file__).parent / "data" / "short_swings_cache.json",
@@ -408,6 +412,8 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
 
         g["vol_ma20"] = v.rolling(20).mean()
         g["turnover"] = (c * v).rolling(20).mean()
+        g["median_turnover"] = (c * v).rolling(20).median()
+        g["current_turnover"] = c * v
         g["active_days"] = v.gt(0).rolling(20).sum()
         g["high20"] = h.rolling(20).max().shift(1)
         g["ret20"] = c / c.shift(20) - 1.0
@@ -417,6 +423,22 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
             & (g["turnover"] >= 1_000_000)
             & (g["active_days"] >= 15)
         )
+        # Preserve pre-rollout simulations and published history. New entry
+        # decisions require typical and current turnover, not a single spike.
+        policy_applies = g["date"].astype(str).str[:10] >= EFFECTIVE_DATE
+        g["entry_liquid"] = g["liquid"] & (g["turnover"] >= MIN_AVERAGE_TURNOVER) & (
+            g["median_turnover"] >= MIN_MEDIAN_TURNOVER) & (g["current_turnover"] >= MIN_CURRENT_TURNOVER) & (
+            g["active_days"] >= MIN_ACTIVE_SESSIONS)
+        calendar_rows = {r.date: {'date': r.date, 'close': r.close, 'volume': r.volume}
+                         for r in g[['date', 'close', 'volume']].itertuples(index=False)}
+        # Sparse histories must be measured over actual exchange sessions, not
+        # twenty trades spread over several months. Only prospective decisions
+        # use the stronger policy, so historical simulations are not rewritten.
+        for index in g.index[policy_applies]:
+            day = g.at[index, 'date']
+            recent = [calendar_rows[d] for d in recent_sessions(day) if d in calendar_rows]
+            g.at[index, 'entry_liquid'] = bool(g.at[index, 'liquid']) and assess_entry_liquidity(recent, day)['eligible']
+        g.loc[policy_applies, "liquid"] = g.loc[policy_applies, "entry_liquid"]
         g["above_ema50"] = g["liquid"] & (c > g["ema50"])
         groups.append(g)
 
@@ -466,7 +488,7 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
 
     next_date_map = dict(zip(dates, dates[1:]))
     market = {}
-    for row in df[["symbol", "date", "open", "high", "low", "close", "volume", "turnover", "atr_pct", "ema10", "ema20"]].itertuples(index=False):
+    for row in df[["symbol", "date", "open", "high", "low", "close", "volume", "turnover", "atr_pct", "ema10", "ema20", "entry_liquid"]].itertuples(index=False):
         market[(row.symbol, row.date)] = row
 
     sig_map = defaultdict(list)
@@ -554,6 +576,8 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
                 continue
             b = market.get((s["symbol"], day))
             if not b or b.volume <= 0 or b.high == b.low:
+                continue
+            if str(day)[:10] >= EFFECTIVE_DATE and not b.entry_liquid:
                 continue
 
             limit_price = s["close"]
@@ -669,6 +693,10 @@ def compute_short_swings(*, phase: str = None) -> Dict[str, Any]:
         sym = s_row["symbol"]
         if sym in positions or sym in seen_symbols:
             continue
+        if last_date >= EFFECTIVE_DATE:
+            bar = market.get((sym, last_date))
+            if not bar or not bar.entry_liquid:
+                continue
         seen_symbols.add(sym)
         close_price = round(float(s_row["close"]), 3)
         sl_price = round(close_price * 0.96, 3)

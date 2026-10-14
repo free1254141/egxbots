@@ -56,6 +56,8 @@ def eligible_candidates(client, candidates, session):
     funds = (client.table('stock_fundamentals').select('symbol,data').eq('exchange', 'EGX')
              .in_('symbol', symbols).limit(500).execute()).data or [] if symbols else []
     funds = {r['symbol']: r.get('data') or {} for r in funds}
+    from api.trade_liquidity import candidate_liquidity
+    liquidity = candidate_liquidity(client, symbols, session) if symbols else {}
     accepted, rejected = [], []
     for row in candidates:
         symbol = str(row.get('symbol') or '').split('.')[0].upper()
@@ -67,7 +69,12 @@ def eligible_candidates(client, candidates, session):
             reason = 'listing_not_eligible'
         if symbol not in listed:
             reason = 'not_in_current_eodhd_inventory'
-        (accepted if reason == 'verified' else rejected).append(row if reason == 'verified' else {'symbol': symbol, 'reason': reason})
+        if reason == 'verified' and not liquidity[symbol]['eligible']:
+            reason = 'liquidity_' + liquidity[symbol]['reason']
+        if reason == 'verified':
+            row = {**row, 'entry_liquidity': liquidity[symbol]}
+        (accepted if reason == 'verified' else rejected).append(row if reason == 'verified' else {
+            'symbol': symbol, 'reason': reason, 'entry_liquidity': liquidity.get(symbol)})
     return accepted, rejected
 
 

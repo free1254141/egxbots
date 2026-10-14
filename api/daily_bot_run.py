@@ -2427,7 +2427,8 @@ async def generate_daily_recommendations(
     except Exception as eligibility_error:
         return no_buy('data_health_unavailable', f'تعذر التحقق من حداثة بيانات المرشحين: {type(eligibility_error).__name__}')
     from api.recommendation_policy import candidate_assessment
-    audit.update(model=resolved_model, candidates=[{**candidate_assessment(item), "council_score": item.get("council_score")} for item in results])
+    audit.update(model=resolved_model, candidates=[{**candidate_assessment(item), "council_score": item.get("council_score"),
+                                                 "entry_liquidity": item.get("entry_liquidity")} for item in results])
     if not results:
         print("[RECOMMENDATIONS] ML scan returned no BUY recommendations.")
         return no_buy("no_ml_signals", "لم يرصد الموديل إشارات شراء تستوفي حد الجودة المطلوب اليوم.")
@@ -2617,6 +2618,7 @@ async def generate_daily_recommendations(
                     "sector": res_item.get("sector_name"),
                     "sector_context": res_item.get("sector_context") or {},
                     "execution": "published_close_reference_not_broker_fill",
+                    "entry_liquidity": res_item.get("entry_liquidity"),
                 },
                 "evaluation": {"last_evaluated_date": str(res_item.get("date") or dt.datetime.now(dt.timezone.utc).date().isoformat())[:10]},
             },
