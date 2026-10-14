@@ -133,7 +133,7 @@ export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Ev
         console.error("[Agentic] request failed or deadline reached", error instanceof Error ? error.message : "unknown");
         const response = withFooter(input.images.length
             ? "وصلت الصورة، لكن انتهت مهلة المعالجة قبل إكمال قراءتها والتحقق من النتيجة. لم أعتمد أرقاماً غير مؤكدة؛ جرّب صورة واحدة واضحة أو أرسل الجزء المطلوب وحده."
-            : safeAgenticFallback(fallbackEvidence(evidence, input.sessionState.last_symbols), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة."));
+            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة."));
         yield { type: "token", data: response };
         yield { type: "done", data: { response, tables: [], session_update: {}, response_origin: "safe_fallback", usage: accounting.summary(),
             publication_review: { passed: false, repaired: false, final_passed: false, reasons: ["request_failed_or_aborted"], completion: "partial" } } };

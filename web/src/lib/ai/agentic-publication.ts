@@ -5,6 +5,7 @@ import { checkAttribution } from "./answer-gate";
 import { buildFactRecords, FactRecord } from "./facts";
 import { ToolResult } from "./types";
 import { newsEventDate } from "./news-evidence";
+import { renderStockRecovery } from "./stock-recovery";
 
 export interface AgenticEvidence {
     tool: string;
@@ -170,6 +171,35 @@ function cleanCellText(text: string): string {
 }
 
 /** Metric labels describe generated evidence, never user intent routing. */
+function compoundMacdFields(label: string): FactRecord["field"][] | null {
+    const parts = label.replace(/[*_`]/g, "").split(/\s*[/،]\s*/);
+    if (parts.length < 2) return null;
+    const fields = parts.map(part => /هيست|hist/i.test(part) ? "macd_hist"
+        : /إشار|اشار|signal/i.test(part) ? "macd_signal"
+            : /^\s*MACD\s*$/i.test(part) ? "macd" : null);
+    return fields.every(Boolean) && new Set(fields).size === fields.length ? fields as FactRecord["field"][] : null;
+}
+
+function checkCompoundMacdCell(label: string, cell: string, symbol: string, facts: FactRecord[]): string[] | null {
+    const fields = compoundMacdFields(label);
+    if (!fields) return null;
+    const parts = normalizeEvidenceNumbers(cell.replace(/[*_`]/g, "")).split(/\s*[/،]\s*/);
+    if (parts.length !== fields.length) return [`compound_metric_value_count_mismatch:${symbol}`];
+    const reasons: string[] = [];
+    for (let i = 0; i < fields.length; i++) {
+        const match = parts[i].trim().match(/^([-+]?\d+(?:\.\d+)?)$/);
+        if (!match) { reasons.push(`compound_metric_value_not_numeric:${symbol}`); continue; }
+        const value = Number(match[1]);
+        const precision = match[1].split(".")[1]?.length || 0;
+        const relevant = facts.filter(f => f.symbol === symbol && f.field === fields[i]);
+        // Ordered metrics retain their signs and accept only rounding at the
+        // displayed precision. Never borrow another metric's similar value.
+        if (!relevant.some(f => Math.abs(value - f.value) <= 0.5 * 10 ** -precision + 1e-8))
+            reasons.push(`table_value_not_grounded:${symbol}:${value}`);
+    }
+    return reasons;
+}
+
 function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     const text = label.replace(/[*_]/g, "");
     // Specific financial labels take precedence over generic profit/currency words.
@@ -777,6 +807,8 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
                 if (!colSymbol) continue;
                 const cell = cells[colIdx];
                 if (!/\d/.test(cell)) continue;
+                const compoundReasons = checkCompoundMacdCell(cells[0], cell, colSymbol, facts);
+                if (compoundReasons) { reasons.push(...compoundReasons); continue; }
                 const clean = cleanCellText(cell);
                 const matches = [...clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)];
                 const fields = companyFields(tableMetricFields(cells[0]), colSymbol);
@@ -836,6 +868,9 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             if (idx === rankColIdx || cells[idx].includes(symbol)) continue;
             const screenRow = evidence.filter(e => e.tool === "screen_stocks").flatMap(e => evidenceRows(e.data)).find(row => row.symbol === symbol);
             const header = headers[idx] || "";
+            const compoundReasons = checkCompoundMacdCell(header, cells[idx], symbol, facts)
+                ?? (!tableHadStockRow ? checkCompoundMacdCell(cells[0], cells[idx], symbol, facts) : null);
+            if (compoundReasons) { reasons.push(...compoundReasons); continue; }
             const explicitDenominator = /(?:أساس|على|مقام|÷)/.test(header) && /الإغلاق|الاغلاق|المقاومة/.test(header)
                 ? /الإغلاق|الاغلاق/.test(header) ? "close" : "resistance" : null;
             const formula = normalizeDigitsAndNumberFormatting(cells[idx].replace(/[*_`]/g, "")).match(/^\s*\(\s*(\d+(?:\.\d+)?)\s*[-−]\s*(\d+(?:\.\d+)?)\s*\)\s*[÷/]\s*(\d+(?:\.\d+)?)\s*[×*]\s*(\d+(?:\.\d+)?)(?:\s*=\s*([-+]?\d+(?:\.\d+)?)\s*[%٪]?)?\s*$/);
@@ -984,30 +1019,12 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     // Evidence passed here should already be scoped to the current request. Keep
     // the first available rows only as a bounded fallback and never resurrect
     // unrelated symbols from an older turn.
-    const rows = evidence.filter(e => e.availability !== "error").flatMap(e => evidenceRows(e.data));
     for (const e of evidence.filter(e => e.availability !== "error")) {
         const planned = renderPlannedReadEvidence(e.tool, e.data);
         if (planned) lines.push(planned);
         if (e.tool === "compare_strategies_history") {
             const result = renderBacktestEvidence(e.data);
             if (result) lines.push(result);
-        }
-        if (e.tool === "get_comparison" && e.availability !== "error") {
-            const comparisonRows = evidenceRows(e.data).filter(row => row.symbol && row.close != null);
-            if (comparisonRows.length) {
-                const fields: Array<[string, string, string]> = [
-                    ["الإغلاق", "close", "جنيه"], ["التغير اليومي", "change_pct", "%"],
-                    ["RSI(14)", "rsi_14", ""], ["MACD", "macd", ""], ["خط الإشارة", "macd_signal", ""],
-                    ["الهيستوجرام", "macd_histogram", ""], ["EMA50", "ema_50", ""], ["EMA200", "ema_200", ""],
-                    ["النشاط النسبي", "r_vol", ""],
-                ];
-                const present = fields.filter(([, field]) => comparisonRows.some(row => Number.isFinite(row[field])));
-                lines.push("\nمقارنة موثقة من بيانات الإغلاق اليومية:", `| البند | ${comparisonRows.map(row => row.symbol).join(" | ")} |`, `|---|${comparisonRows.map(() => "---:").join("|")}|`);
-                for (const [label, field, unit] of present)
-                    lines.push(`| ${label} | ${comparisonRows.map(row => Number.isFinite(row[field]) ? `${row[field]}${unit ? ` ${unit}` : ""}` : "غير متاح").join(" | ")} |`);
-                const dates = [...new Set(comparisonRows.map(row => row.date || row.current_date).filter(Boolean))];
-                lines.push(`التاريخ: ${dates.length === 1 ? dates[0] : dates.join("، ") || "غير متاح"}. هذه إغلاقات يومية وليست أسعاراً لحظية.`);
-            }
         }
         if (e.tool === "screen_stocks" && e.data?.status === "success") {
             const d=e.data;
@@ -1049,22 +1066,10 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             lines.push(`اختبار حساسية حسابي فقط، وليس توقعاً: هبوط افتراضي 5% = ${d.stress_scenarios_not_forecasts[0].loss} جنيه، و10% = ${d.stress_scenarios_not_forecasts[1].loss} جنيه.`);
         }
     }
-    const quotes = new Map<string, any>();
-    const comparisonSymbols = new Set(evidence.filter(e => e.tool === "get_comparison" && e.availability !== "error")
-        .flatMap(e => evidenceRows(e.data).map(row => row.symbol).filter(Boolean)));
-    for (const row of rows) if (row.symbol && !comparisonSymbols.has(row.symbol) && (row.close != null || row.current_price != null)) {
-        const prior = quotes.get(row.symbol), date = String(row.date || row.current_date || ''), priorDate = String(prior?.date || prior?.current_date || '');
-        if (!prior || date >= priorDate) quotes.set(row.symbol, date === priorDate ? { ...prior, ...row } : row);
-    }
-    if (quotes.size) {
-        lines.push("\nالبيانات المتاحة من المصدر (إغلاقات يومية، وليست أسعاراً لحظية):", "| السهم | الإغلاق | التاريخ |", "|---|---|---|");
-        for (const row of [...quotes.values()].slice(0, 10)) lines.push(`| ${row.symbol} | ${row.close ?? row.current_price} | ${row.date ?? row.current_date ?? "غير متاح"} |`);
-        for (const row of [...quotes.values()].slice(0, 10)) {
-            const values = [['RSI',row.rsi_14],['MACD',row.macd],['خط الإشارة',row.macd_signal],['EMA 50',row.ema_50],['EMA 200',row.ema_200],['الدعم',row.support],['المقاومة',row.resistance]]
-                .filter(([,v]) => typeof v === 'number' && Number.isFinite(v));
-            if (values.length) lines.push(`${row.symbol}: ${values.map(([label,v]) => `${label} = ${v}`).join('؛ ')}.`);
-        }
-    }
+    const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison"].includes(e.tool)
+        && e.availability !== "error" && e.availability !== "missing").flatMap(e => evidenceRows(e.data));
+    const stockExplanation = renderStockRecovery(stockRows);
+    if (stockExplanation) lines.push(stockExplanation);
     for (const e of evidence) if (e.data?.persisted === true) lines.push(`عملية المحفظة ${e.data.operation} للسهم ${e.data.symbol}: تم تأكيد تعديل المركز؛ لا تكرر العملية تلقائياً.${e.data.cash_updated === false && e.data.operation === "sell" ? " لم يتغير الرصيد النقدي." : ""}`);
     if (evidence.some(e => e.availability === "error")) lines.push("تعذر تنفيذ بعض أدوات البيانات؛ لا تعتبر نتائجها فارغة أو عملياتها محفوظة.");
     if (evidence.some(e => e.availability === "missing" || e.availability === "partial")) lines.push("بعض البيانات المطلوبة غير متاحة أو غير مكتملة في المصدر.");
