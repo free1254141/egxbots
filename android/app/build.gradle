@@ -51,7 +51,7 @@ def twaManifest = [
 ]
 
 android {
-    compileSdkVersion 34
+    compileSdkVersion 36
     namespace "com.egxbots.artoro"
     defaultConfig {
         applicationId "com.egxbots.artoro"
