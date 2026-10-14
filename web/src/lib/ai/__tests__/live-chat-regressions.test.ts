@@ -17,6 +17,16 @@ test('malformed stock rows are still removed without swallowing the next line', 
     expect(sanitizeReply(reply)).toContain('تحليل سليم محفوظ.');
 });
 
+test('numbered English strategy metrics survive while English deliberation is removed', () => {
+    const metric = '1. **SMC** — **10.56%**';
+    const reply = `الترتيب حسب أقصى هبوط:\n${metric}\n2. الاتجاه وMACD — 17.55%\n\nI need to check the ranking before answering.\nLet me think about the numbers.`;
+    const final = sanitizeReply(sanitizeReply(reply));
+    expect(final).toContain(metric);
+    expect(final).toContain('2. الاتجاه وMACD — 17.55%');
+    expect(final).not.toContain('I need to');
+    expect(final).not.toContain('Let me');
+});
+
 test('recommendation freshness includes returned quote dates and scopes each source', async () => {
     const results = [
         {data:[{symbol:'EPPK',entry_price:9.78,status:'open',created_at:'2026-09-17'}]},
