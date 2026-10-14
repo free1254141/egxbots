@@ -1,0 +1,4290 @@
+import datetime as dt
+import math
+import os
+import ssl
+import urllib.request
+import urllib.error
+import pickle
+import time
+import hashlib
+import warnings
+# Suppress specific FutureWarnings from libraries like 'ta'
+warnings.filterwarnings("ignore", category=FutureWarning)
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple, Union
+from threading import Lock
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import json
+import httpx
+from eodhd import APIClient
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import precision_score
+from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
+from api.train_exchange_model import add_massive_features, add_market_context, QuantitativeModelPipeline
+from api.model_utils import safe_model_path
+
+# Conditional import for LGBM to avoid failure if not installed (though it should be)
+try:
+    from lightgbm import LGBMClassifier
+except ImportError:
+    LGBMClassifier = None
+
+try:
+    import lightgbm as lgb
+except Exception:
+    lgb = None
+
+# Optional dependency for Meta-Labeling meta-model
+try:
+    import xgboost as xgb
+except Exception:
+    xgb = None
+
+
+class _PcaTransformer:
+    def __init__(self, pca, scaler, pca_features):
+        self.pca = pca
+        self.scaler = scaler
+        self.pca_features = pca_features
+
+    def __call__(self, X: pd.DataFrame) -> pd.DataFrame:
+        X = X.copy()
+        present_pca_feats = [f for f in self.pca_features if f in X.columns]
+        if not present_pca_feats:
+            return X
+            
+        X_pca_raw = X[present_pca_feats].fillna(0)
+        X_scaled = self.scaler.transform(X_pca_raw)
+        X_pca = self.pca.transform(X_scaled)
+        
+        X = X.drop(columns=present_pca_feats)
+        for i in range(X_pca.shape[1]):
+            X[f'PCA_Momentum_{i}'] = X_pca[:, i]
+            
+        return X
+
+
+class _LgbmBoosterClassifier:
+    def __init__(self, booster, threshold: float = 0.45, pca_transformer=None): # Tuned strictness (was 0.40)
+        self.booster = booster
+        self.pca_transformer = pca_transformer
+        try:
+            self.threshold = float(threshold)
+        except Exception:
+            self.threshold = 0.45
+
+    def predict(self, X):
+        X_t = X
+        if self.pca_transformer is not None:
+            X_t = self.pca_transformer(X)
+        if hasattr(self.booster, "feature_name"):
+            expected_feats = self.booster.feature_name()
+            if expected_feats:
+                X_t = X_t.reindex(columns=expected_feats, fill_value=0.0)
+        raw = self.booster.predict(X_t)
+        return (np.asarray(raw) >= self.threshold).astype(int)
+
+    def predict_proba(self, X):
+        X_t = X
+        if self.pca_transformer is not None:
+            X_t = self.pca_transformer(X)
+        if hasattr(self.booster, "feature_name"):
+            expected_feats = self.booster.feature_name()
+            if expected_feats:
+                X_t = X_t.reindex(columns=expected_feats, fill_value=0.0)
+        raw = self.booster.predict(X_t)
+        probs = np.asarray(raw)
+        # Return 2-column format: [prob_class_0, prob_class_1]
+        return np.column_stack([1 - probs, probs])
+
+    def get_feature_importance(self):
+        return self.booster.feature_importance()
+
+
+class _MetaLabelingClassifier:
+    def __init__(
+        self,
+        primary_model: Any,
+        meta_model: Any,
+        meta_feature_names: List[str],
+        meta_threshold: float = 0.7,
+        return_raw_prob: bool = False,
+    ):
+        self.primary_model = primary_model
+        self.meta_model = meta_model
+        self.meta_feature_names = list(meta_feature_names or [])
+        self.return_raw_prob = return_raw_prob
+        try:
+            self.meta_threshold = float(meta_threshold)
+        except Exception:
+            self.meta_threshold = 0.7
+
+    def predict_proba(self, X: pd.DataFrame):
+        # Primary probability
+        if hasattr(self.primary_model, "predict_proba"):
+            primary_prob = self.primary_model.predict_proba(X)[:, 1]
+        else:
+            primary_pred = np.asarray(self.primary_model.predict(X)).astype(float)
+            primary_prob = primary_pred
+
+        # Apply PCA transformation if present on primary_model for meta features
+        pca_transformer = getattr(self.primary_model, "pca_transformer", None)
+        if pca_transformer is not None:
+            X_trans = pca_transformer(X)
+        else:
+            X_trans = X
+
+        # Meta features: meta_feature_names typically includes "primary_prob".
+        mf = [c for c in self.meta_feature_names if c != "primary_prob"]
+        X_meta = X_trans[mf].copy() if mf else pd.DataFrame(index=X.index)
+        X_meta = X_meta.replace([np.inf, -np.inf], np.nan).fillna(0)
+        X_meta["primary_prob"] = np.asarray(primary_prob)
+
+        # Ensure consistent column order
+        cols = [c for c in self.meta_feature_names if c in X_meta.columns]
+        X_meta = X_meta[cols]
+
+        if hasattr(self.meta_model, "predict_proba"):
+            meta_prob = self.meta_model.predict_proba(X_meta)[:, 1]
+        else:
+            meta_pred = np.asarray(self.meta_model.predict(X_meta)).astype(float)
+            meta_prob = meta_pred
+
+        # Filter: only keep primary probability when meta confidence passes threshold
+        if getattr(self, 'return_raw_prob', False):
+            filtered_prob = np.asarray(primary_prob)
+        else:
+            filtered_prob = np.where(np.asarray(meta_prob) >= self.meta_threshold, np.asarray(primary_prob), 0.0)
+        return np.column_stack([1 - filtered_prob, filtered_prob])
+
+    def predict(self, X: pd.DataFrame):
+        probs = self.predict_proba(X)[:, 1]
+        return (np.asarray(probs) >= 0.5).astype(int)
+
+    def get_feature_importance(self):
+        if hasattr(self.primary_model, "get_feature_importance"):
+            try:
+                return self.primary_model.get_feature_importance()
+            except Exception:
+                pass
+        return []
+
+
+class TheCouncil:
+    """
+    Ensemble Learning (Voting System) that aggregates predictions from multiple experts.
+    Decision logic:
+    - Decisions are based on a mix of Hard Voting (consensus) and Soft Voting (confidence).
+    - If 75% of experts agree on a BUY, it triggers a STRONG BUY signal.
+    - If 50% agree and average confidence is above threshold, it triggers a BUY signal.
+    """
+    def __init__(self, models_and_predictors: List[Tuple[Any, List[str]]], threshold: float = 0.6):
+        """
+        models_and_predictors: List of tuples (model_object, list_of_predictors)
+        threshold: Minimum confidence for a 'BUY' signal if consensus is split.
+        """
+        self.experts = models_and_predictors
+        self.threshold = threshold
+
+    def predict_proba(self, X: pd.DataFrame):
+        all_probs = []
+        for model, predictors in self.experts:
+            # Ensure features are present
+            missing = [p for p in predictors if p not in X.columns]
+            if missing:
+                # Fill missing columns with 0 as a safety measure
+                X_temp = X.copy()
+                for m in missing:
+                    X_temp[m] = 0
+                X_subset = X_temp[predictors]
+            else:
+                X_subset = X[predictors]
+
+            if hasattr(model, "predict_proba"):
+                # Handle 2D output from predict_proba
+                res = model.predict_proba(X_subset)
+                if res.ndim == 2 and res.shape[1] == 2:
+                    prob = res[:, 1]
+                else:
+                    prob = res.flatten()
+            else:
+                prob = np.asarray(model.predict(X_subset)).astype(float)
+            all_probs.append(np.asarray(prob))
+        
+        avg_prob = np.mean(all_probs, axis=0)
+        return np.column_stack([1 - avg_prob, avg_prob])
+
+    def predict(self, X: pd.DataFrame):
+        all_votes = []
+        all_probs = []
+        for model, predictors in self.experts:
+            missing = [p for p in predictors if p not in X.columns]
+            if missing:
+                X_temp = X.copy()
+                for m in missing:
+                    X_temp[m] = 0
+                X_subset = X_temp[predictors]
+            else:
+                X_subset = X[predictors]
+
+            if hasattr(model, "predict_proba"):
+                res = model.predict_proba(X_subset)
+                prob = res[:, 1] if (res.ndim == 2 and res.shape[1] == 2) else res.flatten()
+                # Individual expert threshold (usually 0.5, but can be looser)
+                vote = (prob >= 0.5).astype(int)
+            else:
+                vote = np.asarray(model.predict(X_subset)).astype(int)
+                prob = vote.astype(float)
+            
+            all_votes.append(vote)
+            all_probs.append(prob)
+            
+        votes_array = np.array(all_votes)
+        buy_votes = np.sum(votes_array, axis=0)
+        total_experts = len(self.experts)
+        consensus_ratio = buy_votes / total_experts
+        avg_prob = np.mean(all_probs, axis=0)
+        
+        final_preds = np.zeros(len(X), dtype=int)
+        for i in range(len(X)):
+            # 75% Consensus (e.g. 3/4 or 4/4)
+            if consensus_ratio[i] >= 0.75:
+                final_preds[i] = 1
+            # 50% Consensus + High Confidence
+            elif consensus_ratio[i] >= 0.50 and avg_prob[i] > self.threshold:
+                final_preds[i] = 1
+                
+        return final_preds
+
+    def get_feature_importance(self):
+        # Weighted average of feature importance if possible, or just the first one
+        try:
+            if self.experts and hasattr(self.experts[0][0], "get_feature_importance"):
+                return self.experts[0][0].get_feature_importance()
+        except Exception:
+            pass
+        return []
+
+supabase: Optional[Client] = None
+
+# Predictors used by the pre-trained LightGBM models
+# Note: the actual predictors used at inference time are the intersection of
+# this list and the columns present in the feature dataframe.
+LGBM_PREDICTORS = [
+    "Close", "Volume",
+    "SMA_50", "SMA_200",
+    "EMA_50", "EMA_200",
+    "RSI", "Momentum", "ROC_12",
+    "MACD", "MACD_Signal",
+    "ATR_14", "ADX_14",
+    "STOCH_K", "STOCH_D",
+    "CCI_20", "VWAP_20", "VOL_SMA20",
+    # Bollinger / volatility context
+    "BB_PctB", "BB_Width",
+    # Volume structure
+    "OBV", "OBV_Slope",
+    # Price context vs rolling extremes
+    "Dist_From_High", "Dist_From_Low",
+    # Standardization and candle geometry
+    "Z_Score", "Body_Size", "Upper_Shadow", "Lower_Shadow",
+    # Time features
+    "Day_Of_Week", "Day_Of_Month",
+    # Lagged features and differences
+    "Close_Lag1", "Close_Diff",
+    "RSI_Lag1", "RSI_Diff",
+    "Volume_Lag1", "Volume_Diff",
+    "OBV_Lag1", "OBV_Diff",
+
+    # Smart Indicators (Stacking)
+    # Market Context
+    "feat_mkt_trend", "feat_mkt_volatility", "feat_rel_strength",
+
+    # Fundamentals
+    "marketCap", "peRatio", "eps", "dividendYield", "sector", "industry",
+]
+
+# Mapping technical feature names to human-readable explanations.
+# Used for Phase 8: Explainable AI.
+FEATURE_EXPLANATIONS = {
+    "RSI": "Relative Strength Index (Momentum)",
+    "MACD": "MACD Trend Divergence",
+    "SMA_50": "50-Day Moving Average Support",
+    "SMA_200": "200-Day Institutional Trend",
+    "EMA_50": "50-Day Exponential Trend",
+    "EMA_200": "200-Day Institutional EMA",
+    "OBV": "On-Balance Volume (Flow)",
+    "OBV_Slope": "Volume Accumulation Intensity",
+    "VWAP_20": "Volume Weighted Average Price",
+    "Momentum": "Price Velocity & Trend Strength",
+    "ROC_12": "Rate of Change (12-period)",
+    "ADX_14": "Trend Strength Index",
+    "STOCH_K": "Stochastic Oscillator K",
+    "BB_PctB": "Bollinger Bands Relative Position",
+    "BB_Width": "Volatility Breakout Potential",
+    "Close_Diff": "Daily Price Change Intensity",
+    "RSI_Diff": "RSI Acceleration/Deceleration",
+    "Z_Score": "Statistical Price Deviation",
+    "Body_Size": "Candle Stick Pattern Strength",
+    "Upper_Shadow": "Selling Pressure Intensity",
+    "Lower_Shadow": "Buying Pressure Support",
+    "VOL_SMA20": "Volume Trend vs Average",
+    "Dist_From_High": "Proximity to Recent Highs",
+    "Dist_From_Low": "Proximity to Recent Lows",
+    "marketCap": "Company Market Valuation",
+    "peRatio": "Price to Earnings (Valuation)",
+    "eps": "Earnings Per Share (Profitability)",
+    "dividendYield": "Dividend Payment Strength",
+    "sector": "Economic Sector Context",
+    "industry": "Specific Industry Dynamics",
+}
+
+def get_top_reasons(model: Any, predictors: List[str], limit: int = 3) -> List[str]:
+    """Extract top N human-readable reasons from model feature importance."""
+    top_reasons = []
+    try:
+        importances = []
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+        elif hasattr(model, "get_feature_importance"):
+            importances = model.get_feature_importance()
+        
+        if len(importances) > 0:
+            # Pair predictors with their importance
+            feat_imp = list(zip(predictors, importances))
+            # Sort by importance descending
+            # LightGBM might return more importances than predictors if not careful, 
+            # but usually they match the length of feature_name()
+            feat_imp.sort(key=lambda x: x[1], reverse=True)
+            # Take top N and map to readable names
+            for f_name, imp in feat_imp[:limit]:
+                reason = FEATURE_EXPLANATIONS.get(f_name, f_name)
+                top_reasons.append(reason)
+    except Exception as e:
+        print(f"Error extracting feature importance: {e}")
+    return top_reasons
+
+
+# Standard predictors for default RandomForest (Legacy)
+RF_PREDICTORS = ["Close", "Volume", "SMA_50", "SMA_200", "RSI", "Momentum"]
+
+_supabase_local = threading.local()
+
+def _get_thread_local_supabase():
+    return getattr(_supabase_local, "client", None)
+
+def _set_thread_local_supabase(client):
+    _supabase_local.client = client
+
+class ThreadLocalSupabaseProxy:
+    def __getattr__(self, name):
+        client = _get_thread_local_supabase()
+        if client is None:
+            _init_supabase()
+            client = _get_thread_local_supabase()
+        if client is None:
+            raise RuntimeError("Supabase client is not initialized")
+        return getattr(client, name)
+
+    def __setattr__(self, name, value):
+        client = _get_thread_local_supabase()
+        if client is None:
+            _init_supabase()
+            client = _get_thread_local_supabase()
+        if client is None:
+            raise RuntimeError("Supabase client is not initialized")
+        setattr(client, name, value)
+
+    def __bool__(self):
+        client = _get_thread_local_supabase()
+        if client is None:
+            try:
+                _init_supabase()
+                client = _get_thread_local_supabase()
+            except Exception:
+                pass
+        return client is not None
+
+supabase = ThreadLocalSupabaseProxy()
+
+def _init_supabase(force=False):
+    if _get_thread_local_supabase() is None or force:
+        url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        if not key:
+            key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        print(f"DEBUG: Init Supabase. URL={'set' if url else 'MISSING'}, KEY={'set' if key else 'MISSING'}")
+        if url and key:
+            try:
+                try:
+                    postgrest_timeout_s = float(os.getenv("SUPABASE_POSTGREST_TIMEOUT", "300"))
+                except Exception:
+                    postgrest_timeout_s = 300.0
+
+                try:
+                    storage_timeout_s = float(os.getenv("SUPABASE_STORAGE_TIMEOUT", "20"))
+                except Exception:
+                    storage_timeout_s = 20.0
+
+                try:
+                    connect_timeout_s = float(os.getenv("SUPABASE_CONNECT_TIMEOUT", "10"))
+                except Exception:
+                    connect_timeout_s = 10.0
+
+                options = ClientOptions(
+                    postgrest_client_timeout=httpx.Timeout(postgrest_timeout_s, connect=connect_timeout_s),
+                    storage_client_timeout=httpx.Timeout(storage_timeout_s, connect=connect_timeout_s),
+                )
+                new_client = create_client(url, key, options)
+                _set_thread_local_supabase(new_client)
+                print("DEBUG: Supabase client initialized successfully")
+            except Exception as e:
+                print(f"Failed to init Supabase: {e}")
+        else:
+            print(f"DEBUG: Supabase env vars missing. URL={url}, KEY={'HIDDEN' if key else 'None'}")
+
+
+def _is_missing_table_error(err: Exception, table_name: str) -> bool:
+    try:
+        msg = str(err).lower()
+    except Exception:
+        return False
+    t = (table_name or "").lower()
+    if not t or t not in msg:
+        return False
+    return ("does not exist" in msg) or ("could not find the table" in msg) or ("relation" in msg and "does not exist" in msg)
+
+
+def _is_transient_ssl_error(err: Exception) -> bool:
+    try:
+        msg = str(err).lower()
+    except Exception:
+        return False
+    return ("unexpected_eof_while_reading" in msg) or ("eof occurred in violation of protocol" in msg) or ("ssl" in msg and "eof" in msg)
+
+
+def _is_transient_supabase_error(err: Exception) -> bool:
+    if isinstance(err, ssl.SSLError):
+        return True
+
+    if isinstance(err, httpx.HTTPStatusError):
+        try:
+            status = int(getattr(err.response, "status_code", 0) or 0)
+        except Exception:
+            status = 0
+        return status in {408, 425, 429, 500, 502, 503, 504}
+
+    if isinstance(err, httpx.HTTPError):
+        return True
+
+    try:
+        msg = str(err).lower()
+    except Exception:
+        msg = ""
+
+    return _is_transient_ssl_error(err) or ("server disconnected" in msg)
+
+
+def _raise_transient_supabase_unavailable(err: Exception, *, table: str) -> None:
+    if _is_transient_supabase_error(err):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "supabase_unavailable",
+                "table": table,
+                "hint": "Upstream Supabase connection failed; retry the request.",
+                "cause": str(err),
+            },
+            headers={"Retry-After": "2"},
+        )
+
+
+def _supabase_read_with_retry(
+    query_func_or_table: Any,
+    max_attempts: int = 4,
+    sleep_base_s: float = 0.5,
+    table_name: Optional[str] = None
+) -> Any:
+    global supabase
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        _init_supabase()
+        if not supabase:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="Supabase not initialized")
+        
+        try:
+            if callable(query_func_or_table):
+                res = query_func_or_table(supabase)
+            else:
+                res = supabase.table(query_func_or_table).select("*").limit(1).execute()
+            return res
+        except Exception as e:
+            last_err = e
+            if table_name and _is_missing_table_error(e, table_name):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "missing_table",
+                        "table": table_name,
+                        "hint": f"Run the SQL migration in supabase/schema.sql to create '{table_name}'.",
+                        "cause": str(e),
+                    },
+                )
+            if not _is_transient_supabase_error(e) or attempt >= max_attempts:
+                _raise_transient_supabase_unavailable(e, table=table_name or "unknown")
+                raise
+            
+            time.sleep(sleep_base_s * attempt)
+            _init_supabase(force=True)
+            
+    if last_err is not None:
+        raise last_err
+
+def _supabase_upsert_with_retry(
+    table: str,
+    rows: List[Dict[str, Any]],
+    *,
+    on_conflict: Optional[str] = None,
+    max_attempts: int = 4,
+    sleep_base_s: float = 0.5,
+) -> None:
+    global supabase
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        _init_supabase()
+        if not supabase:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=500, detail="Supabase not initialized")
+        try:
+            q = supabase.table(table).upsert(rows)
+            if on_conflict:
+                q = supabase.table(table).upsert(rows, on_conflict=on_conflict)
+            q.execute()
+            return
+        except Exception as e:
+            last_err = e
+            if _is_missing_table_error(e, table):
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "missing_table",
+                        "table": table,
+                        "hint": "Run the SQL migration in supabase/schema.sql to create this table.",
+                        "cause": str(e),
+                    },
+                )
+            if not _is_transient_supabase_error(e) or attempt >= max_attempts:
+                raise
+            time.sleep(sleep_base_s * attempt)
+            _init_supabase(force=True)
+    if last_err is not None:
+        raise last_err
+
+
+# Define absolute paths for reliability
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _finite_float(value: Any) -> Optional[float]:
+    try:
+        v = float(value)
+    except Exception:
+        return None
+    return v if np.isfinite(v) else None
+
+
+def _sanitize_value(v: Any) -> Any:
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    return v
+
+
+def _sanitize_for_json(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return [_sanitize_for_json(v) for v in obj]
+    else:
+        return _sanitize_value(obj)
+
+
+def _resolve_barrier_mode(
+    target_pct: float,
+    stop_loss_pct: float,
+    barrier_mode: Optional[str] = None,
+) -> str:
+    mode = str(barrier_mode or "").strip().lower()
+    if mode in {"percent", "percentage", "pct"}:
+        return "percent"
+    if mode in {"atr", "atr_multiplier", "atr-multiplier", "atr multiplier"}:
+        return "atr"
+
+    try:
+        target_v = float(target_pct)
+        stop_v = float(stop_loss_pct)
+    except Exception:
+        return "atr"
+
+    if target_v < 1.0 and stop_v < 1.0:
+        return "percent"
+    return "atr"
+
+
+def _sanitize_fundamentals(fundamentals: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for k, v in (fundamentals or {}).items():
+        if isinstance(v, (int, float, np.number)):
+            fv = _finite_float(v)
+            out[k] = fv if fv is not None else None
+        else:
+            out[k] = v
+    return out
+
+
+def _get_latest_news_sentiment(symbol: str) -> Dict[str, Any]:
+    """
+    Fetch the latest news sentiment record for the given symbol from Supabase.
+    """
+    out = {"sentiment_score": 0.0, "news_count": 0, "negative_flag": 0, "positive_flag": 0}
+    try:
+        _init_supabase()
+        global supabase
+        if supabase and symbol:
+            sym_clean = symbol.split(".")[0].upper()
+            res = (
+                supabase.table("stock_news_sentiment")
+                .select("sentiment_score, news_count, negative_flag, positive_flag")
+                .eq("symbol", sym_clean)
+                .order("date", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                record = res.data[0]
+                out["sentiment_score"] = float(record.get("sentiment_score", 0.0))
+                out["news_count"] = int(record.get("news_count", 0))
+                out["negative_flag"] = int(record.get("negative_flag", 0))
+                out["positive_flag"] = int(record.get("positive_flag", 0))
+    except Exception as e:
+        print(f"DEBUG: Error fetching sentiment score for {symbol}: {e}")
+    return out
+
+
+def _get_market_buy_gate() -> Dict[str, Any]:
+    """Read global market gate for final BUY decisions, failing open on errors."""
+    try:
+        from api.market_status_gate import should_reject_new_buys
+        return should_reject_new_buys()
+    except Exception as e:
+        return {"blocked": False, "reason": f"market gate unavailable: {e}"}
+
+
+def _last_trading_day(today: dt.date) -> dt.date:
+    # Very small heuristic (no exchange calendar):
+    # EGX trades Sunday-Thursday (Python weekday(): Monday=0 ... Sunday=6),
+    # so the weekend is Friday (4) and Saturday (5) — roll back to Thursday.
+    if today.weekday() in (4, 5):
+        offset = 1 if today.weekday() == 4 else 2
+        return today - dt.timedelta(days=offset)
+    return today
+
+
+
+
+def _safe_cache_key(symbol: str) -> str:
+    return symbol.replace("/", "_").replace("\\", "_")
+
+
+def _infer_symbol_exchange(ticker: str, exchange_hint: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Standardize symbol/exchange inference for Supabase lookups.
+    Returns (symbol_clean, exchange_clean)
+    Example: 'AAPL.US' -> ('AAPL', 'US')
+    Example: 'COMI.CC' -> ('COMI', 'EGX')
+    """
+    t = ticker.strip().upper()
+    
+    # Mapping table for country/market names to exchange codes
+    market_to_ex = {
+        "egypt": "EGX",
+        "egx": "EGX",
+        "ca": "EGX",
+        "cc": "EGX",
+        "cairo": "EGX",
+        "usa": "US",
+        "us": "US",
+        "argentina": "BA",
+        "brazil": "SA",      # Brazil (B3 Sao Paulo)
+        "sa": "SA",          # Default SA to Brazil (B3) for legacy
+        "saudi": "SR",       # Saudi Arabia (Tadawul)
+        "saudi arabia": "SR",
+        "sr": "SR",
+        "south korea": "KQ",
+        "canada": "TO",
+
+        "france": "PA",
+        "germany": "F"
+    }
+
+    # 1. Split by dot if present (e.g. AAPL.US)
+    if "." in t:
+        parts = t.split(".")
+        s = parts[0]
+        e = parts[1]
+        # Map known variations
+        if e.lower() in market_to_ex:
+            e = market_to_ex[e.lower()]
+        return s, e.upper()
+        
+    # 2. Use hint if provided
+    if exchange_hint:
+        e = exchange_hint.strip().lower()
+        if e in market_to_ex:
+            e = market_to_ex[e]
+        else:
+            e = e.upper()
+        return t, e
+        
+    # 3. Default fallback (guessing) - mostly US or EGX in this app context
+    # If it's 4+ letters and no dots, often US. If 3 letters, could be either.
+    # But usually the ticker should have the suffix if it's EGX (like COMI.EGX).
+    return t, "US"
+
+
+def check_local_cache(symbol: str, exchange: Optional[str] = None) -> bool:
+    """Checks if data exists in Supabase."""
+    # Fast path: set membership check using get_cached_tickers RPC
+    try:
+        s, e = _infer_symbol_exchange(symbol, exchange)
+        cached = get_cached_tickers()
+        if (s.upper(), e.upper()) in cached:
+            return True
+    except Exception:
+        pass
+
+    _init_supabase()
+    if not supabase:
+        return False
+
+    try:
+        s, e = _infer_symbol_exchange(symbol, exchange)
+
+        def query_count(sb):
+            return sb.table("stock_prices").select("count", count="exact").eq("symbol", s).eq("exchange", e).limit(1).execute()
+
+        res = _supabase_read_with_retry(query_count, table_name="stock_prices")
+        if getattr(res, "count", None) and res.count > 0:
+            return True
+    except Exception as ex:
+        if os.getenv("DEBUG_SUPABASE_ERRORS") == "1":
+            print(f"DEBUG: Supabase count check failed: {ex}")
+
+    return False
+
+is_ticker_synced = check_local_cache
+
+def get_cached_tickers() -> set[Tuple[str, str]]:
+    """Returns a set of (symbol, exchange) tuples currently in Supabase, cached for TTL."""
+    global _CACHED_TICKERS_SET, _CACHED_TICKERS_TS
+    now = time.time()
+    if _CACHED_TICKERS_SET is not None and (now - _CACHED_TICKERS_TS < _CACHE_TTL_SECONDS):
+        return _CACHED_TICKERS_SET
+
+    _init_supabase()
+    if not supabase: return set()
+    try:
+        # Use the RPC to get active symbols efficiently
+        res = supabase.rpc("get_active_symbols").execute()
+        if res.data:
+            s_set = {(str(r['symbol']), str(r['exchange'])) for r in res.data}
+            _CACHED_TICKERS_SET = s_set
+            _CACHED_TICKERS_TS = now
+            return s_set
+    except Exception as e:
+        print(f"DEBUG: get_cached_tickers error: {e}")
+        # Return stale cache if error occurs but cache exists
+        if _CACHED_TICKERS_SET is not None:
+            return _CACHED_TICKERS_SET
+    return set()
+
+
+_CACHED_TICKERS_SET = None
+_CACHED_TICKERS_TS = 0
+_CACHE_TTL_SECONDS = 300
+
+_EXCHANGE_BULK_CACHE: Dict[str, Dict[str, Any]] = {}
+_EXCHANGE_BULK_TTL_SECONDS = 900  # 15 minutes; adjust as needed
+_BULK_LOAD_LOCKS: Dict[str, threading.Lock] = {}
+_GLOBAL_LOAD_LOCK = threading.Lock()
+
+# ----------------------
+# Model Cache (avoid reloading per symbol)
+# ----------------------
+_MODEL_CACHE: Dict[str, Dict[str, Any]] = {}
+_MODEL_CACHE_TTL_SECONDS = 1800  # 30 minutes; adjust as needed
+
+
+# ----------------------
+# Indicator Cache (avoid recomputing TA each scan)
+# ----------------------
+class IndicatorCache:
+    def __init__(self, max_age_seconds: int = 86400):  # 24h
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.max_age = max_age_seconds
+        self.lock = Lock()
+
+    def _cache_key(self, symbol: str, exchange: str) -> str:
+        return f"{exchange.upper()}_{symbol.upper()}"
+
+    def _data_hash(self, df: pd.DataFrame) -> str:
+        # Hash length and last close/volume to detect data changes
+        if df.empty: return "empty"
+        
+        last_row = df.iloc[-1]
+        close = last_row.get("close", last_row.get("Close", 0))
+        vol = last_row.get("volume", last_row.get("Volume", 0))
+        
+        data_str = f"{len(df)}_{close}_{vol}"
+        return hashlib.md5(data_str.encode()).hexdigest()[:12]
+
+    def get_with_indicators(self, symbol: str, exchange: str, df: pd.DataFrame, indicator_func) -> pd.DataFrame:
+        cache_key = f"IND_{self._cache_key(symbol, exchange)}"
+        data_hash = self._data_hash(df)
+
+        with self.lock:
+            entry = self.cache.get(cache_key)
+            if entry and (time.time() - entry["ts"] < self.max_age) and entry.get("data_hash") == data_hash:
+                return entry["data"].copy()
+
+        df_with_ind = indicator_func(df)
+
+        with self.lock:
+            self.cache[cache_key] = {
+                "data": df_with_ind.copy(),
+                "data_hash": data_hash,
+                "ts": time.time(),
+            }
+        return df_with_ind
+
+    def get_with_massive_features(self, symbol: str, exchange: str, df: pd.DataFrame) -> pd.DataFrame:
+        from api.train_exchange_model import add_massive_features
+        cache_key = f"MASS_{self._cache_key(symbol, exchange)}"
+        data_hash = self._data_hash(df)
+
+        with self.lock:
+            entry = self.cache.get(cache_key)
+            if entry and (time.time() - entry["ts"] < self.max_age) and entry.get("data_hash") == data_hash:
+                return entry["data"].copy()
+
+        df_with_feat = add_massive_features(df)
+
+        with self.lock:
+            self.cache[cache_key] = {
+                "data": df_with_feat.copy(),
+                "data_hash": data_hash,
+                "ts": time.time(),
+            }
+        return df_with_feat
+
+    def clear(self, symbol: Optional[str] = None, exchange: Optional[str] = None):
+        with self.lock:
+            if symbol and exchange:
+                key = self._cache_key(symbol, exchange)
+                if key in self.cache:
+                    del self.cache[key]
+            else:
+                self.cache.clear()
+
+    def stats(self) -> Dict[str, Any]:
+        with self.lock:
+            return {"cached_symbols": len(self.cache), "max_age_seconds": self.max_age}
+
+
+_INDICATOR_CACHE: Optional[IndicatorCache] = None
+
+
+def _get_indicator_cache(max_age_seconds: int = 86400) -> IndicatorCache:
+    global _INDICATOR_CACHE
+    if _INDICATOR_CACHE is None:
+        _INDICATOR_CACHE = IndicatorCache(max_age_seconds=max_age_seconds)
+    return _INDICATOR_CACHE
+
+
+def _get_data_with_indicators_cached(symbol: str, exchange: str, df: pd.DataFrame, indicator_func) -> pd.DataFrame:
+    cache = _get_indicator_cache()
+    return cache.get_with_indicators(symbol, exchange, df, indicator_func)
+
+
+def _get_massive_features_cached(symbol: str, exchange: str, df: pd.DataFrame) -> pd.DataFrame:
+    cache = _get_indicator_cache()
+    return cache.get_with_massive_features(symbol, exchange, df)
+
+
+
+
+
+
+def _get_exchange_bulk_data(
+    exchange: str, 
+    from_date: Optional[str] = None, 
+    to_date: Optional[str] = None,
+    bypass_min_limit: bool = False,
+    cache_ttl_seconds: Optional[int] = None,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Load all price data for an exchange in a single Supabase query (paginated) and cache it.
+    Returns mapping symbol -> DataFrame indexed by date.
+
+    When ``HF_HISTORY_DATASET_REPO`` is configured, a versioned historical
+    snapshot is read from the private HF Dataset and only a short recent window
+    is refreshed from Supabase.  This keeps the live database authoritative
+    without paying to transfer the full history on every scanner run.
+    """
+    if not exchange:
+        return {}
+
+    MIN_BULK_ROWS = 5000 
+    now = time.time()
+    ttl_seconds = max(1, int(cache_ttl_seconds or _EXCHANGE_BULK_TTL_SECONDS))
+    cache_key = f"{exchange.upper()}_{from_date or 'ALL'}_{to_date or 'NOW'}_{bypass_min_limit}"
+
+    # 1. Simple cache check
+    cached = _EXCHANGE_BULK_CACHE.get(cache_key)
+    if cached and (now - cached.get("ts", 0) < ttl_seconds):
+        return cached.get("data", {})
+
+    with _GLOBAL_LOAD_LOCK:
+        if cache_key not in _BULK_LOAD_LOCKS:
+            _BULK_LOAD_LOCKS[cache_key] = Lock()
+        lock = _BULK_LOAD_LOCKS[cache_key]
+
+    with lock:
+        # Re-check cache after acquiring lock
+        cached = _EXCHANGE_BULK_CACHE.get(cache_key)
+        if cached and (time.time() - cached.get("ts", 0) < ttl_seconds):
+            return cached.get("data", {})
+
+        max_attempts = 3
+        page_size = 1000   # Supabase caps at 1000 rows per request
+        max_workers = 4
+        last_err = None
+
+        for attempt in range(1, max_attempts + 1):
+            _init_supabase()
+            if not supabase: return {}
+
+            start_time = time.time()
+            try:
+                # 1. Use the private HF snapshot for immutable history, then
+                # correct only the recent tail from Supabase.  A missing or
+                # unavailable snapshot deliberately falls back to the former
+                # all-Supabase behaviour.
+                history_snapshot = pd.DataFrame()
+                history_tail_start = None
+                try:
+                    from api.hf_history_cache import load_history_snapshot, tail_start_date
+                    history_snapshot = load_history_snapshot(exchange)
+                    history_tail_start = tail_start_date(
+                        history_snapshot,
+                        days=int(os.getenv("HF_HISTORY_LIVE_TAIL_DAYS", "45")),
+                    )
+                except Exception as history_err:
+                    print(f"[HF-HISTORY] Could not prepare {exchange} snapshot: {history_err}")
+
+                effective_from_date = from_date
+                using_history_snapshot = not history_snapshot.empty
+                if using_history_snapshot and history_tail_start:
+                    # A caller asking for a narrower recent range should not
+                    # widen it. All-history callers receive the correction tail.
+                    if not effective_from_date or effective_from_date < history_tail_start:
+                        effective_from_date = history_tail_start
+
+                def _build_query(fd: Optional[str]):
+                    q = supabase.table("stock_prices") \
+                        .select("symbol,exchange,date,open,high,low,close,volume", count="exact") \
+                        .eq("exchange", exchange.upper())
+                    if fd: q = q.gte("date", fd)
+                    if to_date: q = q.lte("date", to_date)
+                    return q.order("symbol", desc=False).order("date", desc=False)
+
+                # 2. Fetch first page + total count
+                res0 = _build_query(effective_from_date).range(0, page_size - 1).execute()
+                all_rows = res0.data or []
+                total_count = res0.count or len(all_rows)
+
+                # Expand to full history only when there is no snapshot to
+                # supply the earlier bars (e.g. for SMA50/200).
+                if not using_history_snapshot and not bypass_min_limit and from_date and total_count < MIN_BULK_ROWS:
+                    effective_from_date = None
+                    res0 = _build_query(effective_from_date).range(0, page_size - 1).execute()
+                    all_rows = res0.data or []
+                    total_count = res0.count or len(all_rows)
+                
+                print(f"DEBUG: Starting Parallel Bulk Load for {exchange.upper()} ({total_count} rows total)")
+
+                if total_count > page_size:
+                    offsets = range(page_size, total_count, page_size)
+                    
+                    def _fetch_page(off, retries=5):
+                        for r_attempt in range(retries):
+                            try:
+                                # Throttle to protect IO Budget
+                                time.sleep(0.05)
+                                r = supabase.table("stock_prices") \
+                                    .select("symbol,exchange,date,open,high,low,close,volume") \
+                                    .eq("exchange", exchange.upper())
+                                if effective_from_date: r = r.gte("date", effective_from_date)
+                                if to_date: r = r.lte("date", to_date)
+                                r = r.order("symbol", desc=False).order("date", desc=False)
+                                
+                                res = r.range(off, off + page_size - 1).execute()
+                                return res.data or []
+                            except Exception as e:
+                                wait = (r_attempt + 1) * 3
+                                time.sleep(wait)
+                        raise Exception(f"Failed to fetch page at offset {off} after {retries} retries")
+
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        futures = {executor.submit(_fetch_page, o): o for o in offsets}
+                        for f in as_completed(futures):
+                            p_data = f.result()
+                            if p_data: all_rows.extend(p_data)
+
+                df_all = pd.DataFrame(all_rows)
+                if using_history_snapshot:
+                    from api.hf_history_cache import merge_snapshot_with_live
+                    df_all = merge_snapshot_with_live(history_snapshot, all_rows)
+                    if from_date:
+                        df_all = df_all[df_all["date"] >= pd.to_datetime(from_date)]
+                    if to_date:
+                        df_all = df_all[df_all["date"] <= pd.to_datetime(to_date)]
+                if df_all.empty: return {}
+
+                df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
+                df_all = df_all.dropna(subset=["date"]).sort_values(["symbol", "date"])
+
+                data_by_symbol: Dict[str, pd.DataFrame] = {}
+                for sym, grp in df_all.groupby("symbol"):
+                    g = grp.set_index("date")["open high low close volume".split()]
+                    g = g.rename(columns={"close": "Close", "open": "Open", "high": "High", "low": "Low", "volume": "Volume"})
+                    data_by_symbol[str(sym).upper()] = g
+
+                _EXCHANGE_BULK_CACHE[cache_key] = {
+                    "ts": now,
+                    "data": data_by_symbol,
+                    "rows": len(df_all),
+                }
+                print(f"DEBUG: Bulk Load Complete: {len(all_rows)} rows, {len(data_by_symbol)} symbols.")
+                return data_by_symbol
+            except Exception as e:
+                last_err = e
+                print(f"DEBUG: Bulk load attempt {attempt} failed: {e}")
+                time.sleep(5 * attempt)
+
+        return {}
+
+
+def clear_exchange_bulk_cache(exchange: Optional[str] = None) -> None:
+    """Invalidate price snapshots after a writer has completed a sync."""
+    with _GLOBAL_LOAD_LOCK:
+        if exchange:
+            prefix = f"{exchange.upper()}_"
+            for key in [key for key in _EXCHANGE_BULK_CACHE if key.startswith(prefix)]:
+                _EXCHANGE_BULK_CACHE.pop(key, None)
+        else:
+            _EXCHANGE_BULK_CACHE.clear()
+
+
+def get_cached_exchange_symbol_prices(
+    symbol: str,
+    exchange: str,
+    max_age_seconds: int = 7200,
+) -> pd.DataFrame:
+    """Return a recent in-process bulk-cache entry without triggering a read.
+
+    Historical-similarity scans use this after the daily job has already loaded
+    EGX once. Interactive requests still fall back to their narrow per-symbol
+    query instead of accidentally loading an entire exchange.
+    """
+    symbol = (symbol or "").upper()
+    exchange = (exchange or "").upper()
+    now = time.time()
+    with _GLOBAL_LOAD_LOCK:
+        entries = list(_EXCHANGE_BULK_CACHE.items())
+    for key, cached in reversed(entries):
+        if not key.startswith(f"{exchange}_"):
+            continue
+        if now - cached.get("ts", 0) > max(1, int(max_age_seconds)):
+            continue
+        frame = (cached.get("data") or {}).get(symbol)
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            return frame.copy()
+    return pd.DataFrame()
+
+
+def _normalize_ts_filter(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        v = str(value).strip()
+    except Exception:
+        return None
+    if not v:
+        return None
+
+    # Date-only => assume start of day UTC for PostgREST comparisons.
+    if len(v) == 10 and v[4] == "-" and v[7] == "-":
+        return f"{v}T00:00:00Z"
+
+    return v
+
+
+def _get_exchange_bulk_intraday_data(
+    exchange: str,
+    *,
+    timeframe: str = "1h",
+    from_ts: Optional[str] = None,
+    to_ts: Optional[str] = None,
+) -> Dict[str, pd.DataFrame]:
+    """
+    Load intraday bars from local crypto storage only.
+
+    Intraday rows are intentionally no longer stored in Supabase. Daily market
+    analysis uses ``stock_prices``; crypto bots retain their own local OHLCV
+    storage because ``stock_prices`` has one row per trading date.
+    Returns mapping symbol -> DataFrame indexed by ts.
+    """
+    if not exchange:
+        return {}
+
+    tf = (timeframe or "1h").strip().lower()
+    fd = _normalize_ts_filter(from_ts)
+    td = _normalize_ts_filter(to_ts)
+
+    now = time.time()
+    cache_key = f"INTRA_{exchange.upper()}_{tf}_{fd or 'ALL'}_{td or 'NOW'}"
+
+    cached = _EXCHANGE_BULK_CACHE.get(cache_key)
+    if cached and (now - cached.get("ts", 0) < _EXCHANGE_BULK_TTL_SECONDS):
+        print(f"DEBUG: Bulk Cache Hit for {cache_key}")
+        return cached.get("data", {})
+
+    with _GLOBAL_LOAD_LOCK:
+        if cache_key not in _BULK_LOAD_LOCKS:
+            _BULK_LOAD_LOCKS[cache_key] = Lock()
+        lock = _BULK_LOAD_LOCKS[cache_key]
+
+    with lock:
+        cached = _EXCHANGE_BULK_CACHE.get(cache_key)
+        if cached and (time.time() - cached.get("ts", 0) < _EXCHANGE_BULK_TTL_SECONDS):
+            print(f"DEBUG: Bulk Cache Hit (locked) for {cache_key}")
+            return cached.get("data", {})
+
+        if exchange.upper() == "CRYPTO":
+            try:
+                from api.local_storage import load_all_crypto_bars_local_as_df
+                df_all = load_all_crypto_bars_local_as_df(tf)
+                if df_all.empty:
+                    return {}
+                df_all["ts"] = pd.to_datetime(df_all["ts"], errors="coerce")
+                df_all = df_all.dropna(subset=["ts"]).sort_values(["symbol", "ts"])
+                if fd:
+                    df_all = df_all[df_all["ts"] >= pd.to_datetime(fd)]
+                if td:
+                    df_all = df_all[df_all["ts"] <= pd.to_datetime(td)]
+                
+                data_by_symbol: Dict[str, pd.DataFrame] = {}
+                for sym, grp in df_all.groupby("symbol"):
+                    g = grp.set_index("ts")["open high low close volume".split()]
+                    g = g.rename(
+                        columns={
+                            "close": "Close",
+                            "open": "Open",
+                            "high": "High",
+                            "low": "Low",
+                            "volume": "Volume",
+                        }
+                    )
+                    data_by_symbol[str(sym).upper()] = g
+                
+                _EXCHANGE_BULK_CACHE[cache_key] = {"ts": time.time(), "data": data_by_symbol, "rows": len(df_all)}
+                print(f"DEBUG: Local CRYPTO bulk loaded {len(df_all)} rows for {cache_key}")
+                return data_by_symbol
+            except Exception as e:
+                print(f"DEBUG: Local CRYPTO bulk load failed: {e}")
+                return {}
+
+        # Non-crypto intraday persistence was retired with
+        # stock_bars_intraday. Callers that need daily data must use
+        # _get_exchange_bulk_data instead.
+        return {}
+
+
+# In-memory cache for inventory (TTL = 5 minutes, avoids 4-8s cold queries per request)
+_inventory_cache: List[Dict[str, Any]] = []
+_inventory_cache_ts: float = 0.0
+_INVENTORY_CACHE_TTL = 300  # seconds
+
+
+def get_supabase_inventory() -> List[Dict[str, Any]]:
+    """Call get_inventory_stats RPC and group by country for frontend use."""
+    global _inventory_cache, _inventory_cache_ts
+    import time as _time
+    # Serve from cache if fresh (avoids expensive multi-query calls)
+    if _inventory_cache and (_time.time() - _inventory_cache_ts) < _INVENTORY_CACHE_TTL:
+        return _inventory_cache
+
+    _init_supabase()
+    if not supabase: return _inventory_cache or []
+
+    from api.symbols_local import load_country_summary
+    local_summary = load_country_summary()
+    expected_map = {}
+    for country, data in local_summary.items():
+        exchanges = data.get("Exchanges", {})
+        for ex, count in exchanges.items():
+            expected_map[ex] = {"count": count, "country": country}
+
+    first_attempt_success = False
+    stats = []
+
+    # 1. Try stats from RPC (Primary)
+    try:
+        def _fetch_rpc(sb):
+            return sb.rpc("get_inventory_stats").execute()
+        res = _supabase_read_with_retry(_fetch_rpc, table_name="inventory_rpc")
+        if res.data:
+            stats = res.data
+            first_attempt_success = True
+    except Exception as e:
+        print(f"Warning: Primary inventory stats RPC failed: {e}. Falling back to Fundamentals + Local stats.")
+
+    # 2. Get exchange-to-country mapping from fundamentals if possible (Shared)
+    mapping = {}
+    
+    # 1b. Crypto uses local storage, not Supabase intraday rows.
+    try:
+        crypto_exists = any(s.get('exchange') == 'CRYPTO' and s.get('price_count', 0) > 0 for s in stats)
+        if not crypto_exists:
+            from api.local_storage import get_crypto_symbols_stats_local
+            crypto_stats = get_crypto_symbols_stats_local("1h") or []
+            if crypto_stats:
+                stats.append({
+                    "exchange": "CRYPTO",
+                    "price_count": len(crypto_stats),
+                    "fund_count": 0,
+                    "last_update": None
+                })
+                mapping["CRYPTO"] = "Crypto"
+    except Exception as e:
+        print(f"Warning: CRYPTO intraday inventory check failed: {e}")
+
+    meta_res = None
+    try:
+        def _fetch_meta(sb):
+            return sb.table("stock_fundamentals").select("exchange, data").execute()
+        
+        meta_res = _supabase_read_with_retry(_fetch_meta, table_name="stock_fundamentals")
+        if meta_res and meta_res.data:
+            # Simple voting logic: count symbols per (exchange, country)
+            votes = {} 
+            for row in meta_res.data:
+                ex = row.get('exchange')
+                data_obj = row.get('data') or {}
+                c = data_obj.get('country') or data_obj.get('Country')
+                if ex and c:
+                    key = (ex, c)
+                    votes[key] = votes.get(key, 0) + 1
+            
+            # Pick highest vote for each exchange
+            ex_best = {}
+            for (ex, c), count in votes.items():
+                if ex not in ex_best or count > ex_best[ex][1]:
+                    ex_best[ex] = (c, count)
+            
+            for ex, (c, _) in ex_best.items():
+                mapping[ex] = c
+    except Exception as e:
+        print(f"Warning: Fundamentals metadata fetch failed: {e}")
+
+    # 3. If primary RPC failed, build stats from fundamentals aggregation (Fallback)
+    if not stats:
+        try:
+            fund_counts = {}
+            if meta_res and meta_res.data:
+                for row in meta_res.data:
+                    ex = row.get('exchange')
+                    if ex:
+                        fund_counts[ex] = fund_counts.get(ex, 0) + 1
+            
+            for ex, count in fund_counts.items():
+                stats.append({
+                    "exchange": ex,
+                    "price_count": 0, # Cannot determine efficiently on timeout
+                    "fund_count": count,
+                    "last_update": None
+                })
+        except Exception as e:
+            print(f"Warning: Fallback stats generation failed: {e}")
+
+    # 3b. ADDITIONAL FALLBACK: query stock_prices directly for exchanges missing from stats
+    # This catches exchanges like EGX, SA, BA that have prices but no fundamentals
+    try:
+        price_exchanges_in_stats = {s.get("exchange") for s in stats if s.get("price_count", 0) > 0}
+        
+        # We check each exchange present in our local expected_map that isn't in stats yet
+        missing_exchanges = [ex for ex in expected_map.keys() if ex not in price_exchanges_in_stats]
+        
+        for ex in missing_exchanges:
+            # Efficient check: does this exchange exist in stock_prices?
+            check_res = supabase.table("stock_prices").select("symbol", count="exact").eq("exchange", ex).limit(1).execute()
+            if (check_res.count and check_res.count > 0) or (check_res.data):
+                stats.append({
+                    "exchange": ex,
+                    "price_count": check_res.count or 0,
+                    "fund_count": 0,
+                    "last_update": None
+                })
+    except Exception as e:
+        print(f"Warning: stock_prices direct fallback failed: {e}")
+
+    try:
+        # Supabase intraday persistence was retired. Equity inventory is based
+        # on stock_prices; CRYPTO intraday inventory is enriched from local
+        # storage below without calling the removed database RPC/table.
+        intraday_counts = {}
+
+        # 4. Join and group (Shared Logic)
+        out = []
+        mapped_exchanges = set()
+
+        for row in stats:
+            ex = row.get('exchange', 'Unknown')
+            expected = expected_map.get(ex, {})
+            # Enrich row with readable country or market name
+            if ex == "SA":
+                row['country'] = "Brazil (B3)"
+            elif ex == "SR":
+                row['country'] = "Saudi Arabia"
+            else:
+                row['country'] = mapping.get(ex) or expected.get("country", "Unknown")
+            
+            # Dynamic expected count correction
+            country_name = row['country']
+            if country_name != "Unknown":
+                try:
+                    from api.symbols_local import load_symbols_for_country
+                    syms = load_symbols_for_country(country_name)
+                    # Count for this specific exchange
+                    actual_count = sum(1 for s in syms if str(s.get("Exchange", s.get("exchange", ""))).upper() == ex.upper())
+                    if actual_count > 0:
+                        expected["count"] = actual_count
+                except:
+                    pass
+
+            row['expected_count'] = expected.get("count", 0)
+            # Add camelCase aliases for the UI
+            row['priceCount'] = row.get('price_count', 0)
+            row['fundCount'] = row.get('fund_count', 0)
+            row['expectedCount'] = row['expected_count']
+            row['lastUpdate'] = row.get('last_update')
+            row['intradayCount'] = intraday_counts.get(ex, 0)
+            
+            out.append(row)
+            mapped_exchanges.add(ex)
+
+        # 5. Add missing exchanges from local summary (with 0 counts)
+        for ex, expected in expected_map.items():
+            if ex not in mapped_exchanges:
+                out.append({
+                    "exchange": ex,
+                    "country": expected["country"],
+                    "priceCount": 0,
+                    "fundCount": 0,
+                    "intradayCount": intraday_counts.get(ex, 0),
+                    "expectedCount": expected["count"],
+                    "lastUpdate": None
+                })
+        # Override CRYPTO stats with local data
+        from api.local_storage import get_local_crypto_symbols_count
+        local_crypto_count = get_local_crypto_symbols_count()
+        intraday_counts["CRYPTO"] = local_crypto_count
+        crypto_found = False
+        for row in out:
+            if row.get("exchange") == "CRYPTO":
+                row["price_count"] = local_crypto_count
+                row["priceCount"] = local_crypto_count
+                row["country"] = "Crypto"
+                row["expected_count"] = 400
+                row["expectedCount"] = 400
+                row["intradayCount"] = intraday_counts.get("CRYPTO", 0)
+                crypto_found = True
+                break
+        if not crypto_found:
+            out.append({
+                "exchange": "CRYPTO",
+                "country": "Crypto",
+                "price_count": local_crypto_count,
+                "priceCount": local_crypto_count,
+                "fund_count": 0,
+                "fundCount": 0,
+                "intradayCount": intraday_counts.get("CRYPTO", 0),
+                "expected_count": 400,
+                "expectedCount": 400,
+                "last_update": None,
+                "lastUpdate": None
+            })
+
+        _inventory_cache = out
+        _inventory_cache_ts = _time.time()
+        return out
+    except Exception as e:
+        print(f"Error processing inventory stats: {e}")
+    # Return stale cache on error rather than empty
+    return _inventory_cache or []
+
+
+def _get_model_cached(model_path: str, return_raw_prob: bool = False):
+    now = time.time()
+    cache_key = f"{model_path}|raw={bool(return_raw_prob)}"
+    entry = _MODEL_CACHE.get(cache_key)
+    if entry and (now - entry.get("ts", 0) < _MODEL_CACHE_TTL_SECONDS):
+        return entry.get("model"), entry.get("predictors"), entry.get("is_lgbm_artifact", False)
+    return None
+
+
+def _set_model_cache(model_path: str, model: Any, predictors: Optional[List[str]] = None, is_lgbm_artifact: bool = False, return_raw_prob: bool = False) -> None:
+    cache_key = f"{model_path}|raw={bool(return_raw_prob)}"
+    _MODEL_CACHE[cache_key] = {
+        "model": model,
+        "predictors": predictors,
+        "is_lgbm_artifact": is_lgbm_artifact,
+        "ts": time.time(),
+    }
+
+
+def get_supabase_countries() -> List[str]:
+    """Fetch unique countries from Supabase fundamentals that have price data."""
+    _init_supabase()
+    if not supabase: return []
+    try:
+        res = supabase.rpc("get_active_countries").execute()
+        if res.data:
+            countries = [r['country'] for r in res.data if r.get('country')]
+            # Normalize casing against the canonical country summary so
+            # lowercased RPC results (e.g. "egypt") don't poison downstream
+            # case-sensitive lookups.
+            try:
+                from api.symbols_local import load_country_summary
+                canonical = {k.lower(): k for k in load_country_summary().keys()}
+                countries = [canonical.get(c.lower(), c) for c in countries]
+            except Exception:
+                pass
+            return countries
+    except Exception as e:
+        print(f"Error fetching active countries RPC: {e}")
+    return []
+
+
+def get_supabase_symbols(country: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Fetch symbols from Supabase that have price data, ensuring high coverage."""
+    _init_supabase()
+    if not supabase: return []
+
+    # Normalize country casing: every lookup below is case-sensitive
+    # (get_active_symbols p_country, stock_fundamentals data->>country,
+    # country_to_ex map), and callers may pass e.g. "egypt".
+    if country:
+        try:
+            from api.symbols_local import load_country_summary
+            for key in load_country_summary().keys():
+                if key.lower() == str(country).strip().lower():
+                    country = key
+                    break
+        except Exception:
+            pass
+    
+    try:
+        symbols_map = {}
+
+        # 1. Try RPC first (active symbols with metadata) - paginated
+        try:
+            params = {}
+            if country:
+                params['p_country'] = country
+            
+            page_size = 1000
+            offset = 0
+            while True:
+                rpc_res = supabase.rpc("get_active_symbols", params).range(offset, offset + page_size - 1).execute()
+                if not rpc_res.data:
+                    break
+                for r in rpc_res.data:
+                    symbols_map[r['symbol']] = {
+                        "symbol": str(r.get('symbol') or ''),
+                        "exchange": str(r.get('exchange') or ''),
+                        "name": str(r.get('name') or ''),
+                        "country": str(r.get('country') or country or ''),
+                        "hasLocal": True
+                    }
+                if len(rpc_res.data) < page_size:
+                    break
+                offset += page_size
+        except Exception as rpc_err:
+            print(f"Active symbols RPC query failed: {rpc_err}")
+
+        # 2. Add fallback for symbols in stock_fundamentals - paginated
+        try:
+            page_size = 1000
+            offset = 0
+            while True:
+                fund_query = supabase.table("stock_fundamentals").select("symbol, exchange, data")
+                if country:
+                    # Filter by country in JSONB
+                    fund_query = fund_query.eq("data->>country", country)
+                
+                fund_res = fund_query.range(offset, offset + page_size - 1).execute()
+                if not fund_res.data:
+                    break
+                for r in fund_res.data:
+                    data_obj = r.get("data") or {}
+                    # Try to get country from nested data
+                    row_country = data_obj.get("country") or data_obj.get("Country") or "Unknown"
+                    
+                    sym = r['symbol']
+                    if sym not in symbols_map:
+                        symbols_map[sym] = {
+                            "symbol": str(sym or ''),
+                            "exchange": str(r.get('exchange') or ''),
+                            "name": str(data_obj.get("name", data_obj.get("Name", ""))),
+                            "country": str(row_country or ''),
+                            "hasLocal": True
+                        }
+                if len(fund_res.data) < page_size:
+                    break
+                offset += page_size
+        except Exception as fund_err:
+            print(f"Fallback fundamentals query failed: {fund_err}")
+
+        # 3. Last fallback: stock_prices table (limited to 5000 records, paginated)
+        try:
+            # Map countries to exchanges for direct querying if we have the info
+            country_to_ex = {
+                "Brazil": "SA",
+                "South Korea": "KQ",
+                "Egypt": "EGX",
+                "USA": "US"
+            }
+            
+            ex_filter = country_to_ex.get(country) if country else None
+            
+            page_size = 1000
+            offset = 0
+            for _ in range(5):
+                price_query = supabase.table("stock_prices").select("symbol, exchange")
+                if ex_filter:
+                    price_query = price_query.eq("exchange", ex_filter)
+                p_res = price_query.range(offset, offset + page_size - 1).execute()
+                if not p_res.data:
+                    break
+                for r in p_res.data:
+                    sym = r['symbol']
+                    if sym not in symbols_map:
+                        symbols_map[sym] = {
+                            "symbol": str(sym or ''),
+                            "exchange": str(r.get('exchange') or ''),
+                            "name": f"Unknown ({sym})",
+                            "country": str(country or 'Unknown'),
+                            "hasLocal": True
+                        }
+                if len(p_res.data) < page_size:
+                    break
+                offset += page_size
+        except Exception as price_err:
+            print(f"Fallback price query failed: {price_err}")
+
+        return sorted(list(symbols_map.values()), key=lambda x: str(x.get('symbol') or ''))
+        
+    except Exception as e:
+        print(f"Error fetching symbols: {e}")
+    return []
+
+
+def _candidate_symbols(ticker: str, exchange: Optional[str] = None) -> List[str]:
+    t = ticker.strip().upper()
+    if "." in t:
+        return [t]
+    
+    # Mapping table for common exchange names in JSON to EODHD suffixes
+    mapping = {
+        "EGX": "EGX",   # Match your local cache files
+        "US": "US",    # USA
+        "NYSE": "US",
+        "NASDAQ": "US",
+
+        "WAR": "WAR",  # Poland
+        "TO": "TO",    # Canada
+        "V": "V",      # Canada Venture
+        "PA": "PA",    # France
+        "F": "F",      # Germany
+    }
+    
+    candidates = []
+    if exchange and exchange.upper() in mapping:
+        suffix = mapping[exchange.upper()]
+        candidates.append(f"{t}.{suffix}")
+        candidates.append(t)
+    else:
+        # Fallbacks only when exchange is unknown/not provided
+        candidates.append(f"{t}.US")
+        candidates.append(t)
+    
+    # Remove duplicates while preserving order
+    unique_candidates = []
+    for c in candidates:
+        if c not in unique_candidates:
+            unique_candidates.append(c)
+    return unique_candidates
+
+
+def _normalize_eodhd_eod_result(raw: Union[pd.DataFrame, List[Dict[str, Any]], Any]) -> pd.DataFrame:
+    if raw is None:
+        return pd.DataFrame()
+
+    if isinstance(raw, pd.DataFrame):
+        df = raw.copy()
+    elif isinstance(raw, list):
+        df = pd.DataFrame(raw)
+    else:
+        # Best-effort fallback
+        try:
+            df = pd.DataFrame(raw)
+        except Exception:
+            return pd.DataFrame()
+
+    if df.empty:
+        return df
+
+    # EODHD commonly includes a "date" field.
+    # If it exists, use it as the datetime index.
+    date_col = None
+    for cand in ("date", "Date"):
+        if cand in df.columns:
+            date_col = cand
+            break
+
+    if date_col is not None:
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.dropna(subset=[date_col]).set_index(date_col)
+        df = df[~df.index.duplicated(keep='last')]
+        df = df.sort_index()
+
+    return df
+
+
+def _normalize_eodhd_ticker(ticker: str) -> str:
+    t = ticker.strip().upper()
+    if t.endswith(".EGX"):
+        return t.replace(".EGX", ".EG")
+    return t
+
+
+def get_stock_data_eodhd(
+    api: APIClient,
+    ticker: str,
+    from_date: str,
+    to_date: Optional[str] = None,
+    tolerance_days: int = 0,
+    exchange: Optional[str] = None,
+    force_local: bool = False,
+) -> pd.DataFrame:
+    
+    possible_names = [ticker]
+    
+    # 0. Try bulk cache for the whole exchange first (single query, cached)
+    try:
+        s, e = _infer_symbol_exchange(ticker, exchange)
+        bulk = _get_exchange_bulk_data(e, from_date, to_date)
+        if s.upper() in bulk:
+            df_cached = bulk[s.upper()]
+            if not df_cached.empty:
+                df = df_cached.copy()
+                if from_date:
+                    df = df[df.index >= pd.to_datetime(from_date)]
+                if to_date:
+                    df = df[df.index <= pd.to_datetime(to_date)]
+                if not df.empty:
+                    print(f"DEBUG: Bulk cache hit for {s}.{e} ({len(df)} rows)")
+                    return df
+    except Exception as ex:
+        print(f"DEBUG: Bulk cache lookup failed for {ticker}: {ex}")
+
+    # 1. Read EGX history from the canonical HF snapshot and overlay only the
+    # recent operational tail. Other exchanges retain the database path.
+    _init_supabase()
+    if supabase:
+        try:
+            s, e = _infer_symbol_exchange(ticker, exchange)
+            history_snapshot = pd.DataFrame()
+            history_tail_start = None
+            if e.upper() == "EGX":
+                from api.hf_history_cache import load_symbol_history_snapshot, tail_start_date
+                history_snapshot = load_symbol_history_snapshot(e, s)
+                history_tail_start = tail_start_date(history_snapshot)
+            
+            # Supabase has a default limit of 1000 rows, so we need to paginate
+            # to get all historical data for stocks with long history
+            all_data = []
+            page_size = 1000
+            offset = 0
+            
+            while True:
+                query = (
+                    supabase.table("stock_prices")
+                    .select("date,open,high,low,close,volume")
+                    .eq("symbol", s)
+                    .eq("exchange", e)
+                )
+                if history_tail_start:
+                    query = query.gte("date", history_tail_start)
+                res = query.order("date", desc=False).range(offset, offset + page_size - 1).execute()
+                
+                if not res.data:
+                    break
+                    
+                all_data.extend(res.data)
+                
+                # If we got fewer than page_size, we've reached the end
+                if len(res.data) < page_size:
+                    break
+                    
+                offset += page_size
+            
+            if all_data or not history_snapshot.empty:
+                if not history_snapshot.empty:
+                    from api.hf_history_cache import merge_snapshot_with_live
+                    df = merge_snapshot_with_live(history_snapshot, [
+                        {**row, "symbol": s, "exchange": e} for row in all_data
+                    ])
+                    df = df[df["symbol"] == s.upper()].copy()
+                else:
+                    df = pd.DataFrame(all_data)
+                if not df.empty:
+                    # Convert to standard format
+                    df['date'] = pd.to_datetime(df['date'])
+                    df = df.set_index('date')
+                    df = df[~df.index.duplicated(keep='last')]
+                    df = df.sort_index()
+                    # Filter by date range
+                    if from_date:
+                        df = df[df.index >= pd.to_datetime(from_date)]
+                    if to_date:
+                        df = df[df.index <= pd.to_datetime(to_date)]
+                    if not df.empty:
+                        print(f"DEBUG: Supabase hit for {s}.{e} ({len(df)} rows)")
+                        return df
+        except Exception as e:
+            print(f"Supabase read error for {ticker}: {e}")
+
+    if True:
+        try:
+            from api.tradingview_integration import fetch_tradingview_prices
+            s, e = _infer_symbol_exchange(ticker, exchange)
+            full_ticker = f"{s}.{e}"
+            print(f"DEBUG: Ticker {full_ticker} not found in Supabase. Attempting on-the-fly TradingView sync...")
+            ok, msg = fetch_tradingview_prices(full_ticker, max_days=365)
+            if ok:
+                print(f"DEBUG: On-the-fly TV sync succeeded for {full_ticker}. Re-querying Supabase...")
+                # Re-query Supabase
+                all_data = []
+                page_size = 1000
+                offset = 0
+                while True:
+                    res = (
+                        supabase.table("stock_prices")
+                        .select("date,open,high,low,close,volume")
+                        .eq("symbol", s)
+                        .eq("exchange", e)
+                        .order("date", desc=False)
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                    )
+                    if not res.data:
+                        break
+                    all_data.extend(res.data)
+                    if len(res.data) < page_size:
+                        break
+                    offset += page_size
+                
+                if all_data:
+                    df = pd.DataFrame(all_data)
+                    df['date'] = pd.to_datetime(df['date'])
+                    df = df.set_index('date')
+                    df = df[~df.index.duplicated(keep='last')]
+                    df = df.sort_index()
+                    if from_date:
+                        df = df[df.index >= pd.to_datetime(from_date)]
+                    if to_date:
+                        df = df[df.index <= pd.to_datetime(to_date)]
+                    if not df.empty:
+                        print(f"DEBUG: On-the-fly TV synced data returned successfully ({len(df)} rows)")
+                        return df
+        except Exception as tv_ex:
+            print(f"DEBUG: On-the-fly TradingView sync failed for {ticker}: {tv_ex}")
+        if force_local:
+            return pd.DataFrame() # Return empty instead of raising error if cloud-only
+
+    # No cloud data, try API
+    try:
+        eodhd_ticker = _normalize_eodhd_ticker(ticker)
+        df = api.get_eod_historical_stock_market_data(
+            symbol=eodhd_ticker,
+            period="d",
+            order="a",
+            from_date=from_date,
+        )
+        
+        # Handle 401/Unauthorized returned as plain string by the library
+        if isinstance(df, str) and ("Unauthorized" in df or "401" in df):
+             if best_stale_df is not None: return best_stale_df
+             raise ValueError("EODHD API Key Unauthorized (401)")
+
+        df = _normalize_eodhd_eod_result(df)
+
+        if df is None or df.empty:
+            raise ValueError(f"No historical data returned for {ticker}")
+
+        # Automatic Sync (Directly to Supabase)
+        sync_df_to_supabase(ticker, df)
+        return df
+    except Exception as e:
+        # If any error happens and we had some data (though we returned it above, 
+        # this is a safety net), return it.
+        raise e
+
+
+
+def get_stock_data_yahoo(
+    ticker: str,
+    from_date: str = "2020-01-01",
+    force_local: bool = False
+) -> pd.DataFrame:
+    """
+    Fetch stock data from Yahoo Finance.
+    """
+    if force_local:
+        return pd.DataFrame()
+
+    symbol_map = {
+        "FCMD": "ICMI.CA",
+        "FCMD.CA": "ICMI.CA",
+        "FCMD.EGX": "ICMI.CA",
+    }
+    yf_ticker = symbol_map.get(ticker)
+    if not yf_ticker:
+        if ticker.endswith(".US"):
+            yf_ticker = ticker.replace(".US", "")
+        elif ticker.endswith(".EGX"):
+            base = ticker.replace(".EGX", "")
+            yf_ticker = f"{base}.CA"
+        else:
+            yf_ticker = f"{ticker}.CA" if not ticker.endswith(".CA") else ticker
+
+    try:
+        import yfinance as yf
+        df = yf.download(yf_ticker, start=from_date, progress=False, auto_adjust=True)
+        if isinstance(df.columns, pd.MultiIndex):
+             df.columns = df.columns.get_level_values(0)
+        
+        df = df.rename(columns={
+            "Open": "open", 
+            "High": "high", 
+            "Low": "low", 
+            "Close": "close", 
+            "Volume": "volume"
+        })
+        
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+            
+        df = df[~df.index.duplicated(keep='last')]
+        df = df.sort_index()
+        
+        if df.empty:
+             raise ValueError(f"No data found for {yf_ticker} on Yahoo")
+
+        sync_df_to_supabase(ticker, df)
+        return df
+        
+    except Exception as e:
+        raise ValueError(f"Yahoo fetch failed for {yf_ticker}: {e}")
+
+
+def _get_supabase_last_date(ticker: str) -> Optional[dt.date]:
+    return _get_supabase_info(ticker)["last_date"]
+
+
+def update_stock_data(
+    api: APIClient,
+    ticker: str,
+    source: str = "eodhd",
+    max_days: int = 365
+) -> Tuple[bool, str]:
+    """
+    Updates stock data for a given ticker and upserts directly to Supabase.
+    source: 'eodhd'
+    """
+    print(f"DEBUG IN UPDATE: Ticker: {ticker}, Source received: {source}")
+    if source.lower() != "eodhd":
+        return False, "Only EODHD is supported for price updates"
+    if api is None:
+        return False, "EODHD API client is not configured"
+
+    today = dt.date.today()
+    
+    # Disk-less: Check Supabase for last date and count
+    info = _get_supabase_info(ticker)
+    last_date = info["last_date"]
+    current_count = info["count"]
+    
+    is_up_to_date = last_date and last_date >= _last_trading_day(today)
+    has_enough_history = current_count >= max_days
+    
+    print(f"DEBUG SYNC: {ticker} | last_date={last_date} | count={current_count} | max_days={max_days} | up_to_date={is_up_to_date} | enough_history={has_enough_history}")
+    
+    if is_up_to_date and has_enough_history:
+         return True, "Already up to date and sufficient history in Cloud"
+
+    # Determine if we need to fetch anything
+    # Logic: If NOT up-to-date OR NOT enough history, we fetch.
+    
+    # Needs backfill if history is too short
+    needs_backfill = not has_enough_history
+
+    # EODHD Logic
+    try:
+        if needs_backfill:
+            # Force a full historical download to get enough history
+            print(f"BACKFILL/FULL SYNC MODE: {ticker} has {current_count} records, need {max_days}. Downloading full history.")
+            # We fetch at least max_days, but ensure we also get recent data by fetching up to today
+            start_date = today - dt.timedelta(days=max_days + 120)  # Safe buffer
+            eodhd_ticker = _normalize_eodhd_ticker(ticker)
+            df = api.get_eod_historical_stock_market_data(
+                symbol=eodhd_ticker, period="d", order="a", from_date=str(start_date)
+            )
+            df = _normalize_eodhd_eod_result(df)
+            if df is None or df.empty:
+                return False, "No historical data available (EODHD Full/Backfill)"
+            
+            sync_df_to_supabase(ticker, df)
+            return True, f"Full sync/Backfill: {len(df)} rows to Cloud (was {current_count})"
+        
+        elif not is_up_to_date:
+            # Just append new data
+            start_date = (last_date + dt.timedelta(days=1)) if last_date else (today - dt.timedelta(days=max_days + 30))
+            print(f"APPEND MODE: {ticker} syncing since {start_date} to today.")
+            eodhd_ticker = _normalize_eodhd_ticker(ticker)
+            new_df = api.get_eod_historical_stock_market_data(
+                symbol=eodhd_ticker, period="d", order="a", from_date=str(start_date)
+            )
+            new_df = _normalize_eodhd_eod_result(new_df)
+            
+            if new_df is None or new_df.empty:
+                return True, "No new data returned from API (EODHD Append)"
+            
+            sync_df_to_supabase(ticker, new_df)
+            return True, f"Appended {len(new_df)} rows to Cloud"
+        
+        return True, "Already up to date"
+
+    except Exception as e:
+        return False, f"EODHD Error: {str(e)}"
+
+
+
+def sync_df_to_supabase(ticker: str, df: pd.DataFrame, timeframe: str = "1d") -> tuple[bool, str]:
+    """Upsert a Pandas DataFrame of stock prices or intraday bars directly to Supabase."""
+    _init_supabase()
+    if not supabase:
+        return False, "Supabase not initialized"
+    if df.empty:
+        return False, "DataFrame is empty"
+        
+    try:
+        # Normalize columns to lowercase for case-insensitive access
+        df.columns = [c.lower() for c in df.columns]
+        
+        # Reset index if date/timestamp is index
+        if df.index.name and df.index.name.lower() in ('date', 'timestamp', 'ts'):
+            df = df.reset_index()
+        elif not any(c in df.columns for c in ['date', 'timestamp', 'ts']) and isinstance(df.index, pd.DatetimeIndex):
+            df = df.reset_index().rename(columns={df.index.name or 'index': 'date'})
+
+        # Find the correct time column
+        time_col = 'date'
+        if 'timestamp' in df.columns: time_col = 'timestamp'
+        elif 'ts' in df.columns: time_col = 'ts'
+        elif 'date' not in df.columns:
+            return False, "No time column found (expected date, timestamp, or ts)"
+
+        df[time_col] = pd.to_datetime(df[time_col], errors='coerce')
+        df = df.dropna(subset=[time_col]).sort_values(time_col).tail(10000)
+                
+        rows = []
+        sb_symbol = ticker
+        sb_exchange = "US"
+        if "." in ticker:
+            parts = ticker.split(".")
+            sb_symbol = parts[0]
+            sb_exchange = parts[1]
+            if sb_exchange in ["CC", "CA"]: sb_exchange = "EGX"
+
+        if sb_exchange.upper() in {"BINANCE", "FOREX", "LSE"}:
+            return False, f"Exchange {sb_exchange} has been removed"
+        
+        # Normalize all crypto exchanges to "CRYPTO" for consistency
+        crypto_exchanges = ["OKX", "BYBIT", "MEXC", "COINBASE", "BITTREX", "HUOBI"]
+        is_crypto_sym = sb_exchange.upper() in crypto_exchanges or "/" in sb_symbol
+        if is_crypto_sym:
+            sb_exchange = "CRYPTO"
+            # Crypto intraday bars are stored locally as 1h OHLCV.
+            timeframe = "1h"
+
+        is_intraday = timeframe.lower() not in ["1d", "1day", "daily"]
+
+        # There is no safe way to put several intraday bars into stock_prices:
+        # it is keyed by (symbol, exchange, date). Keep daily data there and
+        # reject retired non-crypto intraday persistence explicitly.
+        if is_intraday and not is_crypto_sym:
+            return False, "Intraday Supabase storage is retired; use daily stock_prices or local crypto storage"
+        
+        for _, row in df.iterrows():
+            # Skip zero volume records for stocks to avoid garbage/placeholder price data.
+            # Indexes (exchange == "INDX") can have 0 volume.
+            volume_val = row.get('volume')
+            if sb_exchange.upper() != "INDX" and volume_val is not None and pd.notna(volume_val):
+                try:
+                    if int(volume_val) == 0:
+                        continue
+                except Exception:
+                    pass
+
+            adj_close = row.get('adjusted_close')
+            if adj_close is None:
+                adj_close = row.get('close')
+
+            record = {
+                "symbol": sb_symbol,
+                "exchange": sb_exchange,
+                "open": _finite_float(row.get('open')),
+                "high": _finite_float(row.get('high')),
+                "low": _finite_float(row.get('low')),
+                "close": _finite_float(row.get('close')),
+                "volume": int(row['volume']) if pd.notna(row.get('volume')) else None,
+            }
+
+            if is_intraday:
+                record["ts"] = row[time_col].isoformat()
+                record["timeframe"] = timeframe
+                # Intraday doesn't use adjusted_close typically in our schema
+            else:
+                record["date"] = row[time_col].strftime('%Y-%m-%d')
+                record["adjusted_close"] = _finite_float(adj_close)
+                # Refresh time must advance on conflict updates as well as inserts.
+                # This is a provider fetch time, not proof of an exchange close.
+                record["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+                if sb_exchange.upper() == 'EGX':
+                    from api.recommendation_freshness import quote_health
+                    if quote_health(record, record['date']) != 'verified':
+                        continue
+            
+            rows.append(record)
+        
+        if rows:
+            # Check if this is crypto intraday, and redirect to local storage instead of Supabase
+            if sb_exchange == "CRYPTO" and is_intraday:
+                try:
+                    from api.local_storage import save_crypto_bars_local
+                    save_crypto_bars_local(sb_symbol, timeframe, rows)
+                    msg = f"Synced {len(rows)} rows locally for {sb_symbol} ({timeframe})."
+                    print(f"DEBUG: {msg}")
+                    return True, msg
+                except Exception as e:
+                    print(f"Local storage save error for {sb_symbol}: {e}")
+                    return False, f"Local save error: {e}"
+
+            table_name = "stock_prices"
+            on_conflict = "symbol,exchange,date"
+            
+            # Use chunks of 100 to avoid request size limits
+            import time
+            for i in range(0, len(rows), 100):
+                chunk = rows[i:i+100]
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        # The write response is never consumed.  Ask PostgREST
+                        # for no representation so hundreds of upserts do not
+                        # echo their rows back as billable database egress.
+                        supabase.table(table_name).upsert(
+                            chunk,
+                            on_conflict=on_conflict,
+                            returning="minimal",
+                        ).execute()
+                        break
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            raise e
+                        sleep_time = (attempt + 1) * 2
+                        print(f"DEBUG: Supabase upsert failed (attempt {attempt+1}/{max_retries}): {e}. Retrying in {sleep_time}s...")
+                        time.sleep(sleep_time)
+            
+            msg = f"Synced {len(rows)} rows to {table_name} ({timeframe})."
+            print(f"DEBUG: {msg}")
+            return True, msg
+        else:
+            return False, "No valid rows found to sync"
+    except Exception as e:
+        msg = f"Supabase sync error for {ticker}: {e}"
+        print(msg)
+        return False, msg
+    
+    return False, "Unknown error"
+
+
+def sync_local_to_supabase(ticker: str, file_path: str) -> tuple[bool, str]:
+    """Read local CSV and upsert to Supabase stock_prices."""
+    _init_supabase()
+    if not supabase:
+        return False, "Supabase not initialized"
+    if not os.path.exists(file_path):
+        return False, f"File not found: {file_path}"
+        
+    try:
+        saved_df = pd.read_csv(file_path)
+        return sync_df_to_supabase(ticker, saved_df)
+    except Exception as e:
+        msg = f"Supabase sync error for {ticker}: {e}"
+        print(msg)
+        return False, msg
+    
+    return False, "Unknown error"
+
+
+
+def sync_data_to_supabase(ticker: str, data: dict) -> tuple[bool, str]:
+    """Upsert fundamental data directly to Supabase."""
+    _init_supabase()
+    if not supabase:
+        return False, "Supabase not initialized"
+    if not data:
+        return False, "No data provided"
+        
+    try:
+        sb_symbol = ticker
+        sb_exchange = "US"
+        if "." in ticker:
+            parts = ticker.split(".")
+            sb_symbol = parts[0]
+            sb_exchange = parts[1]
+            if sb_exchange in ["CC", "CA"]: sb_exchange = "EGX"
+        
+        # Clean symbol (remove fund_ prefix if present)
+        # This handles the user's issue where "fund_ANFI" was stored instead of "ANFI"
+        if sb_symbol.lower().startswith("fund_"):
+            sb_symbol = sb_symbol[5:]  # Remove 'fund_' (5 chars)
+
+        # Providers can return sparse fundamentals (for example no EPS for a
+        # loss-making company). Merge only non-null fields so a partial refresh
+        # cannot erase a previously valid metric or listing metadata.
+        existing_data = {}
+        try:
+            existing = (
+                supabase.table("stock_fundamentals")
+                .select("data")
+                .eq("symbol", sb_symbol)
+                .eq("exchange", sb_exchange)
+                .limit(1)
+                .execute()
+            )
+            if existing.data and isinstance(existing.data[0].get("data"), dict):
+                existing_data = dict(existing.data[0]["data"])
+        except Exception as read_error:
+            print(f"[FUNDAMENTALS] Existing snapshot read failed for {sb_symbol}: {read_error}")
+        merged_data = dict(existing_data)
+        merged_data.update({key: value for key, value in data.items() if value is not None})
+
+        row = {
+            "symbol": sb_symbol,
+            "exchange": sb_exchange,
+            "data": merged_data,
+            "updated_at": dt.datetime.utcnow().isoformat()
+        }
+        
+        # Populate optional columns if available in data
+        # Check for case-insensitive keys just in case
+        clean_data = {k.lower(): v for k, v in merged_data.items()}
+        if "name" in clean_data:
+            row["name"] = clean_data["name"]
+        if "country" in clean_data:
+            row["country"] = clean_data["country"]
+        
+        supabase.table("stock_fundamentals").upsert(row, on_conflict="symbol,exchange").execute()
+        return True, "Fundamentals synced"
+    except Exception as e:
+        msg = f"Supabase fund sync error for {ticker}: {e}"
+        print(msg)
+        return False, msg
+
+
+def clear_supabase_stock_prices() -> tuple[bool, str]:
+    """Delete all records from Supabase stock_prices table."""
+    _init_supabase()
+    if not supabase:
+        return False, "Supabase not initialized"
+    
+    try:
+        # Using .neq("symbol", "") as a catch-all to delete all rows.
+        res = supabase.table("stock_prices").delete().neq("symbol", "").execute()
+        return True, "All stock prices cleared from Supabase"
+    except Exception as e:
+        msg = f"Error clearing stock prices: {e}"
+        print(msg)
+        return False, msg
+
+def upsert_technical_indicators(
+    symbol: str,
+    exchange: str,
+    date: str,
+    close: float,
+    volume: int,
+    indicators: Dict[str, Any]
+) -> tuple[bool, str]:
+    """Upsert technical indicators to Supabase using RPC."""
+    _init_supabase()
+    if not supabase:
+        return False, "Supabase not initialized"
+    
+    try:
+        data = {
+            "p_symbol": symbol,
+            "p_exchange": exchange,
+            "p_date": date,
+            "p_close": close,
+            "p_volume": int(volume),
+            "p_ema_50": _finite_float(indicators.get("EMA_50")),
+            "p_ema_200": _finite_float(indicators.get("EMA_200")),
+            "p_sma_50": _finite_float(indicators.get("SMA_50")),
+            "p_sma_200": _finite_float(indicators.get("SMA_200")),
+            "p_rsi_14": _finite_float(indicators.get("RSI")),
+            "p_macd": _finite_float(indicators.get("MACD")),
+            "p_macd_signal": _finite_float(indicators.get("MACD_Signal")),
+            "p_macd_histogram": _finite_float(indicators.get("MACD_Histogram")), # If implemented
+            "p_adx_14": _finite_float(indicators.get("ADX_14")),
+            "p_atr_14": _finite_float(indicators.get("ATR_14")),
+            "p_bb_upper": _finite_float(indicators.get("BB_Upper")),
+            "p_bb_lower": _finite_float(indicators.get("BB_Lower")),
+            "p_stoch_k": _finite_float(indicators.get("STOCH_K")),
+            "p_stoch_d": _finite_float(indicators.get("STOCH_D")),
+            "p_roc_12": _finite_float(indicators.get("ROC_12")),
+            "p_momentum_10": _finite_float(indicators.get("Momentum")),
+            "p_vol_sma20": int(indicators.get("VOL_SMA20", 0)) if indicators.get("VOL_SMA20") else None,
+            "p_vwap_20": _finite_float(indicators.get("VWAP_20")),
+            "p_r_vol": _finite_float(indicators.get("R_VOL")),
+            "p_change_pct": _finite_float(indicators.get("change_p"))
+        }
+        
+        # Filter out keys with None to allow defaults in SQL if any
+        params = {k: v for k, v in data.items() if v is not None}
+        
+        supabase.rpc("admin_upsert_technical_indicator", params).execute()
+        return True, "Technical indicators upserted"
+    except Exception as e:
+        msg = f"Supabase tech upsert error for {symbol}: {e}"
+        print(msg)
+        return False, msg
+
+            
+
+
+
+
+
+def get_company_fundamentals(
+    ticker: str,
+    return_meta: bool = False,
+    source: str = "auto",
+) -> Any:
+    # 0. Try Supabase
+    _init_supabase()
+    if supabase:
+        try:
+            s, e = _infer_symbol_exchange(ticker)
+            res = supabase.table("stock_fundamentals").select("data").eq("symbol", s).eq("exchange", e).limit(1).execute()
+            if res.data and res.data[0].get("data"):
+                data = res.data[0]["data"]
+                # Safety: Parse JSON if returned as string
+                if isinstance(data, str):
+                    try:
+                        import json
+                        data = json.loads(data)
+                    except:
+                        pass
+                if return_meta:
+                    return data, {"source": "supabase", "servedFrom": "supabase"}
+                return data
+        except Exception as e:
+            print(f"Supabase fund read error: {e}")
+
+    now_ts = int(dt.datetime.utcnow().timestamp())
+    src = (source or "auto").lower()
+
+    def _has_core_metrics(d: Dict[str, Any]) -> bool:
+        if not isinstance(d, dict):
+            return False
+        core = ["marketCap", "peRatio", "eps", "dividendYield", "beta", "high52", "low52"]
+        for k in core:
+            if d.get(k) is not None:
+                return True
+        return False
+
+    def _ret(data: Dict[str, Any], meta: Dict[str, Any]) -> Any:
+        if return_meta:
+            return data, meta
+        return data
+
+    def _try_tradingview() -> Any:
+        upper = (ticker or "").strip().upper()
+        if not upper: return None
+        # Allow EGX/CC in TradingView as fallback
+        # if upper.endswith(".EGX") or upper.endswith(".CC"): return None
+
+        from api.tradingview_integration import fetch_tradingview_fundamentals_bulk
+        bulk = fetch_tradingview_fundamentals_bulk([upper])
+        if upper not in bulk: return None
+        
+        data, meta = bulk[upper]
+        return _ret(data, {**meta, "servedFrom": "live_tradingview"})
+
+    def _try_mubasher_egx() -> Any:
+        upper = ticker.strip().upper()
+        base_symbol = upper.split(".")[0]
+        if not (upper.endswith(".EGX") or upper.endswith(".CC") or upper == base_symbol):
+            return None
+
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+        except Exception:
+            return None
+
+        url = f"https://english.mubasher.info/markets/EGX/stocks/{base_symbol}/"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                return None
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            overview_items = soup.find_all("div", class_="stock-overview__text-and-value-item")
+            raw_map: Dict[str, str] = {}
+
+            for item in overview_items:
+                text_span = item.find("span", class_="stock-overview__text")
+                value_span = item.find("span", class_="stock-overview__value")
+                if text_span and value_span:
+                    key = text_span.get_text(strip=True).replace(":", "").strip()
+                    number_span = value_span.find("span", class_="number")
+                    value = number_span.get_text(strip=True) if number_span else value_span.get_text(strip=True)
+                    if key:
+                        raw_map[key] = value
+
+            def _parse_num(raw_val: str) -> Optional[float]:
+                if raw_val is None:
+                    return None
+                t = str(raw_val).strip()
+                if not t or t.lower() in {"n/a", "na", "-", "--"}:
+                    return None
+                t = t.replace(",", "").replace(" ", "")
+                if t.endswith("%"): 
+                    t = t[:-1]
+                mult = 1.0
+                if t.endswith("K"):
+                    mult = 1e3
+                    t = t[:-1]
+                elif t.endswith("M"):
+                    mult = 1e6
+                    t = t[:-1]
+                elif t.endswith("B"):
+                    mult = 1e9
+                    t = t[:-1]
+                try:
+                    v = float(t) * mult
+                except Exception:
+                    return None
+                return v if np.isfinite(v) else None
+
+            data: Dict[str, Any] = {
+                "name": raw_map.get("Name") or raw_map.get("Company Name") or None,
+                "country": "Egypt",
+                "currency": "EGP",
+            }
+
+            for k, v in raw_map.items():
+                lk = k.strip().lower()
+                if "market cap" in lk:
+                    data["marketCap"] = _parse_num(v)
+                elif "p/e" in lk or lk in {"pe", "pe ratio"}:
+                    data["peRatio"] = _parse_num(v)
+                elif "eps" in lk:
+                    data["eps"] = _parse_num(v)
+                elif "dividend" in lk and "yield" in lk:
+                    data["dividendYield"] = _parse_num(v)
+                elif "beta" in lk:
+                    data["beta"] = _parse_num(v)
+                elif "52" in lk and "high" in lk:
+                    data["high52"] = _parse_num(v)
+                elif "52" in lk and "low" in lk:
+                    data["low52"] = _parse_num(v)
+                elif "sector" in lk:
+                    data["sector"] = v
+
+            if not _has_core_metrics(data):
+                return None
+
+            if any(val is not None for val in data.values()):
+                sync_data_to_supabase(ticker, data)
+                return _ret(data, {"fetchedAt": now_ts, "source": "mubasher", "servedFrom": "live_mubasher"})
+        except Exception:
+            return None
+
+        return None
+
+    def _try_eodhd() -> Any:
+        api_key = os.getenv("EODHD_API_KEY")
+        if not api_key:
+            return None
+        try:
+            url = f"https://eodhd.com/api/fundamentals/{ticker}?api_token={api_key}&fmt=json"
+            with urllib.request.urlopen(url, timeout=20) as resp:
+                raw = resp.read().decode("utf-8")
+            payload = json.loads(raw)
+
+            general = payload.get("General") if isinstance(payload, dict) else None
+            highlights = payload.get("Highlights") if isinstance(payload, dict) else None
+
+            if isinstance(general, dict) or isinstance(highlights, dict):
+                data = {
+                    "marketCap": (highlights or {}).get("MarketCapitalization"),
+                    "peRatio": (highlights or {}).get("PERatio"),
+                    "eps": (highlights or {}).get("EarningsShare"),
+                    "sector": (general or {}).get("Sector"),
+                    "beta": (highlights or {}).get("Beta"),
+                    "dividendYield": (highlights or {}).get("DividendYield"),
+                    "high52": (highlights or {}).get("52WeekHigh"),
+                    "low52": (highlights or {}).get("52WeekLow"),
+                    "name": (general or {}).get("Name"),
+                    "currency": (general or {}).get("CurrencyCode"),
+                    "country": (general or {}).get("CountryName"),
+                }
+
+                if any(v is not None for v in data.values()):
+                    sync_data_to_supabase(ticker, data)
+                    return _ret(data, {"fetchedAt": now_ts, "source": "eodhd", "servedFrom": "live_eodhd"})
+        except Exception:
+            return None
+
+        return None
+
+    if src in {"mubasher", "auto"}:
+        got = _try_mubasher_egx()
+        if got is not None:
+            return got
+
+        if src == "mubasher":
+            return _ret({}, {"fetchedAt": now_ts, "status": "error", "source": "mubasher", "servedFrom": "error"})
+
+    if src in {"tradingview", "auto"}:
+        got = _try_tradingview()
+        if got is not None:
+            return got
+
+    return _ret({}, {"fetchedAt": now_ts, "status": "error", "source": src, "servedFrom": "error"})
+
+
+def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    # Normalize column names expected from EODHD
+    # EODHD typically returns: open, high, low, close, adjusted_close, volume
+    cols = {c.lower(): c for c in df.columns}
+
+    close_col = cols.get("close")
+    open_col = cols.get("open")
+    high_col = cols.get("high")
+    low_col = cols.get("low")
+    volume_col = cols.get("volume")
+
+    if not all([close_col, open_col, high_col, low_col, volume_col]):
+        # Fallback if some columns missing? For now require all for candles.
+        # But if just Close/Volume exist (minimal), we might fail. 
+        # API usually returns all.
+        if close_col is None or volume_col is None:
+             raise ValueError("Missing required columns: close/volume")
+
+    # Create a clean dataframe with required columns
+    out = pd.DataFrame(index=df.index)
+    out["Close"] = df[close_col]
+    out["Volume"] = df[volume_col]
+    
+    # Store others if available
+    if open_col: out["Open"] = df[open_col]
+    if high_col: out["High"] = df[high_col]
+    if low_col: out["Low"] = df[low_col]
+
+    out["SMA_50"] = out["Close"].rolling(window=50, min_periods=1).mean()
+    out["SMA_200"] = out["Close"].rolling(window=200, min_periods=1).mean()
+    
+    # EMA
+    out["EMA_50"] = out["Close"].ewm(span=50, adjust=False).mean()
+    out["EMA_200"] = out["Close"].ewm(span=200, adjust=False).mean()
+
+    # MACD (12, 26, 9)
+    ema_12 = out["Close"].ewm(span=12, adjust=False).mean()
+    ema_26 = out["Close"].ewm(span=26, adjust=False).mean()
+    out["MACD"] = ema_12 - ema_26
+    out["MACD_Signal"] = out["MACD"].ewm(span=9, adjust=False).mean()
+
+    # Bollinger Bands (20, 2)
+    bb_sma20 = out["Close"].rolling(window=20).mean()
+    bb_std20 = out["Close"].rolling(window=20).std()
+    out["BB_Upper"] = bb_sma20 + (2 * bb_std20)
+    out["BB_Lower"] = bb_sma20 - (2 * bb_std20)
+
+    delta = out["Close"].diff()
+    gain = (delta.where(delta > 0, 0.0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
+
+    # Avoid division by zero
+    rs = gain / loss.replace(0.0, np.nan)
+    out["RSI"] = 100 - (100 / (1 + rs))
+
+    # pct_change(fill_method=None) to avoid FutureWarning, then fillna(0)
+    out["Momentum"] = out["Close"].pct_change(fill_method=None).fillna(0)
+
+    out["VOL_SMA20"] = out["Volume"].rolling(window=20, min_periods=1).mean()
+    out["R_VOL"] = (out["Volume"] / out["VOL_SMA20"].replace(0.0, np.nan)).fillna(0.0)
+    out["volume_ma_ratio"] = out["R_VOL"]
+
+    if "High" in out.columns and "Low" in out.columns:
+        high = out["High"].astype(float)
+        low = out["Low"].astype(float)
+        close = out["Close"].astype(float)
+
+        prev_close = close.shift(1)
+        tr = pd.concat(
+            [
+                (high - low).abs(),
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+
+        atr = tr.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+        out["ATR_14"] = atr
+
+        up_move = high.diff()
+        down_move = -low.diff()
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+        tr_sm = tr.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+        plus_dm_sm = pd.Series(plus_dm, index=out.index).ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+        minus_dm_sm = pd.Series(minus_dm, index=out.index).ewm(alpha=1 / 14, adjust=False, min_periods=1).mean()
+
+        plus_di = 100 * (plus_dm_sm / tr_sm.replace(0.0, np.nan))
+        minus_di = 100 * (minus_dm_sm / tr_sm.replace(0.0, np.nan))
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
+        out["ADX_14"] = dx.ewm(alpha=1 / 14, adjust=False, min_periods=1).mean().fillna(0.0)
+
+        lowest_low = low.rolling(window=14, min_periods=1).min()
+        highest_high = high.rolling(window=14, min_periods=1).max()
+        stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low).replace(0.0, np.nan)
+        out["STOCH_K"] = stoch_k.fillna(0.0)
+        out["STOCH_D"] = out["STOCH_K"].rolling(window=3, min_periods=1).mean()
+
+        tp = (high + low + close) / 3
+        tp_sma = tp.rolling(window=20, min_periods=1).mean()
+        mean_dev = (tp - tp_sma).abs().rolling(window=20, min_periods=1).mean()
+        out["CCI_20"] = ((tp - tp_sma) / (0.015 * mean_dev.replace(0.0, np.nan))).fillna(0.0)
+
+        pv = tp * out["Volume"].astype(float)
+        vol_sum = out["Volume"].astype(float).rolling(window=20, min_periods=1).sum()
+        out["VWAP_20"] = pv.rolling(window=20, min_periods=1).sum() / vol_sum.replace(0.0, np.nan)
+        out["VWAP_20"] = out["VWAP_20"].fillna(0.0)
+    else:
+        out["ATR_14"] = 0.0
+        out["ADX_14"] = 0.0
+        out["STOCH_K"] = 0.0
+        out["STOCH_D"] = 0.0
+        out["CCI_20"] = 0.0
+        out["VWAP_20"] = 0.0
+
+    out["ROC_12"] = out["Close"].pct_change(periods=12, fill_method=None).mul(100).fillna(0.0)
+
+    # Bollinger-derived features (percent B and relative width)
+    if "BB_Upper" in out.columns and "BB_Lower" in out.columns:
+        width = out["BB_Upper"] - out["BB_Lower"]
+        out["BB_PctB"] = (
+            (out["Close"] - out["BB_Lower"]) / width.replace(0.0, np.nan)
+        ).fillna(0.0)
+        out["BB_Width"] = (
+            width / out["Close"].replace(0.0, np.nan)
+        ).fillna(0.0)
+    else:
+        out["BB_PctB"] = 0.0
+        out["BB_Width"] = 0.0
+
+    # On-Balance Volume and simple slope
+    price_delta = out["Close"].diff()
+    direction = np.sign(price_delta).fillna(0.0)
+    obv = (direction * out["Volume"]).cumsum()
+    out["OBV"] = obv.fillna(0.0)
+    out["OBV_Slope"] = out["OBV"].diff().fillna(0.0)
+
+    # Chaikin Money Flow (CMF_20) & Market Maker Phases
+    if "High" in out.columns and "Low" in out.columns:
+        high = out["High"].astype(float)
+        low = out["Low"].astype(float)
+        close = out["Close"].astype(float)
+        volume = out["Volume"].astype(float)
+
+        hl_range = high - low
+        hl_range = hl_range.replace(0.0, 1e-9)
+
+        mf_multiplier = ((close - low) - (high - close)) / hl_range
+        mf_volume = mf_multiplier * volume
+
+        out["CMF_20"] = (
+            mf_volume.rolling(window=20, min_periods=1).sum()
+            / volume.rolling(window=20, min_periods=1).sum().replace(0.0, 1e-9)
+        ).fillna(0.0)
+
+        # MM Accumulation Phase (Consolidation + positive money flow)
+        rolling_high_20 = close.rolling(window=20, min_periods=1).max()
+        rolling_low_20 = close.rolling(window=20, min_periods=1).min()
+        price_range_20 = (rolling_high_20 - rolling_low_20) / close.replace(0.0, np.nan)
+        
+        adx_val = out.get("ADX_14", pd.Series(0.0, index=out.index))
+        is_consolidation = (price_range_20 < 0.15) & (adx_val < 25)
+        is_accumulating = (out["CMF_20"] > 0.05) & is_consolidation
+        out["MM_Accumulation"] = is_accumulating.astype(float)
+
+        # MM Distribution Phase (Near highs, high volume, high RSI, but flat price or negative CMF)
+        is_near_high = close >= (rolling_high_20 * 0.95)
+        rsi_val = out.get("RSI", pd.Series(50.0, index=out.index))
+        r_vol_val = out.get("R_VOL", pd.Series(1.0, index=out.index))
+
+        # Volume churn: last 3 days volume is high, but price return is flat or negative
+        vol_3d_avg = volume.rolling(window=3, min_periods=1).mean()
+        vol_sma20 = out.get("VOL_SMA20", volume.rolling(window=20, min_periods=1).mean())
+        r_vol_3d = vol_3d_avg / vol_sma20.replace(0.0, np.nan)
+        ret_3d = close.pct_change(periods=3).fillna(0.0)
+        is_churning = (r_vol_3d > 1.5) & (ret_3d.abs() < 0.02)
+
+        is_distributing = is_near_high & (rsi_val > 70) & ((out["CMF_20"] < -0.05) | is_churning)
+        out["MM_Distribution"] = is_distributing.astype(float)
+    else:
+        out["CMF_20"] = 0.0
+        out["MM_Accumulation"] = 0.0
+        out["MM_Distribution"] = 0.0
+
+    # Distance from rolling high/low (context window)
+    rolling_high = out["Close"].rolling(window=100, min_periods=1).max()
+    rolling_low = out["Close"].rolling(window=100, min_periods=1).min()
+    out["Dist_From_High"] = (
+        (out["Close"] / rolling_high.replace(0.0, np.nan)) - 1.0
+    ).fillna(0.0)
+    out["Dist_From_Low"] = (
+        (out["Close"] / rolling_low.replace(0.0, np.nan)) - 1.0
+    ).fillna(0.0)
+
+    # Z-score of price vs rolling mean/std
+    rolling_mean = out["Close"].rolling(window=50, min_periods=1).mean()
+    rolling_std = out["Close"].rolling(window=50, min_periods=1).std()
+    out["Z_Score"] = (
+        (out["Close"] - rolling_mean) / rolling_std.replace(0.0, np.nan)
+    ).fillna(0.0)
+
+    # Candle geometry: body and shadows (if OHLC are available)
+    if "Open" in out.columns and "High" in out.columns and "Low" in out.columns:
+        open_ = out["Open"].astype(float)
+        high = out["High"].astype(float)
+        low = out["Low"].astype(float)
+        close = out["Close"].astype(float)
+
+        body = close - open_
+        out["Body_Size"] = (body / open_.replace(0.0, np.nan)).fillna(0.0)
+        upper_shadow = high - np.maximum(close, open_)
+        lower_shadow = np.minimum(close, open_) - low
+        out["Upper_Shadow"] = (
+            upper_shadow / open_.replace(0.0, np.nan)
+        ).fillna(0.0)
+        out["Lower_Shadow"] = (
+            lower_shadow / open_.replace(0.0, np.nan)
+        ).fillna(0.0)
+    else:
+        out["Body_Size"] = 0.0
+        out["Upper_Shadow"] = 0.0
+        out["Lower_Shadow"] = 0.0
+
+    # Calendar/time features
+    if isinstance(out.index, pd.DatetimeIndex):
+        out["Day_Of_Week"] = out.index.dayofweek.astype(int)
+        out["Day_Of_Month"] = out.index.day.astype(int)
+    else:
+        out["Day_Of_Week"] = 0
+        out["Day_Of_Month"] = 0
+
+    # Lagged values and differences (memory features)
+    out["Close_Lag1"] = out["Close"].shift(1)
+    out["Close_Diff"] = out["Close"].diff().fillna(0.0)
+
+    if "RSI" in out.columns:
+        out["RSI_Lag1"] = out["RSI"].shift(1)
+        out["RSI_Diff"] = out["RSI"].diff().fillna(0.0)
+    else:
+        out["RSI_Lag1"] = np.nan
+        out["RSI_Diff"] = 0.0
+
+    out["Volume_Lag1"] = out["Volume"].shift(1)
+    out["Volume_Diff"] = out["Volume"].diff().fillna(0.0)
+
+    out["OBV_Lag1"] = out["OBV"].shift(1)
+    out["OBV_Diff"] = out["OBV"].diff().fillna(0.0)
+
+    # Do not dropna here, let prepare_for_ai handle it so we can drop columns if needed
+    return out
+
+def add_trade_levels(df: pd.DataFrame, risk_reward_ratio: float = 2.0, acceleration_score: int = 0) -> Tuple[float, float]:
+    """
+    Calculates Take Profit (T.P) and Stop Loss (S.L) based on ATR (Volatility)
+    and Acceleration Score (dynamic risk management).
+
+    For high acceleration_score stocks (9+), we use wider stops and higher targets
+    to ride the wave for 20%+ gains. Low-score stocks get conservative levels.
+
+    Args:
+        df: DataFrame with price/indicator data
+        risk_reward_ratio: Base risk/reward ratio (default 2.0)
+        acceleration_score: Acceleration score (0-10). Higher = wider risk.
+    """
+    if df.empty or "ATR_14" not in df.columns:
+        return 0.0, 0.0
+    
+    current_price = float(df["Close"].iloc[-1])
+    current_atr = float(df["ATR_14"].iloc[-1])
+    
+    if not np.isfinite(current_atr) or current_atr <= 0:
+        # Fallback to simple percentage if ATR is zero or invalid
+        return round(current_price * 1.05, 2), round(current_price * 0.97, 2)
+
+    # ── Dynamic risk based on Acceleration Score ──
+    # High-score stocks get wider room to breathe
+    if acceleration_score >= 9:
+        # Wave Rider: wide stop, high target (20%+ potential)
+        sl_multiplier = 2.5   # Wider stop
+        rr_ratio = 3.0        # Higher risk/reward
+        max_target_pct = 0.40  # Allow up to 40% target
+        min_stop_pct = 0.08    # At least 8% stop distance
+    elif acceleration_score >= 7:
+        sl_multiplier = 2.0
+        rr_ratio = 2.5
+        max_target_pct = 0.25
+        min_stop_pct = 0.05
+    elif acceleration_score >= 5:
+        sl_multiplier = 2.0
+        rr_ratio = risk_reward_ratio
+        max_target_pct = 0.15
+        min_stop_pct = 0.03
+    else:
+        sl_multiplier = 2.0
+        rr_ratio = risk_reward_ratio
+        max_target_pct = 0.10
+        min_stop_pct = 0.02
+
+    # Stop Loss (S.L) = Current Price - (sl_multiplier * ATR)
+    stop_loss = current_price - (sl_multiplier * current_atr)
+    
+    # Ensure minimum stop distance
+    min_stop_price = current_price * (1 - min_stop_pct)
+    if stop_loss > min_stop_price:
+        stop_loss = min_stop_price
+
+    # Ensure stop_loss is positive and reasonable
+    if stop_loss < current_price * 0.85:  # Max 15% loss regardless of score
+        stop_loss = current_price * 0.85
+
+    # Target Price (T.P) = Current Price + (sl_multiplier * ATR * rr_ratio)
+    target_price = current_price + (sl_multiplier * current_atr * rr_ratio)
+    
+    # Cap and floor target based on acceleration score
+    max_target = current_price * (1 + max_target_pct)
+    min_target = current_price * 1.03  # Min 3% profit target
+    
+    if target_price > max_target:
+        target_price = max_target
+    elif target_price < min_target:
+        target_price = min_target
+
+    return round(float(target_price), 2), round(float(max(stop_loss, 0.01)), 2)
+
+
+def prepare_for_ai(
+    df: pd.DataFrame,
+    target_pct: float = 2.0,
+    stop_loss_pct: float = 1.0,
+    look_forward_days: int = 20,
+    drop_labels: bool = True,
+    use_volatility_label: bool = True,
+    barrier_mode: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Triple-barrier labeling used by the scan/backtest pipeline.
+
+    `target_pct` / `stop_loss_pct` are interpreted as:
+    - percentages when both values are < 1.0
+    - ATR multipliers otherwise
+    """
+    if df.empty: return df
+
+    out = df.copy()
+    
+    # Use lowercase columns if needed or standardizing to capitalized
+    close_col = "Close" if "Close" in out.columns else "close"
+    open_col = "Open" if "Open" in out.columns else "open"
+    high_col = "High" if "High" in out.columns else "high"
+    low_col = "Low" if "Low" in out.columns else "low"
+    resolved_mode = _resolve_barrier_mode(target_pct, stop_loss_pct, barrier_mode)
+    
+    # Ensure ATR_14 exists
+    if "ATR_14" not in out.columns:
+        out["ATR_14"] = out[close_col].rolling(14).std().bfill()
+
+    # Entry is next-day open to avoid signal-entry leakage
+    out['entry_price'] = out[open_col].shift(-1)
+    shifted_atr = out['ATR_14'].shift(-1)
+
+    if resolved_mode == "percent":
+        out['tp_barrier'] = out['entry_price'] * (1 + float(target_pct))
+        out['sl_barrier'] = out['entry_price'] * (1 - float(stop_loss_pct))
+    else:
+        # Dynamic barriers based on ATR
+        out['tp_barrier'] = out['entry_price'] + (shifted_atr * float(target_pct))
+        out['sl_barrier'] = out['entry_price'] - (shifted_atr * float(stop_loss_pct))
+
+    out['Target'] = 0
+    
+    # Vectorized barrier check using loop (needed for first-hit logic)
+    high_vals = out[high_col].values
+    low_vals = out[low_col].values
+    tp_vals = out['tp_barrier'].values
+    sl_vals = out['sl_barrier'].values
+    targets = np.zeros(len(out), dtype=int)
+    
+    for i in range(len(out) - look_forward_days - 1):
+        if not np.isfinite(tp_vals[i]) or not np.isfinite(sl_vals[i]):
+            continue
+        for j in range(1, look_forward_days + 1):
+            idx = i + j
+            if idx >= len(out):
+                break
+            if high_vals[idx] >= tp_vals[i]:
+                targets[i] = 1
+                break
+            if low_vals[idx] <= sl_vals[i]:
+                targets[i] = 0
+                break
+    
+    out['Target'] = targets
+
+    # Cleanup
+    out.drop(columns=['entry_price', 'tp_barrier', 'sl_barrier'], inplace=True, errors='ignore')
+    
+    # Keep more rows by filling numeric gaps
+    for c in ["marketCap", "peRatio", "eps", "dividendYield"]:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors='coerce')
+
+    # Handle categorical fundamental indicators if present
+    for c in ["sector", "industry"]:
+        if c in out.columns:
+            out[c] = out[c].astype(str).replace(['nan', 'None', ''], "Unknown").astype("category")
+
+    numeric_cols = out.select_dtypes(include=["number"]).columns
+    out[numeric_cols] = out[numeric_cols].fillna(0.0)
+    
+    # Drop rows where we couldn't see the future only if requested
+    if drop_labels:
+        out = out.iloc[:-look_forward_days].copy()
+    
+    return out
+
+
+@dataclass
+class PredictionResult:
+    precision: float
+    tomorrow_prediction: int
+    last_close: float
+    last_date: str
+    predictions: List[Dict[str, Any]]
+
+
+def _clamp_int(v: Any, *, min_v: int, max_v: int) -> int:
+    try:
+        iv = int(v)
+    except Exception:
+        raise ValueError("Invalid int")
+    if iv < min_v:
+        return min_v
+    if iv > max_v:
+        return max_v
+    return iv
+
+
+def _ensure_feature_columns(df: pd.DataFrame, features: List[str]) -> None:
+    missing = [f for f in features if f not in df.columns]
+    if not missing:
+        return
+    
+    # Suppress fragmentation warning – it's harmless here
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
+        
+        # Case-insensitive recovery: if model expects 'close' but we have 'Close', copy it!
+        existing_lower = {c.lower(): c for c in df.columns}
+        
+        for name in missing:
+            # 1. Try case-insensitive match
+            lower_name = name.lower()
+            if lower_name in existing_lower:
+                df[name] = df[existing_lower[lower_name]]
+                continue
+            # 2. Fallback to zero or "Unknown" for categories
+            if name in ["sector", "industry"]:
+                df[name] = "Unknown"
+                df[name] = df[name].astype("category")
+            else:
+                df[name] = 0.0
+
+
+def get_distribution_gate(row: Any, cmf_threshold: float = -0.10) -> Dict[str, Any]:
+    """Return whether a row should be blocked because it shows distribution."""
+    r = row.iloc[-1] if hasattr(row, "iloc") else row
+
+    def _f(key: str, default: float = 0.0) -> float:
+        try:
+            value = r.get(key, default) if hasattr(r, "get") else r[key]
+            value = float(value)
+            return value if np.isfinite(value) else default
+        except Exception:
+            return default
+
+    mm_distribution = _f("MM_Distribution", _f("mm_distribution", 0.0))
+    cmf_20 = _f("CMF_20", _f("cmf_20", 0.0))
+    blocked = mm_distribution > 0.5 or cmf_20 < cmf_threshold
+    reason = None
+    if mm_distribution > 0.5:
+        reason = "market_maker_distribution"
+    elif cmf_20 < cmf_threshold:
+        reason = "negative_money_flow"
+    return {
+        "blocked": bool(blocked),
+        "reason": reason,
+        "mm_distribution": mm_distribution,
+        "cmf_20": cmf_20,
+        "cmf_threshold": cmf_threshold,
+    }
+
+
+def _clamp_float(v: Any, *, min_v: float, max_v: float) -> float:
+    try:
+        fv = float(v)
+    except Exception:
+        raise ValueError("Invalid float")
+    if fv < min_v:
+        return min_v
+    if fv > max_v:
+        return max_v
+    return fv
+
+
+def _sanitize_rf_params(
+    raw: Optional[Dict[str, Any]],
+    *,
+    preset: Optional[str],
+    train_len: int,
+    default_min_split: int,
+) -> Dict[str, Any]:
+    base: Dict[str, Any]
+    if (preset or "").lower() == "fast":
+        base = {
+            "n_estimators": 80,
+            "max_depth": 10,
+            "min_samples_split": max(2, min(200, max(10, int(train_len * 0.25)))),
+            "min_samples_leaf": 3,
+            "max_features": "sqrt",
+            "bootstrap": True,
+            "n_jobs": -1,
+            "random_state": 1,
+        }
+    elif (preset or "").lower() == "accurate":
+        base = {
+            "n_estimators": 500,
+            "max_depth": None,
+            "min_samples_split": max(2, default_min_split),
+            "min_samples_leaf": 1,
+            "max_features": "sqrt",
+            "bootstrap": True,
+            "n_jobs": -1,
+            "random_state": 1,
+        }
+    else:
+        base = {
+            "n_estimators": 200,
+            "max_depth": None,
+            "min_samples_split": max(2, default_min_split),
+            "min_samples_leaf": 1,
+            "max_features": "sqrt",
+            "bootstrap": True,
+            "n_jobs": -1,
+            "random_state": 1,
+        }
+
+    if not raw:
+        return base
+
+    out = dict(base)
+
+    for k, v in raw.items():
+        try:
+            if k in ("n_estimators", "verbose"):
+                out[k] = _clamp_int(v, min_v=1, max_v=2000)
+            elif k in ("random_state", "max_leaf_nodes", "n_jobs"):
+                if v is None:
+                    out[k] = None
+                else:
+                    out[k] = _clamp_int(v, min_v=-1 if k == "n_jobs" else 0, max_v=10_000)
+            elif k == "max_depth":
+                if v is None:
+                    out[k] = None
+                else:
+                    out[k] = _clamp_int(v, min_v=1, max_v=256)
+            elif k in ("min_samples_split", "min_samples_leaf"):
+                if isinstance(v, float) or isinstance(v, int):
+                    if 0 < float(v) < 1:
+                        out[k] = _clamp_float(v, min_v=0.0001, max_v=0.9)
+                    else:
+                        out[k] = _clamp_int(v, min_v=2 if k == "min_samples_split" else 1, max_v=10_000)
+            elif k in ("min_weight_fraction_leaf", "min_impurity_decrease", "ccp_alpha"):
+                out[k] = _clamp_float(v, min_v=0.0, max_v=10.0)
+            elif k == "max_features":
+                if v is None:
+                    out[k] = None
+                elif isinstance(v, (int, float)):
+                    if 0 < float(v) <= 1:
+                        out[k] = _clamp_float(v, min_v=0.01, max_v=1.0)
+                    else:
+                        out[k] = _clamp_int(v, min_v=1, max_v=256)
+                elif isinstance(v, str):
+                    vv = v.strip().lower()
+                    if vv in ("sqrt", "log2"):
+                        out[k] = vv
+                    elif vv == "none":
+                        out[k] = None
+            elif k in ("bootstrap", "oob_score", "warm_start"):
+                out[k] = bool(v)
+            elif k == "criterion":
+                if isinstance(v, str):
+                    vv = v.strip().lower()
+                    if vv in ("gini", "entropy", "log_loss"):
+                        out[k] = vv
+            elif k == "class_weight":
+                if v is None or isinstance(v, (str, dict)):
+                    out[k] = v
+            elif k == "max_samples":
+                if v is None:
+                    out[k] = None
+                elif isinstance(v, (int, float)):
+                    if 0 < float(v) <= 1:
+                        out[k] = _clamp_float(v, min_v=0.01, max_v=1.0)
+                    else:
+                        out[k] = _clamp_int(v, min_v=1, max_v=10_000_000)
+        except Exception:
+            continue
+
+    return out
+
+
+def _load_the_council():
+    """
+    Loads multiple pre-trained models and initializes TheCouncil ensemble.
+    """
+    api_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(api_dir, "models")
+    
+    # Define the experts to include in the council
+    model_files = [
+        "KING 👑.pkl",
+        "MINER ⛏.pkl",
+        "SUPER_EGX_EXTENDED_RANDOM_3000.pkl"
+    ]
+    
+    experts = []
+    for filename in model_files:
+        path = os.path.join(models_dir, filename)
+        if not os.path.exists(path):
+            continue
+            
+        try:
+            with open(path, "rb") as f:
+                artifact = pickle.load(f)
+            
+            model = None
+            predictors = LGBM_PREDICTORS
+            
+            # Use same logic as train_and_predict for different artifact kinds
+            if isinstance(artifact, dict) and artifact.get("kind") == "meta_labeling_system":
+                if lgb is not None and xgb is not None:
+                    primary_art = artifact.get("primary_model")
+                    booster = lgb.Booster(model_str=primary_art.get("model_str"))
+                    primary_clf = _LgbmBoosterClassifier(booster, 0.5)
+                    meta_model = artifact.get("meta_model")
+                    meta_feature_names = artifact.get("meta_feature_names")
+                    meta_threshold = artifact.get("meta_threshold", 0.7)
+                    model = _MetaLabelingClassifier(primary_clf, meta_model, meta_feature_names, meta_threshold)
+                    predictors = primary_art.get("feature_names") or list(booster.feature_name())
+            
+            elif isinstance(artifact, dict) and artifact.get("kind") == "lgbm_booster":
+                if lgb is not None:
+                    booster = lgb.Booster(model_str=artifact.get("model_str"))
+                    model = _LgbmBoosterClassifier(booster, artifact.get("threshold", 0.5))
+                    predictors = artifact.get("feature_names") or list(booster.feature_name())
+            
+            else:
+                model = artifact
+                # Guess predictors based on model type if possible, or use RF defaults
+                try:
+                    if hasattr(model, "feature_name_"):
+                        predictors = list(model.feature_name_)
+                    elif hasattr(model, "booster_"):
+                        predictors = list(model.booster_.feature_name())
+                except Exception:
+                    predictors = RF_PREDICTORS
+            
+            if model:
+                experts.append((model, predictors))
+                try:
+                    print(f"Council: Loaded expert from {filename} with {len(predictors)} predictors")
+                except UnicodeEncodeError:
+                    safe_name = filename.encode('ascii', 'ignore').decode('ascii')
+                    print(f"Council: Loaded expert from {safe_name} with {len(predictors)} predictors")
+        except Exception as e:
+            try:
+                print(f"Council: Failed to load expert {filename}: {e}")
+            except UnicodeEncodeError:
+                safe_name = filename.encode('ascii', 'ignore').decode('ascii')
+                print(f"Council: Failed to load expert {safe_name}: {e}")
+
+    if not experts:
+        return None
+    
+    # Threshold 0.6 means if consensus is 50/50, we need 60%+ average probability to BUY
+    return TheCouncil(experts, threshold=0.6)
+
+
+def train_and_predict(
+    df: pd.DataFrame,
+    rf_params: Optional[Dict[str, Any]] = None,
+    rf_preset: Optional[str] = None,
+    exchange: Optional[str] = None,
+    model_name: Optional[str] = None,
+    target_pct: float = 0.15,
+    stop_loss_pct: float = 0.05,
+    look_forward_days: int = 20,
+    buy_threshold: float = 0.45,
+) -> Tuple[Any, List[str], pd.DataFrame, pd.Series, float, float]:
+    """
+    Core prediction logic. 
+    1. Tries to load a pre-trained model for the exchange.
+    2. If not found, trains a fresh RandomForest model on the fly.
+    """
+    preset = (rf_preset or "").lower()
+    
+    # Path for pre-trained model. Prefer explicit model_name if provided,
+    # otherwise fall back to model_{exchange}.pkl convention.
+    api_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(api_dir, "models")
+    if model_name:
+        # Security: keep user-supplied names inside models_dir (no traversal)
+        try:
+            model_path = safe_model_path(model_name, models_dir)
+        except ValueError:
+            print(f"WARNING: rejected unsafe model name: {model_name!r}")
+            model_path = None
+    else:
+        model_filename = f"model_{exchange}.pkl" if exchange else None
+        try:
+            model_path = safe_model_path(model_filename, models_dir) if model_filename else None
+        except ValueError:
+            model_path = None
+    
+    loaded_model = None
+    predictors = RF_PREDICTORS
+    lgbm_artifact_loaded = False
+    
+    # SPECIAL CASE: THE COUNCIL (Ensemble)
+    if model_name == "THE_COUNCIL":
+        loaded_model = _load_the_council()
+        if loaded_model:
+            # Union of all features needed by experts
+            all_preds = set()
+            for _, p_list in loaded_model.experts:
+                all_preds.update(p_list)
+            predictors = list(all_preds)
+            lgbm_artifact_loaded = True # Treat as complex artifact to avoid RF fallbacks
+            print(f"Council active with {len(loaded_model.experts)} experts.")
+    
+    if (not loaded_model) and model_path and os.path.exists(model_path):
+        # Try cached model first
+        cached = _get_model_cached(model_path)
+        if cached:
+            loaded_model, cached_predictors, cached_is_lgbm = cached
+            if cached_predictors:
+                predictors = cached_predictors
+            lgbm_artifact_loaded = bool(cached_is_lgbm)
+            print(f"Using cached model {model_path} with {len(predictors) if predictors else 0} predictors")
+        else:
+            try:
+                with open(model_path, "rb") as f:
+                    loaded_model = pickle.load(f)
+
+                # New lightweight model artifact format from train_exchange_model.py
+                lgbm_artifact_loaded = False
+                if isinstance(loaded_model, dict) and loaded_model.get("kind") == "meta_labeling_system":
+                    if lgb is None:
+                        raise ValueError("lightgbm is required to load meta_labeling_system artifacts")
+                    if xgb is None:
+                        raise ValueError("xgboost is required to load meta_labeling_system artifacts")
+
+                    artifact = loaded_model
+                    primary_art = artifact.get("primary_model")
+                    if not isinstance(primary_art, dict) or primary_art.get("kind") != "lgbm_booster":
+                        raise ValueError("Invalid meta_labeling_system artifact: missing primary_model")
+
+                    model_str = primary_art.get("model_str")
+                    if not isinstance(model_str, str) or not model_str.strip():
+                        raise ValueError("Invalid meta_labeling_system artifact: missing primary model_str")
+
+                    booster = lgb.Booster(model_str=model_str)
+                    
+                    # PCA extraction
+                    pca = primary_art.get("pca")
+                    scaler = primary_art.get("scaler")
+                    pca_features = primary_art.get("pca_features")
+                    pca_transformer = None
+                    if pca is not None and scaler is not None and pca_features:
+                        pca_transformer = _PcaTransformer(pca, scaler, pca_features)
+
+                    primary_clf = _LgbmBoosterClassifier(booster, 0.5, pca_transformer=pca_transformer)
+
+                    f_names = primary_art.get("feature_names")
+                    if isinstance(f_names, list) and f_names:
+                        if pca_features:
+                            predictors = [c for c in f_names if not c.startswith("PCA_Momentum_")] + list(pca_features)
+                        else:
+                            predictors = f_names
+                    else:
+                        try:
+                            predictors = list(booster.feature_name())
+                        except Exception:
+                            predictors = LGBM_PREDICTORS
+
+                    meta_model = artifact.get("meta_model")
+                    meta_feature_names = artifact.get("meta_feature_names")
+                    if not isinstance(meta_feature_names, list):
+                        meta_feature_names = []
+                    meta_threshold = artifact.get("meta_threshold", 0.7)
+
+                    loaded_model = _MetaLabelingClassifier(primary_clf, meta_model, meta_feature_names, meta_threshold)
+                    lgbm_artifact_loaded = True
+
+                    # Extract target settings from artifact
+                    target_pct = primary_art.get("target_pct", target_pct)
+                    stop_loss_pct = primary_art.get("stop_loss_pct", stop_loss_pct)
+                    look_forward_days = primary_art.get("look_forward_days", look_forward_days)
+
+                    _ensure_feature_columns(df, predictors)
+                    try:
+                        print(f"Loaded Meta-Labeling system from {model_path} with {len(predictors)} primary predictors")
+                    except UnicodeEncodeError:
+                        print(f"Loaded Meta-Labeling system (path contains special characters) with {len(predictors)} primary predictors")
+
+                if isinstance(loaded_model, dict) and loaded_model.get("kind") == "lgbm_booster":
+                    if lgb is None:
+                        raise ValueError("lightgbm is required to load lgbm_booster artifacts")
+
+                    artifact = loaded_model
+                    model_str = artifact.get("model_str")
+                    if not isinstance(model_str, str) or not model_str.strip():
+                        raise ValueError("Invalid lgbm_booster artifact: missing model_str")
+
+                    booster = lgb.Booster(model_str=model_str)
+                    
+                    # PCA extraction
+                    pca = artifact.get("pca")
+                    scaler = artifact.get("scaler")
+                    pca_features = artifact.get("pca_features")
+                    pca_transformer = None
+                    if pca is not None and scaler is not None and pca_features:
+                        pca_transformer = _PcaTransformer(pca, scaler, pca_features)
+
+                    threshold = artifact.get("threshold")
+                    loaded_model = _LgbmBoosterClassifier(
+                        booster, 
+                        threshold if isinstance(threshold, (int, float)) else 0.5,
+                        pca_transformer=pca_transformer
+                    )
+                    lgbm_artifact_loaded = True
+
+                    f_names = artifact.get("feature_names")
+                    if isinstance(f_names, list) and f_names:
+                        if pca_features:
+                            predictors = [c for c in f_names if not c.startswith("PCA_Momentum_")] + list(pca_features)
+                        else:
+                            predictors = f_names
+                    else:
+                        try:
+                            predictors = list(booster.feature_name())
+                        except Exception:
+                            predictors = LGBM_PREDICTORS
+
+                    if not predictors:
+                        raise ValueError(
+                            "No overlapping predictors between trained LightGBM booster and current feature set. Please retrain the model."
+                        )
+
+                    print(f"Loaded LightGBM booster artifact from {model_path} with {len(predictors)} predictors")
+                    
+                    # Extract target settings from artifact
+                    target_pct = artifact.get("target_pct", target_pct)
+                    stop_loss_pct = artifact.get("stop_loss_pct", stop_loss_pct)
+                    look_forward_days = artifact.get("look_forward_days", look_forward_days)
+
+                    _ensure_feature_columns(df, predictors)
+
+                # Identify predictors based on model type
+                if (not lgbm_artifact_loaded) and LGBMClassifier and isinstance(loaded_model, LGBMClassifier):
+                    model_features = None
+                    # Prefer the feature names stored with the trained model to avoid
+                    # shape mismatches when the global feature list changes.
+                    try:
+                        model_features = getattr(loaded_model, "feature_name_", None)
+                    except Exception:
+                        model_features = None
+
+                    if (not model_features) and hasattr(loaded_model, "booster_"):
+                        try:
+                            booster = getattr(loaded_model, "booster_", None)
+                            if booster is not None:
+                                model_features = booster.feature_name()
+                        except Exception:
+                            model_features = None
+
+                    if model_features:
+                        predictors = list(model_features)
+                    else:
+                        predictors = LGBM_PREDICTORS
+
+                    if not predictors:
+                        raise ValueError(
+                            "No overlapping predictors between trained LightGBM model and current feature set. Please retrain the model."
+                        )
+
+                    print(f"Loaded pre-trained LightGBM model from {model_path} with {len(predictors)} predictors")
+                    _ensure_feature_columns(df, predictors)
+                elif not lgbm_artifact_loaded:
+                    predictors = [p for p in RF_PREDICTORS if p in df.columns]
+                    print(f"Loaded pre-trained model for {exchange}")
+
+                # Save to cache
+                _set_model_cache(model_path, loaded_model, predictors, lgbm_artifact_loaded)
+            except Exception as e:
+                print(f"Failed to load pre-trained model {model_path}: {e}")
+                loaded_model = None
+
+    if loaded_model and predictors:
+        _ensure_feature_columns(df, predictors)
+
+    if preset == "fast" and len(df) > 600:
+        df = df.iloc[-600:].copy()
+
+    # If we have a loaded model, we don't need to "train" but we still need to generate
+    # test predictions and precision for the UI.
+    if loaded_model:
+        if len(df) < 100:  # Smaller threshold for pre-trained validation
+            # If really short, just return the last prediction with dummy precision
+            last_row = df.iloc[[-1]][predictors]
+            pred = int(loaded_model.predict(last_row)[0])
+            return loaded_model, predictors, df.iloc[[-1]], pd.Series([pred], index=[df.index[-1]]), 0.8, 0.0
+
+        # For precision metrics, we MUST exclude the trailing look_forward_days rows
+        # because we don't know the ground truth for them yet.
+        test_data_pool = df.iloc[:-look_forward_days].copy()
+
+        # Relax test size for pre-trained validation
+        # Use all available data for testing to satisfy the "test all rows" request
+        test_size = len(test_data_pool)
+        test = test_data_pool.iloc[-test_size:]
+
+        if hasattr(loaded_model, "predict_proba"):
+            try:
+                probs = loaded_model.predict_proba(test[predictors])[:, 1]
+                preds = (probs >= buy_threshold).astype(int)
+            except Exception as e:
+                # Catch categorical mismatch specifically for LightGBM
+                if "categorical_feature do not match" in str(e):
+                    print(f"DEBUG: Categorical mismatch for model. Falling back to simple predict.")
+                    try:
+                        # Try simple predict as fallback
+                        preds = loaded_model.predict(test[predictors])
+                    except:
+                        # Last resort: neutral prediction if model is totally broken for this stock
+                        preds = np.zeros(len(test), dtype=int)
+                else:
+                    try:
+                        preds = loaded_model.predict(test[predictors])
+                    except:
+                        preds = np.zeros(len(test), dtype=int)
+        else:
+            try:
+                preds = loaded_model.predict(test[predictors])
+            except:
+                preds = np.zeros(len(test), dtype=int)
+
+        preds = pd.Series(preds, index=test.index)
+        precision = precision_score(test["Target"], preds, zero_division=0)
+
+        profit = _profit_metrics_from_preds(test, preds, target_pct, stop_loss_pct)
+        return loaded_model, predictors, test, preds, float(precision), float(profit["avg_trade_return_pct"])
+
+    # If a specific model was requested but not loaded, stop here to avoid on-the-fly training
+    if model_name:
+        raise ValueError(
+            f"Requested model '{model_name}' not loaded. Please place the .pkl file and retry."
+        )
+
+    # Fallback to existing training logic (only when no explicit model_name)
+    use_lgbm = (LGBMClassifier is not None)
+
+    if use_lgbm:
+        # Use rich feature set for Gradient Boosting
+        predictors = [p for p in LGBM_PREDICTORS if p in df.columns]
+    else:
+        # Fallback to smaller set for RF
+        predictors = [p for p in RF_PREDICTORS if p in df.columns]
+
+    if len(df) < 120:
+        raise ValueError("Not enough data to train. Need at least ~120 rows.")
+
+    if preset == "fast":
+        test_size = 60 if len(df) > 260 else max(40, int(len(df) * 0.2))
+    else:
+        test_size = 100 if len(df) > 400 else max(40, int(len(df) * 0.2))
+
+    train = df.iloc[:-test_size]
+    test = df.iloc[-test_size:]
+
+    if use_lgbm:
+        # Validation split for early stopping logic
+        val_size = max(20, int(len(train) * 0.15))
+        train_inner = train.iloc[:-val_size]
+        val_inner = train.iloc[-val_size:]
+
+        # Configure LightGBM with robust parameters
+        model = LGBMClassifier(
+            n_estimators=1000,
+            learning_rate=0.03,
+            num_leaves=31,
+            max_depth=-1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1,
+            importance_type='gain',
+            verbose=-1
+        )
+
+        callbacks = []
+        if lgb:
+            # Use LightGBM callbacks for early stopping (requires validation set)
+            callbacks.append(lgb.early_stopping(stopping_rounds=50, verbose=False))
+            callbacks.append(lgb.log_evaluation(period=0))
+
+        try:
+            model.fit(
+                train_inner[predictors], train_inner["Target"],
+                eval_set=[(val_inner[predictors], val_inner["Target"])],
+                eval_metric="logloss",
+                callbacks=callbacks
+            )
+            print(f"Trained LGBM (Early Stopping @ {model.best_iteration_ if hasattr(model, 'best_iteration_') else 'N/A'})")
+        except Exception as e:
+            print(f"LGBM Training failed ({e}), falling back to RF...")
+            use_lgbm = False  # Trigger fallback below
+
+    if not use_lgbm:
+        # Legacy Random Forest fallback
+        min_split = min(100, max(2, int(len(train) * 0.2)))
+
+        model_kwargs = _sanitize_rf_params(
+            rf_params,
+            preset=rf_preset,
+            train_len=len(train),
+            default_min_split=min_split,
+        )
+
+        model = RandomForestClassifier(**model_kwargs)
+        model.fit(train[predictors], train["Target"])
+
+    # Use probability threshold instead of hard default 0.5
+    # To make it bolder, we use the passed buy_threshold
+    try:
+        probs = model.predict_proba(test[predictors])[:, 1]
+        preds = (probs >= buy_threshold).astype(int)
+    except Exception:
+        # Fallback if model doesn't support predict_proba
+        preds = model.predict(test[predictors])
+
+    preds = pd.Series(preds, index=test.index)
+    precision = precision_score(test["Target"], preds, zero_division=0)
+
+    profit = _profit_metrics_from_preds(test, preds, target_pct, stop_loss_pct)
+    return model, predictors, test, preds, float(precision), float(profit["avg_trade_return_pct"])
+
+
+def _profit_metrics_from_preds(
+    test: pd.DataFrame,
+    preds: pd.Series,
+    target_pct: float,
+    stop_loss_pct: float,
+) -> Dict[str, Any]:
+    buy_mask = (preds == 1)
+    buy_indices = preds.index[buy_mask]
+    trades = int(len(buy_indices))
+    if trades <= 0:
+        return {
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "avg_trade_return_pct": 0.0,
+            "total_return_pct": 0.0,
+        }
+
+    wins = int((test.loc[buy_indices, "Target"].astype(int) == 1).sum())
+    losses = int(trades - wins)
+    win_rate = float(wins / trades) if trades > 0 else 0.0
+
+    trade_returns = np.where(
+        (test.loc[buy_indices, "Target"].astype(int).values == 1),
+        float(target_pct),
+        -float(stop_loss_pct),
+    )
+    avg_trade_return_pct = float(np.mean(trade_returns) * 100.0) if trades > 0 else 0.0
+    total_return_pct = float(np.sum(trade_returns) * 100.0) if trades > 0 else 0.0
+
+    return {
+        "trades": trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "avg_trade_return_pct": avg_trade_return_pct,
+        "total_return_pct": total_return_pct,
+    }
+
+
+def _walk_forward_profit_folds(
+    test: pd.DataFrame,
+    preds: pd.Series,
+    target_pct: float,
+    stop_loss_pct: float,
+    folds: int = 5,
+) -> List[Dict[str, Any]]:
+    if test is None or test.empty:
+        return []
+
+    if folds < 2:
+        folds = 2
+
+    test_sorted = test.sort_index()
+    preds_sorted = preds.loc[test_sorted.index]
+
+    n = int(len(test_sorted))
+    if n < folds * 10:
+        return []
+
+    fold_size = max(10, n // folds)
+    out: List[Dict[str, Any]] = []
+    start = 0
+    while start < n:
+        end = min(n, start + fold_size)
+        fold_test = test_sorted.iloc[start:end]
+        fold_preds = preds_sorted.loc[fold_test.index]
+        m = _profit_metrics_from_preds(fold_test, fold_preds, target_pct, stop_loss_pct)
+        out.append(
+            {
+                "start": str(pd.to_datetime(fold_test.index.min()).date()) if len(fold_test) else None,
+                "end": str(pd.to_datetime(fold_test.index.max()).date()) if len(fold_test) else None,
+                **m,
+            }
+        )
+        start = end
+
+    return out
+
+
+def calculate_ai_score_val(prob: float, buy_threshold: float = 0.5) -> int:
+    try:
+        if prob >= buy_threshold:
+            denom = (1.0 - buy_threshold)
+            if denom <= 0: denom = 0.01
+            scaled = 6 + (prob - buy_threshold) / denom * 4
+            return int(round(min(max(scaled, 6), 10)))
+        else:
+            denom = buy_threshold
+            if denom <= 0: denom = 0.01
+            scaled = 1 + (prob / denom) * 4
+            return int(round(min(max(scaled, 1), 5)))
+    except Exception:
+        return 5
+
+def calculate_technical_score_val(row) -> int:
+    score = 0
+    try:
+        rsi = float(row.get("RSI", 50))
+        if 30 <= rsi <= 70: score += 2
+        elif 20 <= rsi < 30 or 70 < rsi <= 80: score += 1
+        
+        close = float(row.get("Close", 0))
+        ema50 = float(row.get("EMA_50", 0))
+        ema200 = float(row.get("EMA_200", 0))
+        if close > ema50 > ema200 > 0: score += 2
+        elif close > ema50 > 0 or close > ema200 > 0: score += 1
+        
+        adx = float(row.get("ADX_14", 0))
+        if adx > 25: score += 2
+        elif adx > 15: score += 1
+        
+        volume = float(row.get("Volume", 0))
+        vol_sma = float(row.get("VOL_SMA20", 1))
+        if vol_sma > 0 and volume > vol_sma: score += 2
+        elif vol_sma > 0 and volume > vol_sma * 0.7: score += 1
+    except Exception:
+        pass
+    return min(10, max(1, score))
+
+def calculate_fundamental_score_val(row) -> int:
+    score = 0
+    try:
+        pe = float(row.get("peRatio", 0))
+        if 0 < pe <= 15: score += 3
+        elif 15 < pe <= 25: score += 2
+        elif 25 < pe <= 40: score += 1
+        
+        eps = float(row.get("eps", 0))
+        if eps > 1: score += 3
+        elif eps > 0: score += 2
+        elif eps > -0.5: score += 1
+        
+        div_yield = float(row.get("dividendYield", 0))
+        if div_yield > 3: score += 2
+        elif div_yield > 1: score += 1
+        
+        mkt_cap = float(row.get("marketCap", 0))
+        if mkt_cap > 10_000_000_000: score += 2
+        elif mkt_cap > 1_000_000_000: score += 1
+    except Exception:
+        pass
+    return min(10, max(1, score))
+
+def calculate_sentiment_score_val(row) -> int:
+    score = 5
+    try:
+        mom = float(row.get("Momentum", 0))
+        if mom > 0.02: score += 2
+        elif mom > 0: score += 1
+        elif mom < -0.02: score -= 2
+        elif mom < 0: score -= 1
+        
+        rsi = float(row.get("RSI", 50))
+        if rsi > 70: score += 1
+        elif rsi < 30: score -= 2
+        
+        volume = float(row.get("Volume", 0))
+        vol_sma = float(row.get("VOL_SMA20", 1))
+        r_vol = volume / vol_sma if vol_sma > 0 else 1.0
+        if r_vol > 2.0: score += 2
+        elif r_vol > 1.2: score += 1
+        elif r_vol < 0.5: score -= 1
+    except Exception:
+        pass
+    return min(10, max(1, score))
+
+
+def rescale_news_sentiment(raw_score: float) -> int:
+    """
+    Convert a raw news sentiment score in [-1.0, +1.0] to the 1-10 integer scale
+    used by the AI score display. Score 0 maps to ~6, +1 maps to 10, -1 maps to 1.
+    """
+    scaled = int((raw_score + 1.0) * 4.5) + 1
+    return max(1, min(10, scaled))
+
+
+def run_pipeline(
+    api_key: str,
+    ticker: str,
+    from_date: str = "2020-01-01",
+    to_date: Optional[str] = None,
+    include_fundamentals: bool = True,
+    tolerance_days: int = 0,
+    exchange: Optional[str] = None,
+    force_local: bool = False,
+    rf_params: Optional[Dict[str, Any]] = None,
+    rf_preset: Optional[str] = None,
+    model_name: Optional[str] = None,
+    target_pct: float = 0.15,
+    stop_loss_pct: float = 0.05,
+    look_forward_days: int = 20,
+    buy_threshold: float = 0.45,
+    use_volatility_label: bool = False,
+) -> Dict[str, Any]:
+    api = APIClient(api_key)
+
+    last_error: Optional[Exception] = None
+    prices_ai: Optional[pd.DataFrame] = None
+    selected_symbol: Optional[str] = None
+    last_candidate_len: Optional[int] = None
+    # For model testing, we only need ~10-20 rows after engineering to make a valid current prediction
+    min_required = 10 if model_name else 120
+
+    for sym in _candidate_symbols(ticker, exchange):
+        try:
+            raw = get_stock_data_eodhd(
+                api, 
+                sym, 
+                from_date=from_date, 
+                to_date=to_date,
+                tolerance_days=tolerance_days, 
+                exchange=exchange,
+                force_local=force_local
+            )
+            if raw is None or raw.empty:
+                raise ValueError(
+                    f"No historical data available for {sym} from local cache. "
+                    "Try sync first or disable force_local."
+                )
+
+            # Trim early to reduce heavy feature computation during scanning
+            if force_local and len(raw) > 500:
+                raw = raw.iloc[-500:].copy()
+            # Generate a rich feature set to match models trained by train_exchange_model.py.
+            # This is critical for "max" models that rely on TA/massive features.
+            # USE CACHED VERSION AS IT IS VERY EXPENSIVE
+            feat = _get_indicator_cache().get_with_massive_features(sym, exchange or "US", raw)
+            
+            # Re-ensure basic indicators are there (without wiping massive features)
+            try:
+                required_indicator_cols = {"SMA_50", "CMF_20", "MM_Accumulation", "MM_Distribution"}
+                if not required_indicator_cols.issubset(set(feat.columns)):
+                    feat_with_ind = _get_data_with_indicators_cached(sym, exchange or "US", feat, add_technical_indicators)
+                    if feat_with_ind is not None and not feat_with_ind.empty:
+                        # Merge instead of overwrite to keep massive features
+                        # Use concat to avoid fragmentation warning
+                        new_cols = [c for c in feat_with_ind.columns if c not in feat.columns]
+                        if new_cols:
+                            feat = pd.concat([feat, feat_with_ind[new_cols]], axis=1)
+            except Exception:
+                pass
+
+            # NEW: Add Market Context features (Level 4)
+            # Infer exchange from symbol if not provided
+            current_exchange = exchange or (sym.split('.')[-1] if '.' in sym else "US")
+            index_sym = "EGX30.INDX" if current_exchange in ["EGX", "CA"] else "GSPC.INDX"
+            
+            # Fetch index data (simple internal cache / optimized fetch could be added here)
+            # For now, quick fetch
+            market_df = None
+            try:
+                if supabase:
+                    m_res = supabase.table("stock_prices").select("date, close").eq("symbol", index_sym).order("date", desc=False).execute()
+                    if m_res.data:
+                        market_df = pd.DataFrame(m_res.data)
+                        market_df["date"] = pd.to_datetime(market_df["date"])
+                        market_df = market_df.set_index("date").sort_index()
+                        market_df['atr'] = market_df['close'].pct_change().rolling(20).std().fillna(0)
+            except Exception:
+                pass # Silently fail back to defaults if index not found
+            
+            feat = add_market_context(feat, market_df)
+
+            # --- PHASE EXTRA: Incorporate Fundamentals ---
+            if include_fundamentals:
+                try:
+                    funds = get_company_fundamentals(sym) or {}
+                    if funds:
+                        feat["marketCap"] = _finite_float(funds.get("marketCap"))
+                        feat["peRatio"] = _finite_float(funds.get("peRatio"))
+                        feat["eps"] = _finite_float(funds.get("eps"))
+                        feat["dividendYield"] = _finite_float(funds.get("dividendYield"))
+                        feat["sector"] = funds.get("sector")
+                        feat["industry"] = funds.get("industry")
+                        # Handle categorical explicitly for LGBM
+                        for c in ["sector", "industry"]:
+                            if c in feat.columns:
+                                # Safe categorical fillna
+                                feat[c] = feat[c].astype(str).replace(['nan', 'None', 'None', ''], "Unknown").astype("category")
+                except Exception as e:
+                    print(f"Warning: Fundamental merge failed for {sym}: {e}")
+
+            # 1. Try with all features, keeping trailing rows for prediction
+            candidate = prepare_for_ai(
+                feat, 
+                target_pct=target_pct, 
+                stop_loss_pct=stop_loss_pct, 
+                look_forward_days=look_forward_days, 
+                drop_labels=False,
+                use_volatility_label=use_volatility_label
+            )
+            
+            # 2. If not enough data (likely due to SMA_200 NaNs on a short history), 
+            #    drop SMA_200 and try again.
+            if len(candidate) < 120 and "SMA_200" in feat.columns:
+                print(f"Warning: Insufficient data for SMA_200 (rows={len(candidate)}). Retrying without it.")
+                feat_reduced = feat.drop(columns=["SMA_200"])
+                candidate = prepare_for_ai(
+                    feat_reduced, 
+                    target_pct=target_pct, 
+                    stop_loss_pct=stop_loss_pct, 
+                    look_forward_days=look_forward_days,
+                    use_volatility_label=use_volatility_label
+                )
+
+            last_candidate_len = len(candidate)
+
+            if len(candidate) >= min_required:
+                prices_ai = candidate
+                selected_symbol = sym
+                break
+            
+            last_error = ValueError(f"Not enough rows after feature engineering. Got {len(candidate)}")
+        except Exception as e:
+            last_error = e
+
+    if prices_ai is None:
+        suffix = ""
+        if selected_symbol:
+            suffix = f" (tried {selected_symbol})"
+        
+        if last_candidate_len is not None:
+            raise ValueError(
+                f"Insufficient historical data for {ticker}{suffix}. Need at least ~{min_required} rows after feature engineering, got {last_candidate_len}."
+            ) from last_error
+        
+        err_msg = f"Insufficient historical data or symbol not available on your API plan for {ticker}{suffix}."
+        if last_error:
+            err_msg += f" Details: {str(last_error)}"
+        raise ValueError(err_msg) from last_error
+
+    # For scanning mode (FAST SCAN), limit rows to shrink indicator computation and speed up
+    # But if we are running a specific MODEL TEST (model_name is set), we want more history.
+    limit_rows = 10000 if model_name else 450
+    if force_local and len(prices_ai) > limit_rows:
+        prices_ai = prices_ai.iloc[-limit_rows:].copy()
+
+    # For training (on-the-fly), we MUST exclude the trailing look_forward_days rows 
+    # because they don't have accurate 'Target' labels yet (future is unknown).
+    prices_ai_training = prices_ai.iloc[:-look_forward_days].copy() if not model_name else prices_ai
+
+    model, predictors, test_df, preds, precision, earn_percentage = train_and_predict(
+        df=prices_ai_training,
+        rf_params=rf_params,
+        rf_preset=rf_preset,
+        exchange=exchange,
+        model_name=model_name,
+        target_pct=target_pct,
+        stop_loss_pct=stop_loss_pct,
+        look_forward_days=look_forward_days,
+        buy_threshold=buy_threshold,
+    )
+
+    profit_summary = None
+    walk_forward_folds = []
+    try:
+        profit_summary = _profit_metrics_from_preds(test_df, preds, target_pct, stop_loss_pct)
+        walk_forward_folds = _walk_forward_profit_folds(test_df, preds, target_pct, stop_loss_pct, folds=5)
+    except Exception:
+        profit_summary = None
+        walk_forward_folds = []
+
+    _ensure_feature_columns(prices_ai, predictors)
+    last_row = prices_ai.iloc[[-1]][predictors]
+    if hasattr(model, "predict_proba"):
+        try:
+            prob = model.predict_proba(last_row)[:, 1][0]
+            tomorrow_prediction = 1 if prob >= buy_threshold else 0
+        except Exception as e:
+            msg = str(e)
+            if "categorical_feature do not match" in msg:
+                print(f"DEBUG: Categorical mismatch in final prediction for {selected_symbol or ticker}. Falling back.")
+            try:
+                tomorrow_prediction = int(model.predict(last_row)[0])
+            except:
+                tomorrow_prediction = 0 # Default to no action if all fails
+    else:
+        try:
+            tomorrow_prediction = int(model.predict(last_row)[0])
+        except:
+            tomorrow_prediction = 0
+
+    distribution_gate = get_distribution_gate(prices_ai.iloc[-1])
+    if tomorrow_prediction == 1 and distribution_gate["blocked"]:
+        tomorrow_prediction = 0
+
+    # Sentiment Veto Gate
+    sentiment_data = _get_latest_news_sentiment(selected_symbol or ticker)
+    news_sentiment_score = sentiment_data["sentiment_score"]
+    news_count = sentiment_data["news_count"]
+    sentiment_veto = (sentiment_data["negative_flag"] == 1)
+
+    if tomorrow_prediction == 1 and sentiment_veto:
+        print(f"[SENTIMENT_VETO] Gated prediction for {selected_symbol or ticker} due to negative news sentiment ({news_sentiment_score})")
+        tomorrow_prediction = 0
+
+    market_gate = _get_market_buy_gate()
+    if tomorrow_prediction == 1 and market_gate.get("blocked"):
+        print(f"[MARKET_GATE] Gated prediction for {selected_symbol or ticker}: {market_gate.get('reason')}")
+        tomorrow_prediction = 0
+            
+    # --- PHASE: Ensemble Consensus ---
+    consensus_info = None
+    if isinstance(model, TheCouncil):
+        try:
+            v_list = []
+            p_list = []
+            for expert_model, expert_preds in model.experts:
+                # Prepare row for this expert, handling missing features gracefully
+                missing = [p for p in expert_preds if p not in last_row.columns]
+                if missing:
+                    row_copy = last_row.copy()
+                    for m in missing: row_copy[m] = 0
+                    row_final = row_copy[expert_preds]
+                else:
+                    row_final = last_row[expert_preds]
+
+                if hasattr(expert_model, "predict_proba"):
+                    res = expert_model.predict_proba(row_final)
+                    prob = res[:, 1][0] if (res.ndim == 2 and res.shape[1] == 2) else res.flatten()[0]
+                    vote = 1 if prob >= 0.5 else 0
+                else:
+                    vote = int(expert_model.predict(row_final)[0])
+                    prob = float(vote)
+                v_list.append(vote)
+                p_list.append(prob)
+            
+            buy_votes = sum(v_list)
+            total = len(v_list)
+            avg_conf = sum(p_list) / total
+            consensus_info = {
+                "vote_count": f"{buy_votes}/{total}",
+                "avg_confidence": f"{round(avg_conf * 100)}%",
+                "ratio": round(buy_votes / total, 2)
+            }
+        except Exception as e:
+            print(f"Warning: Failed to calculate ensemble consensus: {e}")
+
+    # --- Phase 7: Finalize Data ---
+    last_close = float(prices_ai.iloc[-1]["Close"])
+    last_date = str(pd.to_datetime(prices_ai.index[-1]).date())
+
+    # --- ADAPTIVE LEARNING LOGGING ---
+    # Log the LATEST prediction (today's signal) for future manual retraining/review
+    # Only if using a specific loaded model (active production model)
+    if model_name: 
+        try:
+            from api.adaptive_learning import ActiveLearner
+            # Use 'EODHD' or 'US' if exchange is not explicitly set
+            logging_exchange = exchange or "EGX" 
+            learner = ActiveLearner(exchange=logging_exchange)
+            
+            # Get probability for confidence
+            pred_conf = 0.5
+            if hasattr(model, "predict_proba"):
+                try:
+                    p = model.predict_proba(last_row)[:, 1][0]
+                    pred_conf = float(p)
+                except: 
+                    pred_conf = float(tomorrow_prediction)
+            else:
+                 pred_conf = float(tomorrow_prediction)
+
+            # Extract features (values only)
+            # last_row is a DataFrame with 1 row
+            feat_vals = last_row.values[0]
+
+            # Prepare data for scan_results
+            safe_last_close = _finite_float(last_close)
+            safe_pred_conf = _finite_float(pred_conf)
+            data = {
+                "user_id": None, # This is a server-side log, no user_id by default
+                "symbol": selected_symbol or ticker,
+                "exchange": logging_exchange,
+                "name": selected_symbol or ticker,
+                "model_name": model_name,
+                "country": "Egypt", # Default country for this app context
+                "last_close": safe_last_close,
+                "precision": safe_pred_conf,
+                "signal": "BUY" if tomorrow_prediction == 1 else "SELL",
+                "distribution_gate": distribution_gate,
+                "status": "open",
+                "entry_price": safe_last_close,
+                "features": json.dumps([_sanitize_value(v) for v in (feat_vals.tolist() if hasattr(feat_vals, "tolist") else list(feat_vals))]),
+                "created_at": dt.datetime.now().isoformat()
+            }
+            # Check if there is already an open recommendation for this symbol
+            existing = (
+                supabase.table("scan_results")
+                .select("id")
+                .eq("symbol", data["symbol"])
+                .eq("status", "open")
+                .execute()
+            )
+            if existing.data:
+                rec_id = existing.data[0]["id"]
+                update_data = {
+                    "precision": data["precision"],
+                    "signal": data["signal"],
+                    "last_close": data["last_close"],
+                    "features": data["features"],
+                    "updated_at": dt.datetime.now().isoformat()
+                }
+                supabase.table("scan_results").update(_sanitize_for_json(update_data)).eq("id", rec_id).execute()
+            else:
+                supabase.table("scan_results").insert(_sanitize_for_json(data)).execute()
+        except Exception as e:
+            print(f"Adaptive logging warning: {e}")
+
+    # --- Phase 8: Explainable AI (Top 3 Reasons) ---
+    top_reasons = get_top_reasons(model, predictors)
+
+    # Fill NaNs for indicators to avoid JSON serialization issues or frontend gaps
+    # Forward fill then backward fill to cover edges
+    cols_to_fill = ["EMA_50", "EMA_200", "MACD", "MACD_Signal", "BB_Upper", "BB_Lower", "RSI", "Momentum"]
+    for c in cols_to_fill:
+        if c in prices_ai.columns:
+            prices_ai[c] = prices_ai[c].ffill().bfill().fillna(0.0)
+
+    # Create display window
+    # User requested "all data", so we return the full dataset provided by the logic
+    display_df = prices_ai
+
+    out_preds: List[Dict[str, Any]] = []
+    for idx, row in display_df.iterrows():
+        # Check if this row has a prediction (was in test set)
+        p = preds.get(idx) 
+        
+        # If p is None (training data), default to 0 (Hold) or similar?
+        # User implies they want to see the chart context. 
+        # We won't show "Buy" markers for training data to avoiding "perfect fit" confusion.
+        prediction_val = int(p) if p is not None else 0
+        
+        target_val = int(row["Target"]) # Target is future > current
+
+        close_v = _finite_float(row.get("Close"))
+        if close_v is None:
+            continue
+
+        row_data = {
+            "date": str(pd.to_datetime(idx).date()),
+            "close": close_v,
+            "pred": prediction_val,
+            "target": target_val,
+            "is_test": p is not None,  # Identify if this row belongs to the test set
+        }
+        
+        # Add OHLC
+        if "Open" in row:
+            v = _finite_float(row["Open"])
+            if v is not None:
+                row_data["open"] = v
+        if "High" in row:
+            v = _finite_float(row["High"])
+            if v is not None:
+                row_data["high"] = v
+        if "Low" in row:
+            v = _finite_float(row["Low"])
+            if v is not None:
+                row_data["low"] = v
+        if "Volume" in row:
+            v = _finite_float(row["Volume"])
+            if v is not None:
+                row_data["volume"] = v
+
+        # Add indicators
+        if "SMA_50" in row:
+            v = _finite_float(row["SMA_50"])
+            if v is not None:
+                row_data["sma50"] = v
+        if "SMA_200" in row:
+            v = _finite_float(row["SMA_200"])
+            if v is not None:
+                row_data["sma200"] = v
+        
+        if "EMA_50" in row:
+            v = _finite_float(row["EMA_50"])
+            if v is not None:
+                row_data["ema50"] = v
+        
+        # EMA_200 should now be present for almost all rows
+        if "EMA_200" in row:
+            v = _finite_float(row["EMA_200"])
+            if v is not None:
+                row_data["ema200"] = v
+        
+        if "MACD" in row:
+            v = _finite_float(row["MACD"])
+            if v is not None:
+                row_data["macd"] = v
+        if "MACD_Signal" in row:
+            v = _finite_float(row["MACD_Signal"])
+            if v is not None:
+                row_data["macd_signal"] = v
+        if "BB_Upper" in row:
+            v = _finite_float(row["BB_Upper"])
+            if v is not None:
+                row_data["bb_upper"] = v
+        if "BB_Lower" in row:
+            v = _finite_float(row["BB_Lower"])
+            if v is not None:
+                row_data["bb_lower"] = v
+
+        if "RSI" in row:
+            v = _finite_float(row["RSI"])
+            if v is not None:
+                row_data["rsi"] = v
+        if "Momentum" in row:
+            v = _finite_float(row["Momentum"])
+            if v is not None:
+                row_data["momentum"] = v
+        
+        out_preds.append(row_data)
+
+    fundamentals = get_company_fundamentals(selected_symbol or ticker) if include_fundamentals else {}
+    fundamentals = _sanitize_fundamentals(fundamentals) if include_fundamentals else {}
+    fundamentals_error = None
+    if include_fundamentals and not fundamentals:
+        fundamentals_error = "Fundamentals not available from yfinance."
+
+    # Calculate current scores
+    last_row_dict = prices_ai.iloc[-1].to_dict()
+    if fundamentals:
+        last_row_dict.update(fundamentals)
+    current_ai_score = calculate_ai_score_val(float(precision), buy_threshold)
+    current_tech_score = calculate_technical_score_val(last_row_dict)
+    current_fund_score = calculate_fundamental_score_val(last_row_dict)
+    
+    # Use real news sentiment if available, otherwise fallback to momentum-based sentiment score
+    # news_count and news_sentiment_score are always initialized (lines ~3829) before the veto gate;
+    # no 'in locals()' check needed — a direct value check is robust against reordering.
+    if news_count > 0:
+        current_sent_score = rescale_news_sentiment(news_sentiment_score)
+    else:
+        current_sent_score = calculate_sentiment_score_val(last_row_dict)
+
+    return {
+        "ticker": selected_symbol or ticker,
+        "precision": precision,
+        "ai_score": current_ai_score,
+        "technical_score": current_tech_score,
+        "fundamental_score": current_fund_score,
+        "sentiment_score": current_sent_score,
+        "earnPercentage": earn_percentage,
+        "profitSummary": profit_summary,
+        "walkForwardFolds": walk_forward_folds,
+        "tomorrowPrediction": tomorrow_prediction,
+        "distributionGate": distribution_gate,
+        "sentimentVeto": sentiment_veto,
+        "newsSentiment": sentiment_data,
+        "marketGate": market_gate,
+        "lastClose": last_close,
+        "lastDate": last_date,
+        "fundamentals": fundamentals,
+        "fundamentalsError": fundamentals_error,
+        "testPredictions": out_preds,
+        "note": "Precision is the % of correct UP predictions in the test set. Higher is better.",
+        "topReasons": top_reasons,
+        "consensus": consensus_info,
+    }
+
+# Alias for compatibility
+get_stock_data = get_stock_data_eodhd
+
+def batch_check_local_cache(symbol_exchange_list: List[Tuple[str, Optional[str]]]) -> Dict[Tuple[str, Optional[str]], bool]:
+    """Efficiently checks multiple symbols in Supabase in a single batch (via cached_tickers)."""
+    cached_set = get_cached_tickers()
+    results = {}
+    for s, e in symbol_exchange_list:
+        # Normalize for lookup
+        sym, ex = _infer_symbol_exchange(s, e)
+        # Check against cached set OR fall back to direct check if set is empty
+        if not cached_set:
+            results[(s, e)] = is_ticker_synced(s, e)
+        else:
+            results[(s, e)] = (sym, ex) in cached_set
+    return results
+
+def batch_get_stock_data(
+    api: APIClient,
+    ticker_list: List[str],
+    from_date: str,
+    exchange_list: Optional[List[Optional[str]]] = None,
+    force_local: bool = True
+) -> Dict[str, pd.DataFrame]:
+    """
+    Fetches stock data for multiple tickers. 
+    Currently sequential but optimized for cloud-first lookups.
+    """
+    results = {}
+    for i, ticker in enumerate(ticker_list):
+        ex = exchange_list[i] if exchange_list else None
+        try:
+            df = get_stock_data_eodhd(api, ticker, from_date, exchange=ex, force_local=force_local)
+            if not df.empty:
+                results[ticker] = df
+        except Exception:
+            continue
+    return results

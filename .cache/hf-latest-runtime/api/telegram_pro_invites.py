@@ -1,0 +1,450 @@
+"""Pro Telegram VIP invite links and channel membership tracking."""
+from __future__ import annotations
+
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional, Set
+
+import requests
+
+from api.stock_ai import _init_supabase, supabase
+
+
+ACTIVE_PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime"]
+
+
+def pro_chat_id() -> str:
+    return os.getenv("TELEGRAM_PRO_CHAT_ID", "").strip()
+
+
+def _bot_token() -> str:
+    return os.getenv("SUPPORT_BOT_TOKEN", "").strip()
+
+
+def _telegram_bases() -> list[str]:
+    """Return the relay and official API once each, in preference order."""
+    bases: list[str] = []
+    for raw in (os.getenv("TELEGRAM_RELAY_URL", "https://api.telegram.org"), "https://api.telegram.org"):
+        base = raw.rstrip("/")
+        if base and base not in bases:
+            bases.append(base)
+    return bases
+
+
+def telegram_api(method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    token = _bot_token()
+    if not token:
+        raise RuntimeError("SUPPORT_BOT_TOKEN is not configured")
+    try:
+        attempts = max(1, min(int(os.getenv("TELEGRAM_INVITE_HTTP_ATTEMPTS", "2")), 3))
+    except ValueError:
+        attempts = 2
+    try:
+        connect_timeout = max(1.0, float(os.getenv("TELEGRAM_CONNECT_TIMEOUT_SECONDS", "3")))
+        read_timeout = max(1.0, float(os.getenv("TELEGRAM_READ_TIMEOUT_SECONDS", "12")))
+    except ValueError:
+        connect_timeout, read_timeout = 3.0, 12.0
+
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        for base in _telegram_bases():
+            try:
+                response = requests.post(
+                    f"{base}/bot{token}/{method}",
+                    json=payload,
+                    timeout=(connect_timeout, read_timeout),
+                )
+                data = response.json()
+                if data.get("ok"):
+                    return data
+                last_error = RuntimeError(f"Telegram {method} failed: {data.get('description', 'unknown error')}")
+                # A Telegram 4xx is a deterministic configuration/permission
+                # error (for example, the bot is not in the VIP channel).
+                # Retrying it through another endpoint only delays the user.
+                if 400 <= int(data.get("error_code") or 0) < 500:
+                    raise last_error
+            except Exception as exc:
+                if isinstance(exc, RuntimeError) and "Telegram " in str(exc):
+                    raise
+                last_error = exc
+    raise RuntimeError(f"Telegram {method} failed after {attempts} attempt(s): {last_error}") from last_error
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_postgrest_no_content(error: Exception) -> bool:
+    """Recognize successful/no-row PostgREST responses rejected by old clients."""
+    text = str(error).lower()
+    code = str(getattr(error, "code", "")).strip()
+    return code == "204" or ("missing response" in text and "204" in text)
+
+
+def _is_missing_invites_table(error: Exception) -> bool:
+    """Support a safe transition while the optional invite migration is pending."""
+    return str(getattr(error, "code", "")).strip() == "PGRST205" or "pro_telegram_invites" in str(error)
+
+
+def _execute_write(query: Any) -> Any:
+    """Execute a write while accepting HTTP 204 as a successful empty response."""
+    try:
+        return query.execute()
+    except Exception as error:
+        if _is_postgrest_no_content(error) or _is_missing_invites_table(error):
+            return None
+        raise
+
+
+def create_invite_link(user_id: str, subscription_end: str) -> str:
+    chat_id = pro_chat_id()
+    if not chat_id:
+        return ""
+    expires_at = _parse_dt(subscription_end) or datetime.now(timezone.utc)
+    result = telegram_api(
+        "createChatInviteLink",
+        {
+            "chat_id": chat_id,
+            "name": f"Pro {user_id[:8]}",
+            "expire_date": int(expires_at.timestamp()),
+            "member_limit": 1,
+        },
+    )
+    return str((result.get("result") or {}).get("invite_link") or "")
+
+
+def _load_invite_row(user_id: str) -> Optional[Dict[str, Any]]:
+    _init_supabase()
+    if not supabase:
+        return None
+    try:
+        res = (
+            supabase.table("pro_telegram_invites")
+            .select("user_id,invite_link,invite_expires_at,vip_telegram_user_id")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as error:
+        # Some deployed postgrest-py versions raise on a legitimate 204 when
+        # maybe_single() finds no row. Treat that as "missing", not an outage.
+        if _is_postgrest_no_content(error):
+            return None
+        raise
+    return res.data if res else None
+
+
+def _sync_order_invite(user_id: str, invite_link: str, invite_expires_at: str) -> None:
+    if not supabase:
+        return
+    orders = (
+        supabase.table("local_payment_orders")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("status", "approved")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not orders:
+        return
+    _execute_write(
+        supabase.table("local_payment_orders").update(
+            {"telegram_invite_link": invite_link, "telegram_invite_expires_at": invite_expires_at}
+        ).eq("id", orders[0]["id"])
+    )
+
+
+def save_invite(user_id: str, invite_link: str, invite_expires_at: str) -> Dict[str, Any]:
+    _init_supabase()
+    if not supabase:
+        raise RuntimeError("Supabase is not initialized")
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "user_id": user_id,
+        "invite_link": invite_link,
+        "invite_expires_at": invite_expires_at,
+        "updated_at": now,
+    }
+    try:
+        _execute_write(
+            supabase.table("pro_telegram_invites").upsert(row, on_conflict="user_id")
+        )
+    except Exception as error:
+        # local_payment_orders is the durable compatibility store created by
+        # the earlier payment migration. Keep issuing a valid user-scoped link
+        # until the optional dedicated invite table is applied to production.
+        if not _is_missing_invites_table(error):
+            raise
+    _sync_order_invite(user_id, invite_link, invite_expires_at)
+    return row
+
+
+def ensure_pro_invite(user_id: str, subscription_end: str) -> Dict[str, Any]:
+    """Return a valid invite for an active Pro user, creating one if needed."""
+    end_dt = _parse_dt(subscription_end)
+    now = datetime.now(timezone.utc)
+    if not end_dt or end_dt <= now:
+        return {"invite_link": "", "invite_expires_at": None}
+
+    existing = _load_invite_row(user_id)
+    if existing:
+        invite_end = _parse_dt(existing.get("invite_expires_at"))
+        link = str(existing.get("invite_link") or "").strip()
+        # A link can still be technically valid while belonging to a shorter
+        # plan (for example, a 30-day link left after a 180-day renewal).
+        # Reuse it only when it covers the complete current subscription.
+        if link and invite_end and invite_end > now and invite_end >= end_dt - timedelta(seconds=60):
+            return {
+                "invite_link": link,
+                "invite_expires_at": existing.get("invite_expires_at"),
+            }
+
+    invite = create_invite_link(user_id, subscription_end)
+    if not invite:
+        return {"invite_link": "", "invite_expires_at": None}
+    saved = save_invite(user_id, invite, subscription_end)
+    return {
+        "invite_link": saved["invite_link"],
+        "invite_expires_at": saved["invite_expires_at"],
+    }
+
+
+def record_vip_channel_join(telegram_user_id: int, invite_link: Optional[str] = None) -> None:
+    """Persist Telegram user id for Pro VIP revocations after channel join."""
+    _init_supabase()
+    if not supabase or not telegram_user_id:
+        return
+    tg_id = int(telegram_user_id)
+    user_id: Optional[str] = None
+
+    if invite_link:
+        by_link = (
+            supabase.table("pro_telegram_invites")
+            .select("user_id")
+            .eq("invite_link", invite_link.strip())
+            .maybe_single()
+            .execute()
+        )
+        if by_link and by_link.data:
+            user_id = str(by_link.data.get("user_id") or "")
+        if not user_id:
+            order = (
+                supabase.table("local_payment_orders")
+                .select("user_id")
+                .eq("telegram_invite_link", invite_link.strip())
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if order:
+                user_id = str(order[0].get("user_id") or "")
+
+    if not user_id:
+        prof = (
+            supabase.table("profiles")
+            .select("id")
+            .eq("telegram_chat_id", str(tg_id))
+            .maybe_single()
+            .execute()
+        )
+        if prof and prof.data:
+            user_id = str(prof.data.get("id") or "")
+
+    if not user_id:
+        return
+
+    sub = (
+        supabase.table("subscriptions")
+        .select("current_period_end")
+        .eq("user_id", user_id)
+        .in_("plan_id", ACTIVE_PRO_PLAN_IDS)
+        .eq("status", "active")
+        .order("current_period_end", desc=True)
+        .limit(1)
+        .maybe_single()
+        .execute()
+    )
+    end = _parse_dt((sub.data or {}).get("current_period_end") if sub else None)
+    existing = _load_invite_row(user_id)
+    bound_id = (existing or {}).get("vip_telegram_user_id")
+    # A one-member invite can be reused after its first member leaves. Bind it
+    # to the first joined Telegram account and reject later sharing.
+    unauthorized = not end or end <= datetime.now(timezone.utc)
+    if bound_id is not None and int(bound_id) != tg_id:
+        unauthorized = True
+    if unauthorized:
+        try:
+            telegram_api("banChatMember", {"chat_id": pro_chat_id(), "user_id": tg_id, "until_date": int(datetime.now(timezone.utc).timestamp()) + 60})
+            telegram_api("unbanChatMember", {"chat_id": pro_chat_id(), "user_id": tg_id, "only_if_banned": True})
+        except Exception as exc:
+            print(f"[TELEGRAM_PRO] failed to remove unauthorized VIP join: {exc}")
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    if existing:
+        supabase.table("pro_telegram_invites").update(
+            {"vip_telegram_user_id": tg_id, "updated_at": now}
+        ).eq("user_id", user_id).execute()
+    elif invite_link:
+        save_invite(user_id, invite_link.strip(), end.isoformat())
+        supabase.table("pro_telegram_invites").update(
+            {"vip_telegram_user_id": tg_id, "updated_at": now}
+        ).eq("user_id", user_id).execute()
+
+    try:
+        supabase.table("profiles").update({"telegram_chat_id": str(tg_id)}).eq("id", user_id).execute()
+    except Exception:
+        pass
+
+
+def _expired_pro_subscriptions() -> Dict[str, datetime]:
+    _init_supabase()
+    if not supabase:
+        return {}
+    rows = (
+        supabase.table("subscriptions")
+        .select("user_id,status,current_period_end")
+        .in_("plan_id", ACTIVE_PRO_PLAN_IDS)
+        .execute()
+        .data
+        or []
+    )
+    now = datetime.now(timezone.utc)
+    latest: Dict[str, datetime] = {}
+    entitled: Set[str] = set()
+    for row in rows:
+        uid = str(row.get("user_id") or "")
+        if not uid:
+            continue
+        end = _parse_dt(row.get("current_period_end")) or datetime.fromtimestamp(0, timezone.utc)
+        if uid not in latest or end > latest[uid]:
+            latest[uid] = end
+        if str(row.get("status") or "").lower() in {"active", "trialing"} and end > now:
+            entitled.add(uid)
+    return {uid: end for uid, end in latest.items() if uid not in entitled}
+
+
+def _expired_pro_user_ids() -> Set[str]:
+    return set(_expired_pro_subscriptions())
+
+
+def revoke_expired_pro_members() -> int:
+    """Remove users whose Pro entitlement expired from the VIP Telegram chat."""
+    chat_id = pro_chat_id()
+    if not chat_id:
+        return 0
+    expired = _expired_pro_subscriptions()
+    if not expired:
+        return 0
+
+    telegram_targets: Dict[str, Set[int]] = {uid: set() for uid in expired}
+    _init_supabase()
+    if not supabase:
+        return 0
+
+    profiles = (
+        supabase.table("profiles")
+        .select("id,telegram_chat_id")
+        .in_("id", list(expired))
+        .execute()
+        .data
+        or []
+    )
+    for profile in profiles:
+        raw = str(profile.get("telegram_chat_id") or "").strip()
+        if raw.lstrip("-").isdigit():
+            telegram_targets[str(profile["id"])].add(int(raw))
+
+    invites = (
+        supabase.table("pro_telegram_invites")
+        .select("user_id,vip_telegram_user_id")
+        .in_("user_id", list(expired))
+        .execute()
+        .data
+        or []
+    )
+    for row in invites:
+        vip_id = row.get("vip_telegram_user_id")
+        if vip_id is not None:
+            telegram_targets[str(row["user_id"])].add(int(vip_id))
+
+    already_revoked: Dict[tuple[str, int], datetime] = {}
+    try:
+        markers = (
+            supabase.table("pro_telegram_revocations")
+            .select("user_id,telegram_user_id,subscription_end")
+            .in_("user_id", list(expired))
+            .execute()
+            .data
+            or []
+        )
+        for row in markers:
+            end = _parse_dt(row.get("subscription_end"))
+            if end:
+                already_revoked[(str(row["user_id"]), int(row["telegram_user_id"]))] = end
+    except Exception as exc:
+        print(f"[TELEGRAM_PRO] revocation tracking unavailable: {exc}")
+
+    removed = 0
+    until = int(datetime.now(timezone.utc).timestamp()) + 60
+    for uid, member_ids in telegram_targets.items():
+        for member_id in member_ids:
+            if already_revoked.get((uid, member_id), datetime.fromtimestamp(0, timezone.utc)) >= expired[uid]:
+                continue
+            try:
+                member = telegram_api("getChatMember", {"chat_id": chat_id, "user_id": member_id})
+                status = str((member.get("result") or {}).get("status") or "")
+                if status not in {"left", "kicked"}:
+                    telegram_api(
+                        "banChatMember",
+                        {"chat_id": chat_id, "user_id": member_id, "until_date": until},
+                    )
+                    telegram_api(
+                        "unbanChatMember",
+                        {"chat_id": chat_id, "user_id": member_id, "only_if_banned": True},
+                    )
+                    removed += 1
+                supabase.table("pro_telegram_revocations").upsert({
+                    "user_id": uid,
+                    "telegram_user_id": member_id,
+                    "subscription_end": expired[uid].isoformat(),
+                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                }, on_conflict="user_id,telegram_user_id").execute()
+            except Exception as exc:
+                print(f"[TELEGRAM_PRO] failed to revoke VIP access for {member_id}: {exc}")
+    return removed
+
+
+def handle_chat_member_update(payload: Dict[str, Any]) -> None:
+    """Track Pro VIP joins from Telegram chat_member updates."""
+    chat_id = pro_chat_id()
+    if not chat_id:
+        return
+    for key in ("chat_member", "my_chat_member"):
+        update = payload.get(key)
+        if not update:
+            continue
+        chat = update.get("chat") or {}
+        if str(chat.get("id")) != str(chat_id):
+            continue
+        new_member = update.get("new_chat_member") or {}
+        if new_member.get("status") not in {"member", "administrator", "creator"}:
+            continue
+        member_user = new_member.get("user") or {}
+        tg_user_id = member_user.get("id")
+        if not tg_user_id:
+            continue
+        invite_payload = update.get("invite_link") or {}
+        invite_link = invite_payload.get("invite_link") if isinstance(invite_payload, dict) else None
+        record_vip_channel_join(int(tg_user_id), invite_link)
+        return

@@ -27,8 +27,70 @@ interface RuntimeInput {
     systemPrompt: string; toolsSchema: any[];
 }
 type Event = { type: string; data: any };
-const footer = "\n\n" + AI_CONFIG.disclaimer + "\n\n📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)";
-const withFooter = (reply: string) => reply.includes("t.me/egxbots") ? reply : reply + footer;
+
+export function buildChatFooter(isPro: boolean, vipInviteLink?: string | null): string {
+    if (isPro) {
+        const target = vipInviteLink || "/profile#telegram";
+        return `\n\n${AI_CONFIG.disclaimer}\n\n👑 [قناة VIP على تليجرام للتوصيات والصفقات الفورية اللحظية](${target})`;
+    }
+    return `\n\n${AI_CONFIG.disclaimer}\n\n📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)`;
+}
+
+export function withChatFooter(reply: string, isPro: boolean, vipInviteLink?: string | null): string {
+    if (reply.includes("t.me/egxbots") || reply.includes("/profile#telegram") || (vipInviteLink && reply.includes(vipInviteLink))) {
+        return reply;
+    }
+    return reply + buildChatFooter(isPro, vipInviteLink);
+}
+
+export function stripChatFooters(content: string): string {
+    return content
+        .replace(/\n\n✅\s*تحليل EGX Bots مبني على أحدث البيانات[\s\S]*$/i, "")
+        .replace(/\n\n📌\s*الرأي مبني على مؤشرات[\s\S]*$/i, "")
+        .replace(/\n\n📢\s*\[قناة EGX Bots المجانية[\s\S]*$/i, "")
+        .replace(/\n\n👑\s*\[قناة VIP[\s\S]*$/i, "")
+        .trim();
+}
+
+async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{ isPro: boolean; vipInviteLink: string | null; userPortfolioSymbols: string[] }> {
+    let isPro = Boolean(optionsIsPro);
+    let vipInviteLink: string | null = null;
+    let userPortfolioSymbols: string[] = [];
+
+    if (supabase && userId && isUuid(userId)) {
+        try {
+            const client = executionSupabase(supabase);
+            const [subRes, inviteRes, posRes] = await Promise.allSettled([
+                !isPro ? client.from("subscriptions").select("plan_id, status").eq("user_id", userId).eq("status", "active").limit(1) : Promise.resolve(null),
+                client.from("pro_telegram_invites").select("invite_link, invite_expires_at").eq("user_id", userId).maybeSingle(),
+                client.from("positions").select("symbol").eq("user_id", userId).eq("status", "open").limit(50),
+            ]);
+
+            if (subRes.status === "fulfilled" && subRes.value?.data && subRes.value.data.length > 0) {
+                isPro = true;
+            }
+
+            if (inviteRes.status === "fulfilled" && inviteRes.value?.data) {
+                const invite = inviteRes.value.data;
+                const expiresAt = invite.invite_expires_at ? new Date(invite.invite_expires_at).getTime() : 0;
+                if (invite.invite_link && (!expiresAt || expiresAt > Date.now())) {
+                    vipInviteLink = invite.invite_link;
+                }
+            }
+
+            if (posRes.status === "fulfilled" && posRes.value?.data && Array.isArray(posRes.value.data)) {
+                userPortfolioSymbols = posRes.value.data.map((p: any) => p.symbol).filter(Boolean);
+            }
+        } catch (e) {
+            console.warn("[Agentic] resolveUserProContext non-blocking error:", e);
+        }
+    }
+
+    return { isPro, vipInviteLink, userPortfolioSymbols };
+}
+
+const footer = buildChatFooter(false);
+const withFooter = (reply: string) => withChatFooter(reply, false);
 /** Suppress reviewer claims that a tool was never tried when the call log proves otherwise. */
 export function removeDisprovenMissingToolIssues(issues: string[], evidence: AgenticEvidence[]) {
     return issues.filter(issue => {
@@ -93,7 +155,7 @@ export function compactHistory(history: Array<{ role: string; content: string }>
     let remaining = 5000;
     const result = [];
     for (const item of history.filter(h => ["user", "assistant"].includes(h.role)).slice(-8).reverse()) {
-        const text = item.role === "assistant" ? String(item.content).replace(footer, "").trim() : String(item.content);
+        const text = item.role === "assistant" ? stripChatFooters(String(item.content)) : String(item.content);
         const cap = Math.min(item.role === "user" ? 1000 : 1600, remaining);
         if (cap <= 0) break;
         const content = text.length <= cap ? text : text.slice(0, Math.max(0,cap-350)) + "\n[مختصر؛ الحقائق في سجل الأدلة]\n" + text.slice(-250);
@@ -132,9 +194,10 @@ export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Ev
     } catch (error) {
         input.options.diagnosticCapture?.("execution_failure", { error: error instanceof Error ? error.message : "unknown" });
         console.error("[Agentic] request failed or deadline reached", error instanceof Error ? error.message : "unknown");
-        const response = withFooter(input.images.length
+        const isPro = Boolean(input.options?.isPro);
+        const response = withChatFooter(input.images.length
             ? "وصلت الصورة، لكن انتهت مهلة المعالجة قبل إكمال قراءتها والتحقق من النتيجة. لم أعتمد أرقاماً غير مؤكدة؛ جرّب صورة واحدة واضحة أو أرسل الجزء المطلوب وحده."
-            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة."));
+            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة."), isPro);
         yield { type: "token", data: response };
         yield { type: "done", data: { response, tables: [], session_update: {}, response_origin: "safe_fallback", usage: accounting.summary(),
             publication_review: { passed: false, repaired: false, final_passed: false, reasons: ["request_failed_or_aborted"], completion: "partial" } } };
@@ -150,6 +213,8 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     // Legacy UI selections remain accepted; the provider retired these aliases.
     const model = ["deepseek-chat", "deepseek-reasoner"].includes(selectedModel) ? "deepseek-flash" : selectedModel;
     const client = executionSupabase(input.supabase);
+    const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
+    const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink);
     let vision: VisionContext | null = null;
     let visionError: string | null = null;
     if (input.images.length) {
@@ -184,7 +249,10 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const compactVision = vision ? { image_type:vision.image_type, symbols:vision.symbols,
         confidence:vision.confidence, uncertainties:vision.uncertainties, technical_observations:vision.technical_observations?.slice(0,10),
         market_depth:vision.market_depth, user_relevant_summary:vision.user_relevant_summary?.slice(0,600) } : null;
-    const context = { symbol_hints: knownSymbolHints(userMessage), state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
+    const visionSymbols = (sessionSummary?.last_vision_context?.symbols || []).map((s: any) => s.symbol).filter(Boolean);
+    const imageSymbols = sessionSummary?.last_image_symbols || [];
+    const allPortfolioSymbols = [...new Set([...proContext.userPortfolioSymbols, ...visionSymbols, ...imageSymbols])];
+    const context = { symbol_hints: knownSymbolHints(userMessage), user_portfolio_symbols: allPortfolioSymbols, state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
         current_symbols:sessionSummary.current_symbols, last_topic:sessionSummary.last_topic?.slice(0,600),
         open_references:sessionSummary.open_references, last_image_symbols:sessionSummary.last_image_symbols,
         last_vision_context: sessionSummary.last_vision_context ? {

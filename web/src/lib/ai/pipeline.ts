@@ -3741,9 +3741,12 @@ async function* runPipelineCore(
         }
     }
 
-    // 📢 Ensure the free Telegram channel footer is appended to every response
-    const TELEGRAM_CHANNEL_FOOTER = "📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)";
-    if (fullResponse && !fullResponse.includes("t.me/egxbots") && !fullResponse.includes("t.me/")) {
+    // 📢 Ensure the Telegram channel footer is appended to every response
+    const hasProAccess = Boolean(options?.isPro ?? userIsPro);
+    const TELEGRAM_CHANNEL_FOOTER = hasProAccess
+        ? "👑 [قناة VIP على تليجرام للتوصيات والصفقات الفورية اللحظية](/profile#telegram)"
+        : "📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)";
+    if (fullResponse && !fullResponse.includes("t.me/") && !fullResponse.includes("/profile#telegram")) {
         fullResponse = `${fullResponse.trim()}\n\n${TELEGRAM_CHANNEL_FOOTER}`;
     }
 

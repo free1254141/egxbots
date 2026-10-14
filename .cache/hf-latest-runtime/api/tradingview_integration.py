@@ -1,0 +1,818 @@
+"""
+TradingView Integration Module
+
+Provides functions to fetch price history and fundamentals from TradingView.
+Used by admin panel and stock_ai module for data updates.
+"""
+
+import os
+import json
+import time
+import pandas as pd
+from typing import List, Dict, Any, Optional, Tuple
+from collections import defaultdict
+import threading
+
+# Module-level shared HTTP session for Yahoo Finance fallback (thread-safe)
+_yahoo_session = None
+_yahoo_session_lock = threading.Lock()
+
+import ssl
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+
+class TLSAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        context = ssl.create_default_context()
+        try:
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.maximum_version = ssl.TLSVersion.TLSv1_2
+        except Exception:
+            pass
+        self.poolmanager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            ssl_context=context,
+            **pool_kwargs
+        )
+
+def _get_yahoo_session():
+    """Get or create a shared requests.Session with connection pooling."""
+    global _yahoo_session
+    if _yahoo_session is None:
+        with _yahoo_session_lock:
+            if _yahoo_session is None:
+                import requests
+                s = requests.Session()
+                s.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                })
+                # Connection pooling: keep up to 20 connections alive
+                adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+                # Force TLS 1.2 for Cloudflare Proxy requests to avoid TLS 1.3 session ticket bugs on HF
+                s.mount("https://", TLSAdapter())
+                s.mount("http://", adapter)
+                _yahoo_session = s
+    return _yahoo_session
+
+
+# Professional Exchange Configuration Mapping
+# Inspired by stockroom model structures
+EXCHANGE_CONFIG = {
+    "ADX": {"market": "uae", "tv_id": "ADX", "country": "UAE"},
+
+    "OKX": {"market": "crypto", "tv_id": "OKX", "country": "Crypto"},
+    "AS": {"market": "netherlands", "tv_id": "EURONEXT", "country": "Netherlands"},
+    "AT": {"market": "greece", "tv_id": "ATHEX", "country": "Greece"},
+    "AU": {"market": "australia", "tv_id": "ASX", "country": "Australia"},
+    "BA": {"market": "argentina", "tv_id": "BCBA", "country": "Argentina"},
+    "BC": {"market": "morocco", "tv_id": "CSE", "country": "Morocco"},
+    "BE": {"market": "germany", "tv_id": "BER", "country": "Germany"},
+    "BK": {"market": "thailand", "tv_id": "SET", "country": "Thailand"},
+    "BR": {"market": "belgium", "tv_id": "EURONEXT", "country": "Belgium"},
+    "BUD": {"market": "hungary", "tv_id": "BET", "country": "Hungary"},
+    "CA": {"market": "egypt", "tv_id": "EGX", "country": "Egypt"},
+    "CM": {"market": "sri_lanka", "tv_id": "CM", "country": "Sri Lanka"},
+    "CO": {"market": "denmark", "tv_id": "OMXCOP", "country": "Denmark"},
+    "DFM": {"market": "uae", "tv_id": "DFM", "country": "UAE"},
+    "DSE": {"market": "tanzania", "tv_id": "DSE", "country": "Tanzania"},
+    "DU": {"market": "germany", "tv_id": "DUS", "country": "Germany"},
+    "EGX": {"market": "egypt", "tv_id": "EGX", "country": "Egypt"},
+    "EUBOND": {"market": "belgium", "tv_id": "EUBOND", "country": "Belgium"},
+    "F": {"market": "germany", "tv_id": "XETRA", "country": "Germany"},
+    "GSE": {"market": "ghana", "tv_id": "GSE", "country": "Ghana"},
+    "HA": {"market": "germany", "tv_id": "HA", "country": "Germany"},
+    "HE": {"market": "finland", "tv_id": "OMXHEL", "country": "Finland"},
+    "HM": {"market": "germany", "tv_id": "HM", "country": "Germany"},
+    "IC": {"market": "iceland", "tv_id": "ICEX", "country": "Iceland"},
+
+    "IR": {"market": "ireland", "tv_id": "EURONEXT", "country": "Ireland"},
+    "IS": {"market": "turkey", "tv_id": "BIST", "country": "Turkey"},
+    "JK": {"market": "indonesia", "tv_id": "IDX", "country": "Indonesia"},
+    "JSE": {"market": "south_africa", "tv_id": "JSE", "country": "South Africa"},
+    "KAR": {"market": "pakistan", "tv_id": "KAR", "country": "Pakistan"},
+    "KLSE": {"market": "malaysia", "tv_id": "MYX", "country": "Malaysia"},
+    "KO": {"market": "korea", "tv_id": "KOSPI", "country": "Korea"},
+    "KQ": {"market": "korea", "tv_id": "KOSDAQ", "country": "Korea"},
+    "LIM": {"market": "peru", "tv_id": "LIM", "country": "Peru"},
+    "LS": {"market": "portugal", "tv_id": "EURONEXT", "country": "Portugal"},
+
+    "LU": {"market": "luxembourg", "tv_id": "LUXSE", "country": "Luxembourg"},
+    "LUSE": {"market": "zambia", "tv_id": "LUSE", "country": "Zambia"},
+    "MC": {"market": "spain", "tv_id": "BME", "country": "Spain"},
+    "MSE": {"market": "malawi", "tv_id": "MSE", "country": "Malawi"},
+    "MU": {"market": "germany", "tv_id": "MUN", "country": "Germany"},
+    "MX": {"market": "mexico", "tv_id": "BMV", "country": "Mexico"},
+    "NASDAQ": {"market": "america", "tv_id": "NASDAQ", "country": "USA"},
+    "NEO": {"market": "canada", "tv_id": "NEO", "country": "Canada"},
+    "NSE": {"market": "india", "tv_id": "NSE", "country": "India"},
+    "NYSE": {"market": "america", "tv_id": "NYSE", "country": "USA"},
+    "OL": {"market": "norway", "tv_id": "OSLO", "country": "Norway"},
+    "PA": {"market": "france", "tv_id": "EURONEXT", "country": "France"},
+    "PR": {"market": "czech", "tv_id": "PRAGUE", "country": "Czech Republic"},
+    "PSE": {"market": "philippines", "tv_id": "PSE", "country": "Philippines"},
+    "RO": {"market": "romania", "tv_id": "BVB", "country": "Romania"},
+    "RSE": {"market": "rwanda", "tv_id": "RSE", "country": "Rwanda"},
+    "SA": {"market": "brazil", "tv_id": "BMFBOVESPA", "country": "Brazil"},
+    "SEM": {"market": "mauritius", "tv_id": "SEM", "country": "Mauritius"},
+    "SHE": {"market": "china", "tv_id": "SZSE", "country": "China"},
+    "SHG": {"market": "china", "tv_id": "SSE", "country": "China"},
+    "SN": {"market": "chile", "tv_id": "SN", "country": "Chile"},
+    "ST": {"market": "sweden", "tv_id": "OMXSTO", "country": "Sweden"},
+    "STU": {"market": "germany", "tv_id": "STU", "country": "Germany"},
+    "SW": {"market": "switzerland", "tv_id": "SIX", "country": "Switzerland"},
+    "TO": {"market": "canada", "tv_id": "TSX", "country": "Canada"},
+    "TW": {"market": "taiwan", "tv_id": "TWSE", "country": "Taiwan"},
+    "TWO": {"market": "taiwan", "tv_id": "TPEX", "country": "Taiwan"},
+    "US": {"market": "america", "tv_id": "NASDAQ", "country": "USA"},
+    "USE": {"market": "uganda", "tv_id": "USE", "country": "Uganda"},
+    "V": {"market": "canada", "tv_id": "TSXV", "country": "Canada"},
+    "VFEX": {"market": "zimbabwe", "tv_id": "VFEX", "country": "Zimbabwe"},
+    "VI": {"market": "austria", "tv_id": "VIE", "country": "Austria"},
+    "VN": {"market": "vietnam", "tv_id": "HOSE", "country": "Vietnam"},
+    "WAR": {"market": "poland", "tv_id": "GPW", "country": "Poland"},
+    "XBOT": {"market": "botswana", "tv_id": "XBOT", "country": "Botswana"},
+    "XETRA": {"market": "germany", "tv_id": "XETRA", "country": "Germany"},
+    "XNAI": {"market": "kenya", "tv_id": "XNAI", "country": "Kenya"},
+    "XNSA": {"market": "nigeria", "tv_id": "XNSA", "country": "Nigeria"},
+    "XZIM": {"market": "zimbabwe", "tv_id": "XZIM", "country": "Zimbabwe"},
+    "ZSE": {"market": "croatia", "tv_id": "ZSE", "country": "Croatia"},
+}
+
+
+def get_tradingview_market(symbol: str) -> str:
+    """
+    Get TradingView market name from symbol exchange suffix.
+    
+    Args:
+        symbol: Stock symbol with exchange suffix (e.g., "AAPL.US", "AIR.PA")
+    
+    Returns:
+        TradingView market name (e.g., "america", "france")
+    """
+    upper = (symbol or "").strip().upper()
+    suffix = upper.split(".")[-1] if "." in upper else ""
+    config = EXCHANGE_CONFIG.get(suffix)
+    if config:
+        return config["market"]
+    return os.getenv("TRADINGVIEW_DEFAULT_MARKET", "america")
+
+
+def get_tradingview_exchange(symbol: str) -> str:
+    """
+    Get tvDatafeed exchange format from symbol exchange suffix.
+    
+    Args:
+        symbol: Stock symbol with exchange suffix (e.g., "AAPL.US", "AIR.PA")
+    
+    Returns:
+        tvDatafeed exchange name (e.g., "NASDAQ", "EURONEXT")
+    """
+    upper = (symbol or "").strip().upper()
+    suffix = upper.split(".")[-1] if "." in upper else ""
+    config = EXCHANGE_CONFIG.get(suffix)
+    if config:
+        return config["tv_id"]
+    return suffix
+
+
+# ── Yahoo Proxy Circuit Breaker ──────────────────────────────────────
+# Transport failures trigger a short cooldown. Symbol-specific 404s are
+# remembered briefly without blocking TradingView or other symbols.
+_yahoo_proxy_fail_count = 0
+_YAHOO_PROXY_FAIL_THRESHOLD = 3
+_yahoo_proxy_tripped = False
+_yahoo_proxy_retry_after = 0.0
+_yahoo_state_lock = threading.Lock()
+_yahoo_missing_until = {}
+
+
+def _remember_yahoo_missing(ticker):
+    with _yahoo_state_lock:
+        now = time.monotonic()
+        for key in list(_yahoo_missing_until):
+            if _yahoo_missing_until[key] <= now:
+                del _yahoo_missing_until[key]
+        if len(_yahoo_missing_until) >= 1024:
+            del _yahoo_missing_until[next(iter(_yahoo_missing_until))]
+        _yahoo_missing_until[ticker] = now + 900
+
+
+def _yahoo_proxy_success():
+    global _yahoo_proxy_fail_count, _yahoo_proxy_tripped, _yahoo_proxy_retry_after
+    with _yahoo_state_lock:
+        _yahoo_proxy_fail_count = 0
+        _yahoo_proxy_tripped = False
+        _yahoo_proxy_retry_after = 0.0
+
+
+def _yahoo_proxy_failure():
+    global _yahoo_proxy_fail_count, _yahoo_proxy_tripped, _yahoo_proxy_retry_after
+    with _yahoo_state_lock:
+        _yahoo_proxy_fail_count += 1
+        if _yahoo_proxy_fail_count >= _YAHOO_PROXY_FAIL_THRESHOLD:
+            _yahoo_proxy_tripped = True
+            _yahoo_proxy_retry_after = time.monotonic() + 60
+            print(f'[CIRCUIT BREAKER] Yahoo proxy cooldown for 60s after {_yahoo_proxy_fail_count} failures')
+
+
+def _emit_observed_quote(frame, required_session, callback, source):
+    """Pass an actual provider observation, never a cached or filled daily bar."""
+    if not callback or not required_session or frame.empty:
+        return
+    from datetime import datetime, timezone
+    import math
+    observed_at = datetime.now(timezone.utc)
+    from zoneinfo import ZoneInfo
+    if observed_at.astimezone(ZoneInfo('Africa/Cairo')).date().isoformat() != required_session:
+        return
+    rows = frame[pd.to_datetime(frame['ts']).dt.strftime('%Y-%m-%d') == required_session]
+    if rows.empty:
+        return
+    row = rows.iloc[-1]
+    try:
+        price, volume = float(row['close']), float(row['volume'])
+        if not math.isfinite(price) or not math.isfinite(volume) or price <= 0 or volume <= 0:
+            return
+        callback({'price': price, 'volume': volume, 'date': required_session,
+                  'observed_at': observed_at.isoformat(), 'verified': True, 'source': source})
+    except (ValueError, TypeError, KeyError):
+        return
+
+
+def _try_yahoo_direct_fallback(
+    upper: str,
+    base_symbol: str,
+    timeframe: str,
+    max_days: int,
+    start_date: Any,
+    end_date: Any,
+    required_session: Optional[str] = None,
+    on_observed_quote=None
+) -> Tuple[bool, str]:
+    """
+    Direct Yahoo Finance API fallback. Fetches the raw JSON from Yahoo Finance
+    query API to bypass yfinance JSONDecodeErrors and timezone issues.
+    """
+    global _yahoo_proxy_fail_count, _yahoo_proxy_tripped, _yahoo_proxy_retry_after
+
+    if timeframe.lower() not in ["1d", "1day", "daily"]:
+        return False, "Yahoo fallback only supports daily data"
+    
+    yf_ticker = upper
+    if upper.endswith(".US"):
+        yf_ticker = upper.replace(".US", "")
+    elif upper.endswith(".EGX"):
+        yf_ticker = f"{base_symbol}.CA"
+
+    with _yahoo_state_lock:
+        if _yahoo_missing_until.get(yf_ticker, 0) > time.monotonic():
+            return False, 'Yahoo API returned HTTP 404 (cached for 15 minutes; TradingView remains eligible)'
+        
+    try:
+        import pandas as pd
+        from api.stock_ai import sync_df_to_supabase
+        
+        print(f"TRYING YAHOO FINANCE DIRECT API FALLBACK FOR {upper} ({yf_ticker})...")
+        
+        # Choose range based on max_days
+        if max_days <= 30:
+            r_range = "1mo"
+        elif max_days <= 90:
+            r_range = "3mo"
+        elif max_days <= 180:
+            r_range = "6mo"
+        elif max_days <= 365:
+            r_range = "1y"
+        elif max_days <= 730:
+            r_range = "2y"
+        else:
+            r_range = "5y"
+            
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?range={r_range}&interval=1d"
+        
+        cf_proxy = os.getenv("CF_PROXY_URL")
+        with _yahoo_state_lock:
+            proxy_available = bool(cf_proxy) and (not _yahoo_proxy_tripped or time.monotonic() >= _yahoo_proxy_retry_after)
+        if proxy_available:
+            import urllib.parse
+            url = f"{cf_proxy}?url={urllib.parse.quote(url)}"
+            print(f"Routing Yahoo request through Cloudflare proxy: {cf_proxy}")
+        elif cf_proxy:
+            print(f"[CIRCUIT BREAKER] Yahoo proxy cooldown active — trying direct Yahoo for {upper}")
+            cf_proxy = None
+        
+        session = _get_yahoo_session()
+        try:
+            r = session.get(url, timeout=8)
+            if r.status_code != 200:
+                print(f"PROXY HTTP ERROR: {r.status_code} - {r.text[:200]}")
+                if r.status_code == 404:
+                    _remember_yahoo_missing(yf_ticker)
+                elif cf_proxy and r.status_code >= 500:
+                    _yahoo_proxy_failure()
+                return False, f"Yahoo API returned HTTP {r.status_code}"
+                
+            chart_res = r.json().get("chart", {}).get("result")
+            if not chart_res:
+                print(f"PROXY EMPTY RESULT: {r.text[:200]}")
+                return False, "Yahoo API returned empty result"
+            # Reset circuit breaker on success
+            if cf_proxy:
+                _yahoo_proxy_success()
+        except Exception as e:
+            print(f"PROXY EXCEPTION: {str(e)}")
+            # A proxy failure is transient. Do not disable it for the whole
+            # 284-symbol sync; give it a short cooldown and try Yahoo direct.
+            if cf_proxy and ("SSL" in str(e) or "ConnectionError" in str(e) or "Max retries" in str(e) or "timed out" in str(e).lower()):
+                _yahoo_proxy_failure()
+            # One direct attempt prevents a temporary Worker/TLS issue from
+            # turning into a failed stock update.
+            if cf_proxy:
+                try:
+                    direct_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yf_ticker}?range={r_range}&interval=1d"
+                    direct = session.get(direct_url, timeout=8)
+                    direct.raise_for_status()
+                    chart_res = direct.json().get("chart", {}).get("result")
+                    # Direct success does not prove the proxy recovered.
+                    if not chart_res:
+                        return False, "Yahoo API returned empty result"
+                except Exception as direct_error:
+                    if getattr(getattr(direct_error, 'response', None), 'status_code', None) == 404:
+                        _remember_yahoo_missing(yf_ticker)
+                    return False, f"Yahoo proxy/direct request failed: {direct_error}"
+            else:
+                return False, f"Yahoo request failed: {str(e)}"
+            
+        data = chart_res[0]
+        timestamps = data.get("timestamp")
+        if not timestamps:
+            return False, "No timestamp data in Yahoo response"
+            
+        indicators = data.get("indicators", {})
+        quote_list = indicators.get("quote", [])
+        if not quote_list or not quote_list[0]:
+            return False, "No quote data in Yahoo response"
+            
+        quote = quote_list[0]
+        opens = quote.get("open", [])
+        highs = quote.get("high", [])
+        lows = quote.get("low", [])
+        closes = quote.get("close", [])
+        volumes = quote.get("volume", [])
+        
+        # Check for adjclose
+        adjclose_list = indicators.get("adjclose", [])
+        if adjclose_list and adjclose_list[0] and "adjclose" in adjclose_list[0]:
+            closes = adjclose_list[0]["adjclose"]
+            
+        df_new = pd.DataFrame({
+            "ts": pd.to_datetime(timestamps, unit="s"),
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": volumes
+        })
+        # Entry observations are traded prices, never split-adjusted history.
+        observed_frame = df_new.copy()
+        observed_frame['close'] = quote.get('close', [])
+        
+        # Drop rows where critical price fields are None before forward-filling,
+        # to avoid propagating previous day's prices into today's empty/placeholder candles.
+        df_new = df_new.dropna(subset=["close", "open", "high", "low"], how="any")
+        if required_session and not (df_new['ts'].dt.strftime('%Y-%m-%d') == required_session).any():
+            return False, 'Yahoo returned no current EGX session bar'
+        observed_frame = observed_frame.dropna(subset=['close', 'volume'])
+        df_new = df_new.ffill().bfill()
+        
+        if start_date or end_date:
+            df_new['ts'] = pd.to_datetime(df_new['ts'])
+            if start_date:
+                df_new = df_new[df_new['ts'].dt.date >= start_date]
+            if end_date:
+                df_new = df_new[df_new['ts'].dt.date <= end_date]
+                
+        if df_new.empty:
+            return True, f"No new data on Yahoo within the filtered range ({start_date} to {end_date})"
+            
+        ok_sync, sync_msg = sync_df_to_supabase(upper, df_new, timeframe=timeframe)
+        if ok_sync:
+            _emit_observed_quote(observed_frame, required_session, on_observed_quote, 'yahoo')
+        return ok_sync, f"OK (yahoo fallback) - {sync_msg}"
+        
+    except Exception as err:
+        return False, f"Yahoo fallback failed: {err}"
+
+
+def fetch_tradingview_prices(
+    symbol: str,
+    max_days: int = 365,
+    timeframe: str = "1d",
+    start_date: Any = None,
+    end_date: Any = None,
+    refresh_latest: bool = False,
+    on_observed_quote=None
+) -> Tuple[bool, str]:
+    """
+    Fetch historical price data from TradingView and sync to Supabase.
+    Incremental: If cloud data exists, fetch only new bars.
+    
+    Args:
+        symbol: Stock symbol with exchange suffix (e.g., "AAPL.US", "AIR.PA")
+        max_days: Max historical bars to fetch if no cloud data exists
+        timeframe: Data interval (e.g., "1d", "1h", "15m", "1m")
+        start_date: Optional start date filter (datetime.date)
+        end_date: Optional end date filter (datetime.date)
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        from tvDatafeed import TvDatafeed, Interval
+    except ImportError:
+        return False, "tvDatafeed library not installed. Run: pip install tvDatafeed"
+    
+    import datetime as dt
+    from api.stock_ai import _last_trading_day, sync_df_to_supabase
+    from api.stock_ai import _init_supabase, _get_thread_local_supabase
+    import pandas as pd
+    
+    def _get_supabase_info(ticker):
+        _init_supabase()
+        sb = _get_thread_local_supabase()
+        sym = ticker.rsplit(".", 1)[0] if "." in ticker else ticker
+        exchange = ticker.rsplit(".", 1)[-1].upper() if "." in ticker else "EGX"
+        if exchange in {"CA", "CC"}:
+            exchange = "EGX"
+        # Count and newest date in the same tiny request.  Returning a fixed
+        # count of 100 made every existing symbol look incomplete, so the daily
+        # job re-downloaded a year of history for the entire exchange.
+        res = (
+            sb.table("stock_prices")
+            .select("date", count="exact")
+            .eq("symbol", sym)
+            .eq("exchange", exchange)
+            .order("date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return {
+                "last_date": pd.to_datetime(res.data[0]["date"]).date(),
+                "count": int(res.count or 0),
+            }
+        return {"last_date": None, "count": 0}
+
+    # Map string timeframe to tvDatafeed Interval
+    tf_map = {
+        "1m": Interval.in_1_minute,
+        "1min": Interval.in_1_minute,
+        "5m": Interval.in_5_minute,
+        "5min": Interval.in_5_minute,
+        "15m": Interval.in_15_minute,
+        "15min": Interval.in_15_minute,
+        "30m": Interval.in_30_minute,
+        "1h": Interval.in_1_hour,
+        "1hour": Interval.in_1_hour,
+        "4h": Interval.in_4_hour,
+        "1d": Interval.in_daily,
+        "1day": Interval.in_daily,
+    }
+    
+    tv_interval = tf_map.get(timeframe.lower(), Interval.in_daily)
+    
+    # Parse symbol
+    upper = symbol.strip().upper()
+    parts = upper.split(".")
+    if len(parts) < 2:
+        return False, f"Invalid symbol format: {symbol}. Expected format: SYMBOL.EXCHANGE"
+    
+    base_symbol = parts[0]
+    exchange_suffix = parts[1]
+    
+    # Get tvDatafeed exchange format
+    tv_exchange = get_tradingview_exchange(symbol)
+    
+    today = dt.date.today()
+    info = _get_supabase_info(upper)
+    last_date = info["last_date"]
+    current_count = info["count"]
+    
+    # Intraday check is different, but for now we skip strict up-to-date check for intraday
+    # to always allow fetching new bars.
+    is_daily = timeframe.lower() in ["1d", "1day", "daily"]
+    required_session = None
+    if is_daily and tv_exchange == 'EGX' and refresh_latest:
+        from api.recommendation_freshness import expected_session
+        required_session = expected_session()
+        if end_date and str(end_date)[:10] < required_session:
+            required_session = None
+    is_up_to_date = last_date and last_date >= _last_trading_day(today) if is_daily else False
+    has_enough_history = current_count >= max_days
+    
+    if is_daily and is_up_to_date and has_enough_history and not refresh_latest:
+        return True, "Already up to date and sufficient history in Cloud"
+    
+    # Throttle slightly
+    try:
+        delay = float(os.getenv("TRADINGVIEW_REQUEST_DELAY", "0.3"))
+        if delay > 0:
+            time.sleep(delay)
+    except Exception:
+        pass
+
+    try:
+        # Initialize TvDatafeed
+        from api.price_sync_policy import configure_tradingview_client
+        tv = configure_tradingview_client(TvDatafeed())
+        
+        # Calculate how many bars we need
+        if is_daily:
+            needed_for_history = max_days + 100 if not has_enough_history else 0
+            needed_for_update = (today - last_date).days + 10 if last_date else max_days + 30
+            n_bars = max(needed_for_history, needed_for_update)
+        else:
+            if start_date:
+                days_to_fetch = (today - start_date).days
+                n_bars_calc = int(days_to_fetch * 20)
+                n_bars = max(n_bars_calc, max_days, 500)
+            else:
+                # For intraday, use max_days as the bar count directly if it's high enough,
+                # otherwise use a reasonable default.
+                n_bars = max(max_days, 500)
+
+        n_bars = min(5000, n_bars)
+
+        # Normalize symbol for TradingView (remove slashes for crypto pairs)
+        tv_symbol = base_symbol.replace("/", "")
+
+        print(f"TV FETCH: {upper} | interval={timeframe} | n_bars={n_bars}")
+
+        # Fetch historical data
+        # Define Yahoo Finance fallback function inside the fetch function
+        def try_yahoo_fallback() -> Tuple[bool, str]:
+            return _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session, on_observed_quote)
+
+        # Fetch historical data
+        df = None
+        tv_fetch_error = None
+        try:
+            from api.price_sync_policy import fetch_tradingview_history
+            df = fetch_tradingview_history(tv,
+                symbol=tv_symbol,
+                exchange=tv_exchange,
+                interval=tv_interval,
+                n_bars=n_bars
+            )
+        except Exception as tv_fetch_err:
+            tv_fetch_error = str(tv_fetch_err)
+            print(f"tvDatafeed get_hist raised exception for {upper}: {tv_fetch_err}")
+
+        if df is not None and not df.empty and required_session:
+            if not (pd.to_datetime(df.index).strftime('%Y-%m-%d') == required_session).any():
+                tv_fetch_error = 'No current EGX session bar returned'
+                df = None
+        
+        if df is None or df.empty:
+            ok_fall, msg_fall = try_yahoo_fallback()
+            if ok_fall:
+                return ok_fall, msg_fall
+            
+            reason = f"TradingView error: {tv_fetch_error}" if tv_fetch_error else f"No data found for {symbol} on {tv_exchange} at {timeframe}"
+            return False, f"{reason} (Yahoo fallback: {msg_fall})"
+        
+        # Prepare data
+        df_new = df.reset_index()
+        # TV returns 'datetime' column
+        df_new = df_new.rename(columns={'datetime': 'ts', 'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'})
+        
+        # Filter by start_date and end_date if provided
+        if start_date or end_date:
+            df_new['ts'] = pd.to_datetime(df_new['ts'])
+            if start_date:
+                df_new = df_new[df_new['ts'].dt.date >= start_date]
+            if end_date:
+                df_new = df_new[df_new['ts'].dt.date <= end_date]
+                
+        if df_new.empty:
+            return True, f"No new data within the filtered range ({start_date} to {end_date})"
+
+        # Sync Directly
+        ok, sync_msg = sync_df_to_supabase(upper, df_new, timeframe=timeframe)
+        if ok:
+            _emit_observed_quote(df_new, required_session, on_observed_quote, 'tradingview')
+        return ok, f"OK (tradingview) - {sync_msg}"
+        
+    except Exception as e:
+        error_msg = str(e)
+        # Fallback helper function is defined inside try, but if initialization fails:
+        # we can define/call a simple fallback here too.
+        try:
+            ok_fall, msg_fall = _try_yahoo_direct_fallback(upper, base_symbol, timeframe, max_days, start_date, end_date, required_session, on_observed_quote)
+            if ok_fall:
+                return ok_fall, msg_fall
+            error_msg += f" (Yahoo fallback: {msg_fall})"
+        except Exception:
+            pass
+
+        if "symbol not found" in error_msg.lower():
+            return False, f"Symbol {base_symbol} not found on {tv_exchange} ({error_msg})"
+        elif "invalid exchange" in error_msg.lower():
+            return False, f"Invalid exchange: {tv_exchange} ({error_msg})"
+        else:
+            return False, f"TradingView error: {error_msg}"
+
+
+
+def fetch_tradingview_fundamentals_bulk(
+    tickers: List[str]
+) -> Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """
+    Bulk fetch fundamentals from TradingView screener.
+    
+    Args:
+        tickers: List of stock symbols with exchange suffix
+    
+    Returns:
+        Dict mapping ticker -> (data_dict, meta_dict)
+    """
+    if not tickers:
+        return {}
+    
+    try:
+        from tradingview_screener import Query
+        try:
+            from tradingview_screener import Column
+        except ImportError:
+            Column = None
+        try:
+            from tradingview_screener import col
+        except ImportError:
+            col = None
+    except ImportError:
+        return {}
+    
+    # Import helper functions
+    from api.stock_ai import _finite_float, sync_data_to_supabase
+    
+    bulk_chunk_size = int(os.getenv("TRADINGVIEW_BULK_CHUNK_SIZE", "500"))
+    bulk_chunk_size = max(50, min(2000, bulk_chunk_size))
+    now_ts = int(time.time())
+    
+    # Group by TradingView market
+    market_groups: Dict[str, List[str]] = defaultdict(list)
+    base_to_tickers_by_market: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+    
+    # Aliases for known mismatches (Local -> TradingView)
+    TV_SYMBOL_ALIASES = {
+        "EKHOA": "EKHO", # Egyptian Kuwaiti Holding (USD/EGP variant)
+        "EKHOA.EGX": "EKHO",
+        "ODHN": "ODIN",  # Odin Investments
+        "ODHN.EGX": "ODIN",
+        # Add more as discovered
+    }
+
+    for sym in tickers:
+        up = (sym or "").strip().upper()
+        if not up:
+            continue
+        
+        # We try TradingView for EGX symbols as fallback if Mubasher is failing
+        # (TradingView has many EGX stocks now)
+        
+        # Check alias first
+        alias_target = TV_SYMBOL_ALIASES.get(up)
+        if not alias_target:
+             # Try without suffix
+             base_only = up.split(".")[0]
+             if base_only in TV_SYMBOL_ALIASES:
+                 alias_target = TV_SYMBOL_ALIASES[base_only]
+
+        if alias_target:
+             base = alias_target
+             market = get_tradingview_market(up) 
+        else:
+             base = up.split(".")[0]
+             market = get_tradingview_market(up)
+             if market == "crypto":
+                 base = base.replace("/", "")
+        
+        market_groups[market].append(base)
+        
+        # KEY: Map the TRADINGVIEW BASE back to the ORIGINAL FULL SYMBOL
+
+        base_to_tickers_by_market[market][base].append(sym)
+    
+    out: Dict[str, Tuple[Dict[str, Any], Dict[str, Any]]] = {}
+    
+    def _chunks(items: List[str], size: int) -> List[List[str]]:
+        if size <= 0:
+            return [items]
+        return [items[i : i + size] for i in range(0, len(items), size)]
+    
+    def _has_core_fund_metrics(d: dict) -> bool:
+        if not isinstance(d, dict):
+            return False
+        core = ["marketCap", "peRatio", "eps", "dividendYield", "beta", "high52", "low52"]
+        for k in core:
+            if d.get(k) is not None:
+                return True
+        return False
+    
+    # Fetch data for each market
+    for market, bases in market_groups.items():
+        uniq_bases = list(dict.fromkeys(bases))
+        
+        for chunk in _chunks(uniq_bases, bulk_chunk_size):
+            try:
+                if market == "crypto":
+                    # Crypto screener has different fields
+                    q = (
+                        Query()
+                        .set_markets(market)
+                        .select(
+                            "name",
+                            "description",
+                            "market_cap_calc", # Crypto often uses calc
+                            "logoid",
+                        )
+                    )
+                else:
+                    q = (
+                        Query()
+                        .set_markets(market)
+                        .select(
+                            "name",
+                            "description",
+                            "market_cap_basic",
+                            "price_earnings_ttm",
+                            "earnings_per_share_basic_ttm",
+                            "dividend_yield_recent",
+                            "sector",
+                            "industry",
+                            "logoid",
+                        )
+                    )
+                
+                # Apply filter based on available import
+                if Column is not None:
+                    q = q.where(Column("name").isin(chunk))
+                elif col is not None:
+                    q = q.where(col("name").isin(chunk))
+                else:
+                    continue
+                
+                _, df = q.limit(len(chunk)).get_scanner_data()
+                if df is None or df.empty:
+                    continue
+                
+                # Process each row
+                for _, row in df.iterrows():
+                    base = str(row.get("name") or "").strip().upper()
+                    if not base:
+                        continue
+                    
+                    if market == "crypto":
+                        mcap = _finite_float(row.get("market_cap_calc"))
+                    else:
+                        mcap = _finite_float(row.get("market_cap_basic"))
+                    
+                    if mcap is None:
+                        mcap = _finite_float(row.get("fund_total_assets"))
+                    
+                    data = {
+                        "marketCap": mcap,
+                        "peRatio": _finite_float(row.get("price_earnings_ttm")),
+                        "eps": _finite_float(row.get("earnings_per_share_basic_ttm")),
+                        "dividendYield": _finite_float(row.get("dividend_yield_recent")),
+                        "sector": row.get("sector"),
+                        "industry": row.get("industry"),
+                        "name": row.get("description") or row.get("name"),
+                        "logoUrl": f"https://s3-symbol-logo.tradingview.com/{row['logoid']}.svg" if row.get("logoid") else None
+                    }
+                    
+                    # Skip if no core metrics
+                    if not _has_core_fund_metrics(data):
+                        continue
+                    
+                    # Sync Directly for all matching symbols
+                    for full_sym in base_to_tickers_by_market[market].get(base, []):
+                        sync_data_to_supabase(full_sym, data)
+                        out[full_sym] = (
+                            data,
+                            {
+                                "fetchedAt": now_ts,
+                                "source": "tradingview",
+                                "servedFrom": "live_tradingview_bulk",
+                                "market": market,
+                            },
+                        )
+            
+            except Exception as e:
+                # Log error but continue with other chunks
+                print(f"Error fetching TradingView fundamentals for market {market}: {e}")
+                continue
+    
+    return out
