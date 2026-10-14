@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.egxbots.artoro",
+      "sha256_cert_fingerprints": [
+        "79:A3:6B:C3:33:A1:01:A0:45:AB:52:D1:BC:14:39:91:D8:CE:3F:B7:0F:E7:32:A2:18:A8:97:6A:23:A1:2F:B7"
+      ]
+    }
+  }
+]

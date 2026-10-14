@@ -1,0 +1,56 @@
+{
+  "packageId": "com.egxbots.artoro",
+  "host": "egxbots.com",
+  "name": "ARTORO — البورصة المصرية بالذكاء الاصطناعي",
+  "launcherName": "ARTORO",
+  "display": "standalone",
+  "themeColor": "#09090b",
+  "themeColorDark": "#09090b",
+  "navigationColor": "#09090b",
+  "navigationColorDark": "#09090b",
+  "navigationDividerColor": "#18181b",
+  "navigationDividerColorDark": "#18181b",
+  "backgroundColor": "#09090b",
+  "enableNotifications": true,
+  "startUrl": "/chat?source=twa",
+  "iconUrl": "http://localhost:3000/icon-512.png",
+  "maskableIconUrl": "http://localhost:3000/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "artoro"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "شات ARTORO",
+      "shortName": "الشات",
+      "url": "/chat",
+      "chosenIconUrl": "http://localhost:3000/icon-192.png"
+    },
+    {
+      "name": "معمل الاستراتيجيات",
+      "shortName": "الاستراتيجيات",
+      "url": "/strategy-lab",
+      "chosenIconUrl": "http://localhost:3000/icon-192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "http://localhost:3000/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": false
+    },
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false
+}

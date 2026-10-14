@@ -5,8 +5,16 @@ import Providers from "@/app/providers";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ChatWidget from "@/components/ChatWidget";
+import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import { Analytics } from "@vercel/analytics/react";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+
+export const viewport: Viewport = {
+  themeColor: "#09090b",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://egxbots.com'),
@@ -67,7 +75,12 @@ export const metadata: Metadata = {
     description: "Advanced AI Stock Analyzer for the Egyptian Exchange (EGX) with technical scanning, daily AI scores, backtests, and AI chatbot.",
     images: ["https://egxbots.com/dashboard_preview.png"],
   },
-  manifest: "/favicon_io/site.webmanifest",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "ARTORO",
+  },
   icons: {
     icon: [
       { url: "/favicon_io/favicon.ico", type: "image/x-icon" },
@@ -180,6 +193,7 @@ export default function RootLayout({
           </main>
           <Footer />
           <ChatWidget />
+          <PwaInstallPrompt />
           <Analytics />
         </Providers>
       </body>

@@ -1,19 +1,21 @@
 {
-  "name": "Your Application Name",
-  "short_name": "App",
-  "description": "Application description",
-  "start_url": "/",
+  "name": "ARTORO — البورصة المصرية بالذكاء الاصطناعي",
+  "short_name": "ARTORO",
+  "description": "منصة تحليل ومحاكاة واستراتيجيات الأسهم المصرية EGX بالذكاء الاصطناعي",
+  "start_url": "/chat?source=pwa",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
-  "orientation": "portrait-primary",
+  "orientation": "portrait",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": [
+    "finance",
+    "business",
+    "productivity"
+  ],
   "icons": [
-    {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
@@ -25,11 +27,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
-  ],
-  "categories": [
-    "productivity"
-  ],
-  "lang": "en",
-  "dir": "ltr"
+  ]
 }
