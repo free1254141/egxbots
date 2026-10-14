@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useWatchlist } from "@/contexts/WatchlistContext";
-import { useAppState } from "@/contexts/AppStateContext";
 import { useTechnicalScanner } from "@/contexts/TechnicalScannerContext";
 import type { TechResult } from "@/lib/api";
 import StockLogo from "@/components/StockLogo";
@@ -22,7 +21,6 @@ const DEFAULT_PILLS = ["price", "rsi", "marketcap", "sector", "divergence", "sha
 export default function TechnicalScannerPage() {
     const { t, language } = useLanguage();
     const { saveSymbol, removeSymbolBySymbol, isSaved } = useWatchlist();
-    const { addSymbolToCompare } = useAppState();
     
     const {
         state: {

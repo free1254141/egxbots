@@ -18,8 +18,8 @@ export default function TechnicalScannerGuide() {
                 : 'Screen EGX stocks using RSI, MACD, moving averages and volume. Compare stocks with your chosen filters using saved market data, not live quotes.'} />
         <div className="mb-5 grid gap-4 border border-zinc-200 bg-white p-4 text-sm leading-7 text-zinc-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 sm:grid-cols-2 sm:p-5">
             <div><h2 className="font-bold text-zinc-950 dark:text-white">{ar ? 'طريقة الاستخدام' : 'How to use the scanner'}</h2>
-                <p>{ar ? 'ابدأ بأحد قوالب الفحص أو عدّل مرشحات المؤشرات والسيولة. شغّل الفحص، ثم رتّب النتائج وافتح السهم أو المقارنة لمراجعة التفاصيل.'
-                    : 'Start with a screening template or adjust indicator and liquidity filters. Run the scan, sort the results, then open a stock or comparison to review the details.'}</p></div>
+                <p>{ar ? 'ابدأ بأحد قوالب الفحص أو عدّل مرشحات المؤشرات والسيولة. شغّل الفحص، ثم رتّب النتائج وافتح السهم لمراجعة التفاصيل.'
+                    : 'Start with a screening template or adjust indicator and liquidity filters. Run the scan, sort the results, then open a stock to review the details.'}</p></div>
             <div><h2 className="font-bold text-zinc-950 dark:text-white">{ar ? 'تاريخ البيانات وحدودها' : 'Data dates and limits'}</h2>
                 <p>{ar ? 'راجع تاريخ التحديث الظاهر في النتائج. اختلاف تواريخ البيانات يحدّ من المقارنة، والتشبع البيعي أو إشارة المؤشر وحدهما لا يثبتان فرصة شراء أو أرباحاً مستقبلية.'
                     : 'Check the update date shown with the results. Different snapshot dates limit comparisons. Oversold readings or an indicator signal alone do not establish a buying opportunity or future returns.'}</p></div>

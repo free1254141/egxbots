@@ -3,10 +3,9 @@
 import { useState, useMemo } from "react";
 import {
     Search, Filter, Calendar, CheckCircle,
-    TrendingUp, TrendingDown, Minus, BarChart3, ArrowLeftRight
+    TrendingUp, TrendingDown, Minus, BarChart3
 } from "lucide-react";
 import type { TestPredictionRow } from "@/lib/types";
-import { useAppState } from "@/contexts/AppStateContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 import { getIndicatorSignals, calculateIndicatorStats, type IndicatorSignals } from "@/lib/indicators";
@@ -46,7 +45,6 @@ export default function TableView({ rows, ticker }: { rows: TestPredictionRow[],
     const [showBuyOnly, setShowBuyOnly] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [showStats, setShowStats] = useState(true);
-    const { addSymbolToCompare } = useAppState();
     const { t } = useLanguage();
 
     const filteredRows = useMemo(() => {
@@ -194,18 +192,6 @@ export default function TableView({ rows, ticker }: { rows: TestPredictionRow[],
                     <BarChart3 className="h-3.5 w-3.5" />
                     Statistics
                 </button>
-
-                {ticker && (
-                    <button
-                        onClick={() => {
-                            void addSymbolToCompare(ticker);
-                        }}
-                        className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
-                    >
-                        <ArrowLeftRight className="h-3.5 w-3.5" />
-                        {t("nav.scanner.compare")}
-                    </button>
-                )}
 
                 <div className="ml-auto flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5">
                     <Search className="h-3.5 w-3.5 text-zinc-500" />
