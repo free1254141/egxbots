@@ -780,6 +780,33 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const d=db(q=>({data:q.ops.some(o=>o[0] === "select" && o[1] === "created_at") ? [] : [{symbol:"COMI",status:"win",entry_price:100,target_price:120}],error:null}));
         const r=await executeAgenticTool("get_recommendations",{status:"closed"},d.client,"u");expect(r.recommendations[0].realized_return_pct).toBeNull();
     });
+    test("get_recommendations supports timeframes, calculates performance_summary, and bounds rows", async () => {
+        const rows = [
+            { id: "1", symbol: "SWDY", signal: "BUY", entry_price: 100, exit_price: 110, profit_loss_pct: 10, status: "win", created_at: "2026-09-15T10:00:00Z" },
+            { id: "2", symbol: "TMGH", signal: "BUY", entry_price: 50, exit_price: 45, profit_loss_pct: -10, status: "loss", created_at: "2026-09-16T10:00:00Z" },
+            { id: "3", symbol: "FWRY", signal: "BUY", entry_price: 20, exit_price: 24, profit_loss_pct: 20, status: "win", created_at: "2026-09-18T10:00:00Z" }
+        ];
+        const d = db(q => ({
+            data: q.ops.some(o => o[0] === "select" && o[1] === "created_at")
+                ? [{ created_at: "2026-09-18T10:00:00Z" }]
+                : rows,
+            error: null
+        }));
+        const r = await executeAgenticTool("get_recommendations", { timeframe: "last_month", status: "closed" }, d.client, "u");
+        expect(r.status).toBe("success");
+        expect(r.performance_summary).toMatchObject({
+            total_recommendations: 3,
+            closed_count: 3,
+            open_count: 0,
+            win_count: 2,
+            loss_count: 1,
+            win_rate_pct: 66.7,
+            avg_return_pct: 6.67
+        });
+        expect(r.performance_summary.best_trade).toMatchObject({ symbol: "FWRY", return_pct: 20 });
+        expect(r.performance_summary.worst_trade).toMatchObject({ symbol: "TMGH", return_pct: -10 });
+        expect(r.recommendations).toHaveLength(3);
+    });
     test("stock news uses bounded sentiment schema and filters requested symbols",async()=>{
         const d=db(q=>({data:q.table === "stocks" ? [{symbol:"COMI",name:"Commercial International Bank"}] : [{symbol:"COMI",date:price.date,headlines:["COMI reports quarterly earnings"],news_count:1,sentiment_score:0.5}],error:null}));
         const r=await executeAgenticTool("get_news",{symbols:["COMI"]},d.client,"u");

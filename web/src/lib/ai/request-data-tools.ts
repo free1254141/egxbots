@@ -1,5 +1,5 @@
 import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
-import { executeAgenticTool, cairoWeekBounds } from './agentic-tools';
+import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 
 const readBatches = new Set(['get_stock', 'get_stock_levels', 'get_comparison', 'get_fundamentals']);
@@ -35,9 +35,17 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
         const saved = snapshot.data?.[0], swings = saved?.payload?.swings;
         const shortAvailable = !snapshot.error && swings?.status === 'ok';
         const status = args.status || 'open', timeframe = args.timeframe || 'all';
-        const { thisWeekStartIso, lastWeekStartIso } = cairoWeekBounds();
-        const since = timeframe === 'this_week' ? thisWeekStartIso : timeframe === 'last_week' ? lastWeekStartIso : null;
-        const before = timeframe === 'last_week' ? thisWeekStartIso : null;
+        const bounds = cairoTimeframeBounds();
+        const since = timeframe === 'this_week' ? bounds.thisWeekStartIso
+            : timeframe === 'last_week' ? bounds.lastWeekStartIso
+            : timeframe === 'this_month' ? bounds.thisMonthStartIso
+            : timeframe === 'last_month' ? bounds.lastMonthStartIso
+            : timeframe === 'last_30_days' ? bounds.last30DaysStartIso
+            : timeframe === 'last_90_days' ? bounds.last90DaysStartIso
+            : null;
+        const before = timeframe === 'last_week' ? bounds.thisWeekStartIso
+            : timeframe === 'last_month' ? bounds.lastMonthEndIso
+            : null;
         const filtered = (r: any) => (!args.symbols?.length || args.symbols.some((s: string) => s.toUpperCase().replace(/\.CA$/, '') === r.symbol))
             && (!since || String(r.signal_date || '') >= since.slice(0, 10))
             && (!before || String(r.signal_date || '') < before.slice(0, 10));
@@ -61,7 +69,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
         const legacyRows = legacy.recommendations.map((r: any) => ({ ...r, source_kind: 'model_signals', recommendation_type: 'توصية نماذج' }));
         const all = [...legacyRows, ...shorts].map(r => recommendationVisibility(r, access.isPro));
         const offset = Number.isInteger(args.offset) && args.offset >= 0 ? args.offset : 0;
-        const limit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : status === 'open' ? 200 : 50;
+        const limit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : 15;
         all.sort((a, b) => String(b.signal_date || '').localeCompare(String(a.signal_date || ''))
             || String(a.source_kind).localeCompare(String(b.source_kind)) || String(a.symbol || '').localeCompare(String(b.symbol || '')));
         const page = all.slice(offset, offset + limit);
@@ -70,6 +78,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
         const truncated = offset + page.length < total;
         return { status: 'success', availability: completeSources && !truncated ? 'available' : 'partial',
             recommendations: page, count: page.length, returned_count: page.length, total_count: total, offset,
+            performance_summary: legacy.performance_summary,
             next_offset: truncated ? offset + page.length : null, truncated, is_page: offset > 0 || page.length < total, sources_complete: completeSources,
             source_counts: { model_signals: legacy.total_count, short_swings: shortAvailable ? shorts.length : null },
             status_filter: status, timeframe, access: access.isPro ? 'pro' : 'free',
@@ -77,7 +86,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             snapshot_date: shortAvailable ? swings.as_of : null,
             latest_recommendation_date: legacy.latest_recommendation_date,
             latest_returned_quote_date: [legacy.latest_returned_quote_date, shortAvailable ? swings.as_of : null].filter(Boolean).sort().at(-1) || null,
-            note: `${access.isPro ? 'المصادر المنشورة متاحة للبرو دون تشفير.' : 'التوصيات الحديثة المحمية تظل مشفرة وفق صلاحية الحساب.'} ${offset > 0 || page.length < total ? `معروض ${page.length} من ${total} ابتداءً من الصف ${offset+1}؛ هذه صفحة وليست السجل كله.${truncated ? ' استعمل next_offset للتكملة.' : ''}` : 'اعرض كل الصفوف مع نوع التوصية وتاريخها دون دمج توصيتين على نفس السهم.'} ${!completeSources ? 'تعذر إكمال مصدر أو تجاوز المصدر القديم حد القراءة؛ هذه نتائج جزئية وليست كل التوصيات.' : ''} سعر الدخول الفعلي منفصل عن الإشارة المعلقة؛ تاريخ التوصية منفصل عن تاريخ السعر. لا توجد أهداف ثابتة للصفقة القصيرة إن لم يسجلها المصدر.` };
+            note: `${access.isPro ? 'المصادر المنشورة متاحة للبرو دون تشفير.' : 'التوصيات الحديثة المحمية تظل مشفرة وفق صلاحية الحساب.'} ${offset > 0 || page.length < total ? `معروض ${page.length} من إجمالي ${total} توصية مطابقة للفترة؛ اذكر ملخص الأداء الإحصائي (نسبة النجاح ومتوسط العائد) ثم اعرض الصفقات البارزة المعروضة في جدول دون محاولة سرد كل الصفقات.` : 'اذكر الإحصاءات والصفقات المعروضة بدقة.'} ${!completeSources ? 'تعذر إكمال مصدر أو تجاوز المصدر القديم حد القراءة؛ هذه نتائج جزئية وليست كل التوصيات.' : ''} سعر الدخول الفعلي منفصل عن الإشارة المعلقة؛ تاريخ التوصية منفصل عن تاريخ السعر.` };
     }
     if (readBatches.has(name) && Array.isArray(args.symbols) && args.symbols.length > 10) {
         if (args.symbols.length > 30) return { status: 'error', availability: 'error', message: 'الطلب يتجاوز الحد المسموح 30 رمزًا؛ قسم الطلب.' };

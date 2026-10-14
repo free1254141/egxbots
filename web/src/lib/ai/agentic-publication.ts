@@ -148,6 +148,21 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             if (Number.isFinite(sum.unrealized_pl_pct)) facts.push({ id: "PORTFOLIO:unrealized_pl_pct", symbol: "PORTFOLIO", field: "profit_pct", value: sum.unrealized_pl_pct, unit: "percent", ...meta });
             if (Number.isFinite(sum.positions_count)) facts.push({ id: "PORTFOLIO:positions_count", symbol: "PORTFOLIO", field: "quantity", value: sum.positions_count, unit: "count", ...meta });
         }
+        if (e.tool === "get_recommendations" && e.data?.performance_summary) {
+            const ps = e.data.performance_summary;
+            const meta = { as_of: e.data_time ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() };
+            if (Number.isFinite(ps.total_recommendations)) facts.push({ id: "RECOMMENDATIONS:total", symbol: "RECOMMENDATIONS", field: "quantity", value: ps.total_recommendations, unit: "count", ...meta });
+            if (Number.isFinite(ps.closed_count)) facts.push({ id: "RECOMMENDATIONS:closed", symbol: "RECOMMENDATIONS", field: "quantity", value: ps.closed_count, unit: "count", ...meta });
+            if (Number.isFinite(ps.open_count)) facts.push({ id: "RECOMMENDATIONS:open", symbol: "RECOMMENDATIONS", field: "quantity", value: ps.open_count, unit: "count", ...meta });
+            if (Number.isFinite(ps.win_count)) facts.push({ id: "RECOMMENDATIONS:wins", symbol: "RECOMMENDATIONS", field: "quantity", value: ps.win_count, unit: "count", ...meta });
+            if (Number.isFinite(ps.loss_count)) facts.push({ id: "RECOMMENDATIONS:losses", symbol: "RECOMMENDATIONS", field: "quantity", value: ps.loss_count, unit: "count", ...meta });
+            if (Number.isFinite(ps.win_rate_pct)) facts.push({ id: "RECOMMENDATIONS:win_rate", symbol: "RECOMMENDATIONS", field: "profit_pct", value: ps.win_rate_pct, unit: "percent", ...meta });
+            if (Number.isFinite(ps.avg_return_pct)) facts.push({ id: "RECOMMENDATIONS:avg_return", symbol: "RECOMMENDATIONS", field: "profit_pct", value: ps.avg_return_pct, unit: "percent", ...meta });
+            if (Number.isFinite(ps.avg_win_pct)) facts.push({ id: "RECOMMENDATIONS:avg_win", symbol: "RECOMMENDATIONS", field: "profit_pct", value: ps.avg_win_pct, unit: "percent", ...meta });
+            if (Number.isFinite(ps.avg_loss_pct)) facts.push({ id: "RECOMMENDATIONS:avg_loss", symbol: "RECOMMENDATIONS", field: "profit_pct", value: ps.avg_loss_pct, unit: "percent", ...meta });
+            if (ps.best_trade && Number.isFinite(ps.best_trade.return_pct)) facts.push({ id: `${ps.best_trade.symbol}:best_trade`, symbol: ps.best_trade.symbol, field: "profit_pct", value: ps.best_trade.return_pct, unit: "percent", ...meta });
+            if (ps.worst_trade && Number.isFinite(ps.worst_trade.return_pct)) facts.push({ id: `${ps.worst_trade.symbol}:worst_trade`, symbol: ps.worst_trade.symbol, field: "profit_pct", value: ps.worst_trade.return_pct, unit: "percent", ...meta });
+        }
     }
     return facts;
 }
@@ -1068,6 +1083,25 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             if(d.rounding_note)lines.push(d.rounding_note);
             if(!d.sector_concentration_complete) lines.push("بيانات قطاع سهم أو أكثر غير متاحة؛ تجميع القطاعات جزئي ولا يصح اعتباره كاملاً.");
             lines.push(`اختبار حساسية حسابي فقط، وليس توقعاً: هبوط افتراضي 5% = ${d.stress_scenarios_not_forecasts[0].loss} جنيه، و10% = ${d.stress_scenarios_not_forecasts[1].loss} جنيه.`);
+        }
+        if (e.tool === "get_recommendations" && e.data?.status === "success") {
+            const d = e.data;
+            const ps = d.performance_summary;
+            if (ps && ps.total_recommendations > 0) {
+                lines.push(`\nملخص أداء التوصيات للفترة (${d.timeframe || "all"}): إجمالي التوصيات ${ps.total_recommendations} (المغلقة: ${ps.closed_count}، المفتوحة: ${ps.open_count})، نسبة النجاح ${ps.win_rate_pct != null ? `${ps.win_rate_pct}%` : "غير محدد"} (${ps.win_count} رابحة مقابل ${ps.loss_count} خاسرة)، متوسط العائد ${ps.avg_return_pct != null ? `${ps.avg_return_pct}%` : "غير محدد"}.`);
+            }
+            if (d.recommendations?.length) {
+                lines.push("| السهم | الإشارة | تاريخ التوصية | سعر الدخول | المستهدف | وقف الخسارة | الحالة | العائد % |", "|---|---|---|---:|---:|---:|---|---:|");
+                for (const r of d.recommendations.slice(0, 15)) {
+                    const returnVal = r.realized_return_pct != null ? `${r.realized_return_pct}%` : r.unrealized_return_pct != null ? `${r.unrealized_return_pct}%` : "—";
+                    lines.push(`| ${r.symbol || "—"} | ${r.signal || "BUY"} | ${r.signal_date || "—"} | ${r.entry_price ?? "—"} | ${r.target_price ?? "—"} | ${r.stop_loss ?? "—"} | ${r.status || "—"} | ${returnVal} |`);
+                }
+                if (d.truncated) {
+                    lines.push(`معروض عينة من ${d.recommendations.length} من إجمالي ${d.total_count} توصية للفترة.`);
+                }
+            } else if (d.note) {
+                lines.push(`\n${d.note}`);
+            }
         }
     }
     const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison", "get_live_quote"].includes(e.tool)

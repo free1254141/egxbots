@@ -9,8 +9,12 @@ const job = { id: 'job', job_type: 'daily_bot', status: 'completed', started_at:
 function setup(j: any, error: unknown = null) {
   mockFrom.mockImplementation((table: string) => {
     const chain: any = {};
-    ['select', 'in', 'eq', 'gte'].forEach(k => chain[k] = jest.fn(() => chain));
-    chain.order = jest.fn(async () => ({ data: [report], error }));
+    ['select', 'in', 'eq', 'gte', 'order'].forEach(k => chain[k] = jest.fn(() => chain));
+    if (table === 'daily_social_reports') {
+      chain.limit = jest.fn(async () => ({ data: [report], error }));
+    } else {
+      chain.limit = jest.fn(async () => ({ data: [j], error: null }));
+    }
     chain.then = (resolve: any) => Promise.resolve({ data: [j], error: null }).then(resolve);
     return chain;
   });

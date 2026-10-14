@@ -25,24 +25,60 @@ function checkedClient(client: any): any {
     return { from: (table:string) => wrap(client.from(table)) };
 }
 
-export function cairoWeekBounds(now = new Date()) {
+export function cairoTimeframeBounds(now = new Date()) {
     const parts = new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Cairo",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
     const part = (kind:string) => Number(parts.find(p=>p.type === kind)?.value);
-    const local = new Date(Date.UTC(part("year"),part("month")-1,part("day")));
-    local.setUTCDate(local.getUTCDate()-local.getUTCDay());
-    const utcMidnight = (day:Date) => {
-        const tz = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo",timeZoneName:"longOffset"}).formatToParts(day).find(p=>p.type === "timeZoneName")?.value || "GMT+02:00";
-        const offset = /GMT([+-])(\d{2}):(\d{2})/.exec(tz);
-        const minutes = offset ? (Number(offset[2])*60+Number(offset[3]))*(offset[1] === "+" ? 1 : -1) : 120;
-        return new Date(day.getTime()-minutes*60000).toISOString();
+    const year = part("year"), month = part("month"), day = part("day");
+    const tz = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Cairo",timeZoneName:"longOffset"}).formatToParts(now).find(p=>p.type === "timeZoneName")?.value || "GMT+02:00";
+    const offset = /GMT([+-])(\d{2}):(\d{2})/.exec(tz);
+    const minutes = offset ? (Number(offset[2])*60+Number(offset[3]))*(offset[1] === "+" ? 1 : -1) : 120;
+
+    const toUtcIso = (y: number, m: number, d: number) => {
+        const utcDate = new Date(Date.UTC(y, m - 1, d));
+        return new Date(utcDate.getTime() - minutes * 60000).toISOString();
     };
-    const previous = new Date(local); previous.setUTCDate(previous.getUTCDate()-7);
-    return { thisWeekStartIso:utcMidnight(local), lastWeekStartIso:utcMidnight(previous) };
+
+    const thisMonthStartIso = toUtcIso(year, month, 1);
+    const lastMonthYear = month === 1 ? year - 1 : year;
+    const lastMonth = month === 1 ? 12 : month - 1;
+    const lastMonthStartIso = toUtcIso(lastMonthYear, lastMonth, 1);
+    const lastMonthEndIso = thisMonthStartIso;
+
+    const localDay = new Date(Date.UTC(year, month - 1, day));
+    localDay.setUTCDate(localDay.getUTCDate() - localDay.getUTCDay());
+    const thisWeekStartIso = new Date(localDay.getTime() - minutes * 60000).toISOString();
+    const prevSunday = new Date(localDay);
+    prevSunday.setUTCDate(prevSunday.getUTCDate() - 7);
+    const lastWeekStartIso = new Date(prevSunday.getTime() - minutes * 60000).toISOString();
+
+    const last30DaysStartIso = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString();
+    const last90DaysStartIso = new Date(now.getTime() - 90 * 24 * 3600 * 1000).toISOString();
+
+    return {
+        thisWeekStartIso,
+        lastWeekStartIso,
+        thisMonthStartIso,
+        lastMonthStartIso,
+        lastMonthEndIso,
+        last30DaysStartIso,
+        last90DaysStartIso,
+        cairoDate: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+    };
+}
+
+export function cairoWeekBounds(now = new Date()) {
+    const { thisWeekStartIso, lastWeekStartIso } = cairoTimeframeBounds(now);
+    return { thisWeekStartIso, lastWeekStartIso };
 }
 
 export async function executeAgenticTool(toolName:string,args:Record<string,any>,supabase:any,userId:string,chartHistoryCache?:ChartHistoryCache):Promise<any> {
     try {
-        const enums:Record<string,string[]> = { operation:["view","add","buy","purchase","update","remove","delete","sell"], preset:["momentum_and_volume","top_gainers","top_losers","rsi_oversold","macd_cross","smart_money_flow"], status:["open","closed","all"], timeframe:["this_week","last_week","all"] };
+        const enums:Record<string,string[]> = {
+            operation:["view","add","buy","purchase","update","remove","delete","sell"],
+            preset:["momentum_and_volume","top_gainers","top_losers","rsi_oversold","macd_cross","smart_money_flow"],
+            status:["open","closed","all"],
+            timeframe:["this_week","last_week","this_month","last_month","last_30_days","last_90_days","all"]
+        };
         if (args?.symbol != null && (typeof args.symbol !== "string" || !/^[A-Za-z0-9.]{2,12}$/.test(args.symbol.trim()))) throw new Error("رمز السهم غير صالح");
         if (!args || Array.isArray(args) || typeof args !== "object") throw new Error("مدخلات الأداة يجب أن تكون كائناً");
         const chartTool = ["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history"].includes(toolName);
@@ -432,26 +468,31 @@ async function executeRawTool(
             const statusFilter = args.status || "all";
             const timeframe = args.timeframe || "all";
 
-            const { thisWeekStartIso, lastWeekStartIso } = cairoWeekBounds();
+            const bounds = cairoTimeframeBounds();
+            const { thisWeekStartIso, lastWeekStartIso, thisMonthStartIso, lastMonthStartIso, lastMonthEndIso, last30DaysStartIso, last90DaysStartIso } = bounds;
 
-            // "Open" is a bounded, decision-relevant set: return all of it, not a
-            // page, so the reply never reports a smaller open count than exists.
-            const limit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : statusFilter === "open" ? 50 : 20;
             const applyFilters = (query: any) => {
                 let out = query;
                 out = out.eq("is_public", true).eq("exchange", "EGX");
                 if (args.symbols?.length) out = out.in("symbol", args.symbols);
                 if (statusFilter === "open") out = out.in("status", ["open", "active"]);
                 else if (statusFilter === "closed") out = out.in("status", ["win", "loss", "closed"]);
+
                 if (timeframe === "this_week") out = out.gte("created_at", thisWeekStartIso);
                 else if (timeframe === "last_week") out = out.gte("created_at", lastWeekStartIso).lt("created_at", thisWeekStartIso);
+                else if (timeframe === "this_month") out = out.gte("created_at", thisMonthStartIso);
+                else if (timeframe === "last_month") out = out.gte("created_at", lastMonthStartIso).lt("created_at", lastMonthEndIso);
+                else if (timeframe === "last_30_days") out = out.gte("created_at", last30DaysStartIso);
+                else if (timeframe === "last_90_days") out = out.gte("created_at", last90DaysStartIso);
+
                 return out;
             };
 
-            const { data: rows } = await applyFilters(supabase
+            // Fetch all matching records in timeframe (up to 300) for statistical accuracy
+            const { data: allMatchingRows } = await applyFilters(supabase
                 .from("scan_results")
                 .select("id,symbol,signal,entry_price,target_price,stop_loss,exit_price,profit_loss_pct,status,created_at,updated_at")
-                .order("created_at", { ascending: false })).limit(limit);
+                .order("created_at", { ascending: false })).limit(300);
 
             // Exact total for the same filter so the answer states "shown of total".
             const { count: totalCount } = await applyFilters(supabase
@@ -467,25 +508,82 @@ async function executeRawTool(
                 .limit(1);
             const latestDateInDb = latestRow?.[0]?.created_at ? String(latestRow[0].created_at).slice(0, 10) : null;
 
-            const enrichedRecs = [];
+            const allRows = allMatchingRows || [];
 
-            for (const r of rows || []) {
+            // Compute performance_summary over all matching recommendations in timeframe
+            let closedCount = 0;
+            let openCount = 0;
+            let winCount = 0;
+            let lossCount = 0;
+            let totalReturnPct = 0;
+            let totalWinPct = 0;
+            let totalLossPct = 0;
+            let bestTrade: { symbol: string; return_pct: number } | null = null;
+            let worstTrade: { symbol: string; return_pct: number } | null = null;
+
+            const parsedAll = allRows.map((r: any) => {
                 const sym = r.symbol;
                 const entry = Number(r.entry_price || 0);
                 const isClosed = ["win", "loss", "closed"].includes(r.status);
-
                 let realizedReturnPct: number | null = null;
-                let unrealizedReturnPct: number | null = null;
-                let currPrice: number | null = null;
-                let quoteDate: string | null = null;
-
                 if (isClosed) {
+                    closedCount++;
                     if (r.profit_loss_pct != null) {
                         realizedReturnPct = Number(Number(r.profit_loss_pct).toFixed(2));
                     } else if (r.exit_price != null && entry > 0) {
                         realizedReturnPct = round(((Number(r.exit_price) - entry) / entry) * 100 * (r.signal === "SELL" ? -1 : 1));
                     }
+                    if (realizedReturnPct != null) {
+                        totalReturnPct += realizedReturnPct;
+                        if (realizedReturnPct > 0) {
+                            winCount++;
+                            totalWinPct += realizedReturnPct;
+                        } else if (realizedReturnPct < 0) {
+                            lossCount++;
+                            totalLossPct += realizedReturnPct;
+                        }
+                        if (!bestTrade || realizedReturnPct > bestTrade.return_pct) {
+                            bestTrade = { symbol: sym, return_pct: realizedReturnPct };
+                        }
+                        if (!worstTrade || realizedReturnPct < worstTrade.return_pct) {
+                            worstTrade = { symbol: sym, return_pct: realizedReturnPct };
+                        }
+                    }
                 } else {
+                    openCount++;
+                }
+                return { ...r, realizedReturnPct, isClosed, entry };
+            });
+
+            const total = typeof totalCount === "number" ? totalCount : allRows.length;
+
+            const performanceSummary = {
+                total_recommendations: total,
+                closed_count: closedCount,
+                open_count: openCount,
+                win_count: winCount,
+                loss_count: lossCount,
+                win_rate_pct: closedCount > 0 ? Number(((winCount / closedCount) * 100).toFixed(1)) : null,
+                avg_return_pct: closedCount > 0 ? Number((totalReturnPct / closedCount).toFixed(2)) : null,
+                avg_win_pct: winCount > 0 ? Number((totalWinPct / winCount).toFixed(2)) : null,
+                avg_loss_pct: lossCount > 0 ? Number((totalLossPct / lossCount).toFixed(2)) : null,
+                best_trade: bestTrade,
+                worst_trade: worstTrade
+            };
+
+            // Bound rows returned to LLM to prevent length/token overflow while providing representative trades
+            const sampleLimit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : 15;
+            const sampleRows = parsedAll.slice(0, sampleLimit);
+
+            const enrichedRecs = [];
+
+            for (const r of sampleRows) {
+                const sym = r.symbol;
+                let unrealizedReturnPct: number | null = null;
+                let currPrice: number | null = null;
+                let quoteDate: string | null = null;
+
+                if (!r.isClosed) {
                     const { data: indRows } = await supabase
                         .from("stock_technical_indicators")
                         .select("close, date")
@@ -494,8 +592,8 @@ async function executeRawTool(
                         .limit(1);
                     currPrice = finite(indRows?.[0]?.close);
                     quoteDate = indRows?.[0]?.date ?? null;
-                    if (entry > 0 && currPrice != null) {
-                        unrealizedReturnPct = round(((currPrice - entry) / entry) * 100 * (r.signal === "SELL" ? -1 : 1));
+                    if (r.entry > 0 && currPrice != null) {
+                        unrealizedReturnPct = round(((currPrice - r.entry) / r.entry) * 100 * (r.signal === "SELL" ? -1 : 1));
                     }
                 }
 
@@ -503,21 +601,20 @@ async function executeRawTool(
                     id: r.id,
                     symbol: sym,
                     signal: r.signal || "BUY",
-                    entry_price: entry,
+                    entry_price: r.entry,
                     target_price: r.target_price,
                     stop_loss: r.stop_loss,
                     exit_price: r.exit_price,
                     status: r.status,
                     signal_date: String(r.created_at || "").slice(0, 10),
-                    closed_date: isClosed ? String(r.updated_at || "").slice(0, 10) : null,
+                    closed_date: r.isClosed ? String(r.updated_at || "").slice(0, 10) : null,
                     current_price: currPrice,
                     current_date: quoteDate,
-                    realized_return_pct: realizedReturnPct,
+                    realized_return_pct: r.realizedReturnPct,
                     unrealized_return_pct: unrealizedReturnPct
                 });
             }
 
-            const total = typeof totalCount === "number" ? totalCount : enrichedRecs.length;
             const latestQuoteDate = enrichedRecs.map(r => r.current_date).filter(Boolean).sort().at(-1) ?? null;
             const latestObservedDate = [latestDateInDb, latestQuoteDate].filter(Boolean).sort().at(-1) ?? null;
             return {
@@ -527,6 +624,7 @@ async function executeRawTool(
                 count: enrichedRecs.length,
                 returned_count: enrichedRecs.length,
                 total_count: total,
+                performance_summary: performanceSummary,
                 recommendations: enrichedRecs,
                 truncated: enrichedRecs.length < total,
                 latest_available_date_in_system: latestObservedDate,
@@ -534,10 +632,8 @@ async function executeRawTool(
                 latest_returned_quote_date: latestQuoteDate,
                 date_scope: "تاريخ التوصيات من scan_results؛ تواريخ آخر الأسعار من المؤشرات لكل سهم وقد تكون أحدث. أحدث تاريخ هنا يخص المصادر المعروضة، ولا يثبت تحديث كل بيانات المنصة.",
                 note: enrichedRecs.length === 0
-                    ? `لا توجد توصيات مسجلة خلال الفترة المطلوبة (${timeframe === "this_week" ? "الأسبوع الحالي" : timeframe === "last_week" ? "الأسبوع الماضي" : timeframe}). ${latestDateInDb ? `أحدث توصيات مسجلة تعود لتاريخ ${latestDateInDb}.` : "لا يوجد تاريخ توصيات موثق متاح."}`
-                    : enrichedRecs.length < total
-                        ? `تُعرض ${enrichedRecs.length} من إجمالي ${total} توصية مطابقة. اذكر العددين في الرد.`
-                        : `كل التوصيات المطابقة معروضة (${total}). اذكر العدد الإجمالي في الرد.`
+                    ? `لا توجد توصيات مسجلة خلال الفترة المطلوبة (${timeframe === "this_week" ? "الأسبوع الحالي" : timeframe === "last_week" ? "الأسبوع الماضي" : timeframe === "last_month" ? "الشهر الماضي" : timeframe === "this_month" ? "الشهر الحالي" : timeframe}). ${latestDateInDb ? `أحدث توصيات مسجلة تعود لتاريخ ${latestDateInDb}.` : "لا يوجد تاريخ توصيات موثق متاح."}`
+                    : `إجمالي توصيات الفترة ${total} (المغلقة: ${performanceSummary.closed_count}، المفتوحة: ${performanceSummary.open_count}، نسبة النجاح: ${performanceSummary.win_rate_pct != null ? `${performanceSummary.win_rate_pct}%` : "غير محدد"}، متوسط العائد: ${performanceSummary.avg_return_pct != null ? `${performanceSummary.avg_return_pct}%` : "غير محدد"}). معروض عينة من ${enrichedRecs.length} توصية لتفادي تجاوز حد الرد.`
             };
         }
 
