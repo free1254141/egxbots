@@ -12,7 +12,7 @@ export type FactField =
     "pe_ratio" | "eps" | "market_cap" | "breadth_total" | "breadth_advancing" | "breadth_declining" | "breadth_unchanged" | "breadth_advancing_pct" | "breadth_ad_ratio"
 
     | "chart_signal_count" | "chart_buy_signal_count" | "chart_sell_signal_count"
-    | "backtest_return_pct" | "backtest_drawdown_pct" | "backtest_win_rate_pct" | "backtest_profit_factor" | "backtest_closed_trades" | "backtest_final_equity"
+    | "backtest_return_pct" | "backtest_drawdown_pct" | "backtest_win_rate_pct" | "backtest_profit_factor" | "backtest_closed_trades" | "backtest_final_equity" | "backtest_candle_count"
     | "high" | "low"
     | "price"
     | "change_pct"
@@ -78,7 +78,7 @@ const FIELD_UNITS: Record<FactField, FactUnit> = {
 pe_ratio: "ratio", eps: "egp", market_cap: "egp", breadth_total: "count", breadth_advancing: "count", breadth_declining: "count", breadth_unchanged: "count", breadth_advancing_pct: "percent", breadth_ad_ratio: "ratio",
     chart_signal_count: "count", chart_buy_signal_count: "count", chart_sell_signal_count: "count",
     backtest_return_pct: "percent", backtest_drawdown_pct: "percent", backtest_win_rate_pct: "percent",
-    backtest_profit_factor: "ratio", backtest_closed_trades: "count", backtest_final_equity: "egp",
+    backtest_profit_factor: "ratio", backtest_closed_trades: "count", backtest_final_equity: "egp", backtest_candle_count: "count",
     price: "egp",
     close: "egp",
     change_pct: "percent",

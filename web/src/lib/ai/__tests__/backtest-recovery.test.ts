@@ -74,3 +74,11 @@ test('zero-trade recovery retains metrics with an undefined profit factor',()=>{
  expect(checkAgenticDraft(reply,[koraEvidence])).toEqual([]);
  expect(renderBacktestEvidence({...koraData,strategy_metrics:[{...koraData.strategy_metrics[0],closedTrades:2}]})).toBeNull();
 });
+
+test('backtest period table grounds its start date and candle count without borrowing another metric',()=>{
+ const draft=`KORA — الاتجاه وMACD\n| المقياس | القيمة |\n|---|---|\n| الفترة | 2026-07-20 → 2026-10-14 (60 شمعة يومية) |`;
+ expect(checkAgenticDraft(draft,[koraEvidence])).toEqual([]);
+ expect(checkAgenticDraft(draft.replace('60 شمعة','61 شمعة'),[koraEvidence])).toContain('table_value_not_grounded:KORA:61');
+ expect(checkAgenticDraft(draft.replace('2026-07-20','2026-07-19'),[koraEvidence]).join()).toContain('table_date_not_grounded:KORA:2026-07-19');
+ expect(checkAgenticDraft(draft.replace('60 شمعة','0 شمعة'),[koraEvidence])).toContain('table_value_not_grounded:KORA:0');
+});

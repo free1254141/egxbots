@@ -121,6 +121,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             }
             for (const metrics of row.strategy_metrics || []) {
                 for (const {key, field, unit} of BACKTEST_METRICS) if (typeof metrics[key] === "number" && Number.isFinite(metrics[key])) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:${key}`, symbol: row.symbol, field, value: metrics[key], unit, as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                if (Number.isFinite(row.candle_count)) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:candle_count`, symbol: row.symbol, field: "backtest_candle_count", value: row.candle_count, unit: "count", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
             // Distances are derived only from a single dated quote/level row.
             if (row.symbol && Number.isFinite(row.close) && row.close > 0) {
@@ -306,6 +307,8 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/ربحية.*سهم|EPS/i.test(text)) return ["eps"];
     if (/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i.test(text)) return ["market_cap"];
     if (/(?:عائد|تغير).*(?:أسبوع|اسبوع)|(?:أسبوع|اسبوع).*(?:عائد|تغير)/i.test(text)) return ["change_pct"];
+    if (/^(?:الفترة|فترة الاختبار|عدد الشموع|شموع|period|candles|bars)$/i.test(text.trim())) return ["backtest_candle_count"];
+    if (/^(?:عدد الجلسات|جلسات)$/i.test(text.trim())) return ["quantity", "backtest_candle_count"];
     if (/ربح|خسار/i.test(text) && /%|٪|نسب/i.test(text)) return ["profit_pct"];
     if (/ربح|خسار/i.test(text) && /جنيه|بالجنيه/i.test(text)) return ["profit_value"];
     if (/^(?:(?:سعر|السعر)\s*)?(?:أعلى|اعلى|الأعلى|الاعلى|high)(?:\s*(?:سعر|السعر|price))?(?:\s*(?:للجلسة|الجلسة|اليومي))?$/i.test(text.replace(/\([^)]*\)/g, "").trim())) return ["high"];
@@ -988,6 +991,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
                 .flatMap(r => [
                     r.date, r.current_date, r.scan_date, r.signal_date, r.indicators_date,
+                    ...(r.strategy_metrics?.length ? [r.start_date] : []),
                     r.last_week_summary?.baseline_date, r.last_week_summary?.start_date, r.last_week_summary?.end_date,
                     ...(Array.isArray(r.recent_sessions) ? r.recent_sessions.map((s: any) => s.date) : [])
                 ]).filter(Boolean).map(d => String(d).slice(0,10));
