@@ -133,6 +133,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     accessOwnerRef.current = userId;
     const [accessState, setAccessState] = useState<{ owner?: string; status: "loading" | "ready" | "error" }>({ status: "loading" });
     const accessRequestRef = useRef<{ owner: string; promise: Promise<void> } | null>(null);
+    const accessCheckedAtRef = useRef(0);
     const isInitializing = Boolean(authLoading || (userId && (accessState.owner !== userId || accessState.status === "loading")));
     const accessError = Boolean(userId && accessState.owner === userId && accessState.status === "error");
     const chartContextRef = useRef<unknown>(undefined);
@@ -340,9 +341,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }, [setSessionMessages, flushStoredMessages]);
 
     // One account-scoped request supplies both history and quota to every chat consumer.
-    const fetchSessions = useCallback((owner: string): Promise<void> => {
+    const fetchSessions = useCallback((owner: string, background = false): Promise<void> => {
         if (accessRequestRef.current?.owner === owner) return accessRequestRef.current.promise;
-        setAccessState({ owner, status: "loading" });
+        accessCheckedAtRef.current = Date.now();
+        setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "loading" });
         const request = { owner, promise: Promise.resolve() };
         accessRequestRef.current = request;
         request.promise = (async () => {
@@ -365,7 +367,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 setRemainingQuota(data.remaining_quota);
                 setAccessState({ owner, status: "ready" });
             } catch (e) {
-                if (accessOwnerRef.current === owner) setAccessState({ owner, status: "error" });
+                if (accessOwnerRef.current === owner) setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "error" });
                 console.error("Failed to fetch chat access:", e);
             } finally {
                 if (accessRequestRef.current === request) accessRequestRef.current = null;
@@ -390,6 +392,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             window.removeEventListener("storage", onStorage);
         };
     }, [retryAccess]);
+
+    // Refresh on a real return to an open chat, not on every token event or a timer.
+    useEffect(() => {
+        const onReturn = () => {
+            if (authLoading || !userId || document.visibilityState !== "visible") return;
+            if (!isOpen && !window.location.pathname.startsWith("/chat")) return;
+            if (Date.now() - accessCheckedAtRef.current < 60_000) return;
+            void fetchSessions(userId, true);
+        };
+        window.addEventListener("focus", onReturn);
+        document.addEventListener("visibilitychange", onReturn);
+        return () => {
+            window.removeEventListener("focus", onReturn);
+            document.removeEventListener("visibilitychange", onReturn);
+        };
+    }, [authLoading, userId, isOpen, fetchSessions]);
 
     // Switch active session instantly while preserving state
     const switchSession = useCallback(async (sessionId: string) => {

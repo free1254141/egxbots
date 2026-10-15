@@ -51,3 +51,19 @@ test('payment completion refreshes the shared quota without polling',async()=>{
  await act(async()=>{window.dispatchEvent(new Event('egx:entitlements-updated'));window.dispatchEvent(new Event('egx:entitlements-updated'));});
  expect(fetch).toHaveBeenCalledTimes(2);expect(chat.remainingQuota).toBe(999);
 });
+
+test('returning to an open chat refreshes stale quota once in the background',async()=>{
+ const now=jest.spyOn(Date,'now').mockReturnValue(100000);
+ try {
+  mockAuth={user:{id:'A'},loading:false};let resolve!:(r:any)=>void;
+  (fetch as jest.Mock).mockResolvedValueOnce(response(5)).mockReturnValueOnce(new Promise(r=>{resolve=r;}));
+  Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});
+  await act(async()=>{render(tree());});
+  act(()=>chat.setIsOpen(true));
+  act(()=>window.dispatchEvent(new Event('focus')));expect(fetch).toHaveBeenCalledTimes(1);
+  now.mockReturnValue(161000);
+  act(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
+  expect(fetch).toHaveBeenCalledTimes(2);expect(chat.isInitializing).toBe(false);
+  await act(async()=>{resolve(response(4));});expect(chat.remainingQuota).toBe(4);
+ } finally {now.mockRestore();}
+});
