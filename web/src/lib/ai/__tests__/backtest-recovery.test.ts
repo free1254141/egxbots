@@ -47,3 +47,30 @@ test('starting capital beside final equity is grounded separately without accept
  expect(checkAgenticDraft(draft.replace('100,000','110,000'),[e])).toContain('table_value_not_grounded:AJWA:110000');
  expect(checkAgenticDraft(draft.replace('83,604.94','100,000'),[e])).toContain('table_value_not_grounded:AJWA:100000');
 });
+
+// Production KORA failure: a daily price decline was mistaken for strategy drawdown.
+const koraData={...data,symbol:'KORA',candle_count:60,start_date:'2026-07-20',date:'2026-10-14',strategy_metrics:[{strategy_id:'trend_macd',strategy_name:'الاتجاه وMACD',winRatePct:0,finalEquity:100000,closedTrades:0,profitFactor:null,maxDrawdownPct:0,totalReturnPct:0}]};
+const koraEvidence=toAgenticEvidence('compare_strategies_history',{symbol:'KORA',strategy_ids:['trend_macd']},koraData);
+const koraDraft=`KORA — الاتجاه وMACD
+| المقياس | النتيجة |
+|---|---|
+| العائد الصافي | 0.00% |
+| أقصى هبوط لرأس المال | 0.00% |
+| نسبة الصفقات الرابحة | 0.00% |
+| عدد الصفقات المغلقة | 0 |
+| معامل الربح | غير متاح (لا صفقات مغلقة) |
+| رأس المال النهائي | 100,000 جنيه |
+التعديلات الرأسمالية غير متحقق منها، والهبوط الحاد المسجل (-56.18% في 2026-10-13) لا يثبت سبب الحركة.`;
+test('KORA zero-trade backtest does not claim a daily price drop is strategy drawdown',()=>{
+ expect(checkAgenticDraft(koraDraft,[koraEvidence])).toEqual([]);
+ expect(checkAgenticDraft('KORA — الاتجاه وMACD\nأقصى هبوط لرأس المال 56.18%.',[koraEvidence])).toContain('strategy_metric_mismatch:KORA:trend_macd:maxDrawdownPct');
+ expect(checkAgenticDraft(koraDraft.replace('هبوط لرأس المال | 0.00','هبوط لرأس المال | 56.18'),[koraEvidence]).length).toBeGreaterThan(0);
+});
+test('zero-trade recovery retains metrics with an undefined profit factor',()=>{
+ const reply=safeAgenticFallback([koraEvidence],'review_rejected');
+ expect(reply).toContain('60 شمعة');
+ expect(reply).toContain('0.00 | 0.00 | 0.00 | 0 | غير متاح (لا صفقات مغلقة) | 100000.00');
+ expect(reply).not.toContain('بعض البيانات المطلوبة غير متاحة');
+ expect(checkAgenticDraft(reply,[koraEvidence])).toEqual([]);
+ expect(renderBacktestEvidence({...koraData,strategy_metrics:[{...koraData.strategy_metrics[0],closedTrades:2}]})).toBeNull();
+});

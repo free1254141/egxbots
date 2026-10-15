@@ -361,8 +361,9 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
             });
         } else if (owner && selected.length <= 1) {
             for (const match of line.matchAll(/[-+]?\d+(?:\.\d+)?\s*(?:%|٪|جنيه)/g)) {
-                const prefix = line.slice(0, match.index);
-                const candidates = labels.flatMap(([pattern, key]) => { const found = [...prefix.matchAll(new RegExp(pattern.source, pattern.flags + "g"))].at(-1); return found ? [{ key, index: found.index! }] : []; }).sort((a, b) => b.index - a.index);
+                // Full-line lookahead preserves peak-to-trough qualifiers after the
+                // number; only labels preceding this value may own it.
+                const candidates = labels.flatMap(([pattern, key]) => { const found = [...line.matchAll(new RegExp(pattern.source, pattern.flags + "g"))].filter(label => label.index! < match.index!).at(-1); return found ? [{ key, index: found.index! }] : []; }).sort((a, b) => b.index - a.index);
                 if (!candidates.length) continue;
                 const key = candidates[0].key, n = Number(match[0].replace(/[%٪\s]|جنيه/g, "")), expected = owner[key];
                 if (["closedTrades", "profitFactor"].includes(key) && /[%٪]/.test(match[0])) continue;
