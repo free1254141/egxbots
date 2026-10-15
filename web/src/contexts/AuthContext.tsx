@@ -25,11 +25,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    // Auth events can arrive before the initial getSession promise resolves.
+    // Do not let a stale initial snapshot overwrite a newer sign-in/sign-out event.
+    let authEventReceived = false;
 
     supabase.auth
       .getSession()
       .then(({ data, error }) => {
-        if (!mounted) return;
+        if (!mounted || authEventReceived) return;
         if (error) {
           setUser(null);
           setSession(null);
@@ -38,12 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(data.session?.user ?? null);
         }
       })
+      .catch((error) => {
+        if (!mounted || authEventReceived) return;
+        console.error("Failed to restore Supabase session:", error);
+        setUser(null);
+        setSession(null);
+      })
       .finally(() => {
         if (mounted) setLoading(false);
       });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!mounted) return;
+      authEventReceived = true;
       setSession(nextSession);
       const nextUser = nextSession?.user ?? null;
       setUser((currentUser) => {
