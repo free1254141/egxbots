@@ -54,14 +54,15 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
             const historyItems = row.recent_sessions.slice(0, 5).map((s: any) =>
                 `• جلسة ${s.date}: إغلاق ${number(s.close)} جنيه${s.change_pct != null ? ` (${s.change_pct >= 0 ? "+" : ""}${number(s.change_pct)}%)` : ""}`
             );
-            comments.push(`سجل الجلسات الأخيرة:\n${historyItems.join("\n")}`);
+            comments.push(`سجل الجلسات الأخيرة من قاعدة البيانات (دون تحقق من التعديلات الرأسمالية):\n${historyItems.join("\n")}`);
         }
         if (!comments.length) comments.push("السعر وحده لا يكفي لترجيح الدخول؛ يلزم تأكيد الزخم والمستويات الفنية.");
         lines.push(comments.join(" "), "");
     }
+    const hasStoredHistory = [...snapshots.values()].some(r => Array.isArray(r.recent_sessions) && r.recent_sessions.length > 1);
     const allLive = [...snapshots.values()].every(r => r.live_quote_available === true);
     const hasLiveQuotes = [...snapshots.values()].some(r => r.live_quote_available === true);
-    const quoteDescription = allLive
+    const quoteDescription = allLive && !hasStoredHistory
         ? "جميع الأسعار المعروضة لقطات مباشرة من مزود البيانات TradingView وليست إغلاقات يومية مخزنة، وتاريخ ومصدر كل قراءة موضحان، والمستويات سيناريوهات فنية غير مضمونة."
         : hasLiveQuotes
             ? "تاريخ ومصدر كل قراءة موضحان (تشمل لقطات مباشرة من TradingView وأخرى من إغلاقات يومية مخزنة)، والمستويات سيناريوهات فنية غير مضمونة."

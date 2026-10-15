@@ -148,12 +148,22 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                 for (const s of row.recent_sessions) {
                     const sDate = s.date ? String(s.date).slice(0, 10) : null;
                     if (s.close != null && Number.isFinite(s.close)) {
-                        facts.push({ id: `${row.symbol}:close:${sDate}`, symbol: row.symbol, field: "close", value: s.close, unit: "egp", as_of: sDate, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                        facts.push({ id: `${row.symbol}:close:${sDate}`, symbol: row.symbol, field: "close", value: s.close, unit: "egp", as_of: sDate, source: "supabase:stock_prices", tool: e.tool, fetched_at: new Date().toISOString() });
+                    }
+                    for (const field of ["high", "low"] as const) if (typeof s[field] === "number" && Number.isFinite(s[field])) {
+                        facts.push({ id:`${row.symbol}:${field}:${sDate}`, symbol:row.symbol, field, value:s[field], unit:"egp", as_of:sDate, source:"supabase:stock_prices", tool:e.tool, fetched_at:new Date().toISOString() });
                     }
                     if (s.change_pct != null && Number.isFinite(s.change_pct)) {
-                        facts.push({ id: `${row.symbol}:change_pct:${sDate}`, symbol: row.symbol, field: "change_pct", value: s.change_pct, unit: "percent", as_of: sDate, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                        facts.push({ id: `${row.symbol}:change_pct:${sDate}`, symbol: row.symbol, field: "change_pct", value: s.change_pct, unit: "percent", as_of: sDate, source: "supabase:stock_prices", tool: e.tool, fetched_at: new Date().toISOString() });
                     }
                 }
+            }
+            if (row.symbol && row.last_week_summary) {
+                const week = row.last_week_summary;
+                for (const [key,dateKey] of [["baseline_close","baseline_date"],["start_close","start_date"],["end_close","end_date"]] as const) {
+                    if (typeof week[key] === "number" && Number.isFinite(week[key])) facts.push({id:`${row.symbol}:week:${key}`,symbol:row.symbol,field:"close",value:week[key],unit:"egp",as_of:week[dateKey] ?? null,source:"supabase:stock_prices",tool:e.tool,fetched_at:new Date().toISOString()});
+                }
+                if (typeof week.within_week_change_pct === "number" && Number.isFinite(week.within_week_change_pct)) facts.push({id:`${row.symbol}:within_week_change`,symbol:row.symbol,field:"change_pct",value:week.within_week_change_pct,unit:"percent",as_of:week.end_date ?? null,source:"supabase:stock_prices",tool:e.tool,fetched_at:new Date().toISOString()});
             }
             if (row.symbol && row.last_week_summary?.change_pct != null && Number.isFinite(row.last_week_summary.change_pct)) {
                 facts.push({ id: `${row.symbol}:last_week_change_pct`, symbol: row.symbol, field: "change_pct", value: row.last_week_summary.change_pct, unit: "percent", as_of: row.last_week_summary.end_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
@@ -280,6 +290,8 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i.test(text)) return ["market_cap"];
     if (/ربح|خسار/i.test(text) && /%|٪|نسب/i.test(text)) return ["profit_pct"];
     if (/ربح|خسار/i.test(text) && /جنيه|بالجنيه/i.test(text)) return ["profit_value"];
+    if (/^(?:(?:سعر|السعر)\s*)?(?:أعلى|اعلى|الأعلى|الاعلى|high)$/i.test(text.trim())) return ["high"];
+    if (/^(?:(?:سعر|السعر)\s*)?(?:أدنى|ادنى|الأدنى|الادنى|low)$/i.test(text.trim())) return ["low"];
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
         [/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i,["pe_ratio"]], [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i,["market_cap"]],
@@ -713,7 +725,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         for (const symbol of requestedNewsSymbols) {
             const hasSymbol = new RegExp(`(?<![A-Z0-9])${symbol}(?![A-Z0-9])`, "i").test(newsText);
             const hasNoNewsClaim = /(?:لا\s+توجد|غياب|عدم\s+وجود|دون|مفيش)\s+(?:أخبار|اخبار|إفصاحات|افصاحات|بيانات\s+إخبارية)/i.test(plain) || /(?:أخبار|اخبار).{0,35}(?:غير\s+متاح|مفقود|لا\s+تتوفر|لم\s+تسجل|فارغ)/i.test(plain);
-            if (!hasSymbol && !hasNoNewsClaim) reasons.push(`requested_news_symbol_omitted:${symbol}`);
+            const emptyForSymbol = evidence.filter(e => e.tool === "get_news" && e.availability !== "error" && e.arguments?.symbols?.includes(symbol))
+                .every(e => Array.isArray(e.data?.news) && !e.data.news.some((n: any) => n.symbol === symbol));
+            const supportedSingleEmpty = requestedNewsSymbols.length === 1 && hasNoNewsClaim && emptyForSymbol;
+            if (!hasSymbol && !supportedSingleEmpty) reasons.push(`requested_news_symbol_omitted:${symbol}`);
         }
     }
     // Verify comparative distance statements from the same dated comparison,
@@ -941,6 +956,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
                 .flatMap(r => [
                     r.date, r.current_date, r.scan_date, r.signal_date, r.indicators_date,
+                    r.last_week_summary?.baseline_date, r.last_week_summary?.start_date, r.last_week_summary?.end_date,
                     ...(Array.isArray(r.recent_sessions) ? r.recent_sessions.map((s: any) => s.date) : [])
                 ]);
             if (!dates.some(d => String(d || "").slice(0,10) === date)) reasons.push(`table_date_not_grounded:${symbol}:${date}`);
@@ -1007,7 +1023,9 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             ];
             const namedStrategy = knownStrategies.find(m => line.includes(m.strategy_id) || (m.strategy_name && line.includes(m.strategy_name)));
             const strategyRelevant = namedStrategy ? relevant.filter(f => (!f.field.startsWith("backtest_") && !f.field.startsWith("chart_")) || f.id.includes(`:${namedStrategy.strategy_id}:`)) : relevant;
-            const targetFacts = fields ? strategyRelevant.filter(f => fields.includes(f.field)) : strategyRelevant;
+            const rowDate = (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
+            const datedRelevant = rowDate ? strategyRelevant.filter(f => !["close","high","low","change_pct"].includes(f.field) || f.as_of?.slice(0,10) === rowDate) : strategyRelevant;
+            const targetFacts = fields ? datedRelevant.filter(f => fields.includes(f.field)) : datedRelevant;
             // Portfolio screenshots often place the cash gain/loss and its
             // percentage together in one cell under a single "return" column
             // (for example: "−784 EGP ▼2.74%"). The visible image evidence
@@ -1179,7 +1197,7 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             } else if (d?.note) {
                 lines.push(`\n${d.note}`);
             } else if (e.symbols?.length) {
-                lines.push(`\nلا توجد عناوين أو إفصاحات رسمية منشورة لـ ${e.symbols.join("، ")} خلال آخر 7 أيام في قاعدة البيانات. الارتفاعات السعرية القوية بدون إفصاحات جوهرية أو بأحجام تداول ضعيفة قد تعكس حركة مضاربية تستوجب الحذر وإدارة المخاطر بدلاً من مطاردة الحركة.`);
+                lines.push(`\nمصدر المنصة لم يرجع عناوين موثقة لـ ${e.symbols.join("، ")} خلال آخر 7 أيام؛ هذا لا يثبت غياب أخبار خارج تغطيته ولا يحدد سبب الحركة.`);
             }
         }
     }

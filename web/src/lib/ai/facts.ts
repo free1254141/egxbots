@@ -13,6 +13,7 @@ export type FactField =
 
     | "chart_signal_count" | "chart_buy_signal_count" | "chart_sell_signal_count"
     | "backtest_return_pct" | "backtest_drawdown_pct" | "backtest_win_rate_pct" | "backtest_profit_factor" | "backtest_closed_trades" | "backtest_final_equity"
+    | "high" | "low"
     | "price"
     | "change_pct"
     | "rsi"
@@ -86,6 +87,8 @@ pe_ratio: "ratio", eps: "egp", market_cap: "egp", breadth_total: "count", breadt
     macd_signal: "unitless",
     macd_hist: "unitless",
     vol_ratio: "ratio",
+    high: "egp",
+    low: "egp",
     volume: "shares",
     value: "egp",
     support: "egp",

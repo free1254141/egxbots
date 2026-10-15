@@ -1,3 +1,4 @@
+import { summarizeStockHistory } from "./stock-history";
 import { executeLiveQuoteTool } from "./live-quote-tool";
 import { reconcileStockQuote, stockPricePresentation, stockQuoteMetadata } from "./stock-quote";
 import { PLANNED_READ_TOOL_NAMES, executePlannedReadTool } from "./planned-read-tools";
@@ -177,39 +178,7 @@ async function executeRawTool(
                     .order("date", { ascending: false })
                     .limit(25);
 
-                const recentSessions = (pRows || []).slice(0, 10).map((r: any, idx: number) => {
-                    const nextSession = (pRows || [])[idx + 1];
-                    const prevClose = nextSession ? finite(nextSession.close) : null;
-                    const curClose = finite(r.close);
-                    const changePct = curClose != null && prevClose != null && prevClose > 0
-                        ? Number((((curClose - prevClose) / prevClose) * 100).toFixed(2))
-                        : null;
-                    return {
-                        date: r.date,
-                        close: curClose,
-                        change_pct: changePct,
-                        high: finite(r.high),
-                        low: finite(r.low)
-                    };
-                });
-
-                const bounds = cairoTimeframeBounds();
-                const lastWeekStartDate = bounds.lastWeekStartIso.slice(0, 10);
-                const thisWeekStartDate = bounds.thisWeekStartIso.slice(0, 10);
-                const lastWeekSessions = (pRows || []).filter((r: any) => r.date >= lastWeekStartDate && r.date < thisWeekStartDate);
-                let lastWeekChangePct: number | null = null;
-                let lastWeekEndClose: number | null = null;
-                let lastWeekStartClose: number | null = null;
-                if (lastWeekSessions.length > 0) {
-                    lastWeekEndClose = finite(lastWeekSessions[0].close);
-                    const firstSessionDate = lastWeekSessions[lastWeekSessions.length - 1].date;
-                    lastWeekStartClose = finite(lastWeekSessions[lastWeekSessions.length - 1].close);
-                    const sessionBeforeWeek = (pRows || []).find((r: any) => r.date < firstSessionDate);
-                    const baseClose = sessionBeforeWeek ? finite(sessionBeforeWeek.close) : lastWeekStartClose;
-                    if (lastWeekEndClose != null && baseClose != null && baseClose > 0) {
-                        lastWeekChangePct = Number((((lastWeekEndClose - baseClose) / baseClose) * 100).toFixed(2));
-                    }
-                }
+                const history = summarizeStockHistory(pRows || []);
 
                 const ind = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 if (!ind) {
@@ -251,15 +220,7 @@ async function executeRawTool(
                         distribution_score: wyckoff.dist_score,
                         consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
                         consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
-                        recent_sessions: recentSessions,
-                        last_week_summary: lastWeekSessions.length > 0 ? {
-                            sessions_count: lastWeekSessions.length,
-                            start_date: lastWeekSessions[lastWeekSessions.length - 1].date,
-                            end_date: lastWeekSessions[0].date,
-                            start_close: lastWeekStartClose,
-                            end_close: lastWeekEndClose,
-                            change_pct: lastWeekChangePct
-                        } : null
+                        ...history
                     };
                 }
             });
@@ -309,39 +270,7 @@ async function executeRawTool(
                         tradingZone = "عند منطقة المقاومة تماماً (منطقة جني أرباح ومقاومة بيعية)";
                     }
 
-                    const recentSessions = pRows.slice(0, 10).map((r: any, idx: number) => {
-                        const nextSession = pRows[idx + 1];
-                        const prevClose = nextSession ? finite(nextSession.close) : null;
-                        const curClose = finite(r.close);
-                        const changePct = curClose != null && prevClose != null && prevClose > 0
-                            ? Number((((curClose - prevClose) / prevClose) * 100).toFixed(2))
-                            : null;
-                        return {
-                            date: r.date,
-                            close: curClose,
-                            change_pct: changePct,
-                            high: finite(r.high),
-                            low: finite(r.low)
-                        };
-                    });
-
-                    const bounds = cairoTimeframeBounds();
-                    const lastWeekStartDate = bounds.lastWeekStartIso.slice(0, 10);
-                    const thisWeekStartDate = bounds.thisWeekStartIso.slice(0, 10);
-                    const lastWeekSessions = pRows.filter((r: any) => r.date >= lastWeekStartDate && r.date < thisWeekStartDate);
-                    let lastWeekChangePct: number | null = null;
-                    let lastWeekEndClose: number | null = null;
-                    let lastWeekStartClose: number | null = null;
-                    if (lastWeekSessions.length > 0) {
-                        lastWeekEndClose = finite(lastWeekSessions[0].close);
-                        const firstSessionDate = lastWeekSessions[lastWeekSessions.length - 1].date;
-                        lastWeekStartClose = finite(lastWeekSessions[lastWeekSessions.length - 1].close);
-                        const sessionBeforeWeek = pRows.find((r: any) => r.date < firstSessionDate);
-                        const baseClose = sessionBeforeWeek ? finite(sessionBeforeWeek.close) : lastWeekStartClose;
-                        if (lastWeekEndClose != null && baseClose != null && baseClose > 0) {
-                            lastWeekChangePct = Number((((lastWeekEndClose - baseClose) / baseClose) * 100).toFixed(2));
-                        }
-                    }
+                    const history = summarizeStockHistory(pRows);
 
                     levels.push({
                         symbol: sym,
@@ -357,15 +286,7 @@ async function executeRawTool(
                         take_profit_2: target2,
                         trading_zone: tradingZone,
                         date: pRows[0].date,
-                        recent_sessions: recentSessions,
-                        last_week_summary: lastWeekSessions.length > 0 ? {
-                            sessions_count: lastWeekSessions.length,
-                            start_date: lastWeekSessions[lastWeekSessions.length - 1].date,
-                            end_date: lastWeekSessions[0].date,
-                            start_close: lastWeekStartClose,
-                            end_close: lastWeekEndClose,
-                            change_pct: lastWeekChangePct
-                        } : null,
+                        ...history,
                         methodology: "20-session range; stop=98% support; target2=60-session high or 105% resistance",
                         observations: pRows.length, ...stockPricePresentation(pRows[0].date)
                     });

@@ -1,7 +1,7 @@
 import { executeAgenticTool, runAgenticPipelineStream, AGENTIC_TOOLS_SCHEMA } from "../agentic-pipeline";
 import { cairoWeekBounds } from "../agentic-tools";
 import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts } from "../agentic-publication";
-import { groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply } from "../agentic-runtime";
+import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
@@ -1170,5 +1170,34 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(reviewPlainDigits).not.toContain("table_value_not_grounded:ZEOT:0");
         expect(reviewPlainDigits).toEqual([]);
     });
+    test("historical highs and lows are grounded by metric and session date", () => {
+        const e = [toAgenticEvidence("get_stock", {symbols:["DCRC"]}, {stocks:[{symbol:"DCRC",close:90,recent_sessions:[
+            {date:"2026-10-12",close:52,high:68.5,low:52,change_pct:4},
+            {date:"2026-09-30",close:50,high:50.3,low:50,change_pct:0}
+        ]}]})];
+        const table = "DCRC\n| التاريخ | الإغلاق | أعلى | أدنى |\n|---|---|---|---|\n| 2026-10-12 | 52 | 68.5 | 52 |\n| 2026-09-30 | 50 | 50.3 | 50 |";
+        expect(checkAgenticDraft(table,e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("| 52 | 68.5 |", "| 52 | 50.3 |"),e)).toContain("table_value_not_grounded:DCRC:50.3");
+        expect(checkAgenticDraft(table.replace("| 52 | 68.5 |", "| 52 | 52 |"),e)).toContain("table_value_not_grounded:DCRC:52");
+    });
+    test("one generic no-news claim does not excuse omitting another requested stock", () => {
+        const e=[toAgenticEvidence("get_news",{symbols:["COMI","SWDY"]},{status:"success",news:[{symbol:"SWDY",date:"2026-10-14",headlines:["خبر موثق"]}]})];
+        expect(checkAgenticDraft("## الأخبار\nCOMI: لا توجد أخبار في مصدر المنصة.",e,"هات أخبار COMI وSWDY")).toContain("requested_news_symbol_omitted:SWDY");
+    });
+    test.each([
+        [{plan_id:"free",status:"active",current_period_end:"2099-01-01"},false],
+        [{plan_id:"pro",status:"active",current_period_end:"2020-01-01"},false],
+        [{plan_id:"pro",status:"active",current_period_end:"2099-01-01"},true],
+    ])("chat footer entitlement validates plan and expiry",async (subscription,expected)=>{
+        const d=db(q=>({data:q.table === "subscriptions" ? [subscription] : [],error:null}));
+        const context=await resolveUserProContext(d.client,"ba9c27e8-f62d-452f-8a29-dc77fd092207",false);
+        expect(context.isPro).toBe(expected);
+    });
+    test("provider quote recovery labels its nested history as stored",()=>{
+        const text=renderStockRecovery([{symbol:"DCRC",close:90,live_quote_available:true,recent_sessions:[{date:"2026-10-14",close:90},{date:"2026-10-12",close:52}]}]);
+        expect(text).toContain("سجل الجلسات الأخيرة من قاعدة البيانات");
+        expect(text).not.toContain("جميع الأسعار المعروضة لقطات مباشرة");
+    });
+
 });
 

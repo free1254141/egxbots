@@ -1,8 +1,9 @@
+import { hasActiveProSubscription } from "./plan-gate";
 import { presentReplyLabels } from "./reply-labels";
 import { advisoryBacktestMetricMeaning } from "./backtest-evidence";
 import { advisoryFactRelations } from "./fact-relations";
 import { advisoryObservedChatClaims } from "./market-meaning-advisory";
-import { reviewInstruction } from "./agentic-review-policy";
+import { reviewInstruction, historicalNewsReview } from "./agentic-review-policy";
 import { fallbackEvidence, safeImageEvidenceReply } from "./agentic-recovery";
 export { fallbackEvidence, safeImageEvidenceReply, safePortfolioImageReply } from "./agentic-recovery";
 import { createUsageAccounting } from "./usage-accounting";
@@ -52,7 +53,7 @@ export function stripChatFooters(content: string): string {
         .trim();
 }
 
-async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{ isPro: boolean; vipInviteLink: string | null; userPortfolioSymbols: string[] }> {
+export async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{ isPro: boolean; vipInviteLink: string | null; userPortfolioSymbols: string[] }> {
     let isPro = Boolean(optionsIsPro);
     let vipInviteLink: string | null = null;
     let userPortfolioSymbols: string[] = [];
@@ -61,12 +62,12 @@ async function resolveUserProContext(supabase: any, userId: string, optionsIsPro
         try {
             const client = executionSupabase(supabase);
             const [subRes, inviteRes, posRes] = await Promise.allSettled([
-                !isPro ? client.from("subscriptions").select("plan_id, status").eq("user_id", userId).eq("status", "active").limit(1) : Promise.resolve(null),
+                !isPro ? client.from("subscriptions").select("plan_id, status, current_period_end").eq("user_id", userId).in("status", ["active", "trialing"]).order("current_period_end", { ascending: false }).limit(5) : Promise.resolve(null),
                 client.from("pro_telegram_invites").select("invite_link, invite_expires_at").eq("user_id", userId).maybeSingle(),
                 client.from("positions").select("symbol").eq("user_id", userId).eq("status", "open").limit(50),
             ]);
 
-            if (subRes.status === "fulfilled" && subRes.value?.data && subRes.value.data.length > 0) {
+            if (subRes.status === "fulfilled" && subRes.value?.data && hasActiveProSubscription(subRes.value.data)) {
                 isPro = true;
             }
 
@@ -437,7 +438,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         options.diagnosticCapture?.("deterministic_review", {draft: reply, reasons: deterministic});
         const imageReviewGuidance = vision ? "\nقيم الصورة من الأدلة المرئية المرتبطة بها: أرقام image_vision دليل للصورة وليس سعراً حديثاً من السوق. افصل quantity وentry_price وprofit_pct عن price وchange_pct، واحتفظ بـ asset_type لكل مركز. لا تستنتج قطاعاً من رمز السهم أو اسم شائع؛ يلزم دليل قطاع من أداة بيانات الأسهم، وإلا اذكر أن التوزيع القطاعي غير متحقق. إذا سأل المستخدم صراحة هل يضيف صناديق نشطة، فهذا طلب رأي نوعي في ملاءمتها؛ لا تعتبر الإجابة العامة عليه توصية غير مطلوبة، مع تجنب أمر تنفيذ قطعي. في الرأي النوعي لا تشترط سيناريو رأس مال أو أداة مسح أسهم، ولا ترفض الإجابة بسبب عدم استدعائها. لا تقبل توصية بيع/شراء أخرى غير مطلوبة، ولا تصف مركزاً من نوع fund بأنه سهم مباشر. أدوات مسح الأسهم لا تمثل قاعدة بيانات صناديق الاستثمار المُدارة." : "";
         const reviewBody = { messages: [{ role: "system", content: AGENTIC_PUBLICATION_CONTRACT },
-            { role: "system", content: reviewInstruction + imageReviewGuidance },
+            { role: "system", content: reviewInstruction + "\n" + historicalNewsReview + imageReviewGuidance },
             { role: "user", content: JSON.stringify(reviewPayload(reply)) }], response_format: { type: "json_object" } };
         let message = await request({ ...reviewBody, max_tokens: 1200 }, "review");
         // A cut-off review is not a rejected answer. Retry that review once,
