@@ -626,7 +626,7 @@ def process_exchange_news(
             processed_count += 1
             
             # Throttling to prevent IP blocking from Google News
-            time.sleep(0.3)
+            time.sleep(0.15)
         except Exception as e:
             print(f"[NEWS_ENGINE] Error processing news for {symbol}: {e}")
         finally:
@@ -637,4 +637,5 @@ def process_exchange_news(
         f"[NEWS_ENGINE] Saved {processed_count} rows for {exchange}; "
         f"{symbols_with_news} symbols had news ({total_headlines} headlines total)."
     )
-    return symbols_with_news > 0 and not budget.stopped and processed_count == len(symbols), symbols_with_news
+    is_ok = not budget.is_outage and (budget.succeeded > 0 or processed_count == len(symbols))
+    return is_ok, symbols_with_news

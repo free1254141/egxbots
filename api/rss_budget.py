@@ -10,6 +10,11 @@ class RSSUnavailable(RuntimeError):
 
 class RSSBudget:
     def __init__(self, seconds=180, max_failures=6):
+        import os
+        try:
+            seconds = int(os.getenv('RSS_BUDGET_SECONDS', str(seconds)))
+        except (TypeError, ValueError):
+            pass
         self.deadline = time.monotonic() + seconds
         self.max_failures = max_failures
         self.failures = 0
@@ -20,6 +25,10 @@ class RSSBudget:
     @property
     def stopped(self):
         return self.failures >= self.max_failures or time.monotonic() >= self.deadline
+
+    @property
+    def is_outage(self):
+        return self.failures >= self.max_failures or (self.attempted > 0 and self.succeeded == 0)
 
     def fetch(self, request):
         if self.stopped:

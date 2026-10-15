@@ -51,6 +51,30 @@ def persist_inventory(client, rows, metadata):
     client.table('market_cache').upsert({'cache_key': CACHE_KEY, 'country': 'Egypt',
         'payload': {'metadata': metadata, 'rows': normalized},
         'computed_at': datetime.now(ZoneInfo('UTC')).isoformat()}).execute()
+    try:
+        now_iso = datetime.now(ZoneInfo('UTC')).isoformat()
+        records = [
+            {
+                'symbol': r['Symbol'],
+                'exchange': 'EGX',
+                'data': {
+                    'symbol': r['Symbol'],
+                    'name': r.get('Name') or r['Symbol'],
+                    'country': 'Egypt',
+                    'currency': r.get('Currency') or 'EGP',
+                    'type': r.get('Type') or 'Common Stock',
+                    'isin': r.get('Isin'),
+                    'isListed': True,
+                    'listingStatus': 'listed',
+                },
+                'updated_at': now_iso,
+            }
+            for r in normalized
+        ]
+        for i in range(0, len(records), 100):
+            client.table('stock_fundamentals').upsert(records[i:i+100], on_conflict='symbol,exchange').execute()
+    except Exception as e:
+        print(f"[INVENTORY] Warning: could not seed fundamentals for inventory symbols: {e}")
 
 
 def normalize_inventory(rows):

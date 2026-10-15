@@ -2150,6 +2150,27 @@ def sync_df_to_supabase(ticker: str, df: pd.DataFrame, timeframe: str = "1d") ->
                         ).execute()
                         break
                     except Exception as e:
+                        err_str = str(e)
+                        if ("23503" in err_str or "fk_stock_prices_fundamentals" in err_str) and attempt < max_retries - 1:
+                            try:
+                                supabase.table("stock_fundamentals").upsert({
+                                    "symbol": sb_symbol,
+                                    "exchange": sb_exchange,
+                                    "data": {
+                                        "symbol": sb_symbol,
+                                        "exchange": sb_exchange,
+                                        "name": sb_symbol,
+                                        "country": "Egypt" if sb_exchange == "EGX" else "Saudi Arabia" if sb_exchange == "TADAWUL" else sb_exchange,
+                                        "currency": "EGP" if sb_exchange == "EGX" else "SAR",
+                                        "isListed": True,
+                                        "listingStatus": "listed",
+                                    },
+                                    "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                                }, on_conflict="symbol,exchange").execute()
+                                print(f"DEBUG: Auto-created missing fundamentals row for {sb_symbol}.{sb_exchange}")
+                                continue
+                            except Exception as fe:
+                                print(f"DEBUG: Failed to auto-create fundamentals row for {sb_symbol}: {fe}")
                         if attempt == max_retries - 1:
                             raise e
                         sleep_time = (attempt + 1) * 2

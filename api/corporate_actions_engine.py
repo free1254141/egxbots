@@ -418,7 +418,7 @@ def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_b
                 company_name=name_map.get(clean_sym, ""),
             )
             processed += 1
-            time.sleep(0.3)
+            time.sleep(0.15)
         except Exception as e:
             print(f"[CA-ENGINE] Error processing {symbol}: {e}")
         finally:
@@ -426,4 +426,5 @@ def process_exchange_corporate_actions(exchange: str, symbols: List[str], days_b
                 progress_callback({"processed": index+1, "total": len(symbols), "saved": saved_total, **budget.summary()})
 
     print(f"[CA-ENGINE] Done — {saved_total} corporate actions stored/refreshed.")
-    return not budget.stopped and processed == len(symbols), saved_total
+    is_ok = not budget.is_outage and (budget.succeeded > 0 or processed == len(symbols))
+    return is_ok, saved_total

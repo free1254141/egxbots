@@ -63,3 +63,24 @@ def test_non_feed_response_is_not_valid_empty_coverage(monkeypatch):
     monkeypatch.setattr('urllib.request.urlopen', Mock(return_value=response))
     with pytest.raises(RSSUnavailable):
         news.fetch_google_news('COMI')
+
+
+def test_bounded_sweep_with_successes_is_not_outage():
+    budget = RSSBudget(seconds=180)
+    budget.succeeded = 50
+    budget.attempted = 50
+    budget.failures = 0
+    assert not budget.is_outage
+    # When deadline expires, it stops, but is still not an outage
+    budget.deadline = 0
+    assert budget.stopped
+    assert not budget.is_outage
+
+
+def test_consecutive_failures_trips_outage():
+    budget = RSSBudget(seconds=180, max_failures=6)
+    budget.failures = 6
+    budget.attempted = 6
+    assert budget.stopped
+    assert budget.is_outage
+
