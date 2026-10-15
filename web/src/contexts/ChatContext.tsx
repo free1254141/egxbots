@@ -293,51 +293,68 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("egxbots_selected_model", model);
     }, []);
 
-    const fetchSessionMessages = useCallback(async (sessionId: string) => {
-        try {
-            const res = await fetch(`/api/ai-chat?session_id=${sessionId}`);
-            if (res.ok) {
+    // Deduplicate history reads per room. The cache is local-first; only one
+    // background sync per session may hit the API at a time.
+    const sessionFetchesRef = useRef<Record<string, Promise<void>>>({});
+    const fetchSessionMessages = useCallback((sessionId: string): Promise<void> => {
+        const pending = sessionFetchesRef.current[sessionId];
+        if (pending) return pending;
+
+        const request = (async () => {
+            try {
+                const res = await fetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}`);
+                if (!res.ok) return;
                 const data = await res.json();
-                if (Array.isArray(data.history) && data.history.length > 0) {
-                    const existing = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
-                    const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
-                    existing.forEach((m, idx) => {
-                        if (m.imageUrl || m.imagePreviewUrl || m.images) {
-                            localImageMap.set(idx, {
-                                imageUrl: m.imageUrl,
-                                imagePreviewUrl: m.imagePreviewUrl,
-                                images: m.images
-                            });
-                        }
-                    });
+                if (!Array.isArray(data.history) || data.history.length === 0) return;
 
-                    const mergedHistory: ChatMessage[] = orderChatMessages(data.history.map((srvMsg: ChatMessage, idx: number) => {
-                        const localImg = localImageMap.get(idx);
-                        return {
-                            ...srvMsg,
-                            content: cleanChatText(srvMsg.content || ""),
-                            suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
-                            imagePreviewUrl: srvMsg.imagePreviewUrl || localImg?.imagePreviewUrl || srvMsg.imageUrl || localImg?.imageUrl,
-                            imageUrl: srvMsg.imageUrl || localImg?.imageUrl,
-                            images: srvMsg.images || localImg?.images
-                        };
-                    }));
-
-                    // If a message is actively streaming in this session, preserve the streaming message at the end
-                    if (loadingSessionIds.current[sessionId]) {
-                        const streamingMsg = existing.find(m => m.isStreaming);
-                        if (streamingMsg && !mergedHistory.some(m => m.id === streamingMsg.id)) {
-                            mergedHistory.push(streamingMsg);
-                        }
+                const existing = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
+                const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
+                existing.forEach((m, idx) => {
+                    if (m.imageUrl || m.imagePreviewUrl || m.images) {
+                        localImageMap.set(idx, {
+                            imageUrl: m.imageUrl,
+                            imagePreviewUrl: m.imagePreviewUrl,
+                            images: m.images
+                        });
                     }
+                });
 
-                    setSessionMessages(sessionId, mergedHistory);
-                    flushStoredMessages(sessionId, mergedHistory);
+                const mergedHistory: ChatMessage[] = orderChatMessages(data.history.map((srvMsg: ChatMessage, idx: number) => {
+                    const localImg = localImageMap.get(idx);
+                    return {
+                        ...srvMsg,
+                        content: cleanChatText(srvMsg.content || ""),
+                        suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
+                        imagePreviewUrl: srvMsg.imagePreviewUrl || localImg?.imagePreviewUrl || srvMsg.imageUrl || localImg?.imageUrl,
+                        imageUrl: srvMsg.imageUrl || localImg?.imageUrl,
+                        images: srvMsg.images || localImg?.images
+                    };
+                }));
+
+                // Keep an in-flight assistant response visible while syncing history.
+                if (loadingSessionIds.current[sessionId]) {
+                    const streamingMsg = existing.find(m => m.isStreaming);
+                    if (streamingMsg && !mergedHistory.some(m => m.id === streamingMsg.id)) {
+                        mergedHistory.push(streamingMsg);
+                    }
                 }
+
+                // setSessionMessages updates the visible state only if this room is
+                // still active, so a late response cannot replace another room.
+                setSessionMessages(sessionId, mergedHistory);
+                flushStoredMessages(sessionId, mergedHistory);
+            } catch (e) {
+                console.error("Failed to load session messages from server:", e);
             }
-        } catch (e) {
-            console.error("Failed to load session messages from server:", e);
-        }
+        })();
+
+        sessionFetchesRef.current[sessionId] = request;
+        void request.finally(() => {
+            if (sessionFetchesRef.current[sessionId] === request) {
+                delete sessionFetchesRef.current[sessionId];
+            }
+        });
+        return request;
     }, [setSessionMessages, flushStoredMessages]);
 
     // One account-scoped request supplies both history and quota to every chat consumer.
