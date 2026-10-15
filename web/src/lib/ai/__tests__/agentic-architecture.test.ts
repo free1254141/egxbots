@@ -1228,5 +1228,20 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(checkAgenticDraft(table.replace("10-01: 6.18", "10-01: 99"),e)).toContain("table_value_not_grounded:KORA:99");
     });
 
+    test("Arabic date cells are dates, not fabricated stock prices",()=>{
+        const e=[toAgenticEvidence("get_stock_levels",{symbols:["KORA"]},{levels:[{symbol:"KORA",close:2.92,recent_sessions:[{date:"2026-10-04",close:6.85,change_pct:10.84},{date:"2026-10-05",close:6.50,change_pct:-5.11},{date:"2026-10-06",close:6.13,change_pct:-5.69},{date:"2026-10-07",close:6.50,change_pct:6.04}]}]})];
+        const table="KORA\n| التاريخ | الإقفال | التغير |\n|---|---|---|\n| 4 أكتوبر | 6.85 | +10.84% |\n| 5 أكتوبر | 6.50 | −5.11% |\n| 6 أكتوبر | 6.13 | −5.69% |\n| 7 أكتوبر | 6.50 | +6.04% |";
+        expect(checkAgenticDraft(table,e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("5 أكتوبر", "٠٥/١٠"),e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("5 أكتوبر", "9 أكتوبر"),e)).toContain("table_date_not_grounded:KORA:9 أكتوبر");
+        expect(checkAgenticDraft(table.replace("5 أكتوبر | 6.50", "5 أكتوبر | 6.13"),e)).toContain("table_value_not_grounded:KORA:6.13");
+    });
+
+    test("a price gap cannot imply a capital action without official dated event evidence",()=>{
+        const e=[toAgenticEvidence("get_stock",{symbols:["KORA"]},{stocks:[{symbol:"KORA",close:2.92}]})];
+        expect(checkAgenticDraft("KORA: الهبوط الحاد قد يعكس حدثا على رأس المال ولم أتحقق من السجل.",e)).toContain("capital_action_cause_without_official_event");
+        expect(checkAgenticDraft("KORA: القفزة لا تثبت أو ترجح تجزئة أو زيادة رأس مال.",e)).not.toContain("capital_action_cause_without_official_event");
+    });
+
 });
 

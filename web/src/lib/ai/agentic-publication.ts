@@ -283,6 +283,22 @@ function checkCompoundMetricCell(label: string, cell: string, symbol: string, fa
     return reasons;
 }
 
+/** Resolve a displayed date against actual evidence, including Arabic month names. */
+function groundedTableDate(cell: string, dates: string[]): string | null {
+    const normalize = (text: string) => normalizeDigitsAndNumberFormatting(text.replace(/[*_`]/g, "")).replace(/[،,\u200e\u200f]/g, "").replace(/[أإآ]/g, "ا").replace(/^جلسة\s+/, "").replace(/\s+/g, " ").trim();
+    const text = normalize(cell);
+    const matches = [...new Set(dates)].filter(date => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+        const [year,month,day] = date.split("-").map(Number);
+        const instant = new Date(`${date}T12:00:00Z`);
+        const variants = [date, `${day}/${month}/${year}`, `${day}/${month}`, `${date.slice(8,10)}/${date.slice(5,7)}`, `${date.slice(8,10)}/${date.slice(5,7)}/${year}`,
+            new Intl.DateTimeFormat("ar-EG",{timeZone:"UTC",day:"numeric",month:"long",year:"numeric"}).format(instant),
+            new Intl.DateTimeFormat("ar-EG",{timeZone:"UTC",day:"numeric",month:"long"}).format(instant)];
+        return variants.some(value => normalize(value) === text);
+    });
+    return matches.length === 1 ? matches[0] : null;
+}
+
 function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     const text = label.replace(/[*_]/g, "");
     // Specific financial labels take precedence over generic profit/currency words.
@@ -311,7 +327,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/متوسط.*شراء|سعر.*(?:شراء|دخول)|الدخول/i,["entry_price"]], [/وقف/i,["stop_loss"]], [/هدف|مستهدف/i,["target_price"]], [/مسافة.*دعم|بعد.*دعم|القرب.*دعم/i,["distance_from_support_pct"]], [/دعم/i,["support"]], [/مسافة.*مقاوم|بعد.*مقاوم|القرب.*مقاوم/i,["distance_from_resistance_pct"]], [/مقاوم/i,["resistance"]],
         [/توزيعات\s*(?:نقدية)?|cash dividends/i,["cash_dividends"]], [/تكلف/i,["cost_basis"]], [/توزيع|وزن|نسبة.*المحفظة|تركيز.*قطاع/i,["position_pct"]], [/مبلغ.*مخصص|قيمة.*مخصصة|رأس.*مال.*موزع/i,["value"]], [/قيمة.*(?:سوق|مركز)|القيمة السوقية/i,["market_value"]], [/ربح|خسار|عائد|النسبة/i,["profit_pct","profit_value","backtest_return_pct"]],
         [/خسارة.*افتراضية|خسارة.*سيناريو|هبوط.*مفترض/i,["scenario_loss_amount","scenario_loss_pct"]], [/رأس.*مال|إجمالي.*رأس المال/i,["scenario_capital"]],
-        [/تغير|التغيّر/i,["change_pct"]], [/كمية|الكمية|عدد|مراكز/i,["quantity"]], [/إغلاق|اغلاق|السعر|سعر|price|close/i,["price","close"]],
+        [/تغير|التغيّر/i,["change_pct"]], [/كمية|الكمية|عدد|مراكز/i,["quantity"]], [/إغلاق|اغلاق|إقفال|اقفال|السعر|سعر|price|close/i,["price","close"]],
     ];
     return labels.find(([pattern]) => pattern.test(text))?.[1];
 }
@@ -647,6 +663,12 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         /(?:الأعلى\s+حجم|اعلى\s+حجم|أعلى\s+حجم\s+تداول|الأكثر\s+تداول)/.test(clause)
         && !/(?:لا\s|ليس|لم\s|غير\s|نسبي)/.test(clause));
     if (unsupportedVolumeRank && !facts.some(f => f.field === "volume")) reasons.push("volume_ranking_without_volume_evidence");
+    const officialCapitalEvent = evidence.filter(e => e.tool === "get_corporate_actions" && e.availability !== "error")
+        .flatMap(e => evidenceRows(e.data)).flatMap(row => row.events || [])
+        .some(event => event.official_source === true && event.action_date && ["stock_split","bonus_shares","rights_issue","capital_increase","capital_reduction"].includes(event.action_type));
+    if (!officialCapitalEvent && reply.split(/[\n.]/).some(clause =>
+        /(?:قد\s+(?:يعكس|تعكس)|غالب[اًا]*|يرج[ّ]?ح|ناتج|بسبب|يفسر|تفسر).{0,100}(?:تجزئة|زيادة\s*رأس|حدث.{0,20}رأس|تعديل.{0,15}رأس)/.test(clause)
+        && !/لا\s+(?:يثبت|تثبت|يرج[ّ]?ح|يمكن)|لم\s+(?:يثبت|يتأكد)/.test(clause))) reasons.push("capital_action_cause_without_official_event");
     const inputs = explicitPositionInputs(request);
     const requestSymbols = [...new Set((request.match(/\b[A-Z]{2,6}\b/g) || []).filter(symbol => symbol !== "RSI"))];
     const positionSymbol = requestSymbols.length === 1 ? requestSymbols[0] : null;
@@ -958,18 +980,21 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         if (scenarioRow?.symbol === "PORTFOLIO") symbol = "PORTFOLIO";
         else if (!symbol && scenarioRow) symbol = scenarioRow.symbol || "PORTFOLIO";
         if (!symbol) continue;
-        for (const date of line.match(/\b\d{4}-\d{2}-\d{2}\b/g) || []) {
-            const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
+        const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
                 .flatMap(r => [
                     r.date, r.current_date, r.scan_date, r.signal_date, r.indicators_date,
                     r.last_week_summary?.baseline_date, r.last_week_summary?.start_date, r.last_week_summary?.end_date,
                     ...(Array.isArray(r.recent_sessions) ? r.recent_sessions.map((s: any) => s.date) : [])
-                ]);
-            if (!dates.some(d => String(d || "").slice(0,10) === date)) reasons.push(`table_date_not_grounded:${symbol}:${date}`);
+                ]).filter(Boolean).map(d => String(d).slice(0,10));
+        for (const date of line.match(/\b\d{4}-\d{2}-\d{2}\b/g) || []) {
+            if (!dates.includes(date)) reasons.push(`table_date_not_grounded:${symbol}:${date}`);
         }
+        const dateColumn = headers.findIndex(header => /^(?:(?:تاريخ|التاريخ|الجلسة|تاريخ الجلسة|date|session))$/i.test(header.replace(/[*_`]/g, "").trim()));
+        const datedSession = dateColumn >= 0 ? groundedTableDate(cells[dateColumn] || "", dates) : null;
+        if (dateColumn >= 0 && !datedSession) reasons.push(`table_date_not_grounded:${symbol}:${cells[dateColumn]}`);
 
         for (let idx = 0; idx < cells.length; idx++) {
-            if (idx === rankColIdx || cells[idx].includes(symbol)) continue;
+            if (idx === rankColIdx || idx === dateColumn || cells[idx].includes(symbol)) continue;
             const screenRow = evidence.filter(e => e.tool === "screen_stocks").flatMap(e => evidenceRows(e.data)).find(row => row.symbol === symbol);
             const header = headers[idx] || "";
             const compoundReasons = checkCompoundMetricCell(header, cells[idx], symbol, facts)
@@ -1033,7 +1058,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             // those label numbers as prices, not as the percentage in the value cell.
             if (idx === 0 && rowFields?.length) fields = undefined;
             const weeklyChangeValue = idx > 0 && rowFields?.includes("change_pct") && /أسبوع|اسبوع/.test(cells[0]);
-            const rowDate = weeklyChangeValue ? undefined : (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
+            const rowDate = weeklyChangeValue ? undefined : datedSession || (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
             const datedRelevant = rowDate ? strategyRelevant.filter(f => !["close","high","low","change_pct"].includes(f.field) || f.as_of?.slice(0,10) === rowDate) : strategyRelevant;
             const targetFacts = fields ? datedRelevant.filter(f => fields.includes(f.field)) : datedRelevant;
             // Portfolio screenshots often place the cash gain/loss and its
