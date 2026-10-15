@@ -371,12 +371,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 const data = await res.json();
                 if (accessOwnerRef.current !== owner) return;
                 if (!Array.isArray(data.sessions) || typeof data.remaining_quota !== "number") throw new Error("CHAT_ACCESS_INVALID");
-                let mergedSessions: ChatSession[] = [];
                 setSessions(prevLocal => {
                     const localMap = new Map(prevLocal.map(s => [s.id, s]));
                     data.sessions.forEach((srvS: ChatSession) => localMap.set(srvS.id, srvS));
-                    mergedSessions = Array.from(localMap.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-                    return mergedSessions;
+                    return Array.from(localMap.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
                 });
 
                 // On first load, localStorage may point at an older room that no
