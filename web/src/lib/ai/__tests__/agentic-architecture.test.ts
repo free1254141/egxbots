@@ -1177,6 +1177,8 @@ describe("Agentic tool correctness and failure boundaries", () => {
         ]}]})];
         const table = "DCRC\n| التاريخ | الإغلاق | أعلى | أدنى |\n|---|---|---|---|\n| 2026-10-12 | 52 | 68.5 | 52 |\n| 2026-09-30 | 50 | 50.3 | 50 |";
         expect(checkAgenticDraft(table,e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("| أعلى | أدنى |", "| أعلى سعر | أدنى سعر |"),e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("| أعلى | أدنى |", "| أعلى سعر (جنيه) | أدنى سعر (جنيه) |"),e)).toEqual([]);
         expect(checkAgenticDraft(table.replace("| 52 | 68.5 |", "| 52 | 50.3 |"),e)).toContain("table_value_not_grounded:DCRC:50.3");
         expect(checkAgenticDraft(table.replace("| 52 | 68.5 |", "| 52 | 52 |"),e)).toContain("table_value_not_grounded:DCRC:52");
     });
@@ -1211,6 +1213,11 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(text).toContain("| 2026-10-07 | 6.5 | 6.5 | 6.13 |");
         expect(text).toContain("التغير بينهما -5.11%");
         expect(text).toContain("عائد الأسبوع مقارنة بإغلاق 2026-10-01 عند 6.18 جنيه: 5.18%");
+    });
+
+    test("weekly return table uses the historical change metric",()=>{
+        const e=[toAgenticEvidence("get_stock_levels",{symbols:["KORA"]},{levels:[{symbol:"KORA",close:2.92,last_week_summary:{start_date:"2026-10-04",end_date:"2026-10-07",start_close:6.85,end_close:6.5,baseline_date:"2026-10-01",baseline_close:6.18,change_pct:5.18,within_week_change_pct:-5.11}}]})];
+        expect(checkAgenticDraft("KORA\n| المقياس | القيمة |\n|---|---|\n| عائد الأسبوع | 5.18% |\n| تغير داخل الأسبوع | -5.11% |",e)).toEqual([]);
     });
 
 });

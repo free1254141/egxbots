@@ -288,10 +288,11 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i.test(text)) return ["pe_ratio"];
     if (/ربحية.*سهم|EPS/i.test(text)) return ["eps"];
     if (/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i.test(text)) return ["market_cap"];
+    if (/(?:عائد|تغير).*(?:أسبوع|اسبوع)|(?:أسبوع|اسبوع).*(?:عائد|تغير)/i.test(text)) return ["change_pct"];
     if (/ربح|خسار/i.test(text) && /%|٪|نسب/i.test(text)) return ["profit_pct"];
     if (/ربح|خسار/i.test(text) && /جنيه|بالجنيه/i.test(text)) return ["profit_value"];
-    if (/^(?:(?:سعر|السعر)\s*)?(?:أعلى|اعلى|الأعلى|الاعلى|high)$/i.test(text.trim())) return ["high"];
-    if (/^(?:(?:سعر|السعر)\s*)?(?:أدنى|ادنى|الأدنى|الادنى|low)$/i.test(text.trim())) return ["low"];
+    if (/^(?:(?:سعر|السعر)\s*)?(?:أعلى|اعلى|الأعلى|الاعلى|high)(?:\s*(?:سعر|السعر|price))?(?:\s*(?:للجلسة|الجلسة|اليومي))?$/i.test(text.replace(/\([^)]*\)/g, "").trim())) return ["high"];
+    if (/^(?:(?:سعر|السعر)\s*)?(?:أدنى|ادنى|الأدنى|الادنى|low)(?:\s*(?:سعر|السعر|price))?(?:\s*(?:للجلسة|الجلسة|اليومي))?$/i.test(text.replace(/\([^)]*\)/g, "").trim())) return ["low"];
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
         [/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i,["pe_ratio"]], [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i,["market_cap"]],
