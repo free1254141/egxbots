@@ -1199,5 +1199,19 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(text).not.toContain("جميع الأسعار المعروضة لقطات مباشرة");
     });
 
+    test("price range cannot establish highest trading volume or leak quote flags",()=>{
+        const e=[toAgenticEvidence("get_stock_levels",{symbols:["DCRC"]},{levels:[{symbol:"DCRC",close:90,date:"2026-10-14",recent_sessions:[{date:"2026-10-14",close:90,high:90,low:52}]}]})];
+        expect(checkAgenticDraft("DCRC: الجلسة الأعلى حجماً في المدى: 14 أكتوبر بمدى 38 جنيهاً.",e)).toContain("volume_ranking_without_volume_evidence");
+        expect(checkAgenticDraft("DCRC: المدى السعري لا يثبت أن الجلسة الأعلى حجماً.",e)).not.toContain("volume_ranking_without_volume_evidence");
+        expect(checkAgenticDraft("DCRC: final_close_confirmed=false",e)).toContain("internal_implementation_names_in_response");
+    });
+
+    test("historical recovery preserves high/low table and separates weekly bases",()=>{
+        const text=renderStockRecovery([{symbol:"KORA",close:2.92,date:"2026-10-14",recent_sessions:[{date:"2026-10-07",close:6.5,high:6.5,low:6.13},{date:"2026-10-06",close:6.13}],last_week_summary:{start_date:"2026-10-04",end_date:"2026-10-07",start_close:6.85,end_close:6.5,baseline_date:"2026-10-01",baseline_close:6.18,change_pct:5.18,within_week_change_pct:-5.11}}]);
+        expect(text).toContain("| 2026-10-07 | 6.5 | 6.5 | 6.13 |");
+        expect(text).toContain("التغير بينهما -5.11%");
+        expect(text).toContain("عائد الأسبوع مقارنة بإغلاق 2026-10-01 عند 6.18 جنيه: 5.18%");
+    });
+
 });
 

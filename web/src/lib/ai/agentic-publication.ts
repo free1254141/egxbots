@@ -616,7 +616,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             && !/لم\s+|دون\s+جلب|بدون\s+جلب|السابقة|السابق/.test(line)) reasons.push("claimed_refresh_without_current_tool");
     }
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
@@ -641,6 +641,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     if (/DSML|<\/?tool_call|<\/?function_call/i.test(reply)) reasons.push("internal_tool_protocol_in_response");
     evidence = evidence.map(compactEvidence);
     const facts = agenticFacts(evidence);
+    const unsupportedVolumeRank = reply.split(/[\n.!؟]/).some(clause =>
+        /(?:الأعلى\s+حجم|اعلى\s+حجم|أعلى\s+حجم\s+تداول|الأكثر\s+تداول)/.test(clause)
+        && !/(?:لا\s|ليس|لم\s|غير\s|نسبي)/.test(clause));
+    if (unsupportedVolumeRank && !facts.some(f => f.field === "volume")) reasons.push("volume_ranking_without_volume_evidence");
     const inputs = explicitPositionInputs(request);
     const requestSymbols = [...new Set((request.match(/\b[A-Z]{2,6}\b/g) || []).filter(symbol => symbol !== "RSI"))];
     const positionSymbol = requestSymbols.length === 1 ? requestSymbols[0] : null;
