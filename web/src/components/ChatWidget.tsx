@@ -32,7 +32,10 @@ export default function ChatWidget() {
         sendMessage, 
         stopResponding,
         isLoading, 
-        remainingQuota, 
+        remainingQuota,
+        isInitializing,
+        accessError,
+        retryAccess,
         showUpgradeModal,
         setShowUpgradeModal,
         selectedModel, 
@@ -287,7 +290,7 @@ export default function ChatWidget() {
             stopResponding();
             return;
         }
-        if ((!input.trim() && imagePreviews.length === 0) || !user) return;
+        if ((!input.trim() && imagePreviews.length === 0) || !user || isInitializing || accessError) return;
 
         setIsUserScrolledUp(false);
         setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
@@ -329,7 +332,7 @@ export default function ChatWidget() {
             `}
         >
             {/* Sidebar Drawer */}
-            {user && (
+            {user && !isInitializing && !accessError && (
                 <ChatSidebar
                     sessions={sessions}
                     activeSessionId={activeSessionId}
@@ -347,7 +350,7 @@ export default function ChatWidget() {
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0">
                     <div className="flex items-center gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight">
-                        {user && !isSidebarOpen && (
+                        {user && !isInitializing && !accessError && !isSidebarOpen && (
                             <button
                                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                                 className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
@@ -362,7 +365,7 @@ export default function ChatWidget() {
                         <span className="rounded-md bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950 border border-amber-500/50 shadow-xs">V3</span>
                     </div>
                     <div className="flex items-center gap-2">
-                        {user && (
+                        {user && !isInitializing && !accessError && (
                             <div className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs">
                                 {remainingQuota >= 99 ? "Unlimited ♾️" : `${remainingQuota}/5 Left`}
                             </div>
@@ -390,7 +393,17 @@ export default function ChatWidget() {
 
                 {/* Messages Body */}
                 <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg dark:bg-black" onScroll={handleScroll}>
-                    {!user ? (
+                    {isInitializing ? (
+                        <div role="status" aria-live="polite" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+                            <Loader2 aria-hidden="true" className="h-6 w-6 motion-safe:animate-spin text-amber-500" />
+                            <span>جاري تجهيز الشات...</span>
+                        </div>
+                    ) : accessError ? (
+                        <div role="alert" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+                            <span>تعذر تحميل الشات. حاول مرة تانية.</span>
+                            <button type="button" onClick={retryAccess} className="rounded-xl bg-amber-400 px-4 py-2 font-bold text-black">إعادة المحاولة</button>
+                        </div>
+                    ) : !user ? (
                         <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 my-auto min-h-[300px]">
                             <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
                                 <Lock className="h-8 w-8" />
@@ -675,7 +688,7 @@ export default function ChatWidget() {
 
                 {/* Input Form */}
                 <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
-                    {user ? (
+                    {isInitializing || accessError ? null : user ? (
                         <>
                         <form onSubmit={handleSubmit} className="space-y-2">
                             {/* Image Previews List */}

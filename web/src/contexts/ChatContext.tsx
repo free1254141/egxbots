@@ -51,6 +51,9 @@ interface ChatContextType {
     stopResponding: () => void;
     isLoading: boolean;
     remainingQuota: number;
+    isInitializing: boolean;
+    accessError: boolean;
+    retryAccess: () => void;
     showUpgradeModal: boolean;
     setShowUpgradeModal: (v: boolean) => void;
     selectedModel: string;
@@ -124,7 +127,14 @@ function cleanChatText(text: string): string {
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
+    const userId = user?.id;
+    const accessOwnerRef = useRef(userId);
+    accessOwnerRef.current = userId;
+    const [accessState, setAccessState] = useState<{ owner?: string; status: "loading" | "ready" | "error" }>({ status: "loading" });
+    const accessRequestRef = useRef<{ owner: string; promise: Promise<void> } | null>(null);
+    const isInitializing = Boolean(authLoading || (userId && (accessState.owner !== userId || accessState.status === "loading")));
+    const accessError = Boolean(userId && accessState.owner === userId && accessState.status === "error");
     const chartContextRef = useRef<unknown>(undefined);
     const chartGenerationRef = useRef(0);
     const chartOwnerRef = useRef(user?.id);
@@ -329,36 +339,57 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
     }, [setSessionMessages, flushStoredMessages]);
 
-    const fetchSessions = useCallback(async () => {
-        try {
-            const res = await fetch("/api/ai-chat?action=sessions");
-            if (res.ok) {
+    // One account-scoped request supplies both history and quota to every chat consumer.
+    const fetchSessions = useCallback((owner: string): Promise<void> => {
+        if (accessRequestRef.current?.owner === owner) return accessRequestRef.current.promise;
+        setAccessState({ owner, status: "loading" });
+        const request = { owner, promise: Promise.resolve() };
+        accessRequestRef.current = request;
+        request.promise = (async () => {
+            try {
+                const res = await fetch("/api/ai-chat?action=sessions");
+                if (!res.ok) throw new Error("CHAT_ACCESS_UNAVAILABLE");
                 const data = await res.json();
-                if (Array.isArray(data.sessions)) {
-                    setSessions(prevLocal => {
-                        const localMap = new Map(prevLocal.map(s => [s.id, s]));
-                        data.sessions.forEach((srvS: ChatSession) => {
-                            localMap.set(srvS.id, srvS);
-                        });
-                        const merged = Array.from(localMap.values());
-                        merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-                        return merged;
-                    });
-
-                    if (!activeSessionIdRef.current && data.sessions.length > 0) {
-                        const latestId = data.sessions[0].id;
-                        setActiveSessionId(latestId);
-                        fetchSessionMessages(latestId);
-                    }
+                if (accessOwnerRef.current !== owner) return;
+                if (!Array.isArray(data.sessions) || typeof data.remaining_quota !== "number") throw new Error("CHAT_ACCESS_INVALID");
+                setSessions(prevLocal => {
+                    const localMap = new Map(prevLocal.map(s => [s.id, s]));
+                    data.sessions.forEach((srvS: ChatSession) => localMap.set(srvS.id, srvS));
+                    return Array.from(localMap.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                });
+                if (!activeSessionIdRef.current && data.sessions.length > 0) {
+                    const latestId = data.sessions[0].id;
+                    setActiveSessionId(latestId);
+                    void fetchSessionMessages(latestId);
                 }
-                if (data.remaining_quota !== undefined) {
-                    setRemainingQuota(data.remaining_quota);
-                }
+                setRemainingQuota(data.remaining_quota);
+                setAccessState({ owner, status: "ready" });
+            } catch (e) {
+                if (accessOwnerRef.current === owner) setAccessState({ owner, status: "error" });
+                console.error("Failed to fetch chat access:", e);
+            } finally {
+                if (accessRequestRef.current === request) accessRequestRef.current = null;
             }
-        } catch (e) {
-            console.error("Failed to fetch chat sessions:", e);
-        }
+        })();
+        return request.promise;
     }, [setActiveSessionId, setSessions, fetchSessionMessages]);
+
+    const retryAccess = useCallback(() => {
+        if (!authLoading && userId) void fetchSessions(userId);
+    }, [authLoading, userId, fetchSessions]);
+
+    // Payment completion is an explicit refresh; ordinary token rotation is not.
+    useEffect(() => {
+        const onStorage = (event: StorageEvent) => {
+            if (event.key === "egx_entitlements_timestamp") retryAccess();
+        };
+        window.addEventListener("egx:entitlements-updated", retryAccess);
+        window.addEventListener("storage", onStorage);
+        return () => {
+            window.removeEventListener("egx:entitlements-updated", retryAccess);
+            window.removeEventListener("storage", onStorage);
+        };
+    }, [retryAccess]);
 
     // Switch active session instantly while preserving state
     const switchSession = useCallback(async (sessionId: string) => {
@@ -437,9 +468,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }, [setSessions]);
 
     useEffect(() => {
-        if (!user) return;
-        fetchSessions();
-    }, [user, fetchSessions]);
+        if (authLoading) return;
+        if (!userId) {
+            setAccessState({ status: "loading" });
+            setRemainingQuota(5);
+            return;
+        }
+        void fetchSessions(userId);
+    }, [authLoading, userId, fetchSessions]);
 
     const sendMessage = useCallback(async (text: string, imageInput?: string | string[]) => {
         text = cleanChatText(text);
@@ -789,6 +825,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             stopResponding,
             isLoading,
             remainingQuota,
+            isInitializing,
+            accessError,
+            retryAccess,
             showUpgradeModal,
             setShowUpgradeModal,
             selectedModel,

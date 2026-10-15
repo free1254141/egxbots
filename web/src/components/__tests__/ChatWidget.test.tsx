@@ -2,9 +2,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import ChatWidget from "../ChatWidget";
 const sendMessage = jest.fn();
-const chat = {isOpen: true, setIsOpen: jest.fn(), messages: [], sendMessage, stopResponding: jest.fn(), isLoading: false, remainingQuota: 99, sessions: [], selectedModel: "deepseek-chat", setSelectedModel: jest.fn(), setShowUpgradeModal: jest.fn(), isSidebarOpen: false, setIsSidebarOpen: jest.fn()};
+let mockUser: {id:string;email:string} | null = {id:"user",email:"test@example.com"};
+const chat = {isInitializing: false, accessError: false, retryAccess: jest.fn(),isOpen: true, setIsOpen: jest.fn(), messages: [], sendMessage, stopResponding: jest.fn(), isLoading: false, remainingQuota: 99, sessions: [], selectedModel: "deepseek-chat", setSelectedModel: jest.fn(), setShowUpgradeModal: jest.fn(), isSidebarOpen: false, setIsSidebarOpen: jest.fn()};
 jest.mock("@/contexts/ChatContext", () => ({useChat: () => chat, AVAILABLE_AI_MODELS: [{id: "deepseek-chat", name: "DeepSeek"}]}));
-jest.mock("@/contexts/AuthContext", () => ({useAuth: () => ({user: {id: "user", email: "test@example.com"}})}));
+jest.mock("@/contexts/AuthContext", () => ({useAuth: () => ({user: mockUser})}));
 jest.mock("@/contexts/LanguageContext", () => ({useLanguage: () => ({language: "ar"})}));
 jest.mock("next/navigation", () => ({useRouter: () => ({push: jest.fn()}), usePathname: () => "/"}));
 jest.mock("next/image", () => ({__esModule: true, default: ({priority: _priority, ...props}: any) => <img {...props} />}));
@@ -37,4 +38,28 @@ test("chat history has one intentional toggle at a time", () => {
     expect(screen.queryByRole("button", {name: "فتح سجل المحادثات"})).toBeNull();
 
     chat.isSidebarOpen = false;
+});
+
+
+test("loading auth and entitlements never flashes login, free quota or a composer", () => {
+    chat.isInitializing = true; mockUser = null;
+    const {rerender}=render(<ChatWidget />);
+    expect(screen.getByRole("status").textContent).toContain("جاري تجهيز الشات");
+    expect(screen.queryByText("تسجيل الدخول مطلوب")).toBeNull();
+    expect(screen.queryByPlaceholderText("اسأل ARTORO...")).toBeNull();
+    mockUser={id:"user",email:"test@example.com"}; rerender(<ChatWidget />);
+    expect(screen.queryByText("Unlimited ♾️")).toBeNull();
+    expect(screen.queryByPlaceholderText("اسأل ARTORO...")).toBeNull();
+    chat.isInitializing=false; rerender(<ChatWidget />);
+    expect(screen.getByPlaceholderText("اسأل ARTORO...")).toBeTruthy();
+});
+test("confirmed guests see login; access failure offers retry rather than login", () => {
+    mockUser=null; const {rerender}=render(<ChatWidget />);
+    expect(screen.getByText("تسجيل الدخول مطلوب")).toBeTruthy();
+    mockUser={id:"user",email:"test@example.com"}; chat.accessError=true; rerender(<ChatWidget />);
+    expect(screen.queryByText("تسجيل الدخول مطلوب")).toBeNull();
+    expect(screen.queryByPlaceholderText("اسأل ARTORO...")).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:"إعادة المحاولة"}));
+    expect(chat.retryAccess).toHaveBeenCalledTimes(1);
+    chat.accessError=false;
 });
