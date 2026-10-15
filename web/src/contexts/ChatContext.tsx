@@ -371,8 +371,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 const data = await res.json();
                 if (accessOwnerRef.current !== owner) return;
                 if (!Array.isArray(data.sessions) || typeof data.remaining_quota !== "number") throw new Error("CHAT_ACCESS_INVALID");
+                const serverSessionIds = new Set(data.sessions.map((session: ChatSession) => session.id));
                 setSessions(prevLocal => {
-                    const localMap = new Map(prevLocal.map(s => [s.id, s]));
+                    // Local session metadata is only a cache. Keep entries the
+                    // authenticated server confirms so a prior account's rooms
+                    // cannot remain selectable after an account change.
+                    const localMap = new Map(prevLocal.filter(session => serverSessionIds.has(session.id)).map(s => [s.id, s]));
                     data.sessions.forEach((srvS: ChatSession) => localMap.set(srvS.id, srvS));
                     return Array.from(localMap.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
                 });
@@ -382,24 +386,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 // case; keep the current room when it is still a server session.
                 const activeId = activeSessionIdRef.current;
                 const activeExistsOnServer = !!activeId && data.sessions.some((s: ChatSession) => s.id === activeId);
-                if (data.sessions.length > 0 && !activeExistsOnServer) {
-                    const latestServerSession = [...data.sessions].sort(
-                        (a: ChatSession, b: ChatSession) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-                    )[0];
-                    setActiveSessionId(latestServerSession.id);
-                    const localMessages = sessionMessagesCache.current[latestServerSession.id] || getStoredMessages(latestServerSession.id);
-                    if (localMessages.length > 0) {
-                        const sanitized = localMessages.map(message => ({
-                            ...message,
-                            content: cleanChatText(message.content || ""),
-                            suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean)
-                        }));
-                        sessionMessagesCache.current[latestServerSession.id] = sanitized;
-                        setMessages(sanitized);
-                    } else {
+                const activeSessionIsSending = !!activeId && !!loadingSessionIds.current[activeId];
+                if (!activeExistsOnServer && !activeSessionIsSending) {
+                    if (data.sessions.length === 0) {
+                        // Clear a locally remembered room when this account has
+                        // no server-side rooms. Do not leave another account's
+                        // cached conversation visible in an empty account.
+                        setActiveSessionId(null);
                         setMessages([]);
+                    } else {
+                        const latestServerSession = [...data.sessions].sort(
+                            (a: ChatSession, b: ChatSession) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                        )[0];
+                        setActiveSessionId(latestServerSession.id);
+                        const localMessages = sessionMessagesCache.current[latestServerSession.id] || getStoredMessages(latestServerSession.id);
+                        if (localMessages.length > 0) {
+                            const sanitized = localMessages.map(message => ({
+                                ...message,
+                                content: cleanChatText(message.content || ""),
+                                suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean)
+                            }));
+                            sessionMessagesCache.current[latestServerSession.id] = sanitized;
+                            setMessages(sanitized);
+                        } else {
+                            setMessages([]);
+                        }
+                        void fetchSessionMessages(latestServerSession.id);
                     }
-                    void fetchSessionMessages(latestServerSession.id);
                 }
                 setRemainingQuota(data.remaining_quota);
                 setAccessState({ owner, status: "ready" });
