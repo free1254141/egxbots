@@ -92,8 +92,8 @@
 
 :root {
   color-scheme: dark;
-  --header-h: 80px;
-  --header-offset: 88px;
+  --header-h: 64px;
+  --header-offset: 72px;
   --app-bg: radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 34%),
     radial-gradient(circle at top right, rgba(99, 102, 241, 0.12), transparent 28%),
     linear-gradient(180deg, #040814 0%, #080d1f 45%, #050816 100%);
@@ -500,7 +500,7 @@ body::before {
   }
 
   .page-below-header {
-    top: calc(var(--header-h) + 12px);
+    top: var(--header-h, 64px);
   }
 
   .language-switch {

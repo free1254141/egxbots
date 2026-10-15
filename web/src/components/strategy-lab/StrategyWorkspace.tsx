@@ -51,36 +51,44 @@ export function applyRouteSymbol(
   const targetSymbol = symbol.toUpperCase().trim();
   const targetExchange = (exchange || "EGX").toUpperCase().trim();
 
-  // 1. If active panel already matches, keep it as is
-  const activePanel = ws.panels.find((p) => p.id === ws.activePanelId);
-  if (
-    activePanel &&
-    activePanel.symbol.toUpperCase().trim() === targetSymbol &&
-    activePanel.exchange.toUpperCase().trim() === targetExchange
-  ) {
-    return ws;
-  }
+  const visiblePanels = ws.panels.slice(0, ws.layout);
+  const activeVisiblePanel =
+    visiblePanels.find((p) => p.id === ws.activePanelId) ||
+    visiblePanels[0] ||
+    ws.panels[0];
+  const targetId = activeVisiblePanel ? activeVisiblePanel.id : ws.panels[0].id;
 
-  // 2. If another visible panel in the current layout already has this symbol, activate it
-  const existingIndex = ws.panels
-    .slice(0, ws.layout)
-    .findIndex(
-      (p) =>
-        p.symbol.toUpperCase().trim() === targetSymbol &&
-        p.exchange.toUpperCase().trim() === targetExchange,
-    );
-  if (existingIndex !== -1) {
+  // 1. If active visible panel already matches, keep it as is
+  if (
+    activeVisiblePanel &&
+    activeVisiblePanel.symbol.toUpperCase().trim() === targetSymbol &&
+    activeVisiblePanel.exchange.toUpperCase().trim() === targetExchange
+  ) {
     return {
       ...ws,
-      activePanelId: ws.panels[existingIndex].id,
+      activePanelId: targetId,
     };
   }
 
-  // 3. Otherwise update the active panel with the requested symbol and clear stale previous-stock drawings
+  // 2. If another visible panel in the current layout already has this symbol, activate it
+  const existingIndex = visiblePanels.findIndex(
+    (p) =>
+      p.symbol.toUpperCase().trim() === targetSymbol &&
+      p.exchange.toUpperCase().trim() === targetExchange,
+  );
+  if (existingIndex !== -1) {
+    return {
+      ...ws,
+      activePanelId: visiblePanels[existingIndex].id,
+    };
+  }
+
+  // 3. Otherwise update the active visible panel with the requested symbol and clear stale previous-stock drawings
   return {
     ...ws,
+    activePanelId: targetId,
     panels: ws.panels.map((panel) =>
-      panel.id === ws.activePanelId
+      panel.id === targetId
         ? {
             ...panel,
             symbol: targetSymbol,
@@ -194,7 +202,7 @@ export default function StrategyWorkspace(props: Props) {
     >
   >({});
   const containers = useRef(new Map<string, HTMLDivElement>());
-  const previousRoute = useRef(`${props.symbol}:${props.exchange}`);
+  const previousRoute = useRef("");
   const latestRoute = useRef({
     symbol: props.symbol,
     exchange: props.exchange,
@@ -305,9 +313,11 @@ export default function StrategyWorkspace(props: Props) {
   }, [workspace, storageKey, hydrated, user?.id]);
 
   useEffect(() => {
+    const shouldApply = props.hasExplicitSymbol ?? Boolean(props.symbol);
     const route = `${props.symbol}:${props.exchange}`;
     if (previousRoute.current === route) return;
     previousRoute.current = route;
+    if (!shouldApply) return;
     setServerResults({});
     setWorkspace((current) => {
       const updated = applyRouteSymbol(current, props.symbol, props.exchange);
@@ -319,7 +329,12 @@ export default function StrategyWorkspace(props: Props) {
       }
       return updated;
     });
-  }, [props.symbol, props.exchange, props.onActiveStockChange]);
+  }, [
+    props.symbol,
+    props.exchange,
+    props.hasExplicitSymbol,
+    props.onActiveStockChange,
+  ]);
 
   useEffect(() => {
     window.dispatchEvent(

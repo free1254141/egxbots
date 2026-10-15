@@ -114,6 +114,7 @@ export default function Header() {
     const currentTab = searchParams.get("tab");
 
     const shellRef = useRef<HTMLDivElement>(null);
+    const headerRef = useRef<HTMLElement>(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -123,9 +124,17 @@ export default function Header() {
     const [searchFocused, setSearchFocused] = useState(false);
 
     const updateHeaderOffset = useCallback(() => {
+        const headerEl = headerRef.current;
+        if (headerEl) {
+            const bottom = headerEl.getBoundingClientRect().bottom;
+            document.documentElement.style.setProperty("--header-h", `${Math.ceil(bottom)}px`);
+            document.documentElement.style.setProperty("--header-offset", `${Math.ceil(bottom + 8)}px`);
+            return;
+        }
         const shell = shellRef.current;
         if (!shell) return;
         const bottom = shell.getBoundingClientRect().bottom;
+        document.documentElement.style.setProperty("--header-h", `${Math.ceil(bottom)}px`);
         document.documentElement.style.setProperty("--header-offset", `${Math.ceil(bottom + 8)}px`);
     }, []);
 
@@ -137,11 +146,11 @@ export default function Header() {
 
     useEffect(() => {
         updateHeaderOffset();
-        const shell = shellRef.current;
-        if (!shell) return;
+        const target = headerRef.current || shellRef.current;
+        if (!target) return;
 
         const observer = new ResizeObserver(updateHeaderOffset);
-        observer.observe(shell);
+        observer.observe(target);
         window.addEventListener("resize", updateHeaderOffset);
 
         return () => {
@@ -251,7 +260,7 @@ export default function Header() {
     }
 
     return (
-        <header className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
+        <header ref={headerRef} className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
             <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-4 md:px-8 py-3 flex items-center justify-between gap-4">
                 {/* Brand */}
                 <div className="flex items-center min-w-0">
