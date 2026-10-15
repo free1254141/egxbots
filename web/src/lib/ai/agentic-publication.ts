@@ -160,6 +160,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             }
             if (row.symbol && row.last_week_summary) {
                 const week = row.last_week_summary;
+                if (typeof week.sessions_count === "number" && Number.isFinite(week.sessions_count)) facts.push({id:`${row.symbol}:week:sessions_count`,symbol:row.symbol,field:"quantity",value:week.sessions_count,unit:"count",as_of:week.end_date ?? null,source:"supabase:stock_prices",tool:e.tool,fetched_at:new Date().toISOString()});
                 for (const [key,dateKey] of [["baseline_close","baseline_date"],["start_close","start_date"],["end_close","end_date"]] as const) {
                     if (typeof week[key] === "number" && Number.isFinite(week[key])) facts.push({id:`${row.symbol}:week:${key}`,symbol:row.symbol,field:"close",value:week[key],unit:"egp",as_of:week[dateKey] ?? null,source:"supabase:stock_prices",tool:e.tool,fetched_at:new Date().toISOString()});
                 }
@@ -617,7 +618,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             && !/لم\s+|دون\s+جلب|بدون\s+جلب|السابقة|السابق/.test(line)) reasons.push("claimed_refresh_without_current_tool");
     }
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
@@ -1028,7 +1029,11 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             ];
             const namedStrategy = knownStrategies.find(m => line.includes(m.strategy_id) || (m.strategy_name && line.includes(m.strategy_name)));
             const strategyRelevant = namedStrategy ? relevant.filter(f => (!f.field.startsWith("backtest_") && !f.field.startsWith("chart_")) || f.id.includes(`:${namedStrategy.strategy_id}:`)) : relevant;
-            const rowDate = (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
+            // A metric label may itself quote a dated baseline price. Validate
+            // those label numbers as prices, not as the percentage in the value cell.
+            if (idx === 0 && rowFields?.length) fields = undefined;
+            const weeklyChangeValue = idx > 0 && rowFields?.includes("change_pct") && /أسبوع|اسبوع/.test(cells[0]);
+            const rowDate = weeklyChangeValue ? undefined : (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
             const datedRelevant = rowDate ? strategyRelevant.filter(f => !["close","high","low","change_pct"].includes(f.field) || f.as_of?.slice(0,10) === rowDate) : strategyRelevant;
             const targetFacts = fields ? datedRelevant.filter(f => fields.includes(f.field)) : datedRelevant;
             // Portfolio screenshots often place the cash gain/loss and its

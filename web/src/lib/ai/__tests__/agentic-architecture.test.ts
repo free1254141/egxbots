@@ -1220,5 +1220,13 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(checkAgenticDraft("KORA\n| المقياس | القيمة |\n|---|---|\n| عائد الأسبوع | 5.18% |\n| تغير داخل الأسبوع | -5.11% |",e)).toEqual([]);
     });
 
+    test("production KORA weekly table binds baseline prices, counts and return separately",()=>{
+        const e=[toAgenticEvidence("get_stock_levels",{symbols:["KORA"]},{levels:[{symbol:"KORA",close:2.92,last_week_summary:{sessions_count:4,start_date:"2026-10-04",end_date:"2026-10-07",start_close:6.85,end_close:6.5,baseline_date:"2026-10-01",baseline_close:6.18,change_pct:5.18,within_week_change_pct:-5.11}}]})];
+        const table="KORA\n| البند | القيمة |\n|---|---|\n| عدد الجلسات | 4 |\n| إغلاق بداية الأسبوع (2026-10-04) | 6.85 |\n| إغلاق نهاية الأسبوع (2026-10-07) | 6.50 |\n| التغير داخل الأسبوع | −5.11% |\n| التغير من إغلاق ما قبل الأسبوع (2026-10-01: 6.18) | +5.18% |";
+        expect(checkAgenticDraft(table,e)).toEqual([]);
+        expect(checkAgenticDraft(table.replace("| +5.18% |", "| +99% |"),e)).toContain("table_value_not_grounded:KORA:99");
+        expect(checkAgenticDraft(table.replace("10-01: 6.18", "10-01: 99"),e)).toContain("table_value_not_grounded:KORA:99");
+    });
+
 });
 

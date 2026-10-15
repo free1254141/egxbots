@@ -64,7 +64,7 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         }
 
         if (!comments.length) comments.push("السعر وحده لا يكفي لترجيح الدخول؛ يلزم تأكيد الزخم والمستويات الفنية.");
-        lines.push(comments.join(" "), "");
+        lines.push(comments.join("\n\n"), "");
     }
     const hasStoredHistory = [...snapshots.values()].some(r => Array.isArray(r.recent_sessions) && r.recent_sessions.length > 1);
     const allLive = [...snapshots.values()].every(r => r.live_quote_available === true);
