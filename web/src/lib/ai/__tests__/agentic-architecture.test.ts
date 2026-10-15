@@ -1243,5 +1243,14 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(checkAgenticDraft("KORA: القفزة لا تثبت أو ترجح تجزئة أو زيادة رأس مال.",e)).not.toContain("capital_action_cause_without_official_event");
     });
 
+    test("claiming a corporate-action lookup requires the actual current tool",()=>{
+        const news=toAgenticEvidence("get_news",{symbols:["DCRC"]},{status:"success",news:[]});
+        const reply="DCRC\nسجل الإجراءات الرأسمالية والتوزيعات: فحصت السجل المؤرخ ولم يرجع أي إجراء مسجل.";
+        expect(checkAgenticDraft(reply,[news])).toContain("corporate_action_read_claim_without_tool");
+        const actions=toAgenticEvidence("get_corporate_actions",{symbols:["DCRC"]},{status:"success",availability:"missing",stocks:[{symbol:"DCRC",events:[]}]});
+        expect(checkAgenticDraft(reply,[news,actions])).not.toContain("corporate_action_read_claim_without_tool");
+        expect(checkAgenticDraft(reply,[news,actions],"",[news])).toContain("corporate_action_read_claim_without_tool");
+    });
+
 });
 

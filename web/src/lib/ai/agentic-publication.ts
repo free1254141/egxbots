@@ -633,6 +633,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         for (const line of reply.split(/\n/)) if (/أعدت\s+(?:قراءة|جلب|التحقق)|(?:جلبت|حدّثت)\s+(?:بيانات|اتساع|سعر)|(?:راجعت|تأكدت)\s+من\s+(?:البيانات|المصدر)/.test(line)
             && !/لم\s+|دون\s+جلب|بدون\s+جلب|السابقة|السابق/.test(line)) reasons.push("claimed_refresh_without_current_tool");
     }
+    const corporateReadClaim = /(?:فحصت|راجعت|تحق[ّ]?قت|بحثت|استعلمت).{0,45}(?:السجل|الإجراءات|التوزيعات)/.test(reply)
+        && /إجراءات\s*رأسمالية|الإجراءات\s*الرأسمالية|سجل\s*(?:الأحداث|التوزيعات)/.test(reply);
+    if (corporateReadClaim && !(currentEvidence || evidence).some(e => e.tool === "get_corporate_actions" && e.availability !== "error"))
+        reasons.push("corporate_action_read_claim_without_tool");
     if (!reply.trim()) reasons.push("empty_response");
     if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
