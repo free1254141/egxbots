@@ -535,3 +535,72 @@ test("image export names the captured panel's stock even if another panel is act
   await waitFor(() => expect(downloads).toEqual(["ADRI-chart.png"]));
   anchorClick.mockRestore();
 });
+
+test("opening with explicit route symbol overrides different saved stock in localStorage", async () => {
+  const saved = createWorkspace("COMI", "EGX");
+  localStorage.setItem(
+    "stokscan:strategy-workspace:v1:guest",
+    JSON.stringify(saved),
+  );
+
+  render(
+    <StrategyWorkspace
+      symbol="TMGH"
+      exchange="EGX"
+      theme="light"
+      activeTool="cursor"
+      hasExplicitSymbol={true}
+      onToolDrawComplete={() => {}}
+    />,
+  );
+
+  await screen.findByTestId("chart");
+  await waitFor(() =>
+    expect(screen.getByTestId("chart")).toHaveAttribute("data-symbol", "TMGH"),
+  );
+});
+
+test("opening without explicit route symbol preserves saved stock from localStorage", async () => {
+  const saved = createWorkspace("ADRI", "EGX");
+  localStorage.setItem(
+    "stokscan:strategy-workspace:v1:guest",
+    JSON.stringify(saved),
+  );
+
+  render(
+    <StrategyWorkspace
+      symbol="COMI"
+      exchange="EGX"
+      theme="light"
+      activeTool="cursor"
+      hasExplicitSymbol={false}
+      onToolDrawComplete={() => {}}
+    />,
+  );
+
+  await screen.findByTestId("chart");
+  await waitFor(() =>
+    expect(screen.getByTestId("chart")).toHaveAttribute("data-symbol", "ADRI"),
+  );
+});
+
+test("notifies onActiveStockChange when route symbol is applied or panel switches", async () => {
+  const handleStockChange = jest.fn();
+  render(
+    <StrategyWorkspace
+      symbol="TMGH"
+      exchange="EGX"
+      theme="light"
+      activeTool="cursor"
+      hasExplicitSymbol={true}
+      onActiveStockChange={handleStockChange}
+      onToolDrawComplete={() => {}}
+    />,
+  );
+
+  await screen.findByTestId("chart");
+  await waitFor(() =>
+    expect(handleStockChange).toHaveBeenCalledWith("TMGH", "EGX"),
+  );
+});
+

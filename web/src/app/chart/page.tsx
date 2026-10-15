@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import StrategyWorkspace from "@/components/strategy-lab/StrategyWorkspace";
 import {
   getRecommendationChartHistory,
@@ -41,8 +41,48 @@ function ChartContent() {
   const isAr = language === "ar";
   const { theme } = useTheme();
 
-  const symbol = searchParams.get("symbol") || "COMI";
-  const exchange = searchParams.get("exchange") || "EGX";
+  const rawSymbol = searchParams.get("symbol");
+  const rawExchange = searchParams.get("exchange");
+  const hasExplicitSymbol = Boolean(rawSymbol);
+
+  const [activeStock, setActiveStock] = useState({
+    symbol: (rawSymbol || "COMI").toUpperCase(),
+    exchange: (rawExchange || "EGX").toUpperCase(),
+  });
+
+  const symbol = activeStock.symbol;
+  const exchange = activeStock.exchange;
+
+  useEffect(() => {
+    if (rawSymbol) {
+      setActiveStock((prev) => {
+        const nextSym = rawSymbol.toUpperCase();
+        const nextEx = (rawExchange || "EGX").toUpperCase();
+        if (prev.symbol === nextSym && prev.exchange === nextEx) return prev;
+        return { symbol: nextSym, exchange: nextEx };
+      });
+    }
+  }, [rawSymbol, rawExchange]);
+
+  const handleActiveStockChange = useCallback(
+    (newSymbol: string, newExchange: string) => {
+      const nextSym = newSymbol.toUpperCase();
+      const nextEx = (newExchange || "EGX").toUpperCase();
+      setActiveStock((prev) => {
+        if (prev.symbol === nextSym && prev.exchange === nextEx) return prev;
+        return { symbol: nextSym, exchange: nextEx };
+      });
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("symbol")?.toUpperCase() !== nextSym) {
+          params.set("symbol", nextSym);
+          params.set("exchange", nextEx);
+          window.history.replaceState(null, "", `/chart?${params.toString()}`);
+        }
+      }
+    },
+    [],
+  );
 
   const { user } = useAuth();
   const { watchlist, saveSymbol, removeSymbol, removeSymbolBySymbol, isSaved } =
@@ -229,6 +269,7 @@ function ChartContent() {
   }, [searchQuery]);
 
   const selectSymbol = (sym: string, ex: string) => {
+    handleActiveStockChange(sym, ex);
     router.push(
       `/chart?symbol=${encodeURIComponent(sym)}&exchange=${encodeURIComponent(ex)}`,
     );
@@ -405,6 +446,8 @@ function ChartContent() {
             focusTimestamp={focusTimestamp}
             focusRequestId={focusRequestId}
             onToolDrawComplete={() => setActiveTool("cursor")}
+            hasExplicitSymbol={hasExplicitSymbol}
+            onActiveStockChange={handleActiveStockChange}
           />
         </div>
       </main>

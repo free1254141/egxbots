@@ -38,7 +38,62 @@ interface Props {
   focusTimestamp?: number;
   focusRequestId?: number;
   onToolDrawComplete: () => void;
+  hasExplicitSymbol?: boolean;
+  onActiveStockChange?: (symbol: string, exchange: string) => void;
 }
+
+export function applyRouteSymbol(
+  ws: LabWorkspace,
+  symbol: string,
+  exchange: string,
+): LabWorkspace {
+  if (!symbol) return ws;
+  const targetSymbol = symbol.toUpperCase().trim();
+  const targetExchange = (exchange || "EGX").toUpperCase().trim();
+
+  // 1. If active panel already matches, keep it as is
+  const activePanel = ws.panels.find((p) => p.id === ws.activePanelId);
+  if (
+    activePanel &&
+    activePanel.symbol.toUpperCase().trim() === targetSymbol &&
+    activePanel.exchange.toUpperCase().trim() === targetExchange
+  ) {
+    return ws;
+  }
+
+  // 2. If another visible panel in the current layout already has this symbol, activate it
+  const existingIndex = ws.panels
+    .slice(0, ws.layout)
+    .findIndex(
+      (p) =>
+        p.symbol.toUpperCase().trim() === targetSymbol &&
+        p.exchange.toUpperCase().trim() === targetExchange,
+    );
+  if (existingIndex !== -1) {
+    return {
+      ...ws,
+      activePanelId: ws.panels[existingIndex].id,
+    };
+  }
+
+  // 3. Otherwise update the active panel with the requested symbol and clear stale previous-stock drawings
+  return {
+    ...ws,
+    panels: ws.panels.map((panel) =>
+      panel.id === ws.activePanelId
+        ? {
+            ...panel,
+            symbol: targetSymbol,
+            exchange: targetExchange,
+            drawings: [],
+            toolOverlays: [],
+            tradeSettings: undefined,
+          }
+        : panel,
+    ),
+  };
+}
+
 export function panelGridSpan(count: number, index: number): string {
   if (count === 1) return "";
   const firstRow = count <= 2 ? count : Math.ceil(count / 2);
@@ -77,9 +132,30 @@ export default function StrategyWorkspace(props: Props) {
   const { user } = useAuth();
   const { language } = useLanguage();
   const ar = language === "ar";
-  const [workspace, setWorkspace] = useState<LabWorkspace>(() =>
-    createWorkspace(props.symbol, props.exchange),
-  );
+  const storageKey = `stokscan:strategy-workspace:v1:${user?.id || "guest"}`;
+  const shouldApplyRoute = props.hasExplicitSymbol ?? Boolean(props.symbol);
+
+  const [workspace, setWorkspace] = useState<LabWorkspace>(() => {
+    const fallback = createWorkspace(props.symbol, props.exchange);
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(
+          `stokscan:strategy-workspace:v1:${user?.id || "guest"}`,
+        );
+        if (stored) {
+          const parsed = parseWorkspace(JSON.parse(stored));
+          if (parsed) {
+            return shouldApplyRoute
+              ? applyRouteSymbol(parsed, props.symbol, props.exchange)
+              : parsed;
+          }
+        }
+      } catch {
+        /* unavailable browser storage */
+      }
+    }
+    return fallback;
+  });
   const [hydrated, setHydrated] = useState(false);
   const [saveStatus, setSaveStatus] = useState<
     "local" | "cloud" | "saving" | "error"
@@ -126,7 +202,6 @@ export default function StrategyWorkspace(props: Props) {
   latestRoute.current = { symbol: props.symbol, exchange: props.exchange };
   const stateRef = useRef(workspace);
   stateRef.current = workspace;
-  const storageKey = `stokscan:strategy-workspace:v1:${user?.id || "guest"}`;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -143,7 +218,16 @@ export default function StrategyWorkspace(props: Props) {
     } catch {
       /* unavailable browser storage */
     }
+    const shouldApply = props.hasExplicitSymbol ?? Boolean(props.symbol);
+    if (shouldApply) {
+      local = applyRouteSymbol(local, props.symbol, props.exchange);
+    }
     setWorkspace(local);
+    const activeLocal =
+      local.panels.find((p) => p.id === local.activePanelId) || local.panels[0];
+    if (activeLocal && props.onActiveStockChange) {
+      props.onActiveStockChange(activeLocal.symbol, activeLocal.exchange);
+    }
     if (!user) {
       setHydrated(true);
       return () => controller.abort();
@@ -158,24 +242,20 @@ export default function StrategyWorkspace(props: Props) {
       })
       .then((data) => {
         if (!controller.signal.aborted) {
-          const loaded = parseWorkspace(data.workspace) || local;
-          const route = latestRoute.current;
-          if (
-            route.symbol !== props.symbol ||
-            route.exchange !== props.exchange
-          )
-            loaded.panels = loaded.panels.map((panel) =>
-              panel.id === loaded.activePanelId
-                ? {
-                    ...panel,
-                    ...route,
-                    drawings: [],
-                    toolOverlays: [],
-                    tradeSettings: undefined,
-                  }
-                : panel,
-            );
+          let loaded = parseWorkspace(data.workspace) || local;
+          if (shouldApply) {
+            loaded = applyRouteSymbol(loaded, props.symbol, props.exchange);
+          }
           setWorkspace(loaded);
+          const activeLoaded =
+            loaded.panels.find((p) => p.id === loaded.activePanelId) ||
+            loaded.panels[0];
+          if (activeLoaded && props.onActiveStockChange) {
+            props.onActiveStockChange(
+              activeLoaded.symbol,
+              activeLoaded.exchange,
+            );
+          }
           setSaveStatus("cloud");
         }
       })
@@ -229,22 +309,17 @@ export default function StrategyWorkspace(props: Props) {
     if (previousRoute.current === route) return;
     previousRoute.current = route;
     setServerResults({});
-    setWorkspace((current) => ({
-      ...current,
-      panels: current.panels.map((panel) =>
-        panel.id === current.activePanelId
-          ? {
-              ...panel,
-              symbol: props.symbol,
-              exchange: props.exchange,
-              drawings: [],
-              toolOverlays: [],
-              tradeSettings: undefined,
-            }
-          : panel,
-      ),
-    }));
-  }, [props.symbol, props.exchange]);
+    setWorkspace((current) => {
+      const updated = applyRouteSymbol(current, props.symbol, props.exchange);
+      const activeP =
+        updated.panels.find((p) => p.id === updated.activePanelId) ||
+        updated.panels[0];
+      if (activeP && props.onActiveStockChange) {
+        props.onActiveStockChange(activeP.symbol, activeP.exchange);
+      }
+      return updated;
+    });
+  }, [props.symbol, props.exchange, props.onActiveStockChange]);
 
   useEffect(() => {
     window.dispatchEvent(
@@ -407,21 +482,34 @@ export default function StrategyWorkspace(props: Props) {
           },
         };
       });
-    setWorkspace((current) => ({
-      ...current,
-      panels: current.panels.map((panel) =>
-        panel.id === id
-          ? {
-              ...panel,
-              ...(patch.symbol && patch.symbol !== panel.symbol
-                ? { drawings: [], toolOverlays: [], tradeSettings: undefined }
-                : {}),
-              ...patch,
-            }
-          : panel,
-      ),
-    }));
-  }, []);
+    setWorkspace((current) => {
+      const updated = {
+        ...current,
+        panels: current.panels.map((panel) =>
+          panel.id === id
+            ? {
+                ...panel,
+                ...(patch.symbol && patch.symbol !== panel.symbol
+                  ? { drawings: [], toolOverlays: [], tradeSettings: undefined }
+                  : {}),
+                ...patch,
+              }
+            : panel,
+        ),
+      };
+      if (
+        patch.symbol &&
+        (id === current.activePanelId || current.layout === 1)
+      ) {
+        const currentP = current.panels.find((p) => p.id === id);
+        props.onActiveStockChange?.(
+          patch.symbol,
+          patch.exchange || currentP?.exchange || "EGX",
+        );
+      }
+      return updated;
+    });
+  }, [props.onActiveStockChange]);
   const active =
     workspace.panels.find((panel) => panel.id === workspace.activePanelId) ||
     workspace.panels[0];
@@ -556,18 +644,18 @@ export default function StrategyWorkspace(props: Props) {
               else containers.current.delete(panel.id);
             }}
             onPointerDown={() =>
-              setWorkspace((current) =>
-                current.activePanelId === panel.id
-                  ? current
-                  : { ...current, activePanelId: panel.id },
-              )
+              setWorkspace((current) => {
+                if (current.activePanelId === panel.id) return current;
+                props.onActiveStockChange?.(panel.symbol, panel.exchange);
+                return { ...current, activePanelId: panel.id };
+              })
             }
             onFocus={() =>
-              setWorkspace((current) =>
-                current.activePanelId === panel.id
-                  ? current
-                  : { ...current, activePanelId: panel.id },
-              )
+              setWorkspace((current) => {
+                if (current.activePanelId === panel.id) return current;
+                props.onActiveStockChange?.(panel.symbol, panel.exchange);
+                return { ...current, activePanelId: panel.id };
+              })
             }
             className={`${panelGridSpan(workspace.layout, index)} ${fullscreen === panel.id ? "fixed inset-0 z-[100]" : "relative min-h-0"} ${panel.id !== active.id ? "hidden md:flex" : "flex"} group flex-col overflow-hidden rounded-lg border ${panel.id === active.id ? "border-indigo-500" : "border-zinc-200 dark:border-white/10"} bg-[var(--app-surface-strong)]`}
           >
