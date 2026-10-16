@@ -46,8 +46,7 @@ export async function GET(req: NextRequest) {
       if (!cohortUserIds || !cohortUserIds.length) return NextResponse.json({ users: [], total: 0 });
     }
 
-    // Auth emails are not stored in profiles. They are used only for admin
-    // search/display and are never exposed through the normal profile client.
+    // Auth emails and metadata names are stored in auth.users.
     let authUsers: any[] = [];
     try {
       const authRes = await supabase.auth.admin.listUsers({ page: 1, perPage: 2000 });
@@ -56,21 +55,63 @@ export async function GET(req: NextRequest) {
       authUsers = [];
     }
     const emailById = new Map(authUsers.map((user: any) => [String(user.id), user.email || null]));
-    if (search.includes("@")) {
-      const matchingIds = authUsers
-        .filter((user: any) => String(user.email || "").toLowerCase().includes(search.toLowerCase()))
+    const nameById = new Map(authUsers.map((user: any) => [
+      String(user.id),
+      user.user_metadata?.full_name || user.user_metadata?.name || null
+    ]));
+
+    if (search) {
+      const searchLower = search.toLowerCase();
+      const safeSearch = search.replace(/[(),]/g, " ").trim();
+
+      // 1. Search in authUsers (email, full_name, name, phone, user.id)
+      const matchingAuthIds = authUsers
+        .filter((user: any) => {
+          const email = String(user.email || "").toLowerCase();
+          const fullName = String(user.user_metadata?.full_name || "").toLowerCase();
+          const name = String(user.user_metadata?.name || "").toLowerCase();
+          const phone = String(user.phone || "");
+          const id = String(user.id || "").toLowerCase();
+          return (
+            email.includes(searchLower) ||
+            fullName.includes(searchLower) ||
+            name.includes(searchLower) ||
+            phone.includes(search) ||
+            id.includes(searchLower)
+          );
+        })
         .map((user: any) => String(user.id));
-      cohortUserIds = cohortUserIds ? cohortUserIds.filter((id) => matchingIds.includes(id)) : matchingIds;
-      if (!cohortUserIds.length) return NextResponse.json({ users: [], total: 0 });
+
+      // 2. Search in profiles table (whatsapp_number, display_name, username)
+      let profileMatchIds: string[] = [];
+      if (safeSearch) {
+        try {
+          const { data: pMatches } = await supabase
+            .from("profiles")
+            .select("id")
+            .or(`display_name.ilike.%${safeSearch}%,username.ilike.%${safeSearch}%,whatsapp_number.ilike.%${safeSearch}%`);
+          if (pMatches) {
+            profileMatchIds = pMatches.map((p: any) => String(p.id));
+          }
+        } catch {
+          // ignore profile search error
+        }
+      }
+
+      const combinedMatchingIds = Array.from(new Set([...matchingAuthIds, ...profileMatchIds]));
+      cohortUserIds = cohortUserIds
+        ? cohortUserIds.filter((id) => combinedMatchingIds.includes(id))
+        : combinedMatchingIds;
+
+      if (!cohortUserIds.length) {
+        return NextResponse.json({ users: [], total: 0 });
+      }
     }
 
     const profileFields = "id, username, display_name, avatar_url, language, telegram_chat_id, whatsapp_number, notification_channel, default_target_pct, default_stop_pct, custom_ai_rules, created_at, updated_at";
     let query = supabase.from("profiles").select(profileFields, { count: "exact" }).order("created_at", { ascending: false });
     if (cohortUserIds) query = query.in("id", cohortUserIds);
-    if (search && !search.includes("@")) {
-      const safeSearch = search.replace(/[(),]/g, " ");
-      query = query.or(`display_name.ilike.%${safeSearch}%,username.ilike.%${safeSearch}%`);
-    }
+
     const { data: allMatchingProfiles, error: profileError } = await query;
     if (profileError) return NextResponse.json({ detail: profileError.message }, { status: 500 });
     const matchingProfiles = allMatchingProfiles || [];
@@ -104,6 +145,7 @@ export async function GET(req: NextRequest) {
       return {
         ...profile,
         email: emailById.get(String(profile.id)) || null,
+        full_name: nameById.get(String(profile.id)) || profile.display_name || null,
         subscription: preferredSubscription(subscriptionsByUser.get(String(profile.id)) || []),
         bot_subscriptions: bots,
         bot_count: bots.filter((bot: any) => bot.notifications_enabled).length,
