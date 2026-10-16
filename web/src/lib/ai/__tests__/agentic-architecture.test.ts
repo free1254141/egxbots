@@ -1,7 +1,7 @@
 import { executeAgenticTool, runAgenticPipelineStream, AGENTIC_TOOLS_SCHEMA } from "../agentic-pipeline";
 import { cairoWeekBounds } from "../agentic-tools";
 import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts } from "../agentic-publication";
-import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply } from "../agentic-runtime";
+import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
@@ -991,6 +991,29 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(e[0].availability).toBe("partial");
         expect(removeDisprovenMissingToolIssues(["لم يتم استدعاء get_comparison للرمز ZZZZ99"],e)).toEqual([]);
         expect(removeDisprovenMissingToolIssues(["لم يتم استدعاء get_news"],e)).toEqual(["لم يتم استدعاء get_news"]);
+    });
+    test("reviewer cannot flag standard trading levels as unsolicited recommendations in stock analysis queries", () => {
+        const e = [toAgenticEvidence("get_stock_levels", { symbols: ["ALCN", "IFAP"] }, { status: "success", levels: [
+            { symbol: "ALCN", close: 33.77, support: 30.7, resistance: 36.18, entry_zone: "31.50 - 32.50", stop_loss: 29.8, target_1: 36.18, target_2: 38.5 },
+            { symbol: "IFAP", close: 18.45, support: 17.17, resistance: 21.15, entry_zone: "17.50 - 18.00", stop_loss: 16.5, target_1: 21.15, target_2: 23.0 },
+        ]})];
+        const issues = [
+            "المسودة تعرض منطقة دخول ووقف خسارة ومستهدفين لسهمين لم يطلب المستخدم توصية تنفيذ لهما؛ الطلب كان تحليلاً عاماً.",
+            "ملاحظة حقيقية: السعر غير مطابق للجدول."
+        ];
+        const filtered = removeBogusAnalysisTradingLevelIssues(issues, e, "حلل الحاويات والمحاصيل");
+        expect(filtered).toEqual(["ملاحظة حقيقية: السعر غير مطابق للجدول."]);
+    });
+    test("reviewer cannot flag news coverage absence as an issue when get_news was executed", () => {
+        const e = [toAgenticEvidence("get_news", { symbols: ["ALCN", "IFAP"] }, { status: "success", news: [
+            { symbol: "ALCN", date: "2026-10-15", headlines: ["Alcn earnings report"] }
+        ]})];
+        const issues = [
+            "غياب أخبار IFAP يُذكر كخلاصة دون أن يوضح قسم الأخبار أن الرمز لم يظهر في نتائج get_news؛ الدليل يغطي ALCN فقط.",
+            "خطأ حقيقي: التاريخ غير مذكور."
+        ];
+        const filtered = removeBogusNewsCoverageReviewIssues(issues, e);
+        expect(filtered).toEqual(["خطأ حقيقي: التاريخ غير مذكور."]);
     });
     test("period constants and small integers are not exemptions for invented price cells",()=>{
         const e=[toAgenticEvidence("get_stock",{symbols:["COMI"]},{stocks:[{symbol:"COMI",close:108,date:price.date}]})];

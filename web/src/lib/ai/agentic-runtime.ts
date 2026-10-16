@@ -141,6 +141,32 @@ export function removeBogusPortfolioReviewIssues(issues: string[], evidence: Age
         return true;
     });
 }
+/** Suppress reviewer objections claiming entry zone, stop loss, or targets are unrequested recommendations when the query was for stock analysis and get_stock_levels was called. */
+export function removeBogusAnalysisTradingLevelIssues(issues: string[], evidence: AgenticEvidence[], userMessage: string) {
+    const hasStockLevels = evidence.some(e => e.tool === "get_stock_levels" && e.availability !== "error");
+    const isAnalysisQuery = /(?:حلل|تحليل|فني|مالي|مستويات|نظرة|رأيك|تقييم|أداء|شاشة)/i.test(userMessage);
+    if (!hasStockLevels && !isAnalysisQuery) return issues;
+
+    return issues.filter(issue => {
+        // If the reviewer complains about entry zone, stop loss, take profit, or target levels being unsolicited/unrequested recommendations
+        if (/(?:دخول|وقف\s*خسارة|مستهدف|أهداف|توصية\s*تنفيذ|نصائح\s*شراء|شراء\s*و?بيع)/i.test(issue) &&
+            /(?:لم\s*يطلب|غير\s*مطلوب|دون\s*طلب|غير\s*مصرح|زائدة|إضافية|تحليلاً\s*عاماً)/i.test(issue)) {
+            return false;
+        }
+        return true;
+    });
+}
+/** Suppress reviewer complaints nitpicking news absence phrasing or coverage when get_news was executed. */
+export function removeBogusNewsCoverageReviewIssues(issues: string[], evidence: AgenticEvidence[]) {
+    const hasNewsEvidence = evidence.some(e => e.tool === "get_news" && e.availability !== "error");
+    if (!hasNewsEvidence) return issues;
+    return issues.filter(issue => {
+        if (/(?:غياب\s*أخبار|لم\s*يظهر\s*في\s*نتائج\s*get_news|الدليل\s*يغطي.{0,40}فقط|عدم\s*ظهور\s*الرمز\s*في\s*الأخبار)/i.test(issue)) {
+            return false;
+        }
+        return true;
+    });
+}
 /** A claim rejection must point to text actually published, never tool-only fields. */
 export function groundedReviewerIssues(verdict: any, draft: string): string[] {
     const issues = verdict.issues ?? verdict.reasons;
@@ -488,7 +514,8 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             if (message.incomplete) throw new Error("INCOMPLETE_REVIEW_RESPONSE");
             issues = parseReview();
         }
-        const failures = removeBogusPortfolioReviewIssues(removeDisprovenMissingToolIssues(removeSelfRetractedReviewerIssues(issues), evidence), evidence);
+        const rawFailures = removeBogusPortfolioReviewIssues(removeDisprovenMissingToolIssues(removeSelfRetractedReviewerIssues(issues), evidence), evidence);
+        const failures = removeBogusNewsCoverageReviewIssues(removeBogusAnalysisTradingLevelIssues(rawFailures, evidence, userMessage), evidence);
         {
             // The LLM reviewer is advisory for every request. Its notes can
             // trigger one writer refinement, but it cannot veto a response or
