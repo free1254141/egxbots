@@ -81,3 +81,38 @@ export async function sendTelegramMessage(chatId: number, text: string): Promise
     return false;
   }
 }
+
+export async function sendTelegramPhoto(chatId: number, photoUrl: string, caption?: string): Promise<boolean> {
+  const token = process.env.SUPPORT_BOT_TOKEN;
+  if (!token) {
+    console.warn("[SUPPORT_TELEGRAM] SUPPORT_BOT_TOKEN is not defined");
+    return false;
+  }
+
+  const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+  const url = `${relayUrl}/bot${token}/sendPhoto`;
+
+  const payload: Record<string, any> = {
+    chat_id: chatId,
+    photo: photoUrl,
+    parse_mode: "HTML"
+  };
+  if (caption) {
+    payload.caption = caption.slice(0, 1024);
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000)
+    });
+
+    const data = await res.json();
+    return !!data.ok;
+  } catch (err) {
+    console.error("[SUPPORT_TELEGRAM] Error sending Telegram photo:", err);
+    return false;
+  }
+}

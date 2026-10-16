@@ -11,6 +11,7 @@ export type SupportMessage = {
     content: string;
     user_name: string;
     created_at: string;
+    image_url?: string | null;
 };
 
 interface SupportChatContextType {
@@ -18,7 +19,7 @@ interface SupportChatContextType {
     setIsOpen: (open: boolean) => void;
     messages: SupportMessage[];
     sessionId: string;
-    sendMessage: (content: string) => Promise<void>;
+    sendMessage: (content: string, image?: string | null) => Promise<void>;
     loading: boolean;
     unreadCount: number;
     resetUnreadCount: () => void;
@@ -205,8 +206,9 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         }
     }, [isOpen]);
 
-    const sendMessage = async (content: string) => {
-        if (!content.trim() || !sessionId) return;
+    const sendMessage = async (content: string, image?: string | null) => {
+        const trimmedContent = content.trim();
+        if ((!trimmedContent && !image) || !sessionId) return;
         setLoading(true);
 
         const userName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
@@ -217,9 +219,10 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             id: tempId,
             session_id: sessionId,
             sender: "user",
-            content,
+            content: trimmedContent || (image ? "صورة مرفقة" : ""),
             user_name: userName,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            image_url: image || undefined
         };
 
         setMessages((prev) => [...prev, optimisticMsg]);
@@ -230,7 +233,8 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     session_id: sessionId,
-                    content,
+                    content: trimmedContent,
+                    image: image || null,
                     user_name: userName
                 })
             });

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase/route-data";
-import { getAdminChatId, sendTelegramMessage } from "@/lib/supportTelegram";
+import { getAdminChatId, sendTelegramMessage, sendTelegramPhoto } from "@/lib/supportTelegram";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { uploadChatImage } from "@/lib/ai/chat-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,20 +14,41 @@ export async function POST(req: Request) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const sessionId = String(body.session_id || "");
-    const content = String(body.content || "").trim();
+    const rawContent = String(body.content || "").trim();
+    const rawImage = typeof body.image === "string" ? body.image.trim() : null;
     const userName = String(user.user_metadata?.full_name || user.email || "User").slice(0, 120);
-    if (!sessionId || !content) return NextResponse.json({ ok: false }, { status: 400 });
-    if (content.length > 5000 || sessionId.length > 128) return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
+
+    if (!sessionId || (!rawContent && !rawImage)) {
+      return NextResponse.json({ ok: false, error: "Missing content or image" }, { status: 400 });
+    }
+    if (rawContent.length > 5000 || sessionId.length > 128) {
+      return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
+    }
     if (sessionId !== user.id) return NextResponse.json({ error: "Invalid support session" }, { status: 403 });
 
+    const content = rawContent || (rawImage ? "صورة مرفقة" : "");
+
     const supabase = getSupabaseClient();
+
+    let imageUrl: string | null = null;
+    if (rawImage) {
+      imageUrl = await uploadChatImage(supabase, user.id, sessionId, rawImage);
+    }
+
     const { data, error } = await supabase
       .from("support_messages")
-      .insert({ session_id: sessionId, user_id: user.id, sender: "user", content, user_name: userName })
+      .insert({
+        session_id: sessionId,
+        user_id: user.id,
+        sender: "user",
+        content,
+        user_name: userName,
+        image_url: imageUrl
+      })
       .select("*")
       .single();
 
-    if (error) return NextResponse.json({ ok: false }, { status: 200 });
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
 
     // Look up profile to check phone number
     let phoneLine = "";
@@ -80,7 +102,15 @@ export async function POST(req: Request) {
           `---------------------------------\n` +
           `${content}\n\n` +
           `<i>(للرد على العميل: اضغط Reply على هذه الرسالة واكتب ردك)</i>`;
-        await sendTelegramMessage(adminChatId, tgText);
+
+        let photoSent = false;
+        if (imageUrl) {
+          photoSent = await sendTelegramPhoto(adminChatId, imageUrl, tgText);
+        }
+        if (!photoSent) {
+          const fallbackText = imageUrl ? `${tgText}\n\n🖼️ <b>الصورة المرفقة:</b> ${imageUrl}` : tgText;
+          await sendTelegramMessage(adminChatId, fallbackText);
+        }
       }
     } catch (tgErr) {
       console.error("Failed to forward support message to Telegram:", tgErr);

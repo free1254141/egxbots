@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase/route-data";
 import { getAdminChatId, sendTelegramMessage } from "@/lib/supportTelegram";
 import { requireAdmin } from "@/lib/admin-auth";
+import { uploadChatImage } from "@/lib/ai/chat-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,13 +13,22 @@ export async function POST(req: NextRequest) {
     if (auth instanceof Response) return auth;
     const body = await req.json().catch(() => ({}));
     const sessionId = String(body.session_id || "");
-    const content = String(body.content || "").trim();
+    const rawContent = String(body.content || "").trim();
+    const rawImage = typeof body.image === "string" ? body.image.trim() : null;
 
-    if (!sessionId || !content) {
-      return NextResponse.json({ ok: false, error: "Missing session_id or content" }, { status: 400 });
+    if (!sessionId || (!rawContent && !rawImage)) {
+      return NextResponse.json({ ok: false, error: "Missing session_id, content, or image" }, { status: 400 });
     }
 
+    const content = rawContent || (rawImage ? "صورة مرفقة" : "");
+
     const supabase = getSupabaseClient();
+
+    let imageUrl: string | null = null;
+    if (rawImage) {
+      imageUrl = await uploadChatImage(supabase, "admin", sessionId, rawImage);
+    }
+
     const { data, error } = await supabase
       .from("support_messages")
         .insert({
@@ -26,7 +36,8 @@ export async function POST(req: NextRequest) {
           sender: "admin",
           content,
           user_name: "Admin",
-          user_id: sessionId
+          user_id: sessionId,
+          image_url: imageUrl
         })
       .select("*")
       .single();

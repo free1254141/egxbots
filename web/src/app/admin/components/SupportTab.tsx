@@ -20,6 +20,7 @@ import {
     AlertTriangle,
     UserPlus,
     X,
+    Image as ImageIcon,
 } from "lucide-react";
 
 type ChatSession = {
@@ -42,6 +43,7 @@ type SupportMessage = {
     content: string;
     user_name: string;
     created_at: string;
+    image_url?: string | null;
 };
 
 export default function SupportTab() {
@@ -51,6 +53,9 @@ export default function SupportTab() {
     const [messages, setMessages] = useState<SupportMessage[]>([]);
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [input, setInput] = useState("");
+    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [previewModalUrl, setPreviewModalUrl] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [replying, setReplying] = useState(false);
     const [mobilePane, setMobilePane] = useState<"sessions" | "conversation">("sessions");
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -152,6 +157,47 @@ export default function SupportTab() {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             void handleSendReply(e);
+        }
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            alert("يرجى اختيار ملف صورة صالح (PNG, JPG, WEBP)");
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            alert("الحد الأقصى لحجم الصورة هو 5 ميجابايت");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (typeof event.target?.result === "string") {
+                setSelectedImage(event.target.result);
+            }
+        };
+        reader.readAsDataURL(file);
+        e.target.value = "";
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== -1) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        if (typeof event.target?.result === "string") {
+                            setSelectedImage(event.target.result);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                    break;
+                }
+            }
         }
     };
 
@@ -346,10 +392,12 @@ export default function SupportTab() {
 
     const handleSendReply = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || !selectedSessionId) return;
+        if ((!input.trim() && !selectedImage) || !selectedSessionId) return;
 
         const content = input.trim();
+        const img = selectedImage;
         setInput("");
+        setSelectedImage(null);
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
         }
@@ -360,9 +408,10 @@ export default function SupportTab() {
             id: tempId,
             session_id: selectedSessionId,
             sender: "admin",
-            content,
+            content: content || (img ? "صورة مرفقة" : ""),
             user_name: "Admin",
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            image_url: img || undefined
         };
 
         setMessages((prev) => [...prev, optimisticMsg]);
@@ -373,7 +422,7 @@ export default function SupportTab() {
             if (idx === -1) return prev;
             const updated: ChatSession = {
                 ...prev[idx],
-                last_message: content,
+                last_message: content || "صورة مرفقة 🖼️",
                 last_message_time: new Date().toISOString(),
                 last_at: new Date().toISOString(),
                 message_count: (prev[idx].message_count || 0) + 1
@@ -389,7 +438,8 @@ export default function SupportTab() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     session_id: selectedSessionId,
-                    content
+                    content,
+                    image: img || null
                 })
             });
             const data = await res.json();
@@ -803,6 +853,17 @@ export default function SupportTab() {
                                                         )}
                                                     </div>
 
+                                                    {msg.image_url && (
+                                                        <div className="mb-2 overflow-hidden rounded-lg border border-black/20 dark:border-white/20">
+                                                            <img
+                                                                src={msg.image_url}
+                                                                alt="Attached"
+                                                                onClick={() => setPreviewModalUrl(msg.image_url!)}
+                                                                className="max-h-64 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity bg-black/5 dark:bg-white/5"
+                                                                loading="lazy"
+                                                            />
+                                                        </div>
+                                                    )}
                                                     <div className="whitespace-pre-wrap">{msg.content}</div>
 
                                                     {/* Delete Single Message Button */}
@@ -827,7 +888,38 @@ export default function SupportTab() {
                                 onSubmit={handleSendReply}
                                 className="p-3 sm:p-4 shrink-0 border-t-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex flex-col gap-2"
                             >
+                                {selectedImage && (
+                                    <div className="relative inline-flex items-center gap-2 p-1.5 bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 rounded-xl w-fit">
+                                        <img src={selectedImage} alt="Preview" className="h-12 w-12 object-cover rounded-lg border border-black/20" />
+                                        <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                                            صورة جاهزة للإرسال 🖼️
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedImage(null)}
+                                            className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition-colors"
+                                            title="إلغاء الصورة"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                )}
                                 <div className="flex items-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="h-[52px] w-[52px] shrink-0 rounded-xl bg-white hover:bg-amber-100 dark:bg-zinc-950 dark:hover:bg-zinc-800 border-2 border-black dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center transition-all shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none"
+                                        title="إرفاق صورة"
+                                    >
+                                        <ImageIcon className="h-5 w-5" />
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={handleFileSelect}
+                                    />
                                     <div className="flex-1 min-w-0">
                                         <textarea
                                             ref={textareaRef}
@@ -835,13 +927,14 @@ export default function SupportTab() {
                                             value={input}
                                             onChange={handleTextareaChange}
                                             onKeyDown={handleKeyDown}
+                                            onPaste={handlePaste}
                                             placeholder="Type support reply..."
                                             className="w-full resize-none min-h-[52px] max-h-[220px] rounded-xl bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3.5 py-2.5 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors custom-scrollbar leading-relaxed font-sans"
                                         />
                                     </div>
                                     <button
                                         type="submit"
-                                        disabled={replying || !input.trim()}
+                                        disabled={replying || (!input.trim() && !selectedImage)}
                                         aria-label="إرسال رد الدعم"
                                         className="shrink-0 h-[52px] px-5 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex flex-col items-center justify-center gap-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none"
                                     >
@@ -971,6 +1064,29 @@ export default function SupportTab() {
                                 })
                             )}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Image Preview Modal */}
+            {previewModalUrl && (
+                <div
+                    className="fixed inset-0 z-[10000] bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+                    onClick={() => setPreviewModalUrl(null)}
+                >
+                    <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+                        <img
+                            src={previewModalUrl}
+                            alt="Full View"
+                            className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain border-2 border-white/20"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setPreviewModalUrl(null)}
+                            className="absolute top-3 right-3 p-2 bg-black/80 hover:bg-black text-white rounded-full transition-colors shadow-lg"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
                     </div>
                 </div>
             )}

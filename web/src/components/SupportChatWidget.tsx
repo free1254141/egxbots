@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useSupportChat } from "@/contexts/SupportChatContext";
-import { Send, X, Crown, User, Headphones, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { Send, X, Crown, User, Headphones, Loader2, Maximize2, Minimize2, Image as ImageIcon } from "lucide-react";
 
 export default function SupportChatWidget() {
     const pathname = usePathname();
@@ -22,9 +22,12 @@ export default function SupportChatWidget() {
     } = useSupportChat();
 
     const [input, setInput] = useState("");
+    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [previewModalUrl, setPreviewModalUrl] = useState<string | null>(null);
     const [isExpanded, setIsExpanded] = useState(false);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Load expanded preference
     useEffect(() => {
@@ -63,6 +66,47 @@ export default function SupportChatWidget() {
         return null;
     }
 
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            alert(isAr ? "يرجى اختيار ملف صورة صالح (PNG, JPG, WEBP)" : "Please select a valid image file");
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            alert(isAr ? "الحد الأقصى لحجم الصورة هو 5 ميجابايت" : "Max image size is 5MB");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (typeof event.target?.result === "string") {
+                setSelectedImage(event.target.result);
+            }
+        };
+        reader.readAsDataURL(file);
+        e.target.value = "";
+    };
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== -1) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        if (typeof event.target?.result === "string") {
+                            setSelectedImage(event.target.result);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                    break;
+                }
+            }
+        }
+    };
+
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInput(e.target.value);
         const textarea = textareaRef.current;
@@ -81,14 +125,16 @@ export default function SupportChatWidget() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || loading) return;
+        if ((!input.trim() && !selectedImage) || loading) return;
 
         const content = input.trim();
+        const img = selectedImage;
         setInput("");
+        setSelectedImage(null);
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
         }
-        await sendMessage(content);
+        await sendMessage(content, img);
     };
 
     if (!isOpen) {
@@ -224,6 +270,17 @@ export default function SupportChatWidget() {
                                         {msg.user_name || (isAr ? "الدعم الفني VIP" : "VIP Support Desk")}
                                     </div>
                                 )}
+                                {msg.image_url && (
+                                    <div className="mb-2 overflow-hidden rounded-lg border border-black/20 dark:border-white/20">
+                                        <img
+                                            src={msg.image_url}
+                                            alt="Attached"
+                                            onClick={() => setPreviewModalUrl(msg.image_url!)}
+                                            className="max-h-56 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity bg-black/5 dark:bg-white/5"
+                                            loading="lazy"
+                                        />
+                                    </div>
+                                )}
                                 <div className="whitespace-pre-wrap leading-relaxed text-xs sm:text-sm font-sans">{msg.content}</div>
                                 <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1.5 text-end font-mono">
                                     {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
@@ -235,27 +292,84 @@ export default function SupportChatWidget() {
             </div>
 
             {/* Input Form */}
-            <form onSubmit={handleSubmit} className="p-3 border-t-2 border-black dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-end gap-2 flex-shrink-0">
-                <div className="flex-1 min-w-0">
-                    <textarea
-                        ref={textareaRef}
-                        rows={1}
-                        value={input}
-                        onChange={handleInputChange}
-                        onKeyDown={handleKeyDown}
-                        placeholder={isAr ? "اكتب استفسارك هنا مباشرة... (Enter للإرسال)" : "Type your message to support... (Enter to send)"}
-                        className="w-full resize-none min-h-[44px] max-h-[130px] rounded-xl bg-zinc-50 dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3 py-2.5 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors custom-scrollbar leading-relaxed"
+            <form onSubmit={handleSubmit} className="p-3 border-t-2 border-black dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col gap-1.5 flex-shrink-0">
+                {selectedImage && (
+                    <div className="relative inline-flex items-center gap-2 p-1.5 bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 rounded-xl w-fit">
+                        <img src={selectedImage} alt="Attachment Preview" className="h-12 w-12 object-cover rounded-lg border border-black/20" />
+                        <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                            {isAr ? "صورة جاهزة للإرسال 🖼️" : "Image ready to send 🖼️"}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setSelectedImage(null)}
+                            className="p-1 rounded-full bg-red-600 text-white hover:bg-red-700 transition-colors"
+                            title={isAr ? "إلغاء الصورة" : "Remove image"}
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                )}
+                <div className="flex items-end gap-2">
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-zinc-100 hover:bg-amber-100 dark:bg-zinc-800 dark:hover:bg-zinc-700 border-2 border-black dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center transition-all shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none"
+                        title={isAr ? "إرفاق صورة" : "Attach image"}
+                    >
+                        <ImageIcon className="h-5 w-5" />
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleFileSelect}
                     />
+                    <div className="flex-1 min-w-0">
+                        <textarea
+                            ref={textareaRef}
+                            rows={1}
+                            value={input}
+                            onChange={handleInputChange}
+                            onKeyDown={handleKeyDown}
+                            onPaste={handlePaste}
+                            placeholder={isAr ? "اكتب استفسارك أو الصق صورة (Ctrl+V)..." : "Type message or paste image (Ctrl+V)..."}
+                            className="w-full resize-none min-h-[44px] max-h-[130px] rounded-xl bg-zinc-50 dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3 py-2.5 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors custom-scrollbar leading-relaxed"
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={loading || (!input.trim() && !selectedImage)}
+                        className="h-11 w-11 shrink-0 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000000] active:translate-y-0.5 active:shadow-none"
+                        title={isAr ? "إرسال (Enter)" : "Send (Enter)"}
+                    >
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </button>
                 </div>
-                <button
-                    type="submit"
-                    disabled={loading || !input.trim()}
-                    className="h-11 w-11 shrink-0 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000000] active:translate-y-0.5 active:shadow-none"
-                    title={isAr ? "إرسال (Enter)" : "Send (Enter)"}
-                >
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </button>
             </form>
+
+            {/* Image Preview Modal */}
+            {previewModalUrl && (
+                <div
+                    className="fixed inset-0 z-[10000] bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+                    onClick={() => setPreviewModalUrl(null)}
+                >
+                    <div className="relative max-w-3xl max-h-[90vh] flex flex-col items-center">
+                        <img
+                            src={previewModalUrl}
+                            alt="Full View"
+                            className="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain border-2 border-white/20"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setPreviewModalUrl(null)}
+                            className="absolute top-3 right-3 p-2 bg-black/80 hover:bg-black text-white rounded-full transition-colors shadow-lg"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
