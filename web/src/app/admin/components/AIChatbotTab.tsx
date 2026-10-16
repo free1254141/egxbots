@@ -336,7 +336,7 @@ export default function AIChatbotTab() {
             </div>
 
             {viewMode === "support_chats" ? (
-                <div className="w-full bg-white dark:bg-black border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] p-4">
+                <div className="w-full">
                     <SupportTab />
                 </div>
             ) : (

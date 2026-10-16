@@ -101,29 +101,41 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             .on(
                 "postgres_changes",
                 {
-                    event: "INSERT",
+                    event: "*",
                     schema: "public",
                     table: "support_messages",
                     filter: `session_id=eq.${sessionId}`
                 },
                 (payload: any) => {
-                    const newMsg = payload.new as SupportMessage;
-                    setMessages((prev) => {
-                        // 1. If we already have this message by real ID, skip
-                        if (prev.some((m) => m.id === newMsg.id)) return prev;
-                        // 2. If we have a matching optimistic message, replace it
-                        const tempIndex = prev.findIndex((m) => m.id.startsWith("temp-") && m.content === newMsg.content && m.sender === newMsg.sender);
-                        if (tempIndex > -1) {
-                            const list = [...prev];
-                            list[tempIndex] = newMsg;
-                            return list;
+                    if (payload.eventType === "DELETE") {
+                        const deletedId = payload.old?.id;
+                        if (deletedId) {
+                            setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+                        } else {
+                            void fetchHistory();
                         }
-                        return [...prev, newMsg];
-                    });
+                        return;
+                    }
 
-                    // If widget is closed and message is from admin, increment unreadCount
-                    if (newMsg.sender === "admin" && !isOpenRef.current) {
-                        setUnreadCount((c) => c + 1);
+                    if (payload.eventType === "INSERT") {
+                        const newMsg = payload.new as SupportMessage;
+                        setMessages((prev) => {
+                            // 1. If we already have this message by real ID, skip
+                            if (prev.some((m) => m.id === newMsg.id)) return prev;
+                            // 2. If we have a matching optimistic message, replace it
+                            const tempIndex = prev.findIndex((m) => m.id.startsWith("temp-") && m.content === newMsg.content && m.sender === newMsg.sender);
+                            if (tempIndex > -1) {
+                                const list = [...prev];
+                                list[tempIndex] = newMsg;
+                                return list;
+                            }
+                            return [...prev, newMsg];
+                        });
+
+                        // If widget is closed and message is from admin, increment unreadCount
+                        if (newMsg.sender === "admin" && !isOpenRef.current) {
+                            setUnreadCount((c) => c + 1);
+                        }
                     }
                 }
             )
