@@ -167,7 +167,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             } catch {
                 // silent background catch
             }
-        }, 3000);
+        }, 1200);
 
         return () => clearInterval(interval);
     }, [sessionId, isOpen]);

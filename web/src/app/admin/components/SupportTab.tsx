@@ -222,6 +222,32 @@ export default function SupportTab() {
         };
     }, [supabase]);
 
+    // Live polling for selected session messages every 2s
+    useEffect(() => {
+        if (!selectedSessionId) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/admin/support/messages?session_id=${selectedSessionId}`);
+                const data = await res.json();
+                if (data.messages && Array.isArray(data.messages)) {
+                    setMessages((prev) => {
+                        const prevIds = new Set(prev.map((m) => m.id));
+                        const hasNew = data.messages.some((m: any) => !prevIds.has(m.id));
+                        if (!hasNew && prev.length === data.messages.length) return prev;
+                        const existingIds = new Set(data.messages.map((m: any) => m.id));
+                        const optimistic = prev.filter((m) => m.id.startsWith("temp-") && !existingIds.has(m.id));
+                        return [...data.messages, ...optimistic];
+                    });
+                }
+            } catch {
+                // silent
+            }
+        }, 2000);
+
+        return () => clearInterval(interval);
+    }, [selectedSessionId]);
+
     const handleSendReply = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || !selectedSessionId) return;
@@ -241,6 +267,22 @@ export default function SupportTab() {
         };
 
         setMessages((prev) => [...prev, optimisticMsg]);
+
+        // Optimistically update the session list in sidebar
+        setSessions((prev) => {
+            const idx = prev.findIndex((s) => s.session_id === selectedSessionId);
+            if (idx === -1) return prev;
+            const updated: ChatSession = {
+                ...prev[idx],
+                last_message: content,
+                last_message_time: new Date().toISOString(),
+                last_at: new Date().toISOString(),
+                message_count: (prev[idx].message_count || 0) + 1
+            };
+            const list = [...prev];
+            list.splice(idx, 1);
+            return [updated, ...list];
+        });
 
         try {
             const res = await fetch("/api/admin/support/reply", {

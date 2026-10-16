@@ -36,19 +36,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    // Send confirmation / update to Admin's Telegram
-    try {
-      const adminChatId = await getAdminChatId();
-      if (adminChatId) {
-        const tgText = `✍️ <b>[Support Chat Reply]</b> (Replied via Admin Panel)\n` +
-          `<b>Session:</b> <code>${sessionId}</code>\n` +
-          `---------------------------------\n` +
-          `${content}`;
-        await sendTelegramMessage(adminChatId, tgText);
+    // Fire and forget Telegram confirmation in background without blocking response to admin
+    void (async () => {
+      try {
+        const adminChatId = await getAdminChatId();
+        if (adminChatId) {
+          const tgText = `✍️ <b>[Support Chat Reply]</b> (Replied via Admin Panel)\n` +
+            `<b>Session:</b> <code>${sessionId}</code>\n` +
+            `---------------------------------\n` +
+            `${content}`;
+          await sendTelegramMessage(adminChatId, tgText);
+        }
+      } catch (tgErr) {
+        console.error("Failed to send admin reply confirmation to Telegram:", tgErr);
       }
-    } catch (tgErr) {
-      console.error("Failed to send admin reply confirmation to Telegram:", tgErr);
-    }
+    })();
 
     return NextResponse.json({ ok: true, message: data });
   } catch (err: any) {
