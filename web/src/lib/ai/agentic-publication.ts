@@ -139,9 +139,19 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             const target2Val = row.take_profit_2 ?? row.target_2;
             if (row.symbol && Number.isFinite(target2Val)) facts.push({ id: `${row.symbol}:target2`, symbol: row.symbol,
                 field: "target_price", value: target2Val, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            if (row.symbol && Number.isFinite(row.support_2)) facts.push({ id: `${row.symbol}:support2`, symbol: row.symbol,
+                field: "support", value: row.support_2, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            if (row.symbol && Number.isFinite(row.resistance_2)) facts.push({ id: `${row.symbol}:resistance2`, symbol: row.symbol,
+                field: "resistance", value: row.resistance_2, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             if (row.symbol && typeof row.entry_zone === "string") for (const value of row.entry_zone.match(/\d+(?:\.\d+)?/g) || []) {
                 facts.push({ id: `${row.symbol}:entry:${value}`, symbol: row.symbol, field: "entry_price", value: Number(value), unit: "egp",
                     as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            }
+            if (row.active_recommendation && row.symbol) {
+                const rec = row.active_recommendation;
+                if (Number.isFinite(rec.entry_price)) facts.push({ id: `${row.symbol}:rec:entry`, symbol: row.symbol, field: "entry_price", value: rec.entry_price, unit: "egp", as_of: rec.signal_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                if (Number.isFinite(rec.stop_loss)) facts.push({ id: `${row.symbol}:rec:stop`, symbol: row.symbol, field: "stop_loss", value: rec.stop_loss, unit: "egp", as_of: rec.signal_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                if (Number.isFinite(rec.target_price)) facts.push({ id: `${row.symbol}:rec:target`, symbol: row.symbol, field: "target_price", value: rec.target_price, unit: "egp", as_of: rec.signal_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
             if (row.symbol && typeof row.consecutive_acc_days === "number" && Number.isFinite(row.consecutive_acc_days)) {
                 facts.push({ id: `${row.symbol}:consecutive_acc_days`, symbol: row.symbol, field: "quantity", value: row.consecutive_acc_days, unit: "count", as_of: row.date ?? row.scan_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
@@ -226,7 +236,10 @@ function cleanCellText(text: string): string {
         .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\b/gi, " ")
         // 4. Strip percentage multipliers/proportions in descriptions (e.g. "98% من الدعم", "105% من المقاومة")
         .replace(/\b\d+(?:\.\d+)?\s*[%٪]\s*من\s*(?:الدعم|المقاومة|الإغلاق|السعر)/gi, " ")
-        .replace(/\b(?:8[0-9]|9[0-9]|10[0-9]|11[0-9]|12[0-9])\s*[%٪]\s*من\s*\S+/gi, " ");
+        .replace(/\b(?:8[0-9]|9[0-9]|10[0-9]|11[0-9]|12[0-9])\s*[%٪]\s*من\s*\S+/gi, " ")
+        // 5. Strip session count descriptions (e.g. "آخر 20 جلسة", "لآخر 20 جلسة", "مدى 60 جلسة", "لمدى 60 جلسة", "20 sessions")
+        .replace(/(?:ل?آخر|ل?مدى|خلال|في)?\s*\d+\s*جلس(?:[ةه]|ات)(?:\s+تداول)?/gi, " ")
+        .replace(/\b\d+\s*(?:sessions?|trading\s*days?)\b/gi, " ");
 }
 
 /** Metric labels describe generated evidence, never user intent routing. */

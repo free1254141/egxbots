@@ -245,10 +245,20 @@ async function executeRawTool(
                     const recentLows = recentRows.map((r: any) => Number(r.low ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
                     const recentHighs = recentRows.map((r: any) => Number(r.high ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
                     const allHighs = pRows.map((r: any) => Number(r.high ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
+                    const allLows = pRows.map((r: any) => Number(r.low ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
 
                     const support = recentLows.length > 0 ? Number(Math.min(...recentLows).toFixed(2)) : null;
                     const resistance = recentHighs.length > 0 ? Number(Math.max(...recentHighs).toFixed(2)) : null;
                     const longTermResistance = allHighs.length > 0 ? Number(Math.max(...allHighs).toFixed(2)) : resistance;
+                    const longTermSupport = allLows.length > 0 ? Number(Math.min(...allLows).toFixed(2)) : support;
+
+                    const support2 = (longTermSupport != null && support != null && longTermSupport < support)
+                        ? longTermSupport
+                        : (support != null ? Number((support * 0.96).toFixed(2)) : null);
+                    const resistance2 = (longTermResistance != null && resistance != null && longTermResistance > resistance)
+                        ? longTermResistance
+                        : (resistance != null ? Number((resistance * 1.05).toFixed(2)) : null);
+
                     const stopLoss = support != null ? Number((support * 0.98).toFixed(2)) : null;
                     const target1 = resistance;
                     const target2 = (longTermResistance != null && resistance != null && longTermResistance > resistance)
@@ -258,6 +268,25 @@ async function executeRawTool(
                     const entryZone = support != null
                         ? `${support} – ${Number((support * 1.02).toFixed(2))}`
                         : "غير محدد";
+
+                    let hasActiveRecommendation = false;
+                    let activeRecommendation: any = null;
+                    try {
+                        const { data: recRow } = await supabase
+                            .from("scan_results")
+                            .select("signal, entry_price, target_price, stop_loss, status, signal_date")
+                            .eq("exchange", "EGX").eq("symbol", sym)
+                            .in("status", ["open", "active"])
+                            .order("created_at", { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                        if (recRow) {
+                            hasActiveRecommendation = true;
+                            activeRecommendation = recRow;
+                        }
+                    } catch {
+                        // ignore query error
+                    }
 
                     let tradingZone = "منطقة حيادية للمراقبة (بين الدعم والمقاومة)";
                     if (support != null && close != null && close < support) {
@@ -276,7 +305,9 @@ async function executeRawTool(
                         symbol: sym,
                         close,
                         support,
+                        support_2: support2,
                         resistance,
+                        resistance_2: resistance2,
                         distance_from_support_pct: close != null && close > 0 && support != null ? (support - close) / close * 100 : null,
                         distance_from_resistance_pct: close != null && close > 0 && resistance != null ? (resistance - close) / close * 100 : null,
                         distance_basis: "(level - close) / close * 100; negative=below close; positive=above close; absolute value for proximity",
@@ -284,10 +315,12 @@ async function executeRawTool(
                         stop_loss: stopLoss,
                         take_profit_1: target1,
                         take_profit_2: target2,
+                        has_active_recommendation: hasActiveRecommendation,
+                        active_recommendation: activeRecommendation,
                         trading_zone: tradingZone,
                         date: pRows[0].date,
                         ...history,
-                        methodology: "20-session range; stop=98% support; target2=60-session high or 105% resistance",
+                        methodology: "20-session range for support/resistance; 60-session range for support2/resistance2; stop=98% support; target2=60-session high or 105% resistance",
                         observations: pRows.length, ...stockPricePresentation(pRows[0].date)
                     });
                 } else {

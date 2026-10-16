@@ -1505,5 +1505,48 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(historyFallback).toContain("سجل الجلسات الأخيرة");
         expect(historyFallback).toContain("الأسبوع 2026-10-04 إلى 2026-10-07");
     });
+
+    test("checkAgenticDraft grounds pure support/resistance table (support 1 & 2, resistance 1 & 2) without entry or targets for non-recommended stocks", () => {
+        const stockEv = toAgenticEvidence("get_stock", { symbols: ["IRON"] }, {
+            symbol: "IRON",
+            close: 26.42,
+            date: "2026-10-15"
+        });
+        const levelsEv = toAgenticEvidence("get_stock_levels", { symbols: ["IRON"] }, {
+            symbol: "IRON",
+            close: 26.42,
+            support: 25.01,
+            support_2: 23.50,
+            resistance: 32.25,
+            resistance_2: 34.99,
+            has_active_recommendation: false,
+            active_recommendation: null
+        });
+
+        const draft = [
+            "### 📊 تحليل سهم الحديد والصلب (IRON)",
+            "**السعر الأخير:** 26.42 ج.م | **التقييم الفني العام:** 🔴 سلبي / مخاطرة مرتفعة",
+            "",
+            "#### 🎯 المستويات الفنية ونقاط المراقبة",
+            "| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |",
+            "|---|---|---|",
+            "| الإغلاق الحالي | 26.42 | آخر سعر إغلاق مسجل |",
+            "| الدعم الأول | 25.01 | أدنى سعر لآخر 20 جلسة |",
+            "| الدعم الثاني | 23.50 | دعم ثانوي تاريخي |",
+            "| المقاومة الأولى | 32.25 | أعلى سعر لآخر 20 جلسة |",
+            "| المقاومة الثانية | 34.99 | قمة سابقة لمدى 60 جلسة |",
+            "",
+            "#### 💡 الرأي التوليفي",
+            "السهم في مسار هابط ومرحلة توزيع ولا توجد إشارة شراء مفعلة حالياً؛ المستويات للمراقبة فقط وانتظار تكوين قاع."
+        ].join("\n");
+
+        const reasons = checkAgenticDraft(draft, [stockEv, levelsEv], "حلل الحديد والصلب");
+        expect(reasons).toEqual([]);
+
+        // Reviewer omission complaint must be suppressed by removeBogusAnalysisTradingLevelIssues
+        const rawIssues = ["أين منطقة الدخول ووقف الخسارة للسهم"];
+        const filtered = removeBogusAnalysisTradingLevelIssues(rawIssues, [levelsEv], "حلل الحديد والصلب");
+        expect(filtered).toEqual([]);
+    });
 });
 

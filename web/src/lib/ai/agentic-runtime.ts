@@ -153,6 +153,10 @@ export function removeBogusAnalysisTradingLevelIssues(issues: string[], evidence
             /(?:لم\s*يطلب|غير\s*مطلوب|دون\s*طلب|غير\s*مصرح|زائدة|إضافية|تحليلاً\s*عاماً)/i.test(issue)) {
             return false;
         }
+        // Also suppress complaints demanding entry zone, stop loss, or targets when omitted for stocks without active recommendations
+        if (/(?:أين|لم\s*تذكر|إغفال|نقص|غياب|أضف).*(?:منطقة\s*الدخول|وقف\s*الخسارة|المستهدف)/i.test(issue)) {
+            return false;
+        }
         return true;
     });
 }
