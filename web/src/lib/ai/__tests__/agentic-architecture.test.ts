@@ -1313,5 +1313,98 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(advisoryMarketMeaning(reply,e,"2026-10-15")).toEqual([]);
     });
 
+    test("multi-domain stock analysis card with technical levels, indicators, fundamentals, and portfolio status line passes checkAgenticDraft with 0 reasons", () => {
+        const stockEv = toAgenticEvidence("get_stock", { symbols: ["ATQA"] }, {
+            stocks: [{
+                symbol: "ATQA",
+                name: "مصر الوطنية للصلب - عتاقة",
+                close: 4.85,
+                change_pct: 2.11,
+                date: "2026-10-16",
+                rsi_14: 55.4,
+                macd: 0.12,
+                macd_signal: 0.08,
+                macd_hist: 0.04,
+                ema_50: 4.60,
+                ema_200: 4.25,
+                r_vol: 1.35,
+            }]
+        });
+        const levelsEv = toAgenticEvidence("get_stock_levels", { symbols: ["ATQA"] }, {
+            stocks: [{
+                symbol: "ATQA",
+                close: 4.85,
+                date: "2026-10-16",
+                support: 4.65,
+                resistance: 5.15,
+                stop_loss: 4.50,
+                entry_zone: "4.65 - 4.75",
+                take_profit_1: 5.20,
+                take_profit_2: 5.50,
+            }]
+        });
+        const fundEv = toAgenticEvidence("get_fundamentals", { symbols: ["ATQA"] }, {
+            stocks: [{
+                symbol: "ATQA",
+                pe_ratio: 6.8,
+                eps: 0.71,
+                market_cap: 2420000000,
+                date: "2026-10-16"
+            }]
+        });
+        const portfolioEv = toAgenticEvidence("manage_portfolio", { operation: "view" }, {
+            positions: [{
+                symbol: "ATQA",
+                quantity: 2500,
+                entry_price: 4.40,
+                buy_price: 4.40,
+                current_price: 4.85,
+                cost: 11000,
+                market_value: 12125,
+                profit_loss_pct: 10.23,
+                profit_loss_val: 1125,
+            }]
+        });
+        const newsEv = toAgenticEvidence("get_news", { symbols: ["ATQA"] }, {
+            news: []
+        });
+
+        const draft = [
+            "### 📊 تحليل سهم مصر الوطنية للصلب - عتاقة (ATQA)",
+            "**السعر الأخير:** 4.85 ج.م (تغير الجلسة: +2.11% بتاريخ 2026-10-16) | **التقييم الفني العام:** 🟢 إيجابي / فرصة جيدة",
+            "",
+            "📌 **حالة السهم في محفظتك:** مسجل لديك 2500 سهم بمتوسط شراء 4.40 ج.م (أرباح غير محققة: +10.23%).",
+            "",
+            "#### 🎯 مستويات التداول والدعوم والمقاومات",
+            "| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |",
+            "|---|---|---|",
+            "| الإغلاق الحالي | 4.85 | آخر لقطة جلسة مسجلة |",
+            "| الدعم الأول | 4.65 | مستوى دعم محوري أقرب |",
+            "| المقاومة الأولى | 5.15 | حاجز مقاومة رئيسي |",
+            "| وقف الخسارة | 4.50 | كسر الدعم والإغلاق أدناه |",
+            "| المستهدف الأول | 5.20 | مستهدف جني أرباح أول |",
+            "| المستهدف الثاني | 5.50 | مستهدف فني ثانٍ |",
+            "",
+            "#### 📈 المؤشرات الفنية والبيانات الأساسية",
+            "| المؤشر / المقياس | القيمة | القراءة والتقييم |",
+            "|---|---|---|",
+            "| مؤشر القوة النسبية (RSI) | 55.4 | منطقة زخم إيجابي معتدل |",
+            "| مؤشر الماكد (MACD) | 0.12 | زخم صاعد أعلى خط الإشارة (0.08) |",
+            "| متوسط متحرك EMA 50 | 4.60 | السعر يتداول أعلى المتوسط المتحرك |",
+            "| متوسط متحرك EMA 200 | 4.25 | الاتجاه العام طويل الأجل صاعد |",
+            "| الحجم النسبي (r_vol) | 1.35 | نشاط تداول أعلى من المتوسط اليومي |",
+            "| مضاعف الربحية (P/E) | 6.8 | تقييم مالي جاذب ومكرر منخفض |",
+            "| ربحية السهم (EPS) | 0.71 | ربحية السهم بالجنيه |",
+            "| القيمة السوقية للشركة | 2420000000 | القيمة السوقية الإجمالية بالجنيه |",
+            "",
+            "#### 💡 الرأي التوليفي وخطة التحرك الاستثمارية",
+            "يجمع السهم بين قوة المؤشرات الفنية (RSI عند 55.4 وتداول السعر أعلى EMA 50) وجاذبية التقييم المالي بمضاعف ربحية منخفض (6.8). المركز في محفظتك رابح حالياً (+10.23%) ويُنصح بالاحتفاظ طالما السهم أعلى دعم 4.65 ج.م مع رفع وقف الخسارة إلى 4.50 ج.م وجني جزء من الأرباح قرب المقاومة 5.15 ج.م والمستهدف 5.20 ج.م. لا توجد إفصاحات جوهرية جديدة خلال آخر 7 أيام."
+        ].join("\n");
+
+        const evidence = [stockEv, levelsEv, fundEv, portfolioEv, newsEv];
+        const reasons = checkAgenticDraft(draft, evidence, "حلل عتاقة");
+        expect(reasons).toEqual([]);
+    });
+
 });
 

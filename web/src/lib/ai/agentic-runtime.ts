@@ -53,10 +53,16 @@ export function stripChatFooters(content: string): string {
         .trim();
 }
 
-export async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{ isPro: boolean; vipInviteLink: string | null; userPortfolioSymbols: string[] }> {
+export async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{
+    isPro: boolean;
+    vipInviteLink: string | null;
+    userPortfolioSymbols: string[];
+    userSavedPositions: Array<{ symbol: string; quantity?: number; entry_price?: number }>;
+}> {
     let isPro = Boolean(optionsIsPro);
     let vipInviteLink: string | null = null;
     let userPortfolioSymbols: string[] = [];
+    let userSavedPositions: Array<{ symbol: string; quantity?: number; entry_price?: number }> = [];
 
     if (supabase && userId && isUuid(userId)) {
         try {
@@ -64,7 +70,7 @@ export async function resolveUserProContext(supabase: any, userId: string, optio
             const [subRes, inviteRes, posRes] = await Promise.allSettled([
                 !isPro ? client.from("subscriptions").select("plan_id, status, current_period_end").eq("user_id", userId).in("status", ["active", "trialing"]).order("current_period_end", { ascending: false }).limit(5) : Promise.resolve(null),
                 client.from("pro_telegram_invites").select("invite_link, invite_expires_at").eq("user_id", userId).maybeSingle(),
-                client.from("positions").select("symbol").eq("user_id", userId).eq("status", "open").limit(50),
+                client.from("positions").select("symbol, quantity, entry_price").eq("user_id", userId).eq("status", "open").limit(50),
             ]);
 
             if (subRes.status === "fulfilled" && subRes.value?.data && hasActiveProSubscription(subRes.value.data)) {
@@ -81,13 +87,14 @@ export async function resolveUserProContext(supabase: any, userId: string, optio
 
             if (posRes.status === "fulfilled" && posRes.value?.data && Array.isArray(posRes.value.data)) {
                 userPortfolioSymbols = posRes.value.data.map((p: any) => p.symbol).filter(Boolean);
+                userSavedPositions = posRes.value.data.filter((p: any) => p.symbol);
             }
         } catch (e) {
             console.warn("[Agentic] resolveUserProContext non-blocking error:", e);
         }
     }
 
-    return { isPro, vipInviteLink, userPortfolioSymbols };
+    return { isPro, vipInviteLink, userPortfolioSymbols, userSavedPositions };
 }
 
 const footer = buildChatFooter(false);
@@ -257,7 +264,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const visionSymbols = (sessionSummary?.last_vision_context?.symbols || []).map((s: any) => s.symbol).filter(Boolean);
     const imageSymbols = sessionSummary?.last_image_symbols || [];
     const allPortfolioSymbols = [...new Set([...proContext.userPortfolioSymbols, ...visionSymbols, ...imageSymbols])];
-    const context = { symbol_hints: knownSymbolHints(userMessage), user_portfolio_symbols: allPortfolioSymbols, state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
+    const context = { symbol_hints: knownSymbolHints(userMessage), user_portfolio_symbols: allPortfolioSymbols, user_saved_positions: proContext.userSavedPositions, state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
         current_symbols:sessionSummary.current_symbols, last_topic:sessionSummary.last_topic?.slice(0,600),
         open_references:sessionSummary.open_references, last_image_symbols:sessionSummary.last_image_symbols,
         last_vision_context: sessionSummary.last_vision_context ? {
@@ -430,7 +437,23 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         const relevantPrevious = currentSymbols.size
             ? unsupersededEvidence(previousEvidence, evidence).filter(e => (e.symbols || []).some(s => currentSymbols.has(String(s).toUpperCase())))
             : [];
-        return [...relevantPrevious, ...evidence, ...(imageEvidence ? [imageEvidence] : [])];
+        const savedPositionsEvidence: AgenticEvidence | null = (proContext.userSavedPositions?.length && !evidence.some(e => e.tool === "manage_portfolio")) ? {
+            tool: "manage_portfolio",
+            arguments: { operation: "view" },
+            source: "supabase:positions",
+            symbols: proContext.userSavedPositions.map(p => p.symbol),
+            availability: "available",
+            data_time: new Date().toISOString(),
+            data: { positions: proContext.userSavedPositions.map(p => ({
+                symbol: p.symbol,
+                quantity: p.quantity,
+                entry_price: p.entry_price,
+                buy_price: p.entry_price,
+                cost: (p.quantity != null && p.entry_price != null) ? p.quantity * p.entry_price : null,
+            })) },
+            data_type: "historical",
+        } : null;
+        return [...relevantPrevious, ...evidence, ...(imageEvidence ? [imageEvidence] : []), ...(savedPositionsEvidence ? [savedPositionsEvidence] : [])];
     };
     const reviewPayload = (reply: string) => ({ request: userMessage, draft_to_review:reply,
         current_tool_calls:evidence.map(e=>({tool:e.tool,arguments:e.arguments,availability:e.availability})),

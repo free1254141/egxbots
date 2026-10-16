@@ -111,6 +111,9 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
         egx_ai_score: row.egx_ai ?? row.egx_ai_score,
         bollinger_upper: row.bollinger_upper ?? row.bb_upper,
         bollinger_lower: row.bollinger_lower ?? row.bb_lower,
+        pe_ratio: row.pe_ratio ?? row.peRatio,
+        eps: row.eps,
+        market_cap: row.market_cap ?? row.marketCap,
     })) }));
     const facts = buildFactRecords(adapted);
     for (const e of evidence) {
@@ -1061,9 +1064,9 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
             const rowFields = !tableHadStockRow ? (symbol === "EGX" ? breadthFields : tableMetricFields(cells[0])) : undefined;
-            const isCommentaryCol = !tableHadStockRow && idx >= 2 && /ملاحظ|تفسير|دلال|حال|قراء|الوضع|الموقع|تعليق|شرح|ملخص|سياق|تفصيل|تفاصيل|النتيجة|الأثر/i.test(header);
+            const isCommentaryCol = !tableHadStockRow && idx >= 2 && /ملاحظ|تفسير|دلال|حال|قراء|الوضع|الموقع|تعليق|شرح|ملخص|سياق|تفصيل|تفاصيل|النتيجة|الأثر|وصف|بيان|إشارة|اشارة/i.test(header);
             const verticalMetricValue = Boolean(rowFields?.length)
-                && (/^(?:السعر|سعر|القيمة|قيمة|price|value)$/i.test(header.replace(/[*_`]/g," ").trim())
+                && (/^(?:(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى|price|value|level)(?:\s*(?:[\/،-]|أو)\s*(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى))?(?:\s*\([^)]*\))?)$/i.test(header.replace(/[*_`]/g," ").trim())
                     || (rowFields?.some(f => f.startsWith("breadth_")) && /^(?:العدد|عدد|count)$/i.test(header.trim())));
             let fields = screenRow && /مساف|بعد|قرب/.test(header) ? ["distance_from_resistance_pct" as const] : distanceColumn && levelField ? [levelField]
                 : isCommentaryCol ? undefined
