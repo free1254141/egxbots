@@ -18,6 +18,8 @@ import {
     Crown,
     ExternalLink,
     AlertTriangle,
+    UserPlus,
+    X,
 } from "lucide-react";
 
 type ChatSession = {
@@ -55,6 +57,83 @@ export default function SupportTab() {
     const [searchQuery, setSearchQuery] = useState("");
     const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
     const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+    const [showNewChatModal, setShowNewChatModal] = useState(false);
+    const [userSearchQuery, setUserSearchQuery] = useState("");
+    const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+    const [searchingUsers, setSearchingUsers] = useState(false);
+    const searchDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+    // Helpers for user information resolution
+    const getUserDisplayName = (u: any) => {
+        return u.display_name || u.username || u.full_name || (u.email ? u.email.split("@")[0] : `عميل (${u.id.slice(0, 8)})`);
+    };
+
+    const isUserPro = (u: any) => {
+        const subPlan = u.subscription?.plan_id?.toLowerCase() || "";
+        const subActive = u.subscription?.status === "active";
+        if (subActive && ["pro", "lifetime", "pro_lifetime"].includes(subPlan)) return true;
+        if (String(u.plan || "").toLowerCase().includes("pro")) return true;
+        return Boolean(u.is_pro);
+    };
+
+    const formatWhatsAppLink = (num?: string) => {
+        if (!num) return "";
+        const digits = num.replace(/\D/g, "");
+        if (!digits) return "";
+        const normalized = digits.startsWith("20") ? digits : digits.startsWith("0") ? `2${digits}` : `20${digits}`;
+        return `https://wa.me/${normalized}`;
+    };
+
+    const fetchUsersForChat = async (q = "") => {
+        try {
+            setSearchingUsers(true);
+            const res = await fetch(`/api/admin/users?search=${encodeURIComponent(q)}&page_size=25`);
+            const data = await res.json();
+            if (data.users && Array.isArray(data.users)) {
+                setUserSearchResults(data.users);
+            }
+        } catch (err) {
+            console.error("Error searching users:", err);
+        } finally {
+            setSearchingUsers(false);
+        }
+    };
+
+    const handleUserSearchInputChange = (val: string) => {
+        setUserSearchQuery(val);
+        if (searchDebounceTimer.current) {
+            clearTimeout(searchDebounceTimer.current);
+        }
+        searchDebounceTimer.current = setTimeout(() => {
+            void fetchUsersForChat(val);
+        }, 300);
+    };
+
+    const handleSelectUserForChat = (u: any) => {
+        const displayName = getUserDisplayName(u);
+        const proStatus = isUserPro(u);
+        const existing = sessions.find((s) => s.session_id === u.id);
+        if (existing) {
+            setSelectedSessionId(u.id);
+        } else {
+            const draftSession: ChatSession = {
+                session_id: u.id,
+                user_id: u.id,
+                user_name: displayName,
+                email: u.email,
+                whatsapp_number: u.whatsapp_number,
+                plan: proStatus ? "PRO" : (u.plan || "FREE"),
+                last_message: "محادثة جديدة لم تبدأ بعد",
+                last_message_time: new Date().toISOString(),
+                last_at: new Date().toISOString(),
+                message_count: 0
+            };
+            setSessions((prev) => [draftSession, ...prev]);
+            setSelectedSessionId(u.id);
+        }
+        setMobilePane("conversation");
+        setShowNewChatModal(false);
+    };
 
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -445,10 +524,20 @@ export default function SupportTab() {
                     data-testid="support-session-list"
                     className="flex lg:flex w-full lg:w-1/3 min-w-0 min-h-0 lg:border-r-4 border-black dark:border-white flex-col h-full bg-zinc-50 dark:bg-zinc-900/40"
                 >
-                    <div className="p-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
-                            قائمة تذاكر ومحادثات العملاء ({filteredSessions.length})
-                        </span>
+                    <div className="p-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                                قائمة تذاكر ومحادثات العملاء ({filteredSessions.length})
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => { setShowNewChatModal(true); void fetchUsersForChat(); }}
+                            className="w-full py-2 px-3 bg-amber-400 hover:bg-amber-300 text-black font-black text-xs rounded-lg border-2 border-black flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none transition-all"
+                        >
+                            <UserPlus className="w-4 h-4" />
+                            <span>+ بدء محادثة مع عميل جديد</span>
+                        </button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800 custom-scrollbar">
@@ -578,9 +667,9 @@ export default function SupportTab() {
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500 font-mono mt-0.5">
                                             <span>Session: {selectedSessionId}</span>
-                                            {activeSession?.whatsapp_number && (
+                                            {activeSession?.whatsapp_number && formatWhatsAppLink(activeSession.whatsapp_number) && (
                                                 <a
-                                                    href={`https://wa.me/2${activeSession.whatsapp_number.replace(/^0+/, "")}`}
+                                                    href={formatWhatsAppLink(activeSession.whatsapp_number)}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold hover:underline"
@@ -624,9 +713,29 @@ export default function SupportTab() {
                                         <span className="text-xs font-bold">جاري تحميل رسائل المحادثة...</span>
                                     </div>
                                 ) : messages.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-zinc-400 space-y-2">
-                                        <MessageSquare className="h-10 w-10 text-zinc-300 dark:text-zinc-700" />
-                                        <span className="text-xs font-bold">لا توجد رسائل في هذه المحادثة حتى الآن.</span>
+                                    <div className="flex flex-col items-center justify-center h-full text-zinc-400 space-y-3 p-6 text-center">
+                                        <div className="h-12 w-12 rounded-2xl bg-amber-400 border-2 border-black flex items-center justify-center text-black shadow-[2px_2px_0px_#000]">
+                                            <Crown className="w-6 h-6 fill-amber-200" />
+                                        </div>
+                                        <div className="space-y-1 max-w-sm">
+                                            <h4 className="font-black text-sm text-black dark:text-white">
+                                                بدء محادثة جديدة مع: {activeSession?.user_name}
+                                            </h4>
+                                            <p className="text-[11px] text-zinc-500 leading-relaxed">
+                                                اكتب رسالتك بالأسفل واضغط <b>إرسال الرد</b>. ستصل للعميل فوراً في شات الدعم بحسابه مع إشعار بالرسائل الجديدة.
+                                            </p>
+                                        </div>
+                                        {activeSession?.whatsapp_number && formatWhatsAppLink(activeSession.whatsapp_number) && (
+                                            <a
+                                                href={formatWhatsAppLink(activeSession.whatsapp_number)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs shadow-[2px_2px_0px_#000] transition-colors"
+                                            >
+                                                <span>أو راسله على واتساب مباشرة ({activeSession.whatsapp_number})</span>
+                                                <ExternalLink className="w-3.5 h-3.5" />
+                                            </a>
+                                        )}
                                     </div>
                                 ) : (
                                     messages.map((msg) => {
@@ -734,6 +843,102 @@ export default function SupportTab() {
                     )}
                 </MobileConversation>
             </div>
+
+            {/* New Chat Modal */}
+            {showNewChatModal && (
+                <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+                    <div
+                        className="w-full max-w-md bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_rgba(255,255,255,0.2)] rounded-2xl flex flex-col overflow-hidden max-h-[85vh]"
+                        dir="rtl"
+                    >
+                        {/* Header */}
+                        <div className="p-4 border-b-4 border-black bg-amber-400 text-black flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2">
+                                <UserPlus className="w-5 h-5" />
+                                <h3 className="font-black text-sm uppercase">بدء محادثة جديدة مع عميل</h3>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowNewChatModal(false)}
+                                className="p-1 rounded-lg hover:bg-black/10 transition-colors"
+                            >
+                                <X className="w-5 h-5 text-black" />
+                            </button>
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="p-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+                            <div className="relative">
+                                <Search className="w-4 h-4 text-zinc-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={userSearchQuery}
+                                    onChange={(e) => handleUserSearchInputChange(e.target.value)}
+                                    placeholder="ابحث بالاسم، الإيميل، أو رقم الهاتف..."
+                                    className="w-full h-10 rounded-xl border-2 border-black dark:border-zinc-700 bg-white dark:bg-zinc-950 pr-9 pl-3 text-xs text-black dark:text-white placeholder:text-zinc-400 focus:outline-none focus:border-amber-500"
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+
+                        {/* Users List */}
+                        <div className="flex-1 overflow-y-auto p-2 divide-y divide-zinc-100 dark:divide-zinc-800 custom-scrollbar">
+                            {searchingUsers ? (
+                                <div className="flex flex-col items-center justify-center p-10 text-zinc-400">
+                                    <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                                    <span className="text-xs font-bold">جاري البحث عن العملاء...</span>
+                                </div>
+                            ) : userSearchResults.length === 0 ? (
+                                <div className="p-8 text-center text-zinc-400 text-xs font-bold">
+                                    لا يوجد مستخدمين مطابقين للبحث.
+                                </div>
+                            ) : (
+                                userSearchResults.map((u) => {
+                                    const displayName = getUserDisplayName(u);
+                                    const isPro = isUserPro(u);
+
+                                    return (
+                                        <button
+                                            key={u.id}
+                                            type="button"
+                                            onClick={() => handleSelectUserForChat(u)}
+                                            className="w-full text-right p-3 hover:bg-amber-50 dark:hover:bg-zinc-900 rounded-xl flex items-center justify-between gap-3 transition-colors group"
+                                        >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <div className="h-9 w-9 rounded-xl bg-amber-400 border border-black flex items-center justify-center text-black font-black text-xs shrink-0">
+                                                    {isPro ? <Crown className="w-4 h-4 fill-black" /> : <User className="w-4 h-4" />}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="font-black text-xs text-black dark:text-white truncate">
+                                                            {displayName}
+                                                        </span>
+                                                        {isPro && (
+                                                            <span className="px-1.5 py-0.2 bg-black text-amber-300 text-[8px] font-black rounded">
+                                                                PRO
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono mt-0.5">
+                                                        {u.whatsapp_number && (
+                                                            <span className="text-emerald-600 font-bold">📱 {u.whatsapp_number}</span>
+                                                        )}
+                                                        {u.email && <span className="truncate max-w-[150px]">{u.email}</span>}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <span className="shrink-0 text-[10px] font-bold px-2.5 py-1 bg-amber-400 text-black border border-black rounded-lg shadow-xs group-hover:bg-amber-300 transition-colors">
+                                                بدء المحادثة 💬
+                                            </span>
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
