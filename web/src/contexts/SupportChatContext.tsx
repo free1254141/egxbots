@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -70,6 +70,11 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         }
     }, [user]);
 
+    const isOpenRef = useRef(isOpen);
+    useEffect(() => {
+        isOpenRef.current = isOpen;
+    }, [isOpen]);
+
     // Load history and subscribe to changes
     useEffect(() => {
         if (!sessionId) return;
@@ -78,8 +83,12 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             try {
                 const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
                 const data = await res.json();
-                if (data.messages) {
-                    setMessages(data.messages);
+                if (data.messages && Array.isArray(data.messages)) {
+                    setMessages((prev) => {
+                        const existingIds = new Set(data.messages.map((m: any) => m.id));
+                        const optimistic = prev.filter((m) => m.id.startsWith("temp-") && !existingIds.has(m.id));
+                        return [...data.messages, ...optimistic];
+                    });
                 }
             } catch (err) {
                 console.error("Error loading chat history:", err);
@@ -113,7 +122,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
                     });
 
                     // If widget is closed and message is from admin, increment unreadCount
-                    if (!isOpen && newMsg.sender === "admin") {
+                    if (newMsg.sender === "admin" && !isOpenRef.current) {
                         setUnreadCount((c) => c + 1);
                     }
                 }
@@ -123,7 +132,59 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         return () => {
             void supabase.removeChannel(channel);
         };
-    }, [sessionId, supabase, isOpen]);
+    }, [sessionId, supabase]);
+
+    // Fast polling while the chat is open (every 3 seconds) for instant render
+    useEffect(() => {
+        if (!sessionId || !isOpen) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
+                const data = await res.json();
+                if (data.messages && Array.isArray(data.messages)) {
+                    setMessages((prev) => {
+                        const prevIds = new Set(prev.map((m) => m.id));
+                        const hasNew = data.messages.some((m: any) => !prevIds.has(m.id));
+                        if (!hasNew && prev.length === data.messages.length) return prev;
+                        const existingIds = new Set(data.messages.map((m: any) => m.id));
+                        const optimistic = prev.filter((m) => m.id.startsWith("temp-") && !existingIds.has(m.id));
+                        return [...data.messages, ...optimistic];
+                    });
+                }
+            } catch {
+                // silent background catch
+            }
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [sessionId, isOpen]);
+
+    // Background check while closed (every 20 seconds) to update unread badge
+    useEffect(() => {
+        if (!sessionId || isOpen || !isPro) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
+                const data = await res.json();
+                if (data.messages && Array.isArray(data.messages)) {
+                    setMessages((prev) => {
+                        const prevIds = new Set(prev.map((m) => m.id));
+                        const newAdminMessages = data.messages.filter((m: any) => m.sender === "admin" && !prevIds.has(m.id));
+                        if (newAdminMessages.length > 0) {
+                            setUnreadCount((c) => c + newAdminMessages.length);
+                        }
+                        return data.messages;
+                    });
+                }
+            } catch {
+                // silent
+            }
+        }, 20000);
+
+        return () => clearInterval(interval);
+    }, [sessionId, isOpen, isPro]);
 
     // Reset unread count when opening the widget
     useEffect(() => {
