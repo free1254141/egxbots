@@ -141,11 +141,12 @@ export function removeBogusPortfolioReviewIssues(issues: string[], evidence: Age
         return true;
     });
 }
-/** Suppress reviewer objections claiming entry zone, stop loss, or targets are unrequested recommendations when the query was for stock analysis and get_stock_levels was called. */
+/** Suppress reviewer objections regarding trading levels and recommendations when following platform policy. */
 export function removeBogusAnalysisTradingLevelIssues(issues: string[], evidence: AgenticEvidence[], userMessage: string) {
     const hasStockLevels = evidence.some(e => e.tool === "get_stock_levels" && e.availability !== "error");
-    const isAnalysisQuery = /(?:حلل|تحليل|فني|مالي|مستويات|نظرة|رأيك|تقييم|أداء|شاشة)/i.test(userMessage);
-    if (!hasStockLevels && !isAnalysisQuery) return issues;
+    const hasRecommendations = evidence.some(e => e.tool === "get_recommendations" && e.availability !== "error");
+    const isAnalysisOrSpeculationQuery = /(?:حلل|تحليل|فني|مالي|مستويات|نظرة|رأيك|تقييم|أداء|شاشة|مضارب|ترشيح|رشح|توصي|توصية|زيرو|شراء|فرص)/i.test(userMessage);
+    if (!hasStockLevels && !hasRecommendations && !isAnalysisOrSpeculationQuery) return issues;
 
     return issues.filter(issue => {
         // If the reviewer complains about entry zone, stop loss, take profit, or target levels being unsolicited/unrequested recommendations
@@ -154,7 +155,11 @@ export function removeBogusAnalysisTradingLevelIssues(issues: string[], evidence
             return false;
         }
         // Also suppress complaints demanding entry zone, stop loss, or targets when omitted for stocks without active recommendations
-        if (/(?:أين|لم\s*تذكر|إغفال|نقص|غياب|أضف).*(?:منطقة\s*الدخول|وقف\s*الخسارة|المستهدف)/i.test(issue)) {
+        if (/(?:أين|لم\s*تذكر|إغفال|نقص|غياب|أضف).*(?:منطقة\s*الدخول|وقف\s*الخسارة|المستهدف|توصية|ترشيح)/i.test(issue)) {
+            return false;
+        }
+        // Suppress complaints claiming the model didn't recommend a stock or didn't provide speculation targets when 0 open recommendations exist
+        if (/(?:لم\s*ترشح|لم\s*تقدم\s*توصية|أين\s*سهم\s*المضاربة|غياب\s*ترشيحات|لم\s*تجب\s*عن\s*سهم\s*المضاربة|أين\s*الترشيح)/i.test(issue)) {
             return false;
         }
         return true;

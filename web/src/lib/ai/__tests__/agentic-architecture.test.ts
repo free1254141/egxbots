@@ -1548,5 +1548,37 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const filtered = removeBogusAnalysisTradingLevelIssues(rawIssues, [levelsEv], "حلل الحديد والصلب");
         expect(filtered).toEqual([]);
     });
+
+    test("speculation queries with 0 open recommendations enforce no-recommendation disclaimer and suppress bogus reviewer complaints", () => {
+        const recsEv = toAgenticEvidence("get_recommendations", { status: "open" }, {
+            recommendations: [],
+            total: 0,
+            performance_summary: {
+                total_recommendations: 0,
+                open_count: 0,
+                closed_count: 0
+            }
+        });
+
+        const draft = [
+            "### 🎯 مضاربة وفرص التداول",
+            "لا توجد حالياً أي إشارات أو توصيات شراء نشطة أو مفتوحة وفق محرك التوصيات الفنية وخوارزميات المنصة.",
+            "",
+            "خوارزميات المنصة تفحص السوق بانضباط ولا تصدر إشارات دخول إلا عند اكتمال شروط فنية وإدارة مخاطر محكمة.",
+            "نوصي بالحفاظ على السيولة وتجنب الدخول العشوائي لحين صدور إشارة فنية مؤكدة من النظام."
+        ].join("\n");
+
+        const reasons = checkAgenticDraft(draft, [recsEv], "سهم للمضاربة يوم الاحد زيرو");
+        expect(reasons).toEqual([]);
+
+        // Bogus reviewer complaints demanding speculation stock or entry/targets must be filtered
+        const rawReviewerIssues = [
+            "المسودة لم ترشح سهم للمضاربة يوم الأحد",
+            "أين سهم المضاربة المطلوب مع منطقة الدخول والمستهدفات؟",
+            "غياب ترشيحات الشراء"
+        ];
+        const filtered = removeBogusAnalysisTradingLevelIssues(rawReviewerIssues, [recsEv], "سهم للمضاربة يوم الاحد زيرو");
+        expect(filtered).toEqual([]);
+    });
 });
 
