@@ -136,7 +136,24 @@ export default function SupportTab() {
     };
 
     const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
+    const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setInput(e.target.value);
+        const textarea = textareaRef.current;
+        if (textarea) {
+            textarea.style.height = "auto";
+            textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 52), 220)}px`;
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void handleSendReply(e);
+        }
+    };
 
     // Format ISO dates safely to prevent "Invalid Date"
     const formatTimeOnly = (iso?: string) => {
@@ -333,6 +350,9 @@ export default function SupportTab() {
 
         const content = input.trim();
         setInput("");
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+        }
         setReplying(true);
 
         const tempId = "temp-admin-" + Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -805,24 +825,39 @@ export default function SupportTab() {
                             {/* Reply Input Form */}
                             <form
                                 onSubmit={handleSendReply}
-                                className="p-3 sm:p-4 shrink-0 border-t-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex gap-2"
+                                className="p-3 sm:p-4 shrink-0 border-t-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex flex-col gap-2"
                             >
-                                <input
-                                    type="text"
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    placeholder="Type support reply..."
-                                    className="flex-1 min-w-0 h-11 rounded-xl bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-4 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:outline-none transition-colors"
-                                />
-                                <button
-                                    type="submit"
-                                    disabled={replying || !input.trim()}
-                                    aria-label="إرسال رد الدعم"
-                                    className="shrink-0 h-11 px-5 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none"
-                                >
-                                    {replying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                    <span className="hidden sm:inline">إرسال الرد</span>
-                                </button>
+                                <div className="flex items-end gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <textarea
+                                            ref={textareaRef}
+                                            rows={2}
+                                            value={input}
+                                            onChange={handleTextareaChange}
+                                            onKeyDown={handleKeyDown}
+                                            placeholder="Type support reply..."
+                                            className="w-full resize-none min-h-[52px] max-h-[220px] rounded-xl bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3.5 py-2.5 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors custom-scrollbar leading-relaxed font-sans"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={replying || !input.trim()}
+                                        aria-label="إرسال رد الدعم"
+                                        className="shrink-0 h-[52px] px-5 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex flex-col items-center justify-center gap-0.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000] active:translate-y-0.5 active:shadow-none"
+                                    >
+                                        <div className="flex items-center gap-1.5">
+                                            {replying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                            <span className="hidden sm:inline">إرسال الرد</span>
+                                        </div>
+                                        <span className="text-[9px] text-zinc-800 dark:text-zinc-900 font-mono hidden sm:inline">↵ Enter</span>
+                                    </button>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 px-1">
+                                    <span>💡 اضغط <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono font-bold text-[10px]">Enter</kbd> للإرسال المباشر، أو <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono font-bold text-[10px]">Shift + Enter</kbd> لسطر جديد.</span>
+                                    {input.length > 0 && (
+                                        <span className="font-mono text-zinc-400 text-[10px]">{input.length} حرف</span>
+                                    )}
+                                </div>
                             </form>
                         </>
                     ) : (

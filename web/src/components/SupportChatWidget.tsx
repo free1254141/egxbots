@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useSupportChat } from "@/contexts/SupportChatContext";
 import { Send, X, Crown, User, Headphones, Loader2, Maximize2, Minimize2 } from "lucide-react";
 
 export default function SupportChatWidget() {
+    const pathname = usePathname();
     const { language } = useLanguage();
     const isAr = language === "ar";
 
@@ -22,6 +24,7 @@ export default function SupportChatWidget() {
     const [input, setInput] = useState("");
     const [isExpanded, setIsExpanded] = useState(false);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Load expanded preference
     useEffect(() => {
@@ -55,10 +58,26 @@ export default function SupportChatWidget() {
         }
     }, [messages, isOpen, isExpanded]);
 
-    // Only render for PRO members
-    if (!isPro) {
+    // Only render for PRO members and do not overlay on admin panels
+    if (!isPro || pathname?.startsWith("/admin")) {
         return null;
     }
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setInput(e.target.value);
+        const textarea = textareaRef.current;
+        if (textarea) {
+            textarea.style.height = "auto";
+            textarea.style.height = `${Math.min(textarea.scrollHeight, 130)}px`;
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSubmit(e);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -66,6 +85,9 @@ export default function SupportChatWidget() {
 
         const content = input.trim();
         setInput("");
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+        }
         await sendMessage(content);
     };
 
@@ -213,19 +235,23 @@ export default function SupportChatWidget() {
             </div>
 
             {/* Input Form */}
-            <form onSubmit={handleSubmit} className="p-3 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900 flex gap-2 flex-shrink-0">
-                <input
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={isAr ? "اكتب استفسارك هنا مباشرة..." : "Type your message to support..."}
-                    className="flex-1 h-11 rounded-xl bg-zinc-50 dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:outline-none transition-colors"
-                />
+            <form onSubmit={handleSubmit} className="p-3 border-t-2 border-black dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-end gap-2 flex-shrink-0">
+                <div className="flex-1 min-w-0">
+                    <textarea
+                        ref={textareaRef}
+                        rows={1}
+                        value={input}
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        placeholder={isAr ? "اكتب استفسارك هنا مباشرة... (Enter للإرسال)" : "Type your message to support... (Enter to send)"}
+                        className="w-full resize-none min-h-[44px] max-h-[130px] rounded-xl bg-zinc-50 dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 px-3 py-2.5 text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors custom-scrollbar leading-relaxed"
+                    />
+                </div>
                 <button
                     type="submit"
                     disabled={loading || !input.trim()}
-                    className="h-11 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000000] active:translate-y-0.5 active:shadow-none"
-                    title={isAr ? "إرسال" : "Send"}
+                    className="h-11 w-11 shrink-0 rounded-xl bg-amber-400 hover:bg-amber-300 border-2 border-black text-black font-black text-xs sm:text-sm flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[2px_2px_0px_#000000] active:translate-y-0.5 active:shadow-none"
+                    title={isAr ? "إرسال (Enter)" : "Send (Enter)"}
                 >
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
