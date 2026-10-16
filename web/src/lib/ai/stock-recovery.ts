@@ -4,7 +4,8 @@ type StockSnapshot = Record<string, any>;
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-export function renderStockRecovery(rows: StockSnapshot[]): string {
+export function renderStockRecovery(rows: StockSnapshot[], options?: { includeRecentSessions?: boolean }): string {
+    const includeRecentSessions = options?.includeRecentSessions ?? true;
     const snapshots = new Map<string, StockSnapshot>();
     for (const row of rows) {
         if (!row.symbol || !finite(row.close ?? row.current_price)) continue;
@@ -50,14 +51,14 @@ export function renderStockRecovery(rows: StockSnapshot[]): string {
         // Levels describe their own dated snapshot, not a replacement live quote.
         if (finite(row.support) && row.support < close) comments.push(`الدعم عند ${number(row.support)}: كسره يضعف السيناريو.`);
         if (finite(row.resistance) && row.resistance > close) comments.push(`المقاومة عند ${number(row.resistance)}: تجاوزها والثبات فوقها شرط لتأكيد تحسن الحركة.`);
-        if (Array.isArray(row.recent_sessions) && row.recent_sessions.length > 1) {
+        if (includeRecentSessions && Array.isArray(row.recent_sessions) && row.recent_sessions.length > 1) {
             const historyItems = row.recent_sessions.filter((s: any) => finite(s.close)).slice(0, 5).map((s: any) =>
                 `| ${s.date} | ${number(s.close)} | ${finite(s.high) ? number(s.high) : "غير متاح"} | ${finite(s.low) ? number(s.low) : "غير متاح"} | ${finite(s.change_pct) ? `${s.change_pct >= 0 ? "+" : ""}${number(s.change_pct)}%` : "غير متاح"} |`
             );
             comments.push(`سجل الجلسات الأخيرة من قاعدة البيانات (دون تحقق من التعديلات الرأسمالية؛ التغير بين آخر تاريخين مسجلين):\n\n| الجلسة | الإغلاق | أعلى | أدنى | التغير |\n|---|---|---|---|---|\n${historyItems.join("\n")}`);
         }
         const week = row.last_week_summary;
-        if (week && finite(week.start_close) && finite(week.end_close)) {
+        if (includeRecentSessions && week && finite(week.start_close) && finite(week.end_close)) {
             comments.push(`الأسبوع ${week.start_date} إلى ${week.end_date}: أول جلسة ${number(week.start_close)} وآخر جلسة ${number(week.end_close)} جنيه${finite(week.within_week_change_pct) ? `؛ التغير بينهما ${number(week.within_week_change_pct)}%` : ""}.`);
             if (finite(week.baseline_close) && finite(week.change_pct)) comments.push(`عائد الأسبوع مقارنة بإغلاق ${week.baseline_date} عند ${number(week.baseline_close)} جنيه: ${number(week.change_pct)}%.`);
             else comments.push("عائد الأسبوع الكامل غير محسوم لغياب إغلاق الجلسة السابقة للأسبوع.");

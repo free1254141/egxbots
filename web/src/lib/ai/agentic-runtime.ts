@@ -235,7 +235,7 @@ export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Ev
         const isPro = Boolean(input.options?.isPro);
         const response = withChatFooter(input.images.length
             ? "وصلت الصورة، لكن انتهت مهلة المعالجة قبل إكمال قراءتها والتحقق من النتيجة. لم أعتمد أرقاماً غير مؤكدة؛ جرّب صورة واحدة واضحة أو أرسل الجزء المطلوب وحده."
-            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة."), isPro);
+            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة.", input.userMessage), isPro);
         yield { type: "token", data: response };
         yield { type: "done", data: { response, tables: [], session_update: {}, response_origin: "safe_fallback", usage: accounting.summary(),
             publication_review: { passed: false, repaired: false, final_passed: false, reasons: ["request_failed_or_aborted"], completion: "partial" } } };
@@ -595,7 +595,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             : (vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? sessionState.last_symbols ?? []);
         draft = input.images.length && vision
             ? safeImageEvidenceReply(vision, userMessage) || "وصلت الصورة، لكن لم أتمكن من استخراج حقائق مؤكدة منها. حدّد الجزء المطلوب أو أرسل صورة أوضح."
-            : safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete");
+            : safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
     }
     const response = withFooter(draft);
     const activeSymbols = usedSymbols.length

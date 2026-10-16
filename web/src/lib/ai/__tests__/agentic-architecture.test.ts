@@ -1429,5 +1429,81 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(reasons).toEqual([]);
     });
 
+    test("checkAgenticDraft accepts description columns with percentage multipliers without false positive ungrounded price issues", () => {
+        const stockEv = toAgenticEvidence("get_stock", { symbols: ["IRON"] }, {
+            symbol: "IRON",
+            close: 26.42,
+            change_pct: -0.19,
+            date: "2026-10-15",
+            rsi: 43.4,
+            macd: -0.4,
+            macd_signal: -0.3,
+            ema_50: 27.5,
+            ema_200: 28.0,
+            relative_volume: 0.95
+        });
+        const levelsEv = toAgenticEvidence("get_stock_levels", { symbols: ["IRON"] }, {
+            symbol: "IRON",
+            current_price: 26.42,
+            support: 25.01,
+            resistance: 32.25,
+            stop_loss: 24.5,
+            target_1: 29.5,
+            target_2: 32.0
+        });
+        const draft = [
+            "### 📊 تحليل سهم الحديد والصلب (IRON)",
+            "| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |",
+            "|---|---|---|",
+            "| الإغلاق الحالي | 26.42 | آخر سعر إغلاق مسجل |",
+            "| الدعم الأول | 25.01 | دعم رئيسي للقاع |",
+            "| المقاومة الأولى | 32.25 | مقاومة أولى مستهدفة |",
+            "| وقف الخسارة | 24.50 | 98% من الدعم لحماية رأس المال |",
+            "| المستهدف الثاني | 32.00 | 105% من المقاومة السابقة |"
+        ].join("\n");
+
+        const reasons = checkAgenticDraft(draft, [stockEv, levelsEv], "حلل الحديد والصلب");
+        expect(reasons).not.toContain("table_value_not_grounded:IRON:98");
+        expect(reasons).not.toContain("table_value_not_grounded:IRON:105");
+        expect(reasons.filter(r => r.startsWith("table_value_not_grounded:IRON"))).toEqual([]);
+    });
+
+    test("safeAgenticFallback suppresses recent sessions table unless user explicitly requested price history", () => {
+        const stockEv = toAgenticEvidence("get_stock", { symbols: ["ABUK"] }, {
+            symbol: "ABUK",
+            close: 87.68,
+            current_price: 87.68,
+            date: "2026-10-15",
+            support: 83.0,
+            resistance: 96.29,
+            recent_sessions: [
+                { date: "2026-10-15", close: 87.68, high: 87.68, low: 83.7, change_pct: 3.96 },
+                { date: "2026-10-14", close: 84.34, high: 85.96, low: 84.0, change_pct: 0.01 },
+                { date: "2026-10-13", close: 84.33, high: 86.3, low: 83.0, change_pct: -1.92 }
+            ],
+            last_week_summary: {
+                start_date: "2026-10-04",
+                end_date: "2026-10-07",
+                start_close: 88.63,
+                end_close: 90.0,
+                baseline_date: "2026-10-01",
+                baseline_close: 87.02,
+                change_pct: 3.42,
+                within_week_change_pct: 1.55
+            }
+        });
+
+        // 1. Normal stock analysis query -> NO session table or week return summary
+        const normalFallback = safeAgenticFallback([stockEv], "verification_incomplete", "حلل ابوقير و الحديد والصلب");
+        expect(normalFallback).toContain("ABUK");
+        expect(normalFallback).toContain("87.68");
+        expect(normalFallback).not.toContain("سجل الجلسات الأخيرة");
+        expect(normalFallback).not.toContain("الأسبوع 2026-10-04 إلى 2026-10-07");
+
+        // 2. Query explicitly asking for history -> includes recent sessions
+        const historyFallback = safeAgenticFallback([stockEv], "verification_incomplete", "هات تاريخ جلسات سهم ابوقير");
+        expect(historyFallback).toContain("سجل الجلسات الأخيرة");
+        expect(historyFallback).toContain("الأسبوع 2026-10-04 إلى 2026-10-07");
+    });
 });
 

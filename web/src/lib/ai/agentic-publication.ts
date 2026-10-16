@@ -136,8 +136,9 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                 }
             }
             // Different calculated targets remain separate supported observations.
-            if (row.symbol && Number.isFinite(row.take_profit_2)) facts.push({ id: `${row.symbol}:target2`, symbol: row.symbol,
-                field: "target_price", value: row.take_profit_2, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            const target2Val = row.take_profit_2 ?? row.target_2;
+            if (row.symbol && Number.isFinite(target2Val)) facts.push({ id: `${row.symbol}:target2`, symbol: row.symbol,
+                field: "target_price", value: target2Val, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             if (row.symbol && typeof row.entry_zone === "string") for (const value of row.entry_zone.match(/\d+(?:\.\d+)?/g) || []) {
                 facts.push({ id: `${row.symbol}:entry:${value}`, symbol: row.symbol, field: "entry_price", value: Number(value), unit: "egp",
                     as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
@@ -222,7 +223,10 @@ function cleanCellText(text: string): string {
         .replace(/(?:فوق|تحت|أعلى\s*من|أسفل\s*من|مخترق|كسر)\s*(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)?\s*(?:14|20|50|100|200)/gi, " ")
         .replace(/(?:(?:فوق|تحت|أعلى|أدنى|بين)\s*)?[12]\s*(?:من\s*2\s*)?متوسط(?:ات|ين)?/gi, " ")
         .replace(/\b(?:14|20|50|100|200)\s*يوماً?\b/gi, " ")
-        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\b/gi, " ");
+        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\b/gi, " ")
+        // 4. Strip percentage multipliers/proportions in descriptions (e.g. "98% من الدعم", "105% من المقاومة")
+        .replace(/\b\d+(?:\.\d+)?\s*[%٪]\s*من\s*(?:الدعم|المقاومة|الإغلاق|السعر)/gi, " ")
+        .replace(/\b(?:8[0-9]|9[0-9]|10[0-9]|11[0-9]|12[0-9])\s*[%٪]\s*من\s*\S+/gi, " ");
 }
 
 /** Metric labels describe generated evidence, never user intent routing. */
@@ -1196,7 +1200,7 @@ export function advisoryTableRowCountConsistency(reply: string): string[] {
     return [...new Set(issues)];
 }
 
-export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string): string {
+export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string, userMessage?: string): string {
     const lines: string[] = [];
     // Evidence passed here should already be scoped to the current request. Keep
     // the first available rows only as a bounded fallback and never resurrect
@@ -1285,7 +1289,8 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     }
     const stockRows = evidence.filter(e => ["get_stock", "get_stock_levels", "get_comparison", "get_live_quote"].includes(e.tool)
         && e.availability !== "error" && e.availability !== "missing").flatMap(e => evidenceRows(e.data));
-    const stockExplanation = renderStockRecovery(stockRows);
+    const userWantsHistory = Boolean(userMessage && /(?:تاريخ|جلسات|إقفال\s+سابق|الأسبوع\s+الماضي|من\s+أسبوع|جلسة\s+سابقة|تغيرات\s+الأسبوع|أسبوع\s+فات|تاريخ\s+السعر)/i.test(userMessage));
+    const stockExplanation = renderStockRecovery(stockRows, { includeRecentSessions: userWantsHistory });
     if (stockExplanation) lines.push(stockExplanation);
     for (const e of evidence) if (e.data?.persisted === true) lines.push(`عملية المحفظة ${e.data.operation} للسهم ${e.data.symbol}: تم تأكيد تعديل المركز؛ لا تكرر العملية تلقائياً.${e.data.cash_updated === false && e.data.operation === "sell" ? " لم يتغير الرصيد النقدي." : ""}`);
     if (evidence.some(e => e.availability === "error")) lines.push("تعذر تنفيذ بعض أدوات البيانات؛ لا تعتبر نتائجها فارغة أو عملياتها محفوظة.");
