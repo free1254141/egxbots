@@ -18,7 +18,7 @@ export function advisoryMarketMeaning(reply: string, evidence: AgenticEvidence[]
         if (named.length > 1) section = null;
         for (const clause of line.split(/[،,؛.!?]/)) {
             const row = section ? latest.get(section) : null;
-            const negated = /(?:لا\s+(?:يثبت|تثبت|يعني|تعني|يعد|تعد|يمثل|تمثل)|ليس(?:ت)?|دون\s+(?:تأكيد|دليل|اكتمال)|غير\s+(?:مؤكد|مثبت|نهائي)|not\s+(?:proof|confirmed|final))/i.test(clause);
+            const negated = /(?:[وف]?لا\s+(?:يثبت|تثبت|يعني|تعني|يعد|تعد|يمثل|تمثل|يدل|تدل|يؤكد|تؤكد|إثبات|اثبات|دليل)|[وف]?ليس(?:ت)?|[وفب]?دون\s+(?:تأكيد|دليل|اكتمال|إثبات|اثبات)|بلا\s+(?:دليل|تأكيد|إثبات|اثبات)|غير\s+(?:مؤكد|مثبت|نهائي)|not\s+(?:proof|confirmed|final))/i.test(clause);
             if (row && String(row.date || "").slice(0,10) === today && row.session_complete !== true && row.final_close_confirmed !== true
                 && /إغلاق|اغلاق|closing\s+price|final\s+close/i.test(clause) && !negated)
                 notes.add(`سعر ${section} بتاريخ اليوم هو آخر سعر/لقطة متاحة للجلسة؛ لا تصفه بإغلاق نهائي دون دليل انتهاء الجلسة. احتفظ بالسعر والتاريخ.`);

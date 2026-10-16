@@ -34,7 +34,7 @@ export function advisoryFactRelations(reply: string, evidence: AgenticEvidence[]
                 ? /(?:أحدث|أقدم)/.test(clause) ? local.sort((a, b) => clause.toUpperCase().indexOf(a) - clause.toUpperCase().indexOf(b))[0] : null
                 : owner;
             // Conditional/negated interpretations are not asserted observations.
-            const uncertain = /(?:^|[\s،؛:])(?:لا|ليس|ليست|مش|لم|غير|دون|بدون|لو|إذا|اذا|هل|قد|ربما|لازم\s+نتحقق)(?=$|[\s،؛:])/.test(clause);
+            const uncertain = /(?:^|[\s،؛:])(?:[وف]?لا|[وف]?ليس(?:ت)?|مش|[وف]?لم|غير|[وفب]?دون|بلا|لو|إذا|اذا|هل|قد|ربما|احتمال(?:ية)?|لازم\s+نتحقق)(?=$|[\s،؛:])/.test(clause);
             if (!subject || uncertain) continue;
             const row = latest.get(subject);
             const close = number(row.close ?? row.current_price), support = number(row.support), resistance = number(row.resistance);

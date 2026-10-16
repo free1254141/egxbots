@@ -217,6 +217,7 @@ function cleanCellText(text: string): string {
         .replace(/(?:مؤشر\s*(?:القوة\s*النسبية)?|فترة|إعداد)\s*\(?\s*14\s*\)?/gi, " ")
         .replace(/(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)\s*\(?\s*(?:14|20|50|100|200)\s*\)?(?:\s*يوم)?/gi, " ")
         .replace(/(?:فوق|تحت|أعلى\s*من|أسفل\s*من|مخترق|كسر)\s*(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)?\s*(?:14|20|50|100|200)/gi, " ")
+        .replace(/(?:(?:فوق|تحت|أعلى|أدنى|بين)\s*)?[12]\s*(?:من\s*2\s*)?متوسط(?:ات|ين)?/gi, " ")
         .replace(/\b(?:14|20|50|100|200)\s*يوماً?\b/gi, " ")
         .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\b/gi, " ");
 }
@@ -330,7 +331,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/متوسط.*شراء|سعر.*(?:شراء|دخول)|الدخول/i,["entry_price"]], [/وقف/i,["stop_loss"]], [/هدف|مستهدف/i,["target_price"]], [/مسافة.*دعم|بعد.*دعم|القرب.*دعم/i,["distance_from_support_pct"]], [/دعم/i,["support"]], [/مسافة.*مقاوم|بعد.*مقاوم|القرب.*مقاوم/i,["distance_from_resistance_pct"]], [/مقاوم/i,["resistance"]],
         [/توزيعات\s*(?:نقدية)?|cash dividends/i,["cash_dividends"]], [/تكلف/i,["cost_basis"]], [/توزيع|وزن|نسبة.*المحفظة|تركيز.*قطاع/i,["position_pct"]], [/مبلغ.*مخصص|قيمة.*مخصصة|رأس.*مال.*موزع/i,["value"]], [/قيمة.*(?:سوق|مركز)|القيمة السوقية/i,["market_value"]], [/ربح|خسار|عائد|النسبة/i,["profit_pct","profit_value","backtest_return_pct"]],
         [/خسارة.*افتراضية|خسارة.*سيناريو|هبوط.*مفترض/i,["scenario_loss_amount","scenario_loss_pct"]], [/رأس.*مال|إجمالي.*رأس المال/i,["scenario_capital"]],
-        [/تغير|التغيّر/i,["change_pct"]], [/كمية|الكمية|عدد|مراكز/i,["quantity"]], [/إغلاق|اغلاق|إقفال|اقفال|السعر|سعر|price|close/i,["price","close"]],
+        [/تغير|التغيّر/i,["change_pct"]], [/فارق|الفارق/i,["change_pct","price","close"]], [/كمية|الكمية|عدد|مراكز/i,["quantity"]], [/إغلاق|اغلاق|إقفال|اقفال|السعر|سعر|price|close/i,["price","close"]],
     ];
     return labels.find(([pattern]) => pattern.test(text))?.[1];
 }
@@ -342,12 +343,14 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
     for (const e of evidence.filter(e => e.availability !== "error")) for (const row of evidenceRows(e.data)) for (const m of row.strategy_metrics || []) latest.set(`${row.symbol}:${m.strategy_id}`, { ...m, symbol: row.symbol });
     const rows = [...latest.values()];
     const labels: Array<[RegExp, string]> = BACKTEST_METRICS.map(({pattern,key}) => [pattern,key]);
+    const matchesMetric = (val: number, expected: unknown, rawStr: string) =>
+        typeof expected === "number" && Math.abs(val - expected) <= Math.max(0.5 * 10 ** -(rawStr.split(".")[1]?.length || 0), Math.abs(expected) * 0.005);
     let headers: string[] = [], owner: any = null, stockOwner: string | null = null;
     for (const rawLine of reply.split("\n")) {
         const line = normalizeEvidenceNumbers(rawLine);
         const stockNames = [...new Set(rows.map(r => r.symbol))].filter(s => line.includes(s));
         if (stockNames.length === 1) stockOwner = stockNames[0];
-        const selected = rows.filter((r: any) => (!stockOwner || r.symbol === stockOwner) && (line.includes(r.strategy_id) || line.includes(r.strategy_name)));
+        const selected = rows.filter((r: any) => (!stockOwner || r.symbol === stockOwner) && (line.includes(r.strategy_id) || line.includes(r.strategy_name) || (r.strategy_id === "trend_macd" && /استراتيجية\s+الاتجاه/.test(line))));
         if (selected.length === 1) owner = selected[0];
         if (line.trim().startsWith("|")) {
             if (/^\|[\s\-:|]+\|$/.test(line.trim())) continue;
@@ -357,20 +360,28 @@ function checkStrategyClaims(reply: string, evidence: AgenticEvidence[]): string
             cells.forEach((cell, i) => {
                 const key = labels.find(([pattern]) => pattern.test(headers[i] || ""))?.[1];
                 if (!key) return;
-                const n = Number(cleanCellText(cell).replace(/[%٪]/g, "").trim());
+                const cleanStr = cleanCellText(cell).replace(/[%٪]/g, "").trim();
+                const n = Number(cleanStr);
                 if (!Number.isFinite(n) || !/\d/.test(cell)) return;
+                const cmpVal = key === "maxDrawdownPct" ? Math.abs(n) : n;
                 const expected = selected[0][key];
-                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.5 * 10 ** -(String(n).split(".")[1]?.length || 0), Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${selected[0].symbol}:${selected[0].strategy_id}:${key}`);
+                if (!matchesMetric(cmpVal, expected, String(n))) reasons.push(`strategy_metric_mismatch:${selected[0].symbol}:${selected[0].strategy_id}:${key}`);
             });
         } else if (owner && selected.length <= 1) {
+            const peerRows = rows.filter((r: any) => r.symbol === owner.symbol);
             for (const match of line.matchAll(/[-+]?\d+(?:\.\d+)?\s*(?:%|٪|جنيه)/g)) {
                 // Full-line lookahead preserves peak-to-trough qualifiers after the
                 // number; only labels preceding this value may own it.
                 const candidates = labels.flatMap(([pattern, key]) => { const found = [...line.matchAll(new RegExp(pattern.source, pattern.flags + "g"))].filter(label => label.index! < match.index!).at(-1); return found ? [{ key, index: found.index! }] : []; }).sort((a, b) => b.index - a.index);
                 if (!candidates.length) continue;
-                const key = candidates[0].key, n = Number(match[0].replace(/[%٪\s]|جنيه/g, "")), expected = owner[key];
+                const key = candidates[0].key, rawNum = match[0].replace(/[%٪\s]|جنيه/g, ""), n = Number(rawNum), expected = owner[key];
                 if (["closedTrades", "profitFactor"].includes(key) && /[%٪]/.test(match[0])) continue;
-                if (typeof expected !== "number" || Math.abs(n - expected) > Math.max(0.5 * 10 ** -(String(n).split(".")[1]?.length || 0), Math.abs(expected) * 0.005)) reasons.push(`strategy_metric_mismatch:${owner.symbol}:${owner.strategy_id}:${key}`);
+                const cmpVal = key === "maxDrawdownPct" ? Math.abs(n) : n;
+                if (matchesMetric(cmpVal, expected, String(n))) continue;
+                const contextWindow = line.slice(Math.max(0, candidates[0].index - 40), Math.min(line.length, match.index! + match[0].length + 45));
+                const isComparative = peerRows.length > 1 && /مقابل|مقارن|أقل\s+من|أعلى\s+من|بينما|في\s+حين|تليها|ثم|عن\s+|في\s+استراتيجية/.test(contextWindow);
+                if (isComparative && peerRows.some((r: any) => matchesMetric(cmpVal, r[key], String(n)))) continue;
+                reasons.push(`strategy_metric_mismatch:${owner.symbol}:${owner.strategy_id}:${key}`);
             }
         }
     }
@@ -686,14 +697,26 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     reasons.push(...checkSnapshotInterpretations(reply, evidence));
     reasons.push(...checkScenarioSectorShareClaims(reply, evidence));
     reasons.push(...checkStrategyClaims(reply, evidence));
-    for (const line of reply.replace(/[*_`]/g, "").split(/\n|[.!؟؛]\s+/)) {
+    for (const line of reply.replace(/[*_`]/g, "").split(/\n|[.!؟؛]\s+|(?:\s*[،,]\s*(?:بينما|في\s+حين|أما|مقابل|على\s+عكس)\s+)|\s+(?:بينما|في\s+حين)\s+/)) {
         if (!/نشاط|حجم\s+نسبي/.test(line) || !/أقل\s+من\s+متوسط|دون\s+المتوسط|أعلى\s+من\s+متوسط/.test(line)) continue;
         const names = evidence.flatMap(e => e.symbols).filter(symbol => new RegExp(`\\b${symbol}\\b`, "i").test(line));
         const blanket = /كل|كلا|الثلاثة|الجميع/.test(line);
+        const hasBelow = /أقل\s+من\s+متوسط|دون\s+المتوسط/.test(line);
+        const hasAbove = /أعلى\s+من\s+متوسط/.test(line);
         for (const row of evidence.flatMap(e => evidenceRows(e.data))) {
             const volume = row.r_vol ?? row.relative_volume ?? row.vol_ratio;
             if (!Number.isFinite(volume) || (!names.includes(row.symbol) && !blanket)) continue;
-            const below = /أقل\s+من\s+متوسط|دون\s+المتوسط/.test(line);
+            let below = hasBelow;
+            if (hasBelow && hasAbove && names.length > 1) {
+                const symMatch = new RegExp(`\\b${row.symbol}\\b`, "i").exec(line);
+                if (symMatch) {
+                    const tail = line.slice(symMatch.index);
+                    const bIdx = tail.search(/أقل\s+من\s+متوسط|دون\s+المتوسط/);
+                    const aIdx = tail.search(/أعلى\s+من\s+متوسط/);
+                    if (bIdx >= 0 && aIdx >= 0) below = bIdx < aIdx;
+                    else if (aIdx >= 0) below = false;
+                }
+            }
             if (below ? volume >= 1 : volume <= 1) reasons.push(`relative_volume_baseline_contradiction:${row.symbol}`);
         }
     }
@@ -874,6 +897,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             if (Math.abs(val - f.value) <= tol) return true;
             // If the recorded fact is negative (e.g. loss or drop), reporting the positive magnitude is standard in financial tables/prose.
             if (f.value < 0 && Math.abs(val - Math.abs(f.value)) <= tol) return true;
+            if (f.field === "backtest_drawdown_pct" && val < 0 && Math.abs(Math.abs(val) - f.value) <= tol) return true;
             return false;
         });
     };
@@ -932,6 +956,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
 
         if (isComparisonTable) {
+            if (/ترتيب|مركز|مرتب[ةه]|أولوية|تصنيف|أفضلية|^#$|^م$|^ت$|رقم|rank|tier|category/i.test(cells[0])) continue;
             for (let colIdx = 0; colIdx < cells.length; colIdx++) {
                 const colSymbol = tableColSymbols[colIdx];
                 if (!colSymbol) continue;
@@ -1036,13 +1061,15 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
             const rowFields = !tableHadStockRow ? (symbol === "EGX" ? breadthFields : tableMetricFields(cells[0])) : undefined;
+            const isCommentaryCol = !tableHadStockRow && idx >= 2 && /ملاحظ|تفسير|دلال|حال|قراء|الوضع|الموقع|تعليق|شرح|ملخص|سياق|تفصيل|تفاصيل|النتيجة|الأثر/i.test(header);
             const verticalMetricValue = Boolean(rowFields?.length)
                 && (/^(?:السعر|سعر|القيمة|قيمة|price|value)$/i.test(header.replace(/[*_`]/g," ").trim())
                     || (rowFields?.some(f => f.startsWith("breadth_")) && /^(?:العدد|عدد|count)$/i.test(header.trim())));
             let fields = screenRow && /مساف|بعد|قرب/.test(header) ? ["distance_from_resistance_pct" as const] : distanceColumn && levelField ? [levelField]
+                : isCommentaryCol ? undefined
                 : verticalMetricValue ? rowFields
                 : (scenarioRow ? scenarioMetricFields(headers[idx]) : tableMetricFields(headers[idx]))
-                    || (currentSymbol ? tableMetricFields(cells[0]) : undefined);
+                    || (currentSymbol && idx < 2 ? tableMetricFields(cells[0]) : undefined);
             // Resolve the short shared label only with unambiguous company evidence.
             if (fields?.length === 1 && fields[0] === "market_value"
                 && evidence.some(e => (e.tool === "get_fundamentals" || e.tool === "get_sector_peers") && e.symbols.includes(symbol!))
@@ -1067,9 +1094,16 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             // those label numbers as prices, not as the percentage in the value cell.
             if (idx === 0 && rowFields?.length) fields = undefined;
             const weeklyChangeValue = idx > 0 && rowFields?.includes("change_pct") && /أسبوع|اسبوع/.test(cells[0]);
-            const rowDate = weeklyChangeValue ? undefined : datedSession || (line.match(/\b\d{4}-\d{2}-\d{2}\b/) || [])[0];
-            const datedRelevant = rowDate ? strategyRelevant.filter(f => !["close","high","low","change_pct"].includes(f.field) || f.as_of?.slice(0,10) === rowDate) : strategyRelevant;
-            const targetFacts = fields ? datedRelevant.filter(f => fields.includes(f.field)) : datedRelevant;
+            const arabicMonthRegex = /(?<![0-9])\d{1,2}\s+(?:يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)(?:\s+\d{4})?/gi;
+            const resolvedArabicRowDates = [...line.matchAll(arabicMonthRegex)].map(m => groundedTableDate(m[0], dates)).filter((d): d is string => Boolean(d));
+            const baseRowDates = weeklyChangeValue ? [] : datedSession ? [datedSession] : [...new Set([...(line.match(/\b\d{4}-\d{2}-\d{2}\b/g) || []), ...resolvedArabicRowDates])];
+            const mentionsSpot = /(?:السعر|سعر|الإغلاق|اغلاق|إغلاق)\s*(?:الحالي|الأخير|اليوم)/i.test(line);
+            const rowDates = baseRowDates.length && mentionsSpot && dates[0] ? [...new Set([...baseRowDates, dates[0]])] : baseRowDates;
+            const datedRelevant = rowDates.length ? strategyRelevant.filter(f => !["close","high","low","change_pct"].includes(f.field) || (f.as_of && rowDates.includes(f.as_of.slice(0,10)))) : strategyRelevant;
+            const explicitSpotPriceRef = !tableHadStockRow && (/(?:السعر|سعر|الإغلاق|اغلاق|إغلاق|close|price)/i.test(cells[idx]) || /(?:السعر|سعر|الإغلاق|اغلاق|إغلاق|close|price)/i.test(cells[0]))
+                && !/سعر.*(?:شراء|دخول)|(?:أعلى|اعلى|الأعلى|الاعلى|أدنى|ادنى|الأدنى|الادنى)\s*سعر/i.test(cells[0]);
+            const effectiveFields = fields && explicitSpotPriceRef ? [...new Set<FactRecord["field"]>([...fields, "close", "price"])] : fields;
+            const targetFacts = effectiveFields ? datedRelevant.filter(f => effectiveFields.includes(f.field)) : datedRelevant;
             // Portfolio screenshots often place the cash gain/loss and its
             // percentage together in one cell under a single "return" column
             // (for example: "−784 EGP ▼2.74%"). The visible image evidence
@@ -1082,7 +1116,8 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const cellFacts = combinedImageReturn
                 ? strategyRelevant.filter(f => fields?.includes(f.field) || f.field === "profit_value")
                 : targetFacts;
-            let clean = cleanCellText(cells[idx]);
+            const cellWithoutGroundedArabicDates = cells[idx].replace(arabicMonthRegex, m => groundedTableDate(m, dates) ? " " : m);
+            let clean = cleanCellText(cellWithoutGroundedArabicDates);
             if (fields?.includes("backtest_final_equity")) {
                 // An explicitly labeled starting amount is a different fact from final equity.
                 const initial = evidence.filter(e => e.tool === "compare_strategies_history" && e.availability !== "error" && e.symbols.includes(symbol))

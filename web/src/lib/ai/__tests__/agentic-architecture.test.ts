@@ -6,6 +6,8 @@ import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
 import { analyzeImage } from "../vision";
+import { advisoryFactRelations } from "../fact-relations";
+import { advisoryMarketMeaning } from "../market-meaning-advisory";
 jest.mock("../server-secrets", () => ({ getDeepSeekApiKey: () => "offline-fake-key" }));
 jest.mock("../vision", () => ({ analyzeImage: jest.fn(), reconcileVisionWithMarket: jest.fn() }));
 jest.mock("../live-stock-updater", () => ({ fetchLiveStockIndicators: jest.fn().mockResolvedValue({ success: false, error: "offline_test" }), isEgxSessionOpen: jest.fn().mockReturnValue(false) }));
@@ -1250,6 +1252,65 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const actions=toAgenticEvidence("get_corporate_actions",{symbols:["DCRC"]},{status:"success",availability:"missing",stocks:[{symbol:"DCRC",events:[]}]});
         expect(checkAgenticDraft(reply,[news,actions])).not.toContain("corporate_action_read_claim_without_tool");
         expect(checkAgenticDraft(reply,[news,actions],"",[news])).toContain("corporate_action_read_claim_without_tool");
+    });
+
+    test("contrastive multi-symbol relative volume sentence does not trigger false contradiction",()=>{
+        const e=[toAgenticEvidence("screen_stocks",{},{stocks:[
+            {symbol:"IFAP",close:15.2,rsi:55.1,r_vol:1.1372},
+            {symbol:"ASCM",close:42.8,rsi:57.4,r_vol:0.7489}
+        ]})];
+        const reply="IFAP يتداول عند 15.2 جنيه ونشاطه النسبي 1.14 أي أعلى من متوسطه، بينما ASCM عند 42.8 جنيه ونشاطه النسبي 0.75 أي أقل من متوسطه.";
+        expect(checkAgenticDraft(reply,e)).toEqual([]);
+    });
+
+    test("vertical stock table allows spot price in commentary, multi-date ranges, and explicit spot price references",()=>{
+        const e=[toAgenticEvidence("get_stock_levels",{symbols:["MOSC"]},{levels:[{
+            symbol:"MOSC",close:270,support:256.83,resistance:285.12,date:"2026-10-15",
+            recent_sessions:[{date:"2026-10-15",close:270,change_pct:-8.15},{date:"2026-10-08",close:293.96}]
+        }]})];
+        const table=[
+            "MOSC",
+            "| البند | القيمة | ملاحظة |",
+            "|---|---|---|",
+            "| السعر الحالي (15 أكتوبر) | 270 | مستقر عند 270 جنيه |",
+            "| الفارق من إغلاق 8 أكتوبر (293.96) إلى السعر الحالي (270) | −8.15% | مقارنة بالسعر الحالي 270 |",
+            "| المدى من 2026-10-08 إلى 2026-10-15 | 270 – 293.96 | جلسات موثقة |"
+        ].join("\n");
+        expect(checkAgenticDraft(table,e)).toEqual([]);
+    });
+
+    test("comparison table allows rank rows and moving average count phrases",()=>{
+        const e=[toAgenticEvidence("get_comparison",{symbols:["COMI","EAST"]},{comparison:[
+            {symbol:"COMI",close:82.5,ema_50:80.1,ema_200:75.0,rsi:58.2},
+            {symbol:"EAST",close:28.4,ema_50:29.0,ema_200:25.5,rsi:51.0}
+        ]})];
+        const table=[
+            "| المعيار | COMI | EAST |",
+            "|---|---|---|",
+            "| الترتيب | 2 | 1 |",
+            "| السعر | 82.5 | 28.4 |",
+            "| الموقع من المتوسطات | فوق 2 متوسطات (80.1 و 75) | فوق 1 من 2 متوسطات (25.5) |"
+        ].join("\n");
+        expect(checkAgenticDraft(table,e)).toEqual([]);
+    });
+
+    test("strategy drawdown accepts negative sign and peer strategy drawdown comparisons",()=>{
+        const e=[toAgenticEvidence("compare_strategies_history",{symbol:"GIHD"},{
+            symbol:"GIHD",
+            strategy_metrics:[
+                {strategy_id:"trend_macd",strategy_name:"استراتيجية الاتجاه (MACD + EMA200)",totalReturnPct:-31.33,winRate:33.33,maxDrawdownPct:23.39,tradesCount:3},
+                {strategy_id:"rsi_bounce",strategy_name:"ارتداد مؤشر القوة النسبية (RSI)",totalReturnPct:-12.4,winRate:50,maxDrawdownPct:26.25,tradesCount:4}
+            ]
+        })];
+        const reply="GIHD: سجلت استراتيجية الاتجاه (trend_macd) عائداً إجمالياً -31.33% وأقصى هبوط -23.39% (مقابل أقصى هبوط 26.25% في استراتيجية RSI).";
+        expect(checkAgenticDraft(reply,e)).toEqual([]);
+    });
+
+    test("attached Arabic conjunctions on negated institutional buying do not trigger advisory repair",()=>{
+        const e=[toAgenticEvidence("get_stock",{symbols:["MOSC"]},{stocks:[{symbol:"MOSC",close:270,acc_score:85,date:"2026-10-15"}]})];
+        const reply="MOSC: درجة التجميع 85 هي إشارة نموذج احتمالية وليست إثباتاً لشراء مؤسسات ولا تحديداً لهوية المتداولين، أي أن الرقم إشارة نموذج لا إثبات شراء مؤسسات.";
+        expect(advisoryFactRelations(reply,e)).toEqual([]);
+        expect(advisoryMarketMeaning(reply,e,"2026-10-15")).toEqual([]);
     });
 
 });

@@ -95,6 +95,10 @@ const withFooter = (reply: string) => withChatFooter(reply, false);
 /** Suppress reviewer claims that a tool was never tried when the call log proves otherwise. */
 export function removeDisprovenMissingToolIssues(issues: string[], evidence: AgenticEvidence[]) {
     return issues.filter(issue => {
+        if (/(?:availability\s*=\s*missing|أعادت\s+(?:سجلاً\s+فارغاً|قائمة\s+فارغة)).{0,140}(?:توزيعات|أخبار|إفصاحات|get_corporate_actions|get_news)/i.test(issue) &&
+            evidence.some(e => (e.tool === "get_corporate_actions" || e.tool === "get_news") && e.availability !== "error")) {
+            return false;
+        }
         if (!/(?:لم\s*(?:يتم\s*)?(?:استدعاء|استخدام|تجربة|التحقق)|لم\s+يحاول|not\s+(?:been\s+)?(?:called|invoked|attempted|used)|did\s+not\s+(?:call|invoke|attempt|use))/i.test(issue)) return true;
         const mentioned = [...new Set(issue.match(/\b(?:get_[a-z_]+|screen_stocks|analyze_portfolio_risk)\b/gi) || [])];
         if (!mentioned.length) return true;
@@ -102,7 +106,7 @@ export function removeDisprovenMissingToolIssues(issues: string[], evidence: Age
     });
 }
 export function removeSelfRetractedReviewerIssues(issues: string[]) {
-    return issues.filter(issue => !/(?:\d+(?:\.\d+)?\s+أقل\s+من\s+\d+(?:\.\d+)?\s*[؟?]\s*لا[،,]?\s*\d+(?:\.\d+)?\s+أعلى(?:\s+من)?(?:\s+قليلاً)?|لا يوجد خطأ هنا.{0,160}(?:الوصف مقبول|صحيح تقريباً|مقبول تقريباً))/i.test(issue));
+    return issues.filter(issue => !/(?:\d+(?:\.\d+)?\s+أقل\s+من\s+\d+(?:\.\d+)?\s*[؟?]\s*لا[،,]?\s*\d+(?:\.\d+)?\s+أعلى(?:\s+من)?(?:\s+قليلاً)?|لا يوجد خطأ هنا.{0,160}(?:الوصف مقبول|صحيح تقريباً|مقبول تقريباً)|التقريب\s+مقبول|وهذا\s+صحيح\s*[،,]?\s*لكن.{0,140}availability\s*=\s*missing|رغم أن المؤشرات الظاهرة على الشارت.{0,140}إضافة غير مطلوبة)/i.test(issue));
 }
 /** Suppress reviewer objections claiming empty portfolio was unproven or persisted=true is required when only viewing or analyzing. */
 export function removeBogusPortfolioReviewIssues(issues: string[], evidence: AgenticEvidence[]) {
@@ -501,7 +505,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 { role: "user", content: (needsCompletion
                     ? "المسودة ناقصة رغم وجود أدلة. اكتب الآن إجابة عربية مكتملة للطلب الحالي باستخدام الأدلة المتاحة، واذكر بوضوح أي جزء لم تنفذه أداة. لا تكرر اعتذاراً عاماً ولا تخترع أرقاماً."
                     : refineFromAdvisory && initial.passed
-                        ? "حسّن الإجابة باستخدام ملاحظات المراجع كاقتراحات فقط. لا تتبع اعتراضاً يخالف الأدلة، ولا تحذف جزءاً صحيحاً أو تستبدل الإجابة ببيانات جافة أو اعتذار عام. أجب عن الطلب مباشرة، واحتفظ بكل قيمة مدعومة ولا تضف ادعاءات غير موجودة في الدليل."
+                        ? "حسّن الإجابة باستخدام ملاحظات المراجع كاقتراحات فقط. لا تتبع اعتراضاً يخالف الأدلة، ولا تحذف جزءاً صحيحاً أو تستبدل الإجابة ببيانات جافة أو اعتذار عام. أجب عن الطلب مباشرة، واحتفظ بكل قيمة مدعومة ولا تضف ادعاءات غير موجودة في الدليل. وإذا كانت ملاحظة المراجع تطلب جلب بيانات ناقصة لرمز مطلوب في السؤال بأداة متاحة لم تُستدعَ بعد، فاستدعِ الأداة الآن بدل الاكتفاء بنفي التوفر."
                         : "أعد كتابة إجابة نهائية كاملة لسؤال المستخدم بعد معالجة الأخطاء التالية. لا تعرض سجل التعديلات أو أسباب المراجعة أو تقول ما تم إصلاحه؛ المستخدم لم ير المسودة السابقة. احتفظ بالخلاصة المفيدة والتقريب الصحيح، ولا تطلب الدقة الكاملة بلا سبب. إذا تحتاج بيانات ناقصة اطلب أدواتها الآن، دون تكرار كتابة محفظة. لا تنفِ الأدلة السابقة:") + "\n" + JSON.stringify({current_request:userMessage,issues:reasons,reviewer_advisory:refineFromAdvisory?advisoryIssues:[]}) }];
             let fixed = await request({ messages: repairMessages, ...answerBody }, "repair");
             if (fixed.tool_calls?.length) {
