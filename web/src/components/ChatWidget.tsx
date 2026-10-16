@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, Check, PanelLeft, Square, Download, ZoomIn } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -158,6 +158,7 @@ export default function ChatWidget() {
     }, [setIsOpen]);
     
     const bottomRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const modelMenuRef = useRef<HTMLDivElement>(null);
     const portalMenuRef = useRef<HTMLDivElement>(null);
@@ -215,6 +216,21 @@ export default function ChatWidget() {
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
         setIsUserScrolledUp(!isAtBottom);
     };
+
+    const scrollToBottom = useCallback(() => {
+        setIsUserScrolledUp(false);
+        if (scrollContainerRef.current && typeof scrollContainerRef.current.scrollTo === "function") {
+            scrollContainerRef.current.scrollTo({
+                top: scrollContainerRef.current.scrollHeight,
+                behavior: "smooth",
+            });
+        }
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, []);
+
+    useEffect(() => {
+        setIsUserScrolledUp(false);
+    }, [activeSessionId]);
 
     useEffect(() => {
         if (!isUserScrolledUp) {
@@ -392,7 +408,8 @@ export default function ChatWidget() {
                 </div>
 
                 {/* Messages Body */}
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg dark:bg-black" onScroll={handleScroll}>
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg dark:bg-black" onScroll={handleScroll}>
                     {isInitializing ? (
                         <div role="status" aria-live="polite" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
                             <Loader2 aria-hidden="true" className="h-6 w-6 motion-safe:animate-spin text-amber-500" />
@@ -684,6 +701,19 @@ export default function ChatWidget() {
                         </>
                     )}
                     <div ref={bottomRef} />
+                </div>
+                {isUserScrolledUp && messages.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={scrollToBottom}
+                        className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 rounded-full border border-zinc-300 dark:border-white/30 bg-white/95 dark:bg-black/95 px-3.5 py-2 text-xs font-extrabold text-zinc-900 dark:text-white shadow-lg dark:shadow-[3px_3px_0_0_#FFE600] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-zinc-900 active:scale-95 cursor-pointer animate-in fade-in slide-in-from-bottom-2"
+                        title={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
+                        aria-label={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
+                    >
+                        <ArrowDown className="h-4 w-4 text-amber-500 animate-bounce" />
+                        <span>{language === "ar" ? "آخر رسالة" : "Latest message"}</span>
+                    </button>
+                )}
                 </div>
 
                 {/* Input Form */}

@@ -63,3 +63,28 @@ test("confirmed guests see login; access failure offers retry rather than login"
     expect(chat.retryAccess).toHaveBeenCalledTimes(1);
     chat.accessError=false;
 });
+
+test("scroll-to-bottom button appears when user scrolls up and scrolls to latest message on click", () => {
+    (chat as any).messages = [
+        { id: "1", role: "user", content: "حلل COMI" },
+        { id: "2", role: "assistant", content: "تحليل COMI" },
+    ];
+    const { container } = render(<ChatWidget />);
+    expect(screen.queryByRole("button", { name: "النزول لآخر رسالة" })).toBeNull();
+
+    const scrollContainer = container.querySelector(".neobrutal-grid-bg") as HTMLDivElement;
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 1200 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 400 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, value: 100 });
+    const scrollToMock = jest.fn();
+    scrollContainer.scrollTo = scrollToMock;
+
+    fireEvent.scroll(scrollContainer);
+    const btn = screen.getByRole("button", { name: "النزول لآخر رسالة" });
+    expect(btn).toBeTruthy();
+
+    fireEvent.click(btn);
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 1200, behavior: "smooth" });
+    expect(screen.queryByRole("button", { name: "النزول لآخر رسالة" })).toBeNull();
+    (chat as any).messages = [];
+});
