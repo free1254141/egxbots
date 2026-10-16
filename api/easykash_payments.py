@@ -237,6 +237,10 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
     inserted = supabase.table("local_payment_orders").insert(row).execute()
     if not inserted.data:
         raise RuntimeError("Could not create payment order")
+    try:
+        supabase.table("profiles").update({"whatsapp_number": mobile, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", user_id).execute()
+    except Exception as exc:
+        print(f"[EASYKASH] Warning: could not update profile whatsapp_number: {exc}")
 
     origin = os.getenv("WEB_ORIGIN", "https://egxbots.com").strip().rstrip("/")
     return_url = f"{origin}/pricing?payment=easykash&customerReference={order_id}"

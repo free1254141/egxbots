@@ -32,6 +32,7 @@ import {
     Clock,
     Target,
     Zap,
+    Smartphone,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -48,6 +49,7 @@ interface UserRow {
     avatar_url: string | null;
     language: string | null;
     telegram_chat_id: string | null;
+    whatsapp_number: string | null;
     notification_channel: string | null;
     default_target_pct: number | string | null;
     default_stop_pct: number | string | null;
@@ -210,6 +212,7 @@ export default function UsersTab() {
         display_name: string;
         language: string;
         telegram_chat_id: string;
+        whatsapp_number: string;
         notification_channel: string | null;
         default_target_pct: string;
         default_stop_pct: string;
@@ -218,6 +221,7 @@ export default function UsersTab() {
         display_name: "",
         language: "",
         telegram_chat_id: "",
+        whatsapp_number: "",
         notification_channel: "",
         default_target_pct: "",
         default_stop_pct: "",
@@ -310,6 +314,7 @@ export default function UsersTab() {
             display_name: user.display_name || "",
             language: user.language || "en",
             telegram_chat_id: user.telegram_chat_id || "",
+            whatsapp_number: user.whatsapp_number || "",
             notification_channel: user.notification_channel || "",
             default_target_pct: user.default_target_pct !== null && user.default_target_pct !== undefined ? String(user.default_target_pct) : "10.00",
             default_stop_pct: user.default_stop_pct !== null && user.default_stop_pct !== undefined ? String(user.default_stop_pct) : "3.50",
@@ -326,6 +331,7 @@ export default function UsersTab() {
                 default_stop_pct: editForm.default_stop_pct ? parseFloat(editForm.default_stop_pct) : 3.50,
                 custom_ai_rules: editForm.custom_ai_rules || null,
                 telegram_chat_id: editForm.telegram_chat_id || null,
+                whatsapp_number: editForm.whatsapp_number || null,
                 notification_channel: editForm.notification_channel || null,
             };
             const res = await fetch(`/api/admin/users/${editingId}`, {
@@ -946,6 +952,20 @@ export default function UsersTab() {
                                                     <div className="min-w-0">
                                                         <div className="font-bold text-black dark:text-white text-sm lg:text-xs lg:truncate lg:max-w-[180px] [overflow-wrap:anywhere]">{u.display_name || u.username || "—"}</div>
                                                         <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 lg:truncate lg:max-w-[200px] [overflow-wrap:anywhere]">{u.email || u.username || "—"}</div>
+                                                        {u.whatsapp_number && (
+                                                            <div className="flex items-center gap-1 mt-0.5" onClick={(e) => e.stopPropagation()}>
+                                                                <a
+                                                                    href={`https://wa.me/20${u.whatsapp_number.replace(/^0/, "")}`}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500 text-[10px] font-mono font-bold hover:bg-emerald-100 transition-colors"
+                                                                    title={isAr ? "مراسلة واتساب" : "Chat on WhatsApp"}
+                                                                >
+                                                                    <Smartphone className="w-2.5 h-2.5" />
+                                                                    {u.whatsapp_number}
+                                                                </a>
+                                                            </div>
+                                                        )}
                                                         <div className="text-[9px] text-zinc-400 truncate font-mono">{u.id.slice(0, 10)}...</div>
                                                     </div>
                                                 </div>
@@ -1136,6 +1156,28 @@ export default function UsersTab() {
                                         onChange={(e) => setEditForm(f => ({ ...f, telegram_chat_id: e.target.value }))}
                                         className="w-full h-9 px-3 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 font-bold text-xs font-mono"
                                     />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1 block">WhatsApp / Mobile</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={editForm.whatsapp_number}
+                                            onChange={(e) => setEditForm(f => ({ ...f, whatsapp_number: e.target.value }))}
+                                            placeholder="01012345678"
+                                            className="w-full h-9 px-3 border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 font-bold text-xs font-mono"
+                                        />
+                                        {editForm.whatsapp_number && (
+                                            <a
+                                                href={`https://wa.me/20${editForm.whatsapp_number.replace(/^0/, "")}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="h-9 px-3 bg-emerald-500 text-black border-4 border-black dark:border-white font-black text-xs flex items-center justify-center shrink-0 hover:bg-emerald-400"
+                                            >
+                                                WhatsApp
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1 block">Notification Status</label>

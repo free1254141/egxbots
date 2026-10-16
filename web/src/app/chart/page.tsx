@@ -562,8 +562,8 @@ function ChartContent() {
                     <BrainCircuit className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
                     <span>
                       {isAr
-                        ? "قراءة السهم تجمع مؤشرات فنية وسياق السوق؛ والتوصيات السابقة موضحة على الرسم بحسب تاريخها. الأداء السابق لا يضمن النتائج المقبلة."
-                        : "Stock analysis combines technical indicators with market context. Past recommendations appear on the chart by date; past performance does not guarantee future results."}
+                        ? "قراءة السهم تجمع مؤشرات فنية وسياق السوق؛ والإشارات الفنية السابقة موضحة على الرسم بحسب تاريخها. الأداء السابق لا يضمن النتائج المقبلة."
+                        : "Stock analysis combines technical indicators with market context. Past signals appear on the chart by date; past performance does not guarantee future results."}
                     </span>
                   </div>
                 </div>
@@ -571,27 +571,27 @@ function ChartContent() {
                 <section className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/70 space-y-3 dark:border-indigo-500/15 dark:bg-indigo-500/[0.03]">
                   <h4 className="text-sm font-black text-zinc-950 dark:text-white">
                     {isAr
-                      ? "توصياتنا للسهم"
-                      : "Our recommendations for this stock"}
+                      ? "الإشارات الفنية السابقة للسهم"
+                      : "Past technical signals for this stock"}
                   </h4>
                   {loadingRecommendations ? (
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       {isAr
-                        ? "جاري تحميل التوصيات..."
-                        : "Loading recommendations..."}
+                        ? "جاري تحميل الإشارات..."
+                        : "Loading signals..."}
                     </div>
                   ) : recommendationsError ? (
                     <p className="text-xs text-red-500">
                       {isAr
-                        ? "تعذر تحميل سجل التوصيات."
-                        : "Could not load recommendation history."}
+                        ? "تعذر تحميل سجل الإشارات."
+                        : "Could not load signal history."}
                     </p>
                   ) : recommendations.length === 0 ? (
                     <p className="text-xs text-zinc-500">
                       {isAr
-                        ? "لا توجد توصيات متاحة لهذا السهم."
-                        : "No recommendations available for this stock."}
+                        ? "لا توجد إشارات سابقة متاحة لهذا السهم."
+                        : "No signals available for this stock."}
                     </p>
                   ) : (
                     <>
@@ -601,7 +601,7 @@ function ChartContent() {
                             {recommendations.length}
                           </div>
                           <div className="text-[10px] text-zinc-500">
-                            {isAr ? "إجمالي التوصيات" : "Recommendations"}
+                            {isAr ? "إجمالي الإشارات" : "Signals"}
                           </div>
                         </div>
                         <div className="rounded-lg bg-white/70 p-2 dark:bg-zinc-900/40">
@@ -639,8 +639,8 @@ function ChartContent() {
                       </div>
                       <p className="text-[10px] text-zinc-500">
                         {isAr
-                          ? "الإحصاءات تخص التوصيات المتاحة لحسابك فقط."
-                          : "Statistics cover recommendations available to your account."}
+                          ? "الإحصاءات تخص الإشارات الفنية المتاحة لحسابك فقط."
+                          : "Statistics cover signals available to your account."}
                       </p>
                       <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
                         {recommendations.map((row) => (
@@ -705,7 +705,7 @@ function ChartContent() {
                       {selectedRecommendation && (
                         <div className="rounded-lg border border-indigo-500/20 p-3 text-xs space-y-1">
                           <div className="font-bold">
-                            {isAr ? "تفاصيل التوصية" : "Recommendation details"}{" "}
+                            {isAr ? "تفاصيل الإشارة" : "Signal details"}{" "}
                             · {selectedRecommendation.signal || "BUY"}
                           </div>
                           <div>

@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useWatchlist, type SavedSymbol } from "@/contexts/WatchlistContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
-import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2 } from "lucide-react";
+import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
@@ -26,6 +26,10 @@ export default function ProfilePage() {
 
   const [username, setUsername] = useState<string | null>(null);
   const [telegramLinked, setTelegramLinked] = useState(false);
+  const [whatsappNumber, setWhatsappNumber] = useState<string | null>(null);
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
   const [quotaData, setQuotaData] = useState<any>(null);
   const proInviteUrl = proInvite.is_pro && proInvite.invite_link ? proInvite.invite_link : "";
   const freeTelegramUrl = "https://t.me/egxbots/153";
@@ -51,12 +55,13 @@ export default function ProfilePage() {
     lastProfileRefreshAtRef.current = Date.now();
     const { data: profileRow } = await supabase
       .from("profiles")
-      .select("username, display_name, telegram_chat_id")
+      .select("username, display_name, telegram_chat_id, whatsapp_number")
       .eq("id", userId)
       .maybeSingle();
     if (profileRow) {
       setUsername((profileRow as any).username || (profileRow as any).display_name || null);
       setTelegramLinked(Boolean((profileRow as any).telegram_chat_id));
+      setWhatsappNumber((profileRow as any).whatsapp_number || null);
     }
 
     try {
@@ -67,6 +72,30 @@ export default function ProfilePage() {
       }
     } catch {}
   }, [supabase, userId]);
+
+  const handleSavePhone = async () => {
+    if (!userId) return;
+    const cleanPhone = phoneDraft.trim().replace(/[\s-]/g, "");
+    if (cleanPhone && !/^01[0125]\d{8}$/.test(cleanPhone)) {
+      toast.error(isAr ? "أدخل رقم موبايل مصري صحيح (11 رقم يبدأ بـ 01)" : "Enter a valid 11-digit Egyptian mobile number");
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ whatsapp_number: cleanPhone || null, updated_at: new Date().toISOString() })
+        .eq("id", userId);
+      if (error) throw error;
+      setWhatsappNumber(cleanPhone || null);
+      setIsEditingPhone(false);
+      toast.success(isAr ? "تم حفظ رقم الواتساب بنجاح" : "Phone number saved successfully");
+    } catch {
+      toast.error(isAr ? "تعذر حفظ الرقم، حاول مجدداً" : "Could not save phone number");
+    } finally {
+      setSavingPhone(false);
+    }
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -198,6 +227,59 @@ export default function ProfilePage() {
                 </span>
               </div>
             )}
+            <div>
+              <span className="text-zinc-500 uppercase text-[10px] tracking-wider block">
+                {isAr ? "رقم الواتساب / الموبايل" : "WhatsApp / Mobile"}
+              </span>
+              {isEditingPhone ? (
+                <div className="flex flex-col gap-2 mt-1.5">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      value={phoneDraft}
+                      onChange={(e) => setPhoneDraft(e.target.value)}
+                      placeholder="01012345678"
+                      className="w-full px-2.5 py-1.5 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800 text-xs font-mono font-bold text-black dark:text-white outline-none"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSavePhone}
+                      disabled={savingPhone}
+                      className="px-3 py-1 bg-emerald-500 text-black border-2 border-black font-black text-xs hover:bg-emerald-400 transition-colors disabled:opacity-50"
+                    >
+                      {savingPhone ? (isAr ? "جاري الحفظ..." : "Saving...") : (isAr ? "حفظ" : "Save")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingPhone(false)}
+                      disabled={savingPhone}
+                      className="px-2.5 py-1 bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white border-2 border-black text-xs font-bold"
+                    >
+                      {isAr ? "إلغاء" : "Cancel"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-black dark:text-white font-mono font-bold text-xs" dir="ltr">
+                    {whatsappNumber || (isAr ? "غير مسجل" : "Not set")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneDraft(whatsappNumber || "");
+                      setIsEditingPhone(true);
+                    }}
+                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 underline hover:text-indigo-500"
+                  >
+                    {whatsappNumber ? (isAr ? "تعديل" : "Edit") : (isAr ? "إضافة رقم" : "Add number")}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -227,7 +309,7 @@ export default function ProfilePage() {
                  ? (isAr ? "تعذر تجهيز دعوة VIP حالياً. أعد المحاولة، وإذا استمرت المشكلة تواصل مع الدعم من الموقع." : "We couldn't prepare the VIP invite. Retry, or contact support if the problem continues.")
                  : proInvite.is_pro
                    ? (isAr ? "أنت مشترك Pro. استخدم رابط الدعوة الخاص بك للوصول إلى قناة Pro." : "You are a Pro member. Use your private invite to join the Pro Telegram channel.")
-                   : (isAr ? "القناة المجانية تعرض التوصيات القديمة والتعديلات بتأخير 15 يوماً. التحديث اللحظي متاح في Pro." : "The free channel shows older recommendations and updates with a 15-day delay. Live updates are available in Pro.")}
+                   : (isAr ? "القناة المجانية تعرض الإشارات الفنية السابقة والتحليلات بتأخير 15 يوماً. التحديث الفوري متاح في Pro." : "The free channel shows past technical signals and updates with a 15-day delay. Live updates are available in Pro.")}
           </p>
 
            {proInvite.is_pro && proInvite.invite_link && (

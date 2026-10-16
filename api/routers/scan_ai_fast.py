@@ -460,6 +460,17 @@ def _process_symbol(
         
         if len(candidate) < 60:
             return None
+
+        # Liquidity guard for Egypt: Reject illiquid stocks with low trading volume
+        if (str(ex).upper() == "EGX" or str(country).lower() == "egypt") and buy_threshold > 0.0 and not return_raw_prob:
+            recent_close = candidate["Close"]
+            recent_vol = candidate["Volume"]
+            recent_turnover = recent_close * recent_vol
+            curr_turnover = float(recent_turnover.iloc[-1]) if len(recent_turnover) > 0 else 0.0
+            avg_turnover_20 = float(recent_turnover.tail(20).mean()) if len(recent_turnover) >= 20 else float(recent_turnover.mean())
+            active_sessions = int((recent_vol.tail(20) > 0).sum()) if len(recent_vol) >= 20 else int((recent_vol > 0).sum())
+            if curr_turnover < 250_000 or avg_turnover_20 < 500_000 or active_sessions < 10:
+                return None
         
         # We only care about the last row for the real-time scan
         candidate = candidate.iloc[[-1]].copy()
@@ -756,6 +767,7 @@ def fast_scan(
     validator_model: Optional[str] = None,
     return_raw_prob: bool = False,
     bulk_cache_ttl_seconds: Optional[int] = None,
+    allow_blocked_gate: bool = False,
 ):
     start = time.time()
     
@@ -803,7 +815,7 @@ def fast_scan(
         raise HTTPException(status_code=400, detail="Model predictors not found")
 
     market_gate = should_reject_new_buys() if country == "Egypt" else {"blocked": False, "reason": "market gate not applicable"}
-    if market_gate.get("blocked") and not return_raw_prob:
+    if market_gate.get("blocked") and not return_raw_prob and not allow_blocked_gate:
         duration = time.time() - start
         print(f"[MARKET_GATE] Fast scan blocked: {market_gate.get('reason')}")
         return {
@@ -815,6 +827,8 @@ def fast_scan(
             "min_precision": min_precision,
             "market_gate": market_gate,
         }
+    if market_gate.get("blocked") and allow_blocked_gate:
+        print(f"[MARKET_GATE] Fast scan running in shadow/audit mode (gate blocked: {market_gate.get('reason')})")
 
     # Prepare Market Context (EGX30 index)
     market_df = None

@@ -39,7 +39,7 @@ export default function AIScannerClient() {
     },
     {
       q: "ما هو مقياس الذكاء الاصطناعي (AI Score) من 1 إلى 10؟",
-      a: "المقياس هو تصنيف احتمالي لقوة حركة السهم: من 1 إلى 3 يمثل مناطق ضغط بيعي أو خروج (Sell / Strong Sell)، ومن 4 إلى 6 يمثل مناطق اتجاه عرضي أو احتفاظ (Hold)، ومن 7 إلى 10 يمثل فرص شراء ذات احتمالية إيجابية مرتفعة (Buy / Strong Buy)."
+      a: "المقياس هو تصنيف احتمالي لحالة السهم الفنية: من 1 إلى 3 يمثل مؤشراً سلبياً وضغطاً بيعياً (Bearish / Negative Momentum)، ومن 4 إلى 6 يمثل اتجاهاً محايداً واستقراراً (Neutral)، ومن 7 إلى 10 يمثل مؤشر زخم إيجابي وتوافقاً صاعداً (Bullish / Positive Momentum)."
     },
     {
       q: "كيف يمكنني استخدام الشات بوت التفاعلي لتحليل سهمي؟",
@@ -211,7 +211,7 @@ export default function AIScannerClient() {
             <div className="rounded-xl border-2 border-red-900/60 bg-red-950/20 p-5 text-right">
               <div className="flex items-center justify-between">
                 <span className="rounded bg-red-500/20 px-2.5 py-1 font-mono text-xs font-bold text-red-400">1 - 3</span>
-                <span className="text-sm font-black text-red-400">بيع / تخفيف (Sell)</span>
+                <span className="text-sm font-black text-red-400">مؤشر سلبي (Bearish)</span>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-zinc-400">
                 إشارات تدل على ضغط بيعي مرتفع، كسر دعوم رئيسية، أو ضعف في الزخم. ينصح بالحذر ومراقبة وقف الخسارة.
@@ -221,7 +221,7 @@ export default function AIScannerClient() {
             <div className="rounded-xl border-2 border-amber-900/60 bg-amber-950/20 p-5 text-right">
               <div className="flex items-center justify-between">
                 <span className="rounded bg-amber-500/20 px-2.5 py-1 font-mono text-xs font-bold text-amber-400">4 - 6</span>
-                <span className="text-sm font-black text-amber-400">احتفاظ / محايد (Hold)</span>
+                <span className="text-sm font-black text-amber-400">مؤشر محايد (Neutral)</span>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-zinc-400">
                 السهم يتحرك داخل نطاق عرضي أو مرحلة ترقب وتجميع. مناسب للمتابعة حتى تأكيد الاتجاه الصاعد.
@@ -231,7 +231,7 @@ export default function AIScannerClient() {
             <div className="rounded-xl border-2 border-emerald-900/60 bg-emerald-950/20 p-5 text-right">
               <div className="flex items-center justify-between">
                 <span className="rounded bg-emerald-500/20 px-2.5 py-1 font-mono text-xs font-bold text-emerald-400">7 - 10</span>
-                <span className="text-sm font-black text-emerald-400">شراء قوي (Buy)</span>
+                <span className="text-sm font-black text-emerald-400">مؤشر إيجابي (Bullish)</span>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-zinc-400">
                 توافق إيجابي بين تدفق السيولة والزخم الفني، مع احتمالية صعود متفوقة على أداء مؤشر البورصة EGX30.

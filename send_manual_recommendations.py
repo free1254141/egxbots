@@ -39,7 +39,7 @@ def send_message():
         print(f"✅ Telegram bot initialized: chat_id = {bot.chat_id}")
         
         # The pre-formatted message from the admin panel
-        message = """🚀 *توصيات الذكاء الاصطناعي الجديدة / New AI Recommendations* 🚀
+        message = """🚀 *إشارات النماذج الفنية الجديدة / New Algorithmic Signals* 🚀
 📅 *التاريخ:* `2026-07-09`
 ━━━━━━━━━━━━━━━━━━━━
 
@@ -82,7 +82,9 @@ def send_message():
 📈 *إجمالي الإشارات الجديدة:* `6` أسهم
 
 🔗 *لمتابعة الرسوم البيانية والتفاصيل الكاملة:*
-👉 [اضغط هنا لفتح المنصة](https://egxbots.com/scanner/backtests?tab=bots)"""
+👉 [اضغط هنا لفتح المنصة](https://egxbots.com/scanner/backtests?tab=bots)
+
+⚠️ *تنويه هام:* مخرجات النماذج الكمية هي مؤشرات فنية وإحصائية عامة لأغراض الدراسة والبحث فقط، ولا تمثل توصية استثمارية أو دعوة للشراء أو البيع. قرار التداول مسؤوليتك المستقلة عبر سمسارك المرخص."""
         
         # Send to the channel
         chat_id = "-1002083067817_153"  # Channel + Thread ID for public channel

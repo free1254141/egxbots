@@ -81,6 +81,13 @@ def test_short_engine_blocks_thin_published_pending_entry_without_rewriting_hist
     monkeypatch.setitem(sys.modules, 'api.stock_ai', SimpleNamespace(_init_supabase=lambda: None,
                         supabase=SimpleNamespace(table=lambda _: Query())))
     monkeypatch.setattr('api.hf_history_cache.load_history_snapshot', lambda _: pd.DataFrame(rows))
+    from zoneinfo import ZoneInfo
+    import datetime as dt_mod
+    session_dt = dt_mod.datetime.fromisoformat(SESSION).replace(hour=17, tzinfo=ZoneInfo('Africa/Cairo'))
+    class Clock(dt_mod.datetime):
+        @classmethod
+        def now(cls, tz=None): return session_dt.astimezone(tz or dt_mod.timezone.utc)
+    monkeypatch.setattr(engine, 'dt', SimpleNamespace(datetime=Clock, date=dt_mod.date, timezone=dt_mod.timezone, timedelta=dt_mod.timedelta))
     monkeypatch.setattr(engine, 'load_stock_metadata', lambda: {})
     monkeypatch.setattr(engine, 'CACHE_PATHS', [tmp_path / 'cache.json'])
     monkeypatch.setattr(engine, '_load_published_signals', lambda _: [

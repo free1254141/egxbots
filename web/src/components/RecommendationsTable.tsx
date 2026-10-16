@@ -435,7 +435,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         sentScore: { en: "Sentiment", ar: "المشاعر" },
         lowRisk: { en: "Low Risk", ar: "نسبة الأمان" },
         volume: { en: "Volume", ar: "الحجم" },
-        noResults: { en: "No recommendations found matching criteria", ar: "لم يتم العثور على توصيات تطابق الاختيارات" },
+        noResults: { en: "No signals found matching criteria", ar: "لم يتم العثور على إشارات تطابق الاختيارات" },
         outdated: { en: "Data may be outdated. Retrying in 1 minute...", ar: "قد تكون البيانات قديمة. جاري إعادة المحاولة خلال دقيقة..." },
         retryBtn: { en: "Retry Now", ar: "أعد المحاولة الآن" },
         allSectors: { en: "All Sectors", ar: "جميع القطاعات" },
@@ -454,7 +454,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         shariaHint: { en: "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork).", ar: "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)." },
         halal: { en: "Halal", ar: "حلال" },
         shareTrade: { en: "Share Trade", ar: "مشاركة الصفقة" },
-        shareCardTitle: { en: "Trade Signal Card", ar: "كارت توصية الصفقة" },
+        shareCardTitle: { en: "Trade Signal Card", ar: "بطاقة الإشارة الفنية" },
         shareDownload: { en: "Download Image", ar: "تحميل الصورة" },
         shareX: { en: "Share on X", ar: "شارك على X" },
         shareTelegram: { en: "Share on Telegram", ar: "شارك على تيليجرام" },
@@ -470,8 +470,8 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         shareExitReason: { en: "Exit Reason", ar: "سبب الخروج" },
         shareClosedSignal: { en: "EXIT", ar: "خروج" },
         shareWinRate: { en: "Win Rate", ar: "نسبة النجاح" },
-        shareScanDate: { en: "Scan Date", ar: "تاريخ التوصية" },
-        shareDisclaimer: { en: "Not financial advice. Do your own research.", ar: "هذه ليست نصيحة مالية. ادرس بنفسك." },
+        shareScanDate: { en: "Scan Date", ar: "تاريخ الإشارة" },
+        shareDisclaimer: { en: "Not financial advice. General technical indicators for research.", ar: "مؤشرات فنية عامة لأغراض البحث والدراسة وليست نصيحة مالية." },
         shareScore: { en: "AI Score", ar: "تقييم الذكاء" },
         shareSector: { en: "Sector", ar: "القطاع" },
         shareCurrent: { en: "Current", ar: "الحالي" },
@@ -880,7 +880,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         return (
             <span className="inline-flex flex-wrap items-center justify-center gap-1 px-2 py-1 rounded border border-amber-400/40 bg-amber-400/10 text-amber-500 text-[10px] font-black leading-tight">
                 <span>PRO</span>
-                <span>{isAr ? "عائد التوصية تعدّى 50%" : "Recommendation return exceeded 50%"}</span>
+                <span>{isAr ? "عائد الإشارة تعدّى 50%" : "Signal return exceeded 50%"}</span>
                 {hasAge && <span className="font-bold">· {ageLabel}</span>}
             </span>
         );
@@ -1315,10 +1315,10 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         {pctChangeSinceRec != null && (
                                             <div 
                                                 className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold cursor-help ${pctChangeSinceRec >= 0 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border border-rose-500/20"}`}
-                                                title={isAr ? "نسبة التغير الإجمالية منذ تاريخ توصية البوت" : "Total change percentage since the bot's recommendation"}
+                                                title={isAr ? "نسبة التغير الإجمالية منذ تاريخ إشارة البوت" : "Total change percentage since the bot's signal"}
                                             >
                                                 {pctChangeSinceRec >= 0 ? "▲" : "▼"} {pctChangeSinceRec >= 0 ? "+" : ""}{pctChangeSinceRec.toFixed(2)}%
-                                                 <span className={`${d("text-zinc-500", "text-zinc-600")} font-medium`}>{isAr ? "منذ التوصية" : "since rec"}</span>
+                                                 <span className={`${d("text-zinc-500", "text-zinc-600")} font-medium`}>{isAr ? "منذ الإشارة" : "since signal"}</span>
                                                  <Info className={`w-3.5 h-3.5 ${d("text-zinc-400", "text-zinc-500")} inline-block shrink-0`} />
                                             </div>
                                         )}
@@ -1559,11 +1559,11 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                      }] : []),
                                     { label: isAr ? "نسبة المخاطرة/العائد" : "Risk/Reward", value: rrRatio !== null ? `1:${rrRatio.toFixed(2)}` : "—", color: "text-indigo-400" },
                                     {
-                                        label: isAr ? "نسبة التغيّر منذ التوصية" : "Chg. Since Rec.",
+                                        label: isAr ? "نسبة التغيّر منذ الإشارة" : "Chg. Since Signal",
                                         value: pctChangeSinceRec !== null ? `${pctChangeSinceRec >= 0 ? "+" : ""}${pctChangeSinceRec.toFixed(2)}%` : "—",
                                         color: pctChangeSinceRec !== null && pctChangeSinceRec >= 0 ? "text-emerald-400" : "text-rose-400"
                                     },
-                                    { label: isAr ? "تاريخ التوصية" : "Rec. Date", value: row.created_at ? formatDate(row.created_at) : "—", color: "text-zinc-300" },
+                                    { label: isAr ? "تاريخ الإشارة" : "Signal Date", value: row.created_at ? formatDate(row.created_at) : "—", color: "text-zinc-300" },
                                     {
                                         label: isAr ? "آخر مراجعة للروبوت" : "Last Bot Review",
                                         value: row.updated_at ? formatDate(row.updated_at) : (row.created_at ? formatDate(row.created_at) : "—"),
@@ -3309,7 +3309,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 {getVisibleReturnPct(row) != null && (
                                                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-black ${getVisibleReturnPct(row)! >= 0 ? "text-emerald-400 bg-emerald-500/10" : "text-rose-400 bg-rose-500/10"}`}>
                                                         {getVisibleReturnPct(row)! >= 0 ? "+" : ""}{getVisibleReturnPct(row)!.toFixed(1)}%
-                                                        <span className="ms-1 font-medium">{isAr ? "منذ التوصية" : "since rec."}</span>
+                                                        <span className="ms-1 font-medium">{isAr ? "منذ الإشارة" : "since signal"}</span>
                                                     </span>
                                                 )}
                                                 {renderHighReturnProBadge(row)}

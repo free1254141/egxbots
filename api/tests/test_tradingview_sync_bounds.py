@@ -108,7 +108,7 @@ def test_daily_refresh_rejects_old_provider_bars_even_if_cloud_has_today(monkeyp
     names=['in_1_minute','in_5_minute','in_15_minute','in_30_minute','in_1_hour','in_4_hour','in_daily']
     monkeypatch.setitem(sys.modules,'tvDatafeed',types.SimpleNamespace(
         TvDatafeed=TvDatafeed,Interval=types.SimpleNamespace(**{n:n for n in names})))
-    previous=datetime.date.today()-datetime.timedelta(days=1)
+    previous=datetime.date.today()-datetime.timedelta(days=10)
     frame=pd.DataFrame({'open':[10],'high':[12],'low':[9],'close':[11],'volume':[10]},
                        index=pd.DatetimeIndex([str(previous)],name='datetime'))
     monkeypatch.setattr(policy,'fetch_tradingview_history',lambda *args,**kwargs:frame)

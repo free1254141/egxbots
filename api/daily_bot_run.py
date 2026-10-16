@@ -1213,12 +1213,13 @@ def _notify_free_telegram(message: str, service_type: str = "free_summary", *, m
     web_origin = get_web_origin()
     free_footer = (
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📢 *إعلان Pro:* كل التوصيات وتعديلاتها والتفاصيل الكاملة تصل فوراً إلى قناة VIP.\n"
+        "📢 *إعلان Pro:* كل الإشارات الفنية وتعديلاتها والتفاصيل الكاملة تصل فوراً إلى قناة المشتركين.\n"
         "القناة المجانية تعرض الإغلاقات والملخص الأسبوعي والإعلانات المهمة فقط.\n"
+        "⚠️ تنويه: إشارات مؤتمتة لأغراض الدراسة والبحث فقط وليست توصيات استثمارية.\n"
         f"🔗 التفاصيل والاشتراك: {web_origin}/pricing"
     )
     message_with_footer = message.rstrip()
-    if "كل التوصيات وتعديلاتها والتفاصيل الكاملة تصل" not in message_with_footer:
+    if "كل الإشارات الفنية وتعديلاتها والتفاصيل الكاملة تصل" not in message_with_footer:
         message_with_footer = f"{message_with_footer}\n\n{free_footer}"
 
     outcome = _deliver_telegram_message(
@@ -2314,6 +2315,26 @@ async def generate_daily_recommendations(
         if run_context is not None:
             run_context.update(market_gate)
         print(f"[RECOMMENDATIONS] Broad-market gate blocked new BUYs: {market_gate.get('reason')}")
+        # Run shadow scan to record blocked candidates for operator audit without publishing
+        try:
+            shadow_scan = fast_scan(
+                country="Egypt",
+                limit=50,
+                min_precision=0.5,
+                model_name="model_EGX.bin",
+                council_model="KING.bin",
+                validator_model="The_Council_Validator.bin",
+                bulk_cache_ttl_seconds=bulk_cache_ttl_seconds,
+                allow_blocked_gate=True,
+            )
+            shadow_results = shadow_scan.get("results", [])
+            audit["market_gate_blocked_candidates"] = [
+                {"symbol": item.get("symbol"), "last_close": item.get("last_close"),
+                 "precision": item.get("precision"), "council_score": item.get("council_score")}
+                for item in shadow_results[:10]
+            ]
+        except Exception as shadow_err:
+            print(f"[RECOMMENDATIONS] Shadow scan for audit skipped: {shadow_err}")
         return no_buy("market_gate", market_gate.get("reason") or "قاطع أمان السوق منع شراء جديد.")
     resolved_model = "model_EGX.bin"
     
@@ -3523,21 +3544,16 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 market_gate_context = dict(market_gate or {})
                 if evaluation is not None:
                     market_gate_context["active_recommendations"] = max(0, evaluation["total"] - evaluation["closed"])
+                generated_count = await generate_daily_recommendations(
+                    model_name=model_filter,
+                    bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
+                    run_context=market_gate_context,
+                )
                 if market_gate.get("blocked"):
-                    msg = f"Skipped - {market_gate.get('reason')}"
-                    print(f"[MARKET_GATE] {msg}")
-                    _mark_daily_cache_payload("recommendation_decision_audit", dict(
-                        date=dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(),
-                        reason_code="market_gate", reason=market_gate.get("reason"), published=0))
-                    _record_step("generate_recommendations", True, msg[:200], 0)
+                    decision_details = f"Skipped - {market_gate.get('reason')}"
                 else:
-                    generated_count = await generate_daily_recommendations(
-                        model_name=model_filter,
-                        bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
-                        run_context=market_gate_context,
-                    )
                     decision_details = market_gate_context.get("no_buy_reason") or f"Generated {generated_count} recommendations using {model_filter or 'default'}"
-                    _record_step("generate_recommendations", True, decision_details[:1000], int(generated_count or 0))
+                _record_step("generate_recommendations", True, decision_details[:1000], int(generated_count or 0))
                 if not generated_count:
                     market_gate_context.setdefault("no_buy_reason", "لم يجتز أي مرشح جميع ضوابط النماذج والمخاطر والسيولة اليوم.")
                     _send_market_buy_hold(

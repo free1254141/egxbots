@@ -5,6 +5,7 @@ import Providers from "@/app/providers";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ChatWidget from "@/components/ChatWidget";
+import SupportChatWidget from "@/components/SupportChatWidget";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
@@ -193,6 +194,7 @@ export default function RootLayout({
           </main>
           <Footer />
           <ChatWidget />
+          <SupportChatWidget />
           <PwaInstallPrompt />
           <Analytics />
         </Providers>

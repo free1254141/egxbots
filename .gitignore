@@ -26,6 +26,9 @@ api/.pytest_cache/
 api/.mplconfig/
 api/local_data/crypto/
 backup DATA/
+backups/
+*.sql.gz
+*.dump
 
 # IDEs
 .vscode/
@@ -122,4 +125,8 @@ web/planner_compare_report.md
 .env*
 !.env.example
 
-.vercel
+# Service account credentials
+*service_account*.json
+*credentials*.json
+scripts/*.json
+!scripts/package*.json

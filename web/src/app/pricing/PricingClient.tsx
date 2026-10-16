@@ -33,6 +33,7 @@ import {
   Award,
 } from "lucide-react";
 import { toast } from "sonner";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type Step = "plans" | "payment" | "submitted";
 
@@ -78,6 +79,30 @@ export default function PricingClient() {
       }
     }
   }, []);
+
+  // Pre-fill customer mobile from their saved profile if available
+  useEffect(() => {
+    if (!user?.id) return;
+    const currentUserId = user.id;
+    let active = true;
+    async function loadPhone() {
+      try {
+        const sb = createSupabaseBrowserClient();
+        const { data } = await sb
+          .from("profiles")
+          .select("whatsapp_number")
+          .eq("id", currentUserId)
+          .maybeSingle();
+        if (active && data?.whatsapp_number && typeof data.whatsapp_number === "string") {
+          setCustomerMobile(data.whatsapp_number);
+        }
+      } catch {}
+    }
+    void loadPhone();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
   const [copiedOrder, setCopiedOrder] = useState(false);
   const [pollRestart, setPollRestart] = useState(0);
   const [pollingExhausted, setPollingExhausted] = useState(false);
@@ -400,11 +425,11 @@ export default function PricingClient() {
     ...chartFeatures,
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حتى ${freeLimits.portfolio_stocks} أسهم في المحفظة` : `Up to ${freeLimits.portfolio_stocks} portfolio stocks`, included: true },
     { icon: <Activity className="w-4 h-4" />, text: isAr ? "النشاط غير الطبيعي (أسهم ارتفع حجمها بشكل غير طبيعي)" : "Unusual Activity (volume spike detection)", included: false },
-    { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة VIP على تليجرام (إشارات وتوصيات يومية فورية)" : "VIP Telegram Channel (instant daily signals)", included: false },
+    { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية ومؤشرات الخوارزميات)" : "Instant Telegram Channel (daily technical signals)", included: false },
   ];
 
   const proFeatures = [
-    { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة VIP على تليجرام (إشارات وتوصيات يومية فور صدورها بدون تأخير)" : "VIP Telegram Channel (instant daily signals without delay)", included: true },
+    { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية بدون تأخير)" : "Instant Telegram Channel (daily algorithmic signals without delay)", included: true },
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "الصفقات القصيرة ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح EMA10 بدون تشفير" : "Short Swings ⚡ PRO — momentum trades, tight 4% stop, and EMA10 runners unmasked", included: true },
     { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? `${proLimits.chat_messages_per_month} رسالة شات بوت ذكي شهرياً` : `${proLimits.chat_messages_per_month} smart chatbot messages / month`, included: true },
     ...chartFeatures,
@@ -414,7 +439,7 @@ export default function PricingClient() {
 
   const lifetimeFeatures = [
     { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (never expires, zero recurring renewals)", included: true },
-    { icon: <ShieldCheck className="w-4 h-4 text-emerald-500" />, text: isAr ? "قناة VIP على تليجرام (إشارات وتوصيات يومية فورية للأبد)" : "VIP Telegram Channel forever", included: true },
+    { icon: <ShieldCheck className="w-4 h-4 text-emerald-500" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية للأبد)" : "Instant Telegram Channel forever", included: true },
     { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "الصفقات القصيرة ⚡ PRO ومتابعة الأرباح كاملة بدون تشفير" : "Short Swings ⚡ PRO momentum trades unmasked", included: true },
     { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? `${proLimits.chat_messages_per_month} استشارة شات بوت شهرياً تتجدد تلقائياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages refreshed monthly for life`, included: true },
     ...chartFeatures,
@@ -841,7 +866,7 @@ export default function PricingClient() {
                   <>
                     <div className="flex items-center gap-2 text-zinc-300">
                       <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "قناة VIP على تليجرام (إشارات وتوصيات يومية فور صدورها بدون تأخير)" : "VIP Telegram Channel (instant daily signals without delay)"}</span>
+                      <span>{isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية بدون تأخير)" : "Instant Telegram Channel (daily signals without delay)"}</span>
                     </div>
                     <div className="flex items-center gap-2 text-zinc-300">
                       <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -882,12 +907,12 @@ export default function PricingClient() {
             EGX BOTS PRO · خطط واشتراكات
           </span>
           <h1 className="text-3xl sm:text-5xl font-black text-zinc-950 dark:text-white tracking-tight">
-            {isAr ? "اختر خطتك الاستثمارية" : "Choose Your Investment Plan"}
+            {isAr ? "اختر باقة الاشتراك البرمجي" : "Choose Your Software Plan"}
           </h1>
           <p className="text-sm sm:text-base font-bold text-zinc-600 dark:text-zinc-300 max-w-2xl mx-auto leading-relaxed">
             {isAr
-              ? "تحليلات كمية، وتوصيات مبنية على الذكاء الاصطناعي، وقناة VIP حصرية لتداول البورصة المصرية بثقة."
-              : "Quantitative analysis, AI-driven stock signals, and VIP channel access for the Egyptian Stock Exchange."}
+              ? "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة البورصة المصرية."
+              : "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Egyptian Stock Exchange."}
           </p>
         </div>
 
@@ -925,8 +950,8 @@ export default function PricingClient() {
                 </h2>
                 <p className="text-xs sm:text-sm font-semibold text-zinc-300 mt-2 leading-relaxed max-w-2xl">
                   {isAr
-                    ? "اشتراك دائم بدون أي رسوم أو تجديدات شهرية نهائياً. تمتع بكافة إشارات وتوصيات قناة VIP الفورية، والصفقات القصيرة ⚡ PRO، و350 استشارة ذكاء اصطناعي تتجدد شهرياً تلقائياً للأبد."
-                    : "Permanent membership with zero recurring monthly fees forever. Unrestricted VIP Telegram channel signals, Short Swings PRO trades, and 350 monthly AI queries refreshed automatically for life."}
+                    ? "اشتراك دائم بدون أي رسوم أو تجديدات شهرية نهائياً. تمتع بكافة إشارات وتنبيهات الخوارزميات الفورية، والصفقات القصيرة ⚡ PRO، و350 استشارة ذكاء اصطناعي تتجدد شهرياً تلقائياً للأبد."
+                    : "Permanent membership with zero recurring monthly fees forever. Unrestricted instant Telegram channel signals, Short Swings PRO trades, and 350 monthly AI queries refreshed automatically for life."}
                 </p>
               </div>
 
@@ -1526,8 +1551,8 @@ export default function PricingClient() {
               </h4>
               <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
                 {isAr
-                  ? "المنصة لا تقدم شاشة بث أسعار لحظية للأسهم (Live Ticker) أثناء جلسة التداول، وإنما تعتمد على بيانات الإغلاق والتحليل الفني والكمي. المقصود بـ «الإشارات الفورية» هو وصول تنبيهات التوصيات للمشتركين فور صدورها واعتمادها من نماذج الذكاء الاصطناعي دون أي تأخير زمني، بينما يتم تنفيذ عمليات الشراء والبيع عبر تطبيق السمسرة المعتمد الخاص بك."
-                  : "The platform does not provide a live streaming stock ticker during trading sessions; it relies on closing data and quantitative technical analysis. «Instant Signals» refers to recommendation alerts being delivered to subscribers immediately upon AI model approval without delay. Buy/sell orders are executed through your personal licensed broker."}
+                  ? "المنصة لا تقدم شاشة بث أسعار لحظية للأسهم (Live Ticker) أثناء جلسة التداول، وإنما تعتمد على بيانات الإغلاق والتحليل الفني والكمي. المقصود بـ «الإشارات الفورية» هو وصول التنبيهات الفنية للمشتركين فور صدورها واعتمادها من النماذج الإحصائية دون أي تأخير زمني، بينما يتم اتخاذ أي قرار استثماري وتنفيذه باستقلالية تامة عبر تطبيق السمسرة المرخص الخاص بك."
+                  : "The platform does not provide a live streaming stock ticker during trading sessions; it relies on closing data and quantitative technical analysis. «Instant Signals» refers to technical alerts being delivered to subscribers immediately upon statistical model calculation without delay. Buy/sell orders are executed independently through your licensed broker."}
               </p>
               <div className="pt-1.5">
                 <Link

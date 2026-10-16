@@ -28,15 +28,58 @@ export async function POST(req: Request) {
 
     if (error) return NextResponse.json({ ok: false }, { status: 200 });
 
-    // Forward to admin on Telegram
+    // Look up profile to check phone number
+    let phoneLine = "";
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("whatsapp_number")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profile?.whatsapp_number) {
+        phoneLine = `<b>واتساب / الموبايل:</b> <code>${profile.whatsapp_number}</code>\n`;
+      }
+    } catch {}
+
+    // Check if an automated acknowledgment should be inserted (if no admin message in last 15 min)
+    try {
+      const { data: recentAdminMsgs } = await supabase
+        .from("support_messages")
+        .select("id, created_at")
+        .eq("session_id", sessionId)
+        .eq("sender", "admin")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const lastAdminTime = recentAdminMsgs?.[0]?.created_at ? new Date(recentAdminMsgs[0].created_at).getTime() : 0;
+      const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
+
+      if (!recentAdminMsgs || recentAdminMsgs.length === 0 || lastAdminTime < fifteenMinutesAgo) {
+        const autoReply = "أهلاً بك يا فندم! 👑 تم استلام استفسارك وتوجيهه مباشرة لإدارة المنصة والدعم الفني، وجاري مراجعة طلبك والرد عليك هنا في أسرع وقت.";
+        await supabase.from("support_messages").insert({
+          session_id: sessionId,
+          user_id: user.id,
+          sender: "admin",
+          content: autoReply,
+          user_name: "الدعم الفني VIP",
+        });
+      }
+    } catch (ackErr) {
+      console.error("Failed to insert auto acknowledgment:", ackErr);
+    }
+
+    // Forward to admin on Telegram with Session ID for instant Reply
     try {
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
-        const tgText = `💬 <b>[Support Chat Request]</b>\n` +
+        const tgText = `👑 <b>[رسالة دعم VIP من عميل Pro]</b>\n` +
           `<b>Session:</b> <code>${sessionId}</code>\n` +
-          `<b>User Name:</b> ${userName}\n` +
+          `<b>العميل:</b> ${userName}\n` +
+          `${phoneLine}` +
+          `<b>الإيميل:</b> ${user.email || "—"}\n` +
           `---------------------------------\n` +
-          `${content}`;
+          `${content}\n\n` +
+          `<i>(للرد على العميل: اضغط Reply على هذه الرسالة واكتب ردك)</i>`;
         await sendTelegramMessage(adminChatId, tgText);
       }
     } catch (tgErr) {

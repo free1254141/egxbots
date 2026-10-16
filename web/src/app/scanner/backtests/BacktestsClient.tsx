@@ -338,12 +338,12 @@ function TelegramNotificationCard() {
                     </div>
                     <div className="min-w-0">
                         <h3 className="text-sm font-black text-white uppercase tracking-tight">
-                            {isAr ? "تابع التوصيات والتقارير على تليجرام" : "Follow recommendations & reports on Telegram"}
+                            {isAr ? "تابع الإشارات الفنية والتقارير على تليجرام" : "Follow technical signals & reports on Telegram"}
                         </h3>
                         <p className="mt-1 text-[10px] text-zinc-400 font-medium leading-relaxed">
                             {isAr
-                                ? "اشترك في القناة الرسمية لتلقي التنبيهات وإشارات التداول والتقارير اليومية فور صدورها"
-                                : "Join our official channel to receive daily recommendations, alerts, and market reports instantly"}
+                                ? "اشترك في القناة الرسمية لتلقي التنبيهات الفنية ومؤشرات النماذج والتقارير الإحصائية فور صدورها"
+                                : "Join our official channel to receive daily algorithmic signals, alerts, and market reports instantly"}
                         </p>
                     </div>
                 </div>

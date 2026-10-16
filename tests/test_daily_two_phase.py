@@ -321,7 +321,8 @@ def test_forced_price_refresh_bypasses_same_date_skip_with_small_incremental_fet
     calls, writes = [], []
     intervals = types.SimpleNamespace(**{name: name for name in ['in_1_minute','in_5_minute','in_15_minute',
                      'in_30_minute','in_1_hour','in_4_hour','in_daily']})
-    today = dt.date.today()
+    from api.recommendation_freshness import expected_session
+    today = dt.date.fromisoformat(expected_session())
     class TV:
         def get_hist(self, **kwargs):
             calls.append(kwargs)

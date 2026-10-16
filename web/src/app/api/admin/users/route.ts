@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
       if (!cohortUserIds.length) return NextResponse.json({ users: [], total: 0 });
     }
 
-    const profileFields = "id, username, display_name, avatar_url, language, telegram_chat_id, notification_channel, default_target_pct, default_stop_pct, custom_ai_rules, created_at, updated_at";
+    const profileFields = "id, username, display_name, avatar_url, language, telegram_chat_id, whatsapp_number, notification_channel, default_target_pct, default_stop_pct, custom_ai_rules, created_at, updated_at";
     let query = supabase.from("profiles").select(profileFields, { count: "exact" }).order("created_at", { ascending: false });
     if (cohortUserIds) query = query.in("id", cohortUserIds);
     if (search && !search.includes("@")) {

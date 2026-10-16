@@ -22,6 +22,7 @@ interface SupportChatContextType {
     loading: boolean;
     unreadCount: number;
     resetUnreadCount: () => void;
+    isPro: boolean;
 }
 
 const SupportChatContext = createContext<SupportChatContextType | undefined>(undefined);
@@ -33,8 +34,27 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
     const [sessionId, setSessionId] = useState<string>("");
     const [loading, setLoading] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
+    const [isPro, setIsPro] = useState(false);
 
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
+    // Check if user is a PRO subscriber
+    useEffect(() => {
+        if (!user) {
+            setIsPro(false);
+            return;
+        }
+        fetch("/api/user/quota", { cache: "no-store" })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data?.ok && data?.plan?.is_pro) {
+                    setIsPro(true);
+                } else {
+                    setIsPro(false);
+                }
+            })
+            .catch(() => setIsPro(false));
+    }, [user]);
 
     // Load or generate session ID
     useEffect(() => {
@@ -165,8 +185,9 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         sendMessage,
         loading,
         unreadCount,
-        resetUnreadCount: () => setUnreadCount(0)
-    }), [isOpen, messages, sessionId, loading, unreadCount]);
+        resetUnreadCount: () => setUnreadCount(0),
+        isPro,
+    }), [isOpen, messages, sessionId, loading, unreadCount, isPro]);
 
     return (
         <SupportChatContext.Provider value={value}>

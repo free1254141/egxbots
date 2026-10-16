@@ -505,8 +505,25 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         & (close_pos >= 0.75)
     )
 
-    df["signal"] = sig_base_bo | sig_power_pb
-    df["sig_type"] = np.where(sig_base_bo, "اختراق قمة 20 جلسة مع انفجار سيولة", "ارتداد زخم من متوسط 10 أيام")
+    # Extreme RS Leader Breakout:
+    # When broad market breadth is below 45% (market stress/pullback), allow exceptional
+    # market leaders with strong momentum (+20% in 20 sessions) breaking to 20-day highs on high volume (>= 1.5x 20MA).
+    sig_rs_leader = (
+        (~mkt_ok)
+        & trend_aligned
+        & (df["close"] > df["high20"])
+        & (df["volume"] >= df["vol_ma20"] * 1.5)
+        & (df["close"] > df["open"])
+        & (close_pos >= 0.75)
+        & (df["ret20"] >= 0.20)
+    )
+
+    df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader
+    df["sig_type"] = np.where(
+        sig_rs_leader,
+        "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+        np.where(sig_base_bo, "اختراق قمة 20 جلسة مع انفجار سيولة", "ارتداد زخم من متوسط 10 أيام")
+    )
 
     next_date_map = dict(zip(dates, dates[1:]))
     market = {}

@@ -15,6 +15,17 @@ export async function POST(req: NextRequest) {
   if (!/^01[0125]\d{8}$/.test(mobile)) {
     return NextResponse.json({ detail: "أدخل رقم موبايل مصري صحيح من أي شبكة" }, { status: 400 });
   }
+
+  // Save/update phone number in profiles so the user never has to enter it again
+  try {
+    await auth
+      .from("profiles")
+      .update({ whatsapp_number: mobile, updated_at: new Date().toISOString() })
+      .eq("id", user.id);
+  } catch (err) {
+    console.error("Failed to update profile whatsapp_number:", err);
+  }
+
   try {
     const response = await fetch(`${BACKEND_URL}/payment/easykash/create`, {
       method: "POST",

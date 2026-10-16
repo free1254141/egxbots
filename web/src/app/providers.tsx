@@ -12,6 +12,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { TelegramProProvider } from "@/contexts/TelegramProContext";
+import { SupportChatProvider } from "@/contexts/SupportChatContext";
 import UserActivityTracker from "@/components/UserActivityTracker";
 
 if (typeof window !== "undefined") {
@@ -65,7 +66,9 @@ export default function Providers({ children }: { children: ReactNode }) {
                   <AIScannerProvider>
                     <TechnicalScannerProvider>
                       <ChatProvider>
-                        {children}
+                        <SupportChatProvider>
+                          {children}
+                        </SupportChatProvider>
                       </ChatProvider>
                     </TechnicalScannerProvider>
                   </AIScannerProvider>

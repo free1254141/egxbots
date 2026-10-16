@@ -70,7 +70,7 @@ class TelegramNotifyRoutingTests(unittest.TestCase):
             self.assertTrue(_notify_free_telegram("weekly summary", "weekly_performance_report_free"))
         message = deliver.call_args.args[0]
         self.assertTrue(message.rstrip().endswith("/pricing"))
-        self.assertIn("كل التوصيات وتعديلاتها والتفاصيل الكاملة تصل فوراً إلى قناة VIP", message)
+        self.assertIn("كل الإشارات الفنية وتعديلاتها والتفاصيل الكاملة تصل فوراً إلى قناة المشتركين", message)
 
 
 if __name__ == "__main__":

@@ -84,8 +84,8 @@ export default function FAQClient() {
             ar: "ما الأسواق التي يدعمها EGX Bots؟",
           },
           a: {
-            en: "We focus primarily on the Egyptian Exchange (EGX), with models trained exclusively on Egyptian market data and behavior. The platform also supports viewing selected US stocks for comparison, but the AI signals and recommendations are specifically engineered for EGX market behavior.",
-            ar: "نركز بشكل أساسي على البورصة المصرية (EGX) مع تدريب النماذج حصرياً على بيانات وأنماط السوق المصري. يدعم النظام أيضاً عرض أسهم أمريكية مختارة للمقارنة، لكن إشارات الذكاء الاصطناعي والتوصيات مصممة خصيصاً لسلوك سوق EGX.",
+            en: "We focus primarily on the Egyptian Exchange (EGX), with models trained exclusively on Egyptian market data and behavior. The platform also supports viewing selected US stocks for comparison, but the AI signals and technical models are specifically engineered for EGX market behavior.",
+            ar: "نركز بشكل أساسي على البورصة المصرية (EGX) مع تدريب النماذج حصرياً على بيانات وأنماط السوق المصري. يدعم النظام أيضاً عرض أسهم أمريكية مختارة للمقارنة، لكن إشارات الذكاء الاصطناعي والنماذج الفنية مصممة خصيصاً لسلوك سوق EGX.",
           },
         },
         {
