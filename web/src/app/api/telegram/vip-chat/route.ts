@@ -388,6 +388,25 @@ export async function POST(req: NextRequest) {
             );
         }
 
+        // Maintenance / Under-Development Mode (enabled by default unless AI_CHAT_MAINTENANCE_MODE === "false")
+        if (process.env.AI_CHAT_MAINTENANCE_MODE !== "false" && !process.env.JEST_WORKER_ID && process.env.NODE_ENV !== "test") {
+            return NextResponse.json({
+                ok: true,
+                reply:
+                    "🛠️ **المساعد الذكي (ARTORO AI) تحت التطوير والتحديث حالياً**\n\n" +
+                    "نقوم حالياً بإجراء تحديثات وترقية لمحرك الذكاء الاصطناعي لتحسين سرعة ودقة التحليل الفني والمالي.\n" +
+                    "✅ **لم يتم خصم أي سؤال من رصيدك.** سيعود أرتورو للعمل بكامل طاقته قريباً جداً!",
+                tables: [],
+                linked: Boolean(userInfo.linkedUserId),
+                display_name: userInfo.displayName,
+                is_pro: userInfo.isPro,
+                used: userInfo.used,
+                limit: userInfo.limit,
+                remaining: userInfo.remaining,
+                period: userInfo.period,
+            });
+        }
+
         // Atomically consume 1 quota unit
         let newUsed = userInfo.used + 1;
         if (!userInfo.isAdmin && userInfo.linkedUserId) {

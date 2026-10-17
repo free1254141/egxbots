@@ -495,7 +495,61 @@ export async function POST(req: NextRequest) {
             });
         }
 
+        // Maintenance / Under-Development Mode (enabled by default unless AI_CHAT_MAINTENANCE_MODE === "false" or running Jest tests)
+        const isMaintenanceMode =
+            process.env.AI_CHAT_MAINTENANCE_MODE !== "false" &&
+            !process.env.JEST_WORKER_ID &&
+            process.env.NODE_ENV !== "test";
 
+        if (isMaintenanceMode) {
+            const maintenanceReply =
+                "🛠️ **المساعد الذكي (ARTORO AI) تحت التطوير والتحديث حالياً**\n\n" +
+                "نقوم حالياً بإجراء تحديثات وترقية لمحرك الذكاء الاصطناعي لتحسين سرعة ودقة التحليل الفني والمالي للبورصة المصرية.\n\n" +
+                "✅ **لن يتم خصم هذه الرسالة من رصيدك اليومي أو الشهري.**\n" +
+                "📊 يمكنك في الوقت الحالي استخدام **الماسح الذكي**، **التوصيات الفنية**، و**الشارت اللحظي** في المنصة بشكل طبيعي حتى انتهاء التحديث قريباً جداً.";
+
+            const activeSessionId = inputSessionId || crypto.randomUUID();
+            if (stream) {
+                const encoder = new TextEncoder();
+                const readable = new ReadableStream({
+                    start(controller) {
+                        const sendEvent = (payload: Record<string, unknown>) => {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+                        };
+                        sendEvent({ type: "token", content: maintenanceReply });
+                        sendEvent({
+                            type: "done",
+                            reply: maintenanceReply,
+                            session_id: activeSessionId,
+                            remaining_quota: userIsPro ? 99 : 5,
+                            suggested_buttons: [],
+                            tables: [],
+                            chart_actions: [],
+                            latency_ms: 15,
+                        });
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        controller.close();
+                    },
+                });
+                return new Response(readable, {
+                    headers: {
+                        "Content-Type": "text/event-stream; charset=utf-8",
+                        "Cache-Control": "no-cache, no-transform",
+                        Connection: "keep-alive",
+                    },
+                });
+            }
+
+            return NextResponse.json({
+                reply: maintenanceReply,
+                tables: [],
+                chart_actions: [],
+                session_id: activeSessionId,
+                remaining_quota: userIsPro ? 99 : 5,
+                suggested_buttons: [],
+                latency_ms: 15,
+            });
+        }
 
         if (clientMessageId) {
             const { data: existing } = await supabase.from("ai_chat_idempotency").select("status,response,updated_at,created_at").eq("user_id", userId).eq("client_message_id", clientMessageId).maybeSingle();

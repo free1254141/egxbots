@@ -456,6 +456,21 @@ export default function ChatWidget() {
                         </div>
                     ) : (
                         <>
+                            {/* Under Development / Maintenance Banner */}
+                            <div className="max-w-3xl mx-auto w-full p-4 rounded-2xl bg-amber-500/15 border-2 border-amber-500 text-right dir-rtl mb-4 shadow-sm animate-in fade-in">
+                                <div className="flex items-start gap-3">
+                                    <span className="text-2xl shrink-0">🛠️</span>
+                                    <div className="space-y-1 flex-1">
+                                        <h4 className="font-black text-sm sm:text-base text-amber-900 dark:text-amber-300">
+                                            المساعد الذكي (ARTORO AI) تحت التطوير والتحديث حالياً
+                                        </h4>
+                                        <p className="text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 font-semibold leading-relaxed">
+                                            نقوم حالياً بإجراء تحديثات وترقية لمحرك الذكاء الاصطناعي لتحسين سرعة ودقة التحليل الفني والمالي. سيعود الشات للعمل بكامل طاقته قريباً جداً، ولن يتم خصم أي رسائل من رصيدك خلال فترة التحديث. يمكنك تصفح الماسح الذكي والتوصيات والشارت بشكل طبيعي.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
                             {remainingQuota === 1 && (
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
