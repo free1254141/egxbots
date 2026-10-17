@@ -332,6 +332,12 @@ def format_market_indices(data: Dict) -> str:
     return response
 
 
+@router.get("/health")
+def chatbot_health():
+    """Return a lightweight readiness response for the chatbot router."""
+    return {"status": "ok", "service": "chatbot"}
+
+
 @router.get("/tools")
 def get_available_tools():
     """Return list of available tools for documentation."""
