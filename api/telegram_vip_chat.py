@@ -163,15 +163,17 @@ def build_welcome_panel_html() -> str:
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "أهلاً بك في الغرفة التفاعلية المباشرة لمساعد الذكاء الاصطناعي <b>ARTORO</b> للبورصة المصرية (EGX)!\n"
         "يعمل أرتورو هنا بنفس محرك الموقع الذكي مع حفظ سياق محادثتك وأدوات التحليل اللحظية.\n\n"
-        "⚡ <b>كيف تستخدم أرتورو بسهولة بدون كتابة؟</b>\n"
-        "• <b>🔍 حلل سهم:</b> اضغط الزر ثم اكتب اسم السهم بالعربي (مثل <code>فوري</code>، <code>طلعت مصطفى</code>) أو الكود (<code>COMI</code>).\n"
-        "• <b>⚖️ قارن سهمين:</b> اضغط الزر ثم اكتب اسم السهمين للمقارنة الفنية والمالية.\n"
-        "• <b>🤖 اسأل أرتورو:</b> اضغط الزر واكتب أي سؤال استثماري أو فني بحرية.\n"
-        "• <b>أدوات بضغطة واحدة:</b> ملخص السوق، أسهم التجميع والسيولة، المسح الفني، التوصيات المفتوحة، أخبار السوق، وتحليل محفظتك!\n\n"
+        "💬 <b>نظام الغرفة (دردشة حرة + استدعاء بالأزرار فقط):</b>\n"
+        "• يمكنك التحدث والدردشة مع الأعضاء في الغرفة بحرية تامة دون أن يتدخل البوت أو يخصم من رصيدك.\n"
+        "• <b>لكي يرد عليك أرتورو:</b> يجب الضغط أولاً على أحد أزرار القائمة بالأسفل:\n"
+        "  1️⃣ <b>🔍 حلل سهم:</b> اضغط الزر ثم اكتب اسم السهم بالعربي (مثل <code>فوري</code>، <code>طلعت مصطفى</code>) أو الكود (<code>COMI</code>).\n"
+        "  2️⃣ <b>⚖️ قارن سهمين:</b> اضغط الزر ثم اكتب اسم السهمين للمقارنة الفنية والمالية.\n"
+        "  3️⃣ <b>🤖 اسأل أرتورو:</b> اضغط الزر ثم اكتب سؤالك في الرسالة التالية.\n"
+        "  4️⃣ <b>أدوات فورية بضغطة واحدة:</b> ملخص السوق، أسهم التجميع والسيولة، المسح الفني، التوصيات المفتوحة، أخبار السوق، وتحليل محفظتك!\n\n"
         "🎫 <b>نظام الباقات والرصيد:</b>\n"
         "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
         "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 10 أسهم بمحفظتك.\n\n"
-        "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل للبدء فوراً:</b>"
+        "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل عندما تريد سؤال أرتورو:</b>"
     )
 
 
@@ -1111,22 +1113,13 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         )
         return True
 
-    # Command to show/pin the interactive ARTORO Control Panel
+    # Command to show/pin the interactive ARTORO Control Panel (only explicit slash commands)
     if clean_lower in (
-        "/start",
         "/panel",
         "/vippanel",
         "/artoro",
         "/artoro_panel",
         "/menu",
-        "/help",
-        "ارتورو",
-        "أرتورو",
-        "يا ارتورو",
-        "يا أرتورو",
-        "لوحة التحكم",
-        "الادوات",
-        "الأدوات",
     ):
         panel_msg_id = send_vip_message(
             bot_token=bot_token,
@@ -1145,7 +1138,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             )
         return True
 
-    # Check if user has a pending prompt mode (from clicking 🔍 حلل سهم or ⚖️ قارن سهمين or 🤖 اسأل أرتورو)
+    # Check if user has an active pending prompt mode (from clicking 🔍 حلل سهم, ⚖️ قارن سهمين, or 🤖 اسأل أرتورو)
     pending_mode = get_local_pending_prompt(chat_id, tg_user_id)
     reply_to = msg.get("reply_to_message") or {}
     reply_to_text = str(reply_to.get("text") or "")
@@ -1158,13 +1151,15 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         elif "اسأل أرتورو —" in reply_to_text:
             pending_mode = "free"
 
+    # STRICT RULE: Users can chat freely with each other in the topic!
+    # If the user did NOT click a menu button first (pending_mode is None),
+    # do NOT invoke ARTORO and do NOT deduct any quota.
+    if not pending_mode:
+        return True
+
     set_local_pending_prompt(chat_id, tg_user_id, None)
 
-    # Strip leading "/ask" or "يا أرتورو" if user typed it
-    cleaned_input = re.sub(r"^(?:/ask(?:@\w+)?|يا\s*[اأ]رتورو|[اأ]رتورو)\s*[:،\-]?\s*", "", text, flags=re.IGNORECASE).strip()
-    if not cleaned_input:
-        cleaned_input = text
-
+    cleaned_input = text.strip()
     if pending_mode == "stock":
         if not re.search(r"(?:حلل|تحليل|سعر|رايك|رأيك|مستويات|اخبار|أخبار)", cleaned_input):
             query_text = f"حلل سهم {cleaned_input}"

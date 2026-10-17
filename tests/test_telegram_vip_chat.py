@@ -250,3 +250,42 @@ def test_pro_only_recommendations_gate_for_free_user():
         assert len(alert_calls) == 1
         assert alert_calls[0]["show_alert"] is True
         assert "PRO" in alert_calls[0]["text"]
+
+
+def test_unprompted_group_chat_is_ignored_without_button_press():
+    """
+    Members chatting with each other in Topic 1652 without clicking an ARTORO menu button
+    must NOT trigger ARTORO replies or deduct from their quota.
+    """
+    tg_calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        tg_calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 999}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        return {"ok": True}
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        # Ensure user has no pending prompt
+        set_local_pending_prompt(-1002083067817, 556677, None)
+
+        msg_data = {
+            "message": {
+                "message_id": 205,
+                "chat": {"id": -1002083067817, "type": "supergroup"},
+                "message_thread_id": 1652,
+                "from": {"id": 556677, "first_name": "Omar"},
+                "text": "يا جماعة حد اشترى في فوري النهارده؟ إيه رأيكم في السوق؟",
+            }
+        }
+        handled = handle_vip_chat_update(msg_data, "TEST_TOKEN")
+        assert handled is True
+        # Zero web API calls (no quota deducted) and zero Telegram messages sent by ARTORO
+        assert len(web_calls) == 0
+        assert len(tg_calls) == 0
+
