@@ -371,6 +371,9 @@ def send_vip_message(
             payload["reply_markup"] = reply_markup
 
         res = _call_telegram_api(bot_token, "sendMessage", payload)
+        if not res.get("ok") and "message_thread_id" in payload and "thread not found" in str(res.get("description") or "").lower():
+            payload.pop("message_thread_id", None)
+            res = _call_telegram_api(bot_token, "sendMessage", payload)
         if not res.get("ok"):
             # Fallback without HTML parse_mode if entities failed
             plain_payload = dict(payload)
@@ -609,10 +612,19 @@ def is_vip_chat_update(data: Dict[str, Any]) -> bool:
 
     # Check if inside the configured group + topic (e.g., -1002083067817 thread 1652)
     if chat_id_str == target_group:
+        if thread_id == 153:
+            return False
         if target_topic is not None and thread_id == target_topic:
             return True
-        # Also allow admin command /vippanel or /artoro_panel to initialize topic
-        if text.lower().startswith(("/vippanel", "/artoro_panel")):
+        from_id = int((msg.get("from") or {}).get("id") or 0)
+        if from_id and get_local_pending_prompt(chat_id_str, from_id):
+            return True
+        reply_to = msg.get("reply_to_message") or {}
+        reply_text = str(reply_to.get("text") or "")
+        if "تحليل سهم فوري —" in reply_text or "مقارنة الأسهم —" in reply_text or "اسأل أرتورو —" in reply_text:
+            return True
+        # Also allow commands to open panel or test quota in general topic
+        if text.lower().startswith(("/vippanel", "/artoro_panel", "/panel", "/artoro", "/menu", "/test_")):
             return True
         return False
 
