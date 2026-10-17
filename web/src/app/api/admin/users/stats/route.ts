@@ -167,15 +167,29 @@ export async function GET(req: NextRequest) {
     const daysToLookBack = Math.max(Math.ceil((now.getTime() - earliestTime) / (1000 * 60 * 60 * 24)), 29);
     const signupsByDay: Record<string, number> = {};
     const proSignupsByDay: Record<string, number> = {};
+    const toCairoDate = (val: Date | string | number): string => {
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Africa/Cairo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(val));
+      } catch {
+        const d = new Date(val);
+        return new Date(d.getTime() + 3 * 60 * 60 * 1000).toISOString().split("T")[0];
+      }
+    };
+
     const recsByDay: Record<string, number> = {};
     for (let i = daysToLookBack; i >= 0; i -= 1) {
-      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      const date = toCairoDate(now.getTime() - i * 24 * 60 * 60 * 1000);
       signupsByDay[date] = 0;
       proSignupsByDay[date] = 0;
       recsByDay[date] = 0;
     }
     allProfiles.forEach((profile: any) => {
-      const date = new Date(profile.created_at).toISOString().split("T")[0];
+      const date = toCairoDate(profile.created_at);
       if (date in signupsByDay) signupsByDay[date] += 1;
     });
 
@@ -184,7 +198,7 @@ export async function GET(req: NextRequest) {
       if (adminUserIds.has(String(sub.user_id))) return;
       const subDateStr = sub.current_period_start || sub.created_at;
       if (subDateStr) {
-        const date = new Date(subDateStr).toISOString().split("T")[0];
+        const date = toCairoDate(subDateStr);
         if (date in proSignupsByDay) proSignupsByDay[date] += 1;
       }
     });
@@ -193,7 +207,7 @@ export async function GET(req: NextRequest) {
     const scanResults = scanResultsRes?.data || [];
     scanResults.forEach((scan: any) => {
       if (scan.created_at) {
-        const date = new Date(scan.created_at).toISOString().split("T")[0];
+        const date = toCairoDate(scan.created_at);
         if (date in recsByDay) recsByDay[date] += 1;
       }
     });

@@ -528,7 +528,7 @@ class TelegramBot:
                     {
                         "offset": self._poll_offset,
                         "timeout": 30,
-                        "allowed_updates": ["message"],
+                        "allowed_updates": ["message", "callback_query"],
                     },
                     timeout=35,
                 )
@@ -537,6 +537,10 @@ class TelegramBot:
                     updates = result.get("result", [])
                     for update in updates:
                         self._poll_offset = update["update_id"] + 1
+                        from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
+                        if is_vip_chat_update(update):
+                            handle_vip_chat_update(update, self.token)
+                            continue
                         msg = update.get("message", {})
                         text = msg.get("text", "")
                         chat_id = msg.get("chat", {}).get("id")
@@ -559,6 +563,12 @@ class TelegramBot:
         try:
             uid = data.get("update_id", "?")
             self._log(f"Processing update: {uid}")
+            from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
+            if is_vip_chat_update(data):
+                handle_vip_chat_update(data, self.token)
+                self._log(f"Processed VIP chat update: {uid}")
+                return
+
             msg = data.get("message", {})
             text = msg.get("text", "")
             chat_id = msg.get("chat", {}).get("id")
@@ -946,7 +956,13 @@ class TelegramBot:
                 # Cap at 10 attempts — if HF blocks Telegram, run in outbound-only mode
                 for attempt in range(1, 11):
                     self._log(f"Webhook attempt {attempt}...")
-                    r = self._call_api("setWebhook", {"url": hook})
+                    r = self._call_api(
+                        "setWebhook",
+                        {
+                            "url": hook,
+                            "allowed_updates": ["message", "callback_query", "chat_member", "my_chat_member"],
+                        },
+                    )
                     if r.get("ok"):
                         self._log("SUCCESS: Webhook set! ✅")
                         self._setup_bot_menu()

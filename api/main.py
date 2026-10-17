@@ -297,7 +297,7 @@ async def startup_event():
 
                     json={
                         "url": support_hook,
-                        "allowed_updates": ["message", "chat_member", "my_chat_member"],
+                        "allowed_updates": ["message", "callback_query", "chat_member", "my_chat_member"],
                     },
 
                     timeout=10
@@ -666,7 +666,7 @@ async def tg_set_webhook_from_local(request: Request):
 
             json={
                 "url": support_hook,
-                "allowed_updates": ["message", "chat_member", "my_chat_member"],
+                "allowed_updates": ["message", "callback_query", "chat_member", "my_chat_member"],
             },
 
             timeout=30,
@@ -715,7 +715,10 @@ async def tg_set_webhook_from_local(request: Request):
 
             f"https://api.telegram.org/bot{bridge.token}/setWebhook",
 
-            json={"url": hook},
+            json={
+                "url": hook,
+                "allowed_updates": ["message", "callback_query", "chat_member", "my_chat_member"],
+            },
 
             timeout=30,
 

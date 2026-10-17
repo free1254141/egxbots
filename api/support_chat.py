@@ -64,6 +64,9 @@ def load_admin_chat_id() -> Optional[int]:
     return 5149631436
 
 def save_admin_chat_id(chat_id: int):
+    # Never overwrite admin chat ID with a group/channel ID (negative in Telegram)
+    if not chat_id or int(chat_id) < 0:
+        return
     try:
         with open(CHAT_ID_FILE, "w") as f:
             f.write(str(chat_id))
@@ -160,7 +163,13 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
     return saved_msg
 
 def handle_telegram_update(data: dict):
-    # 1. Handle Callback Query (from Inline Keyboard)
+    # 0. Route VIP Chat Room / Topic updates (https://t.me/egxbots/1652)
+    from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
+    if is_vip_chat_update(data):
+        handle_vip_chat_update(data, get_token())
+        return
+
+    # 1. Handle Callback Query (from Admin Inline Keyboard)
     if data.get("callback_query"):
         cb = data["callback_query"]
         cb_id = cb.get("id")
@@ -172,7 +181,7 @@ def handle_telegram_update(data: dict):
         if cb_id:
             answer_callback_query(cb_id, "جاري تحديث البيانات...")
             
-        if not chat_id:
+        if not chat_id or int(chat_id) < 0:
             return
             
         save_admin_chat_id(chat_id)
@@ -211,7 +220,8 @@ def handle_telegram_update(data: dict):
     chat_id = chat.get("id")
     text = (message.get("text") or "").strip()
     
-    if not chat_id:
+    # Do not run Admin AI assistant in group/channel chats
+    if not chat_id or int(chat_id) < 0:
         return
         
     # Always register / update admin chat ID
