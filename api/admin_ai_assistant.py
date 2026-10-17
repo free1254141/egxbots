@@ -20,11 +20,18 @@ from api.support_analytics import (
 )
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_MODEL = "deepseek-chat"
+DEEPSEEK_MODEL = "deepseek-flash"
+EXPERIENTIAL_API_URL = "https://api.experientiallabs.ai/v1/chat/completions"
+EXPERIENTIAL_MODEL = "deepseek-v4.1-flash-uncensored"
 
 
 def _get_deepseek_key() -> str:
     key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or ""
+    return key.strip().strip('"').strip("'")
+
+
+def _get_experiential_key() -> str:
+    key = os.getenv("EXPLABS_API_KEY") or os.getenv("EXPERIENTIAL_API_KEY") or ""
     return key.strip().strip('"').strip("'")
 
 
@@ -316,10 +323,37 @@ ADMIN_SYSTEM_PROMPT = """أنت "ARTORO Admin Assistant" — المساعد ال
 """
 
 
+def _call_llm_with_fallback(payload_base: Dict[str, Any], exp_key: str, ds_key: str) -> Dict[str, Any]:
+    """Calls fast deepseek-v4.1-flash-uncensored first; falls back to official deepseek-flash on any error."""
+    providers = []
+    if exp_key:
+        providers.append((EXPERIENTIAL_API_URL, EXPERIENTIAL_MODEL, exp_key))
+    if ds_key:
+        providers.append((DEEPSEEK_API_URL, DEEPSEEK_MODEL, ds_key))
+
+    last_err: Optional[Exception] = None
+    for url, model_name, token in providers:
+        payload = {**payload_base, "model": model_name}
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=req_data,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            last_err = exc
+            print(f"[ADMIN_AI] Model {model_name} failed ({exc}), trying fallback if available...")
+    raise RuntimeError(str(last_err or "No AI provider available"))
+
+
 def ask_admin_ai(user_message: str, chat_id: Optional[int] = None) -> str:
-    """Interacts with DeepSeek using OpenAI-compatible function calling to answer admin queries."""
-    api_key = _get_deepseek_key()
-    if not api_key:
+    """Interacts with DeepSeek V4.1 Flash (with fallback to DeepSeek Flash) to answer admin queries."""
+    ds_key = _get_deepseek_key()
+    exp_key = _get_experiential_key()
+    if not ds_key and not exp_key:
         return "❌ <b>عذراً، مفتاح DeepSeek API غير معرف في السيرفر.</b>"
 
     if chat_id:
@@ -331,7 +365,6 @@ def ask_admin_ai(user_message: str, chat_id: Optional[int] = None) -> str:
     ]
 
     payload: Dict[str, Any] = {
-        "model": DEEPSEEK_MODEL,
         "messages": messages,
         "tools": ADMIN_AI_TOOLS,
         "tool_choice": "auto",
@@ -339,19 +372,11 @@ def ask_admin_ai(user_message: str, chat_id: Optional[int] = None) -> str:
         "max_tokens": 1500,
     }
 
-    req_data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        DEEPSEEK_API_URL,
-        data=req_data,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=35) as resp:
-            resp_body = json.loads(resp.read().decode("utf-8"))
+        resp_body = _call_llm_with_fallback(payload, exp_key, ds_key)
     except Exception as exc:
-        print(f"[ADMIN_AI] DeepSeek initial request failed: {exc}")
-        return f"❌ تعذر الاتصال بـ DeepSeek حالياً: {exc}"
+        print(f"[ADMIN_AI] Initial AI request failed: {exc}")
+        return f"❌ تعذر الاتصال بالمساعد الذكي حالياً: {exc}"
 
     choice = (resp_body.get("choices") or [{}])[0]
     msg = choice.get("message", {})
@@ -385,25 +410,17 @@ def ask_admin_ai(user_message: str, chat_id: Optional[int] = None) -> str:
             "content": tool_result,
         })
 
-    # Call DeepSeek with tool outputs to get the final synthesis
+    # Call AI with tool outputs to get the final synthesis
     synthesis_payload: Dict[str, Any] = {
-        "model": DEEPSEEK_MODEL,
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 1500,
     }
-    synth_data = json.dumps(synthesis_payload).encode("utf-8")
-    synth_req = urllib.request.Request(
-        DEEPSEEK_API_URL,
-        data=synth_data,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
 
     try:
-        with urllib.request.urlopen(synth_req, timeout=35) as resp:
-            final_body = json.loads(resp.read().decode("utf-8"))
-            final_choice = (final_body.get("choices") or [{}])[0]
-            return final_choice.get("message", {}).get("content") or "✅ تم استلام البيانات وتحليلها."
+        final_body = _call_llm_with_fallback(synthesis_payload, exp_key, ds_key)
+        final_choice = (final_body.get("choices") or [{}])[0]
+        return final_choice.get("message", {}).get("content") or "✅ تم استلام البيانات وتحليلها."
     except Exception as exc:
-        print(f"[ADMIN_AI] DeepSeek synthesis request failed: {exc}")
-        return f"❌ تعذر استكمال توليد التقرير من DeepSeek: {exc}"
+        print(f"[ADMIN_AI] Synthesis request failed: {exc}")
+        return f"❌ تعذر استكمال توليد التقرير: {exc}"

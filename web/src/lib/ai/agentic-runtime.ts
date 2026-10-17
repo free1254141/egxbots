@@ -266,10 +266,10 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             (!isTestEnv && process.env.AI_CHAT_PRIMARY_ENGINE === LUNA_DECISIONS_MODEL && Boolean(experientialKey)));
     const selectedModel = AI_CONFIG.models.response.allowedUserModels.includes(input.requestedModel || "")
         ? input.requestedModel! : AI_CONFIG.models.response.default;
-    const useExperientialChat = !hasImages && selectedModel === "deepseek-v4.1-flash-uncensored" && Boolean(experientialKey);
+    let useExperientialChat = !hasImages && selectedModel === "deepseek-v4.1-flash-uncensored" && Boolean(experientialKey);
     // Legacy UI selections remain accepted; the provider retired these aliases.
     // When an image is attached while Luna Decisions or V4.1 Uncensored is selected in the UI, DeepSeek handles vision + synthesis using deepseek-flash.
-    const model = useExperientialChat
+    let model = useExperientialChat
         ? "deepseek-v4.1-flash-uncensored"
         : ["deepseek-chat", "deepseek-reasoner", "deepseek-v4.1-flash-uncensored", LUNA_DECISIONS_MODEL].includes(selectedModel)
         ? "deepseek-flash"
@@ -340,7 +340,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     let providerCalls = 0, toolCalls = 0, draft = "", origin = "llm";
     let finishFailure: string | null = null;
     let social = false, executedRounds = 0;
-    const request = async (body: any, stage = "chat") => {
+    const request = async (body: any, stage = "chat"): Promise<any> => {
         if (++providerCalls > AGENTIC_BUDGET.providerCalls) throw new Error("MODEL_CALL_BUDGET_EXHAUSTED");
         const activeProvider = useExperientialChat ? "experiential" : "deepseek";
         const activeUrl = useExperientialChat ? AI_CONFIG.api.experientialChatBaseUrl : AI_CONFIG.api.deepseekBaseUrl;
@@ -348,18 +348,29 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         const capture = accounting.start(activeProvider, model, stage);
         const requestBody = { model, temperature: 0.2, thinking: { type: stage !== "review" && selectedModel === "deepseek-reasoner" ? "enabled" : "disabled" }, ...body };
         options.diagnosticCapture?.("provider_request", {stage, body: requestBody});
-        const response = await executionFetch(activeUrl, { method: "POST",
-            headers: { Authorization: `Bearer ${activeKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify(requestBody) });
-        if (!response.ok) { options.diagnosticCapture?.("provider_http_error", {stage, status: response.status}); throw new Error(`MODEL_HTTP_${response.status}`); }
-        const json = await awaitExecution(response.json());
-        capture(json);
-        options.diagnosticCapture?.("provider_response", {stage, model: json.model || model, choices: json.choices, usage: json.usage});
-        const choice = json.choices?.[0];
-        if (!choice?.message) throw new Error("INVALID_MODEL_RESPONSE");
-        if (choice.finish_reason === "length" && !choice.message.tool_calls?.length) return { ...choice.message, incomplete: true };
-        if (choice.finish_reason && !["stop", "tool_calls"].includes(choice.finish_reason)) throw new Error("INCOMPLETE_MODEL_RESPONSE");
-        return choice.message;
+        try {
+            const response = await executionFetch(activeUrl, { method: "POST",
+                headers: { Authorization: `Bearer ${activeKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody) });
+            if (!response.ok) { options.diagnosticCapture?.("provider_http_error", {stage, status: response.status}); throw new Error(`MODEL_HTTP_${response.status}`); }
+            const json = await awaitExecution(response.json());
+            capture(json);
+            options.diagnosticCapture?.("provider_response", {stage, model: json.model || model, choices: json.choices, usage: json.usage});
+            const choice = json.choices?.[0];
+            if (!choice?.message) throw new Error("INVALID_MODEL_RESPONSE");
+            if (choice.finish_reason === "length" && !choice.message.tool_calls?.length) return { ...choice.message, incomplete: true };
+            if (choice.finish_reason && !["stop", "tool_calls"].includes(choice.finish_reason)) throw new Error("INCOMPLETE_MODEL_RESPONSE");
+            return choice.message;
+        } catch (err: any) {
+            if (useExperientialChat && key) {
+                console.warn(`[Agentic] Experiential V4.1 failed (${err?.message || "unknown"}); falling back to official DeepSeek Flash`);
+                useExperientialChat = false;
+                model = "deepseek-flash";
+                providerCalls = Math.max(0, providerCalls - 1);
+                return request(body, stage);
+            }
+            throw err;
+        }
     };
     const cache = new Map<string, any>();
     const chartHistoryCache: ChartHistoryCache = new Map();
