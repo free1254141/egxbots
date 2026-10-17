@@ -20,7 +20,7 @@ export function getDeepSeekApiKey(): string | null {
 }
 
 export function getExperientialApiKey(): string | null {
-    const key = process.env.EXPERIENTIAL_API_KEY?.trim();
+    const key = (process.env.EXPLABS_API_KEY || process.env.EXPERIENTIAL_API_KEY)?.trim();
     if (!key || PLACEHOLDER_VALUES.has(key.toLowerCase())) return null;
     return key;
 }

@@ -11,6 +11,7 @@ export const AI_CONFIG = {
       allowedUserModels: [
         "deepseek-chat",
         "deepseek-reasoner",
+        "deepseek-v4.1-flash-uncensored",
         "gpt-6-luna-decisions"
       ],
       vision: ["deepseek-flash"],
@@ -32,6 +33,7 @@ export const AI_CONFIG = {
   },
   api: {
     deepseekBaseUrl: "https://api.deepseek.com/chat/completions",
+    experientialChatBaseUrl: "https://api.experientiallabs.ai/v1/chat/completions",
     nvidiaBaseUrl: "https://integrate.api.nvidia.com/v1/chat/completions",
   },
   tools: {

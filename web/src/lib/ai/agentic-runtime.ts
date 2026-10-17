@@ -266,9 +266,14 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             (!isTestEnv && process.env.AI_CHAT_PRIMARY_ENGINE === LUNA_DECISIONS_MODEL && Boolean(experientialKey)));
     const selectedModel = AI_CONFIG.models.response.allowedUserModels.includes(input.requestedModel || "")
         ? input.requestedModel! : AI_CONFIG.models.response.default;
+    const useExperientialChat = !hasImages && selectedModel === "deepseek-v4.1-flash-uncensored" && Boolean(experientialKey);
     // Legacy UI selections remain accepted; the provider retired these aliases.
-    // When an image is attached while Luna Decisions is selected in the UI, DeepSeek handles vision + synthesis using deepseek-flash.
-    const model = ["deepseek-chat", "deepseek-reasoner", LUNA_DECISIONS_MODEL].includes(selectedModel) ? "deepseek-flash" : selectedModel;
+    // When an image is attached while Luna Decisions or V4.1 Uncensored is selected in the UI, DeepSeek handles vision + synthesis using deepseek-flash.
+    const model = useExperientialChat
+        ? "deepseek-v4.1-flash-uncensored"
+        : ["deepseek-chat", "deepseek-reasoner", "deepseek-v4.1-flash-uncensored", LUNA_DECISIONS_MODEL].includes(selectedModel)
+        ? "deepseek-flash"
+        : selectedModel;
     const client = executionSupabase(input.supabase);
     const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
     const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink);
@@ -337,11 +342,14 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     let social = false, executedRounds = 0;
     const request = async (body: any, stage = "chat") => {
         if (++providerCalls > AGENTIC_BUDGET.providerCalls) throw new Error("MODEL_CALL_BUDGET_EXHAUSTED");
-        const capture = accounting.start("deepseek", model, stage);
+        const activeProvider = useExperientialChat ? "experiential" : "deepseek";
+        const activeUrl = useExperientialChat ? AI_CONFIG.api.experientialChatBaseUrl : AI_CONFIG.api.deepseekBaseUrl;
+        const activeKey = useExperientialChat ? experientialKey : key;
+        const capture = accounting.start(activeProvider, model, stage);
         const requestBody = { model, temperature: 0.2, thinking: { type: stage !== "review" && selectedModel === "deepseek-reasoner" ? "enabled" : "disabled" }, ...body };
         options.diagnosticCapture?.("provider_request", {stage, body: requestBody});
-        const response = await executionFetch(AI_CONFIG.api.deepseekBaseUrl, { method: "POST",
-            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        const response = await executionFetch(activeUrl, { method: "POST",
+            headers: { Authorization: `Bearer ${activeKey}`, "Content-Type": "application/json" },
             body: JSON.stringify(requestBody) });
         if (!response.ok) { options.diagnosticCapture?.("provider_http_error", {stage, status: response.status}); throw new Error(`MODEL_HTTP_${response.status}`); }
         const json = await awaitExecution(response.json());
