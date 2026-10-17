@@ -5,6 +5,12 @@ import threading
 import time
 from typing import Optional, List, Dict
 from api.stock_ai import _init_supabase, supabase as _supabase
+from api.support_analytics import (
+    get_registrations_summary,
+    get_activity_summary,
+    get_chat_summary,
+    get_comprehensive_report
+)
 
 def get_token() -> str:
     return os.getenv("SUPPORT_BOT_TOKEN", "").strip()
@@ -15,8 +21,34 @@ def __getattr__(name: str):
         print("[SUPPORT_CHAT] SUPPORT_BOT_TOKEN is configured")
         return token
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 CHAT_ID_FILE = os.path.join(os.path.dirname(__file__), "support_admin_chat_id.txt")
 TELEGRAM_RELAY_URL = os.getenv("TELEGRAM_RELAY_URL", "https://api.telegram.org").rstrip("/")
+
+ADMIN_REPLY_KEYBOARD = {
+    "keyboard": [
+        [{"text": "👥 المسجلين (اليوم وأمس)"}, {"text": "💬 مستخدمين الشات"}],
+        [{"text": "⚡ نشاط المستخدمين"}, {"text": "📊 تقرير شامل"}]
+    ],
+    "resize_keyboard": True,
+    "is_persistent": True
+}
+
+ADMIN_INLINE_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "👥 المسجلين", "callback_data": "cmd_users"},
+            {"text": "💬 الشات", "callback_data": "cmd_chats"}
+        ],
+        [
+            {"text": "⚡ النشاط", "callback_data": "cmd_activity"},
+            {"text": "📊 تقرير شامل", "callback_data": "cmd_stats"}
+        ],
+        [
+            {"text": "🔄 تحديث الأرقام الآن", "callback_data": "cmd_refresh"}
+        ]
+    ]
+}
 
 def load_admin_chat_id() -> Optional[int]:
     env_chat = os.getenv("SUPPORT_ADMIN_CHAT_ID") or os.getenv("ADMIN_CHAT_ID")
@@ -39,18 +71,47 @@ def save_admin_chat_id(chat_id: int):
     except Exception as e:
         print(f"[SUPPORT_CHAT] Error saving admin chat ID: {e}")
 
-def send_telegram_message(chat_id: int, text: str) -> bool:
+def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None) -> bool:
     url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML"
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         resp = requests.post(url, json=payload, timeout=10)
         return resp.json().get("ok", False)
     except Exception as e:
         print(f"[SUPPORT_CHAT] Telegram send error: {e}")
+        return False
+
+def answer_callback_query(callback_query_id: str, text: Optional[str] = None):
+    url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"[SUPPORT_CHAT] Error answering callback: {e}")
+
+def edit_telegram_message(chat_id: int, message_id: int, text: str, reply_markup: Optional[dict] = None) -> bool:
+    url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        resp = requests.post(url, json=payload, timeout=10)
+        return resp.json().get("ok", False)
+    except Exception as e:
+        print(f"[SUPPORT_CHAT] Telegram edit error: {e}")
         return False
 
 def handle_customer_message(session_id: str, content: str, user_name: Optional[str] = None):
@@ -88,34 +149,67 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
     return saved_msg
 
 def handle_telegram_update(data: dict):
+    # 1. Handle Callback Query (from Inline Keyboard)
     if data.get("callback_query"):
+        cb = data["callback_query"]
+        cb_id = cb.get("id")
+        cb_data = cb.get("data", "")
+        message = cb.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+        msg_id = message.get("message_id")
+        
+        if cb_id:
+            answer_callback_query(cb_id, "جاري تحديث البيانات...")
+            
+        if not chat_id:
+            return
+            
+        save_admin_chat_id(chat_id)
+        
+        report_text = ""
+        if cb_data == "cmd_users":
+            report_text = get_registrations_summary()
+        elif cb_data == "cmd_chats":
+            report_text = get_chat_summary()
+        elif cb_data == "cmd_activity":
+            report_text = get_activity_summary()
+        elif cb_data in ("cmd_stats", "cmd_refresh"):
+            report_text = get_comprehensive_report()
+            
+        if report_text:
+            if msg_id:
+                edited = edit_telegram_message(chat_id, msg_id, report_text, reply_markup=ADMIN_INLINE_KEYBOARD)
+                if not edited:
+                    send_telegram_message(chat_id, report_text, reply_markup=ADMIN_INLINE_KEYBOARD)
+            else:
+                send_telegram_message(chat_id, report_text, reply_markup=ADMIN_INLINE_KEYBOARD)
         return
+
+    # 2. Handle Member updates (Pro channel invites)
     if data.get("chat_member") or data.get("my_chat_member"):
         from api.telegram_pro_invites import handle_chat_member_update
         handle_chat_member_update(data)
         return
+
+    # 3. Handle Regular Messages
     message = data.get("message", {})
     if not message:
         return
         
     chat = message.get("chat", {})
     chat_id = chat.get("id")
-    text = message.get("text", "")
+    text = (message.get("text") or "").strip()
     
-    if not chat_id or not text:
+    if not chat_id:
         return
         
-    # Handle /start command to register admin
-    if text.strip().startswith("/start"):
-        save_admin_chat_id(chat_id)
-        send_telegram_message(chat_id, "✅ <b>Support Bot Activated!</b>\n\nYou will now receive customer chat messages here. Reply directly to any message to send a response back to the customer on the website.")
-        return
-        
-    # Handle reply to a forwarded message
+    # Always register / update admin chat ID
+    save_admin_chat_id(chat_id)
+
+    # Check if this is a reply to a forwarded customer support message ticket
     reply_to = message.get("reply_to_message", {})
-    if reply_to:
-        reply_text = reply_to.get("text", "")
-        # Extract session ID using regex
+    if reply_to and text:
+        reply_text = reply_to.get("text", "") or reply_to.get("caption", "")
         match = re.search(r'Session:\s*([a-zA-Z0-9\-]+)', reply_text)
         if match:
             session_id = match.group(1)
@@ -130,6 +224,54 @@ def handle_telegram_update(data: dict):
                 }
                 try:
                     _supabase.table("support_messages").insert(reply_data).execute()
+                    send_telegram_message(chat_id, f"✅ تم إرسال ردك للعميل بنجاح في جلسة <code>{session_id}</code>")
                     print(f"[SUPPORT_CHAT] Saved admin reply for session {session_id}")
                 except Exception as e:
                     print(f"[SUPPORT_CHAT] Error saving admin reply: {e}")
+            return
+
+    clean_cmd = text.lower()
+
+    # Handle /start or /menu or /help
+    if clean_cmd.startswith("/start") or clean_cmd in ("/menu", "/help", "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر"):
+        welcome_text = (
+            "👑 <b>أهلاً بك في بوت إدارة ودعم منصة EGX Bots!</b>\n\n"
+            "هذا البوت مخصص للإدارة لمتابعة المنصة ودعم العملاء:\n"
+            "١. 💬 استقبال رسائل استفسارات العملاء والرد عليها مباشرة.\n"
+            "٢. 📊 متابعة إحصائيات المنصة اللحظية (المسجلين، النشاط، ومستخدمي الشات).\n\n"
+            "👇 <b>اختر من الأدوات والأزرار السريعة أدناه:</b>"
+        )
+        send_telegram_message(chat_id, welcome_text, reply_markup=ADMIN_REPLY_KEYBOARD)
+        send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
+        return
+
+    # Handle Registered Users (اليوم وأمس)
+    if clean_cmd in ("/users", "/registrations", "المسجلين", "المستخدمين", "مسجلين", "👥 المسجلين (اليوم وأمس)", "المسجلين اليوم"):
+        send_telegram_message(chat_id, get_registrations_summary(), reply_markup=ADMIN_INLINE_KEYBOARD)
+        return
+
+    # Handle Activity (النشاط)
+    if clean_cmd in ("/activity", "/active", "النشاط", "نشاط", "تفاعل", "التفاعل", "⚡ نشاط المستخدمين"):
+        send_telegram_message(chat_id, get_activity_summary(), reply_markup=ADMIN_INLINE_KEYBOARD)
+        return
+
+    # Handle Chat Users & Sessions (مستخدمين الشات)
+    if clean_cmd in ("/chat", "/chats", "الشات", "شات", "محادثات", "المحادثات", "💬 مستخدمين الشات"):
+        send_telegram_message(chat_id, get_chat_summary(), reply_markup=ADMIN_INLINE_KEYBOARD)
+        return
+
+    # Handle Comprehensive Report (التقرير الشامل)
+    if clean_cmd in ("/stats", "/report", "تقرير", "إحصائيات", "احصائيات", "التقرير", "الإحصائيات", "📊 تقرير شامل"):
+        send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
+        return
+
+    # Fallback response for unhandled text
+    help_text = (
+        "❓ <b>أمر غير معروف</b>\n\n"
+        "يمكنك استخدام الأزرار أدناه أو كتابة:\n"
+        "• <code>المسجلين</code> — عدد المسجلين اليوم وأمس وتفاصيلهم\n"
+        "• <code>النشاط</code> — عدد المستخدمين النشطين والتفاعلات\n"
+        "• <code>الشات</code> — إحصائيات دعم العملاء وشات الذكاء الاصطناعي\n"
+        "• <code>تقرير</code> — التقرير التنفيذي الشامل"
+    )
+    send_telegram_message(chat_id, help_text, reply_markup=ADMIN_REPLY_KEYBOARD)
