@@ -73,19 +73,30 @@ def save_admin_chat_id(chat_id: int):
 
 def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None) -> bool:
     url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        return resp.json().get("ok", False)
-    except Exception as e:
-        print(f"[SUPPORT_CHAT] Telegram send error: {e}")
-        return False
+    # Chunk text if exceeds Telegram's limit (4096 chars)
+    chunks = [text[i:i + 4000] for i in range(0, max(1, len(text)), 4000)]
+    success = True
+    for idx, chunk in enumerate(chunks):
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "parse_mode": "HTML"
+        }
+        if idx == len(chunks) - 1 and reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            resp = requests.post(url, json=payload, timeout=12)
+            res_json = resp.json()
+            if not res_json.get("ok"):
+                # If HTML parse error or rejected, retry without parse_mode
+                payload.pop("parse_mode", None)
+                resp2 = requests.post(url, json=payload, timeout=12)
+                if not resp2.json().get("ok"):
+                    success = False
+        except Exception as e:
+            print(f"[SUPPORT_CHAT] Telegram send error: {e}")
+            success = False
+    return success
 
 def answer_callback_query(callback_query_id: str, text: Optional[str] = None):
     url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/answerCallbackQuery"
@@ -236,10 +247,11 @@ def handle_telegram_update(data: dict):
     if clean_cmd.startswith("/start") or clean_cmd in ("/menu", "/help", "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر"):
         welcome_text = (
             "👑 <b>أهلاً بك في بوت إدارة ودعم منصة EGX Bots!</b>\n\n"
-            "هذا البوت مخصص للإدارة لمتابعة المنصة ودعم العملاء:\n"
-            "١. 💬 استقبال رسائل استفسارات العملاء والرد عليها مباشرة.\n"
-            "٢. 📊 متابعة إحصائيات المنصة اللحظية (المسجلين، النشاط، ومستخدمي الشات).\n\n"
-            "👇 <b>اختر من الأدوات والأزرار السريعة أدناه:</b>"
+            "هذا البوت مخصص للمؤسس والإدارة للتحكم الكامل والدعم الذكي:\n"
+            "١. 💬 <b>دعم العملاء المباشر:</b> اضغط Reply (رد) على أي تذكرة عميل لإرسال ردك فورياً لشاشته بالموقع.\n"
+            "٢. 🤖 <b>المساعد الذكي (DeepSeek):</b> اكتب أي سؤال أو اطلب تحليلاً للمسجلين، النشاط، استخدام الصفحات، استفسارات الشات، أو تحليل الأسهم وتوصيات السوق.\n"
+            "٣. 📊 <b>تقارير لحظية سريعة:</b> استخدم الأزرار الثابتة بالأسفل لعرض إحصائيات اليوم وأمس بضغطة واحدة.\n\n"
+            "👇 <b>اختر من الأزرار أو اكتب استفسارك مباشرة لديب سيك:</b>"
         )
         send_telegram_message(chat_id, welcome_text, reply_markup=ADMIN_REPLY_KEYBOARD)
         send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
@@ -265,13 +277,16 @@ def handle_telegram_update(data: dict):
         send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
         return
 
-    # Fallback response for unhandled text
-    help_text = (
-        "❓ <b>أمر غير معروف</b>\n\n"
-        "يمكنك استخدام الأزرار أدناه أو كتابة:\n"
-        "• <code>المسجلين</code> — عدد المسجلين اليوم وأمس وتفاصيلهم\n"
-        "• <code>النشاط</code> — عدد المستخدمين النشطين والتفاعلات\n"
-        "• <code>الشات</code> — إحصائيات دعم العملاء وشات الذكاء الاصطناعي\n"
-        "• <code>تقرير</code> — التقرير التنفيذي الشامل"
-    )
-    send_telegram_message(chat_id, help_text, reply_markup=ADMIN_REPLY_KEYBOARD)
+    # Natural language query -> Route to DeepSeek Admin AI Assistant
+    try:
+        from api.admin_ai_assistant import ask_admin_ai
+        ai_reply = ask_admin_ai(text, chat_id=chat_id)
+        send_telegram_message(chat_id, ai_reply, reply_markup=ADMIN_REPLY_KEYBOARD)
+    except Exception as ai_err:
+        print(f"[SUPPORT_CHAT] Admin AI Assistant error: {ai_err}")
+        err_msg = (
+            "⚠️ <b>تعذر معالجة الاستفسار بواسطة مساعد الذكاء الاصطناعي:</b>\n"
+            f"<code>{ai_err}</code>\n\n"
+            "يمكنك استخدام الأزرار أدناه لعرض التقارير اللحظية مباشرة."
+        )
+        send_telegram_message(chat_id, err_msg, reply_markup=ADMIN_REPLY_KEYBOARD)

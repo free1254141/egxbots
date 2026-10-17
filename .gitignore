@@ -29,6 +29,7 @@ backup DATA/
 backups/
 *.sql.gz
 *.dump
+api/support_admin_chat_id.txt
 
 # IDEs
 .vscode/
