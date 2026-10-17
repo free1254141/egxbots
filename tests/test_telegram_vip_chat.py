@@ -289,3 +289,69 @@ def test_unprompted_group_chat_is_ignored_without_button_press():
         assert len(web_calls) == 0
         assert len(tg_calls) == 0
 
+
+def test_private_bot_button_in_topic_and_direct_private_chat():
+    """
+    1. Public topic keyboard has '🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)' button.
+    2. In private chat with @egxbots_bot (chat.type == 'private'), users can type directly
+       or send /start artoro_chat to get the private panel.
+    """
+    topic_kb = build_vip_chat_keyboard(is_private=False)
+    last_row = topic_kb["inline_keyboard"][-1]
+    assert len(last_row) == 1
+    assert "@egxbots_bot" in last_row[0]["text"]
+    assert "https://t.me/egxbots_bot?start=artoro_chat" in last_row[0]["url"]
+
+    tg_calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        tg_calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 888}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        return {
+            "ok": True,
+            "reply": "تحليل خاص لسهم فوري",
+            "tables": [],
+            "display_name": "Sara",
+            "is_pro": True,
+            "used": 1,
+            "limit": 350,
+            "remaining": 349,
+            "period": "monthly",
+        }
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        # 1. /start artoro_chat in private chat
+        start_msg = {
+            "message": {
+                "message_id": 301,
+                "chat": {"id": 990011, "type": "private"},
+                "from": {"id": 990011, "first_name": "Sara"},
+                "text": "/start artoro_chat",
+            }
+        }
+        assert handle_vip_chat_update(start_msg, "TEST_TOKEN") is True
+        assert len(tg_calls) == 1
+        assert "الشات الخاص مع أرتورو" in tg_calls[0][1]["text"]
+
+        # 2. Direct text in private chat without pressing a button first
+        tg_calls.clear()
+        direct_msg = {
+            "message": {
+                "message_id": 302,
+                "chat": {"id": 990011, "type": "private"},
+                "from": {"id": 990011, "first_name": "Sara"},
+                "text": "حلل سهم فوري",
+            }
+        }
+        assert handle_vip_chat_update(direct_msg, "TEST_TOKEN") is True
+        time.sleep(0.25)
+        assert len(web_calls) == 1
+        assert web_calls[0]["message"] == "حلل سهم فوري"
+
+

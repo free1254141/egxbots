@@ -545,7 +545,7 @@ class TelegramBot:
                         text = msg.get("text", "")
                         chat_id = msg.get("chat", {}).get("id")
                         if chat_id and text:
-                            self._dispatch_command(chat_id, text, msg)
+                            self._dispatch_command(chat_id, text, msg, raw_update=update)
                 else:
                     consecutive_errors += 1
                     err = result.get("description", result.get("error", "unknown"))
@@ -575,7 +575,7 @@ class TelegramBot:
             if not chat_id:
                 return
 
-            self._dispatch_command(chat_id, text, msg)
+            self._dispatch_command(chat_id, text, msg, raw_update=data)
             self._log(f"Processed update: {uid}")
         except Exception as e:
             self._log(f"Webhook error: {e}")
@@ -583,13 +583,33 @@ class TelegramBot:
 
             traceback.print_exc()
 
-    def _dispatch_command(self, chat_id: int, text: str, msg: dict = None):
-        """Route text commands to the correct handler."""
+    def _dispatch_command(self, chat_id: int, text: str, msg: dict = None, raw_update: dict = None):
+        """Route text commands or private @egxbots_bot chat messages to the correct handler."""
+        from api.telegram_vip_chat import (
+            handle_vip_chat_update,
+            send_vip_message,
+            build_welcome_panel_html,
+            build_vip_chat_keyboard,
+        )
+
+        is_priv = self._is_private_chat(msg)
+
         if text.startswith("/start"):
             parts = text.split()
             if len(parts) > 1:
                 user_id_param = parts[1].strip()
-                self._handle_start_with_user_id(chat_id, user_id_param, msg)
+                if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip"):
+                    self._handle_start_with_user_id(chat_id, user_id_param, msg)
+                    if is_priv:
+                        send_vip_message(
+                            bot_token=self.token,
+                            chat_id=chat_id,
+                            text=build_welcome_panel_html(is_private=True, chat_id=chat_id),
+                            reply_markup=build_vip_chat_keyboard(is_private=True),
+                        )
+                    return
+            if is_priv and raw_update:
+                handle_vip_chat_update(raw_update, self.token)
             else:
                 self._handle_start(chat_id)
         elif text.startswith("/daily"):
@@ -598,6 +618,9 @@ class TelegramBot:
             self._handle_weekly(chat_id)
         elif text.startswith("/help"):
             self._handle_help(chat_id)
+        elif is_priv and raw_update:
+            # Any other message in private chat with @egxbots_bot goes directly to ARTORO AI!
+            handle_vip_chat_update(raw_update, self.token)
 
     # ── command handlers ─────────────────────────────────────────────
 

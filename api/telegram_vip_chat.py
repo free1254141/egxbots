@@ -63,61 +63,95 @@ def _profile_url() -> str:
     return f"{origin}/profile"
 
 
-def build_vip_chat_keyboard() -> Dict[str, Any]:
+def _private_bot_url() -> str:
+    bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "egxbots_bot").strip().lstrip("@") or "egxbots_bot"
+    return f"https://t.me/{bot_username}?start=artoro_chat"
+
+
+def _topic_url() -> str:
+    return "https://t.me/egxbots/1652"
+
+
+def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
     """Sleek interactive Inline Keyboard for summoning ARTORO and running quick tools."""
-    return {
-        "inline_keyboard": [
+    rows: List[List[Dict[str, Any]]] = [
+        [
+            {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
+            {"text": "🔍 حلل سهم", "callback_data": "vip_ask_stock"},
+            {"text": "⚖️ قارن سهمين", "callback_data": "vip_ask_compare"},
+        ],
+        [
+            {"text": "📈 ملخص السوق وأقوى الأسهم", "callback_data": "vip_tool_market"},
+            {"text": "🧲 أسهم التجميع والسيولة", "callback_data": "vip_tool_accum"},
+        ],
+        [
+            {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
+            {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"},
+            {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
+        ],
+        [
+            {"text": "💼 تحليل محفظتي", "callback_data": "vip_tool_portfolio"},
+            {"text": "📊 رصيدي وخطتي", "callback_data": "vip_my_quota"},
+            {"text": "💎 مميزات PRO", "callback_data": "vip_pricing_dialog"},
+        ],
+    ]
+    if is_private:
+        rows.append(
             [
-                {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
-                {"text": "🔍 حلل سهم", "callback_data": "vip_ask_stock"},
-                {"text": "⚖️ قارن سهمين", "callback_data": "vip_ask_compare"},
-            ],
+                {"text": "💬 غرفة أرتورو العامة", "url": _topic_url()},
+                {"text": "🔗 ربط حساب الموقع", "url": _profile_url()},
+            ]
+        )
+    else:
+        rows.append(
             [
-                {"text": "📈 ملخص السوق وأقوى الأسهم", "callback_data": "vip_tool_market"},
-                {"text": "🧲 أسهم التجميع والسيولة", "callback_data": "vip_tool_accum"},
-            ],
-            [
-                {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
-                {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"},
-                {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
-            ],
-            [
-                {"text": "💼 تحليل محفظتي", "callback_data": "vip_tool_portfolio"},
-                {"text": "📊 رصيدي وخطتي", "callback_data": "vip_my_quota"},
-                {"text": "💎 مميزات PRO", "callback_data": "vip_pricing_dialog"},
-            ],
-        ]
-    }
+                {
+                    "text": "🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)",
+                    "url": _private_bot_url(),
+                }
+            ]
+        )
+    return {"inline_keyboard": rows}
 
 
-def build_pricing_upgrade_keyboard() -> Dict[str, Any]:
+def build_pricing_upgrade_keyboard(is_private: bool = False) -> Dict[str, Any]:
     """Inline keyboard for the Limit Reached / Pro Upgrade dialog card."""
-    return {
-        "inline_keyboard": [
+    rows: List[List[Dict[str, Any]]] = [
+        [
+            {
+                "text": "👑 اشترك في PRO الآن — صفحة التسعير (50 ج.م)",
+                "url": _pricing_url(),
+            }
+        ],
+        [
+            {
+                "text": "💎 عرض مميزات PRO في نافذة خاصة",
+                "callback_data": "vip_pricing_alert",
+            },
+            {
+                "text": "🔗 ربط حساب الموقع",
+                "url": _profile_url(),
+            },
+        ],
+    ]
+    if not is_private:
+        rows.append(
             [
                 {
-                    "text": "👑 اشترك في PRO الآن — صفحة التسعير (50 ج.م)",
-                    "url": _pricing_url(),
+                    "text": "🔒 فتح شات خاص مع أرتورو (@egxbots_bot)",
+                    "url": _private_bot_url(),
                 }
-            ],
-            [
-                {
-                    "text": "💎 عرض مميزات PRO في نافذة خاصة",
-                    "callback_data": "vip_pricing_alert",
-                },
-                {
-                    "text": "🔗 ربط حساب الموقع",
-                    "url": _profile_url(),
-                },
-            ],
-            [
-                {
-                    "text": "🤖 العودة للوحة أدوات أرتورو",
-                    "callback_data": "vip_show_panel",
-                }
-            ],
+            ]
+        )
+    rows.append(
+        [
+            {
+                "text": "🤖 العودة للوحة أدوات أرتورو",
+                "callback_data": "vip_show_panel",
+            }
         ]
-    }
+    )
+    return {"inline_keyboard": rows}
 
 
 # Native Telegram modal popup dialog text (max 200 characters for show_alert=True)
@@ -156,8 +190,25 @@ ACCOUNT_LINK_ALERT_TEXT = (
 )
 
 
-def build_welcome_panel_html() -> str:
-    """Build the main pinned ARTORO VIP Chat Hub message."""
+def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = None) -> str:
+    """Build the main ARTORO VIP Chat Hub message (for public topic or private @egxbots_bot DM)."""
+    if is_private:
+        chat_id_line = f"\n🆔 <b>معرف تليجرام الخاص بك (Chat ID):</b> <code>{chat_id}</code>" if chat_id else ""
+        return (
+            "🤖 <b>الشات الخاص مع أرتورو — @egxbots_bot</b> 👑\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "أهلاً بك في المحادثة الخاصة المباشرة مع المساعد الذكي <b>ARTORO</b> للبورصة المصرية (EGX)!\n"
+            "🔒 <b>خصوصية تامة 100%:</b> جميع أسئلتك، تحليلات أسهمك، ومحفظتك الاستثمارية هنا خاصة بك وحدك ولا يراها أي عضو آخر.\n\n"
+            "💬 <b>كيف تستخدم البوت هنا؟</b>\n"
+            "• <b>اكتب مباشرةً:</b> يمكنك كتابة سؤالك أو اسم أي سهم مباشرة في الرسائل (مثل: <code>حلل فوري</code> أو <code>قارن بين التجاري الدولي وطلعت مصطفى</code>).\n"
+            "• <b>أو استخدم الأزرار السريعة بالأسفل:</b> لتحليل سهم، مقارنة سهمين، ملخص السوق، أسهم التجميع، المسح الفني، التوصيات المفتوحة، وتحليل محفظتك بضغطة واحدة!\n\n"
+            "🎫 <b>نظام الباقات والرصيد:</b>\n"
+            "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
+            "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 10 أسهم بمحفظتك."
+            f"{chat_id_line}\n\n"
+            "👇 <b>اكتب سؤالك الآن أو اختر الأداة المطلوبة من الأزرار بالأسفل:</b>"
+        )
+
     return (
         "🤖 <b>غرفة أرتورو الذكية — EGX Bots VIP Chat</b> 👑\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -165,15 +216,13 @@ def build_welcome_panel_html() -> str:
         "يعمل أرتورو هنا بنفس محرك الموقع الذكي مع حفظ سياق محادثتك وأدوات التحليل اللحظية.\n\n"
         "💬 <b>نظام الغرفة (دردشة حرة + استدعاء بالأزرار فقط):</b>\n"
         "• يمكنك التحدث والدردشة مع الأعضاء في الغرفة بحرية تامة دون أن يتدخل البوت أو يخصم من رصيدك.\n"
-        "• <b>لكي يرد عليك أرتورو:</b> يجب الضغط أولاً على أحد أزرار القائمة بالأسفل:\n"
-        "  1️⃣ <b>🔍 حلل سهم:</b> اضغط الزر ثم اكتب اسم السهم بالعربي (مثل <code>فوري</code>، <code>طلعت مصطفى</code>) أو الكود (<code>COMI</code>).\n"
-        "  2️⃣ <b>⚖️ قارن سهمين:</b> اضغط الزر ثم اكتب اسم السهمين للمقارنة الفنية والمالية.\n"
-        "  3️⃣ <b>🤖 اسأل أرتورو:</b> اضغط الزر ثم اكتب سؤالك في الرسالة التالية.\n"
-        "  4️⃣ <b>أدوات فورية بضغطة واحدة:</b> ملخص السوق، أسهم التجميع والسيولة، المسح الفني، التوصيات المفتوحة، أخبار السوق، وتحليل محفظتك!\n\n"
+        "• <b>لكي يرد عليك أرتورو هنا:</b> اضغط أولاً على أحد أزرار القائمة بالأسفل (مثل <code>🔍 حلل سهم</code> أو <code>🤖 اسأل أرتورو</code> أو أدوات الضغطة الواحدة).\n\n"
+        "🔒 <b>تفضل الخصوصية الكاملة؟ (شات خاص 1-on-1):</b>\n"
+        "• إذا كنت لا ترغب في كتابة أسهمك أو محفظتك في الشات العام، اضغط على زر <b>«🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)»</b> بالأسفل أو راسل البوت <a href=\"https://t.me/egxbots_bot?start=artoro_chat\">@egxbots_bot</a> مباشرة للتحدث معه على انفراد وبخصوصية تامة!\n\n"
         "🎫 <b>نظام الباقات والرصيد:</b>\n"
         "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
         "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 10 أسهم بمحفظتك.\n\n"
-        "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل عندما تريد سؤال أرتورو:</b>"
+        "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل أو افتح الشات الخاص:</b>"
     )
 
 
@@ -751,13 +800,14 @@ def _execute_and_reply_vip_chat(
             return
 
         err_detail = html.escape(str(api_res.get("detail") or api_res.get("error") or "تعذر إكمال التحليل حالياً"))
+        is_priv = str(chat_id) == str(tg_user_id)
         send_vip_message(
             bot_token=bot_token,
             chat_id=chat_id,
             text=f"⚠️ <b>عذراً يا {safe_user}، تعذر إتمام الطلب حالياً:</b>\n<code>{err_detail}</code>",
             message_thread_id=thread_id,
             reply_to_message_id=reply_to_message_id,
-            reply_markup=build_vip_chat_keyboard(),
+            reply_markup=build_vip_chat_keyboard(is_private=is_priv),
         )
         return
 
@@ -773,19 +823,20 @@ def _execute_and_reply_vip_chat(
         period=str(api_res.get("period") or "daily"),
     )
 
+    is_priv = str(chat_id) == str(tg_user_id)
     send_vip_message(
         bot_token=bot_token,
         chat_id=chat_id,
         text=formatted_html,
         message_thread_id=thread_id,
         reply_to_message_id=reply_to_message_id,
-        reply_markup=build_vip_chat_keyboard(),
+        reply_markup=build_vip_chat_keyboard(is_private=is_priv),
     )
 
 
 def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     """
-    Process a Telegram update (callback_query or message) for the VIP Chat room.
+    Process a Telegram update (callback_query or message) for the VIP Chat room or @egxbots_bot private chat.
     Returns True if handled.
     """
     if not bot_token:
@@ -805,6 +856,8 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         msg = cb.get("message") or {}
         chat = msg.get("chat") or {}
         chat_id = chat.get("id")
+        chat_type = str(chat.get("type") or "")
+        is_private = chat_type == "private" or (chat_id is not None and str(chat_id) == str((cb.get("from") or {}).get("id")))
         thread_id = msg.get("message_thread_id")
         from_obj = cb.get("from") or {}
         tg_user_id, user_name = _extract_user_info(from_obj)
@@ -836,9 +889,9 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             send_vip_message(
                 bot_token=bot_token,
                 chat_id=chat_id,
-                text=build_welcome_panel_html(),
+                text=build_welcome_panel_html(is_private=is_private, chat_id=chat_id),
                 message_thread_id=thread_id,
-                reply_markup=build_vip_chat_keyboard(),
+                reply_markup=build_vip_chat_keyboard(is_private=is_private),
             )
             return True
 
@@ -1037,7 +1090,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
 
         return False
 
-    # 2. Handle Regular Messages in the VIP Chat Topic
+    # 2. Handle Regular Messages in the VIP Chat Topic or Private Chat with @egxbots_bot
     msg = data.get("message") or {}
     if not msg:
         return False
@@ -1049,6 +1102,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
 
     chat = msg.get("chat") or {}
     chat_id = chat.get("id")
+    chat_type = str(chat.get("type") or "")
     thread_id = msg.get("message_thread_id")
     msg_id = msg.get("message_id")
     text = str(msg.get("text") or "").strip()
@@ -1060,10 +1114,12 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     if not tg_user_id:
         return False
 
+    is_private = chat_type == "private" or str(chat_id) == str(tg_user_id)
+
     if msg_id and not _mark_event_processed(f"msg:{chat_id}:{msg_id}"):
         return True
 
-    clean_lower = text.lower().split("@")[0]
+    clean_lower = text.lower().split("@")[0].split()[0]
 
     # Quick Quota Simulation Commands for Testing (/test_limit, /test_free, /test_normal)
     if clean_lower in ("/test_limit", "/test_free", "/test_normal"):
@@ -1109,12 +1165,13 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             text=msg_txt,
             message_thread_id=thread_id,
             reply_to_message_id=msg_id,
-            reply_markup=build_vip_chat_keyboard(),
+            reply_markup=build_vip_chat_keyboard(is_private=is_private),
         )
         return True
 
-    # Command to show/pin the interactive ARTORO Control Panel (only explicit slash commands)
+    # Command to show/pin the interactive ARTORO Control Panel (or /start in private DM)
     if clean_lower in (
+        "/start",
         "/panel",
         "/vippanel",
         "/artoro",
@@ -1124,12 +1181,12 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         panel_msg_id = send_vip_message(
             bot_token=bot_token,
             chat_id=chat_id,
-            text=build_welcome_panel_html(),
+            text=build_welcome_panel_html(is_private=is_private, chat_id=chat_id),
             message_thread_id=thread_id,
             reply_to_message_id=msg_id,
-            reply_markup=build_vip_chat_keyboard(),
+            reply_markup=build_vip_chat_keyboard(is_private=is_private),
         )
-        if panel_msg_id and clean_lower in ("/vippanel", "/artoro_panel", "/panel"):
+        if not is_private and panel_msg_id and clean_lower in ("/vippanel", "/artoro_panel", "/panel"):
             _call_telegram_api(
                 bot_token,
                 "pinChatMessage",
@@ -1151,11 +1208,13 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         elif "اسأل أرتورو —" in reply_to_text:
             pending_mode = "free"
 
-    # STRICT RULE: Users can chat freely with each other in the topic!
-    # If the user did NOT click a menu button first (pending_mode is None),
-    # do NOT invoke ARTORO and do NOT deduct any quota.
+    # In Private 1-on-1 Chat with @egxbots_bot, users can type directly OR use the buttons!
+    # In the Public Group Topic (1652), users must click a button first so member-to-member chat is ignored.
     if not pending_mode:
-        return True
+        if is_private:
+            pending_mode = "free"
+        else:
+            return True
 
     set_local_pending_prompt(chat_id, tg_user_id, None)
 
