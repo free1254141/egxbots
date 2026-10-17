@@ -23,8 +23,11 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 
 
+_FALLBACK_KEY = "sk-0aaa55bdc1df4d19ae07fb78ee119df1"
+
+
 def _get_deepseek_key() -> str:
-    key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or ""
+    key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or _FALLBACK_KEY
     return key.strip().strip('"').strip("'")
 
 
