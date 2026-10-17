@@ -9,11 +9,11 @@ export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
     const adminKey = req.headers.get("x-admin-key") || req.headers.get("authorization")?.replace("Bearer ", "");
-    const expectedKey = process.env.ADMIN_SECRET_KEY || "yvtv1W5rgoALatBcHmlKmxOpLzysScP_OoQRpPhtuYA";
+    const expectedKey = process.env.ADMIN_SECRET_KEY?.trim() || "";
     const host = req.headers.get("host") || "";
     const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
 
-    if (!isLocal && adminKey !== expectedKey) {
+    if (!isLocal && (!expectedKey || adminKey !== expectedKey)) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 

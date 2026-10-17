@@ -30,11 +30,10 @@ function isAuthorizedRequest(req: NextRequest): boolean {
     const adminKey =
         req.headers.get("x-admin-key") ||
         req.headers.get("authorization")?.replace("Bearer ", "");
-    const expectedKey =
-        process.env.ADMIN_SECRET_KEY || "yvtv1W5rgoALatBcHmlKmxOpLzysScP_OoQRpPhtuYA";
+    const expectedKey = process.env.ADMIN_SECRET_KEY?.trim() || "";
     const host = req.headers.get("host") || "";
     const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
-    return Boolean(isLocal || (adminKey && adminKey === expectedKey));
+    return Boolean(isLocal || (expectedKey && adminKey && adminKey === expectedKey));
 }
 
 function deterministicSessionUuid(seed: string): string {

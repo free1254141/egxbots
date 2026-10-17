@@ -23,11 +23,8 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 
 
-_FALLBACK_KEY = "sk-0aaa55bdc1df4d19ae07fb78ee119df1"
-
-
 def _get_deepseek_key() -> str:
-    key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or _FALLBACK_KEY
+    key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or ""
     return key.strip().strip('"').strip("'")
 
 
@@ -143,7 +140,7 @@ def tool_query_market_engine(query: str) -> Dict[str, Any]:
     """Queries Next.js chat engine route to get official platform analysis."""
     app_url = os.getenv("NEXT_PUBLIC_APP_URL") or "http://localhost:3000"
     url = f"{app_url}/api/admin/chat-engine"
-    admin_key = os.getenv("ADMIN_SECRET_KEY") or "yvtv1W5rgoALatBcHmlKmxOpLzysScP_OoQRpPhtuYA"
+    admin_key = (os.getenv("ADMIN_SECRET_KEY") or "").strip()
     payload = json.dumps({"message": query}).encode("utf-8")
     req = urllib.request.Request(
         url,

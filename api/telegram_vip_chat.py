@@ -377,7 +377,7 @@ def _web_vip_chat_endpoints() -> List[str]:
 
 def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
     """Call Next.js /api/telegram/vip-chat endpoint with automatic local->production fallback."""
-    admin_key = os.getenv("ADMIN_SECRET_KEY", "yvtv1W5rgoALatBcHmlKmxOpLzysScP_OoQRpPhtuYA").strip()
+    admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
     headers = {
         "Content-Type": "application/json",
         "x-admin-key": admin_key,
