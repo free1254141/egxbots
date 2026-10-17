@@ -39,8 +39,12 @@ type ChatAction = {
 };
 
 export const AVAILABLE_AI_MODELS = [
-    { id: "deepseek-chat", name: "DeepSeek Flash", badgeAr: "الافتراضي ⚡", badgeEn: "Default ⚡", descAr: "أسرع نموذج ديب سيك — استجابة فورية لتحليلات البورصة", descEn: "Fastest DeepSeek model — instant response for stock analysis" },
+    { id: "deepseek-chat", name: "DeepSeek Flash", badgeAr: "الأسرع ⚡", badgeEn: "Fastest ⚡", descAr: "أسرع نموذج ديب سيك — استجابة فورية لتحليلات البورصة", descEn: "Fastest DeepSeek model — instant response for stock analysis" },
     { id: "deepseek-reasoner", name: "DeepSeek Pro", badgeAr: "الأعمق 🧠", badgeEn: "Reasoner 🧠", descAr: "النموذج الاستدلالي المتقدم لقرارات التداول والتحليلات العميقة", descEn: "Advanced reasoning model for deep analysis and trade decisions" },
+];
+
+// Kept for future testing (stock analysis benchmarks):
+export const EXPERIMENTAL_AI_MODELS = [
     { id: "deepseek-v4.1-flash-uncensored", name: "DeepSeek V4.1 Flash", badgeAr: "V4.1 حر 🔥", badgeEn: "V4.1 Uncensored 🔥", descAr: "إصدار ديب سيك V4.1 فلاش غير المقيد عبر Experiential Labs", descEn: "DeepSeek V4.1 Flash Uncensored via Experiential Labs" },
     { id: "gpt-6-luna-decisions", name: "GPT-6 Luna Decisions", badgeAr: "قرارات 🎯", badgeEn: "Decisions 🎯", descAr: "محرك اتخاذ القرارات وفحص الأدلة الرقمية للبورصة المصرية", descEn: "Decision engine & structured evidence verification for EGX" },
 ];

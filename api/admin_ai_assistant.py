@@ -324,12 +324,12 @@ ADMIN_SYSTEM_PROMPT = """أنت "ARTORO Admin Assistant" — المساعد ال
 
 
 def _call_llm_with_fallback(payload_base: Dict[str, Any], exp_key: str, ds_key: str) -> Dict[str, Any]:
-    """Calls fast deepseek-v4.1-flash-uncensored first; falls back to official deepseek-flash on any error."""
+    """Calls official deepseek-flash first as default; falls back to Experiential V4.1 only if DeepSeek fails."""
     providers = []
-    if exp_key:
-        providers.append((EXPERIENTIAL_API_URL, EXPERIENTIAL_MODEL, exp_key))
     if ds_key:
         providers.append((DEEPSEEK_API_URL, DEEPSEEK_MODEL, ds_key))
+    if exp_key:
+        providers.append((EXPERIENTIAL_API_URL, EXPERIENTIAL_MODEL, exp_key))
 
     last_err: Optional[Exception] = None
     for url, model_name, token in providers:

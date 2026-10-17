@@ -494,7 +494,7 @@ export async function POST(req: NextRequest) {
             effectiveUserId,
             sessionId,
             messageId,
-            "deepseek-v4.1-flash-uncensored",
+            "deepseek-chat",
             { isPro: userInfo.isPro }
         );
         const latencyMs = Date.now() - startTime;
