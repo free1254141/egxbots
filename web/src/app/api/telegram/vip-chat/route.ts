@@ -478,8 +478,10 @@ export async function POST(req: NextRequest) {
 
         const deepSeekKey = getDeepSeekApiKey();
         const apiKeys = [...getNvidiaApiKeys(), ...(deepSeekKey ? [deepSeekKey] : [])];
+        const chatSource = body.chat_source === "telegram_private" ? "telegram_private" : "telegram_topic";
         const effectiveUserId = userInfo.linkedUserId || `tg_${telegramUserId}`;
-        const sessionId = deterministicSessionUuid(`tg-vip-${effectiveUserId}`);
+        const auditUserId = userInfo.linkedUserId || deterministicSessionUuid(`tg-user-${telegramUserId}`);
+        const sessionId = deterministicSessionUuid(`tg-${chatSource}-${auditUserId}`);
         const messageId = `tg_msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
         const startTime = Date.now();
@@ -536,39 +538,58 @@ export async function POST(req: NextRequest) {
             { onConflict: "telegram_user_id" }
         );
 
-        // If linked to a website user, also log to ai_chat_sessions & ai_chat_messages so it appears in Admin Logs
-        if (userInfo.linkedUserId) {
-            try {
-                await supabase.from("ai_chat_sessions").upsert(
-                    {
-                        id: sessionId,
-                        user_id: userInfo.linkedUserId,
-                        title: `[Telegram VIP] ${rawMessage.slice(0, 28)}`,
-                        state: updatedSessionState,
-                        updated_at: new Date().toISOString(),
+        // Permanently log ALL Telegram messages (both linked and unlinked users, both Private Bot and Public Topic)
+        // in ai_chat_sessions & ai_chat_messages so they are always retained in Admin Logs even if the user deletes the bot.
+        try {
+            const roomPrefix =
+                chatSource === "telegram_private"
+                    ? "🔒 [بوت تليجرام الخاص]"
+                    : "📢 [تليجرام التوبيك العام]";
+            await supabase.from("ai_chat_sessions").upsert(
+                {
+                    id: sessionId,
+                    user_id: auditUserId,
+                    title: `${roomPrefix} ${rawMessage.slice(0, 28)}`,
+                    state: updatedSessionState,
+                    is_deleted_by_user: false,
+                    updated_at: new Date().toISOString(),
+                },
+                { onConflict: "id" }
+            );
+            const commonMeta = {
+                chat_source: chatSource,
+                telegram_user_id: telegramUserId,
+                telegram_username: telegramUsername,
+                display_name: userInfo.displayName,
+                linked_user_id: userInfo.linkedUserId,
+            };
+            await supabase.from("ai_chat_messages").insert([
+                {
+                    session_id: sessionId,
+                    user_id: auditUserId,
+                    role: "user",
+                    content: rawMessage,
+                    metadata: commonMeta,
+                    created_at: new Date(Date.now() - 1000).toISOString(),
+                },
+                {
+                    session_id: sessionId,
+                    user_id: auditUserId,
+                    role: "assistant",
+                    content: result.response,
+                    latency_ms: latencyMs,
+                    metadata: {
+                        ...commonMeta,
+                        tables: result.tables || [],
+                        usage: (result as any).usage || null,
+                        response_origin: (result as any).response_origin || "llm",
+                        publication_review: (result as any).publication_review || null,
                     },
-                    { onConflict: "id" }
-                );
-                await supabase.from("ai_chat_messages").insert([
-                    {
-                        session_id: sessionId,
-                        user_id: userInfo.linkedUserId,
-                        role: "user",
-                        content: rawMessage,
-                        created_at: new Date(Date.now() - 1000).toISOString(),
-                    },
-                    {
-                        session_id: sessionId,
-                        user_id: userInfo.linkedUserId,
-                        role: "assistant",
-                        content: result.response,
-                        latency_ms: latencyMs,
-                        created_at: new Date().toISOString(),
-                    },
-                ]);
-            } catch (logErr) {
-                console.warn("[telegram/vip-chat] Non-fatal session log error:", logErr);
-            }
+                    created_at: new Date().toISOString(),
+                },
+            ]);
+        } catch (logErr) {
+            console.warn("[telegram/vip-chat] Non-fatal session log error:", logErr);
         }
 
         return NextResponse.json({

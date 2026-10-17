@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { getSupabaseClient } from "@/lib/supabase/route-data";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
 import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function deterministicSessionUuid(seed: string): string {
+    const hash = createHash("sha256").update(seed).digest("hex");
+    return [
+        hash.slice(0, 8),
+        hash.slice(8, 12),
+        "4" + hash.slice(13, 16),
+        "a" + hash.slice(17, 20),
+        hash.slice(20, 32),
+    ].join("-");
+}
 
 export async function GET(req: NextRequest) {
     try {
@@ -15,14 +27,14 @@ export async function GET(req: NextRequest) {
         const limit = Math.min(5000, Math.max(100, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 1000));
 
         // Run data fetching in parallel for maximum speed
-        const [authRes, profilesRes, legacyLogsRes, chatMsgsRes, subscriptionsRes, sessionsRes] = await Promise.allSettled([
+        const [authRes, profilesRes, legacyLogsRes, chatMsgsRes, subscriptionsRes, sessionsRes, tgStateRes] = await Promise.allSettled([
             // 1. Fetch user emails from auth.admin API
             supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }).catch((e: any) => {
                 console.warn("Could not list auth users:", e);
                 return { data: { users: [] } };
             }),
-            // 2. Fetch profiles for display names
-            supabase.from("profiles").select("id, display_name, username").limit(2000),
+            // 2. Fetch profiles for display names and telegram_chat_id
+            supabase.from("profiles").select("id, display_name, username, telegram_chat_id").limit(2000),
             // 3. Fetch legacy logs from ai_chatbot_logs
             supabase.from("ai_chatbot_logs").select("*").order("created_at", { ascending: false }).limit(limit),
             // 4. Fetch latest structured chat messages ordered descending (newest first)
@@ -39,7 +51,11 @@ export async function GET(req: NextRequest) {
             // 6. Fetch all session metadata (including soft deleted flag and titles)
             supabase.from("ai_chat_sessions")
                 .select("id, user_id, title, is_deleted_by_user, deleted_at, created_at, updated_at")
-                .limit(3000)
+                .limit(3000),
+            // 7. Fetch Telegram VIP & Private bot state to resolve Telegram usernames and IDs
+            supabase.from("telegram_vip_chat_state")
+                .select("telegram_user_id, telegram_username, linked_user_id")
+                .limit(2000)
         ]);
 
         // Build User Email Map
@@ -50,12 +66,29 @@ export async function GET(req: NextRequest) {
             });
         }
 
-        // Build Profile Map
+        // Build Profile Map & Profile Telegram Map
         const profileMap = new Map<string, string>();
+        const profileTelegramMap = new Map<string, string>();
         if (profilesRes.status === "fulfilled" && (profilesRes.value as any)?.data) {
             (profilesRes.value as any).data.forEach((p: any) => {
                 const name = p.display_name || p.username;
                 if (p.id && name) profileMap.set(p.id, name);
+                if (p.id && p.telegram_chat_id) profileTelegramMap.set(p.id, String(p.telegram_chat_id));
+            });
+        }
+
+        // Build Telegram User Map (indexed by both deterministic tg-user UUID and linked_user_id)
+        const telegramUserMap = new Map<string, { telegram_user_id: string; telegram_username: string }>();
+        if (tgStateRes.status === "fulfilled" && (tgStateRes.value as any)?.data) {
+            (tgStateRes.value as any).data.forEach((t: any) => {
+                if (!t.telegram_user_id) return;
+                const tgIdStr = String(t.telegram_user_id);
+                const tgName = String(t.telegram_username || "مستخدم تليجرام").trim();
+                const detUuid = deterministicSessionUuid(`tg-user-${tgIdStr}`);
+                telegramUserMap.set(detUuid, { telegram_user_id: tgIdStr, telegram_username: tgName });
+                if (t.linked_user_id) {
+                    telegramUserMap.set(String(t.linked_user_id), { telegram_user_id: tgIdStr, telegram_username: tgName });
+                }
             });
         }
 
@@ -73,10 +106,12 @@ export async function GET(req: NextRequest) {
             });
         }
 
-        const getUserLabel = (userId?: string | null, defaultName?: string) => {
+        const getUserLabel = (userId?: string | null, defaultName?: string, tgMeta?: { telegram_user_id?: string | number; telegram_username?: string }) => {
             if (!userId) return defaultName || "مستخدم زائر (Guest)";
             if (userEmailMap.has(userId)) return userEmailMap.get(userId)!;
             if (profileMap.has(userId)) return profileMap.get(userId)!;
+            const tgEntry = telegramUserMap.get(userId) || (tgMeta?.telegram_user_id ? { telegram_user_id: String(tgMeta.telegram_user_id), telegram_username: tgMeta.telegram_username || "مستخدم تليجرام" } : null);
+            if (tgEntry) return `📱 تليجرام: ${tgEntry.telegram_username} (#${tgEntry.telegram_user_id})`;
             if (defaultName && defaultName !== "Guest User" && !defaultName.includes("-")) return defaultName;
             return userId;
         };
@@ -193,13 +228,24 @@ export async function GET(req: NextRequest) {
                         }
 
                         // Data provenance saved by the chat pipeline (migration 20260906)
-                        const meta = assistantMsg?.metadata || null;
-                        const dataSource = meta?.data_source || null;
+                        const meta = assistantMsg?.metadata || msg.metadata || null;
+                        const userMeta = msg.metadata || meta || null;
+                        const dataSource = meta?.data_source || (userMeta?.chat_source ? `telegram (${userMeta.chat_source === "telegram_private" ? "خاص @egxbots_bot" : "التوبيك العام"})` : null);
                         const dataDate = meta?.data_date || null;
                         const tables = Array.isArray(meta?.tables) ? meta.tables : [];
 
                         const effectiveUserId = msg.user_id || (msg.session_id ? `guest_${msg.session_id.slice(0, 8)}` : "guest");
-                        const userName = getUserLabel(msg.user_id, msg.user_id ? undefined : `زائر (${msg.session_id?.slice(0, 6) || "عام"})`);
+                        const tgFromMap = msg.user_id ? telegramUserMap.get(String(msg.user_id)) : undefined;
+                        const tgChatId =
+                            (userMeta?.telegram_user_id ? String(userMeta.telegram_user_id) : null) ||
+                            tgFromMap?.telegram_user_id ||
+                            (msg.user_id ? profileTelegramMap.get(String(msg.user_id)) : null) ||
+                            null;
+                        const userName = getUserLabel(
+                            msg.user_id,
+                            msg.user_id ? undefined : `زائر (${msg.session_id?.slice(0, 6) || "عام"})`,
+                            userMeta
+                        );
                         const cleanMessage = sanitizeUiLabel(msg.content || "");
                         const cleanReply = replyContent ? stripEnvironmentLeak(replyContent) : "";
 
@@ -212,7 +258,7 @@ export async function GET(req: NextRequest) {
                             deleted_at: sessionInfo?.deleted_at || null,
                             user_id: effectiveUserId,
                             user_name: userName,
-                            telegram_chat_id: null,
+                            telegram_chat_id: tgChatId,
                             message: cleanMessage,
                             image_url: msg.image_url || null,
                             reply: cleanReply,
@@ -237,9 +283,19 @@ export async function GET(req: NextRequest) {
                 for (const msg of sessionMsgs) {
                     if (msg.role === "assistant" && !matchedAssistantIds.has(msg.id)) {
                         const effectiveUserId = msg.user_id || (msg.session_id ? `guest_${msg.session_id.slice(0, 8)}` : "guest");
-                        const userName = getUserLabel(msg.user_id, msg.user_id ? undefined : `زائر (${msg.session_id?.slice(0, 6) || "عام"})`);
-                        const cleanReply = msg.content ? stripEnvironmentLeak(msg.content) : "";
                         const meta = msg.metadata || null;
+                        const tgFromMap = msg.user_id ? telegramUserMap.get(String(msg.user_id)) : undefined;
+                        const tgChatId =
+                            (meta?.telegram_user_id ? String(meta.telegram_user_id) : null) ||
+                            tgFromMap?.telegram_user_id ||
+                            (msg.user_id ? profileTelegramMap.get(String(msg.user_id)) : null) ||
+                            null;
+                        const userName = getUserLabel(
+                            msg.user_id,
+                            msg.user_id ? undefined : `زائر (${msg.session_id?.slice(0, 6) || "عام"})`,
+                            meta
+                        );
+                        const cleanReply = msg.content ? stripEnvironmentLeak(msg.content) : "";
 
                         const asstSessionInfo = msg.session_id ? sessionMetaMap.get(msg.session_id) : null;
                         logsMap.set(`msg_asst_${msg.id}`, {
@@ -250,7 +306,7 @@ export async function GET(req: NextRequest) {
                             deleted_at: asstSessionInfo?.deleted_at || null,
                             user_id: effectiveUserId,
                             user_name: userName,
-                            telegram_chat_id: null,
+                            telegram_chat_id: tgChatId,
                             message: "💬 [رسالة مباشرة / بدء جلسة من المساعد]",
                             image_url: null,
                             reply: cleanReply,

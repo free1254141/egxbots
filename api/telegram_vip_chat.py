@@ -746,12 +746,14 @@ def _execute_and_reply_vip_chat(
         reply_to_message_id=reply_to_message_id,
     )
 
+    is_private_chat = str(chat_id) == str(tg_user_id)
     api_res = call_web_vip_chat_api(
         {
             "action": "chat",
             "telegram_user_id": tg_user_id,
             "telegram_username": user_name,
             "message": query_text,
+            "chat_source": "telegram_private" if is_private_chat else "telegram_topic",
         }
     )
 
