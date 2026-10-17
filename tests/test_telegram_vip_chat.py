@@ -23,12 +23,12 @@ def clear_dedup_state():
 
 
 def test_is_vip_chat_update_topic_isolation():
-    # 1. Message inside Topic 1652 (ARTORO topic in -1002083067817) -> True
+    # 1. Message inside Topic 1680 (ARTORO topic in -1002083067817) -> True
     update_in_artoro_topic = {
         "message": {
             "message_id": 101,
             "chat": {"id": -1002083067817, "type": "supergroup"},
-            "message_thread_id": 1652,
+            "message_thread_id": 1680,
             "from": {"id": 998877, "first_name": "Ahmed"},
             "text": "حلل فوري",
         }
@@ -67,7 +67,7 @@ def test_is_vip_chat_update_topic_isolation():
             "message": {
                 "message_id": 50,
                 "chat": {"id": -1002083067817, "type": "supergroup"},
-                "message_thread_id": 1652,
+                "message_thread_id": 1680,
             },
         }
     }
@@ -124,7 +124,7 @@ def test_stock_button_sets_pending_prompt_and_processes_stock_name():
                 "message": {
                     "message_id": 10,
                     "chat": {"id": -1002083067817, "type": "supergroup"},
-                    "message_thread_id": 1652,
+                    "message_thread_id": 1680,
                 },
             }
         }
@@ -137,13 +137,13 @@ def test_stock_button_sets_pending_prompt_and_processes_stock_name():
         assert len(send_calls) == 1
         assert send_calls[0]["reply_markup"]["force_reply"] is True
 
-        # Step 2: User types just "فوري" in Topic 1652
+        # Step 2: User types just "فوري" in Topic 1680
         calls.clear()
         msg_data = {
             "message": {
                 "message_id": 11,
                 "chat": {"id": -1002083067817, "type": "supergroup"},
-                "message_thread_id": 1652,
+                "message_thread_id": 1680,
                 "from": {"id": 112233, "first_name": "Ahmed"},
                 "text": "فوري",
             }
@@ -187,7 +187,7 @@ def test_limit_reached_triggers_private_alert_dialog_and_pricing_card():
                 "message": {
                     "message_id": 20,
                     "chat": {"id": -1002083067817, "type": "supergroup"},
-                    "message_thread_id": 1652,
+                    "message_thread_id": 1680,
                 },
             }
         }
@@ -240,7 +240,7 @@ def test_pro_only_recommendations_gate_for_free_user():
                 "message": {
                     "message_id": 30,
                     "chat": {"id": -1002083067817, "type": "supergroup"},
-                    "message_thread_id": 1652,
+                    "message_thread_id": 1680,
                 },
             }
         }
@@ -254,7 +254,7 @@ def test_pro_only_recommendations_gate_for_free_user():
 
 def test_unprompted_group_chat_is_ignored_without_button_press():
     """
-    Members chatting with each other in Topic 1652 without clicking an ARTORO menu button
+    Members chatting with each other in Topic 1680 without clicking an ARTORO menu button
     must NOT trigger ARTORO replies or deduct from their quota.
     """
     tg_calls = []
@@ -278,7 +278,7 @@ def test_unprompted_group_chat_is_ignored_without_button_press():
             "message": {
                 "message_id": 205,
                 "chat": {"id": -1002083067817, "type": "supergroup"},
-                "message_thread_id": 1652,
+                "message_thread_id": 1680,
                 "from": {"id": 556677, "first_name": "Omar"},
                 "text": "يا جماعة حد اشترى في فوري النهارده؟ إيه رأيكم في السوق؟",
             }

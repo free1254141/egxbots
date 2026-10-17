@@ -163,7 +163,7 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
     return saved_msg
 
 def handle_telegram_update(data: dict):
-    # 0. Route VIP Chat Room / Topic updates (https://t.me/egxbots/1652)
+    # 0. Route VIP Chat Room / Topic updates (https://t.me/egxbots/1680)
     from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
     if is_vip_chat_update(data):
         handle_vip_chat_update(data, get_token())

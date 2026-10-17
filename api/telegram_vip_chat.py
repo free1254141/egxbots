@@ -1,5 +1,5 @@
 """
-Telegram VIP Chat Room & ARTORO Interactive Hub (https://t.me/egxbots/1652).
+Telegram VIP Chat Room & ARTORO Interactive Hub (https://t.me/egxbots/1680).
 
 Connects the public/VIP Telegram chat topic directly to the website's Agentic AI
 Pipeline (/api/telegram/vip-chat), enforcing per-user Free (5/day) and Pro (350/month)
@@ -20,9 +20,9 @@ import requests
 
 from api.web_origin import get_web_origin
 
-# Default Group & Topic from https://t.me/egxbots/1652 -> -1002083067817_1652
+# Default Group & Topic from https://t.me/egxbots/1680 -> -1002083067817_1680
 DEFAULT_VIP_GROUP_ID = "-1002083067817"
-DEFAULT_VIP_TOPIC_ID = 1652
+DEFAULT_VIP_TOPIC_ID = 1680
 
 # In-memory deduplication & pending prompt state (backed by Supabase telegram_vip_chat_state)
 _DEDUP_LOCK = threading.Lock()
@@ -69,7 +69,7 @@ def _private_bot_url() -> str:
 
 
 def _topic_url() -> str:
-    return "https://t.me/egxbots/1652"
+    return "https://t.me/egxbots/1680"
 
 
 def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
@@ -610,7 +610,7 @@ def is_vip_chat_update(data: Dict[str, Any]) -> bool:
     target_group = get_vip_group_id()
     target_topic = get_vip_topic_id()
 
-    # Check if inside the configured group + topic (e.g., -1002083067817 thread 1652)
+    # Check if inside the configured group + topic (e.g., -1002083067817 thread 1680)
     if chat_id_str == target_group:
         if thread_id == 153:
             return False
@@ -1221,7 +1221,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             pending_mode = "free"
 
     # In Private 1-on-1 Chat with @egxbots_bot, users can type directly OR use the buttons!
-    # In the Public Group Topic (1652), users must click a button first so member-to-member chat is ignored.
+    # In the Public Group Topic (1680), users must click a button first so member-to-member chat is ignored.
     if not pending_mode:
         if is_private:
             pending_mode = "free"
@@ -1262,7 +1262,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
 
 
 def post_initial_vip_panel(bot_token: Optional[str] = None) -> Dict[str, Any]:
-    """Post and attempt to pin the welcome control panel in https://t.me/egxbots/1652."""
+    """Post and attempt to pin the welcome control panel in https://t.me/egxbots/1680."""
     token = (bot_token or os.getenv("ARTORO_AI_BOT") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
     if not token:
         return {"ok": False, "error": "No bot token configured"}
