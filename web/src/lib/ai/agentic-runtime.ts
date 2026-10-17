@@ -722,9 +722,17 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         const activeForFallback = usedSymbols.length
             ? usedSymbols
             : (vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? sessionState.last_symbols ?? []);
+        let deterministicDashboard: string | null = null;
+        if (!input.images.length) {
+            try {
+                const dash = renderLunaStockDashboard(evidence, proContext.userSavedPositions);
+                if (dash && checkAgenticDraft(dash, verificationEvidence(), userMessage, evidence).length === 0) deterministicDashboard = dash;
+            } catch { deterministicDashboard = null; }
+        }
+        if (deterministicDashboard) origin = "deterministic_dashboard";
         draft = input.images.length && vision
             ? safeImageEvidenceReply(vision, userMessage) || "وصلت الصورة، لكن لم أتمكن من استخراج حقائق مؤكدة منها. حدّد الجزء المطلوب أو أرسل صورة أوضح."
-            : safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
+            : deterministicDashboard || safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
     }
     const response = withFooter(draft);
     const activeSymbols = usedSymbols.length

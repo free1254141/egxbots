@@ -329,18 +329,26 @@ def _call_telegram_api(bot_token: str, method: str, payload: Dict[str, Any], tim
     bases = [relay, "https://api.telegram.org"] if relay != "https://api.telegram.org" else ["https://api.telegram.org"]
     last_err: Dict[str, Any] = {"ok": False, "description": "No endpoint tried"}
     for base in bases:
-        try:
-            url = f"{base}/bot{bot_token}/{method}"
-            resp = requests.post(url, json=payload, timeout=timeout)
-            data = resp.json()
-            if data.get("ok"):
-                return data
-            last_err = data
-            # If 4xx error from Telegram (like parse error or user blocked), don't retry on other base
-            if 400 <= int(data.get("error_code") or 0) < 500:
-                return data
-        except Exception as exc:
-            last_err = {"ok": False, "description": str(exc)}
+        for attempt in range(3):
+            try:
+                url = f"{base}/bot{bot_token}/{method}"
+                resp = requests.post(url, json=payload, timeout=timeout)
+                data = resp.json()
+                if data.get("ok"):
+                    return data
+                last_err = data
+                # Flood control: wait the server-provided retry_after (capped) and retry instead of losing the reply.
+                if int(data.get("error_code") or 0) == 429 and attempt < 2 and method in ("sendMessage", "editMessageText"):
+                    retry_after = float((data.get("parameters") or {}).get("retry_after") or 2)
+                    time.sleep(min(max(retry_after, 1.0), 8.0))
+                    continue
+                # If 4xx error from Telegram (like parse error or user blocked), don't retry on other base
+                if 400 <= int(data.get("error_code") or 0) < 500:
+                    return data
+                break
+            except Exception as exc:
+                last_err = {"ok": False, "description": str(exc)}
+                break
     return last_err
 
 
@@ -546,6 +554,8 @@ def format_pipeline_reply_for_telegram(
 ) -> str:
     """Convert pipeline markdown response + tables into rich Telegram HTML."""
     cleaned = (reply_text or "").strip()
+    # Telegram users are already inside Telegram: drop the Telegram-channel promo line the web chat appends.
+    cleaned = re.sub(r"^[^\n]*(?:t\.me/|/profile#telegram)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
     has_md_table = bool(re.search(r"^\|.+\|$", cleaned, flags=re.MULTILINE))
     cleaned = _convert_markdown_tables_to_bullets(cleaned)
 
@@ -582,13 +592,15 @@ def format_pipeline_reply_for_telegram(
     plan_badge = "👑 PRO VIP" if is_pro else "🎫 مجاني (Free)"
     period_label = "شهرياً" if period == "monthly" else "اليوم"
 
+    site_origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
+    if "localhost" in site_origin or "127.0.0.1" in site_origin:
+        site_origin = "https://egxbots.com"
     footer = (
         f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 المستثمر: <b>{user_link}</b> | الباقة: <b>{plan_badge}</b>\n"
-        f"📊 الرصيد المتبقي ({period_label}): <code>{remaining}</code> من <code>{limit}</code> سؤال"
+        f"📊 الرصيد المتبقي ({period_label}): <code>{remaining}</code> من <code>{limit}</code> سؤال\n"
+        f'🌐 <a href="{site_origin}">موقع EGX Bots</a> • 💎 <a href="{_pricing_url()}">صفحة التسعير والاشتراك</a>'
     )
-    if not is_pro and remaining <= 2:
-        footer += f'\n💎 <a href="{_pricing_url()}">اشترك في باقة PRO (50 ج.م) للحصول على 350 سؤال شهرياً وتوصيات لحظية</a>'
 
     return f"🤖 <b>رد أرتورو الذكي لـ {user_link}:</b>\n\n{escaped}{footer}"
 
@@ -715,7 +727,32 @@ def _show_limit_or_upgrade_dialog(
         )
 
 
+_VIP_WORKER_SLOTS = threading.BoundedSemaphore(int(os.getenv("TELEGRAM_VIP_MAX_CONCURRENCY", "8") or 8))
+
+
 def _execute_and_reply_vip_chat(
+    bot_token: str,
+    chat_id: Any,
+    thread_id: Optional[int],
+    tg_user_id: int,
+    user_name: str,
+    query_text: str,
+    reply_to_message_id: Optional[int] = None,
+    callback_query_id: Optional[str] = None,
+) -> None:
+    """Bounded-concurrency wrapper: bursts of simultaneous users queue briefly instead of overloading the backend."""
+    acquired = _VIP_WORKER_SLOTS.acquire(timeout=90)
+    try:
+        _execute_and_reply_vip_chat_inner(
+            bot_token, chat_id, thread_id, tg_user_id, user_name, query_text,
+            reply_to_message_id, callback_query_id,
+        )
+    finally:
+        if acquired:
+            _VIP_WORKER_SLOTS.release()
+
+
+def _execute_and_reply_vip_chat_inner(
     bot_token: str,
     chat_id: Any,
     thread_id: Optional[int],

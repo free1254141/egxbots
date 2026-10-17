@@ -355,3 +355,46 @@ def test_private_bot_button_in_topic_and_direct_private_chat():
         assert web_calls[0]["message"] == "حلل سهم فوري"
 
 
+
+
+def test_telegram_reply_has_site_and_pricing_links_without_telegram_promo():
+    from api.telegram_vip_chat import format_pipeline_reply_for_telegram
+
+    reply = (
+        "### ????? ???\n\n?? ???????\n\n"
+        "? ????? EGX Bots ???? ??? ???? ????????.\n\n"
+        "?? [???? EGX Bots ???????? ??? ??????? ????????? ??????](https://t.me/egxbots)\n"
+    )
+    out = format_pipeline_reply_for_telegram(reply, [], "Ahmed", 1, False, 1, 5, 4, "daily")
+    assert "t.me/egxbots" not in out
+    assert "???? EGX Bots ????????" not in out
+    assert "/pricing" in out
+    assert "???? EGX Bots" in out
+    assert "?? ???????" in out
+
+
+def test_telegram_api_retries_on_flood_control(monkeypatch):
+    import api.telegram_vip_chat as vip
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("TELEGRAM_TEST_MODE", "false")
+    monkeypatch.setattr(vip.time, "sleep", lambda *_: None)
+    calls = []
+
+    class Resp:
+        def __init__(self, data):
+            self._d = data
+
+        def json(self):
+            return self._d
+
+    def fake_post(url, json=None, timeout=None):
+        calls.append(url)
+        if len(calls) == 1:
+            return Resp({"ok": False, "error_code": 429, "parameters": {"retry_after": 1}})
+        return Resp({"ok": True, "result": {"message_id": 5}})
+
+    monkeypatch.setattr(vip.requests, "post", fake_post)
+    res = vip._call_telegram_api("tok", "sendMessage", {"chat_id": 1, "text": "x"})
+    assert res.get("ok") is True
+    assert len(calls) == 2

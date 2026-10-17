@@ -101,8 +101,15 @@ test.each(["provider_failure", "rejected_repair"])("actual runtime %s cannot pub
     }
     try {
         const { done, events } = await runRuntime();
-        expect(done.response_origin).toBe("safe_fallback");
-        expect(done.response).toContain("الزخم الحالي ضعيف");
+        if (failure === "rejected_repair") {
+            // A rejected writer draft is replaced by a deterministic dashboard that passes the same grounding checker.
+            expect(["safe_fallback", "deterministic_dashboard"]).toContain(done.response_origin);
+            for (const s of stocks) expect(done.response).toContain(s.symbol);
+            expect(done.response).not.toContain("0.148 / 0.039 / -0.108");
+        } else {
+            expect(done.response_origin).toBe("safe_fallback");
+            expect(done.response).toContain("الزخم الحالي ضعيف");
+        }
         expect(done.response).not.toContain("EGCH");
         for (const event of events.filter(e => e.type === "token")) {
             expect(event.data).not.toContain("RSI =");

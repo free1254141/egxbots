@@ -307,7 +307,9 @@ describe("Agentic architecture integration: current production path", () => {
     test("false reviewer approval cannot authorize fabricated price", async () => {
         const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]}, {content:"سعر COMI الحالي 9999 جنيه"},verdict(),
             {content:"سعر COMI الحالي 9999 جنيه"},verdict()],{db:stockDb()});
-        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999"); expect(r.done.response).toContain("آخر إغلاق متاح 100 جنيه بتاريخ 2026-10-08");expect(r.done.response).not.toContain("| السهم |");
+        expect(r.done.publication_review.final_passed).toBe(false); expect(r.done.response).not.toContain("9999");
+        expect(["safe_fallback","deterministic_dashboard"]).toContain(r.done.response_origin);
+        expect(r.done.response).toMatch(/100(?:\.0+)?\s*(?:جنيه|ج\.م)|آخر إغلاق متاح 100 جنيه بتاريخ 2026-10-08/);
         expect(r.events.filter(e=>e.type === "token").every(e=>!String(e.data).includes("9999"))).toBe(true);
     });
     test("review rejection is repaired once and verified again", async () => {
