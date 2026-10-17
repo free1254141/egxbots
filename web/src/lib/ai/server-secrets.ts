@@ -19,6 +19,12 @@ export function getDeepSeekApiKey(): string | null {
     return key;
 }
 
+export function getExperientialApiKey(): string | null {
+    const key = process.env.EXPERIENTIAL_API_KEY?.trim();
+    if (!key || PLACEHOLDER_VALUES.has(key.toLowerCase())) return null;
+    return key;
+}
+
 export function getNvidiaApiKeys(): string[] {
     return Array.from(new Set([
         process.env.NVIDIA_API_KEY,

@@ -41,6 +41,7 @@ type ChatAction = {
 export const AVAILABLE_AI_MODELS = [
     { id: "deepseek-chat", name: "DeepSeek Flash", badgeAr: "الأسرع ⚡", badgeEn: "Fastest ⚡", descAr: "أسرع نموذج ديب سيك — استجابة فورية لتحليلات البورصة", descEn: "Fastest DeepSeek model — instant response for stock analysis" },
     { id: "deepseek-reasoner", name: "DeepSeek Pro", badgeAr: "الأعمق 🧠", badgeEn: "Reasoner 🧠", descAr: "النموذج الاستدلالي المتقدم لقرارات التداول والتحليلات العميقة", descEn: "Advanced reasoning model for deep analysis and trade decisions" },
+    { id: "gpt-6-luna-decisions", name: "GPT-6 Luna Decisions", badgeAr: "قرارات 🎯", badgeEn: "Decisions 🎯", descAr: "محرك اتخاذ القرارات وفحص الأدلة الرقمية للبورصة المصرية", descEn: "Decision engine & structured evidence verification for EGX" },
 ];
 
 interface ChatContextType {

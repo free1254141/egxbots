@@ -13,7 +13,7 @@ TOKENS = {
     "Supabase secret key": re.compile(r"sb_secret_[A-Za-z0-9_-]{15,}"),
     "Hugging Face token": re.compile(r"hf_[A-Za-z0-9]{20,}"),
     "GitHub token": re.compile(r"(?:ghp_|github_pat_)[A-Za-z0-9_]{30,}"),
-    "Provider secret key": re.compile(r"(?:sk-(?:proj-)?|nvapi-)[A-Za-z0-9_-]{30,}"),
+    "Provider secret key": re.compile(r"(?:sk-(?:proj-)?|nvapi-|xpl_)[A-Za-z0-9_-]{25,}"),
     "Telegram bot token": re.compile(r"\b[0-9]{8,12}:[A-Za-z0-9_-]{30,}"),
 }
 

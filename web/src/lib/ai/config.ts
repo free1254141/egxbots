@@ -10,7 +10,8 @@ export const AI_CONFIG = {
       fallbacks: [],
       allowedUserModels: [
         "deepseek-chat",
-        "deepseek-reasoner"
+        "deepseek-reasoner",
+        "gpt-6-luna-decisions"
       ],
       vision: ["deepseek-flash"],
     },

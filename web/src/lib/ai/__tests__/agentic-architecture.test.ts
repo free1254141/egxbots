@@ -1580,5 +1580,28 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const filtered = removeBogusAnalysisTradingLevelIssues(rawReviewerIssues, [recsEv], "سهم للمضاربة يوم الاحد زيرو");
         expect(filtered).toEqual([]);
     });
+
+    test("renderLunaStockDashboard formats grounded stock analysis card with levels, indicators, and news headlines", () => {
+        const { renderLunaStockDashboard } = require("../experiential-decisions");
+        const stockEv = toAgenticEvidence("get_stock", { symbols: ["FWRY"] }, {
+            status: "success",
+            stocks: [{ symbol: "FWRY", name_ar: "فوري", close: 18.79, change_pct: 2.12, date: "2026-10-15", rsi_14: 50.59, macd: -0.08, macd_signal: -0.12, ema_50: 18.88, ema_200: 18.16 }]
+        });
+        const levelsEv = toAgenticEvidence("get_stock_levels", { symbols: ["FWRY"] }, {
+            status: "success",
+            levels: [{ symbol: "FWRY", close: 18.79, support: 17.5, support_2: 16.8, resistance: 19.36, resistance_2: 19.81, date: "2026-10-15", has_active_recommendation: false }]
+        });
+        const newsEv = toAgenticEvidence("get_news", { symbols: ["FWRY"] }, {
+            status: "success",
+            news: [{ symbol: "FWRY", date: "2026-10-11", headlines: ["فوري تتصدر قائمة الفنتك"] }]
+        });
+        const card = renderLunaStockDashboard([stockEv, levelsEv, newsEv], []);
+        expect(card).toContain("### 📊 تحليل سهم فوري (FWRY)");
+        expect(card).toContain("| الإغلاق الحالي | 18.79 |");
+        expect(card).toContain("| الدعم الأول | 17.5 |");
+        expect(card).toContain("| المقاومة الأولى | 19.36 |");
+        expect(card).toContain("فوري تتصدر قائمة الفنتك");
+    });
 });
+
 

@@ -388,8 +388,8 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Maintenance / Under-Development Mode (enabled by default unless AI_CHAT_MAINTENANCE_MODE === "false")
-        if (process.env.AI_CHAT_MAINTENANCE_MODE !== "false" && !process.env.JEST_WORKER_ID && process.env.NODE_ENV !== "test") {
+        // Maintenance / Under-Development Mode (only when explicitly enabled via AI_CHAT_MAINTENANCE_MODE === "true")
+        if (process.env.AI_CHAT_MAINTENANCE_MODE === "true" && !process.env.JEST_WORKER_ID && process.env.NODE_ENV !== "test") {
             return NextResponse.json({
                 ok: true,
                 reply:

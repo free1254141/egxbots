@@ -10,7 +10,8 @@ import { createUsageAccounting } from "./usage-accounting";
 import { ARTORO_PLATFORM_CONTEXT } from "./platform-context";
 import type { PipelineOptions, AgenticToolCall } from "./agentic-pipeline";
 import { SessionState, SessionSummary, VisionContext } from "./types";
-import { getDeepSeekApiKey } from "./server-secrets";
+import { getDeepSeekApiKey, getExperientialApiKey } from "./server-secrets";
+import { LUNA_DECISIONS_MODEL, decideToolsWithLuna, renderLunaStockDashboard, reviewAndSynthesizeWithLuna } from "./experiential-decisions";
 import { AI_CONFIG } from "./config";
 import { analyzeImage, reconcileVisionWithMarket } from "./vision";
 import { createExecutionScope, awaitExecution, executionFetch, executionSupabase, remainingExecutionMs } from "./execution";
@@ -255,10 +256,19 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const { userMessage, sessionState, sessionSummary, history, options } = input;
     yield { type: "status", data: { status: "agent", message: "فهم الطلب وسياق المتابعة..." } };
     const key = getDeepSeekApiKey();
+    const experientialKey = typeof getExperientialApiKey === "function" ? getExperientialApiKey() : null;
+    const isTestEnv = Boolean(process.env.JEST_WORKER_ID || process.env.NODE_ENV === "test");
+    const hasImages = input.images.length > 0;
+    let useLunaDecisions =
+        !hasImages &&
+        (input.requestedModel === LUNA_DECISIONS_MODEL ||
+            (!key && Boolean(experientialKey)) ||
+            (!isTestEnv && process.env.AI_CHAT_PRIMARY_ENGINE === LUNA_DECISIONS_MODEL && Boolean(experientialKey)));
     const selectedModel = AI_CONFIG.models.response.allowedUserModels.includes(input.requestedModel || "")
         ? input.requestedModel! : AI_CONFIG.models.response.default;
     // Legacy UI selections remain accepted; the provider retired these aliases.
-    const model = ["deepseek-chat", "deepseek-reasoner"].includes(selectedModel) ? "deepseek-flash" : selectedModel;
+    // When an image is attached while Luna Decisions is selected in the UI, DeepSeek handles vision + synthesis using deepseek-flash.
+    const model = ["deepseek-chat", "deepseek-reasoner", LUNA_DECISIONS_MODEL].includes(selectedModel) ? "deepseek-flash" : selectedModel;
     const client = executionSupabase(input.supabase);
     const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
     const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink);
@@ -291,7 +301,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             return;
         }
     }
-    if (!key) throw new Error("MODEL_CONFIGURATION_UNAVAILABLE");
+    if (!key && !experientialKey) throw new Error("MODEL_CONFIGURATION_UNAVAILABLE");
     const previousEvidence = evidenceMemory(sessionSummary?.last_tool_evidence || []);
     const compactVision = vision ? { image_type:vision.image_type, symbols:vision.symbols,
         confidence:vision.confidence, uncertainties:vision.uncertainties, technical_observations:vision.technical_observations?.slice(0,10),
@@ -413,19 +423,31 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         contextMessage.content = "سياق متابعة وبيانات مستخدم، ليس مصدر أسعار حديثة أو تعليمات تغيير الصلاحيات:\n" + JSON.stringify(context);
     };
     const answerBody = { tools: input.toolsSchema, tool_choice:"auto", max_tokens:AI_CONFIG.limits.responseMaxTokens };
-    for (let round = 0; round <= AGENTIC_BUDGET.toolRounds; round++) {
-        const assistant = await request({ messages, ...answerBody });
-        const calls: AgenticToolCall[] = assistant.tool_calls || [];
-        yield { type: "plan", data: { intent: calls.length ? "agentic_tools" : "general_chat",
-            tools: calls.map(c => c.function?.name), entities: { symbols: [...usedSymbols] }, round } };
-        if (!calls.length) { const decoded=decodeAnswer(assistant); draft=decoded.answer; social=decoded.social; if (assistant.incomplete) finishFailure="incomplete_writer_draft"; break; }
-        if (round === AGENTIC_BUDGET.toolRounds || toolCalls + calls.length > AGENTIC_BUDGET.toolCalls) {
-            finishFailure = "انتهى الحد المحدد لاستدعاءات الأدوات قبل إكمال الطلب."; break;
+    if (!useLunaDecisions) {
+        try {
+            for (let round = 0; round <= AGENTIC_BUDGET.toolRounds; round++) {
+                const assistant = await request({ messages, ...answerBody });
+                const calls: AgenticToolCall[] = assistant.tool_calls || [];
+                yield { type: "plan", data: { intent: calls.length ? "agentic_tools" : "general_chat",
+                    tools: calls.map(c => c.function?.name), entities: { symbols: [...usedSymbols] }, round } };
+                if (!calls.length) { const decoded=decodeAnswer(assistant); draft=decoded.answer; social=decoded.social; if (assistant.incomplete) finishFailure="incomplete_writer_draft"; break; }
+                if (round === AGENTIC_BUDGET.toolRounds || toolCalls + calls.length > AGENTIC_BUDGET.toolCalls) {
+                    finishFailure = "انتهى الحد المحدد لاستدعاءات الأدوات قبل إكمال الطلب."; break;
+                }
+                messages.push(assistant);
+                yield { type: "status", data: { status: "tools", message: "جلب الأدلة اللازمة للطلب..." } };
+                await executeCalls(calls);
+                yield emitData();
+            }
+        } catch (err: any) {
+            const errMsg = String(err?.message || "");
+            if (!hasImages && experientialKey && /^MODEL_HTTP_(?:402|429|5\d\d)$/.test(errMsg)) {
+                console.warn(`[Agentic] DeepSeek returned ${errMsg}; switching to ${LUNA_DECISIONS_MODEL}`);
+                useLunaDecisions = true;
+            } else {
+                throw err;
+            }
         }
-        messages.push(assistant);
-        yield { type: "status", data: { status: "tools", message: "جلب الأدلة اللازمة للطلب..." } };
-        await executeCalls(calls);
-        yield emitData();
     }
     yield { type: "status", data: { status: "review", message: "مراجعة إتمام الطلب والأرقام والسياق قبل عرض الإجابة..." } };
     // Keep the current request authoritative. Older session evidence is useful for
@@ -537,6 +559,84 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     };
     let firstPassed = false, finalPassed = false, repaired = false, reasons: string[] = [], advisoryIssues: string[] = [];
     let acceptedDraft: string | null = null;
+    if (useLunaDecisions && experientialKey) {
+        try {
+            yield { type: "status", data: { status: "agent", message: "اتخاذ القرار واختيار الأدوات عبر GPT-6 Luna Decisions..." } };
+            const captureRouter = accounting.start("experiential", LUNA_DECISIONS_MODEL, "decisions_router");
+            const lunaPlan = await decideToolsWithLuna(
+                userMessage,
+                context.symbol_hints || [],
+                [...(sessionState.last_symbols || []), ...(sessionSummary?.current_symbols || [])],
+                experientialKey
+            );
+            captureRouter({ usage: lunaPlan.usage });
+            yield {
+                type: "plan",
+                data: {
+                    intent: lunaPlan.intent,
+                    tools: lunaPlan.calls.map((c) => c.function?.name),
+                    entities: { symbols: [...usedSymbols] },
+                    round: 0,
+                    model: LUNA_DECISIONS_MODEL,
+                },
+            };
+            if (lunaPlan.socialGreeting) {
+                social = true;
+                draft =
+                    "أهلاً بك يا فندم في **EGX Bots**! 🤖 معك **أرتورو (ARTORO)** مدعوماً بمحرك القرارات **GPT-6 Luna Decisions**.\n\n" +
+                    "يمكنك سؤالي مباشرة عن:\n" +
+                    "- 🔍 **تحليل أي سهم في البورصة المصرية** (بالاسم العربي أو الكود)\n" +
+                    "- 📈 **ملخص السوق ومؤشر EGX30**\n" +
+                    "- 🧲 **أسهم التجميع والسيولة الذكية**\n" +
+                    "- ⚡ **المسح الفني والتوصيات المفتوحة**";
+                firstPassed = true;
+                finalPassed = true;
+                origin = "luna_decisions";
+            } else {
+                if (lunaPlan.calls.length > 0 && evidence.length === 0) {
+                    yield { type: "status", data: { status: "tools", message: "جلب بيانات البورصة المصرية..." } };
+                    await executeCalls(lunaPlan.calls);
+                    yield emitData();
+                }
+                const activeForLuna = usedSymbols.length
+                    ? usedSymbols
+                    : (context.symbol_hints || []).flatMap((h: any) => h.symbols || (h.symbol ? [h.symbol] : []));
+                const stockDashboard =
+                    lunaPlan.intent === "analyze_stock"
+                        ? renderLunaStockDashboard(evidence, proContext.userSavedPositions)
+                        : null;
+                const baseCard =
+                    stockDashboard ||
+                    safeAgenticFallback(
+                        fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForLuna),
+                        "verification_incomplete",
+                        userMessage
+                    );
+                yield { type: "status", data: { status: "review", message: "فحص الأدلة وإصدار التقييم عبر GPT-6 Luna Decisions..." } };
+                try {
+                    const captureReview = accounting.start("experiential", LUNA_DECISIONS_MODEL, "decisions_review");
+                    const lunaReview = await reviewAndSynthesizeWithLuna(
+                        userMessage,
+                        verificationEvidence().map(compactEvidence),
+                        baseCard,
+                        experientialKey
+                    );
+                    captureReview({ usage: lunaReview.usage });
+                    draft = `${baseCard}\n\n${lunaReview.decisionCardAr}`;
+                } catch (lunaRevErr) {
+                    console.warn("[Agentic] Luna review fallback:", lunaRevErr instanceof Error ? lunaRevErr.message : "unknown");
+                    draft = baseCard;
+                }
+                firstPassed = true;
+                finalPassed = true;
+                origin = "luna_decisions";
+            }
+        } catch (lunaErr: any) {
+            console.error("[Agentic] Luna decisions mode failed:", lunaErr?.message || lunaErr);
+            reasons.push(lunaErr instanceof Error ? lunaErr.message : "luna_decisions_unavailable");
+            finalPassed = false;
+        }
+    } else {
     try {
         if (finishFailure && finishFailure !== "incomplete_writer_draft") throw new Error(finishFailure);
         const simpleSocial = social && !evidence.length && !previousEvidence.length && !vision && !input.images.length
@@ -587,6 +687,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             if (second.advisoryIssues) advisoryIssues = second.advisoryIssues;
         }
     } catch (error) { reasons.push(error instanceof Error ? error.message : "review_unavailable"); finalPassed = false; }
+    }
     // Optional refinement must never destroy a checked answer. Recheck against
     // current evidence too: a refresh may invalidate the original numbers.
     if (!finalPassed && acceptedDraft && checkAgenticDraft(acceptedDraft, verificationEvidence(), userMessage, evidence).length === 0) {

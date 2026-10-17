@@ -18,7 +18,7 @@ import { analyzeImage } from "@/lib/ai/vision";
 import { retrieveRelevantMemory } from "@/lib/ai/memory";
 import { executeStructuredTools } from "@/lib/ai/tools-v2";
 import { generateV2Response, generateV2Stream } from "@/lib/ai/final-v2";
-import { getDeepSeekApiKey, getNvidiaApiKeys, isUnlimitedChatUser } from "@/lib/ai/server-secrets";
+import { getDeepSeekApiKey, getExperientialApiKey, getNvidiaApiKeys, isUnlimitedChatUser } from "@/lib/ai/server-secrets";
 import { uploadChatImages } from "@/lib/ai/chat-storage";
 import { createChatMessageTimestamps, orderChatMessages } from "@/lib/ai/chat-order";
 
@@ -495,9 +495,9 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        // Maintenance / Under-Development Mode (enabled by default unless AI_CHAT_MAINTENANCE_MODE === "false" or running Jest tests)
+        // Maintenance / Under-Development Mode (only when explicitly enabled via AI_CHAT_MAINTENANCE_MODE === "true")
         const isMaintenanceMode =
-            process.env.AI_CHAT_MAINTENANCE_MODE !== "false" &&
+            process.env.AI_CHAT_MAINTENANCE_MODE === "true" &&
             !process.env.JEST_WORKER_ID &&
             process.env.NODE_ENV !== "test";
 
@@ -636,7 +636,7 @@ export async function POST(req: NextRequest) {
         diagnostics.capture("runtime_configuration", {config: AI_CONFIG, user_is_pro: userIsPro, unlimited: isUnlimited, billing_enabled: billingOn, history_source: "server_session_messages_preferred", endpoint: "/api/ai-chat", transport: stream === true || stream === "true" || (req.headers.get("accept") || "").includes("text/event-stream") ? "sse" : "json"});
         const keysToTry = getNvidiaApiKeys();
 
-        if (!getDeepSeekApiKey() && keysToTry.length === 0) {
+        if (!getDeepSeekApiKey() && !getExperientialApiKey() && keysToTry.length === 0) {
             return NextResponse.json({ detail: "AI service not configured" }, { status: 500 });
         }
 
