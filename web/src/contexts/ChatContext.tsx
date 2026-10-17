@@ -57,6 +57,8 @@ interface ChatContextType {
     stopResponding: () => void;
     isLoading: boolean;
     remainingQuota: number;
+    quotaLimit?: number;
+    isPro?: boolean;
     isInitializing: boolean;
     accessError: boolean;
     retryAccess: () => void;
@@ -171,11 +173,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [remainingQuota, setRemainingQuota] = useState<number>(5);
+    const [quotaLimit, setQuotaLimit] = useState<number>(5);
+    const [isPro, setIsPro] = useState<boolean>(false);
     const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
     const [selectedModel, setSelectedModelState] = useState<string>("deepseek-chat");
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
     const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+
 
     useEffect(() => {
         if (typeof window !== "undefined") {
@@ -421,6 +426,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     }
                 }
                 setRemainingQuota(data.remaining_quota);
+                if (typeof data.quota_limit === "number") setQuotaLimit(data.quota_limit);
+                if (typeof data.is_pro === "boolean") setIsPro(data.is_pro);
                 setAccessState({ owner, status: "ready" });
             } catch (e) {
                 if (accessOwnerRef.current === owner) setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "error" });
@@ -722,6 +729,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 if (data.remaining_quota !== undefined) {
                     setRemainingQuota(data.remaining_quota);
                 }
+                if (data.quota_limit !== undefined) {
+                    setQuotaLimit(data.quota_limit);
+                }
+                if (data.is_pro !== undefined) {
+                    setIsPro(Boolean(data.is_pro));
+                }
                 assistantMsg.content = stripMarkdownTables(sanitizeReply(data.reply || "معذرة، لم أتمكن من معالجة هذا الطلب."));
                 assistantMsg.tables = Array.isArray(data.tables) ? data.tables : undefined;
                 assistantMsg.suggestedButtons = Array.isArray(data.suggested_buttons) ? data.suggested_buttons.map((button: unknown) => sanitizeUiLabel(String(button))).filter(Boolean) : undefined;
@@ -819,6 +832,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 if (parsed.remaining_quota !== undefined) {
                                     setRemainingQuota(parsed.remaining_quota);
                                 }
+                                if (parsed.quota_limit !== undefined) {
+                                    setQuotaLimit(parsed.quota_limit);
+                                }
+                                if (parsed.is_pro !== undefined) {
+                                    setIsPro(Boolean(parsed.is_pro));
+                                }
                                 assistantMsg.latencyMs = parsed.latency_ms || (Date.now() - newUserMsg.timestamp);
                                 assistantMsg.isStreaming = false;
                                 updateAssistantMsgInState(assistantMsg);
@@ -836,6 +855,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 }
                                 if (parsed.remaining_quota !== undefined) {
                                     setRemainingQuota(parsed.remaining_quota);
+                                }
+                                if (parsed.quota_limit !== undefined) {
+                                    setQuotaLimit(parsed.quota_limit);
+                                }
+                                if (parsed.is_pro !== undefined) {
+                                    setIsPro(Boolean(parsed.is_pro));
                                 }
                                 updateAssistantMsgInState(assistantMsg);
                             }
@@ -901,6 +926,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             stopResponding,
             isLoading,
             remainingQuota,
+            quotaLimit,
+            isPro,
             isInitializing,
             accessError,
             retryAccess,

@@ -14,7 +14,8 @@ import os
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -28,6 +29,118 @@ DEFAULT_VIP_TOPIC_ID = 1680
 _DEDUP_LOCK = threading.Lock()
 _PROCESSED_EVENTS: Dict[str, float] = {}
 _PENDING_PROMPTS: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+
+@lru_cache(maxsize=1)
+def _get_egx_symbols_set() -> Set[str]:
+    """Return all known EGX tickers (uppercase) with resilient fallback."""
+    try:
+        from api.symbols_local import load_symbols_for_country
+        syms = load_symbols_for_country("Egypt")
+        res = {str(s.get("Symbol") or "").strip().upper() for s in syms if s.get("Symbol")}
+        res.discard("")
+        if res:
+            return res
+    except Exception:
+        pass
+    return {
+        "ABUK", "ADCI", "ADIB", "AFMC", "AIND", "AJWA", "ALCN", "ALUM", "AMER", "AMOC",
+        "ANFI", "ARAB", "ARCC", "AREH", "AREHA", "ARVA", "ASCM", "ASPI", "ATLC", "ATQA",
+        "AUTO", "AXPH", "BINV", "BIOC", "BONY", "BTFH", "CAED", "CANA", "CCRS", "CEFM",
+        "CERA", "CFGH", "CICH", "CLHO", "CNFN", "COMI", "COPR", "COSG", "CPCI", "CSAG",
+        "DTPP", "EAST", "EBSC", "EFIC", "EGAL", "EGAS", "EGCH", "EGSA", "EGTS", "EHDR",
+        "EKHO", "EKHOA", "ELNA", "ELSH", "EMFD", "EPCO", "ESRS", "ETEL", "ETRS", "EXPA",
+        "FIRE", "FWRY", "GBCO", "GDWA", "GECE", "GGCC", "GMCB", "GOCO", "GOUR", "GRCA",
+        "GSPC", "GTHE", "HELI", "HDBK", "HRHO", "ICMI", "IDRE", "IFAP", "IFIN", "INFI",
+        "IRAX", "IRON", "ISPH", "JUFO", "KABO", "KASABF", "KIMA", "KLHO", "KORA", "KRRE",
+        "LCSH", "MAAL", "MASR", "MCQE", "MEPA", "MFPC", "MICH", "MIPH", "MNHD", "MOIL",
+        "MPCO", "MPRC", "MRCO", "MTIE", "NAHO", "NASR", "NATP", "NBKE", "NINH", "OBRI",
+        "OCDI", "OFH", "OLFI", "ORAS", "ORHD", "ORWE", "PACH", "PHDC", "POUL", "PRCL",
+        "PRDC", "PRMH", "QNBA", "RAKT", "RAYA", "RREI", "RUBX", "SAIB", "SAUD", "SCEM",
+        "SDTI", "SEEK", "SKPC", "SMFR", "SPHT", "SPMD", "SUGR", "SVCE", "SWDY", "TAQA",
+        "TCAP", "TMGH", "TRTO", "UEGC", "UNIP", "UTOP", "VALU", "VERT", "VOIL", "ZEOT",
+    }
+
+
+EGX_ARABIC_NAMES: List[str] = [
+    "فوري", "طلعت مصطفى", "أجواء", "اجواء", "أجوا", "اجوا", "موبكو", "سيدي كرير", "سيدى كرير",
+    "حديد عز", "عز الدخيلة", "بالم هيلز", "أسكوم", "اسكوم", "بلتون", "بيلتون", "هيرمس", "هيرميس",
+    "إي إف جي", "اي اف جي", "ابوقير", "أبوقير", "أبو قير", "ابو قير", "إيديتا", "ايديتا",
+    "جهينة", "جهينه", "السويدي", "السويدى", "النساجون", "النساجون الشرقيون", "كيما", "مدينة نصر",
+    "مدينه نصر", "مصر الجديدة", "مصر الجديده", "إعمار", "اعمار", "إعمار مصر", "ابن سينا",
+    "القاهرة للادوية", "القاهرة للأدوية", "رميدا", "سبيد ميديكال", "غاز مصر", "أموك", "اموك",
+    "المالية والصناعية", "الماليه والصناعيه", "القلعة", "القلعه", "بايونيرز", "جي بي أوتو",
+    "جي بي كورب", "أوراسكوم", "اوراسكوم", "ريماس", "عتاقة", "عتاقه", "الزهراء", "شارم دريمز",
+    "شمس للإسكان", "الشمس", "سبأ", "راكتا", "الرواد", "العربية لحليج", "الشرقية للدخان",
+    "الشرقيه للدخان", "إيسترن كومباني", "ايسترن", "النزهة", "النزهه", "جدوى", "جدوي", "كونتكت",
+    "ثروة", "برايم", "أصول", "اصول", "كفر الزيات", "الحديد والصلب", "القاهرة للزيوت",
+    "العربية للادوية", "العبور", "مطاحن مصر الوسطى", "مطاحن اسكندرية", "مطاحن إسكندرية",
+    "الخليج الكندي", "كونكريت", "سي اي كابيتال", "سي آي كابيتال", "كوبر", "دومتي", "دومتى",
+    "قناة السويس", "أبوظبي الإسلامي", "ابوظبي الاسلامي", "مصرف أبوظبي", "بنك فيصل",
+    "المصرف المتحد", "المصرية للاتصالات", "المصريه للاتصالات", "وي", "إي فاينانس", "اي فاينانس",
+    "تعليم", "كابو", "أم بي للهندسة", "مصر للأسمنت", "أسمنت قنا", "أكرو مصر", "العربية للاسمنت",
+    "العربيه للاسمنت", "شمال الصعيد", "الجيزة العامة", "الصعيد للمقاولات", "رواد السياحة",
+    "مرسى علم", "مينا للاستثمار", "زهراء المعادي", "طاقة عربية", "طاقه عربيه", "طاقة",
+    "بي انفستمنتس", "بي إنفستمنتس", "قرة", "قره", "أوراسكوم كونستراكشون", "اسكندرية لتداول الحاويات",
+    "الحاويات", "حاويات اسكندرية", "الاسكندرية لتداول الحاويات", "الإسكندرية لتداول الحاويات",
+]
+
+
+def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
+    """
+    Intelligently determine if a message in Topic 1680 (ARTORO) is a user query for ARTORO.
+    Returns (mode, query_text) or None if it's pure member-to-member banter.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    # 1. Pure member-to-member social banter that clearly addresses other human members
+    # (e.g. "يا جماعة حد اشترى...", "صباح الخير يا شباب", "شكرا يا غالي", "تسلم يا باشا", "مبروك")
+    # UNLESS it explicitly mentions @egxbots_bot or "يا أرتورو"
+    has_bot_call = bool(re.search(r"(?:@egxbots_bot|[اأ]رتورو|يا\s*[اأ]رتورو)", raw, re.IGNORECASE))
+    if not has_bot_call:
+        if re.search(r"^(?:يا\s*(?:جماعة|شباب|رجالة|أعضاء|إخواني|اخواني)|حد\s*(?:اشترى|باع|جرب|عرف|عنده|هنا)|صباح الخير|مساء الخير|السلام عليكم|شكرا|شكراً|تسلم|ألف شكر|تسلم ايدك|مبروك|تمام(?:\s+يا|$))", raw, re.IGNORECASE):
+            return None
+
+    # Strip bot mention if present
+    cleaned = re.sub(r"^(?:/ask(?:@\w+)?|@egxbots_bot|يا\s*[اأ]رتورو|[اأ]رتورو)\s*[:،\-]?\s*", "", raw, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        cleaned = raw
+
+    # 2. Check if text is an explicit EGX Ticker (e.g. "ASCM", "PHDC", "COMI", "FWRY", "ASCM.CA")
+    token = re.sub(r"[^\w\.]", "", cleaned).upper().replace(".CA", "")
+    all_egx = _get_egx_symbols_set()
+    if token in all_egx or (re.match(r"^[A-Z0-9]{2,6}$", token) and len(cleaned.split()) <= 2):
+        return ("stock", f"حلل سهم {token}")
+
+    # 3. Check for comparison intent ("قارن بين X و Y", "مقارنة X و Y", "أيهما أفضل")
+    if re.search(r"(?:قارن|مقارن|مقارنة|ايهم|أيهما|\bبين\b.*\bو\b)", cleaned):
+        if not re.search(r"^(?:قارن|مقارنة)", cleaned):
+            return ("compare", f"قارن بين {cleaned}")
+        return ("compare", cleaned)
+
+    # 4. Check if text matches known Egyptian Arabic stock names (e.g. "فوري", "طلعت مصطفى", "أجواء")
+    for name in EGX_ARABIC_NAMES:
+        if name in cleaned:
+            # If the user only typed the stock name (e.g. "فوري" or "سهم فوري" or "بالم هيلز")
+            if len(cleaned.split()) <= 3 and not re.search(r"(?:حلل|تحليل|سعر|رايك|رأيك|مستويات|اخبار|أخبار)", cleaned):
+                return ("stock", f"حلل سهم {cleaned}")
+            return ("free", cleaned)
+
+    # 5. Check for analysis keywords (e.g. "حلل سهم ...", "تحليل ...", "سعر ...", "رايك في ...")
+    if re.search(r"(?:حلل|تحليل|سعر|اسعار|أسعار|رايك|رأيك|مستهدف|دعم|مقاومة|شراء|بيع|توصي|توصية|توصيات|محفظ|تجميع|مسح|مؤشر|سهم|اسهم|أسهم|البورصة|السوق)", cleaned):
+        return ("free", cleaned)
+
+    # 6. Questions directed at the room (e.g. ends with ? or contains question particles)
+    if re.search(r"[؟\?]|(?:^|\s)(?:ايه|إيه|فين|ازاي|إزاي|مين|ليه|كام|متى|هل|توقعات|فرص)(?:\s|$)", cleaned):
+        return ("free", cleaned)
+
+    # 7. If the user addressed the bot by name (@egxbots_bot or أرتورو), answer unconditionally
+    if has_bot_call:
+        return ("free", cleaned)
+
+    return None
 
 
 def get_vip_group_id() -> str:
@@ -425,13 +538,21 @@ def answer_vip_callback(
 
 def _web_vip_chat_endpoints() -> List[str]:
     urls: List[str] = []
-    local_port = os.getenv("PORT_WEB", "3000")
-    urls.append(f"http://127.0.0.1:{local_port}/api/telegram/vip-chat")
+    is_hf = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE"))
     origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
-    if origin and "127.0.0.1" not in origin and "localhost" not in origin:
-        urls.append(f"{origin}/api/telegram/vip-chat")
-    elif "https://egxbots.com/api/telegram/vip-chat" not in urls:
-        urls.append("https://egxbots.com/api/telegram/vip-chat")
+    prod_url = (
+        f"{origin}/api/telegram/vip-chat"
+        if origin and "127.0.0.1" not in origin and "localhost" not in origin
+        else "https://egxbots.com/api/telegram/vip-chat"
+    )
+
+    if is_hf:
+        urls.append(prod_url)
+    else:
+        local_port = os.getenv("PORT_WEB", "3000")
+        urls.append(f"http://127.0.0.1:{local_port}/api/telegram/vip-chat")
+        if prod_url not in urls:
+            urls.append(prod_url)
     return urls
 
 
@@ -554,8 +675,11 @@ def format_pipeline_reply_for_telegram(
 ) -> str:
     """Convert pipeline markdown response + tables into rich Telegram HTML."""
     cleaned = (reply_text or "").strip()
-    # Telegram users are already inside Telegram: drop the Telegram-channel promo line the web chat appends.
-    cleaned = re.sub(r"^[^\n]*(?:t\.me/|/profile#telegram)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
+    # Telegram users are already inside Telegram: drop Telegram promo lines and duplicate website markdown lines
+    cleaned = re.sub(r"^[^\n]*(?:t\.me/|/profile#telegram|قناة VIP على تليجرام|قناة EGX Bots المجانية)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
+    cleaned = re.sub(r"👑\s*\[قناة VIP على تليجرام[^\]]*\]\([^\)]+\)", "", cleaned).rstrip()
+    cleaned = re.sub(r"📢\s*\[قناة EGX Bots المجانية[^\]]*\]\([^\)]+\)", "", cleaned).rstrip()
+    cleaned = re.sub(r"🌐\s*\[منصة EGX Bots[^\]]*\]\([^\)]+\)(?:\s*•\s*👑\s*\[ترقية باقة VIP\]\([^\)]+\))?", "", cleaned).rstrip()
     has_md_table = bool(re.search(r"^\|.+\|$", cleaned, flags=re.MULTILINE))
     cleaned = _convert_markdown_tables_to_bullets(cleaned)
 
@@ -796,12 +920,15 @@ def _execute_and_reply_vip_chat_inner(
 
     # Delete temporary waiting message
     if wait_msg_id:
-        _call_telegram_api(
-            bot_token,
-            "deleteMessage",
-            {"chat_id": chat_id, "message_id": wait_msg_id},
-            timeout=5,
-        )
+        try:
+            _call_telegram_api(
+                bot_token,
+                "deleteMessage",
+                {"chat_id": chat_id, "message_id": wait_msg_id},
+                timeout=5,
+            )
+        except Exception:
+            pass
 
     if not api_res.get("ok"):
         err_code = str(api_res.get("error_code") or "")
@@ -1250,6 +1377,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     pending_mode = get_local_pending_prompt(chat_id, tg_user_id)
     reply_to = msg.get("reply_to_message") or {}
     reply_to_text = str(reply_to.get("text") or "")
+    reply_to_from = bool((reply_to.get("from") or {}).get("is_bot"))
 
     if not pending_mode and reply_to_text:
         if "تحليل سهم فوري —" in reply_to_text:
@@ -1258,18 +1386,16 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             pending_mode = "compare"
         elif "اسأل أرتورو —" in reply_to_text:
             pending_mode = "free"
-
-    # In Private 1-on-1 Chat with @egxbots_bot, users can type directly OR use the buttons!
-    # In the Public Group Topic (1680), users must click a button first so member-to-member chat is ignored.
-    if not pending_mode:
-        if is_private:
+        elif reply_to_from:
+            # User replied to ANY message from ARTORO!
             pending_mode = "free"
-        else:
-            return True
 
+    # Always reset pending prompt for this user so subsequent messages aren't trapped
     set_local_pending_prompt(chat_id, tg_user_id, None)
 
     cleaned_input = text.strip()
+    query_text = cleaned_input
+
     if pending_mode == "stock":
         if not re.search(r"(?:حلل|تحليل|سعر|رايك|رأيك|مستويات|اخبار|أخبار)", cleaned_input):
             query_text = f"حلل سهم {cleaned_input}"
@@ -1280,8 +1406,20 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             query_text = f"قارن بين {cleaned_input}"
         else:
             query_text = cleaned_input
-    else:
+    elif pending_mode == "free":
         query_text = cleaned_input
+    else:
+        # In Private 1-on-1 Chat with @egxbots_bot, users can type directly
+        if is_private:
+            query_text = cleaned_input
+        else:
+            # In the Public Group Topic (1680), intelligently detect query intent!
+            detected = detect_topic_query_intent(text)
+            if not detected:
+                # Pure casual member-to-member banter in the group without any stock query -> ignore
+                return True
+            det_mode, det_query = detected
+            query_text = det_query
 
     threading.Thread(
         target=_execute_and_reply_vip_chat,

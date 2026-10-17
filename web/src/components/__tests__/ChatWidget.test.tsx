@@ -88,3 +88,26 @@ test("scroll-to-bottom button appears when user scrolls up and scrolls to latest
     expect(screen.queryByRole("button", { name: "النزول لآخر رسالة" })).toBeNull();
     (chat as any).messages = [];
 });
+
+test("quota badge correctly reflects Pro plan quota out of 350 vs Free plan out of 5", () => {
+    mockUser = { id: "user", email: "pro@example.com" };
+    (chat as any).isPro = true;
+    (chat as any).quotaLimit = 350;
+    (chat as any).remainingQuota = 84;
+
+    const { rerender } = render(<ChatWidget />);
+    expect(screen.getByText("84/350 Left")).toBeTruthy();
+    expect(screen.queryByText("84/5 Left")).toBeNull();
+
+    // Free plan test
+    (chat as any).isPro = false;
+    (chat as any).quotaLimit = 5;
+    (chat as any).remainingQuota = 4;
+    rerender(<ChatWidget />);
+    expect(screen.getByText("4/5 Left")).toBeTruthy();
+
+    // Reset
+    (chat as any).isPro = false;
+    (chat as any).quotaLimit = 5;
+    (chat as any).remainingQuota = 99;
+});

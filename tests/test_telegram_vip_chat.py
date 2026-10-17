@@ -361,16 +361,15 @@ def test_telegram_reply_has_site_and_pricing_links_without_telegram_promo():
     from api.telegram_vip_chat import format_pipeline_reply_for_telegram
 
     reply = (
-        "### ????? ???\n\n?? ???????\n\n"
-        "? ????? EGX Bots ???? ??? ???? ????????.\n\n"
-        "?? [???? EGX Bots ???????? ??? ??????? ????????? ??????](https://t.me/egxbots)\n"
+        "### تحليل سهم\n\nتم التحليل\n\n"
+        "📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)\n"
     )
     out = format_pipeline_reply_for_telegram(reply, [], "Ahmed", 1, False, 1, 5, 4, "daily")
     assert "t.me/egxbots" not in out
-    assert "???? EGX Bots ????????" not in out
+    assert "قناة EGX Bots المجانية" not in out
     assert "/pricing" in out
-    assert "???? EGX Bots" in out
-    assert "?? ???????" in out
+    assert "موقع EGX Bots" in out
+    assert "صفحة التسعير" in out
 
 
 def test_telegram_api_retries_on_flood_control(monkeypatch):
@@ -398,3 +397,133 @@ def test_telegram_api_retries_on_flood_control(monkeypatch):
     res = vip._call_telegram_api("tok", "sendMessage", {"chat_id": 1, "text": "x"})
     assert res.get("ok") is True
     assert len(calls) == 2
+
+
+def test_direct_stock_ticker_in_topic_without_button_press():
+    """
+    When a user types an EGX stock ticker (like ASCM or PHDC) directly in Topic 1680
+    without pressing a menu button first, ARTORO must recognize it and analyze the stock!
+    """
+    from api.telegram_vip_chat import handle_vip_chat_update, set_local_pending_prompt
+    import time
+
+    tg_calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        tg_calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 111}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        return {
+            "ok": True,
+            "reply": f"تحليل سهم أسيك للتعدين (ASCM): السعر 42.80 ج.م",
+            "tables": [],
+            "display_name": "Taher A",
+            "is_pro": False,
+            "used": 1,
+            "limit": 5,
+            "remaining": 4,
+            "period": "daily",
+        }
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        set_local_pending_prompt(-1002083067817, 778899, None)
+
+        msg_update = {
+            "message": {
+                "message_id": 801,
+                "chat": {"id": -1002083067817, "type": "supergroup"},
+                "message_thread_id": 1680,
+                "from": {"id": 778899, "first_name": "Taher", "last_name": "A"},
+                "text": "ASCM",
+            }
+        }
+        assert handle_vip_chat_update(msg_update, "TEST_TOKEN") is True
+
+        # Wait briefly for worker thread to execute
+        time.sleep(0.1)
+
+        assert len(web_calls) == 1
+        assert web_calls[0]["telegram_user_id"] == 778899
+        assert "ASCM" in web_calls[0]["message"]
+        assert "حلل سهم ASCM" == web_calls[0]["message"]
+
+
+def test_concurrent_users_in_same_minute_both_get_replies():
+    """
+    When two users ask in the same minute (e.g. Sameh asks Phdc and Taher asks ASCM),
+    both queries must be processed concurrently and both users must receive their replies!
+    """
+    from api.telegram_vip_chat import handle_vip_chat_update, set_local_pending_prompt
+    import time
+
+    tg_calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        tg_calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 999}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        uid = payload["telegram_user_id"]
+        sym = "PHDC" if uid == 1150269195 else "ASCM"
+        return {
+            "ok": True,
+            "reply": f"تحليل سهم {sym}: مؤشرات إيجابية وتداول مستقر",
+            "tables": [],
+            "display_name": payload.get("telegram_username", ""),
+            "is_pro": False,
+            "used": 1,
+            "limit": 5,
+            "remaining": 4,
+            "period": "daily",
+        }
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        # User 1: Sameh Avram has a stock pending prompt and sends "Phdc"
+        set_local_pending_prompt(-1002083067817, 1150269195, "stock")
+        msg_sameh = {
+            "message": {
+                "message_id": 901,
+                "chat": {"id": -1002083067817, "type": "supergroup"},
+                "message_thread_id": 1680,
+                "from": {"id": 1150269195, "first_name": "Sameh", "last_name": "Avram"},
+                "text": "Phdc",
+            }
+        }
+
+        # User 2: Taher A sends "ASCM" directly without button prompt
+        set_local_pending_prompt(-1002083067817, 223344, None)
+        msg_taher = {
+            "message": {
+                "message_id": 902,
+                "chat": {"id": -1002083067817, "type": "supergroup"},
+                "message_thread_id": 1680,
+                "from": {"id": 223344, "first_name": "Taher", "last_name": "A"},
+                "text": "ASCM",
+            }
+        }
+
+        # Dispatch both within the same minute!
+        assert handle_vip_chat_update(msg_sameh, "TEST_TOKEN") is True
+        assert handle_vip_chat_update(msg_taher, "TEST_TOKEN") is True
+
+        # Wait briefly for both concurrent worker threads
+        time.sleep(0.15)
+
+        # Both web calls must have fired!
+        assert len(web_calls) == 2
+        user_ids = {c["telegram_user_id"] for c in web_calls}
+        assert user_ids == {1150269195, 223344}
+
+        queries = {c["message"] for c in web_calls}
+        assert "حلل سهم Phdc" in queries
+        assert "حلل سهم ASCM" in queries
+

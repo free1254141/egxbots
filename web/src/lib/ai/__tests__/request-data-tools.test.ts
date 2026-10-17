@@ -93,6 +93,9 @@ test('name hints identify Kima while preserving explicit ticker intent',()=>{
  expect(knownSymbolHints('سهم كيما')).toContainEqual({name:'كيما',symbols:['EGCH']});
  expect(knownSymbolHints('KIMA')).toEqual([]);
  expect(knownSymbolHints('كيماويات مصر').some(r=>r.symbols.includes('EGCH'))).toBe(false);
+ const ajwaHints = knownSymbolHints('اجواء و الاسكندريه');
+ expect(ajwaHints.some(h => h.symbols.includes('AJWA'))).toBe(true);
+ expect(ajwaHints.some(h => h.symbols.includes('ALCN'))).toBe(true);
 });
 
 test('corporate-action news is available but never promoted to an official confirmation',async()=>{

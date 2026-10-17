@@ -1969,6 +1969,7 @@ export interface PipelineOptions {
     mockVisionResult?: VisionContext;
     /** User subscription tier: true for Pro, false for Free. */
     isPro?: boolean;
+    chatSource?: string;
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */

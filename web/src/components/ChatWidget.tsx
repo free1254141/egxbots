@@ -33,6 +33,8 @@ export default function ChatWidget() {
         stopResponding,
         isLoading, 
         remainingQuota,
+        quotaLimit = 5,
+        isPro = false,
         isInitializing,
         accessError,
         retryAccess,
@@ -383,7 +385,7 @@ export default function ChatWidget() {
                     <div className="flex items-center gap-2">
                         {user && !isInitializing && !accessError && (
                             <div className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs">
-                                {remainingQuota >= 99 ? "Unlimited ♾️" : `${remainingQuota}/5 Left`}
+                                {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/5 Left`}
                             </div>
                         )}
                         {!isChatRoute && (
@@ -456,7 +458,7 @@ export default function ChatWidget() {
                         </div>
                     ) : (
                         <>
-                            {remainingQuota === 1 && (
+                            {!isPro && remainingQuota === 1 && (
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
                                         <span className="text-base">⚠️</span>
@@ -472,7 +474,7 @@ export default function ChatWidget() {
                                 </div>
                             )}
 
-                            {remainingQuota === 0 && (
+                            {!isPro && remainingQuota === 0 && (
                                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
                                         <span className="text-base">🛑</span>
@@ -485,6 +487,15 @@ export default function ChatWidget() {
                                     >
                                         اشترك في Pro الآن
                                     </button>
+                                </div>
+                            )}
+
+                            {isPro && remainingQuota === 0 && (
+                                <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-base">🛑</span>
+                                        <span>استهلكت رصيدك الشهري لخطة Pro ({quotaLimit || 350}/{quotaLimit || 350})</span>
+                                    </div>
                                 </div>
                             )}
 

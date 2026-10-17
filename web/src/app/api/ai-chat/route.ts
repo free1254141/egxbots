@@ -896,6 +896,8 @@ export async function POST(req: NextRequest) {
                                         reply: replyText,
                                         session_id: activeSessionId,
                                         remaining_quota: calcRemainingQuota(),
+                                        quota_limit: isUnlimited ? 999 : (userIsPro ? userMonthlyCap : 5),
+                                        is_pro: isUnlimited || userIsPro,
                                         suggested_buttons: suggestedButtons,
                                         session_state: sessionUpdate,
                                         tables: event.data.tables || [],
@@ -1088,6 +1090,8 @@ export async function POST(req: NextRequest) {
             chart_actions: pipelineResult.chart_actions || [],
             session_id: activeSessionId,
             remaining_quota: calcRemainingQuota(),
+            quota_limit: isUnlimited ? 999 : (userIsPro ? userMonthlyCap : 5),
+            is_pro: isUnlimited || userIsPro,
             suggested_buttons: suggestedButtons,
             session_state: pipelineResult.session_update,
             latency_ms: totalLatencyMs
@@ -1139,13 +1143,14 @@ export async function GET(req: NextRequest) {
             let isUnlimited = !billingOn && isUnlimitedChatUser(user);
             let quotaLimit = AI_CONFIG.limits.dailyMessages;
             let usedCount = 0;
+            let userIsPro = false;
 
             if (billingOn) {
                 const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
-                const pro = gateIsPro(planRows || []);
+                userIsPro = gateIsPro(planRows || []);
                 isUnlimited = false;
 
-                if (pro) {
+                if (userIsPro) {
                     quotaLimit = planLimits("pro").chat_messages_per_month;
                     const monthStart = new Date();
                     monthStart.setDate(1);
@@ -1184,7 +1189,9 @@ export async function GET(req: NextRequest) {
 
             return NextResponse.json({
                 sessions: sessions || [],
-                remaining_quota: isUnlimited ? 999 : Math.max(0, quotaLimit - usedCount)
+                remaining_quota: isUnlimited ? 999 : Math.max(0, quotaLimit - usedCount),
+                quota_limit: isUnlimited ? 999 : quotaLimit,
+                is_pro: isUnlimited || userIsPro
             });
         }
 

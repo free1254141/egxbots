@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
             "admin-tg-session",
             `admin-${Date.now()}`,
             "deepseek-flash",
-            { isPro: true }
+            { isPro: true, chatSource: "telegram_admin" }
         );
 
         return NextResponse.json({

@@ -14,6 +14,7 @@ export interface PipelineOptions {
     mockPlannerResult?: any;
     mockVisionResult?: any;
     isPro?: boolean;
+    chatSource?: string;
 }
 
 export interface AgenticToolCall {

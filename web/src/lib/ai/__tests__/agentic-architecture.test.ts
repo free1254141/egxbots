@@ -1604,6 +1604,28 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(card).toContain("| المقاومة الأولى | 19.36 |");
         expect(card).toContain("فوري تتصدر قائمة الفنتك");
     });
+
+    test("Telegram chatSource suppresses Telegram promotional links and provides website / pricing links", () => {
+        const { buildChatFooter, withChatFooter } = require("../agentic-runtime");
+        // 1. Pro user on Telegram
+        const proFooter = buildChatFooter(true, null, "telegram_topic");
+        expect(proFooter).not.toContain("t.me/");
+        expect(proFooter).not.toContain("/profile#telegram");
+        expect(proFooter).toContain("egxbots.com");
+
+        // 2. Free user on Telegram
+        const freeFooter = buildChatFooter(false, null, "telegram_private");
+        expect(freeFooter).not.toContain("t.me/");
+        expect(freeFooter).toContain("egxbots.com");
+        expect(freeFooter).toContain("/pricing");
+
+        // 3. withChatFooter cleans any pre-existing Telegram promo links when in Telegram
+        const draftWithPromo = "تحليل السهم مكتمل.\n\n👑 [قناة VIP على تليجرام للتوصيات والصفقات الفورية اللحظية](https://t.me/fake_vip)";
+        const cleanedReply = withChatFooter(draftWithPromo, true, null, "telegram_topic");
+        expect(cleanedReply).not.toContain("t.me/fake_vip");
+        expect(cleanedReply).toContain("egxbots.com");
+    });
 });
+
 
 

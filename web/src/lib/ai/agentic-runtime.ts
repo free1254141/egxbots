@@ -30,7 +30,13 @@ interface RuntimeInput {
 }
 type Event = { type: string; data: any };
 
-export function buildChatFooter(isPro: boolean, vipInviteLink?: string | null): string {
+export function buildChatFooter(isPro: boolean, vipInviteLink?: string | null, chatSource?: string): string {
+    if (chatSource && chatSource.startsWith("telegram")) {
+        if (isPro) {
+            return `\n\n${AI_CONFIG.disclaimer}\n\n🌐 [منصة EGX Bots لتحليل الأسهم المصرية](https://egxbots.com)`;
+        }
+        return `\n\n${AI_CONFIG.disclaimer}\n\n🌐 [منصة EGX Bots](https://egxbots.com) • 👑 [ترقية باقة VIP](https://egxbots.com/pricing)`;
+    }
     if (isPro) {
         const target = vipInviteLink || "/profile#telegram";
         return `\n\n${AI_CONFIG.disclaimer}\n\n👑 [قناة VIP على تليجرام للتوصيات والصفقات الفورية اللحظية](${target})`;
@@ -38,7 +44,17 @@ export function buildChatFooter(isPro: boolean, vipInviteLink?: string | null): 
     return `\n\n${AI_CONFIG.disclaimer}\n\n📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)`;
 }
 
-export function withChatFooter(reply: string, isPro: boolean, vipInviteLink?: string | null): string {
+export function withChatFooter(reply: string, isPro: boolean, vipInviteLink?: string | null, chatSource?: string): string {
+    if (chatSource && chatSource.startsWith("telegram")) {
+        let cleaned = reply
+            .replace(/\n\n👑\s*\[قناة VIP على تليجرام[^\]]*\]\([^)]+\)/gi, "")
+            .replace(/\n\n📢\s*\[قناة EGX Bots المجانية[^\]]*\]\([^)]+\)/gi, "")
+            .replace(/https?:\/\/t\.me\/[^\s\)]+/gi, "https://egxbots.com");
+        if (cleaned.includes("egxbots.com")) {
+            return cleaned;
+        }
+        return cleaned + buildChatFooter(isPro, vipInviteLink, chatSource);
+    }
     if (reply.includes("t.me/egxbots") || reply.includes("/profile#telegram") || (vipInviteLink && reply.includes(vipInviteLink))) {
         return reply;
     }
@@ -51,8 +67,10 @@ export function stripChatFooters(content: string): string {
         .replace(/\n\n📌\s*الرأي مبني على مؤشرات[\s\S]*$/i, "")
         .replace(/\n\n📢\s*\[قناة EGX Bots المجانية[\s\S]*$/i, "")
         .replace(/\n\n👑\s*\[قناة VIP[\s\S]*$/i, "")
+        .replace(/\n\n🌐\s*\[منصة EGX Bots[\s\S]*$/i, "")
         .trim();
 }
+
 
 export async function resolveUserProContext(supabase: any, userId: string, optionsIsPro?: boolean): Promise<{
     isPro: boolean;
@@ -245,7 +263,7 @@ export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Ev
         const isPro = Boolean(input.options?.isPro);
         const response = withChatFooter(input.images.length
             ? "وصلت الصورة، لكن انتهت مهلة المعالجة قبل إكمال قراءتها والتحقق من النتيجة. لم أعتمد أرقاماً غير مؤكدة؛ جرّب صورة واحدة واضحة أو أرسل الجزء المطلوب وحده."
-            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة.", input.userMessage), isPro);
+            : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة.", input.userMessage), isPro, null, input.options?.chatSource);
         yield { type: "token", data: response };
         yield { type: "done", data: { response, tables: [], session_update: {}, response_origin: "safe_fallback", usage: accounting.summary(),
             publication_review: { passed: false, repaired: false, final_passed: false, reasons: ["request_failed_or_aborted"], completion: "partial" } } };
@@ -276,7 +294,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         : selectedModel;
     const client = executionSupabase(input.supabase);
     const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
-    const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink);
+    const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink, options?.chatSource);
     let vision: VisionContext | null = null;
     let visionError: string | null = null;
     if (input.images.length) {
