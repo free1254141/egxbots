@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Brain, Database, Bot, LineChart, History, Sparkles, Clock, Users, MessageSquare, Send, CreditCard } from "lucide-react";
+import { Brain, Database, Bot, LineChart, History, Sparkles, Clock, Users, MessageSquare, Send, CreditCard, Zap } from "lucide-react";
 
 interface AdminHeaderProps {
-    activeMainTab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing";
-    setActiveMainTab: (tab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing") => void;
+    activeMainTab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts";
+    setActiveMainTab: (tab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts") => void;
 }
 
 export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHeaderProps) {
@@ -22,6 +22,7 @@ export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHe
         { id: "similarity", label: "SIMILARITY", icon: History, color: "pink" },
         { id: "jobs", label: "JOBS", icon: Clock, color: "orange" },
         { id: "schedule", label: "TELEGRAM", icon: Send, color: "amber" },
+        { id: "alerts", label: "ALERTS RADAR", icon: Zap, color: "yellow" },
         { id: "users", label: "USERS", icon: Users, color: "blue" },
         { id: "support", label: "SUPPORT & AI", icon: MessageSquare, color: "pink" },
         { id: "billing", label: "BILLING", icon: CreditCard, color: "teal" },

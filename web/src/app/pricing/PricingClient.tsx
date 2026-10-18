@@ -31,6 +31,7 @@ import {
   Crown,
   Flame,
   Award,
+  BellRing,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -435,11 +436,13 @@ export default function PricingClient() {
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حتى ${freeLimits.portfolio_stocks} أسهم في المحفظة` : `Up to ${freeLimits.portfolio_stocks} portfolio stocks`, included: true },
     { icon: <Activity className="w-4 h-4" />, text: isAr ? "النشاط غير الطبيعي (أسهم ارتفع حجمها بشكل غير طبيعي)" : "Unusual Activity (volume spike detection)", included: false },
     { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية ومؤشرات الخوارزميات)" : "Instant Telegram Channel (daily technical signals)", included: false },
+    { icon: <BellRing className="w-4 h-4" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات)" : "Live Telegram Scanner Alerts (Volume & Breakouts)", included: false },
   ];
 
   const proFeatures = [
     { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية بدون تأخير)" : "Instant Telegram Channel (daily algorithmic signals without delay)", included: true },
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "الصفقات القصيرة ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح EMA10 بدون تشفير" : "Short Swings ⚡ PRO — momentum trades, tight 4% stop, and EMA10 runners unmasked", included: true },
+    { icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام — سيولة ذكية، اختراقات، تشبع بيعي، وإفصاحات" : "Live Telegram Scanner Alerts — smart volume, breakouts, oversold bounce & disclosures", included: true },
     { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? `${proLimits.chat_messages_per_month} رسالة شات بوت ذكي شهرياً` : `${proLimits.chat_messages_per_month} smart chatbot messages / month`, included: true },
     ...chartFeatures,
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حتى ${proLimits.portfolio_stocks} أسهم نشطة في المحفظة` : `Up to ${proLimits.portfolio_stocks} active portfolio stocks`, included: true },
@@ -449,6 +452,7 @@ export default function PricingClient() {
   const lifetimeFeatures = [
     { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (never expires, zero recurring renewals)", included: true },
     { icon: <ShieldCheck className="w-4 h-4 text-emerald-500" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية للأبد)" : "Instant Telegram Channel forever", included: true },
+    { icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام بكافة مراحله للأبد" : "Live Telegram Scanner Alerts forever across all stages", included: true },
     { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "الصفقات القصيرة ⚡ PRO ومتابعة الأرباح كاملة بدون تشفير" : "Short Swings ⚡ PRO momentum trades unmasked", included: true },
     { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? `${proLimits.chat_messages_per_month} استشارة شات بوت شهرياً تتجدد تلقائياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages refreshed monthly for life`, included: true },
     ...chartFeatures,
@@ -868,6 +872,10 @@ export default function PricingClient() {
                     </div>
                     <div className="flex items-center gap-2 text-zinc-300">
                       <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام للأبد" : "Live Telegram Scanner Alerts lifetime"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                       <span>{isAr ? `محفظة حتى ${proLimits.portfolio_stocks} أسهم + كشف السيولة غير الطبيعية` : `Up to ${proLimits.portfolio_stocks} portfolio stocks + volume spikes`}</span>
                     </div>
                   </>
@@ -876,6 +884,10 @@ export default function PricingClient() {
                     <div className="flex items-center gap-2 text-zinc-300">
                       <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                       <span>{isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية بدون تأخير)" : "Instant Telegram Channel (daily signals without delay)"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-300">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات وإفصاحات)" : "Live Telegram Scanner Alerts (volume, breakouts & filings)"}</span>
                     </div>
                     <div className="flex items-center gap-2 text-zinc-300">
                       <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />

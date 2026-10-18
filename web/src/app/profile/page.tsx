@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
 import FoundingMemberBanner from "./components/FoundingMemberBanner";
+import ScannerAlertsCard from "./components/ScannerAlertsCard";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -187,6 +188,9 @@ export default function ProfilePage() {
           onPortfolioUpdated={() => setPortfolioVersion((v) => v + 1)}
         />
       </div>
+
+      {/* ── Scanner Alerts Preferences (تفضيلات تنبيهات الإسكانر) ── */}
+      <ScannerAlertsCard initialTelegramLinked={telegramLinked} />
 
       {/* ── Account + Telegram ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">

@@ -137,7 +137,12 @@ export default function SupportChatWidget() {
         await sendMessage(content, img);
     };
 
+    const isChartRoute = pathname === "/chart" || pathname?.startsWith("/chart");
+
     if (!isOpen) {
+        if (isChartRoute) {
+            return null;
+        }
         return (
             <button
                 onClick={() => setIsOpen(true)}

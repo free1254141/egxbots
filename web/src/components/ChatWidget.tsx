@@ -62,6 +62,7 @@ export default function ChatWidget() {
         pathname = "";
     }
     const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat");
+    const isChartRoute = pathname === "/chart" || pathname.startsWith("/chart");
     const [input, setInput] = useState("");
     const [isExpanded, setIsExpanded] = useState(false);
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
@@ -325,6 +326,9 @@ export default function ChatWidget() {
     };
 
     if (!isOpen && !isChatRoute) {
+        if (isChartRoute) {
+            return null;
+        }
         return (
             <button
                 onClick={() => setIsOpen(true)}

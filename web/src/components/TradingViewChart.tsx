@@ -359,6 +359,7 @@ export default function TradingViewChart({
 
   // States
   const [candlesData, setCandlesData] = useState<Candle[]>([]);
+  const [cachedNoticeDismissed, setCachedNoticeDismissed] = useState(false);
   const candlesLoadedRef = useRef(onCandlesLoaded);
   candlesLoadedRef.current = onCandlesLoaded;
   const drawingChangeRef = useRef(onDrawingsChange);
@@ -2849,14 +2850,25 @@ export default function TradingViewChart({
             className="absolute inset-0 overflow-hidden"
           />
 
-          {isEgxEndOfDay && !compact && (
+          {isEgxEndOfDay && !compact && !cachedNoticeDismissed && (
             <div
               dir="rtl"
-              className="pointer-events-none absolute right-3 top-3 z-30 max-w-[260px] rounded-xl border border-amber-300/70 bg-white/95 px-3 py-2 text-right shadow-lg backdrop-blur-md dark:border-amber-500/30 dark:bg-[#131722]/95"
+              className="pointer-events-auto absolute right-3 top-3 z-30 max-w-[240px] sm:max-w-[260px] rounded-xl border border-amber-300/70 bg-white/95 px-3 py-2 text-right shadow-lg backdrop-blur-md dark:border-amber-500/30 dark:bg-[#131722]/95"
             >
-              <div className="flex items-center justify-end gap-1.5 text-[11px] font-black text-amber-800 dark:text-amber-300">
-                <span>بيانات آخر تحديث محفوظ</span>
-                <Clock3 className="h-3.5 w-3.5" />
+              <div className="flex items-center justify-between gap-2 text-[11px] font-black text-amber-800 dark:text-amber-300">
+                <button
+                  type="button"
+                  onClick={() => setCachedNoticeDismissed(true)}
+                  className="rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-white transition-colors cursor-pointer"
+                  aria-label="إغلاق التنبيه"
+                  title="إغلاق التنبيه"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                <div className="flex items-center gap-1.5">
+                  <span>بيانات آخر تحديث محفوظ</span>
+                  <Clock3 className="h-3.5 w-3.5" />
+                </div>
               </div>
               <div className="mt-0.5 text-[10px] font-bold leading-4 text-zinc-700 dark:text-zinc-300">
                 تحديث أثناء الجلسة وبعد الإغلاق — البيانات ليست لحظية.

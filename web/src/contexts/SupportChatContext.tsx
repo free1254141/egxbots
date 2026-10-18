@@ -278,6 +278,10 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
     );
 }
 
+export function useOptionalSupportChat() {
+    return useContext(SupportChatContext);
+}
+
 export function useSupportChat() {
     const context = useContext(SupportChatContext);
     if (!context) {

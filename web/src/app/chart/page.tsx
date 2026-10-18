@@ -28,6 +28,7 @@ import {
   ExternalLink,
   ArrowRightLeft,
   Plus,
+  X,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -134,6 +135,8 @@ function ChartContent() {
   const [activeTab, setActiveTab] = useState<"watchlist" | "details">(
     "details",
   );
+  const [mobileDrawOpen, setMobileDrawOpen] = useState<boolean>(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
 
   useEffect(() => {
     // Disable body scroll when workspace is active
@@ -270,6 +273,7 @@ function ChartContent() {
 
   const selectSymbol = (sym: string, ex: string) => {
     handleActiveStockChange(sym, ex);
+    setMobileSidebarOpen(false);
     router.push(
       `/chart?symbol=${encodeURIComponent(sym)}&exchange=${encodeURIComponent(ex)}`,
     );
@@ -290,150 +294,228 @@ function ChartContent() {
     }).format(num);
   };
 
+  const renderDrawingTools = (isMobile = false) => (
+    <>
+      <button
+        onClick={() => {
+          handleToolClick("cursor");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "cursor"
+            ? "bg-indigo-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Crosshair / Pointer"
+      >
+        <MousePointer className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Pointer
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("trend");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "trend"
+            ? "bg-emerald-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Trend Line"
+      >
+        <TrendingUp className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Trend Line
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("horizontal");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "horizontal"
+            ? "bg-indigo-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Horizontal Support/Resistance Line"
+      >
+        <Minus className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Horizontal Line (Click Chart)
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("text");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "text"
+            ? "bg-indigo-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Text Label"
+      >
+        <Type className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Text Label (Mock)
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("rectangle");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "rectangle"
+            ? "bg-sky-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Rectangle Zone"
+      >
+        <svg
+          className="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <rect x="4" y="6" width="16" height="12" strokeWidth="2" />
+        </svg>
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Rectangle Zone
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("fib");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "fib"
+            ? "bg-amber-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Fibonacci Retracement"
+      >
+        <Compass className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Fibonacci
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("ray");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "ray"
+            ? "bg-orange-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Ray"
+      >
+        <TrendingUp className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Ray
+        </span>
+      </button>
+
+      <button
+        onClick={() => {
+          handleToolClick("extendedLine");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className={`p-2 rounded-xl transition-all duration-200 group relative ${
+          activeTool === "extendedLine"
+            ? "bg-fuchsia-600 text-white"
+            : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
+        }`}
+        title="Extended Line"
+      >
+        <ArrowRightLeft className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Extended Line
+        </span>
+      </button>
+
+      <div className={isMobile ? "hidden" : "flex-1"} />
+
+      <button
+        onClick={() => {
+          handleToolClick("trash");
+          if (isMobile) setMobileDrawOpen(false);
+        }}
+        className="p-2 rounded-xl text-[#ef5350] hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 group relative"
+        title="Clear all drawings"
+      >
+        <Trash2 className="w-4 h-4" />
+        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
+          Clear Drawings
+        </span>
+      </button>
+    </>
+  );
+
   return (
     <div className="fixed inset-x-0 bottom-0 page-below-header z-40 bg-zinc-50 text-zinc-900 dark:bg-[#050816] dark:text-[#d1d4dc] flex overflow-hidden select-none font-sans">
-      {/* 1. LEFT TOOLBAR (Drawing tools) */}
+      {/* 1. LEFT TOOLBAR (Drawing tools - Desktop) */}
       <aside className="hidden md:flex w-12 border-r border-zinc-200 bg-white/85 dark:border-[#2a2e39] dark:bg-[#1c2030]/20 flex flex-col items-center py-4 gap-4 shrink-0 z-10 select-none shadow-[4px_0_0_rgba(0,0,0,0.04)] dark:shadow-none">
-        <button
-          onClick={() => handleToolClick("cursor")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "cursor"
-              ? "bg-indigo-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Crosshair / Pointer"
-        >
-          <MousePointer className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Pointer
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("trend")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "trend"
-              ? "bg-emerald-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Trend Line"
-        >
-          <TrendingUp className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Trend Line
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("horizontal")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "horizontal"
-              ? "bg-indigo-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Horizontal Support/Resistance Line"
-        >
-          <Minus className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Horizontal Line (Click Chart)
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("text")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "text"
-              ? "bg-indigo-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Text Label"
-        >
-          <Type className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Text Label (Mock)
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("rectangle")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "rectangle"
-              ? "bg-sky-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Rectangle Zone"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <rect x="4" y="6" width="16" height="12" strokeWidth="2" />
-          </svg>
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Rectangle Zone
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("fib")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "fib"
-              ? "bg-amber-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Fibonacci Retracement"
-        >
-          <Compass className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Fibonacci
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("ray")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "ray"
-              ? "bg-orange-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Ray"
-        >
-          <TrendingUp className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Ray
-          </span>
-        </button>
-
-        <button
-          onClick={() => handleToolClick("extendedLine")}
-          className={`p-2 rounded-xl transition-all duration-200 group relative ${
-            activeTool === "extendedLine"
-              ? "bg-fuchsia-600 text-white"
-              : "text-zinc-500 hover:text-zinc-950 hover:bg-zinc-100 dark:text-[#787b86] dark:hover:text-white dark:hover:bg-zinc-800"
-          }`}
-          title="Extended Line"
-        >
-          <ArrowRightLeft className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Extended Line
-          </span>
-        </button>
-
-        <div className="flex-1" />
-
-        <button
-          onClick={() => handleToolClick("trash")}
-          className="p-2 rounded-xl text-[#ef5350] hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 group relative"
-          title="Clear all drawings"
-        >
-          <Trash2 className="w-4 h-4" />
-          <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-white text-[10px] font-bold text-zinc-900 px-2 py-1 rounded border border-zinc-200 shadow-xl dark:bg-zinc-950 dark:text-white dark:border-white/5 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none uppercase tracking-wider">
-            Clear Drawings
-          </span>
-        </button>
+        {renderDrawingTools(false)}
       </aside>
+
+      {/* Mobile Floating Toggle for Drawing Tools */}
+      <button
+        onClick={() => setMobileDrawOpen((prev) => !prev)}
+        className={`md:hidden fixed left-2 top-36 z-30 flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg backdrop-blur-md active:scale-95 transition-all ${
+          activeTool !== "cursor"
+            ? "border-emerald-500 bg-emerald-500/20 text-emerald-400"
+            : "border-zinc-200 bg-white/90 text-zinc-700 dark:border-white/10 dark:bg-zinc-900/90 dark:text-zinc-200"
+        }`}
+        aria-label={isAr ? "أدوات الرسم" : "Drawing Tools"}
+        title={isAr ? "أدوات الرسم" : "Drawing Tools"}
+      >
+        <TrendingUp className="h-5 w-5" />
+        {activeTool !== "cursor" && (
+          <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          </span>
+        )}
+      </button>
+
+      {/* Mobile Slide-out Drawer for Drawing Tools */}
+      {mobileDrawOpen && (
+        <>
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-xs animate-fade-in"
+            onClick={() => setMobileDrawOpen(false)}
+          />
+          <aside className="md:hidden fixed left-2 top-24 z-50 flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 p-2 shadow-2xl backdrop-blur-md dark:border-white/15 dark:bg-[#101525]/95 max-h-[calc(100vh-140px)] overflow-y-auto animate-in slide-in-from-left duration-200">
+            <div className="flex items-center justify-between w-full px-1 pb-1 border-b border-zinc-200 dark:border-white/10">
+              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase">
+                {isAr ? "الرسم" : "Draw"}
+              </span>
+              <button
+                onClick={() => setMobileDrawOpen(false)}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                aria-label="إغلاق"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {renderDrawingTools(true)}
+          </aside>
+        </>
+      )}
 
       {/* 2. MAIN CENTER WORKSPACE */}
       <main className="flex-1 min-w-0 h-full bg-zinc-50 dark:bg-[#050816] flex flex-col relative">
@@ -465,41 +547,77 @@ function ChartContent() {
         )}
       </button>
 
-      {rightSidebarOpen && (
-        <aside
-          style={{ width: rightSidebarWidth }}
-          className="hidden lg:flex border-l border-zinc-200 bg-white/85 backdrop-blur-2xl flex-col shrink-0 z-20 h-full relative shadow-[-8px_0_24px_rgba(15,23,42,0.08)] dark:border-[#2a2e39] dark:bg-[#0c0d12]/60 dark:shadow-none"
-        >
-          {/* Resize Handle */}
-          <div
-            onMouseDown={() => setIsResizingRightSidebar(true)}
-            className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-indigo-500/50 hover:w-1.5 transition-all z-30"
-          />
-          {/* Tab Selector */}
-          <div className="flex border-b border-zinc-200 dark:border-[#2a2e39] h-11">
-            <button
-              onClick={() => setActiveTab("details")}
-              className={`flex-1 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 flex items-center justify-center gap-1.5 ${
-                activeTab === "details"
-                  ? "border-indigo-500 text-zinc-950 bg-indigo-50 dark:text-white dark:bg-zinc-900/40"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5" />
-              Symbol Profile
-            </button>
-            <button
-              onClick={() => setActiveTab("watchlist")}
-              className={`flex-1 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 flex items-center justify-center gap-1.5 ${
-                activeTab === "watchlist"
-                  ? "border-indigo-500 text-zinc-950 bg-indigo-50 dark:text-white dark:bg-zinc-900/40"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
-              }`}
-            >
-              <Landmark className="w-3.5 h-3.5" />
-              Watchlist
-            </button>
-          </div>
+      {/* Mobile Floating Toggle for Watchlist & Details */}
+      <button
+        onClick={() => setMobileSidebarOpen((prev) => !prev)}
+        className="lg:hidden fixed right-2 top-36 z-30 flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white/90 shadow-lg backdrop-blur-md active:scale-95 transition-all dark:border-white/10 dark:bg-zinc-900/90 text-zinc-700 dark:text-zinc-200"
+        aria-label={isAr ? "بيانات السهم وقائمة المتابعة" : "Stock details & watchlist"}
+        title={isAr ? "بيانات السهم وقائمة المتابعة" : "Stock details & watchlist"}
+      >
+        <Activity className="h-5 w-5 text-indigo-500" />
+      </button>
+
+      {(rightSidebarOpen || mobileSidebarOpen) && (
+        <>
+          {mobileSidebarOpen && (
+            <div
+              className="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-xs animate-fade-in"
+              onClick={() => setMobileSidebarOpen(false)}
+            />
+          )}
+          <aside
+            style={mobileSidebarOpen ? undefined : { width: rightSidebarWidth }}
+            className={`${
+              mobileSidebarOpen
+                ? "fixed inset-y-0 right-0 z-50 flex w-[88vw] max-w-[390px] shadow-2xl animate-in slide-in-from-right duration-200"
+                : "hidden lg:flex"
+            } border-l border-zinc-200 bg-white/95 backdrop-blur-2xl flex-col shrink-0 h-full relative dark:border-[#2a2e39] dark:bg-[#0c0d12]`}
+          >
+            {/* Mobile Header with close button */}
+            {mobileSidebarOpen && (
+              <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-zinc-950 shrink-0">
+                <span className="text-xs font-black uppercase text-zinc-900 dark:text-white">
+                  {isAr ? "بيانات السهم والمتابعة" : "Symbol & Watchlist"}
+                </span>
+                <button
+                  onClick={() => setMobileSidebarOpen(false)}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                  aria-label="إغلاق"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {/* Resize Handle (Desktop Only) */}
+            <div
+              onMouseDown={() => setIsResizingRightSidebar(true)}
+              className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-indigo-500/50 hover:w-1.5 transition-all z-30"
+            />
+            {/* Tab Selector */}
+            <div className="flex border-b border-zinc-200 dark:border-[#2a2e39] h-11 shrink-0">
+              <button
+                onClick={() => setActiveTab("details")}
+                className={`flex-1 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 flex items-center justify-center gap-1.5 ${
+                  activeTab === "details"
+                    ? "border-indigo-500 text-zinc-950 bg-indigo-50 dark:text-white dark:bg-zinc-900/40"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                {isAr ? "ملف السهم" : "Symbol Profile"}
+              </button>
+              <button
+                onClick={() => setActiveTab("watchlist")}
+                className={`flex-1 text-[10px] font-black uppercase tracking-wider transition-all border-b-2 flex items-center justify-center gap-1.5 ${
+                  activeTab === "watchlist"
+                    ? "border-indigo-500 text-zinc-950 bg-indigo-50 dark:text-white dark:bg-zinc-900/40"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                }`}
+              >
+                <Landmark className="w-3.5 h-3.5" />
+                {isAr ? "قائمة المتابعة" : "Watchlist"}
+              </button>
+            </div>
 
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-6">
             {/* TAB CONTENT: DETAILS */}
@@ -952,6 +1070,7 @@ function ChartContent() {
             )}
           </div>
         </aside>
+        </>
       )}
     </div>
   );

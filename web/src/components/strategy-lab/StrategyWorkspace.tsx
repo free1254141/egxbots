@@ -16,10 +16,12 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
+  Headphones,
 } from "lucide-react";
 import TradingViewChart from "@/components/TradingViewChartDynamic";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useOptionalSupportChat } from "@/contexts/SupportChatContext";
 import {
   createWorkspace,
   parseWorkspace,
@@ -140,6 +142,7 @@ export default function StrategyWorkspace(props: Props) {
   const { user } = useAuth();
   const { language } = useLanguage();
   const ar = language === "ar";
+  const supportChat = useOptionalSupportChat();
   const storageKey = `stokscan:strategy-workspace:v1:${user?.id || "guest"}`;
   const shouldApplyRoute = props.hasExplicitSymbol ?? Boolean(props.symbol);
 
@@ -804,6 +807,22 @@ export default function StrategyWorkspace(props: Props) {
                     AI
                   </span>
                 </button>
+                {supportChat?.isPro && (
+                  <button
+                    aria-label={ar ? "خدمة عملاء VIP" : "VIP Support"}
+                    title={ar ? "خدمة عملاء VIP للمشتركين" : "VIP Support for Pro Subscribers"}
+                    onClick={() => supportChat?.setIsOpen(true)}
+                    className="app-icon-button flex items-center gap-1 shrink-0 rounded-lg p-1.5 text-amber-500 hover:text-amber-400"
+                  >
+                    <Headphones className="h-4 w-4" />
+                    <span className="rounded bg-amber-500/15 px-1 text-[10px] font-bold text-amber-500">
+                      {ar ? "دعم VIP" : "VIP"}
+                    </span>
+                    {supportChat.unreadCount > 0 && (
+                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                    )}
+                  </button>
+                )}
                 {toolLabels.map((item) => (
                   <button
                     key={item.id}

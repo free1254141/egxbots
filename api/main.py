@@ -357,6 +357,14 @@ async def startup_event():
 
         print(f"DEBUG ERROR: Failed to start Daily Job Scheduler: {e}")
 
+    # Scanner Alerts Scheduler — runs periodically during EGX session hours (Sun-Thu 10:00-14:35)
+    try:
+        from api.scanner_alerts_scheduler import start_scanner_alerts_scheduler
+        start_scanner_alerts_scheduler()
+        print("DEBUG: Scanner Alerts Scheduler started successfully.")
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to start Scanner Alerts Scheduler: {e}")
+
 
 
 
@@ -376,6 +384,12 @@ async def shutdown_event():
 
     except Exception:
 
+        pass
+
+    try:
+        from api.scanner_alerts_scheduler import stop_scanner_alerts_scheduler
+        stop_scanner_alerts_scheduler()
+    except Exception:
         pass
 
 

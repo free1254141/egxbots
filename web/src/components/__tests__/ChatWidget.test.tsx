@@ -7,7 +7,8 @@ const chat = {isInitializing: false, accessError: false, retryAccess: jest.fn(),
 jest.mock("@/contexts/ChatContext", () => ({useChat: () => chat, AVAILABLE_AI_MODELS: [{id: "deepseek-chat", name: "DeepSeek"}]}));
 jest.mock("@/contexts/AuthContext", () => ({useAuth: () => ({user: mockUser})}));
 jest.mock("@/contexts/LanguageContext", () => ({useLanguage: () => ({language: "ar"})}));
-jest.mock("next/navigation", () => ({useRouter: () => ({push: jest.fn()}), usePathname: () => "/"}));
+let mockPathname = "/";
+jest.mock("next/navigation", () => ({useRouter: () => ({push: jest.fn()}), usePathname: () => mockPathname}));
 jest.mock("next/image", () => ({__esModule: true, default: ({priority: _priority, ...props}: any) => <img {...props} />}));
 jest.mock("@/components/chat/ChatSidebar", () => ({ChatSidebar: () => null}));
 jest.mock("@/components/chat/FormattedChatMessage", () => ({FormattedChatMessage: () => null}));
@@ -110,4 +111,17 @@ test("quota badge correctly reflects Pro plan quota out of 350 vs Free plan out 
     (chat as any).isPro = false;
     (chat as any).quotaLimit = 5;
     (chat as any).remainingQuota = 99;
+});
+
+test("floating launcher button is not rendered on /chart when closed so it does not block the toolbar", () => {
+    mockPathname = "/chart";
+    chat.isOpen = false;
+    const { rerender } = render(<ChatWidget />);
+    expect(screen.queryByRole("button", { name: "افتح ARTORO V3" })).toBeNull();
+
+    mockPathname = "/";
+    rerender(<ChatWidget />);
+    expect(screen.getByRole("button", { name: "افتح ARTORO V3" })).toBeTruthy();
+
+    chat.isOpen = true;
 });
