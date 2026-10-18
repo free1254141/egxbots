@@ -147,11 +147,14 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         };
     }, [sessionId, supabase]);
 
-    // Fast polling while the chat is open (every 3 seconds) for instant render
+    // Fallback polling while the chat is open. Realtime (above) delivers new
+    // messages instantly; this only covers dropped websocket events, so it runs
+    // every 30s and pauses while the tab is hidden.
     useEffect(() => {
         if (!sessionId || !isOpen) return;
 
         const interval = setInterval(async () => {
+            if (typeof document !== "undefined" && document.hidden) return;
             try {
                 const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
                 const data = await res.json();
@@ -168,16 +171,18 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             } catch {
                 // silent background catch
             }
-        }, 1200);
+        }, 30000);
 
         return () => clearInterval(interval);
     }, [sessionId, isOpen]);
 
-    // Background check while closed (every 20 seconds) to update unread badge
+    // Background fallback while closed (every 60 seconds, visible tabs only) to
+    // update the unread badge if a realtime event was missed.
     useEffect(() => {
         if (!sessionId || isOpen || !isPro) return;
 
         const interval = setInterval(async () => {
+            if (typeof document !== "undefined" && document.hidden) return;
             try {
                 const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
                 const data = await res.json();
@@ -194,7 +199,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             } catch {
                 // silent
             }
-        }, 20000);
+        }, 60000);
 
         return () => clearInterval(interval);
     }, [sessionId, isOpen, isPro]);

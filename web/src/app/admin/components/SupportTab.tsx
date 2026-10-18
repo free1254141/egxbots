@@ -364,11 +364,14 @@ export default function SupportTab() {
         };
     }, [supabase]);
 
-    // Live polling for selected session messages every 2s
+    // Fallback polling for the selected session. The realtime channel above
+    // pushes new messages instantly; this only recovers missed events, so it
+    // runs every 30s and pauses while the tab is hidden.
     useEffect(() => {
         if (!selectedSessionId) return;
 
         const interval = setInterval(async () => {
+            if (typeof document !== "undefined" && document.hidden) return;
             try {
                 const res = await fetch(`/api/admin/support/messages?session_id=${selectedSessionId}`);
                 const data = await res.json();
@@ -385,7 +388,7 @@ export default function SupportTab() {
             } catch {
                 // silent
             }
-        }, 2000);
+        }, 30000);
 
         return () => clearInterval(interval);
     }, [selectedSessionId]);
