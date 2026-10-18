@@ -286,6 +286,15 @@ export default function PricingClient() {
     setSelectedPlan(id);
   };
 
+  // The plans view is much taller than the payment view. Reset scroll before
+  // switching views so the browser cannot clamp the old scroll position to
+  // the bottom of the shorter payment page.
+  const openPaymentStep = (planId: string) => {
+    setSelectedPlan(planId);
+    window.scrollTo({ top: 0, behavior: "auto" });
+    setStep("payment");
+  };
+
   const startEasyKashPayment = async (planId = selectedPlan) => {
     if (!user) {
       router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
@@ -999,10 +1008,7 @@ export default function PricingClient() {
               <button
                 type="button"
                 disabled={!lifetimeIsOpen}
-                onClick={() => {
-                  setSelectedPlan("lifetime");
-                  setStep("payment");
-                }}
+                onClick={() => openPaymentStep("lifetime")}
                 className={`w-full flex items-center justify-center gap-2 border-3 border-black py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all ${
                   lifetimeIsOpen
                     ? "bg-[#FFE600] hover:bg-yellow-400 text-black cursor-pointer"
@@ -1284,10 +1290,7 @@ export default function PricingClient() {
                 <div className="pt-4 space-y-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedPlan(activeProDetails.id);
-                      setStep("payment");
-                    }}
+                    onClick={() => openPaymentStep(activeProDetails.id)}
                     className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer ${
                       isFeatured
                         ? "bg-emerald-500 hover:bg-emerald-600 text-zinc-950 dark:text-black font-black"
@@ -1518,10 +1521,7 @@ export default function PricingClient() {
                       <td className="p-3 text-end">
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedPlan(plan.id);
-                            window.scrollTo({ top: 300, behavior: "smooth" });
-                          }}
+                          onClick={() => setSelectedPlan(plan.id)}
                           className={`px-3 py-1.5 border-2 border-black dark:border-white text-[11px] font-black transition-all ${
                             isCur
                               ? "bg-[#FFE600] text-black shadow-[2px_2px_0px_#000]"
