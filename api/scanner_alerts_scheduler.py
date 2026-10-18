@@ -36,7 +36,9 @@ def _is_market_session(cairo_dt: dt.datetime) -> bool:
 def _trigger_scanner_job():
     global _last_run_timestamp
     admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
+    web_origin = os.getenv("WEB_ORIGIN", "https://egxbots.com").rstrip("/")
     target_urls = [
+        f"{web_origin}/api/cron/scanner-alerts",
         "http://localhost:3000/api/cron/scanner-alerts",
         "http://127.0.0.1:3000/api/cron/scanner-alerts"
     ]

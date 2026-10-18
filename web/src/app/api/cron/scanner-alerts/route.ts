@@ -33,11 +33,14 @@ async function handleCron(req: NextRequest) {
   const force = url.searchParams.get("force") === "true";
   const forceDispatch = url.searchParams.get("force_dispatch") === "true";
 
+  const chatId = url.searchParams.get("chat_id") || undefined;
+
   try {
     const result = await executeScannerEngine({
-      trigger: "Cron Scheduler",
+      trigger: chatId ? `Test Run for Chat ${chatId}` : "Cron Scheduler",
       forceMarketHours: force,
       forceDispatch,
+      singleRecipientChatId: chatId,
     });
 
     return NextResponse.json(result);

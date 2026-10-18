@@ -329,7 +329,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     const userIds = targetProfiles.map((p: any) => p.id);
     const [settingsRes, portfolioRes] = await Promise.all([
       serviceClient.from("user_settings").select("user_id, app_state").in("user_id", userIds),
-      serviceClient.from("user_portfolios").select("user_id, symbol").in("user_id", userIds),
+      serviceClient.from("positions").select("user_id, symbol").eq("status", "open").in("user_id", userIds),
     ]);
 
     const settingsMap = new Map((settingsRes.data || []).map((s: any) => [s.user_id, s.app_state?.scanner_alerts]));

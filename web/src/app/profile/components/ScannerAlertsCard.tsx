@@ -13,7 +13,8 @@ import {
   Lock, 
   Sparkles,
   ExternalLink,
-  Loader2
+  Loader2,
+  Globe
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -53,6 +54,9 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
 
   const botUsername = "egxbots_bot";
   const connectBotUrl = user?.id ? `https://t.me/${botUsername}?start=${user.id}` : `https://t.me/${botUsername}`;
+  const connectBotWebUrl = user?.id
+    ? `https://web.telegram.org/a/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${botUsername}&start=${user.id}`)}`
+    : `https://web.telegram.org/a/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${botUsername}`)}`;
 
   useEffect(() => {
     if (initialTelegramLinked) {
@@ -238,31 +242,54 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             </div>
           </div>
 
-          <a
-            href={connectBotUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-widest shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 transition-all shrink-0 w-full md:w-auto"
-          >
-            <Send className="w-4 h-4 fill-[#FFE600]" />
-            {isAr ? "ربط وتفعيل البوت الآن" : "Connect Bot Now"}
-            <ExternalLink className="w-3.5 h-3.5 ml-1" />
-          </a>
+          <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full md:w-auto">
+            <a
+              href={connectBotUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] transition-all w-full sm:w-auto"
+            >
+              <Send className="w-4 h-4 fill-[#FFE600]" />
+              {isAr ? "فتح التطبيق (App)" : "Open in App"}
+              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
+            </a>
+            <a
+              href={connectBotWebUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white text-black hover:bg-zinc-100 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] transition-all w-full sm:w-auto"
+            >
+              <Globe className="w-4 h-4" />
+              {isAr ? "فتح ويب (Telegram Web)" : "Open in Web"}
+              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
+            </a>
+          </div>
         </div>
       )}
 
       {/* ── Connected Confirmation (If Linked) ── */}
       {telegramLinked && (
-        <div className="border-4 border-black dark:border-white bg-emerald-400 text-black px-4 py-3 shadow-[3px_3px_0px_rgba(0,0,0,1)] flex items-center justify-between">
+        <div className="border-4 border-black dark:border-white bg-emerald-400 text-black px-4 py-3 shadow-[3px_3px_0px_rgba(0,0,0,1)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-black shrink-0" />
             <span className="text-xs font-black uppercase tracking-wider">
               {isAr ? "بوت التليجرام متصل بنجاح — التنبيهات المحددة ستصلك فورياً على هاتفك" : "Telegram bot connected — Selected alerts will be sent directly to your phone"}
             </span>
           </div>
-          <span className="text-[10px] font-mono font-black border-2 border-black bg-white px-2 py-0.5">
-            @{botUsername}
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={connectBotWebUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 border-2 border-black bg-white hover:bg-zinc-100 text-black px-2.5 py-1 text-[11px] font-black uppercase shadow-[1.5px_1.5px_0px_#000] transition-transform active:translate-y-0.5"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              {isAr ? "فتح تليجرام ويب" : "Open Web"}
+            </a>
+            <span className="text-[10px] font-mono font-black border-2 border-black bg-white px-2 py-0.5">
+              @{botUsername}
+            </span>
+          </div>
         </div>
       )}
 
