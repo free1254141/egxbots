@@ -6,7 +6,7 @@ import { hasActiveProSubscription } from "@/lib/ai/plan-gate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export interface ScannerPreferences {
+interface ScannerPreferences {
   volume_surge: boolean;
   breakout: boolean;
   rsi_oversold: boolean;
@@ -14,7 +14,7 @@ export interface ScannerPreferences {
   disclosures: boolean;
 }
 
-export const DEFAULT_PREFERENCES: ScannerPreferences = {
+const DEFAULT_PREFERENCES: ScannerPreferences = {
   volume_surge: true,
   breakout: true,
   rsi_oversold: true,
