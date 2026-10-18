@@ -218,6 +218,7 @@ function cleanCellText(text: string): string {
         // 1. Strip full dates FIRST (both YYYY-MM-DD and DD-MM-YYYY) before any dash/number normalization
         .replace(/(?:\b|\D)\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\b|\D)/g, " ")
         .replace(/(?:\b|\D)\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\b|\D)/g, " ")
+        .replace(/(?:جلسة|بتاريخ|تاريخ|يوم)\s*\b\d{1,2}[-/]\d{1,2}\b/g, " ")
         // 2. Disambiguate range dashes vs negative values
         .replace(/(?<=\d)\s*[-−–—]\s*(?=\d)/g, " ")
         .replace(/(\d+(?:\.\d+)?)\s*[%٪]?\s*[-−–](?!\s*\d)/g, "-$1")
@@ -1138,6 +1139,13 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
                 : targetFacts;
             const cellWithoutGroundedArabicDates = cells[idx].replace(arabicMonthRegex, m => groundedTableDate(m, dates) ? " " : m);
             let clean = cleanCellText(cellWithoutGroundedArabicDates);
+            if (isCommentaryCol) {
+                // In commentary / qualitative description columns (e.g. "الوصف الفني", "ملاحظات"),
+                // strip any descriptive percentages, dates, and session counts so they are not evaluated as stock prices.
+                clean = clean
+                    .replace(/[-+]?\d+(?:\.\d+)?\s*[%٪]/g, " ")
+                    .replace(/(?:جلسة|بتاريخ|تاريخ|يوم|في)?\s*\b\d{1,2}[-/]\d{1,2}\b/g, " ");
+            }
             if (fields?.includes("backtest_final_equity")) {
                 // An explicitly labeled starting amount is a different fact from final equity.
                 const initial = evidence.filter(e => e.tool === "compare_strategies_history" && e.availability !== "error" && e.symbols.includes(symbol))

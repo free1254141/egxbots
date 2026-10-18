@@ -335,6 +335,34 @@ async function executeRawTool(
             const rawOp = String(args.operation || "view").toLowerCase();
             const operation = ["buy", "purchase", "add"].includes(rawOp) ? "add" : rawOp;
             const symbol = args.symbol ? normalizeSymbol(args.symbol) : null;
+
+            // Handle guest / unlinked Telegram users (userId is "tg_...") safely without querying Postgres with invalid UUID
+            if (typeof userId === "string" && userId.startsWith("tg_")) {
+                if (operation === "view") {
+                    return {
+                        status: "success",
+                        operation: "view",
+                        persisted: false,
+                        read_complete: true,
+                        empty: true,
+                        saved_positions_found: false,
+                        is_guest: true,
+                        valuation_complete: true,
+                        truncated: false,
+                        positions: [],
+                        summary: {
+                            positions_count: 0,
+                            total_invested: 0,
+                            total_market_value: 0,
+                            unrealized_pl_val: 0,
+                            unrealized_pl_pct: 0,
+                        },
+                        message: "المستخدم غير مرتبط بحساب مسجل على الموقع؛ لا توجد محفظة محفوظة.",
+                    };
+                }
+                throw new Error("لإدارة محفظتك الاستثمارية، يرجى تسجيل الدخول وربط حسابك في الموقع بالبوت أولاً من صفحة البروفايل.");
+            }
+
             const { data: posRows } = await supabase.from("positions")
                 .select("id,symbol,quantity,entry_price,status,added_at,updated_at")
                 .eq("user_id", userId).eq("status", "open").limit(101);

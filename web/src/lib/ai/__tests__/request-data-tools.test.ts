@@ -125,3 +125,30 @@ test('closed classic identity remains locked for Free within the settlement dela
  const r=recommendationVisibility({source_kind:'model_signals',symbol:'PRIVATE',status:'win',signal_date:'2026-09-01',closed_date:'2026-10-13',entry_price:50},false,new Date('2026-10-14'));
  expect(r).toMatchObject({symbol:null,is_locked:true});expect(JSON.stringify(r)).not.toContain('PRIVATE');
 });
+
+test('knownSymbolHints extracts GOUR for جورميه and variations', () => {
+    expect(knownSymbolHints('حلل سهم جورميه').flatMap(h => h.symbols)).toContain('GOUR');
+    expect(knownSymbolHints('جورميه مصر').flatMap(h => h.symbols)).toContain('GOUR');
+    expect(knownSymbolHints('جورميه ايجيبت').flatMap(h => h.symbols)).toContain('GOUR');
+});
+
+test('manage_portfolio safely returns empty guest portfolio for unlinked telegram user', async () => {
+    const { db } = database();
+    const result = await executeRequestTool('manage_portfolio', { operation: 'view' }, db, 'tg_8767316567', new Map(), { isPro: false });
+    expect(result).toMatchObject({
+        status: 'success',
+        operation: 'view',
+        empty: true,
+        saved_positions_found: false,
+        is_guest: true,
+        positions: [],
+    });
+});
+
+test('checkAgenticDraft allows dates and descriptive percentages in commentary columns without ungrounded error', () => {
+    const e = toAgenticEvidence('get_stock_levels', { symbols: ['AMOC'] }, {
+        levels: [{ symbol: 'AMOC', close: 13.48, support: 12.18, resistance: 14.10, date: '2026-10-15' }]
+    });
+    const table = '### AMOC\n| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |\n|---|---:|---|\n| الإغلاق الحالي | 13.48 | آخر إغلاق مسجل (جلسة 15-10) بنسبة 2.85% |\n| الدعم الأول | 12.18 | احتمال ارتداد 80% وحماية رأس المال |\n| المقاومة الأولى | 14.10 | حاجز فني قوي لآخر 20 جلسة |';
+    expect(checkAgenticDraft(table, [e])).toEqual([]);
+});
