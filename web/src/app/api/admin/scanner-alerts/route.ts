@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       const engineResult = await executeScannerEngine({
         trigger: `Manual (${user.email || "Admin"})`,
         forceMarketHours: true, // Allow manual test run anytime from Admin UI
-        forceDispatch: Boolean(body.force_dispatch),
+        forceDispatch: body.force_dispatch !== undefined ? Boolean(body.force_dispatch) : true,
       });
 
       const updated = await getAdminConfig(serviceClient);

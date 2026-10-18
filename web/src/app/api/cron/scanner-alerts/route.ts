@@ -30,14 +30,21 @@ async function handleCron(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const force = url.searchParams.get("force") === "true";
-  const forceDispatch = url.searchParams.get("force_dispatch") === "true";
+  let bodyJson: any = {};
+  if (req.method === "POST") {
+    try {
+      bodyJson = await req.json();
+    } catch {}
+  }
 
-  const chatId = url.searchParams.get("chat_id") || undefined;
+  const force = url.searchParams.get("force") === "true" || Boolean(bodyJson.force);
+  const forceDispatch = url.searchParams.get("force_dispatch") === "true" || Boolean(bodyJson.force_dispatch);
+  const chatId = url.searchParams.get("chat_id") || bodyJson.chat_id || undefined;
+  const trigger = bodyJson.trigger || (chatId ? `Test Run for Chat ${chatId}` : "Cron Scheduler");
 
   try {
     const result = await executeScannerEngine({
-      trigger: chatId ? `Test Run for Chat ${chatId}` : "Cron Scheduler",
+      trigger,
       forceMarketHours: force,
       forceDispatch,
       singleRecipientChatId: chatId,

@@ -1536,6 +1536,15 @@ def health():
 
 
 
+@app.get("/admin/scanner/trigger-now")
+@app.post("/admin/scanner/trigger-now")
+def admin_scanner_trigger_now(force: bool = True, force_dispatch: bool = True):
+    from api.scanner_alerts_scheduler import trigger_scanner_job_now
+    res = trigger_scanner_job_now(force=force, force_dispatch=force_dispatch)
+    return res
+
+
+
 
 
 _MARKET_STATUS_CACHE = {}  # type: ignore[var-annotated]

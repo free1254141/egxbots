@@ -121,11 +121,12 @@ export default function ScannerAlertsTab() {
       const res = await fetch("/api/admin/scanner-alerts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "run_scan_now" }),
+        body: JSON.stringify({ action: "run_scan_now", force_dispatch: true }),
       });
       if (res.ok) {
         const data = await res.json();
-        toast.success(`اكتمل الفحص في ${data.duration_ms} مللي ثانية بنجاح!`);
+        const dispatched = data.alerts_dispatched ?? 0;
+        toast.success(`اكتمل الفحص في ${data.duration_ms} مللي ثانية وتم إرسال ${dispatched} تنبيه على تليجرام!`);
         fetchConfig();
       } else {
         toast.error("فشل تنفيذ الفحص الفوري");

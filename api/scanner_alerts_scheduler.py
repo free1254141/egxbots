@@ -33,7 +33,7 @@ def _is_market_session(cairo_dt: dt.datetime) -> bool:
     # EGX Market hours: 10:00 AM (600m) to 02:35 PM (875m)
     return 600 <= total_minutes <= 875
 
-def _trigger_scanner_job():
+def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     global _last_run_timestamp
     admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
     web_origin = os.getenv("WEB_ORIGIN", "https://egxbots.com").rstrip("/")
@@ -43,7 +43,8 @@ def _trigger_scanner_job():
         "http://127.0.0.1:3000/api/cron/scanner-alerts"
     ]
 
-    success = False
+    last_error = None
+    result_data = None
     for url in target_urls:
         try:
             req = urllib.request.Request(
@@ -53,23 +54,30 @@ def _trigger_scanner_job():
                     "Content-Type": "application/json",
                     "x-admin-key": admin_key,
                 },
-                data=json.dumps({"trigger": "Python Background Scheduler"}).encode("utf-8")
+                data=json.dumps({
+                    "trigger": "Python Manual Trigger" if force else "Python Background Scheduler",
+                    "force": force,
+                    "force_dispatch": force_dispatch,
+                }).encode("utf-8")
             )
             with urllib.request.urlopen(req, timeout=45) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if resp.status == 200:
                     dispatched = data.get("alerts_dispatched", 0)
-                    matches = data.get("fresh_matches", {})
-                    print(f"[SCANNER_SCHEDULER] Auto-scan executed: {dispatched} alerts sent. Matches: {matches}")
-                    success = True
-                    break
+                    matches = data.get("matches", {})
+                    fresh = data.get("fresh_matches", {})
+                    print(f"[SCANNER_SCHEDULER] Scan executed! Dispatched: {dispatched} alerts to Telegram. Matches: {matches}, Fresh: {fresh}")
+                    _last_run_timestamp = time.time()
+                    return {"ok": True, "data": data}
         except Exception as e:
+            last_error = str(e)
             continue
 
-    if success:
-        _last_run_timestamp = time.time()
-    else:
-        print("[SCANNER_SCHEDULER] Scanner trigger skipped or failed to reach frontend cron endpoint.")
+    print(f"[SCANNER_SCHEDULER] Scanner trigger skipped or failed to reach frontend cron endpoint. Error: {last_error}")
+    return {"ok": False, "error": last_error}
+
+def trigger_scanner_job_now(force: bool = True, force_dispatch: bool = True) -> Dict[str, Any]:
+    return _trigger_scanner_job(force=force, force_dispatch=force_dispatch)
 
 def _worker_loop():
     print("[SCANNER_SCHEDULER] Worker thread started. Monitoring EGX session hours...")
