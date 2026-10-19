@@ -17,8 +17,10 @@ import {
   Activity,
   Flame,
   Info,
-  X
+  X,
+  BarChart2
 } from "lucide-react";
+import ScannerIntradayChartModal from "./ScannerIntradayChartModal";
 
 export type ScannerCategory = "all" | "volume_surge" | "breakout" | "rsi_oversold" | "disclosures";
 
@@ -32,9 +34,9 @@ export interface ScanHistoryItem {
   recipients_count: number;
   triggered_by: string;
   stage_results?: {
-    volume_surge: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
-    breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
-    rsi_oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }>;
+    volume_surge: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
+    breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
+    rsi_oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string }>;
     disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
   };
 }
@@ -53,6 +55,13 @@ export default function ScannerStatsCalendar({
   const [selectedCategory, setSelectedCategory] = useState<ScannerCategory>("all");
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [isMounted, setIsMounted] = useState<boolean>(false);
+  const [chartModalStock, setChartModalStock] = useState<{
+    symbol: string;
+    date: string;
+    signalTime?: string;
+    signalPrice?: number;
+    scannerType?: string;
+  } | null>(null);
 
   // Helper formatters for clean financial representation (1-2 decimals instead of 4-5)
   const formatPct = (val: number | string | undefined) => {
@@ -81,6 +90,48 @@ export default function ScannerStatsCalendar({
     const num = typeof val === "string" ? parseFloat(val) : val;
     if (isNaN(num)) return "30";
     return Math.round(num);
+  };
+
+  // Format signal timestamp into localized Cairo time string (e.g., 10:15 ص or 10:15 AM)
+  const formatSignalTime = (timeStr?: string) => {
+    if (!timeStr) return isAr ? "10:15 ص" : "10:15 AM";
+    try {
+      const d = new Date(timeStr);
+      if (isNaN(d.getTime())) {
+        return timeStr.includes(":") ? timeStr : (isAr ? "10:15 ص" : "10:15 AM");
+      }
+      return d.toLocaleTimeString(isAr ? "ar-EG" : "en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Africa/Cairo",
+      });
+    } catch {
+      return isAr ? "10:15 ص" : "10:15 AM";
+    }
+  };
+
+  // Extract HH:MM for chart session marker lookup
+  const getSignalHHMM = (timeStr?: string) => {
+    if (!timeStr) return "10:15";
+    try {
+      const d = new Date(timeStr);
+      if (isNaN(d.getTime())) {
+        const match = timeStr.match(/\d{2}:\d{2}/);
+        return match ? match[0] : "10:15";
+      }
+      const parts = new Intl.DateTimeFormat("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Africa/Cairo",
+      }).formatToParts(d);
+      const hour = parts.find((p) => p.type === "hour")?.value || "10";
+      const minute = parts.find((p) => p.type === "minute")?.value || "15";
+      return `${hour}:${minute}`;
+    } catch {
+      return "10:15";
+    }
   };
 
   useEffect(() => {
@@ -136,9 +187,9 @@ export default function ScannerStatsCalendar({
         avgDurationMs: number;
         samples: ScanHistoryItem[];
         stocks: {
-          volume: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
-          breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
-          oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }>;
+          volume: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
+          breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
+          oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string }>;
           disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
         };
       }
@@ -181,28 +232,28 @@ export default function ScannerStatsCalendar({
       if (h.stage_results) {
         if (h.stage_results.volume_surge) {
           for (const s of h.stage_results.volume_surge) {
-            if (!dEntry.stocks.volume.some((x) => x.symbol === s.symbol)) {
-              dEntry.stocks.volume.push(s);
+            if (!dEntry.stocks.volume.some((x: any) => x.symbol === s.symbol)) {
+              dEntry.stocks.volume.push({ ...s, signal_time: s.signal_time || h.timestamp });
             }
           }
         }
         if (h.stage_results.breakout) {
           for (const s of h.stage_results.breakout) {
-            if (!dEntry.stocks.breakout.some((x) => x.symbol === s.symbol)) {
-              dEntry.stocks.breakout.push(s);
+            if (!dEntry.stocks.breakout.some((x: any) => x.symbol === s.symbol)) {
+              dEntry.stocks.breakout.push({ ...s, signal_time: s.signal_time || h.timestamp });
             }
           }
         }
         if (h.stage_results.rsi_oversold) {
           for (const s of h.stage_results.rsi_oversold) {
-            if (!dEntry.stocks.oversold.some((x) => x.symbol === s.symbol)) {
-              dEntry.stocks.oversold.push(s);
+            if (!dEntry.stocks.oversold.some((x: any) => x.symbol === s.symbol)) {
+              dEntry.stocks.oversold.push({ ...s, signal_time: s.signal_time || h.timestamp });
             }
           }
         }
         if (h.stage_results.disclosures) {
           for (const s of h.stage_results.disclosures) {
-            if (!dEntry.stocks.disclosures.some((x) => x.title === s.title)) {
+            if (!dEntry.stocks.disclosures.some((x: any) => x.title === s.title)) {
               dEntry.stocks.disclosures.push(s);
             }
           }
@@ -216,13 +267,22 @@ export default function ScannerStatsCalendar({
       if (map.has(todayKey)) {
         const dEntry = map.get(todayKey)!;
         if (dEntry.stocks.volume.length === 0 && lastScan.stage_results.volume_surge) {
-          dEntry.stocks.volume = [...lastScan.stage_results.volume_surge];
+          dEntry.stocks.volume = lastScan.stage_results.volume_surge.map((s: any) => ({
+            ...s,
+            signal_time: s.signal_time || lastScan.timestamp,
+          }));
         }
         if (dEntry.stocks.breakout.length === 0 && lastScan.stage_results.breakout) {
-          dEntry.stocks.breakout = [...lastScan.stage_results.breakout];
+          dEntry.stocks.breakout = lastScan.stage_results.breakout.map((s: any) => ({
+            ...s,
+            signal_time: s.signal_time || lastScan.timestamp,
+          }));
         }
         if (dEntry.stocks.oversold.length === 0 && lastScan.stage_results.rsi_oversold) {
-          dEntry.stocks.oversold = [...lastScan.stage_results.rsi_oversold];
+          dEntry.stocks.oversold = lastScan.stage_results.rsi_oversold.map((s: any) => ({
+            ...s,
+            signal_time: s.signal_time || lastScan.timestamp,
+          }));
         }
         if (dEntry.stocks.disclosures.length === 0 && lastScan.stage_results.disclosures) {
           dEntry.stocks.disclosures = [...lastScan.stage_results.disclosures];
@@ -810,28 +870,52 @@ export default function ScannerStatsCalendar({
                           {isAr ? "معيار الرصد: مضاعف السيولة rVol ≥ 2.5x مع اتجاه صاعد أو تجميع" : "Trigger: rVol ≥ 2.5x with positive/neutral price action"}
                         </p>
                       </div>
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.volume.length > 0 ? (
                           selectedDayData.stocks.volume.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+                              className="p-3 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
                             >
-                              <div className="flex items-center gap-2.5">
-                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
-                                  {s.symbol}
-                                </span>
-                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
-                                  {formatPrice(s.close)} ج.م
-                                </span>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                    {s.symbol}
+                                  </span>
+                                  <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                    {formatPrice(s.close)} ج.م
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
+                                    +{formatPct(s.change_pct)}%
+                                  </span>
+                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-500 dark:bg-amber-950 dark:text-amber-300">
+                                    {formatVol(s.r_vol)}x سيولة
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
-                                  +{formatPct(s.change_pct)}%
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1 font-bold">
+                                  <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                  <span className="font-black text-black dark:text-white">{formatSignalTime((s as any).signal_time)}</span>
                                 </span>
-                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-500 dark:bg-amber-950 dark:text-amber-300">
-                                  {formatVol(s.r_vol)}x سيولة
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setChartModalStock({
+                                    symbol: s.symbol,
+                                    date: selectedDateStr,
+                                    signalTime: getSignalHHMM((s as any).signal_time),
+                                    signalPrice: s.close,
+                                    scannerType: "volume_surge"
+                                  })}
+                                  className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                >
+                                  <BarChart2 className="w-3.5 h-3.5" />
+                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                </button>
                               </div>
                             </div>
                           ))
@@ -861,28 +945,52 @@ export default function ScannerStatsCalendar({
                           {isAr ? "معيار الرصد: كسر قمة 20 جلسة مع تأكيد سيولة rVol ≥ 1.5x" : "Trigger: High(20) breakout confirmed with rVol ≥ 1.5x"}
                         </p>
                       </div>
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.breakout.length > 0 ? (
                           selectedDayData.stocks.breakout.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+                              className="p-3 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
                             >
-                              <div className="flex items-center gap-2.5">
-                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
-                                  {s.symbol}
-                                </span>
-                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
-                                  {formatPrice(s.close)} ج.م
-                                </span>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                    {s.symbol}
+                                  </span>
+                                  <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                    {formatPrice(s.close)} ج.م
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
+                                    +{formatPct(s.change_pct)}%
+                                  </span>
+                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-zinc-100 text-zinc-800 border border-zinc-400 dark:bg-zinc-750 dark:text-zinc-200">
+                                    {formatVol(s.r_vol)}x سيولة
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
-                                  +{formatPct(s.change_pct)}%
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1 font-bold">
+                                  <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                  <span className="font-black text-black dark:text-white">{formatSignalTime((s as any).signal_time)}</span>
                                 </span>
-                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-zinc-100 text-zinc-800 border border-zinc-400 dark:bg-zinc-750 dark:text-zinc-200">
-                                  {formatVol(s.r_vol)}x سيولة
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setChartModalStock({
+                                    symbol: s.symbol,
+                                    date: selectedDateStr,
+                                    signalTime: getSignalHHMM((s as any).signal_time),
+                                    signalPrice: s.close,
+                                    scannerType: "breakout"
+                                  })}
+                                  className="px-2.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                >
+                                  <BarChart2 className="w-3.5 h-3.5" />
+                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                </button>
                               </div>
                             </div>
                           ))
@@ -912,32 +1020,56 @@ export default function ScannerStatsCalendar({
                           {isAr ? "معيار الرصد: مؤشر القوة RSI(14) ≤ 30 نقطة قرب دعوم ارتدادية" : "Trigger: RSI(14) ≤ 30 points near historical support floor"}
                         </p>
                       </div>
-                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.oversold.length > 0 ? (
                           selectedDayData.stocks.oversold.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+                              className="p-3 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
                             >
-                              <div className="flex items-center gap-2.5">
-                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
-                                  {s.symbol}
-                                </span>
-                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
-                                  {formatPrice(s.close)} ج.م
-                                </span>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                    {s.symbol}
+                                  </span>
+                                  <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                    {formatPrice(s.close)} ج.م
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-sky-100 text-sky-800 border border-sky-500 dark:bg-sky-950 dark:text-sky-300">
+                                    RSI: {formatRsi(s.rsi_14)}
+                                  </span>
+                                  <span className={`font-mono font-black text-xs px-2 py-0.5 border ${
+                                    s.change_pct >= 0
+                                      ? "bg-emerald-100 text-emerald-800 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300"
+                                      : "bg-rose-100 text-rose-800 border-rose-500 dark:bg-rose-950 dark:text-rose-300"
+                                  }`}>
+                                    {s.change_pct >= 0 ? `+${formatPct(s.change_pct)}%` : `${formatPct(s.change_pct)}%`}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-sky-100 text-sky-800 border border-sky-500 dark:bg-sky-950 dark:text-sky-300">
-                                  RSI: {formatRsi(s.rsi_14)}
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1 font-bold">
+                                  <Clock className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                  <span className="font-black text-black dark:text-white">{formatSignalTime((s as any).signal_time)}</span>
                                 </span>
-                                <span className={`font-mono font-black text-xs px-2 py-0.5 border ${
-                                  s.change_pct >= 0
-                                    ? "bg-emerald-100 text-emerald-800 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300"
-                                    : "bg-rose-100 text-rose-800 border-rose-500 dark:bg-rose-950 dark:text-rose-300"
-                                }`}>
-                                  {s.change_pct >= 0 ? `+${formatPct(s.change_pct)}%` : `${formatPct(s.change_pct)}%`}
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setChartModalStock({
+                                    symbol: s.symbol,
+                                    date: selectedDateStr,
+                                    signalTime: getSignalHHMM((s as any).signal_time),
+                                    signalPrice: s.close,
+                                    scannerType: "rsi_oversold"
+                                  })}
+                                  className="px-2.5 py-1 bg-sky-400 hover:bg-sky-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                >
+                                  <BarChart2 className="w-3.5 h-3.5" />
+                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                </button>
                               </div>
                             </div>
                           ))
@@ -1012,6 +1144,20 @@ export default function ScannerStatsCalendar({
           </div>
         </div>,
         document.body
+      )}
+
+      {/* ── 15-Minute Intraday Session Candlestick Chart Modal ── */}
+      {chartModalStock && (
+        <ScannerIntradayChartModal
+          isOpen={Boolean(chartModalStock)}
+          onClose={() => setChartModalStock(null)}
+          symbol={chartModalStock.symbol}
+          date={chartModalStock.date}
+          signalTime={chartModalStock.signalTime}
+          signalPrice={chartModalStock.signalPrice}
+          scannerType={chartModalStock.scannerType}
+          isAr={isAr}
+        />
       )}
     </section>
   );

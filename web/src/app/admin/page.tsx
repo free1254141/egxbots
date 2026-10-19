@@ -24,6 +24,7 @@ import UsersTab from "./components/UsersTab";
 import AIChatbotTab from "./components/AIChatbotTab";
 import BillingTab from "./components/BillingTab";
 import ScannerAlertsTab from "./components/ScannerAlertsTab";
+import SocialReportsTab from "./components/SocialReportsTab";
 
 
 const SESSION_KEY = "admin_unlocked_v1";
@@ -53,7 +54,7 @@ export default function AdminPage() {
     const [pageSize, setPageSize] = useState(100);
     // Opening Admin is normally for Chatbot/User review. Keep the large data
     // manager dormant until an administrator explicitly requests it.
-    const [activeMainTab, setActiveMainTab] = useState<"data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts">("support");
+    const [activeMainTab, setActiveMainTab] = useState<"data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts" | "social_reports">("support");
     const [dataLoaded, setDataLoaded] = useState(false);
     const [dataSourcesTab, setDataSourcesTab] = useState<"prices" | "funds">("prices");
     const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
@@ -610,6 +611,8 @@ export default function AdminPage() {
                     <UsersTab />
                 ) : activeMainTab === "support" ? (
                     <AIChatbotTab />
+                ) : activeMainTab === "social_reports" ? (
+                    <SocialReportsTab />
                 ) : activeMainTab === "billing" ? (
                     <BillingTab />
                 ) : (
