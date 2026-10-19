@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -15,7 +16,8 @@ import {
   TrendingUp,
   Activity,
   Flame,
-  Info
+  Info,
+  X
 } from "lucide-react";
 
 export type ScannerCategory = "all" | "volume_surge" | "breakout" | "rsi_oversold" | "disclosures";
@@ -49,6 +51,28 @@ export default function ScannerStatsCalendar({
   isAr = true,
 }: ScannerStatsCalendarProps) {
   const [selectedCategory, setSelectedCategory] = useState<ScannerCategory>("all");
+  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsDialogOpen(false);
+    };
+    if (isDialogOpen) {
+      window.addEventListener("keydown", handleEsc);
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      window.removeEventListener("keydown", handleEsc);
+      document.body.style.overflow = "unset";
+    };
+  }, [isDialogOpen]);
   
   // Current viewing month (default to latest history month or today)
   const [currentDate, setCurrentDate] = useState(() => {
@@ -539,7 +563,10 @@ export default function ScannerStatsCalendar({
               <button
                 key={idx}
                 type="button"
-                onClick={() => setSelectedDateStr(cell.dateStr)}
+                onClick={() => {
+                  setSelectedDateStr(cell.dateStr);
+                  setIsDialogOpen(true);
+                }}
                 className={`min-h-[85px] sm:min-h-[110px] p-2 border-2 sm:border-4 border-black dark:border-white flex flex-col justify-between text-right transition-all group ${
                   isSelected
                     ? "bg-amber-100 dark:bg-zinc-800 ring-4 ring-black dark:ring-white scale-[1.02] shadow-[4px_4px_0px_rgba(0,0,0,1)] z-10"
@@ -599,172 +626,269 @@ export default function ScannerStatsCalendar({
         </div>
       </div>
 
-      {/* ── Selected Day Detailed Ledger & Stock Cards ── */}
-      <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 p-6 shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)] space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-4 border-black dark:border-white pb-4">
-          <div className="flex items-center gap-2.5">
-            <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h4 className="text-lg font-black text-black dark:text-white uppercase tracking-tight">
-              {isAr ? "تفاصيل الفرص المرصودة ليوم:" : "Signals Ledger For Date:"}{" "}
-              <span className="font-mono text-indigo-600 dark:text-indigo-400 underline ml-2">
-                {selectedDateStr}
-              </span>
-            </h4>
-          </div>
-          {selectedDayData && (
-            <span className="font-mono text-xs font-black bg-black text-[#FFE600] px-3 py-1 border-2 border-black">
-              {selectedDayData.scansCount} {isAr ? "عمليات فحص دوري" : "Total scans"} | {selectedDayData.avgDurationMs}ms {isAr ? "متوسط السرعة" : "avg"}
-            </span>
-          )}
-        </div>
-
-        {!selectedDayData || selectedDayData.totalOpportunities === 0 ? (
-          <div className="p-8 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 font-bold text-xs text-zinc-500">
+      {/* ── Guidance Action Bar ── */}
+      <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <Sparkles className="w-5 h-5 shrink-0" />
+          <span className="text-xs sm:text-sm font-black">
             {isAr
-              ? "لا توجد فرص مسجلة في هذا اليوم لهذا الفلتر، أو أن اليوم كان عطلة بالبورصة المصرية."
-              : "No scanner signals recorded for this date or market was closed."}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Stage 1: Volume Surge */}
-            {(selectedCategory === "all" || selectedCategory === "volume_surge") && (
-              <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                  <span className="font-black text-xs flex items-center gap-1.5 text-amber-600">
-                    <Zap className="w-4 h-4 fill-amber-500" />
-                    {isAr ? "السيولة والتجميع" : "Volume Surge"}
-                  </span>
-                  <span className="font-mono text-xs font-black bg-amber-400 text-black px-1.5 py-0.5 border border-black">
-                    {selectedDayData.stocks.volume.length > 0 ? selectedDayData.stocks.volume.length : selectedDayData.volumeCount}
-                  </span>
-                </div>
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {selectedDayData.stocks.volume.length > 0 ? (
-                    selectedDayData.stocks.volume.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
-                      >
-                        <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                        <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                        <span className="text-emerald-600">+{s.change_pct}%</span>
-                        <span className="bg-amber-100 text-amber-800 px-1 text-[10px] font-black">
-                          {s.r_vol}x
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-zinc-500 font-bold block py-2">
-                      {isAr ? `${selectedDayData.volumeCount} إشارات تم رصدها وإرسالها للمشتركين` : `${selectedDayData.volumeCount} signals captured`}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Stage 2: Breakouts */}
-            {(selectedCategory === "all" || selectedCategory === "breakout") && (
-              <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                  <span className="font-black text-xs flex items-center gap-1.5 text-emerald-600">
-                    <ArrowUpRight className="w-4 h-4" />
-                    {isAr ? "الاختراقات الفنية" : "Breakouts"}
-                  </span>
-                  <span className="font-mono text-xs font-black bg-emerald-400 text-black px-1.5 py-0.5 border border-black">
-                    {selectedDayData.stocks.breakout.length > 0 ? selectedDayData.stocks.breakout.length : selectedDayData.breakoutCount}
-                  </span>
-                </div>
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {selectedDayData.stocks.breakout.length > 0 ? (
-                    selectedDayData.stocks.breakout.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
-                      >
-                        <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                        <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                        <span className="text-emerald-600 font-black">+{s.change_pct}%</span>
-                        <span className="text-zinc-500 text-[10px]">{s.r_vol}x</span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-zinc-500 font-bold block py-2">
-                      {isAr ? `${selectedDayData.breakoutCount} اختراقات تم رصدها` : `${selectedDayData.breakoutCount} breakouts captured`}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Stage 3: Oversold */}
-            {(selectedCategory === "all" || selectedCategory === "rsi_oversold") && (
-              <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                  <span className="font-black text-xs flex items-center gap-1.5 text-sky-600">
-                    <Target className="w-4 h-4" />
-                    {isAr ? "التشبع البيعي (RSI)" : "RSI Oversold"}
-                  </span>
-                  <span className="font-mono text-xs font-black bg-sky-400 text-black px-1.5 py-0.5 border border-black">
-                    {selectedDayData.stocks.oversold.length > 0 ? selectedDayData.stocks.oversold.length : selectedDayData.oversoldCount}
-                  </span>
-                </div>
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {selectedDayData.stocks.oversold.length > 0 ? (
-                    selectedDayData.stocks.oversold.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
-                      >
-                        <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                        <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                        <span className="text-sky-600 font-black">RSI: {Math.round(s.rsi_14)}</span>
-                        <span className={s.change_pct >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                          {s.change_pct}%
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-zinc-500 font-bold block py-2">
-                      {isAr ? `${selectedDayData.oversoldCount} فرص ارتداد قاع` : `${selectedDayData.oversoldCount} oversold bounces`}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Stage 4: Disclosures */}
-            {(selectedCategory === "all" || selectedCategory === "disclosures") && (
-              <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                  <span className="font-black text-xs flex items-center gap-1.5 text-purple-600">
-                    <Newspaper className="w-4 h-4" />
-                    {isAr ? "الإفصاحات الرسمية" : "Disclosures"}
-                  </span>
-                  <span className="font-mono text-xs font-black bg-purple-400 text-black px-1.5 py-0.5 border border-black">
-                    {selectedDayData.stocks.disclosures.length > 0 ? selectedDayData.stocks.disclosures.length : selectedDayData.disclosuresCount}
-                  </span>
-                </div>
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {selectedDayData.stocks.disclosures.length > 0 ? (
-                    selectedDayData.stocks.disclosures.map((d, i) => (
-                      <div
-                        key={i}
-                        className="text-xs font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1.5 text-zinc-700 dark:text-zinc-300"
-                      >
-                        • {d.title}
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-zinc-500 font-bold block py-2">
-                      {isAr ? `${selectedDayData.disclosuresCount} إفصاحات رسمية مرصودة` : `${selectedDayData.disclosuresCount} official disclosures`}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+              ? "اضغط على أي يوم به إشارات لفتح نافذة منبثقة (Dialog) بتفاصيل الأسهم والفرص المكتشفة."
+              : "Click any day tile with signals to open a popup dialog with detailed signals and stock breakdown."}
+          </span>
+        </div>
+        {selectedDayData && (
+          <button
+            type="button"
+            onClick={() => setIsDialogOpen(true)}
+            className="border-2 border-black bg-black text-[#FFE600] px-4 py-2 font-mono font-black text-xs uppercase tracking-wider hover:bg-zinc-800 active:translate-x-0.5 active:translate-y-0.5 transition-all shrink-0 w-full sm:w-auto flex items-center justify-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
+          >
+            <span>{isAr ? `عرض تفاصيل (${selectedDateStr})` : `Open (${selectedDateStr}) Details`}</span>
+            <Info className="w-3.5 h-3.5" />
+          </button>
         )}
       </div>
+
+      {/* ── Dialog / Modal for Selected Day Details ── */}
+      {isMounted && isDialogOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-3 sm:p-6"
+          dir={isAr ? "rtl" : "ltr"}
+        >
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsDialogOpen(false)}
+          />
+
+          {/* Dialog Card */}
+          <div className="relative w-full max-w-5xl bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col max-h-[90vh] z-10 animate-in zoom-in-95 duration-150">
+            {/* Dialog Header */}
+            <div className="p-4 sm:p-6 border-b-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-850 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 border-2 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                  <CalendarIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg sm:text-xl font-black text-black dark:text-white uppercase tracking-tight">
+                      {isAr ? "تفاصيل الفرص المرصودة ليوم:" : "Signals Ledger For Date:"}
+                    </h3>
+                    <span className="font-mono text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 border-2 border-indigo-600 dark:border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-0.5">
+                      {selectedDateStr}
+                    </span>
+                  </div>
+                  {selectedDayData && (
+                    <p className="text-xs font-mono font-bold text-zinc-600 dark:text-zinc-400 mt-1">
+                      {selectedDayData.scansCount} {isAr ? "عمليات فحص دوري" : "scans"} | {selectedDayData.avgDurationMs}ms {isAr ? "متوسط السرعة" : "avg speed"} | {selectedDayData.totalOpportunities} {isAr ? "إجمالي الفرص" : "total signals"}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setIsDialogOpen(false)}
+                className="h-10 w-10 border-4 border-black dark:border-white bg-[#FFE600] hover:bg-rose-500 hover:text-white text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 self-end sm:self-auto shrink-0"
+                title={isAr ? "إغلاق (Esc)" : "Close (Esc)"}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Category Filter Inside Dialog */}
+            <div className="px-4 sm:px-6 py-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 flex items-center gap-2 overflow-x-auto">
+              <span className="text-[10px] font-black uppercase text-zinc-500 shrink-0">
+                {isAr ? "تصفية النوع:" : "Filter:"}
+              </span>
+              {categories.map((cat) => {
+                const isSelected = selectedCategory === cat.id;
+                const Icon = cat.icon;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`h-7 px-2.5 border-2 border-black dark:border-white font-black text-[10px] uppercase tracking-wide flex items-center gap-1.5 shrink-0 transition-all ${
+                      isSelected
+                        ? cat.activeBg
+                        : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    <span>{isAr ? cat.nameAr : cat.nameEn}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Dialog Scrollable Content */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1">
+              {!selectedDayData || selectedDayData.totalOpportunities === 0 ? (
+                <div className="p-12 text-center border-4 border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 font-bold text-sm text-zinc-500">
+                  {isAr
+                    ? "لا توجد فرص مسجلة في هذا اليوم لهذا الفلتر، أو أن اليوم كان عطلة بالبورصة المصرية."
+                    : "No scanner signals recorded for this date or market was closed."}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Stage 1: Volume Surge */}
+                  {(selectedCategory === "all" || selectedCategory === "volume_surge") && (
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
+                        <span className="font-black text-xs flex items-center gap-1.5 text-amber-600">
+                          <Zap className="w-4 h-4 fill-amber-500" />
+                          {isAr ? "السيولة والتجميع" : "Volume Surge"}
+                        </span>
+                        <span className="font-mono text-xs font-black bg-amber-400 text-black px-1.5 py-0.5 border border-black">
+                          {selectedDayData.stocks.volume.length > 0 ? selectedDayData.stocks.volume.length : selectedDayData.volumeCount}
+                        </span>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {selectedDayData.stocks.volume.length > 0 ? (
+                          selectedDayData.stocks.volume.map((s, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                            >
+                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
+                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
+                              <span className="text-emerald-600">+{s.change_pct}%</span>
+                              <span className="bg-amber-100 text-amber-800 px-1 text-[10px] font-black">
+                                {s.r_vol}x
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                            {isAr ? `${selectedDayData.volumeCount} إشارات تم رصدها وإرسالها للمشتركين` : `${selectedDayData.volumeCount} signals captured`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stage 2: Breakouts */}
+                  {(selectedCategory === "all" || selectedCategory === "breakout") && (
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
+                        <span className="font-black text-xs flex items-center gap-1.5 text-emerald-600">
+                          <ArrowUpRight className="w-4 h-4" />
+                          {isAr ? "الاختراقات الفنية" : "Breakouts"}
+                        </span>
+                        <span className="font-mono text-xs font-black bg-emerald-400 text-black px-1.5 py-0.5 border border-black">
+                          {selectedDayData.stocks.breakout.length > 0 ? selectedDayData.stocks.breakout.length : selectedDayData.breakoutCount}
+                        </span>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {selectedDayData.stocks.breakout.length > 0 ? (
+                          selectedDayData.stocks.breakout.map((s, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                            >
+                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
+                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
+                              <span className="text-emerald-600 font-black">+{s.change_pct}%</span>
+                              <span className="text-zinc-500 text-[10px]">{s.r_vol}x</span>
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                            {isAr ? `${selectedDayData.breakoutCount} اختراقات تم رصدها` : `${selectedDayData.breakoutCount} breakouts captured`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stage 3: Oversold */}
+                  {(selectedCategory === "all" || selectedCategory === "rsi_oversold") && (
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
+                        <span className="font-black text-xs flex items-center gap-1.5 text-sky-600">
+                          <Target className="w-4 h-4" />
+                          {isAr ? "التشبع البيعي (RSI)" : "RSI Oversold"}
+                        </span>
+                        <span className="font-mono text-xs font-black bg-sky-400 text-black px-1.5 py-0.5 border border-black">
+                          {selectedDayData.stocks.oversold.length > 0 ? selectedDayData.stocks.oversold.length : selectedDayData.oversoldCount}
+                        </span>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {selectedDayData.stocks.oversold.length > 0 ? (
+                          selectedDayData.stocks.oversold.map((s, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                            >
+                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
+                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
+                              <span className="text-sky-600 font-black">RSI: {Math.round(s.rsi_14)}</span>
+                              <span className={s.change_pct >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                                {s.change_pct}%
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                            {isAr ? `${selectedDayData.oversoldCount} فرص ارتداد قاع` : `${selectedDayData.oversoldCount} oversold bounces`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stage 4: Disclosures */}
+                  {(selectedCategory === "all" || selectedCategory === "disclosures") && (
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
+                        <span className="font-black text-xs flex items-center gap-1.5 text-purple-600">
+                          <Newspaper className="w-4 h-4" />
+                          {isAr ? "الإفصاحات الرسمية" : "Disclosures"}
+                        </span>
+                        <span className="font-mono text-xs font-black bg-purple-400 text-black px-1.5 py-0.5 border border-black">
+                          {selectedDayData.stocks.disclosures.length > 0 ? selectedDayData.stocks.disclosures.length : selectedDayData.disclosuresCount}
+                        </span>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {selectedDayData.stocks.disclosures.length > 0 ? (
+                          selectedDayData.stocks.disclosures.map((d, i) => (
+                            <div
+                              key={i}
+                              className="text-xs font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1.5 text-zinc-700 dark:text-zinc-300"
+                            >
+                              • {d.title}
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                            {isAr ? `${selectedDayData.disclosuresCount} إفصاحات رسمية مرصودة` : `${selectedDayData.disclosuresCount} official disclosures`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Dialog Footer */}
+            <div className="p-4 border-t-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-850 flex items-center justify-between">
+              <span className="text-xs font-mono font-bold text-zinc-500">
+                {isAr ? "اضغط Esc أو زر الإغلاق للعودة للتقويم" : "Press Esc or close button to return to calendar"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsDialogOpen(false)}
+                className="px-5 py-2 border-2 border-black dark:border-white bg-black dark:bg-white text-white dark:text-black font-black text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:bg-zinc-800 active:translate-x-0.5 active:translate-y-0.5 transition-all"
+              >
+                {isAr ? "إغلاق النافذة" : "Close Dialog"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </section>
   );
 }
