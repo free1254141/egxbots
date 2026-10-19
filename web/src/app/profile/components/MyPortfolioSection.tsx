@@ -6,6 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import {
     Loader2, RefreshCw, Plus, Trash2, Pencil, Check, X, Wallet,
     TrendingUp, TrendingDown, Coins, Save, BadgeDollarSign, MessageSquare,
+    ChevronDown, ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePortfolio, type PortfolioRow, type PortfolioSnapshot } from "@/contexts/PortfolioContext";
@@ -40,6 +41,27 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
     const [busy, setBusy] = useState(false);
     const reportState = usePortfolioReport(user?.id || null, snapshot);
     const [saleDraft,setSaleDraft] = useState<{symbol:string;quantity:number|null;key:number}|null>(null);
+
+    const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+        if (typeof window !== "undefined") {
+            try {
+                return localStorage.getItem("egx_portfolio_section_collapsed") === "true";
+            } catch {
+                return false;
+            }
+        }
+        return false;
+    });
+
+    const toggleCollapse = () => {
+        setIsCollapsed(prev => {
+            const next = !prev;
+            try {
+                localStorage.setItem("egx_portfolio_section_collapsed", String(next));
+            } catch {}
+            return next;
+        });
+    };
 
     // add form (multi-row bulk add)
     interface AddRow {
@@ -78,6 +100,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
     useEffect(() => {
         if (typeof window !== "undefined" && (window.location.hash === "#portfolio" || window.location.hash === "#my-portfolio")) {
             setShowAdd(true);
+            setIsCollapsed(false);
         }
     }, []);
 
@@ -191,23 +214,51 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
     const profitTone = totalProfit === null ? "text-zinc-500" : totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
 
     return (
-        <section className="relative z-10 min-w-0 rounded-2xl p-3 sm:p-6 space-y-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-zinc-200 dark:border-zinc-800 pb-5">
-                <div>
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="h-10 w-10 border-4 border-black dark:border-white bg-emerald-500 text-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
+        <section className={`relative z-10 min-w-0 rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-sm transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-5"}`}>
+            <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b border-zinc-200 dark:border-zinc-800 pb-5"}`}>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 border-4 border-black dark:border-white bg-emerald-500 text-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
                             <Wallet className="h-5 w-5" />
                         </div>
-                        <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight">
-                            {isAr ? "محفظتى" : "My Portfolio"}
-                        </h2>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight">
+                                {isAr ? "محفظتى" : "My Portfolio"}
+                            </h2>
+                            {isCollapsed && (
+                                <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                    {isAr ? "مطوية" : "Collapsed"}
+                                </span>
+                            )}
+                        </div>
                     </div>
-                    <p className="text-xs text-zinc-600 dark:text-zinc-400 font-black uppercase tracking-widest leading-relaxed">
-                        {isAr
-                            ? "أسهمك وسيولتك — حدّثها من هنا أو كلّم الشات بوت وهو يحدّثها لك"
-                            : "Your holdings and cash — edit here or just tell the chatbot"}
-                    </p>
+                    {!isCollapsed ? (
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400 font-black uppercase tracking-widest leading-relaxed">
+                            {isAr
+                                ? "أسهمك وسيولتك — حدّثها من هنا أو كلّم الشات بوت وهو يحدّثها لك"
+                                : "Your holdings and cash — edit here or just tell the chatbot"}
+                        </p>
+                    ) : (
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold mt-1 text-zinc-600 dark:text-zinc-400">
+                            <span className="font-mono">
+                                {positions.length} {isAr ? "أسهم" : "holdings"}
+                            </span>
+                            <span className="text-zinc-300 dark:text-zinc-600">•</span>
+                            <span className="text-black dark:text-white font-mono font-black">
+                                {money(totals?.market_value)} {isAr ? "ج.م" : "EGP"}
+                            </span>
+                            {totalProfit !== null && (
+                                <>
+                                    <span className="text-zinc-300 dark:text-zinc-600">•</span>
+                                    <span className={`font-mono font-black ${profitTone}`}>
+                                        {totalProfit >= 0 ? "+" : ""}{money(totalProfit)} ({totals?.profit_pct != null && totals.profit_pct >= 0 ? "+" : ""}{money(totals?.profit_pct)}%)
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                    )}
                 </div>
+
                 <div className="flex flex-wrap items-center gap-2">
                     <button
                         onClick={() => void load()}
@@ -216,25 +267,56 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     >
                         <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                     </button>
+
+                    {!isCollapsed && (
+                        <>
+                            <button
+                                onClick={() => setShowAdd((v) => !v)}
+                                className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                            >
+                                <Plus className="h-4 w-4" />
+                                {isAr ? "إضافة حيازة" : "Add Holding"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    window.dispatchEvent(new CustomEvent("open-chat-with-message", { detail: "حلل محفظتي" }));
+                                }}
+                                disabled={positions.length === 0}
+                                className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-sky-300 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <MessageSquare className="h-4 w-4" />
+                                {isAr ? "حلل محفظتي" : "Analyze Portfolio"}
+                            </button>
+                        </>
+                    )}
+
                     <button
-                        onClick={() => setShowAdd((v) => !v)}
-                        className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                        type="button"
+                        onClick={toggleCollapse}
+                        className={`h-10 px-3 flex items-center justify-center gap-1.5 border-4 border-black dark:border-white font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
+                            isCollapsed
+                                ? "bg-[#FFE600] text-black hover:bg-amber-300"
+                                : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
+                        }`}
+                        title={isCollapsed ? (isAr ? "فتح وتوسيع المحفظة" : "Expand Portfolio") : (isAr ? "إغلاق وطي السيكشن" : "Collapse Section")}
                     >
-                        <Plus className="h-4 w-4" />
-                        {isAr ? "إضافة حيازة" : "Add Holding"}
-                    </button>
-                    <button
-                        onClick={() => {
-                            window.dispatchEvent(new CustomEvent("open-chat-with-message", { detail: "حلل محفظتي" }));
-                        }}
-                        disabled={positions.length === 0}
-                        className="h-10 px-4 flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-sky-300 text-black font-black text-xs uppercase tracking-widest shadow-[2px_2px_0px_rgba(0,0,0,1)] disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                        <MessageSquare className="h-4 w-4" />
-                        {isAr ? "حلل محفظتي" : "Analyze Portfolio"}
+                        {isCollapsed ? (
+                            <>
+                                <ChevronDown className="h-4 w-4" />
+                                <span>{isAr ? "عرض المحفظة" : "Expand"}</span>
+                            </>
+                        ) : (
+                            <>
+                                <ChevronUp className="h-4 w-4" />
+                                <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
+                            </>
+                        )}
                     </button>
                 </div>
             </div>
+
+            {!isCollapsed && (
+              <>
 
             {/* Summary tiles */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -527,6 +609,8 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                     ? "الأسعار آخر إغلاق من قاعدة البيانات — تحدّث تلقائياً مع كل جلسة"
                     : "Prices from latest DB close — refreshed with every session"}
             </p>
+              </>
+            )}
         </section>
     );
 }
