@@ -94,10 +94,10 @@
   color-scheme: dark;
   --header-h: 64px;
   --header-offset: 72px;
-  --app-bg: radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 34%),
-    radial-gradient(circle at top right, rgba(99, 102, 241, 0.12), transparent 28%),
-    linear-gradient(180deg, #040814 0%, #080d1f 45%, #050816 100%);
-  --app-bg-solid: #050816;
+  --app-bg-solid: #000000;
+  --app-bg: linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  --app-bg-size: 28px 28px;
   --app-surface: rgba(8, 13, 31, 0.72);
   --app-surface-strong: rgba(6, 10, 24, 0.88);
   --app-surface-soft: rgba(255, 255, 255, 0.05);
@@ -115,6 +115,10 @@
 }
 
 html.dark {
+  --app-bg-solid: #000000;
+  --app-bg: linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  --app-bg-size: 28px 28px;
   --brutal-border: #ffffff;
   --brutal-shadow: #f59e0b;
   --brutal-shadow-offset: 5px;
@@ -133,6 +137,7 @@ html.light {
     radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 26%),
     linear-gradient(180deg, #f8fbff 0%, #eef2ff 48%, #f8fafc 100%);
   --app-bg-solid: #f4f7fb;
+  --app-bg-size: auto;
   --app-surface: rgba(255, 255, 255, 0.76);
   --app-surface-strong: rgba(255, 255, 255, 0.92);
   --app-surface-soft: rgba(255, 255, 255, 0.58);
@@ -155,6 +160,7 @@ html {
   @apply antialiased;
   background-color: var(--app-bg-solid);
   background-image: var(--app-bg);
+  background-size: var(--app-bg-size, 28px 28px);
   color: var(--app-text);
   background-attachment: fixed;
 }
@@ -164,6 +170,7 @@ html.light {
   @apply antialiased;
   background-color: var(--app-bg-solid);
   background-image: var(--app-bg);
+  background-size: var(--app-bg-size, auto);
   color: var(--app-text);
   background-attachment: fixed;
 }
@@ -187,7 +194,7 @@ body {
   width: 100%;
 }
 
-body::before {
+html.light body::before {
   content: "";
   position: fixed;
   inset: 0;
@@ -200,10 +207,17 @@ body::before {
   z-index: -1;
 }
 
+html.dark body::before,
+body::before {
+  display: none !important;
+}
+
   @layer utilities {
   .app-shell {
     background-color: var(--app-bg-solid);
     background-image: var(--app-bg);
+    background-size: var(--app-bg-size, 28px 28px);
+    background-attachment: fixed;
     color: var(--app-text);
   }
 
@@ -216,7 +230,7 @@ body::before {
     color: var(--app-text);
   }
 
-  .app-page-shell::before {
+  html.light .app-page-shell::before {
     content: "";
     position: absolute;
     inset: 0 auto auto 0;
@@ -226,6 +240,10 @@ body::before {
     filter: blur(12px);
     pointer-events: none;
     z-index: 0;
+  }
+
+  html.dark .app-page-shell::before {
+    display: none !important;
   }
 
   .app-page-shell > * {

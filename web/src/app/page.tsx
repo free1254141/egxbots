@@ -301,8 +301,8 @@ export default function HomePage() {
         <div className="neobrutal-layout min-h-screen -mx-3 sm:-mx-6 md:-mx-8 overflow-hidden pb-16">
             {/* Hero Section */}
             <section className="relative px-4 sm:px-6 lg:px-8 pt-12 sm:pt-20 pb-16 sm:pb-24 neobrutal-grid-bg overflow-hidden">
-                {/* Animated dots background */}
-                <div className="absolute inset-0 opacity-20">
+                {/* Animated dots background (light mode only) */}
+                <div className="absolute inset-0 opacity-20 dark:hidden">
                     <div className="absolute inset-0 animate-[pulse_4s_ease-in-out_infinite]" style={{
                         backgroundImage: 'radial-gradient(circle, rgba(59, 130, 246, 0.3) 1px, transparent 1px)',
                         backgroundSize: '50px 50px'
