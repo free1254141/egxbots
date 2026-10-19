@@ -44,6 +44,12 @@ export interface AdminScannerConfig {
     disclosures_count: number;
     recipients_count: number;
     triggered_by: string;
+    stage_results?: {
+      volume_surge: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
+      breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
+      rsi_oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }>;
+      disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
+    };
   }>;
 }
 
@@ -474,6 +480,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     disclosures_count: disclosuresMatches.length,
     recipients_count: alertsDispatchedCount,
     triggered_by: options.trigger || "Scheduled",
+    stage_results: newScanResult.stage_results,
   };
 
   const updatedConfig: AdminScannerConfig = {
@@ -483,7 +490,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       date: cairoTime.dateStr,
       sent_keys: Array.from(sentKeysSet).slice(-200),
     },
-    history: [historyEntry, ...(config.history || [])].slice(0, 30),
+    history: [historyEntry, ...(config.history || [])].slice(0, 100),
   };
 
   await saveAdminConfig(updatedConfig, serviceClient);

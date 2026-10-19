@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import ScannerStatsCalendar from "./ScannerStatsCalendar";
 
 interface ScannerPreferences {
   volume_surge: boolean;
@@ -51,6 +52,8 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   const [isPro, setIsPro] = useState(false);
   const [telegramLinked, setTelegramLinked] = useState(initialTelegramLinked);
   const [prefs, setPrefs] = useState<ScannerPreferences>(DEFAULT_PREFS);
+  const [history, setHistory] = useState<any[]>([]);
+  const [lastScan, setLastScan] = useState<any>(null);
 
   const botUsername = "egxbots_bot";
   const connectBotUrl = user?.id ? `https://t.me/${botUsername}?start=${user.id}` : `https://t.me/${botUsername}`;
@@ -76,6 +79,12 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             setTelegramLinked(Boolean(data.telegram_linked));
             if (data.preferences) {
               setPrefs(data.preferences);
+            }
+            if (data.history) {
+              setHistory(data.history);
+            }
+            if (data.last_scan) {
+              setLastScan(data.last_scan);
             }
           }
         }
@@ -187,7 +196,8 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   ];
 
   return (
-    <section className="neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
+    <div className="space-y-8">
+      <section className="neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
       {/* ── Section Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-4 border-black dark:border-white pb-5">
         <div className="flex items-center gap-3">
@@ -397,5 +407,13 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         })}
       </div>
     </section>
+
+      {/* ── Interactive Scanner Intelligence Calendar ── */}
+      <ScannerStatsCalendar
+        history={history}
+        lastScan={lastScan}
+        isAr={isAr}
+      />
+    </div>
   );
 }

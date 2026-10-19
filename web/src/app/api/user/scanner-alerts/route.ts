@@ -65,6 +65,23 @@ export async function GET() {
     const isPro = hasActiveProSubscription(subRes?.data || []);
     const telegramLinked = Boolean(profileRes?.data?.telegram_chat_id);
 
+    // Fetch scanner history & stats for calendar
+    let scannerHistory: any[] = [];
+    let lastScanData: any = null;
+    try {
+      const { data: botState } = await client
+        .from("bot_states")
+        .select("state")
+        .eq("bot_id", "scanner_alerts")
+        .maybeSingle();
+      if (botState?.state) {
+        scannerHistory = botState.state.history || [];
+        lastScanData = botState.state.last_scan || null;
+      }
+    } catch (e) {
+      console.warn("Could not load bot_states for user calendar:", e);
+    }
+
     const savedAlerts = settingsRes?.data?.app_state?.scanner_alerts || {};
     const preferences: ScannerPreferences = {
       volume_surge: savedAlerts.volume_surge ?? DEFAULT_PREFERENCES.volume_surge,
@@ -80,6 +97,8 @@ export async function GET() {
       telegram_linked: telegramLinked,
       telegram_chat_id: profileRes?.data?.telegram_chat_id || null,
       preferences,
+      history: scannerHistory,
+      last_scan: lastScanData,
     });
   } catch (err: any) {
     console.error("Error in GET /api/user/scanner-alerts:", err);

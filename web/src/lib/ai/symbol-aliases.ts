@@ -53,6 +53,7 @@ export const ARABIC_STOCK_MAPPINGS: Record<string, string | string[]> = {
     "شركة أجواء": "AJWA", "شركة اجواء": "AJWA", "سهم أجواء": "AJWA", "سهم اجواء": "AJWA",
     "أجواء للصناعات الغذائية": "AJWA", "اجواء للصناعات الغذائية": "AJWA",
     "أجواء مصر": "AJWA", "اجواء مصر": "AJWA", "أجواء الغذائية": "AJWA", "اجواء الغذائية": "AJWA",
+    "ajwa": "AJWA", "Ajwa": "AJWA", "AJWA": "AJWA",
 
     // ── AMER  عامر جروب ─────────────────────────────────────
     "عامر جروب": "AMER", "عامر هولدنج": "AMER",
