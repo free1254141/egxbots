@@ -230,11 +230,35 @@ export default function ScannerStatsCalendar({
       }
     }
 
-    // Compute averages
+    // Compute averages and normalize daily counts to UNIQUE stock opportunities (avoiding inflated repeating snapshot sums)
     for (const entry of map.values()) {
       if (entry.scansCount > 0) {
         entry.avgDurationMs = Math.round(entry.avgDurationMs / entry.scansCount);
       }
+
+      // If unique stocks are collected in stage_results, use their true count.
+      // Otherwise fallback to the peak snapshot count across scans for that day.
+      entry.volumeCount = entry.stocks.volume.length > 0
+        ? entry.stocks.volume.length
+        : Math.max(0, ...entry.samples.map((s) => s.volume_count || 0));
+
+      entry.breakoutCount = entry.stocks.breakout.length > 0
+        ? entry.stocks.breakout.length
+        : Math.max(0, ...entry.samples.map((s) => s.breakout_count || 0));
+
+      entry.oversoldCount = entry.stocks.oversold.length > 0
+        ? entry.stocks.oversold.length
+        : Math.max(0, ...entry.samples.map((s) => s.oversold_count || 0));
+
+      entry.disclosuresCount = entry.stocks.disclosures.length > 0
+        ? entry.stocks.disclosures.length
+        : Math.max(0, ...entry.samples.map((s) => s.disclosures_count || 0));
+
+      entry.totalOpportunities =
+        entry.volumeCount +
+        entry.breakoutCount +
+        entry.oversoldCount +
+        entry.disclosuresCount;
     }
 
     return map;
