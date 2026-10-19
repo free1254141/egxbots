@@ -55,6 +55,35 @@ interface IntradaySessionPayload {
   bars_count: number;
 }
 
+const CLIENT_SESSION_CACHE = new Map<string, IntradaySessionPayload>();
+
+export async function prefetchIntradaySession(
+  symbol: string,
+  date: string,
+  signalTime?: string,
+  signalPrice?: number
+): Promise<IntradaySessionPayload | null> {
+  const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+  if (CLIENT_SESSION_CACHE.has(cacheKey)) {
+    return CLIENT_SESSION_CACHE.get(cacheKey)!;
+  }
+  try {
+    const params = new URLSearchParams({ symbol, date });
+    if (signalTime) params.set("signal_time", signalTime);
+    if (signalPrice) params.set("signal_price", String(signalPrice));
+    const res = await fetch(`/api/scanner/intraday-session?${params.toString()}`);
+    if (res.ok) {
+      const json = await res.json();
+      CLIENT_SESSION_CACHE.set(cacheKey, json);
+      try {
+        sessionStorage.setItem(`egx_intraday_${cacheKey}`, JSON.stringify(json));
+      } catch {}
+      return json;
+    }
+  } catch {}
+  return null;
+}
+
 export default function ScannerIntradayChartModal({
   isOpen,
   onClose,
@@ -89,13 +118,41 @@ export default function ScannerIntradayChartModal({
     };
   }, [isOpen, onClose]);
 
-  // Fetch session data
+  // Fetch session data with intelligent caching (instant 0ms chart presentation)
   useEffect(() => {
     if (!isOpen || !symbol) return;
 
     let isCancelled = false;
-    setLoading(true);
-    setError(null);
+    const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+
+    // 1. Instant cache check (in-memory or sessionStorage)
+    let cached = CLIENT_SESSION_CACHE.get(cacheKey);
+    if (!cached && typeof window !== "undefined") {
+      try {
+        const stored = sessionStorage.getItem(`egx_intraday_${cacheKey}`);
+        if (stored) {
+          cached = JSON.parse(stored);
+          if (cached) CLIENT_SESSION_CACHE.set(cacheKey, cached);
+        }
+      } catch {}
+    }
+
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      setError(null);
+      if (cached?.signal && typeof cached.signal.max_gain_pct === "number") {
+        onGainLoaded?.({
+          symbol: cached.symbol || symbol,
+          max_gain_pct: cached.signal.max_gain_pct,
+          peak_price: cached.session_high,
+          peak_time: cached.peak_time,
+        });
+      }
+    } else {
+      setLoading(true);
+      setError(null);
+    }
 
     const fetchData = async () => {
       try {
@@ -109,9 +166,15 @@ export default function ScannerIntradayChartModal({
         const res = await fetch(`/api/scanner/intraday-session?${params.toString()}`);
         if (!res.ok) throw new Error("Failed to fetch session bars");
 
-        const json = await res.json();
+        const json: IntradaySessionPayload = await res.json();
+        CLIENT_SESSION_CACHE.set(cacheKey, json);
+        try {
+          sessionStorage.setItem(`egx_intraday_${cacheKey}`, JSON.stringify(json));
+        } catch {}
+
         if (!isCancelled) {
           setData(json);
+          setLoading(false);
           if (json?.signal && typeof json.signal.max_gain_pct === "number") {
             onGainLoaded?.({
               symbol: json.symbol || symbol,
@@ -124,7 +187,9 @@ export default function ScannerIntradayChartModal({
       } catch (err: any) {
         if (!isCancelled) {
           console.error("Intraday fetch error:", err);
-          setError(isAr ? "تعذر تحميل شارت الجلسة، حاول مجدداً" : "Failed to load session chart");
+          if (!cached) {
+            setError(isAr ? "تعذر تحميل شارت الجلسة، حاول مجدداً" : "Failed to load session chart");
+          }
         }
       } finally {
         if (!isCancelled) setLoading(false);

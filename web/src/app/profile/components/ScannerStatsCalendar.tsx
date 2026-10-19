@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -18,9 +19,11 @@ import {
   Flame,
   Info,
   X,
-  BarChart2
+  BarChart2,
+  Lock,
+  Crown
 } from "lucide-react";
-import ScannerIntradayChartModal from "./ScannerIntradayChartModal";
+import ScannerIntradayChartModal, { prefetchIntradaySession } from "./ScannerIntradayChartModal";
 
 export type ScannerCategory = "all" | "volume_surge" | "breakout" | "rsi_oversold" | "disclosures";
 
@@ -34,9 +37,9 @@ export interface ScanHistoryItem {
   recipients_count: number;
   triggered_by: string;
   stage_results?: {
-    volume_surge: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
-    breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
-    rsi_oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string }>;
+    volume_surge: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string; is_locked?: boolean }>;
+    breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string; is_locked?: boolean }>;
+    rsi_oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string; is_locked?: boolean }>;
     disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
   };
 }
@@ -45,16 +48,19 @@ interface ScannerStatsCalendarProps {
   history: ScanHistoryItem[];
   lastScan?: any;
   isAr?: boolean;
+  isPro?: boolean;
 }
 
 export default function ScannerStatsCalendar({
   history = [],
   lastScan,
   isAr = true,
+  isPro = false,
 }: ScannerStatsCalendarProps) {
   const [selectedCategory, setSelectedCategory] = useState<ScannerCategory>("all");
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [isMounted, setIsMounted] = useState<boolean>(false);
+  const [showProModal, setShowProModal] = useState<boolean>(false);
   const [chartModalStock, setChartModalStock] = useState<{
     symbol: string;
     date: string;
@@ -187,9 +193,9 @@ export default function ScannerStatsCalendar({
         avgDurationMs: number;
         samples: ScanHistoryItem[];
         stocks: {
-          volume: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
-          breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string }>;
-          oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string }>;
+          volume: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string; is_locked?: boolean }>;
+          breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; signal_time?: string; is_locked?: boolean }>;
+          oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; signal_time?: string; is_locked?: boolean }>;
           disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
         };
       }
@@ -455,6 +461,21 @@ export default function ScannerStatsCalendar({
       isSubscribed = false;
     };
   }, [selectedDateStr, selectedDayData]);
+
+  const handleCalendarStockClick = (s: any, scannerType: string) => {
+    const isLocked = Boolean(s.is_locked || !isPro);
+    if (isLocked) {
+      setShowProModal(true);
+      return;
+    }
+    setChartModalStock({
+      symbol: s.symbol,
+      date: selectedDateStr,
+      signalTime: getSignalHHMM((s as any).signal_time),
+      signalPrice: s.close,
+      scannerType,
+    });
+  };
 
   // Filter categories config
   const categories: Array<{
@@ -897,6 +918,27 @@ export default function ScannerStatsCalendar({
 
             {/* Dialog Scrollable Content */}
             <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 bg-zinc-50 dark:bg-zinc-950">
+              {/* Pro Alert Banner inside dialog for non-Pro users */}
+              {!isPro && (
+                <div className="p-3 bg-amber-400 border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,1)] flex items-center justify-between gap-3 text-black">
+                  <div className="flex items-center gap-2">
+                    <Crown className="w-5 h-5 shrink-0" />
+                    <span className="text-xs font-black">
+                      {isAr
+                        ? "أنت تتصفح الحساب المجاني: تفاصيل الأسهم وشارت 15 دقيقة اللحظي متاحة فقط لأعضاء PRO VIP."
+                        : "Free tier active: Stock symbols and 15m intraday charts are restricted to PRO VIP."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowProModal(true)}
+                    className="px-3 py-1 bg-black text-[#FFE600] font-black text-xs border border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] hover:bg-zinc-800 shrink-0"
+                  >
+                    {isAr ? "ترقية الحساب ⚡" : "Upgrade ⚡"}
+                  </button>
+                </div>
+              )}
+
               {!selectedDayData || selectedDayData.totalOpportunities === 0 ? (
                 <div className="p-12 text-center border-4 border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 font-bold text-sm text-zinc-500">
                   {isAr
@@ -927,21 +969,37 @@ export default function ScannerStatsCalendar({
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.volume.length > 0 ? (
                           selectedDayData.stocks.volume.map((s, i) => {
+                            const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
                             const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
                             return (
                               <div
                                 key={i}
-                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                                onClick={() => handleCalendarStockClick(s, "volume_surge")}
+                                onMouseEnter={() => {
+                                  if (!isLocked) {
+                                    prefetchIntradaySession(s.symbol, selectedDateStr, getSignalHHMM((s as any).signal_time), s.close);
+                                  }
+                                }}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2 cursor-pointer hover:border-amber-500 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 transition-all"
+                                title={isAr ? "اضغط لعرض شارت 15 دقيقة والتفاصيل" : "Click to view 15m intraday chart & details"}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                      {s.symbol}
-                                    </span>
+                                    {isLocked ? (
+                                      <span className="font-mono font-black text-xs text-amber-950 bg-amber-300 px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] flex items-center gap-1">
+                                        <Lock className="w-3 h-3" />
+                                        <span>••••</span>
+                                        <span className="text-[10px] bg-black text-[#FFE600] px-1 py-0.2">PRO</span>
+                                      </span>
+                                    ) : (
+                                      <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                        {s.symbol}
+                                      </span>
+                                    )}
                                     <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                      {formatPrice(s.close)} ج.م
+                                      {isLocked ? "••.•• ج.م" : `${formatPrice(s.close)} ج.م`}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
@@ -972,21 +1030,32 @@ export default function ScannerStatsCalendar({
                                       {formatSignalTime((s as any).signal_time)}
                                     </span>
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setChartModalStock({
-                                      symbol: s.symbol,
-                                      date: selectedDateStr,
-                                      signalTime: getSignalHHMM((s as any).signal_time),
-                                      signalPrice: s.close,
-                                      scannerType: "volume_surge"
-                                    })}
-                                    className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                  >
-                                    <BarChart2 className="w-3.5 h-3.5" />
-                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                  </button>
+                                  {isLocked ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowProModal(true);
+                                      }}
+                                      className="px-2.5 py-1 bg-black text-[#FFE600] border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    >
+                                      <Lock className="w-3.5 h-3.5 text-[#FFE600]" />
+                                      <span>{isAr ? "فتح لـ PRO" : "Unlock PRO"}</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCalendarStockClick(s, "volume_surge");
+                                      }}
+                                      className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                      title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                    >
+                                      <BarChart2 className="w-3.5 h-3.5" />
+                                      <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1022,21 +1091,37 @@ export default function ScannerStatsCalendar({
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.breakout.length > 0 ? (
                           selectedDayData.stocks.breakout.map((s, i) => {
+                            const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
                             const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
                             return (
                               <div
                                 key={i}
-                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                                onClick={() => handleCalendarStockClick(s, "breakout")}
+                                onMouseEnter={() => {
+                                  if (!isLocked) {
+                                    prefetchIntradaySession(s.symbol, selectedDateStr, getSignalHHMM((s as any).signal_time), s.close);
+                                  }
+                                }}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2 cursor-pointer hover:border-emerald-500 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20 transition-all"
+                                title={isAr ? "اضغط لعرض شارت 15 دقيقة والتفاصيل" : "Click to view 15m intraday chart & details"}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                      {s.symbol}
-                                    </span>
+                                    {isLocked ? (
+                                      <span className="font-mono font-black text-xs text-emerald-950 bg-emerald-300 px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] flex items-center gap-1">
+                                        <Lock className="w-3 h-3" />
+                                        <span>••••</span>
+                                        <span className="text-[10px] bg-black text-[#FFE600] px-1 py-0.2">PRO</span>
+                                      </span>
+                                    ) : (
+                                      <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                        {s.symbol}
+                                      </span>
+                                    )}
                                     <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                      {formatPrice(s.close)} ج.م
+                                      {isLocked ? "••.•• ج.م" : `${formatPrice(s.close)} ج.م`}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
@@ -1067,21 +1152,32 @@ export default function ScannerStatsCalendar({
                                       {formatSignalTime((s as any).signal_time)}
                                     </span>
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setChartModalStock({
-                                      symbol: s.symbol,
-                                      date: selectedDateStr,
-                                      signalTime: getSignalHHMM((s as any).signal_time),
-                                      signalPrice: s.close,
-                                      scannerType: "breakout"
-                                    })}
-                                    className="px-2.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                  >
-                                    <BarChart2 className="w-3.5 h-3.5" />
-                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                  </button>
+                                  {isLocked ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowProModal(true);
+                                      }}
+                                      className="px-2.5 py-1 bg-black text-[#FFE600] border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    >
+                                      <Lock className="w-3.5 h-3.5 text-[#FFE600]" />
+                                      <span>{isAr ? "فتح لـ PRO" : "Unlock PRO"}</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCalendarStockClick(s, "breakout");
+                                      }}
+                                      className="px-2.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                      title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                    >
+                                      <BarChart2 className="w-3.5 h-3.5" />
+                                      <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1117,21 +1213,37 @@ export default function ScannerStatsCalendar({
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.oversold.length > 0 ? (
                           selectedDayData.stocks.oversold.map((s, i) => {
+                            const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
                             const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
                             return (
                               <div
                                 key={i}
-                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                                onClick={() => handleCalendarStockClick(s, "rsi_oversold")}
+                                onMouseEnter={() => {
+                                  if (!isLocked) {
+                                    prefetchIntradaySession(s.symbol, selectedDateStr, getSignalHHMM((s as any).signal_time), s.close);
+                                  }
+                                }}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2 cursor-pointer hover:border-sky-500 hover:bg-sky-50/40 dark:hover:bg-sky-950/20 transition-all"
+                                title={isAr ? "اضغط لعرض شارت 15 دقيقة والتفاصيل" : "Click to view 15m intraday chart & details"}
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                      {s.symbol}
-                                    </span>
+                                    {isLocked ? (
+                                      <span className="font-mono font-black text-xs text-sky-950 bg-sky-300 px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] flex items-center gap-1">
+                                        <Lock className="w-3 h-3" />
+                                        <span>••••</span>
+                                        <span className="text-[10px] bg-black text-[#FFE600] px-1 py-0.2">PRO</span>
+                                      </span>
+                                    ) : (
+                                      <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                        {s.symbol}
+                                      </span>
+                                    )}
                                     <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                      {formatPrice(s.close)} ج.م
+                                      {isLocked ? "••.•• ج.م" : `${formatPrice(s.close)} ج.م`}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
@@ -1164,21 +1276,32 @@ export default function ScannerStatsCalendar({
                                       {formatSignalTime((s as any).signal_time)}
                                     </span>
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setChartModalStock({
-                                      symbol: s.symbol,
-                                      date: selectedDateStr,
-                                      signalTime: getSignalHHMM((s as any).signal_time),
-                                      signalPrice: s.close,
-                                      scannerType: "rsi_oversold"
-                                    })}
-                                    className="px-2.5 py-1 bg-sky-400 hover:bg-sky-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                  >
-                                    <BarChart2 className="w-3.5 h-3.5" />
-                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                  </button>
+                                  {isLocked ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowProModal(true);
+                                      }}
+                                      className="px-2.5 py-1 bg-black text-[#FFE600] border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    >
+                                      <Lock className="w-3.5 h-3.5 text-[#FFE600]" />
+                                      <span>{isAr ? "فتح لـ PRO" : "Unlock PRO"}</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCalendarStockClick(s, "rsi_oversold");
+                                      }}
+                                      className="px-2.5 py-1 bg-sky-400 hover:bg-sky-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                      title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                    >
+                                      <BarChart2 className="w-3.5 h-3.5" />
+                                      <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1251,6 +1374,55 @@ export default function ScannerStatsCalendar({
                 className="px-6 py-2 border-2 border-black bg-rose-500 hover:bg-rose-600 text-white font-black text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
               >
                 {isAr ? "إغلاق النافذة" : "Close Dialog"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Pro Upgrade Modal Portal ── */}
+      {showProModal && isMounted && createPortal(
+        <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] p-6 space-y-4" dir={isAr ? "rtl" : "ltr"}>
+            <button
+              onClick={() => setShowProModal(false)}
+              className="absolute top-4 left-4 p-1 border-2 border-black bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200"
+            >
+              <X className="w-4 h-4 text-black dark:text-white" />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-[#FFE600] border-4 border-black flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                <Crown className="w-6 h-6 text-black" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-black dark:text-white uppercase tracking-tight">
+                  {isAr ? "ميزة حصرية لمشتركي PRO" : "PRO Exclusive Feature"}
+                </h3>
+                <span className="text-xs font-bold text-zinc-500">
+                  {isAr ? "رادار الصفقات اللحظية والشارت الفوري" : "Live Signals Radar & Intraday Chart"}
+                </span>
+              </div>
+            </div>
+            <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {isAr
+                ? "الإشارات اللحظية والأسهم المرصودة وشارت جلسات 15 دقيقة وأسعار الدخول ومتابعة الأهداف متاحة حصرياً لأعضاء باقة Pro. اشترك الآن للاستفادة الكاملة!"
+                : "Live signals, stock symbols, 15m session candlestick charts and profit tracking are exclusive to Pro subscribers. Upgrade now to unlock full access!"}
+            </p>
+            <div className="pt-2 flex items-center gap-3">
+              <Link
+                href="/pricing"
+                className="flex-1 h-11 bg-[#FFE600] text-black border-4 border-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:bg-yellow-300 transition-all"
+              >
+                <Zap className="w-4 h-4" />
+                <span>{isAr ? "ترقية الحساب الآن إلى PRO" : "Upgrade to PRO"}</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowProModal(false)}
+                className="h-11 px-4 bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black font-black text-xs cursor-pointer"
+              >
+                {isAr ? "إغلاق" : "Close"}
               </button>
             </div>
           </div>

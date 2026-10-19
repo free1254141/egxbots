@@ -100,6 +100,28 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     }
   }, [initialTelegramLinked]);
 
+  // Intelligent Cache: initialize from localStorage immediately for 0ms load delay
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const cachedStr = localStorage.getItem("egx_scanner_alerts_cache_v2");
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached && typeof cached === "object") {
+          if (typeof cached.is_pro === "boolean") setIsPro(cached.is_pro);
+          if (typeof cached.telegram_linked === "boolean") setTelegramLinked(cached.telegram_linked);
+          if (cached.preferences) setPrefs(cached.preferences);
+          if (Array.isArray(cached.history)) setHistory(cached.history);
+          if (cached.last_scan) setLastScan(cached.last_scan);
+          if (Array.isArray(cached.active_signals)) setActiveSignals(cached.active_signals);
+          if (Array.isArray(cached.closed_signals)) setClosedSignals(cached.closed_signals);
+          if (cached.signals_kpis) setSignalsKpis(cached.signals_kpis);
+          setLoading(false);
+        }
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     async function loadAlerts() {
@@ -110,24 +132,17 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           if (isMounted && data.ok) {
             setIsPro(Boolean(data.is_pro));
             setTelegramLinked(Boolean(data.telegram_linked));
-            if (data.preferences) {
-              setPrefs(data.preferences);
-            }
-            if (data.history) {
-              setHistory(data.history);
-            }
-            if (data.last_scan) {
-              setLastScan(data.last_scan);
-            }
-            if (data.active_signals) {
-              setActiveSignals(data.active_signals);
-            }
-            if (data.closed_signals) {
-              setClosedSignals(data.closed_signals);
-            }
-            if (data.signals_kpis) {
-              setSignalsKpis(data.signals_kpis);
-            }
+            if (data.preferences) setPrefs(data.preferences);
+            if (data.history) setHistory(data.history);
+            if (data.last_scan) setLastScan(data.last_scan);
+            if (data.active_signals) setActiveSignals(data.active_signals);
+            if (data.closed_signals) setClosedSignals(data.closed_signals);
+            if (data.signals_kpis) setSignalsKpis(data.signals_kpis);
+
+            // Persist into smart cache
+            try {
+              localStorage.setItem("egx_scanner_alerts_cache_v2", JSON.stringify(data));
+            } catch {}
           }
         }
       } catch (e) {
@@ -136,9 +151,28 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         if (isMounted) setLoading(false);
       }
     }
+
     loadAlerts();
+
+    // Listen to entitlement updates (e.g. user upgraded to Pro or subscribed)
+    const handleEntitlements = () => {
+      try {
+        localStorage.removeItem("egx_scanner_alerts_cache_v2");
+      } catch {}
+      void loadAlerts();
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
+        handleEntitlements();
+      }
+    };
+    window.addEventListener("egx:entitlements-updated", handleEntitlements);
+    window.addEventListener("storage", handleStorage);
+
     return () => {
       isMounted = false;
+      window.removeEventListener("egx:entitlements-updated", handleEntitlements);
+      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
@@ -369,6 +403,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           closedSignals={closedSignals}
           kpis={signalsKpis}
           isAr={isAr}
+          isPro={isPro}
         />
       )}
 
@@ -377,6 +412,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           history={history}
           lastScan={lastScan}
           isAr={isAr}
+          isPro={isPro}
         />
       )}
 

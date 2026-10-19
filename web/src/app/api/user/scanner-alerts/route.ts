@@ -106,15 +106,74 @@ export async function GET() {
       disclosures: savedAlerts.disclosures ?? DEFAULT_PREFERENCES.disclosures,
     };
 
+    const cutoff15Days = new Date();
+    cutoff15Days.setDate(cutoff15Days.getDate() - 15);
+    const cutoffDateStr = cutoff15Days.toISOString().split("T")[0];
+
+    const sanitizedActiveSignals = isPro
+      ? activeSignals.map((s: any) => ({ ...s, is_locked: false }))
+      : activeSignals.map((s: any) => ({
+          ...s,
+          symbol: "••••",
+          entry_price: null,
+          current_price: null,
+          target_1: null,
+          target_1_pct: null,
+          target_2: null,
+          target_2_pct: null,
+          stop_loss: null,
+          stop_loss_pct: null,
+          highest_price: null,
+          lowest_price: null,
+          is_locked: true,
+        }));
+
+    const sanitizedHistory = isPro
+      ? scannerHistory.map((item: any) => ({ ...item, is_locked: false }))
+      : scannerHistory.map((item: any) => {
+          const itemDate = item.timestamp ? item.timestamp.split("T")[0] : "";
+          const isRecent = !itemDate || itemDate >= cutoffDateStr;
+          if (!isRecent) return { ...item, is_locked: false };
+
+          const stageResults = item.stage_results;
+          if (!stageResults) return { ...item, is_locked: true };
+
+          return {
+            ...item,
+            is_locked: true,
+            stage_results: {
+              volume_surge: (stageResults.volume_surge || []).map((s: any) => ({
+                ...s,
+                symbol: "••••",
+                close: null,
+                is_locked: true,
+              })),
+              breakout: (stageResults.breakout || []).map((s: any) => ({
+                ...s,
+                symbol: "••••",
+                close: null,
+                is_locked: true,
+              })),
+              rsi_oversold: (stageResults.rsi_oversold || []).map((s: any) => ({
+                ...s,
+                symbol: "••••",
+                close: null,
+                is_locked: true,
+              })),
+              disclosures: stageResults.disclosures || [],
+            },
+          };
+        });
+
     return NextResponse.json({
       ok: true,
       is_pro: isPro,
       telegram_linked: telegramLinked,
       telegram_chat_id: profileRes?.data?.telegram_chat_id || null,
       preferences,
-      history: scannerHistory,
+      history: sanitizedHistory,
       last_scan: lastScanData,
-      active_signals: activeSignals,
+      active_signals: sanitizedActiveSignals,
       closed_signals: closedSignals,
       signals_kpis: signalsKpis,
     });

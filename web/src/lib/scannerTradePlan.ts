@@ -127,6 +127,7 @@ export interface TrackedScannerSignal {
   sessions_count: number;
   max_sessions: number;
   updated_at: string;
+  is_locked?: boolean;
 }
 
 export interface ScannerSignalsKPIs {
