@@ -7624,6 +7624,87 @@ def export_optimization_results(job_id: str, format: str = "csv"):
     )
 
 
+_INTRADAY_SESSION_CACHE = {}
+_TV_DATAFEED_SINGLETON = None
+
+
+def _get_tv_datafeed():
+    global _TV_DATAFEED_SINGLETON
+    if _TV_DATAFEED_SINGLETON is None:
+        try:
+            from tvDatafeed import TvDatafeed
+            _TV_DATAFEED_SINGLETON = TvDatafeed()
+        except Exception as e:
+            logging.warning(f"[SCANNER_INTRADAY] Failed to init TvDatafeed: {e}")
+    return _TV_DATAFEED_SINGLETON
+
+
+def _compute_post_signal_metrics(candles, target_date, clean_sym, signal_time=None, signal_price=None):
+    if not candles:
+        return None
+    target_sig_time = signal_time or "10:15"
+
+    # If the provided signal time is outside market trading hours (e.g. post-market scan at night),
+    # clamp it to the session morning entry (10:15) so the progression is measured within the session!
+    if target_sig_time > "14:15" or target_sig_time < "10:00":
+        target_sig_time = "10:15"
+
+    # Find the candle at or immediately after signal time
+    sig_idx = 0
+    for idx, c in enumerate(candles):
+        if c["time"] >= target_sig_time:
+            sig_idx = idx
+            break
+
+    signal_candle = candles[sig_idx]
+    effective_sig_price = (
+        float(signal_price)
+        if (
+            signal_price is not None
+            and float(signal_price) > 0
+            and abs(float(signal_price) - float(signal_candle["close"])) / max(0.01, float(signal_candle["close"])) < 0.3
+        )
+        else float(signal_candle["close"])
+    )
+
+    # Strictly search for the peak FROM the signal candle forwards to the end of the session!
+    post_signal_candles = candles[sig_idx:]
+    if not post_signal_candles:
+        post_signal_candles = [signal_candle]
+
+    peak_candle = max(post_signal_candles, key=lambda c: c["high"])
+    peak_price = peak_candle["high"]
+    peak_time = peak_candle["time"]
+
+    session_open = candles[0]["open"]
+    session_close = candles[-1]["close"]
+    session_gain_pct = round(((session_close - session_open) / session_open) * 100, 2)
+    session_max_gain_pct = round(((max(c["high"] for c in candles) - session_open) / session_open) * 100, 2)
+
+    gain_from_signal_pct = round(((peak_price - effective_sig_price) / effective_sig_price) * 100, 2)
+    if gain_from_signal_pct < 0:
+        gain_from_signal_pct = 0.0
+
+    return {
+        "symbol": clean_sym,
+        "date": target_date,
+        "session_open": session_open,
+        "session_close": session_close,
+        "session_high": peak_price,
+        "peak_time": peak_time,
+        "session_low": min(c["low"] for c in candles),
+        "session_gain_pct": session_gain_pct,
+        "session_max_gain_pct": session_max_gain_pct,
+        "signal": {
+            "time": target_sig_time,
+            "price": effective_sig_price,
+            "max_gain_pct": gain_from_signal_pct,
+        },
+        "candles": candles,
+        "bars_count": len(candles),
+    }
+
+
 @app.get("/api/scanner/intraday-session")
 def get_scanner_intraday_session(
     symbol: str = Query(..., description="Stock symbol (e.g. COMI, POUL)"),
@@ -7634,58 +7715,76 @@ def get_scanner_intraday_session(
     """
     Fetch and return 15-minute candlestick bars for an EGX stock strictly for
     a single trading session (10:00 to 14:30), highlighting the signal point
-    and the session peak. Result is automatically cached in Supabase market_cache.
+    and the session peak achieved AFTER the signal. Results are in-memory and
+    Supabase cached for instantaneous zero-latency responses.
     """
     import datetime as dt
     from datetime import timezone
+    import time
     import pandas as pd
     from api.stock_ai import _init_supabase, _get_thread_local_supabase
 
     clean_sym = symbol.strip().upper().replace(".CA", "").replace(".EGX", "")
     target_date = date or dt.date.today().strftime("%Y-%m-%d")
     cache_key = f"scanner_15m:{target_date}:{clean_sym}"
+    now_ts = time.time()
 
-    # 1. Check Supabase market_cache
+    # 1. Check in-memory process cache (0ms instant response)
+    mem_cached = _INTRADAY_SESSION_CACHE.get(cache_key)
+    if mem_cached and (now_ts - mem_cached["timestamp"] < 3600):
+        candles = mem_cached["payload"].get("candles", [])
+        if candles:
+            payload = _compute_post_signal_metrics(
+                candles, target_date, clean_sym, signal_time, signal_price
+            )
+            if payload:
+                return JSONResponse(content=payload)
+
+    # 2. Check Supabase market_cache
     try:
         _init_supabase()
         sb = _get_thread_local_supabase()
         cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
         if cached and cached.data and cached.data.get("payload"):
-            payload = cached.data["payload"]
-            if signal_price and not payload.get("signal", {}).get("price"):
-                payload["signal"]["price"] = signal_price
-                if payload.get("session_high"):
-                    payload["signal"]["max_gain_pct"] = round(((payload["session_high"] - signal_price) / signal_price) * 100, 2)
-            return JSONResponse(content=payload)
+            raw_payload = cached.data["payload"]
+            candles = raw_payload.get("candles", [])
+            if candles:
+                payload = _compute_post_signal_metrics(
+                    candles, target_date, clean_sym, signal_time, signal_price
+                )
+                if payload:
+                    _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
+                    return JSONResponse(content=payload)
     except Exception as e:
         logging.warning(f"[SCANNER_INTRADAY] Cache lookup error: {e}")
 
-    # 2. Fetch from TvDatafeed
+    # 3. Fetch from TvDatafeed with timeout guard
     candles = []
     try:
-        from tvDatafeed import TvDatafeed, Interval
-        tv = TvDatafeed()
-        df = tv.get_hist(symbol=clean_sym, exchange="EGX", interval=Interval.in_15_minute, n_bars=60)
-        if df is not None and not df.empty:
-            df = df.reset_index()
-            df["date"] = df["datetime"].dt.strftime("%Y-%m-%d")
-            session_df = df[df["date"] == target_date]
-            if not session_df.empty:
-                for _, r in session_df.iterrows():
-                    t_str = r["datetime"].strftime("%H:%M")
-                    candles.append({
-                        "time": t_str,
-                        "datetime": r["datetime"].strftime("%Y-%m-%d %H:%M"),
-                        "open": round(float(r["open"]), 2),
-                        "high": round(float(r["high"]), 2),
-                        "low": round(float(r["low"]), 2),
-                        "close": round(float(r["close"]), 2),
-                        "volume": int(r["volume"]) if pd.notnull(r["volume"]) else 0,
-                    })
+        tv = _get_tv_datafeed()
+        if tv:
+            from tvDatafeed import Interval
+            df = tv.get_hist(symbol=clean_sym, exchange="EGX", interval=Interval.in_15_minute, n_bars=60)
+            if df is not None and not df.empty:
+                df = df.reset_index()
+                df["date"] = df["datetime"].dt.strftime("%Y-%m-%d")
+                session_df = df[df["date"] == target_date]
+                if not session_df.empty:
+                    for _, r in session_df.iterrows():
+                        t_str = r["datetime"].strftime("%H:%M")
+                        candles.append({
+                            "time": t_str,
+                            "datetime": r["datetime"].strftime("%Y-%m-%d %H:%M"),
+                            "open": round(float(r["open"]), 2),
+                            "high": round(float(r["high"]), 2),
+                            "low": round(float(r["low"]), 2),
+                            "close": round(float(r["close"]), 2),
+                            "volume": int(r["volume"]) if pd.notnull(r["volume"]) else 0,
+                        })
     except Exception as e:
         logging.warning(f"[SCANNER_INTRADAY] tvDatafeed fetch error: {e}")
 
-    # 3. Fallback: Generate realistic session curve from daily row if needed
+    # 4. Fallback: Generate realistic session curve from daily row if needed
     if not candles:
         base_p = signal_price or 10.0
         try:
@@ -7746,50 +7845,32 @@ def get_scanner_intraday_session(
                 "volume": int(base_v / len(times)),
             })
 
-    # 4. Compute metrics
-    peak_candle = max(candles, key=lambda c: c["high"])
-    peak_price = peak_candle["high"]
-    peak_time = peak_candle["time"]
+    # 5. Compute metrics with post-signal logic
+    payload = _compute_post_signal_metrics(
+        candles, target_date, clean_sym, signal_time, signal_price
+    )
+    if not payload:
+        raise HTTPException(status_code=404, detail="No session data found")
 
-    session_open = candles[0]["open"]
-    session_close = candles[-1]["close"]
-    session_gain_pct = round(((session_close - session_open) / session_open) * 100, 2)
-    session_max_gain_pct = round(((peak_price - session_open) / session_open) * 100, 2)
+    # Store in memory cache
+    _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
 
-    s_price = signal_price or session_open
-    gain_from_signal_pct = round(((peak_price - s_price) / s_price) * 100, 2)
+    # 6. Non-blocking background sync to Supabase
+    def _save_cache():
+        try:
+            _init_supabase()
+            sb = _get_thread_local_supabase()
+            sb.table("market_cache").upsert({
+                "cache_key": cache_key,
+                "country": "EG",
+                "payload": payload,
+                "computed_at": dt.datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception as e:
+            logging.warning(f"[SCANNER_INTRADAY] Cache write error: {e}")
 
-    payload = {
-        "symbol": clean_sym,
-        "date": target_date,
-        "session_open": session_open,
-        "session_close": session_close,
-        "session_high": peak_price,
-        "peak_time": peak_time,
-        "session_low": min(c["low"] for c in candles),
-        "session_gain_pct": session_gain_pct,
-        "session_max_gain_pct": session_max_gain_pct,
-        "signal": {
-            "time": signal_time or "10:15",
-            "price": s_price,
-            "max_gain_pct": gain_from_signal_pct,
-        },
-        "candles": candles,
-        "bars_count": len(candles),
-    }
-
-    # 5. Cache in Supabase
-    try:
-        _init_supabase()
-        sb = _get_thread_local_supabase()
-        sb.table("market_cache").upsert({
-            "cache_key": cache_key,
-            "country": "EG",
-            "payload": payload,
-            "computed_at": dt.datetime.now(timezone.utc).isoformat(),
-        }).execute()
-    except Exception as e:
-        logging.warning(f"[SCANNER_INTRADAY] Cache write error: {e}")
+    import threading
+    threading.Thread(target=_save_cache, daemon=True).start()
 
     return JSONResponse(content=payload)
 

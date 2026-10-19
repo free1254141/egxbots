@@ -232,8 +232,8 @@ export default function ScannerIntradayChartModal({
         color: "#10b981",
         shape: "arrowDown",
         text: isAr
-          ? `🎯 أعلى نقطة (${peakCandle.origTime}) • ${data.session_high} ج.م (+${data.signal.max_gain_pct}%)`
-          : `🎯 Peak High (${peakCandle.origTime}) • ${data.session_high} EGP (+${data.signal.max_gain_pct}%)`,
+          ? `🎯 أعلى قمة بعد الإشارة (${peakCandle.origTime}) • ${data.session_high} ج.م (+${data.signal.max_gain_pct}%)`
+          : `🎯 Peak After Signal (${peakCandle.origTime}) • ${data.session_high} EGP (+${data.signal.max_gain_pct}%)`,
       });
     }
 
@@ -345,18 +345,18 @@ export default function ScannerIntradayChartModal({
                 <span className="text-sm font-black">{data.signal.price} ج.م</span>
               </div>
 
-              {/* Peak High */}
+              {/* Peak High After Signal */}
               <div className="p-2.5 bg-emerald-950/40 border-2 border-emerald-500 text-emerald-300">
                 <span className="text-[10px] text-emerald-400 block flex items-center gap-1">
                   <Target className="w-3 h-3" />
-                  {isAr ? `أعلى قمة (${data.peak_time})` : `Peak (${data.peak_time})`}
+                  {isAr ? `أعلى قمة بعد الإشارة (${data.peak_time})` : `Peak After Signal (${data.peak_time})`}
                 </span>
                 <span className="text-sm font-black">{data.session_high} ج.م</span>
               </div>
 
               {/* Max Gain from Signal */}
               <div className="p-2.5 bg-emerald-500 text-black border-2 border-black font-black">
-                <span className="text-[10px] uppercase block">{isAr ? "أقصى ربح محقق" : "Max Gain Achieved"}</span>
+                <span className="text-[10px] uppercase block">{isAr ? "أقصى ربح بعد الإشارة" : "Max Gain After Signal"}</span>
                 <span className="text-base font-black">+{data.signal.max_gain_pct}%</span>
               </div>
 
@@ -381,21 +381,20 @@ export default function ScannerIntradayChartModal({
                     <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
                     <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
                     <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. واصل السهم صعوده
-                    حتى سجل أعلى نقطة في الجلسة في تمام الساعة{" "}
+                    بعد الإشارة حتى سجل أعلى نقطة في تمام الساعة{" "}
                     <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> بسعر{" "}
                     <span className="text-emerald-400 font-mono font-black">{data.session_high} ج.م</span>، محققاً أقصى
-                    فرصة ربح للمضارب بلغت{" "}
-                    <span className="text-emerald-400 font-mono font-black">+{data.signal.max_gain_pct}%</span> من لحظة
-                    إرسال التنبيه.
+                    فرصة ربح للمضارب بعد التنبيه بلغت{" "}
+                    <span className="text-emerald-400 font-mono font-black">+{data.signal.max_gain_pct}%</span>.
                   </>
                 ) : (
                   <>
                     <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
                     <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
-                    <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. The stock rallied
-                    to its peak at <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> hitting{" "}
+                    <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. The stock moved
+                    to reach its subsequent peak at <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> hitting{" "}
                     <span className="text-emerald-400 font-mono font-black">{data.session_high} EGP</span> (+
-                    {data.signal.max_gain_pct}% gain from signal).
+                    {data.signal.max_gain_pct}% max gain after signal).
                   </>
                 )}
               </p>

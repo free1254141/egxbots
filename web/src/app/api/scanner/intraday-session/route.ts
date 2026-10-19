@@ -1,6 +1,73 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServiceClient, getSupabaseClient } from "@/lib/supabase/route-data";
 
+const MEM_CACHE = new Map<string, { payload: any; timestamp: number }>();
+
+function computePostSignalPayload(
+  candles: any[],
+  targetDate: string,
+  cleanSymbol: string,
+  signalTime?: string | null,
+  signalPrice?: string | null
+) {
+  if (!candles || candles.length === 0) return null;
+  let targetSigTime = signalTime || "10:15";
+  if (targetSigTime > "14:15" || targetSigTime < "10:00") {
+    targetSigTime = "10:15";
+  }
+
+  let sigIdx = 0;
+  for (let i = 0; i < candles.length; i++) {
+    if (candles[i].time >= targetSigTime) {
+      sigIdx = i;
+      break;
+    }
+  }
+
+  const signalCandle = candles[sigIdx];
+  const parsedPrice = signalPrice ? parseFloat(signalPrice) : 0;
+  const sPrice =
+    parsedPrice > 0 && Math.abs(parsedPrice - signalCandle.close) / Math.max(0.01, signalCandle.close) < 0.3
+      ? parsedPrice
+      : signalCandle.close;
+
+  // Search strictly from the signal candle forwards to find the peak AFTER the signal!
+  const postSignalCandles = candles.slice(sigIdx);
+  const peakCandle = postSignalCandles.length > 0
+    ? postSignalCandles.reduce((max, c) => (c.high > max.high ? c : max), signalCandle)
+    : signalCandle;
+
+  const peakPrice = peakCandle.high;
+  const peakTime = peakCandle.time;
+
+  const sessionOpen = candles[0].open;
+  const sessionClose = candles[candles.length - 1].close;
+  const sessionGainPct = Number((((sessionClose - sessionOpen) / sessionOpen) * 100).toFixed(2));
+  const sessionMaxGainPct = Number((((Math.max(...candles.map((c) => c.high)) - sessionOpen) / sessionOpen) * 100).toFixed(2));
+
+  let gainFromSignalPct = Number((((peakPrice - sPrice) / sPrice) * 100).toFixed(2));
+  if (gainFromSignalPct < 0) gainFromSignalPct = 0.0;
+
+  return {
+    symbol: cleanSymbol,
+    date: targetDate,
+    session_open: sessionOpen,
+    session_close: sessionClose,
+    session_high: peakPrice,
+    peak_time: peakTime,
+    session_low: Math.min(...candles.map((c) => c.low)),
+    session_gain_pct: sessionGainPct,
+    session_max_gain_pct: sessionMaxGainPct,
+    signal: {
+      time: targetSigTime,
+      price: sPrice,
+      max_gain_pct: gainFromSignalPct,
+    },
+    candles,
+    bars_count: candles.length,
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -17,6 +84,44 @@ export async function GET(request: NextRequest) {
     const today = new Date().toISOString().split("T")[0];
     const targetDate = date || today;
     const cacheKey = `scanner_15m:${targetDate}:${cleanSymbol}`;
+    const now = Date.now();
+
+    const headers = {
+      "Cache-Control": "public, max-age=600, stale-while-revalidate=86400",
+    };
+
+    // 1. In-memory fast cache (0ms instant hit)
+    const mem = MEM_CACHE.get(cacheKey);
+    if (mem && now - mem.timestamp < 3600000) {
+      const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
+      if (payload) {
+        return NextResponse.json(payload, { headers });
+      }
+    }
+
+    // 2. Call local Python FastAPI backend first if available (uses fast singleton tvDatafeed & local memory)
+    const pythonUrl = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
+    try {
+      const pyParams = new URLSearchParams({
+        symbol: cleanSymbol,
+        date: targetDate,
+      });
+      if (signalTime) pyParams.set("signal_time", signalTime);
+      if (signalPrice) pyParams.set("signal_price", signalPrice);
+
+      const pyRes = await fetch(`${pythonUrl}/api/scanner/intraday-session?${pyParams.toString()}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(3500),
+      });
+
+      if (pyRes.ok) {
+        const payload = await pyRes.json();
+        MEM_CACHE.set(cacheKey, { payload, timestamp: now });
+        return NextResponse.json(payload, { headers });
+      }
+    } catch {
+      // Backend busy or timeout, check Supabase or fallback
+    }
 
     let serviceClient: any = null;
     try {
@@ -29,7 +134,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 1. Try Supabase market_cache first (Zero-latency hit)
+    // 3. Try Supabase market_cache
     if (serviceClient) {
       try {
         const { data: cached } = await serviceClient
@@ -39,37 +144,18 @@ export async function GET(request: NextRequest) {
           .maybeSingle();
 
         if (cached?.payload && cached.payload.candles?.length > 0) {
-          return NextResponse.json(cached.payload);
+          const payload = computePostSignalPayload(cached.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
+          if (payload) {
+            MEM_CACHE.set(cacheKey, { payload, timestamp: now });
+            return NextResponse.json(payload, { headers });
+          }
         }
       } catch (e) {
         console.warn("Supabase market_cache check failed:", e);
       }
     }
 
-    // 2. Call local Python FastAPI backend if running
-    const pythonUrl = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
-    try {
-      const pyParams = new URLSearchParams({
-        symbol: cleanSymbol,
-        date: targetDate,
-      });
-      if (signalTime) pyParams.set("signal_time", signalTime);
-      if (signalPrice) pyParams.set("signal_price", signalPrice);
-
-      const pyRes = await fetch(`${pythonUrl}/api/scanner/intraday-session?${pyParams.toString()}`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (pyRes.ok) {
-        const payload = await pyRes.json();
-        return NextResponse.json(payload);
-      }
-    } catch {
-      // Backend not reachable, fall through to cloud fallback
-    }
-
-    // 3. Cloud Fallback: Generate realistic session curve from daily records and cache in Supabase
+    // 4. Fallback: Generate realistic session curve from daily records and cache
     const sPrice = signalPrice ? parseFloat(signalPrice) : 10.0;
     let baseO = sPrice;
     let baseH = Number((sPrice * 1.048).toFixed(2));
@@ -77,31 +163,33 @@ export async function GET(request: NextRequest) {
     let baseC = Number((sPrice * 1.032).toFixed(2));
     let baseV = 250000;
 
-    try {
-      const { data: indRow } = await serviceClient
-        .from("stock_technical_indicators")
-        .select("close, volume")
-        .eq("symbol", cleanSymbol)
-        .eq("date", targetDate)
-        .maybeSingle();
+    if (serviceClient) {
+      try {
+        const { data: indRow } = await serviceClient
+          .from("stock_technical_indicators")
+          .select("close, volume")
+          .eq("symbol", cleanSymbol)
+          .eq("date", targetDate)
+          .maybeSingle();
 
-      if (indRow?.close) {
-        const c = parseFloat(indRow.close);
-        baseO = Number((c * 0.975).toFixed(2));
-        baseH = Number((c * 1.025).toFixed(2));
-        baseL = Number((c * 0.965).toFixed(2));
-        baseC = c;
-        if (indRow.volume) baseV = parseInt(indRow.volume, 10);
+        if (indRow?.close) {
+          const c = parseFloat(indRow.close);
+          baseO = Number((c * 0.975).toFixed(2));
+          baseH = Number((c * 1.025).toFixed(2));
+          baseL = Number((c * 0.965).toFixed(2));
+          baseC = c;
+          if (indRow.volume) baseV = parseInt(indRow.volume, 10);
+        }
+      } catch {
+        // Ignore
       }
-    } catch {
-      // Ignore
     }
 
     const times = [
       "10:00", "10:15", "10:30", "10:45", "11:00", "11:15", "11:30", "11:45",
       "12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30", "13:45", "14:00", "14:15"
     ];
-    const peakIdx = 7; // 11:45 AM peak
+    const peakIdx = 7;
     const stepUp = (baseH - baseO) / Math.max(1, peakIdx);
     const stepDown = (baseH - baseC) / Math.max(1, times.length - 1 - peakIdx);
 
@@ -141,33 +229,12 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const peakCandle = candles.reduce((max, c) => (c.high > max.high ? c : max), candles[0]);
-    const peakPrice = peakCandle.high;
-    const peakTime = peakCandle.time;
-    const sessionOpen = candles[0].open;
-    const sessionClose = candles[candles.length - 1].close;
-    const sessionGainPct = Number((((sessionClose - sessionOpen) / sessionOpen) * 100).toFixed(2));
-    const sessionMaxGainPct = Number((((peakPrice - sessionOpen) / sessionOpen) * 100).toFixed(2));
-    const gainFromSignalPct = Number((((peakPrice - sPrice) / sPrice) * 100).toFixed(2));
+    const payload = computePostSignalPayload(candles, targetDate, cleanSymbol, signalTime, signalPrice);
+    if (!payload) {
+      return NextResponse.json({ error: "Failed to generate session bars" }, { status: 500 });
+    }
 
-    const payload = {
-      symbol: cleanSymbol,
-      date: targetDate,
-      session_open: sessionOpen,
-      session_close: sessionClose,
-      session_high: peakPrice,
-      peak_time: peakTime,
-      session_low: Math.min(...candles.map((c) => c.low)),
-      session_gain_pct: sessionGainPct,
-      session_max_gain_pct: sessionMaxGainPct,
-      signal: {
-        time: signalTime || "10:15",
-        price: sPrice,
-        max_gain_pct: gainFromSignalPct,
-      },
-      candles,
-      bars_count: candles.length,
-    };
+    MEM_CACHE.set(cacheKey, { payload, timestamp: now });
 
     // Cache fallback into Supabase
     if (serviceClient) {
@@ -183,7 +250,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, { headers });
   } catch (err: any) {
     console.error("Error in GET /api/scanner/intraday-session:", err);
     return NextResponse.json({ error: "Failed to load session intraday data" }, { status: 500 });

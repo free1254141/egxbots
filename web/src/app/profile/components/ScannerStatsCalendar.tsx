@@ -409,6 +409,23 @@ export default function ScannerStatsCalendar({
   // Selected Day Details
   const selectedDayData = selectedDateStr ? dailyDataMap.get(selectedDateStr) : null;
 
+  // Pre-fetch intraday session charts in background for instantaneous modal opening
+  useEffect(() => {
+    if (!isDialogOpen || !selectedDayData) return;
+    const stocksToPreload = [
+      ...selectedDayData.stocks.volume.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
+      ...selectedDayData.stocks.breakout.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
+      ...selectedDayData.stocks.oversold.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
+    ];
+    // Warm up the cache for these symbols in the background
+    stocksToPreload.slice(0, 8).forEach(({ symbol, time, price }) => {
+      const p = new URLSearchParams({ symbol, date: selectedDateStr });
+      if (time) p.set("signal_time", time);
+      if (price) p.set("signal_price", String(price));
+      fetch(`/api/scanner/intraday-session?${p.toString()}`).catch(() => {});
+    });
+  }, [isDialogOpen, selectedDateStr, selectedDayData]);
+
   // Filter categories config
   const categories: Array<{
     id: ScannerCategory;
