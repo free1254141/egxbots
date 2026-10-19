@@ -18,7 +18,9 @@ import {
   Calendar as CalendarIcon,
   Activity,
   SlidersHorizontal,
-  BookOpen
+  BookOpen,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -64,6 +66,27 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   const [activeSignals, setActiveSignals] = useState<any[]>([]);
   const [closedSignals, setClosedSignals] = useState<any[]>([]);
   const [signalsKpis, setSignalsKpis] = useState<any>(null);
+
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem("egx_profile_scanner_collapsed") === "true";
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  const toggleCollapse = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("egx_profile_scanner_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const botUsername = "egxbots_bot";
   const connectBotUrl = user?.id ? `https://t.me/${botUsername}?start=${user.id}` : `https://t.me/${botUsername}`;
@@ -215,13 +238,76 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   ];
 
   return (
-    <div className="space-y-8">
-      {/* ── Main Tab Navigation Bar (Neobrutal) ── */}
-      <div className="flex flex-wrap items-center gap-2 p-2 bg-zinc-100 dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-        <button
-          type="button"
-          onClick={() => setActiveMainTab("tracker")}
-          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+    <section className={`relative z-10 min-w-0 rounded-2xl p-4 sm:p-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-6"}`}>
+      {/* ── Section Header & Toggle Button ── */}
+      <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b-4 border-black dark:border-white pb-5"}`}>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
+                {isAr ? "رادار وإسكانر الصفقات اللحظية" : "Live Signals & Scanner Radar"}
+              </h2>
+              <span className="border-2 border-black dark:border-white bg-black text-[#FFE600] dark:bg-white dark:text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-widest shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                {isPro ? "PRO VIP" : "PRO RADAR"}
+              </span>
+              {isCollapsed && (
+                <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                  {isAr ? "مطوي" : "Collapsed"}
+                </span>
+              )}
+            </div>
+          </div>
+          {!isCollapsed ? (
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 font-black uppercase tracking-widest leading-relaxed">
+              {isAr
+                ? "متابعة دقيقة للصفقات اللحظية المفتوحة والمغلقة، سجل الجلسات، وتنبيهات التليجرام الفورية"
+                : "Live tracking of active & closed trades, historical calendar sessions, and Telegram alerts"}
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold mt-1 text-zinc-600 dark:text-zinc-400">
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black border border-emerald-500/40 rounded">
+                {activeSignals.length} {isAr ? "إشارة مفتوحة حالياً" : "Active Signals"}
+              </span>
+              <span className="text-zinc-300 dark:text-zinc-600">•</span>
+              <span className="px-2 py-0.5 bg-sky-500/20 text-sky-600 dark:text-sky-400 font-black border border-sky-500/40 rounded">
+                {closedSignals.length} {isAr ? "صفقة مغلقة" : "Closed Trades"}
+              </span>
+              {signalsKpis?.winRate != null && (
+                <>
+                  <span className="text-zinc-300 dark:text-zinc-600">•</span>
+                  <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                    {isAr ? "نسبة النجاح:" : "Win Rate:"} {signalsKpis.winRate}%
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleCollapse}
+            className="h-10 px-3 flex items-center justify-center gap-1.5 border-4 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
+            title={isCollapsed ? (isAr ? "فتح السيكشن" : "Expand Section") : (isAr ? "طي السيكشن" : "Collapse Section")}
+          >
+            {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+            <span>{isCollapsed ? (isAr ? "عرض الإسكانر" : "Expand") : (isAr ? "طي السيكشن" : "Collapse")}</span>
+          </button>
+        </div>
+      </div>
+
+      {!isCollapsed && (
+        <div className="space-y-6 pt-1">
+          {/* ── Main Tab Navigation Bar (Neobrutal) ── */}
+          <div className="flex flex-wrap items-center gap-2 p-2 bg-zinc-100 dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+            <button
+              type="button"
+              onClick={() => setActiveMainTab("tracker")}
+              className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
             activeMainTab === "tracker"
               ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
               : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
@@ -510,6 +596,8 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       </div>
     </section>
       )}
-    </div>
+        </div>
+      )}
+    </section>
   );
 }

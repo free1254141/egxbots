@@ -1148,22 +1148,32 @@ body.antigrafity-theme #main-content {
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
-/* Keep the profile surface aligned with the pricing page in dark mode. */
+/* Profile pure black unified grid background (no radial gradient / glow) */
 .profile-page-shell {
-  background-color: #ffffff;
-  background-image: linear-gradient(rgba(15, 23, 42, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, 0.08) 1px, transparent 1px);
-  background-size: 36px 36px;
+  background-color: transparent;
 }
 
+html.dark:has(.profile-page-shell),
+html.dark body:has(.profile-page-shell),
 html.dark .profile-page-shell {
-  background-color: #030303;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
-  background-size: 36px 36px;
+  background-color: #000000 !important;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px) !important;
+  background-size: 28px 28px !important;
+  background-attachment: fixed !important;
 }
 
-/* Profile panels use the same near-black surface as the pricing page. */
+html.dark:has(.profile-page-shell)::before,
+html.dark body:has(.profile-page-shell)::before {
+  display: none !important;
+  opacity: 0 !important;
+  background: none !important;
+}
+
+/* Profile panels use crisp solid neobrutal dark surface */
 html.dark .profile-page-shell .dark\:bg-zinc-900 {
-  background-color: #090909 !important;
+  background-color: #0a0a0a !important;
 }
 
 html.dark .profile-page-shell .dark\:bg-zinc-800 {

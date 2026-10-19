@@ -16,6 +16,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 interface QuotaData {
@@ -63,6 +65,27 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
   const [data, setData] = useState<QuotaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem("egx_profile_plan_collapsed") === "true";
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  const toggleCollapse = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("egx_profile_plan_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const fetchQuota = useCallback(async (isSilent = false) => {
     if (!isSilent) setRefreshing(true);
@@ -140,10 +163,12 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
       }`}
     >
       {/* ── Top Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-4 border-black dark:border-zinc-800 pb-5 mb-6">
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+        isCollapsed ? "mb-0 pb-0 border-b-0" : "border-b-4 border-black dark:border-zinc-800 pb-5 mb-6"
+      }`}>
         <div className="flex items-center gap-3">
           <div
-            className={`h-11 w-11 border-4 border-black dark:border-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] ${
+            className={`h-11 w-11 border-4 border-black dark:border-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0 ${
               isPro ? "bg-emerald-500 text-white" : "bg-zinc-800 text-white"
             }`}
           >
@@ -170,20 +195,45 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
                   ⭐ {isAr ? `مؤسس #${data.plan.founding_member_number || ""}` : `FOUNDER #${data.plan.founding_member_number || ""}`}
                 </span>
               )}
+              {isCollapsed && (
+                <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                  {isAr ? "مطوية" : "Collapsed"}
+                </span>
+              )}
             </div>
-            <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
-              {data?.plan?.is_lifetime
-                ? isAr
-                  ? "عضوية مدى الحياة نشطة للأبد (بدون تجديد أو انتهاء)"
-                  : "Permanent lifetime membership (never expires)"
-                : isPro
-                ? isAr
-                  ? "اشتراك Pro نشط مع كامل الصلاحيات"
-                  : "Active Pro subscription with full access"
-                : isAr
-                ? "خطة مجانية بميزات واستخدام محدد"
-                : "Free plan with limited usage"}
-            </p>
+            {!isCollapsed ? (
+              <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
+                {data?.plan?.is_lifetime
+                  ? isAr
+                    ? "عضوية مدى الحياة نشطة للأبد (بدون تجديد أو انتهاء)"
+                    : "Permanent lifetime membership (never expires)"
+                  : isPro
+                  ? isAr
+                    ? "اشتراك Pro نشط مع كامل الصلاحيات"
+                    : "Active Pro subscription with full access"
+                  : isAr
+                  ? "خطة مجانية بميزات واستخدام محدد"
+                  : "Free plan with limited usage"}
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold mt-1 text-zinc-600 dark:text-zinc-400">
+                <span>
+                  {isAr ? "الكوتا المستهلكة:" : "Quota Used:"}{" "}
+                  <b className="font-mono text-black dark:text-white font-black">{chat?.used ?? 0} / {chat?.limit ?? 50}</b> ({chat?.percent ?? 0}%)
+                </span>
+                <span>•</span>
+                <span>
+                  {isAr ? "أسهم المحفظة:" : "Portfolio:"}{" "}
+                  <b className="font-mono text-black dark:text-white">{portfolio?.used ?? 0} / {portfolio?.limit ?? 10}</b>
+                </span>
+                {data?.plan?.current_period_end && !data?.plan?.is_lifetime && (
+                  <>
+                    <span>•</span>
+                    <span>{isAr ? "التجديد:" : "Renews:"} <b className="text-black dark:text-white">{formatDate(data.plan.current_period_end)}</b></span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -208,8 +258,34 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
               <ArrowRight className="w-3 h-3 rtl:rotate-180" />
             </Link>
           )}
+
+          <button
+            type="button"
+            onClick={toggleCollapse}
+            className={`h-9 px-3 border-2 border-black dark:border-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all ${
+              isCollapsed
+                ? "bg-[#FFE600] text-black hover:bg-amber-300"
+                : "bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-300 dark:hover:bg-zinc-700"
+            }`}
+            title={isCollapsed ? (isAr ? "عرض تفاصيل الخطة" : "Expand Plan") : (isAr ? "طي السيكشن" : "Collapse Section")}
+          >
+            {isCollapsed ? (
+              <>
+                <ChevronDown className="w-3.5 h-3.5" />
+                <span>{isAr ? "عرض الخطة" : "Expand"}</span>
+              </>
+            ) : (
+              <>
+                <ChevronUp className="w-3.5 h-3.5" />
+                <span>{isAr ? "طي السيكشن" : "Collapse"}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
+
+      {!isCollapsed && (
+        <>
 
       {/* ── Quota Metrics Grid ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -428,6 +504,8 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );
