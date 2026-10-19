@@ -54,6 +54,35 @@ export default function ScannerStatsCalendar({
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [isMounted, setIsMounted] = useState<boolean>(false);
 
+  // Helper formatters for clean financial representation (1-2 decimals instead of 4-5)
+  const formatPct = (val: number | string | undefined) => {
+    if (val === undefined || val === null) return "0.0";
+    const num = typeof val === "string" ? parseFloat(val) : val;
+    if (isNaN(num)) return "0.0";
+    return num.toFixed(1);
+  };
+
+  const formatVol = (val: number | string | undefined) => {
+    if (val === undefined || val === null) return "1.0";
+    const num = typeof val === "string" ? parseFloat(val) : val;
+    if (isNaN(num)) return "1.0";
+    return num.toFixed(1);
+  };
+
+  const formatPrice = (val: number | string | undefined) => {
+    if (val === undefined || val === null) return "0.00";
+    const num = typeof val === "string" ? parseFloat(val) : val;
+    if (isNaN(num)) return "0.00";
+    return num < 1 ? num.toFixed(3) : num.toFixed(2);
+  };
+
+  const formatRsi = (val: number | string | undefined) => {
+    if (val === undefined || val === null) return "30";
+    const num = typeof val === "string" ? parseFloat(val) : val;
+    if (isNaN(num)) return "30";
+    return Math.round(num);
+  };
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -110,7 +139,7 @@ export default function ScannerStatsCalendar({
           volume: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
           breakout: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }>;
           oversold: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }>;
-          disclosures: Array<{ id: string; title: string }>;
+          disclosures: Array<{ id: string; title: string; symbol?: string; published_at?: string }>;
         };
       }
     >();
@@ -662,25 +691,33 @@ export default function ScannerStatsCalendar({
 
           {/* Dialog Card */}
           <div className="relative w-full max-w-5xl bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col max-h-[90vh] z-10 animate-in zoom-in-95 duration-150">
-            {/* Dialog Header */}
-            <div className="p-4 sm:p-6 border-b-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-850 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            {/* Dialog Header - High Contrast Neobrutal Yellow */}
+            <div className="p-4 sm:p-5 border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 border-2 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
-                  <CalendarIcon className="w-5 h-5" />
+                <div className="h-11 w-11 border-2 border-black bg-black text-[#FFE600] flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                  <CalendarIcon className="w-6 h-6" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-lg sm:text-xl font-black text-black dark:text-white uppercase tracking-tight">
+                    <h3 className="text-lg sm:text-xl font-black text-black uppercase tracking-tight">
                       {isAr ? "تفاصيل الفرص المرصودة ليوم:" : "Signals Ledger For Date:"}
                     </h3>
-                    <span className="font-mono text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 border-2 border-indigo-600 dark:border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-0.5">
+                    <span className="font-mono text-base sm:text-lg font-black text-[#FFE600] border-2 border-black bg-black px-3 py-0.5 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
                       {selectedDateStr}
                     </span>
                   </div>
                   {selectedDayData && (
-                    <p className="text-xs font-mono font-bold text-zinc-600 dark:text-zinc-400 mt-1">
-                      {selectedDayData.scansCount} {isAr ? "عمليات فحص دوري" : "scans"} | {selectedDayData.avgDurationMs}ms {isAr ? "متوسط السرعة" : "avg speed"} | {selectedDayData.totalOpportunities} {isAr ? "إجمالي الفرص" : "total signals"}
-                    </p>
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold text-black mt-1.5 flex-wrap">
+                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                        ⚡ {selectedDayData.scansCount} {isAr ? "عمليات فحص" : "scans"}
+                      </span>
+                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                        ⏱️ {Math.round(selectedDayData.avgDurationMs)}ms {isAr ? "متوسط السرعة" : "avg speed"}
+                      </span>
+                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                        🎯 {selectedDayData.totalOpportunities} {isAr ? "إجمالي الفرص" : "total signals"}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -689,7 +726,7 @@ export default function ScannerStatsCalendar({
               <button
                 type="button"
                 onClick={() => setIsDialogOpen(false)}
-                className="h-10 w-10 border-4 border-black dark:border-white bg-[#FFE600] hover:bg-rose-500 hover:text-white text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 self-end sm:self-auto shrink-0"
+                className="h-10 w-10 border-2 border-black bg-black hover:bg-rose-600 text-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 self-end sm:self-auto shrink-0"
                 title={isAr ? "إغلاق (Esc)" : "Close (Esc)"}
               >
                 <X className="w-5 h-5" />
@@ -697,8 +734,8 @@ export default function ScannerStatsCalendar({
             </div>
 
             {/* Quick Category Filter Inside Dialog */}
-            <div className="px-4 sm:px-6 py-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 flex items-center gap-2 overflow-x-auto">
-              <span className="text-[10px] font-black uppercase text-zinc-500 shrink-0">
+            <div className="px-4 sm:px-6 py-3 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 shrink-0">
                 {isAr ? "تصفية النوع:" : "Filter:"}
               </span>
               {categories.map((cat) => {
@@ -709,13 +746,13 @@ export default function ScannerStatsCalendar({
                     key={cat.id}
                     type="button"
                     onClick={() => setSelectedCategory(cat.id)}
-                    className={`h-7 px-2.5 border-2 border-black dark:border-white font-black text-[10px] uppercase tracking-wide flex items-center gap-1.5 shrink-0 transition-all ${
+                    className={`h-8 px-3 border-2 border-black dark:border-white font-black text-xs uppercase tracking-wide flex items-center gap-1.5 shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] transition-all ${
                       isSelected
                         ? cat.activeBg
-                        : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                        : "bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
                     }`}
                   >
-                    <Icon className="w-3 h-3" />
+                    <Icon className="w-3.5 h-3.5" />
                     <span>{isAr ? cat.nameAr : cat.nameEn}</span>
                   </button>
                 );
@@ -723,44 +760,54 @@ export default function ScannerStatsCalendar({
             </div>
 
             {/* Dialog Scrollable Content */}
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1">
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 bg-zinc-50 dark:bg-zinc-950">
               {!selectedDayData || selectedDayData.totalOpportunities === 0 ? (
-                <div className="p-12 text-center border-4 border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 font-bold text-sm text-zinc-500">
+                <div className="p-12 text-center border-4 border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 font-bold text-sm text-zinc-500">
                   {isAr
                     ? "لا توجد فرص مسجلة في هذا اليوم لهذا الفلتر، أو أن اليوم كان عطلة بالبورصة المصرية."
                     : "No scanner signals recorded for this date or market was closed."}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className={`grid gap-5 ${selectedCategory === "all" ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
                   {/* Stage 1: Volume Surge */}
                   {(selectedCategory === "all" || selectedCategory === "volume_surge") && (
-                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                        <span className="font-black text-xs flex items-center gap-1.5 text-amber-600">
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2.5">
+                        <span className="font-black text-sm flex items-center gap-2 text-amber-600 dark:text-amber-400">
                           <Zap className="w-4 h-4 fill-amber-500" />
-                          {isAr ? "السيولة والتجميع" : "Volume Surge"}
+                          {isAr ? "السيولة والتجميع (Volume Surge)" : "Volume Surge"}
                         </span>
-                        <span className="font-mono text-xs font-black bg-amber-400 text-black px-1.5 py-0.5 border border-black">
-                          {selectedDayData.stocks.volume.length > 0 ? selectedDayData.stocks.volume.length : selectedDayData.volumeCount}
+                        <span className="font-mono text-xs font-black bg-amber-400 text-black px-2.5 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                          {selectedDayData.stocks.volume.length > 0 ? selectedDayData.stocks.volume.length : selectedDayData.volumeCount} {isAr ? "فرصة" : "signals"}
                         </span>
                       </div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                         {selectedDayData.stocks.volume.length > 0 ? (
                           selectedDayData.stocks.volume.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
                             >
-                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                              <span className="text-emerald-600">+{s.change_pct}%</span>
-                              <span className="bg-amber-100 text-amber-800 px-1 text-[10px] font-black">
-                                {s.r_vol}x
-                              </span>
+                              <div className="flex items-center gap-2.5">
+                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                  {s.symbol}
+                                </span>
+                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                  {formatPrice(s.close)} ج.م
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
+                                  +{formatPct(s.change_pct)}%
+                                </span>
+                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-500 dark:bg-amber-950 dark:text-amber-300">
+                                  {formatVol(s.r_vol)}x سيولة
+                                </span>
+                              </div>
                             </div>
                           ))
                         ) : (
-                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                          <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.volumeCount} إشارات تم رصدها وإرسالها للمشتركين` : `${selectedDayData.volumeCount} signals captured`}
                           </span>
                         )}
@@ -770,31 +817,43 @@ export default function ScannerStatsCalendar({
 
                   {/* Stage 2: Breakouts */}
                   {(selectedCategory === "all" || selectedCategory === "breakout") && (
-                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                        <span className="font-black text-xs flex items-center gap-1.5 text-emerald-600">
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2.5">
+                        <span className="font-black text-sm flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                           <ArrowUpRight className="w-4 h-4" />
-                          {isAr ? "الاختراقات الفنية" : "Breakouts"}
+                          {isAr ? "الاختراقات الفنية (Breakouts)" : "Technical Breakouts"}
                         </span>
-                        <span className="font-mono text-xs font-black bg-emerald-400 text-black px-1.5 py-0.5 border border-black">
-                          {selectedDayData.stocks.breakout.length > 0 ? selectedDayData.stocks.breakout.length : selectedDayData.breakoutCount}
+                        <span className="font-mono text-xs font-black bg-emerald-400 text-black px-2.5 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                          {selectedDayData.stocks.breakout.length > 0 ? selectedDayData.stocks.breakout.length : selectedDayData.breakoutCount} {isAr ? "فرصة" : "signals"}
                         </span>
                       </div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                         {selectedDayData.stocks.breakout.length > 0 ? (
                           selectedDayData.stocks.breakout.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
                             >
-                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                              <span className="text-emerald-600 font-black">+{s.change_pct}%</span>
-                              <span className="text-zinc-500 text-[10px]">{s.r_vol}x</span>
+                              <div className="flex items-center gap-2.5">
+                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                  {s.symbol}
+                                </span>
+                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                  {formatPrice(s.close)} ج.م
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300">
+                                  +{formatPct(s.change_pct)}%
+                                </span>
+                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-zinc-100 text-zinc-800 border border-zinc-400 dark:bg-zinc-700 dark:text-zinc-200">
+                                  {formatVol(s.r_vol)}x سيولة
+                                </span>
+                              </div>
                             </div>
                           ))
                         ) : (
-                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                          <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.breakoutCount} اختراقات تم رصدها` : `${selectedDayData.breakoutCount} breakouts captured`}
                           </span>
                         )}
@@ -804,33 +863,47 @@ export default function ScannerStatsCalendar({
 
                   {/* Stage 3: Oversold */}
                   {(selectedCategory === "all" || selectedCategory === "rsi_oversold") && (
-                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                        <span className="font-black text-xs flex items-center gap-1.5 text-sky-600">
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2.5">
+                        <span className="font-black text-sm flex items-center gap-2 text-sky-600 dark:text-sky-400">
                           <Target className="w-4 h-4" />
-                          {isAr ? "التشبع البيعي (RSI)" : "RSI Oversold"}
+                          {isAr ? "التشبع البيعي (RSI Oversold)" : "RSI Oversold"}
                         </span>
-                        <span className="font-mono text-xs font-black bg-sky-400 text-black px-1.5 py-0.5 border border-black">
-                          {selectedDayData.stocks.oversold.length > 0 ? selectedDayData.stocks.oversold.length : selectedDayData.oversoldCount}
+                        <span className="font-mono text-xs font-black bg-sky-400 text-black px-2.5 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                          {selectedDayData.stocks.oversold.length > 0 ? selectedDayData.stocks.oversold.length : selectedDayData.oversoldCount} {isAr ? "فرصة" : "signals"}
                         </span>
                       </div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                         {selectedDayData.stocks.oversold.length > 0 ? (
                           selectedDayData.stocks.oversold.map((s, i) => (
                             <div
                               key={i}
-                              className="flex items-center justify-between text-xs font-mono font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1"
+                              className="flex items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)]"
                             >
-                              <span className="font-black text-black dark:text-white">{s.symbol}</span>
-                              <span className="text-zinc-600 dark:text-zinc-400">{s.close} ج.م</span>
-                              <span className="text-sky-600 font-black">RSI: {Math.round(s.rsi_14)}</span>
-                              <span className={s.change_pct >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                                {s.change_pct}%
-                              </span>
+                              <div className="flex items-center gap-2.5">
+                                <span className="font-mono font-black text-xs text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-2 py-0.5 border border-black dark:border-zinc-500">
+                                  {s.symbol}
+                                </span>
+                                <span className="font-mono font-bold text-xs text-zinc-700 dark:text-zinc-300">
+                                  {formatPrice(s.close)} ج.م
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-black text-xs px-2 py-0.5 bg-sky-100 text-sky-800 border border-sky-500 dark:bg-sky-950 dark:text-sky-300">
+                                  RSI: {formatRsi(s.rsi_14)}
+                                </span>
+                                <span className={`font-mono font-black text-xs px-2 py-0.5 border ${
+                                  s.change_pct >= 0
+                                    ? "bg-emerald-100 text-emerald-800 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300"
+                                    : "bg-rose-100 text-rose-800 border-rose-500 dark:bg-rose-950 dark:text-rose-300"
+                                }`}>
+                                  {s.change_pct >= 0 ? `+${formatPct(s.change_pct)}%` : `${formatPct(s.change_pct)}%`}
+                                </span>
+                              </div>
                             </div>
                           ))
                         ) : (
-                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                          <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.oversoldCount} فرص ارتداد قاع` : `${selectedDayData.oversoldCount} oversold bounces`}
                           </span>
                         )}
@@ -840,28 +913,35 @@ export default function ScannerStatsCalendar({
 
                   {/* Stage 4: Disclosures */}
                   {(selectedCategory === "all" || selectedCategory === "disclosures") && (
-                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] space-y-3">
-                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2">
-                        <span className="font-black text-xs flex items-center gap-1.5 text-purple-600">
+                    <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] space-y-3">
+                      <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-2.5">
+                        <span className="font-black text-sm flex items-center gap-2 text-purple-600 dark:text-purple-400">
                           <Newspaper className="w-4 h-4" />
-                          {isAr ? "الإفصاحات الرسمية" : "Disclosures"}
+                          {isAr ? "الإفصاحات الرسمية (Disclosures)" : "Official Disclosures"}
                         </span>
-                        <span className="font-mono text-xs font-black bg-purple-400 text-black px-1.5 py-0.5 border border-black">
-                          {selectedDayData.stocks.disclosures.length > 0 ? selectedDayData.stocks.disclosures.length : selectedDayData.disclosuresCount}
+                        <span className="font-mono text-xs font-black bg-purple-400 text-black px-2.5 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                          {selectedDayData.stocks.disclosures.length > 0 ? selectedDayData.stocks.disclosures.length : selectedDayData.disclosuresCount} {isAr ? "إفصاح" : "items"}
                         </span>
                       </div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                      <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
                         {selectedDayData.stocks.disclosures.length > 0 ? (
                           selectedDayData.stocks.disclosures.map((d, i) => (
                             <div
                               key={i}
-                              className="text-xs font-bold border-b border-zinc-200 dark:border-zinc-800 pb-1.5 text-zinc-700 dark:text-zinc-300"
+                              className="p-3 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-zinc-700 shadow-[2px_2px_0px_rgba(0,0,0,1)] space-y-1.5"
                             >
-                              • {d.title}
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono font-black bg-purple-100 text-purple-800 border border-purple-400 dark:bg-purple-950 dark:text-purple-300 px-2 py-0.5">
+                                  {d.symbol || (isAr ? "إفصاح رسمي" : "Official Disclosure")}
+                                </span>
+                              </div>
+                              <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-snug">
+                                {d.title}
+                              </p>
                             </div>
                           ))
                         ) : (
-                          <span className="text-[11px] text-zinc-500 font-bold block py-2">
+                          <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.disclosuresCount} إفصاحات رسمية مرصودة` : `${selectedDayData.disclosuresCount} official disclosures`}
                           </span>
                         )}
@@ -873,14 +953,14 @@ export default function ScannerStatsCalendar({
             </div>
 
             {/* Dialog Footer */}
-            <div className="p-4 border-t-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-850 flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-zinc-500">
+            <div className="p-4 border-t-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 flex items-center justify-between text-black dark:text-white">
+              <span className="text-xs font-mono font-bold text-zinc-600 dark:text-zinc-400">
                 {isAr ? "اضغط Esc أو زر الإغلاق للعودة للتقويم" : "Press Esc or close button to return to calendar"}
               </span>
               <button
                 type="button"
                 onClick={() => setIsDialogOpen(false)}
-                className="px-5 py-2 border-2 border-black dark:border-white bg-black dark:bg-white text-white dark:text-black font-black text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:bg-zinc-800 active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                className="px-6 py-2 border-2 border-black bg-rose-500 hover:bg-rose-600 text-white font-black text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
               >
                 {isAr ? "إغلاق النافذة" : "Close Dialog"}
               </button>
