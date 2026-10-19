@@ -19,6 +19,8 @@ import {
   Info,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   Flame,
   Calendar as CalendarIcon,
   Layers,
@@ -136,6 +138,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   const requestVersion = useRef(0);
   const entitlementRefresh = useRef(false);
   const [viewMode, setViewMode] = useState<"active" | "closed" | "all" | "calendar">("active");
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const toggleGuide = useCallback(() => {
+    setIsGuideOpen((prev) => !prev);
+  }, []);
 
   // Helper for YYYY-MM-DD formatting
   const formatYMD = (d: Date) => {
@@ -506,11 +512,12 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   }, [filteredAllTrades, allPage, pageSize]);
 
   return (
-    <div className="space-y-6 w-full" dir="rtl">
-      {/* ── 1. HEADER & HERO BANNER (Neo-Brutalist) ── */}
-      <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black shadow-[6px_6px_0px_#000] dark:shadow-[6px_6px_0px_#fff] p-5 sm:p-7 relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
-          <div className="space-y-2 max-w-3xl">
+    <div className="space-y-6 w-full" dir="ltr">
+      {/* ── 1. COLLAPSIBLE GUIDE & SYSTEMS COMPARISON ── */}
+      <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black shadow-[6px_6px_0px_#000] dark:shadow-[6px_6px_0px_#fff] overflow-hidden">
+        {/* Header Bar */}
+        <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 border-2 border-black bg-black text-[#FFE600] text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000]">
                 <Flame className="w-4 h-4 fill-[#FFE600]" />
@@ -526,36 +533,161 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
               </span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-black tracking-tight leading-tight">
-              نظام الصفقات القصيرة وركوب موجات الصعود
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-black tracking-tight leading-tight">
+              نظام الصفقات القصيرة وركوب موجات الصعود ومقارنة الأنظمة
             </h1>
 
-            <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed max-w-2xl">
-              استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة. يتم تأمين الصفقة آلياً عند ربح +4.5%، وترك الأرباح تنطلق دون سقف عبر الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
-            </p>
+            {!isGuideOpen && (
+              <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed max-w-2xl">
+                استراتيجية رقمية صارمة لا تدخل إلا مع انفجار السيولة المؤسسية (&gt;140%) بعد كسر قمم تماسك 20 جلسة ومقارنتها مع التوصيات المتوسطة.
+              </p>
+            )}
           </div>
 
-          <div className="flex flex-col sm:flex-row lg:flex-col items-stretch lg:items-end gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               onClick={() => loadData(true)}
               disabled={refreshing}
-              className="h-11 px-5 border-2 border-black bg-white hover:bg-zinc-100 text-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[3px_3px_0px_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+              className="h-10 px-4 border-2 border-black bg-white hover:bg-zinc-100 text-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
             >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
               <span>{refreshing ? "جار التحديث..." : "تحديث الإشارات"}</span>
             </button>
 
             {!userHasPro && (
               <Link
                 href="/pricing"
-                className="h-11 px-5 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[3px_3px_0px_#000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                className="h-10 px-4 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
               >
-                <Crown className="w-4 h-4 text-[#FFE600]" />
+                <Crown className="w-3.5 h-3.5 text-[#FFE600]" />
                 <span>ترقية الحساب إلى PRO</span>
               </Link>
             )}
+
+            <button
+              onClick={toggleGuide}
+              className="h-10 px-4 border-2 border-black bg-black text-[#FFE600] hover:bg-zinc-900 font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+            >
+              <span>{isGuideOpen ? (isAr ? "إغلاق السيكشن ▴" : "Close Guide ▴") : (isAr ? "عرض الدليل والمقارنة ▾" : "Show Guide & Comparison ▾")}</span>
+              {isGuideOpen ? <ChevronUp className="w-4 h-4 text-[#FFE600]" /> : <ChevronDown className="w-4 h-4 text-[#FFE600]" />}
+            </button>
           </div>
         </div>
+
+        {/* Collapsible Content: Definition + Comparison */}
+        {isGuideOpen && (
+          <div className="border-t-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-5 sm:p-7 space-y-6">
+            {/* 1. تعريف نظام الصفقات القصيرة */}
+            <div className="border-2 border-black dark:border-zinc-700 bg-amber-50 dark:bg-amber-950/20 p-4 sm:p-5 space-y-2">
+              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-black text-sm uppercase">
+                <Zap className="w-4 h-4" />
+                <span>{isAr ? "قواعد واستراتيجية الصفقات القصيرة" : "Short Swings Strategy Rules"}</span>
+              </div>
+              <p className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed max-w-4xl">
+                استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة. يتم تأمين الصفقة آلياً عند ربح +4.5%، وترك الأرباح تنطلق دون سقف عبر الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
+              </p>
+            </div>
+
+            {/* 2. المقارنة بين النظامين (المتوسطة vs القصيرة) - مرتبة من الشمال لليمين */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2.5 border-b-2 border-black dark:border-zinc-700 pb-3">
+                <div className="w-7 h-7 border-2 border-black bg-[#FFE600] flex items-center justify-center font-black">
+                  <Info className="w-4 h-4 text-black" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-black dark:text-white">
+                    {isAr ? "مقارنة وتوضيح: ما الفرق بين التوصيات المتوسطة والصفقات القصيرة؟" : "Comparison: Medium vs Short Swings Systems"}
+                  </h2>
+                  <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                    {isAr ? "دليل لاختيار النظام الأنسب لأسلوب تداولك ومحفظتك" : "Guide to picking the system that matches your trading style"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Grid 2 cards from Left to Right: Card 1 (Medium) on Left, Card 2 (Short) on Right */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Card 1: التوصيات المتوسطة */}
+                <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/70 p-4 space-y-3 relative">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 border-2 border-black bg-blue-400 text-black text-xs font-black shadow-[2px_2px_0px_#000]">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>التوصيات المتوسطة (النظام الأساسي)</span>
+                    </span>
+                    <span className="text-[11px] font-black text-zinc-500">أفق هادئ</span>
+                  </div>
+
+                  <ul className="text-xs font-bold text-zinc-700 dark:text-zinc-300 space-y-2">
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-500 font-black">•</span>
+                      <span><strong>المدى الزمني:</strong> أسبوعان إلى شهرين (متوسط 25 - 45 يوماً).</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-500 font-black">•</span>
+                      <span><strong>الاستراتيجية:</strong> موجات صعود ونماذج كلاسيكية (قيعان مزدوجة، اختراق قنوات) مع فحص مالي وأساسي.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-500 font-black">•</span>
+                      <span><strong>إدارة الوقف:</strong> وقف خسارة واسع نسبياً (-7% إلى -12%) لتحمل تذبذبات السوق العادية.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-500 font-black">•</span>
+                      <span><strong>جني الأرباح:</strong> أهداف سعرية رقمية ثابتة (هدف أول وهدف ثانٍ).</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-blue-500 font-black">•</span>
+                      <span><strong>الأنسب لـ:</strong> المستثمر والمضارب الهادئ الذي يفضل متابعة أسبوعية وعدد صفقات أقل.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Card 2: الصفقات القصيرة */}
+                <div className="border-2 border-black bg-amber-50 dark:bg-amber-950/20 p-4 space-y-3 relative shadow-[2px_2px_0px_#000]">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 border-2 border-black bg-[#FFE600] text-black text-xs font-black shadow-[2px_2px_0px_#000]">
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>الصفقات القصيرة ⚡ PRO (نظام الزخم)</span>
+                    </span>
+                    <span className="text-[11px] font-black text-amber-600 dark:text-amber-400">حركة سريعة</span>
+                  </div>
+
+                  <ul className="text-xs font-bold text-zinc-700 dark:text-zinc-300 space-y-2">
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-black">•</span>
+                      <span><strong>المدى الزمني:</strong> سريع ومكثف (متوسط 2 إلى 6 جلسات، وحتى 20 جلسة كحد أقصى مع استمرار الاتجاه).</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-black">•</span>
+                      <span><strong>الاستراتيجية:</strong> اختراق قمم تماسك 20 جلسة مع انفجار في السيولة المؤسسية (&gt;140% من المتوسط).</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-black">•</span>
+                      <span><strong>إدارة الوقف:</strong> وقف خسارة صارم جداً (-4.0% كحد أقصى)، مع تأمين الدخول آلياً عند +4.5%.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-black">•</span>
+                      <span><strong>ركوب الاتجاه:</strong> لا يوجد سقف للأرباح؛ الوقف يتبع متوسط 10 أيام (EMA10) ما دامت موجة الصعود مستمرة.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-amber-500 font-black">•</span>
+                      <span><strong>الأنسب لـ:</strong> المضارب اليومي والنشط الباحث عن تدوير السيولة واقتناص الطفرات السريعة.</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Button to collapse */}
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={toggleGuide}
+                className="px-3.5 py-1.5 border-2 border-black bg-zinc-100 hover:bg-zinc-200 text-black text-xs font-black flex items-center gap-1.5 shadow-[2px_2px_0px_#000]"
+              >
+                <span>{isAr ? "إغلاق السيكشن" : "Close Section"}</span>
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── 2. FREE USER 15-DAY DELAY NOTICE (Neo-Brutalist) ── */}
@@ -588,100 +720,13 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
         {isAr ? "تعذر تحميل الصفقات المحفوظة. حاول تحديث العرض." : "Saved trades could not be loaded. Refresh the display."}
       </div>}
 
-      {/* ── 3. COMPARISON SECTION: المتوسطة vs القصيرة (User's Core Requirement) ── */}
-      <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-5 sm:p-6 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] space-y-4">
-        <div className="flex items-center gap-2.5 border-b-2 border-black dark:border-white pb-3">
-          <div className="w-8 h-8 border-2 border-black bg-[#FFE600] flex items-center justify-center font-black">
-            <Info className="w-4 h-4 text-black" />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-black dark:text-white">
-              مقارنة وتوضيح: ما الفرق بين التوصيات المتوسطة والصفقات القصيرة؟
-            </h2>
-            <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-              دليل لاختيار النظام الأنسب لأسلوب تداولك ومحفظتك
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Card 1: التوصيات المتوسطة */}
-          <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/70 p-4 space-y-3 relative">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 border-2 border-black bg-blue-400 text-black text-xs font-black shadow-[2px_2px_0px_#000]">
-                <Layers className="w-3.5 h-3.5" />
-                <span>التوصيات المتوسطة (النظام الأساسي)</span>
-              </span>
-              <span className="text-[11px] font-black text-zinc-500">أفق هادئ</span>
-            </div>
-
-            <ul className="text-xs font-bold text-zinc-700 dark:text-zinc-300 space-y-2">
-              <li className="flex items-start gap-2">
-                <span className="text-blue-500 font-black">•</span>
-                <span><strong>المدى الزمني:</strong> أسبوعان إلى شهرين (متوسط 25 - 45 يوماً).</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-500 font-black">•</span>
-                <span><strong>الاستراتيجية:</strong> موجات صعود ونماذج كلاسيكية (قيعان مزدوجة، اختراق قنوات) مع فحص مالي وأساسي.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-500 font-black">•</span>
-                <span><strong>إدارة الوقف:</strong> وقف خسارة واسع نسبياً (-7% إلى -12%) لتحمل تذبذبات السوق العادية.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-500 font-black">•</span>
-                <span><strong>جني الأرباح:</strong> أهداف سعرية رقمية ثابتة (هدف أول وهدف ثانٍ).</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-500 font-black">•</span>
-                <span><strong>الأنسب لـ:</strong> المستثمر والمضارب الهادئ الذي يفضل متابعة أسبوعية وعدد صفقات أقل.</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Card 2: الصفقات القصيرة */}
-          <div className="border-2 border-black bg-amber-50 dark:bg-amber-950/20 p-4 space-y-3 relative shadow-[2px_2px_0px_#000]">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 border-2 border-black bg-[#FFE600] text-black text-xs font-black shadow-[2px_2px_0px_#000]">
-                <Zap className="w-3.5 h-3.5" />
-                <span>الصفقات القصيرة ⚡ PRO (نظام الزخم)</span>
-              </span>
-              <span className="text-[11px] font-black text-amber-600 dark:text-amber-400">حركة سريعة</span>
-            </div>
-
-            <ul className="text-xs font-bold text-zinc-700 dark:text-zinc-300 space-y-2">
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 font-black">•</span>
-                <span><strong>المدى الزمني:</strong> سريع ومكثف (متوسط 2 إلى 6 جلسات، وحتى 20 جلسة كحد أقصى مع استمرار الاتجاه).</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 font-black">•</span>
-                <span><strong>الاستراتيجية:</strong> اختراق قمم تماسك 20 جلسة مع انفجار في السيولة المؤسسية (&gt;140% من المتوسط).</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 font-black">•</span>
-                <span><strong>إدارة الوقف:</strong> وقف خسارة صارم جداً (-4.0% كحد أقصى)، مع تأمين الدخول آلياً عند +4.5%.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 font-black">•</span>
-                <span><strong>ركوب الاتجاه:</strong> لا يوجد سقف للأرباح؛ الوقف يتبع متوسط 10 أيام (EMA10) ما دامت موجة الصعود مستمرة.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-amber-500 font-black">•</span>
-                <span><strong>الأنسب لـ:</strong> المضارب اليومي والنشط الباحث عن تدوير السيولة واقتناص الطفرات السريعة.</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
       {/* ── 4. SUB-TABS NAVIGATION BAR (Identical to Medium Swings) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 gap-2 select-none">
         {[
           { id: "active", label: isAr ? "الصفقات النشطة (المفتوحة)" : "Active Swings", count: activeTrades.length, icon: Zap },
           { id: "closed", label: isAr ? "أرشيف الصفقات (المغلقة)" : "Closed Trades", count: closedTrades.length, icon: History },
           { id: "all", label: isAr ? "جميع الصفقات" : "All Trades", count: activeTrades.length + closedTrades.length, icon: Layers },
-          { id: "calendar", label: isAr ? "تقويم وإحصائيات الصفقات" : "Trade Analytics & Calendar", count: null, icon: CalendarIcon, isSpecial: true },
+          { id: "calendar", label: isAr ? "تقويم الأرباح" : "Profit Calendar", count: null, icon: CalendarIcon, isSpecial: true },
         ].map(tab => {
           const isSelected = viewMode === tab.id;
           const Icon = tab.icon;
@@ -1497,18 +1542,18 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
               {/* Desktop Table View */}
               <div className="hidden md:block overflow-x-auto w-full">
-                <table className="w-full text-right border-collapse whitespace-nowrap">
+                <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead>
                     <tr className="text-xs font-black uppercase text-black dark:text-white bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white select-none">
-                      <th className="px-4 py-3.5 text-center w-12 border-l border-zinc-200 dark:border-zinc-800">#</th>
-                      <th className="px-6 py-3.5 text-right border-l border-zinc-200 dark:border-zinc-800">السهم والشركة</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">القطاع</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">تاريخ الدخول</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">سعر الدخول</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">السعر الحالي</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">الوقف المتحرك (EMA10)</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">العائد الحالي</th>
-                      <th className="px-4 py-3.5 text-center border-l border-zinc-200 dark:border-zinc-800">حماية رأس المال</th>
+                      <th className="px-4 py-3.5 text-center w-12 border-r border-zinc-200 dark:border-zinc-800">#</th>
+                      <th className="px-6 py-3.5 text-left border-r border-zinc-200 dark:border-zinc-800">السهم والشركة</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">القطاع</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">تاريخ الدخول</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">سعر الدخول</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">السعر الحالي</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">الوقف المتحرك (EMA10)</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">العائد الحالي</th>
+                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">حماية رأس المال</th>
                       <th className="px-4 py-3.5 text-center">إجراء</th>
                     </tr>
                   </thead>
@@ -1521,14 +1566,14 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-900/60 cursor-pointer transition-colors text-xs font-bold"
                         >
                           {/* Rank */}
-                          <td className="px-4 py-4 text-center font-mono font-black border-l border-zinc-200 dark:border-zinc-800">
+                          <td className="px-4 py-4 text-center font-mono font-black border-r border-zinc-200 dark:border-zinc-800">
                             <span className="w-7 h-7 inline-flex items-center justify-center border border-black bg-zinc-100 dark:bg-zinc-800">
                               {idx + 1}
                             </span>
                           </td>
 
                           {/* Symbol & Name */}
-                          <td className="px-6 py-4 border-l border-zinc-200 dark:border-zinc-800">
+                          <td className="px-6 py-4 border-r border-zinc-200 dark:border-zinc-800 text-left">
                             <div className="flex items-center gap-3">
                               {trade.is_locked ? (
                                 <div className="w-9 h-9 border-2 border-black bg-amber-400 flex items-center justify-center">
@@ -1732,19 +1777,20 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
           {/* Table */}
           <div className="overflow-x-auto border-2 border-black">
-            <table className="w-full text-right text-xs">
+            <table className="w-full text-left text-xs">
               <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black">
                 <tr>
-                  <th className="p-3">السهم</th>
-                  <th className="p-3">القطاع</th>
-                  <th className="p-3">تاريخ الدخول</th>
-                  <th className="p-3">تاريخ الخروج</th>
-                  <th className="p-3">سعر الدخول</th>
-                  <th className="p-3">سعر الخروج</th>
-                  <th className="p-3">المدة</th>
-                  <th className="p-3">العائد</th>
-                  <th className="p-3">سبب الخروج</th>
-                  <th className="p-3">{isAr ? "التفاصيل" : "Details"}</th>
+                  <th className="p-3 text-center w-12 border-r border-zinc-300 dark:border-zinc-800">#</th>
+                  <th className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800">السهم</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">القطاع</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الدخول</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الخروج</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الدخول</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الخروج</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">المدة</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">العائد</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سبب الخروج</th>
+                  <th className="p-3 text-center">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-bold">
@@ -1756,7 +1802,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       onClick={() => setSelectedActiveTrade(t)}
                       className="hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors"
                     >
-                      <td className="p-3">
+                      <td className="p-3 text-center font-mono font-black border-r border-zinc-200 dark:border-zinc-800">
+                        {(page - 1) * pageSize + idx + 1}
+                      </td>
+                      <td className="p-3 border-r border-zinc-200 dark:border-zinc-800">
                         <div className="flex items-center gap-2">
                           {t.is_locked ? (
                             <Lock className="w-4 h-4 text-amber-500" />
@@ -1908,20 +1957,21 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
           {/* Table */}
           <div className="overflow-x-auto border-2 border-black">
-            <table className="w-full text-right text-xs">
+            <table className="w-full text-left text-xs">
               <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black">
                 <tr>
-                  <th className="p-3">السهم</th>
-                  <th className="p-3">الحالة</th>
-                  <th className="p-3">القطاع</th>
-                  <th className="p-3">تاريخ الدخول</th>
-                  <th className="p-3">تاريخ الخروج</th>
-                  <th className="p-3">سعر الدخول</th>
-                  <th className="p-3">سعر الخروج / الحالي</th>
-                  <th className="p-3">المدة</th>
-                  <th className="p-3">العائد</th>
-                  <th className="p-3">الاستراتيجية / السبب</th>
-                  <th className="p-3">{isAr ? "التفاصيل" : "Details"}</th>
+                  <th className="p-3 text-center w-12 border-r border-zinc-300 dark:border-zinc-800">#</th>
+                  <th className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800">السهم</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">الحالة</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">القطاع</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الدخول</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الخروج</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الدخول</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الخروج / الحالي</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">المدة</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">العائد</th>
+                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">الاستراتيجية / السبب</th>
+                  <th className="p-3 text-center">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-black font-bold">
@@ -1933,7 +1983,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       onClick={() => setSelectedActiveTrade(t)}
                       className="hover:bg-zinc-50 dark:hover:bg-zinc-900/60 transition-colors"
                     >
-                      <td className="p-3">
+                      <td className="p-3 text-center font-mono font-black border-r border-zinc-200 dark:border-zinc-800">
+                        {(allPage - 1) * pageSize + idx + 1}
+                      </td>
+                      <td className="p-3 border-r border-zinc-200 dark:border-zinc-800">
                         <div className="flex items-center gap-2">
                           {t.is_locked ? (
                             <Lock className="w-4 h-4 text-amber-500" />
