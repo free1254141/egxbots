@@ -100,6 +100,25 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     }
   }, [initialTelegramLinked]);
 
+  // Listen for #scanner-signals anchor in URL to auto-expand and switch to Tracker tab
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const checkHash = () => {
+      const hash = window.location.hash;
+      if (hash === "#scanner-signals" || hash === "#scanner-alerts" || hash === "#scanner") {
+        setIsCollapsed(false);
+        setActiveMainTab("tracker");
+        setTimeout(() => {
+          const el = document.getElementById("scanner-signals");
+          if (el) el.scrollIntoView({ behavior: "smooth" });
+        }, 150);
+      }
+    };
+    checkHash();
+    window.addEventListener("hashchange", checkHash);
+    return () => window.removeEventListener("hashchange", checkHash);
+  }, []);
+
   // Intelligent Cache: initialize from localStorage immediately for 0ms load delay
   useEffect(() => {
     if (typeof window === "undefined") return;

@@ -457,7 +457,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
       lines.push(`───────────────`);
       lines.push(`⏱️ التوقيت: <b>${cairoTime.timeStr} بتوقيت القاهرة</b>`);
-      lines.push(`🔗 تفاصيل الشارت والمؤشرات: <a href="https://egxbots.com">EGX BOTS</a>`);
+      lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات في بروفايلك</a>`);
 
       const text = lines.join("\n");
       const sent = await sendTelegramAlert(user.telegram_chat_id, text);
@@ -646,6 +646,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         }
         hitLines.push(`───────────────`);
         hitLines.push(`💡 <i>توصية: يفضل جني الأرباح جزئياً أو رفع أمر الوقف لسعر الدخول لحجز الأرباح.</i>`);
+        hitLines.push(`📊 <b>متابعة النتائج والشارتات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
         await sendTelegramAlert(user.telegram_chat_id, hitLines.join("\n"));
       }
 
@@ -661,6 +662,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         }
         slLines.push(`───────────────`);
         slLines.push(`⚠️ <i>تنبيه: التزم بإدارة رأس المال وتجنب التمسك بالصفقات الخاسرة.</i>`);
+        slLines.push(`📊 <b>متابعة النتائج وسجل الصفقات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
         await sendTelegramAlert(user.telegram_chat_id, slLines.join("\n"));
       }
     }

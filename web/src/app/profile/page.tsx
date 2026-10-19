@@ -268,8 +268,10 @@ export default function ProfilePage() {
         />
       </div>
 
-      {/* ── Scanner Alerts Preferences (تفضيلات تنبيهات الإسكانر) ── */}
-      <ScannerAlertsCard key={`scanner-${portfolioVersion}`} initialTelegramLinked={telegramLinked} />
+      {/* ── Scanner Alerts Preferences & Live Signals Tracker (تفضيلات وتتبع إشارات الإسكانر) ── */}
+      <div id="scanner-signals" className="scroll-mt-24">
+        <ScannerAlertsCard key={`scanner-${portfolioVersion}`} initialTelegramLinked={telegramLinked} />
+      </div>
 
       {/* ── Account + Telegram ── */}
       <section className={`relative z-10 min-w-0 rounded-2xl p-4 sm:p-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${accountCollapsed ? "space-y-0" : "space-y-6"}`}>
