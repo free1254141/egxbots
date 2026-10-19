@@ -65,9 +65,13 @@ export async function GET() {
     const isPro = hasActiveProSubscription(subRes?.data || []);
     const telegramLinked = Boolean(profileRes?.data?.telegram_chat_id);
 
-    // Fetch scanner history & stats for calendar
+    // Fetch scanner history, tracked signals & stats for calendar and signal tracker
     let scannerHistory: any[] = [];
     let lastScanData: any = null;
+    let activeSignals: any[] = [];
+    let closedSignals: any[] = [];
+    let signalsKpis: any = null;
+
     try {
       const { data: botState } = await client
         .from("bot_states")
@@ -77,6 +81,17 @@ export async function GET() {
       if (botState?.state) {
         scannerHistory = botState.state.history || [];
         lastScanData = botState.state.last_scan || null;
+        if (botState.state.active_signals && botState.state.active_signals.length > 0) {
+          activeSignals = botState.state.active_signals;
+          closedSignals = botState.state.closed_signals || [];
+          signalsKpis = botState.state.signals_kpis || null;
+        } else if (scannerHistory.length > 0) {
+          const { deriveTrackedSignalsFromHistory } = await import("@/lib/scannerTradePlan");
+          const derived = deriveTrackedSignalsFromHistory(scannerHistory);
+          activeSignals = derived.activeSignals;
+          closedSignals = derived.closedSignals;
+          signalsKpis = derived.kpis;
+        }
       }
     } catch (e) {
       console.warn("Could not load bot_states for user calendar:", e);
@@ -99,6 +114,9 @@ export async function GET() {
       preferences,
       history: scannerHistory,
       last_scan: lastScanData,
+      active_signals: activeSignals,
+      closed_signals: closedSignals,
+      signals_kpis: signalsKpis,
     });
   } catch (err: any) {
     console.error("Error in GET /api/user/scanner-alerts:", err);

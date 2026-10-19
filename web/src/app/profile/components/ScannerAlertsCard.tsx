@@ -14,7 +14,11 @@ import {
   Sparkles,
   ExternalLink,
   Loader2,
-  Globe
+  Globe,
+  Calendar as CalendarIcon,
+  Activity,
+  SlidersHorizontal,
+  BookOpen
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -22,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ScannerStatsCalendar from "./ScannerStatsCalendar";
 import ScannerDefinitionsGuide from "./ScannerDefinitionsGuide";
+import ScannerSignalsTracker from "./ScannerSignalsTracker";
 
 interface ScannerPreferences {
   volume_surge: boolean;
@@ -48,6 +53,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   const { language } = useLanguage();
   const isAr = language === "ar";
 
+  const [activeMainTab, setActiveMainTab] = useState<"tracker" | "calendar" | "settings" | "guide">("tracker");
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [isPro, setIsPro] = useState(false);
@@ -55,6 +61,9 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   const [prefs, setPrefs] = useState<ScannerPreferences>(DEFAULT_PREFS);
   const [history, setHistory] = useState<any[]>([]);
   const [lastScan, setLastScan] = useState<any>(null);
+  const [activeSignals, setActiveSignals] = useState<any[]>([]);
+  const [closedSignals, setClosedSignals] = useState<any[]>([]);
+  const [signalsKpis, setSignalsKpis] = useState<any>(null);
 
   const botUsername = "egxbots_bot";
   const connectBotUrl = user?.id ? `https://t.me/${botUsername}?start=${user.id}` : `https://t.me/${botUsername}`;
@@ -86,6 +95,15 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             }
             if (data.last_scan) {
               setLastScan(data.last_scan);
+            }
+            if (data.active_signals) {
+              setActiveSignals(data.active_signals);
+            }
+            if (data.closed_signals) {
+              setClosedSignals(data.closed_signals);
+            }
+            if (data.signals_kpis) {
+              setSignalsKpis(data.signals_kpis);
             }
           }
         }
@@ -198,7 +216,90 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
 
   return (
     <div className="space-y-8">
-      <section className="neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
+      {/* ── Main Tab Navigation Bar (Neobrutal) ── */}
+      <div className="flex flex-wrap items-center gap-2 p-2 bg-zinc-100 dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("tracker")}
+          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+            activeMainTab === "tracker"
+              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
+              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          <span>{isAr ? "متابعة الصفقات والإشارات" : "Signals & Trades"}</span>
+          {activeSignals.length > 0 && (
+            <span className="px-1.5 py-0.5 bg-emerald-500 text-black text-[11px] font-black border border-black rounded-full animate-pulse">
+              {activeSignals.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("calendar")}
+          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+            activeMainTab === "calendar"
+              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
+              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          }`}
+        >
+          <CalendarIcon className="w-4 h-4" />
+          <span>{isAr ? "سجل الجلسات التاريخي" : "Sessions Calendar"}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("settings")}
+          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+            activeMainTab === "settings"
+              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
+              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          }`}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          <span>{isAr ? "تفضيلات التنبيهات" : "Alert Preferences"}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("guide")}
+          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+            activeMainTab === "guide"
+              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
+              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          <span>{isAr ? "دليل استراتيجيات الإسكانر" : "Scanner Guide"}</span>
+        </button>
+      </div>
+
+      {/* ── Active Main Tab View ── */}
+      {activeMainTab === "tracker" && (
+        <ScannerSignalsTracker
+          activeSignals={activeSignals}
+          closedSignals={closedSignals}
+          kpis={signalsKpis}
+          isAr={isAr}
+        />
+      )}
+
+      {activeMainTab === "calendar" && (
+        <ScannerStatsCalendar
+          history={history}
+          lastScan={lastScan}
+          isAr={isAr}
+        />
+      )}
+
+      {activeMainTab === "guide" && (
+        <ScannerDefinitionsGuide isAr={isAr} />
+      )}
+
+      {activeMainTab === "settings" && (
+        <section className="neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
       {/* ── Section Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-4 border-black dark:border-white pb-5">
         <div className="flex items-center gap-3">
@@ -408,16 +509,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         })}
       </div>
     </section>
-
-      {/* ── Interactive Scanner Intelligence Calendar ── */}
-      <ScannerStatsCalendar
-        history={history}
-        lastScan={lastScan}
-        isAr={isAr}
-      />
-
-      {/* ── Scanners Technical Guide & Definitions ── */}
-      <ScannerDefinitionsGuide isAr={isAr} />
+      )}
     </div>
   );
 }
