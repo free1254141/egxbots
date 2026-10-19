@@ -602,7 +602,8 @@ def _downloader_worker_loop():
             from datetime import datetime, time as dt_time
             from zoneinfo import ZoneInfo
             cairo_now = datetime.now(ZoneInfo("Africa/Cairo"))
-            is_open = cairo_now.weekday() < 5 and dt_time(10, 0) <= cairo_now.time() < dt_time(15, 0)
+            # Python weekday: Mon=0 .. Sun=6. EGX trading days: Sun(6), Mon(0), Tue(1), Wed(2), Thu(3)
+            is_open = cairo_now.weekday() in {6, 0, 1, 2, 3} and dt_time(10, 0) <= cairo_now.time() < dt_time(15, 0)
             try:
                 session_date = cairo_now.date().isoformat()
             except Exception:

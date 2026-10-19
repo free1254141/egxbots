@@ -1625,6 +1625,75 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(cleanedReply).not.toContain("t.me/fake_vip");
         expect(cleanedReply).toContain("egxbots.com");
     });
+
+    test("checkAgenticDraft grounds EGX30 market overview facts (close, change_pct, high, low, volume)", () => {
+        const marketEv = {
+            tool: "get_market",
+            availability: "available",
+            data: {
+                status: "success",
+                session_date: "2026-10-15",
+                egx30: {
+                    close: 50896.2,
+                    change_pct: -2.63,
+                    high: 52273.3,
+                    low: 50479.6,
+                    volume: 230385000,
+                    market_regime: "تصحيح هابط"
+                },
+                top_gainers: [{ symbol: "UEGC", close: 1.25, change_pct: 19.8 }],
+                top_losers: [{ symbol: "ADCI", close: 3.12, change_pct: -9.5 }]
+            }
+        };
+        const draft = `### 📈 نظرة عامة على أداء السوق ومؤشر EGX30
+| المقياس | القيمة |
+|---|---|
+| إغلاق EGX30 | 50896.2 |
+| نسبة التغير | -2.63% |
+| أعلى سعر | 52273.3 |
+| أدنى سعر | 50479.6 |
+| حجم التداول | 230385000 |`;
+        const reasons = checkAgenticDraft(draft, [marketEv as any]);
+        expect(reasons).toEqual([]);
+    });
+
+    test("checkAgenticDraft does not reject commentary columns describing sessions, years, or percentages", () => {
+        const stockEv = {
+            tool: "get_stock",
+            availability: "available",
+            symbols: ["EGCH"],
+            data: {
+                symbol: "EGCH",
+                date: "2026-10-15",
+                close: 12.50,
+                rsi_14: 28.5,
+                macd: -0.85
+            }
+        };
+        const levelsEv = {
+            tool: "get_stock_levels",
+            availability: "available",
+            symbols: ["EGCH"],
+            data: {
+                levels: [{
+                    symbol: "EGCH",
+                    date: "2026-10-15",
+                    close: 12.50,
+                    support: 12.00,
+                    resistance: 13.50,
+                    has_active_recommendation: false
+                }]
+            }
+        };
+        const draftCommentary = `### 📊 تحليل سهم كيما (EGCH)
+| المؤشر / المقياس | القيمة (ج.م) | الوصف الفني |
+|---|---|---|
+| الإغلاق الحالي | 12.50 | يتداول في نطاق إيجابي لآخر 30 جلسة وحقق أرباحاً في 2025 و 2026 |
+| الدعم الأول | 12.00 | دعم ارتدادي اختبره السهم 3 مرات بنسبة 80% من القوة الفنية |
+| المقاومة الأولى | 13.50 | مقاومة رئيسية تمثل أعلى سعر للجلسة السابقة |`;
+        const reasons = checkAgenticDraft(draftCommentary, [stockEv as any, levelsEv as any]);
+        expect(reasons).toEqual([]);
+    });
 });
 
 

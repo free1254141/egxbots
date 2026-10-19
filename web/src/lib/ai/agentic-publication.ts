@@ -68,6 +68,13 @@ export function evidenceRows(data: any): any[] {
     const rows = ["stocks", "levels", "positions", "recommendations", "comparison", "accumulation_stocks", "top_gainers", "top_losers", "news", "sector_exposure", "industry_exposure", "scenario_metrics"]
         .flatMap(key => Array.isArray(data[key]) ? data[key] : []);
     if (data.symbol) rows.push(data);
+    if (data.egx30 && typeof data.egx30 === "object" && (data.egx30.close != null || data.egx30.change_pct != null)) {
+        rows.push({
+            symbol: "EGX",
+            date: data.session_date ?? data.date ?? null,
+            ...data.egx30,
+        });
+    }
     return rows;
 }
 
@@ -105,6 +112,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
         cost_basis: row.cost ?? row.cost_basis, profit_value: row.profit_loss_val ?? row.profit_value,
         position_pct: row.allocation_pct, value: row.allocated_capital,
         close: row.close ?? row.current_price, price: row.current_price ?? row.close,
+        change_pct: row.change_pct ?? row.change_percent ?? row.change,
         macd_hist: row.macd_hist ?? row.macd_histogram,
         rsi: row.rsi ?? row.rsi_14,
         king_ai_score: row.king_ai ?? row.king_ai_score,
@@ -126,13 +134,21 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                 for (const {key, field, unit} of BACKTEST_METRICS) if (typeof metrics[key] === "number" && Number.isFinite(metrics[key])) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:${key}`, symbol: row.symbol, field, value: metrics[key], unit, as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
                 if (Number.isFinite(row.candle_count)) facts.push({ id: `${row.symbol}:${metrics.strategy_id}:candle_count`, symbol: row.symbol, field: "backtest_candle_count", value: row.candle_count, unit: "count", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
-            // Distances are derived only from a single dated quote/level row.
-            if (row.symbol && Number.isFinite(row.close) && row.close > 0) {
-                for (const [level, field] of [["support", "distance_from_support_pct"], ["resistance", "distance_from_resistance_pct"]] as const) {
-                    if (Number.isFinite(row[level]) && row[level] > 0 && row[field] == null)
-                        facts.push({ id: `${row.symbol}:${field}:close`, symbol: row.symbol, field,
-                            value: (row[level] - row.close) / row.close * 100, unit: "percent",
-                            as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+            // Distances are derived from quote/level rows for primary and secondary levels.
+            const closePrices = [row.close, row.current_price].filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+            if (row.symbol && closePrices.length > 0) {
+                for (const closeVal of closePrices) {
+                    for (const [level, field] of [
+                        ["support", "distance_from_support_pct"],
+                        ["resistance", "distance_from_resistance_pct"],
+                        ["support_2", "distance_from_support_pct"],
+                        ["resistance_2", "distance_from_resistance_pct"]
+                    ] as const) {
+                        if (Number.isFinite(row[level]) && row[level] > 0)
+                            facts.push({ id: `${row.symbol}:${field}:${level}:${closeVal}`, symbol: row.symbol, field,
+                                value: (row[level] - closeVal) / closeVal * 100, unit: "percent",
+                                as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                    }
                 }
             }
             // Different calculated targets remain separate supported observations.
@@ -215,11 +231,13 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
 
 function cleanCellText(text: string): string {
     return normalizeEvidenceNumbers(text)
-        // 1. Strip full dates FIRST (both YYYY-MM-DD and DD-MM-YYYY) before any dash/number normalization
+        // 1. Strip full dates and short dates FIRST before any dash/number normalization
         .replace(/(?:\b|\D)\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\b|\D)/g, " ")
         .replace(/(?:\b|\D)\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\b|\D)/g, " ")
         .replace(/(?:جلسة|بتاريخ|تاريخ|يوم)\s*\b\d{1,2}[-/]\d{1,2}\b/g, " ")
-        // 2. Disambiguate range dashes vs negative values
+        .replace(/\b(?:0?[1-9]|[12][0-9]|3[01])[-/.](?:0?[1-9]|1[0-2])\b/g, " ")
+        // 2. Disambiguate range dashes vs negative values vs bullet points
+        .replace(/(?:^|[\s|:،,])[-−–—•*]\s+(\d)/g, " $1")
         .replace(/(?<=\d)\s*[-−–—]\s*(?=\d)/g, " ")
         .replace(/(\d+(?:\.\d+)?)\s*[%٪]?\s*[-−–](?!\s*\d)/g, "-$1")
         .replace(/[−–—]/g, "-")
@@ -344,6 +362,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
+        [/(?:حجم|أحجام|احجام)\s*(?:التداول|السيولة)?|volume/i,["volume","vol_ratio"]],
         [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]],
         [/(?:درجة|مؤشر)?\s*(?:(?:ال)?تجميع|acc)\s*[/،]\s*(?:(?:ال)?توزيع|(?:ال)?تصريف|dist)/i, ["acc_score", "dist_score"]],
         [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
@@ -1082,7 +1101,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
             const rowFields = !tableHadStockRow ? (symbol === "EGX" ? breadthFields : tableMetricFields(cells[0])) : undefined;
-            const isCommentaryCol = !tableHadStockRow && idx >= 2 && /ملاحظ|تفسير|دلال|حال|قراء|الوضع|الموقع|تعليق|شرح|ملخص|سياق|تفصيل|تفاصيل|النتيجة|الأثر|وصف|بيان|إشارة|اشارة/i.test(header);
+            const isCommentaryCol = !tableHadStockRow && idx >= 2
+                && /(?:الوصف(?:\s+الفني)?|القراءة(?:\s+والتقييم)?|ملاحظات|التعليق|التفسير|الدلالة|الشرح|البيان|الإشارة|الوضع\s+الفني)/i.test(header)
+                && !/سعر|إغلاق|قيمة|مستوى|عائد/i.test(header);
+            if (isCommentaryCol) continue;
             const verticalMetricValue = Boolean(rowFields?.length)
                 && (/^(?:(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى|price|value|level)(?:\s*(?:[\/،-]|أو)\s*(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى))?(?:\s*\([^)]*\))?)$/i.test(header.replace(/[*_`]/g," ").trim())
                     || (rowFields?.some(f => f.startsWith("breadth_")) && /^(?:العدد|عدد|count)$/i.test(header.trim())));

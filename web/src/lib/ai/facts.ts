@@ -139,6 +139,8 @@ const VALUE_KEYS: Array<{ key: string; field: FactField }> = [
     { key: "close", field: "close" },
     { key: "current_price", field: "price" },
     { key: "valuation_price", field: "price" },
+    { key: "high", field: "high" },
+    { key: "low", field: "low" },
     { key: "change_pct", field: "change_pct" },
     { key: "change_pct_num", field: "change_pct" },
     { key: "change", field: "change_pct" },
@@ -373,6 +375,10 @@ export function buildFactRecords(toolResults: any[], fetchedAt = new Date().toIS
                 ingestObject(normalizeSymbol(data.symbol), data.recommendation, { ...meta,
                     as_of: validatedObservationDate(recDate) });
             }
+        }
+        if (data.egx30 && typeof data.egx30 === "object") {
+            const egxDate = validatedObservationDate(data.session_date) || validatedObservationDate(data.date) || meta.as_of;
+            ingestObject("EGX", data.egx30, { ...meta, as_of: egxDate });
         }
         if (Array.isArray(data.stocks)) {
             for (const stock of data.stocks) {

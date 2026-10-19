@@ -884,7 +884,7 @@ async function executeRawTool(
             let query = supabase.from("stock_news_sentiment")
                 .select("symbol,date,sentiment_score,news_count,headlines")
                 .eq("exchange", "EGX").gte("date", sinceDate).gt("news_count", 0)
-                .order("date", { ascending: false }).limit(50);
+                .order("date", { ascending: false }).limit(15);
             if (symbols.length) query = query.in("symbol", symbols);
             const { data: rows } = await query;
             const rowSymbols = [...new Set((rows || []).map((r:any)=>String(r.symbol || "").toUpperCase()).filter(Boolean))];
