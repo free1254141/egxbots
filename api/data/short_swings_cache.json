@@ -1,46 +1,40 @@
 {
   "status": "ok",
   "kpis": {
-    "profit_factor": 1.85,
-    "win_rate_pct": 50.1,
-    "total_return_pct": 306.7,
-    "max_drawdown_pct": 10.6,
-    "avg_holding_days": 5.0,
-    "avg_win_pct": 8.32,
-    "avg_loss_pct": -4.53,
-    "top_win_pct": 224.05,
-    "monthly_trades_avg": 35.7,
-    "total_trades": 1141,
-    "wins_count": 572,
-    "losses_count": 569
+    "profit_factor": 1.84,
+    "win_rate_pct": 49.9,
+    "total_return_pct": 322.4,
+    "max_drawdown_pct": 10.5,
+    "avg_holding_days": 4.9,
+    "avg_win_pct": 8.3,
+    "avg_loss_pct": -4.5,
+    "top_win_pct": 131.6,
+    "monthly_trades_avg": 35.8,
+    "total_trades": 1182,
+    "wins_count": 590,
+    "losses_count": 592
   },
-  "active_trades": [
+  "active_trades": [],
+  "closed_trades": [
     {
-      "signal_id": "AJWA_2026-10-06",
       "symbol": "AJWA",
-      "name_ar": "EGX Stock AJWA",
+      "name_ar": "أجواء للصناعات الغذائية",
       "name_en": "Ajwa for Food Industries Co. Egypt",
       "sector": "عام",
       "entry_date": "2026-10-07",
-      "signal_date": "2026-10-06",
-      "published": true,
+      "exit_date": "2026-10-19",
       "entry_price": 197.736,
-      "current_price": 196.16,
-      "price_date": "2026-10-07",
-      "reference_close": 196.16,
-      "return_pct": -0.8,
-      "stop_loss": 189.827,
-      "trailing_stop": 189.827,
-      "ema10_trend": 187.122,
-      "is_breakeven_protected": false,
-      "max_gain_pct": 1.65,
+      "exit_price": 207.728,
+      "return_pct": 5.05,
+      "max_gain_pct": 16.31,
+      "sessions": 7,
+      "holding_days": 7,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
       "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
-      "status": "قيد التداول",
-      "is_pending_entry": false,
-      "as_of": "2026-10-07"
-    }
-  ],
-  "closed_trades": [
+      "entry_mode": null,
+      "observed_at": null
+    },
     {
       "symbol": "CCAP",
       "name_ar": "القلعة",
@@ -56,7 +50,9 @@
       "holding_days": 18,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OIH",
@@ -73,7 +69,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NCCW",
@@ -90,7 +88,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RUBX",
@@ -107,7 +107,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ETEL",
@@ -124,7 +126,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ATQA",
@@ -141,7 +145,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CRST",
@@ -158,7 +164,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MFPC",
@@ -175,7 +183,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SDTI",
@@ -192,7 +202,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MIPH",
@@ -209,7 +221,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KORA",
@@ -226,7 +240,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HDBK",
@@ -243,7 +259,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCO",
@@ -260,7 +278,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ACTF",
@@ -277,7 +297,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OIH",
@@ -294,7 +316,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -311,7 +335,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORAS",
@@ -328,7 +354,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORWE",
@@ -345,7 +373,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ALCN",
@@ -362,7 +392,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GSSC",
@@ -379,7 +411,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RUBX",
@@ -396,7 +430,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BINV",
@@ -413,12 +449,14 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CPME",
       "name_ar": "EGX Stock CPME",
-      "name_en": "EGX Stock CPME",
+      "name_en": "Catalyst Partners Middle East",
       "sector": "عام",
       "entry_date": "2026-09-16",
       "exit_date": "2026-09-17",
@@ -430,7 +468,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGREF",
@@ -447,7 +487,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KORA",
@@ -464,7 +506,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TALM",
@@ -481,7 +525,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SPMD",
@@ -498,7 +544,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "UNIT",
@@ -515,7 +563,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KABO",
@@ -532,7 +582,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NCCW",
@@ -549,7 +601,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "DTPP",
@@ -566,7 +620,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ZMID",
@@ -583,7 +639,9 @@
       "holding_days": 16,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORAS",
@@ -600,7 +658,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EMFD",
@@ -617,7 +677,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ABUK",
@@ -634,7 +696,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MFPC",
@@ -651,7 +715,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EXPA",
@@ -668,7 +734,9 @@
       "holding_days": 6,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "FAIT",
@@ -685,7 +753,9 @@
       "holding_days": 4,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ACGC",
@@ -702,7 +772,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MBSC",
@@ -719,7 +791,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EBSC",
@@ -736,7 +810,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COSG",
@@ -753,7 +829,9 @@
       "holding_days": 4,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARAB",
@@ -770,7 +848,9 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TAQA",
@@ -787,7 +867,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HDBK",
@@ -804,7 +886,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OFH",
@@ -821,7 +905,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SWDY",
@@ -838,7 +924,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SVCE",
@@ -855,7 +943,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "LUTS",
@@ -872,7 +962,9 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KASABF",
@@ -889,7 +981,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISMA",
@@ -906,7 +1000,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NINH",
@@ -923,12 +1019,14 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CPME",
       "name_ar": "EGX Stock CPME",
-      "name_en": "EGX Stock CPME",
+      "name_en": "Catalyst Partners Middle East",
       "sector": "عام",
       "entry_date": "2026-08-26",
       "exit_date": "2026-08-30",
@@ -940,7 +1038,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EASB",
@@ -957,7 +1057,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SUGR",
@@ -974,7 +1076,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CCRS",
@@ -991,7 +1095,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KRDI",
@@ -1008,7 +1114,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMOC",
@@ -1025,7 +1133,9 @@
       "holding_days": 7,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ICFC",
@@ -1042,7 +1152,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NIPH",
@@ -1059,7 +1171,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCI",
@@ -1076,7 +1190,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COSG",
@@ -1093,7 +1209,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "LUTS",
@@ -1110,7 +1228,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SAUD",
@@ -1127,7 +1247,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "IEEC",
@@ -1144,7 +1266,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "FCMD",
@@ -1161,7 +1285,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GTWL",
@@ -1178,7 +1304,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMES",
@@ -1195,7 +1323,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KZPC",
@@ -1212,7 +1342,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CRST",
@@ -1229,41 +1361,47 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BIOC",
       "name_ar": "EGX Stock BIOC",
       "name_en": "GlaxoSmithKline S.A.E.",
       "sector": "عام",
-      "entry_date": "2026-07-28",
+      "entry_date": "2026-07-30",
       "exit_date": "2026-08-20",
-      "entry_price": 143.014,
+      "entry_price": 200.1,
       "exit_price": 463.439,
-      "return_pct": 224.05,
-      "max_gain_pct": 325.83,
-      "sessions": 17,
-      "holding_days": 17,
+      "return_pct": 131.6,
+      "max_gain_pct": 204.35,
+      "sessions": 15,
+      "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ODIN",
       "name_ar": "EGX Stock ODIN",
       "name_en": "ODIN Investments",
       "sector": "عام",
-      "entry_date": "2026-07-30",
+      "entry_date": "2026-08-02",
       "exit_date": "2026-08-20",
-      "entry_price": 2.724,
+      "entry_price": 2.764,
       "exit_price": 3.292,
-      "return_pct": 20.86,
-      "max_gain_pct": 43.9,
-      "sessions": 15,
-      "holding_days": 15,
+      "return_pct": 19.11,
+      "max_gain_pct": 41.82,
+      "sessions": 14,
+      "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AFMC",
@@ -1280,7 +1418,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OCDI",
@@ -1297,7 +1437,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NIPH",
@@ -1314,7 +1456,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EFIH",
@@ -1331,7 +1475,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AALR",
@@ -1348,7 +1494,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EALR",
@@ -1365,7 +1513,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CIRA",
@@ -1382,7 +1532,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PHAR",
@@ -1399,7 +1551,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGCH",
@@ -1416,7 +1570,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -1433,7 +1589,9 @@
       "holding_days": 10,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SCEM",
@@ -1450,7 +1608,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EXPA",
@@ -1467,7 +1627,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ENGC",
@@ -1484,7 +1646,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMOC",
@@ -1501,7 +1665,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ADIB",
@@ -1518,41 +1684,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "RREI",
-      "name_ar": "EGX Stock RREI",
-      "name_en": "Arab Real Estate Investment Co.",
-      "sector": "عام",
-      "entry_date": "2026-07-28",
-      "exit_date": "2026-08-04",
-      "entry_price": 4.377,
-      "exit_price": 4.383,
-      "return_pct": 0.15,
-      "max_gain_pct": 13.79,
-      "sessions": 5,
-      "holding_days": 5,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "AFDI",
-      "name_ar": "EGX Stock AFDI",
-      "name_en": "Alahly For Development & Investment",
-      "sector": "عام",
-      "entry_date": "2026-07-30",
-      "exit_date": "2026-08-04",
-      "entry_price": 52.499,
-      "exit_price": 52.577,
-      "return_pct": 0.15,
-      "max_gain_pct": 9.05,
-      "sessions": 3,
-      "holding_days": 3,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ETEL",
@@ -1569,7 +1703,47 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "ASCM",
+      "name_ar": "EGX Stock ASCM",
+      "name_en": "ASEC Co. for Mining",
+      "sector": "عام",
+      "entry_date": "2026-08-03",
+      "exit_date": "2026-08-04",
+      "entry_price": 66.109,
+      "exit_price": 66.021,
+      "return_pct": -0.13,
+      "max_gain_pct": 5.81,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "NINH",
+      "name_ar": "EGX Stock NINH",
+      "name_en": "Nozha International Hospital",
+      "sector": "عام",
+      "entry_date": "2026-08-03",
+      "exit_date": "2026-08-04",
+      "entry_price": 24.637,
+      "exit_price": 24.674,
+      "return_pct": 0.15,
+      "max_gain_pct": 5.49,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "DTPP",
@@ -1586,7 +1760,47 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "ASPI",
+      "name_ar": "EGX Stock ASPI",
+      "name_en": "Aspire Capital Holding for Financial Investments",
+      "sector": "عام",
+      "entry_date": "2026-07-27",
+      "exit_date": "2026-08-02",
+      "entry_price": 0.397,
+      "exit_price": 0.402,
+      "return_pct": 1.44,
+      "max_gain_pct": 18.51,
+      "sessions": 4,
+      "holding_days": 4,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "RREI",
+      "name_ar": "EGX Stock RREI",
+      "name_en": "Arab Real Estate Investment Co.",
+      "sector": "عام",
+      "entry_date": "2026-07-30",
+      "exit_date": "2026-08-02",
+      "entry_price": 4.987,
+      "exit_price": 4.593,
+      "return_pct": -7.91,
+      "max_gain_pct": 0.0,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMES",
@@ -1603,7 +1817,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ATLC",
@@ -1620,7 +1836,9 @@
       "holding_days": 20,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NIPH",
@@ -1637,7 +1855,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BTFH",
@@ -1654,7 +1874,9 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SCEM",
@@ -1671,7 +1893,28 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "MPCO",
+      "name_ar": "EGX Stock MPCO",
+      "name_en": "Mansourah Poultry Co.",
+      "sector": "عام",
+      "entry_date": "2026-07-29",
+      "exit_date": "2026-07-30",
+      "entry_price": 1.933,
+      "exit_price": 1.936,
+      "return_pct": 0.15,
+      "max_gain_pct": 7.09,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ZMID",
@@ -1688,7 +1931,9 @@
       "holding_days": 17,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -1705,7 +1950,28 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "KRDI",
+      "name_ar": "EGX Stock KRDI",
+      "name_en": "Al Khair River for Development Agriculture Investment and Environmental Services",
+      "sector": "عام",
+      "entry_date": "2026-07-27",
+      "exit_date": "2026-07-29",
+      "entry_price": 0.414,
+      "exit_price": 0.396,
+      "return_pct": -4.14,
+      "max_gain_pct": 1.3,
+      "sessions": 2,
+      "holding_days": 2,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EDBM",
@@ -1722,24 +1988,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "ASPI",
-      "name_ar": "EGX Stock ASPI",
-      "name_en": "Aspire Capital Holding for Financial Investments",
-      "sector": "عام",
-      "entry_date": "2026-07-28",
-      "exit_date": "2026-07-29",
-      "entry_price": 0.455,
-      "exit_price": 0.436,
-      "return_pct": -4.14,
-      "max_gain_pct": 3.37,
-      "sessions": 1,
-      "holding_days": 1,
-      "reason": "stop_loss",
-      "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GGCC",
@@ -1756,7 +2007,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ELKA",
@@ -1773,7 +2026,28 @@
       "holding_days": 18,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "CPME",
+      "name_ar": "EGX Stock CPME",
+      "name_en": "Catalyst Partners Middle East",
+      "sector": "عام",
+      "entry_date": "2026-07-27",
+      "exit_date": "2026-07-28",
+      "entry_price": 24.076,
+      "exit_price": 23.078,
+      "return_pct": -4.14,
+      "max_gain_pct": 3.13,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPRC",
@@ -1790,7 +2064,9 @@
       "holding_days": 22,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRDC",
@@ -1807,7 +2083,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ADCI",
@@ -1824,7 +2102,9 @@
       "holding_days": 22,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ZEOT",
@@ -1841,7 +2121,9 @@
       "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OCDI",
@@ -1858,7 +2140,9 @@
       "holding_days": 19,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRCL",
@@ -1875,7 +2159,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MAAL",
@@ -1892,7 +2178,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GTWL",
@@ -1909,7 +2197,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRCL",
@@ -1926,7 +2216,9 @@
       "holding_days": 16,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISMQ",
@@ -1943,7 +2235,9 @@
       "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EEII",
@@ -1960,11 +2254,13 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AJWA",
-      "name_ar": "EGX Stock AJWA",
+      "name_ar": "أجواء للصناعات الغذائية",
       "name_en": "Ajwa for Food Industries Co. Egypt",
       "sector": "عام",
       "entry_date": "2026-06-15",
@@ -1977,7 +2273,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EPPK",
@@ -1994,7 +2292,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ICID",
@@ -2011,7 +2311,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TYCN",
@@ -2028,12 +2330,14 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ETRS",
       "name_ar": "EGX Stock ETRS",
-      "name_en": "Egyptian Transport & Commercial Services Co. SAE",
+      "name_en": "Egyptian Transport And Commercial Services Co. (Egytrans Nosco)",
       "sector": "عام",
       "entry_date": "2026-06-28",
       "exit_date": "2026-06-29",
@@ -2045,7 +2349,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ATLC",
@@ -2062,7 +2368,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GBCO",
@@ -2079,7 +2387,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "POUL",
@@ -2096,7 +2406,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MICH",
@@ -2113,7 +2425,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PHDC",
@@ -2130,7 +2444,9 @@
       "holding_days": 7,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCI",
@@ -2147,7 +2463,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CNFN",
@@ -2164,7 +2482,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TWSA",
@@ -2181,7 +2501,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TYCN",
@@ -2198,7 +2520,9 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ELKA",
@@ -2215,7 +2539,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ZEOT",
@@ -2232,7 +2558,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COPR",
@@ -2249,7 +2577,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ELSH",
@@ -2266,7 +2596,9 @@
       "holding_days": 18,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRDC",
@@ -2283,7 +2615,9 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EMFD",
@@ -2300,7 +2634,9 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SVCE",
@@ -2317,7 +2653,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GPIM",
@@ -2334,7 +2672,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CERA",
@@ -2351,7 +2691,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "LUTS",
@@ -2368,7 +2710,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCO",
@@ -2385,7 +2729,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ASCM",
@@ -2402,7 +2748,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARVA",
@@ -2419,7 +2767,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRMH",
@@ -2436,7 +2786,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EASB",
@@ -2453,7 +2805,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BINV",
@@ -2470,7 +2824,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MAAL",
@@ -2487,24 +2843,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "ETRS",
-      "name_ar": "EGX Stock ETRS",
-      "name_en": "Egyptian Transport & Commercial Services Co. SAE",
-      "sector": "عام",
-      "entry_date": "2026-06-02",
-      "exit_date": "2026-06-11",
-      "entry_price": 8.523,
-      "exit_price": 8.833,
-      "return_pct": 3.64,
-      "max_gain_pct": 14.16,
-      "sessions": 7,
-      "holding_days": 7,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARVA",
@@ -2521,7 +2862,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "JUFO",
@@ -2538,7 +2881,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGTS",
@@ -2555,7 +2900,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISMQ",
@@ -2572,7 +2919,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ANFI",
@@ -2589,7 +2938,28 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "RMDA",
+      "name_ar": "راميدا",
+      "name_en": "Tenth of Ramadan Pharmaceutical Industries & Diagnostic-Rameda",
+      "sector": "عام",
+      "entry_date": "2026-05-11",
+      "exit_date": "2026-06-10",
+      "entry_price": 5.038,
+      "exit_price": 5.138,
+      "return_pct": 1.99,
+      "max_gain_pct": 6.8,
+      "sessions": 18,
+      "holding_days": 18,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EMFD",
@@ -2606,7 +2976,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISPH",
@@ -2623,7 +2995,9 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARCC",
@@ -2640,7 +3014,9 @@
       "holding_days": 4,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CCAP",
@@ -2657,7 +3033,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "KASABF",
@@ -2674,7 +3052,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EXPA",
@@ -2691,7 +3071,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BONY",
@@ -2708,7 +3090,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TWSA",
@@ -2725,7 +3109,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ACAMD",
@@ -2742,7 +3128,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCO",
@@ -2759,7 +3147,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORHD",
@@ -2776,7 +3166,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PHDC",
@@ -2793,7 +3185,9 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ASCM",
@@ -2810,7 +3204,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SVCE",
@@ -2827,7 +3223,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISMA",
@@ -2844,7 +3242,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SUCE",
@@ -2861,7 +3261,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGTS",
@@ -2878,7 +3280,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SNFC",
@@ -2895,7 +3299,9 @@
       "holding_days": 7,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGCH",
@@ -2912,7 +3318,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ACGC",
@@ -2929,7 +3337,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MHOT",
@@ -2946,7 +3356,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ACAMD",
@@ -2963,7 +3375,9 @@
       "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCI",
@@ -2980,7 +3394,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGTS",
@@ -2997,7 +3413,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARVA",
@@ -3014,7 +3432,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MENA",
@@ -3031,24 +3451,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "ZMID",
-      "name_ar": "زهراء المعادي",
-      "name_en": "Zahraa Maadi Investment & Development",
-      "sector": "عام",
-      "entry_date": "2026-04-26",
-      "exit_date": "2026-05-20",
-      "entry_price": 5.909,
-      "exit_price": 6.043,
-      "return_pct": 2.27,
-      "max_gain_pct": 11.19,
-      "sessions": 18,
-      "holding_days": 18,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CLHO",
@@ -3065,7 +3470,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CCAP",
@@ -3082,7 +3489,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMOC",
@@ -3099,7 +3508,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OFH",
@@ -3116,7 +3527,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BONY",
@@ -3133,7 +3546,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COPR",
@@ -3150,7 +3565,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RAYA",
@@ -3167,7 +3584,9 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MASR",
@@ -3184,7 +3603,9 @@
       "holding_days": 4,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -3201,7 +3622,28 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "TMGH",
+      "name_ar": "طلعت مصطفى, مصطفى, هشام طلعت, طلعت",
+      "name_en": "Talaat Moustafa Group Holding",
+      "sector": "عام",
+      "entry_date": "2026-05-06",
+      "exit_date": "2026-05-17",
+      "entry_price": 98.347,
+      "exit_price": 94.272,
+      "return_pct": -4.14,
+      "max_gain_pct": 2.65,
+      "sessions": 7,
+      "holding_days": 7,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HRHO",
@@ -3218,7 +3660,9 @@
       "holding_days": 6,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISPH",
@@ -3235,24 +3679,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
-    },
-    {
-      "symbol": "ARVA",
-      "name_ar": "EGX Stock ARVA",
-      "name_en": "Arab Valves Co.",
-      "sector": "عام",
-      "entry_date": "2026-05-07",
-      "exit_date": "2026-05-17",
-      "entry_price": 8.813,
-      "exit_price": 8.826,
-      "return_pct": 0.15,
-      "max_gain_pct": 4.73,
-      "sessions": 6,
-      "holding_days": 6,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EMFD",
@@ -3269,7 +3698,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORAS",
@@ -3286,7 +3717,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MASR",
@@ -3303,7 +3736,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRDC",
@@ -3320,7 +3755,9 @@
       "holding_days": 22,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CRST",
@@ -3337,7 +3774,28 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "MOSC",
+      "name_ar": "EGX Stock MOSC",
+      "name_en": "Misr Oils & Soap Co.",
+      "sector": "عام",
+      "entry_date": "2026-04-29",
+      "exit_date": "2026-05-10",
+      "entry_price": 266.659,
+      "exit_price": 271.982,
+      "return_pct": 2.0,
+      "max_gain_pct": 27.5,
+      "sessions": 7,
+      "holding_days": 7,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRCL",
@@ -3354,7 +3812,28 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "OCPH",
+      "name_ar": "EGX Stock OCPH",
+      "name_en": "October Pharma Co.",
+      "sector": "عام",
+      "entry_date": "2026-04-05",
+      "exit_date": "2026-05-06",
+      "entry_price": 117.241,
+      "exit_price": 192.106,
+      "return_pct": 63.86,
+      "max_gain_pct": 77.63,
+      "sessions": 21,
+      "holding_days": 21,
+      "reason": "max_time",
+      "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RREI",
@@ -3371,7 +3850,9 @@
       "holding_days": 18,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CCAP",
@@ -3388,24 +3869,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "MTIE",
-      "name_ar": "EGX Stock MTIE",
-      "name_en": "MM Group for Industry & International Trade",
-      "sector": "عام",
-      "entry_date": "2026-04-27",
-      "exit_date": "2026-05-06",
-      "entry_price": 6.894,
-      "exit_price": 7.343,
-      "return_pct": 6.51,
-      "max_gain_pct": 25.48,
-      "sessions": 7,
-      "holding_days": 7,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "NIPH",
@@ -3422,7 +3888,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MFPC",
@@ -3439,7 +3907,9 @@
       "holding_days": 16,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OIH",
@@ -3456,7 +3926,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMIA",
@@ -3473,7 +3945,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "FWRY",
@@ -3490,7 +3964,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SDTI",
@@ -3507,7 +3983,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MPCI",
@@ -3524,7 +4002,28 @@
       "holding_days": 5,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "ZMID",
+      "name_ar": "زهراء المعادي",
+      "name_en": "Zahraa Maadi Investment & Development",
+      "sector": "عام",
+      "entry_date": "2026-04-27",
+      "exit_date": "2026-04-28",
+      "entry_price": 6.049,
+      "exit_price": 5.798,
+      "return_pct": -4.14,
+      "max_gain_pct": 0.84,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -3541,41 +4040,28 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MENA",
       "name_ar": "EGX Stock MENA",
       "name_en": "Mena Touristic & Real Estate Investment",
       "sector": "عام",
-      "entry_date": "2026-04-09",
+      "entry_date": "2026-03-31",
       "exit_date": "2026-04-23",
-      "entry_price": 5.408,
+      "entry_price": 5.188,
       "exit_price": 5.711,
-      "return_pct": 5.6,
-      "max_gain_pct": 15.94,
-      "sessions": 8,
-      "holding_days": 8,
+      "return_pct": 10.08,
+      "max_gain_pct": 20.86,
+      "sessions": 15,
+      "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
-    },
-    {
-      "symbol": "PHDC",
-      "name_ar": "بالم هيلز",
-      "name_en": "Palm Hills Development Co.",
-      "sector": "عام",
-      "entry_date": "2026-04-22",
-      "exit_date": "2026-04-23",
-      "entry_price": 10.986,
-      "exit_price": 11.003,
-      "return_pct": 0.15,
-      "max_gain_pct": 9.23,
-      "sessions": 1,
-      "holding_days": 1,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ADIB",
@@ -3592,24 +4078,9 @@
       "holding_days": 7,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "CICH",
-      "name_ar": "EGX Stock CICH",
-      "name_en": "CI Capital Holding for Financial Investments",
-      "sector": "عام",
-      "entry_date": "2026-04-09",
-      "exit_date": "2026-04-21",
-      "entry_price": 11.237,
-      "exit_price": 11.254,
-      "return_pct": 0.15,
-      "max_gain_pct": 5.72,
-      "sessions": 6,
-      "holding_days": 6,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CIEB",
@@ -3626,7 +4097,9 @@
       "holding_days": 7,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GPIM",
@@ -3643,7 +4116,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGAL",
@@ -3660,7 +4135,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EASB",
@@ -3677,7 +4154,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CCAP",
@@ -3694,7 +4173,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGAL",
@@ -3711,7 +4192,9 @@
       "holding_days": 7,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "DTPP",
@@ -3728,7 +4211,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SCTS",
@@ -3745,7 +4230,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HDBK",
@@ -3762,7 +4249,28 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "MAAL",
+      "name_ar": "EGX Stock MAAL",
+      "name_en": "Marseilla Al Masreia Al Khalegeya for Holding Investment",
+      "sector": "عام",
+      "entry_date": "2026-04-06",
+      "exit_date": "2026-04-07",
+      "entry_price": 4.997,
+      "exit_price": 4.703,
+      "return_pct": -5.89,
+      "max_gain_pct": 0.05,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ZEOT",
@@ -3779,7 +4287,9 @@
       "holding_days": 10,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TWSA",
@@ -3796,7 +4306,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CRST",
@@ -3813,7 +4325,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRMH",
@@ -3830,7 +4344,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MENA",
@@ -3847,7 +4363,28 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "ATLC",
+      "name_ar": "EGX Stock ATLC",
+      "name_en": "Al Tawfeek Leasing Company-A.T.LEASE",
+      "sector": "عام",
+      "entry_date": "2026-03-24",
+      "exit_date": "2026-03-26",
+      "entry_price": 5.108,
+      "exit_price": 5.115,
+      "return_pct": 0.15,
+      "max_gain_pct": 9.84,
+      "sessions": 2,
+      "holding_days": 2,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ABUK",
@@ -3864,7 +4401,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ARAB",
@@ -3881,24 +4420,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "ATLC",
-      "name_ar": "EGX Stock ATLC",
-      "name_en": "Al Tawfeek Leasing Company-A.T.LEASE",
-      "sector": "عام",
-      "entry_date": "2026-03-25",
-      "exit_date": "2026-03-26",
-      "entry_price": 5.508,
-      "exit_price": 5.28,
-      "return_pct": -4.14,
-      "max_gain_pct": 1.85,
-      "sessions": 1,
-      "holding_days": 1,
-      "reason": "stop_loss",
-      "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AIDC",
@@ -3915,7 +4439,28 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "TWSA",
+      "name_ar": "EGX Stock TWSA",
+      "name_en": "EGX Stock TWSA",
+      "sector": "عام",
+      "entry_date": "2026-03-11",
+      "exit_date": "2026-03-24",
+      "entry_price": 3.493,
+      "exit_price": 3.905,
+      "return_pct": 11.78,
+      "max_gain_pct": 43.6,
+      "sessions": 6,
+      "holding_days": 6,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BONY",
@@ -3932,24 +4477,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
-    },
-    {
-      "symbol": "TWSA",
-      "name_ar": "EGX Stock TWSA",
-      "name_en": "EGX Stock TWSA",
-      "sector": "عام",
-      "entry_date": "2026-03-16",
-      "exit_date": "2026-03-17",
-      "entry_price": 4.57,
-      "exit_price": 4.577,
-      "return_pct": 0.15,
-      "max_gain_pct": 9.76,
-      "sessions": 1,
-      "holding_days": 1,
-      "reason": "stop_be",
-      "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "UEGC",
@@ -3966,7 +4496,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "OBRI",
@@ -3983,7 +4515,104 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "ALCN",
+      "name_ar": "EGX Stock ALCN",
+      "name_en": "Alexandria Containers & Goods",
+      "sector": "عام",
+      "entry_date": "2026-03-10",
+      "exit_date": "2026-03-11",
+      "entry_price": 31.067,
+      "exit_price": 29.356,
+      "return_pct": -5.51,
+      "max_gain_pct": 0.0,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "MICH",
+      "name_ar": "EGX Stock MICH",
+      "name_en": "Misr Chemical Industries Ltd.",
+      "sector": "عام",
+      "entry_date": "2026-03-10",
+      "exit_date": "2026-03-11",
+      "entry_price": 38.057,
+      "exit_price": 35.047,
+      "return_pct": -7.91,
+      "max_gain_pct": 0.0,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "SKPC",
+      "name_ar": "سيدي كرير",
+      "name_en": "Sidi Kerir Petrochemicals",
+      "sector": "عام",
+      "entry_date": "2026-03-09",
+      "exit_date": "2026-03-10",
+      "entry_price": 19.279,
+      "exit_price": 18.48,
+      "return_pct": -4.14,
+      "max_gain_pct": 3.43,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "AMOC",
+      "name_ar": "أموك, اموك",
+      "name_en": "Alexandria Mineral Oils Co.",
+      "sector": "عام",
+      "entry_date": "2026-03-09",
+      "exit_date": "2026-03-10",
+      "entry_price": 8.823,
+      "exit_price": 8.836,
+      "return_pct": 0.15,
+      "max_gain_pct": 11.64,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "TWSA",
+      "name_ar": "EGX Stock TWSA",
+      "name_en": "EGX Stock TWSA",
+      "sector": "عام",
+      "entry_date": "2026-03-08",
+      "exit_date": "2026-03-09",
+      "entry_price": 2.848,
+      "exit_price": 2.853,
+      "return_pct": 0.15,
+      "max_gain_pct": 9.79,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PHTV",
@@ -4000,7 +4629,66 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "TWSA",
+      "name_ar": "EGX Stock TWSA",
+      "name_en": "EGX Stock TWSA",
+      "sector": "عام",
+      "entry_date": "2026-02-26",
+      "exit_date": "2026-03-01",
+      "entry_price": 2.572,
+      "exit_price": 2.576,
+      "return_pct": 0.15,
+      "max_gain_pct": 9.75,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "SDTI",
+      "name_ar": "EGX Stock SDTI",
+      "name_en": "Sharm Dreams Co. for Tourism Investment",
+      "sector": "عام",
+      "entry_date": "2026-02-25",
+      "exit_date": "2026-02-26",
+      "entry_price": 35.754,
+      "exit_price": 35.447,
+      "return_pct": -0.86,
+      "max_gain_pct": 10.62,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "MCQE",
+      "name_ar": "مكادي",
+      "name_en": "Misr Cement Co. (Qena)",
+      "sector": "عام",
+      "entry_date": "2026-02-25",
+      "exit_date": "2026-02-26",
+      "entry_price": 203.284,
+      "exit_price": 192.561,
+      "return_pct": -5.28,
+      "max_gain_pct": 0.83,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SKPC",
@@ -4017,7 +4705,28 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "HELI",
+      "name_ar": "مصر الجديدة, مصر الجديده",
+      "name_en": "Heliopolis Housing",
+      "sector": "عام",
+      "entry_date": "2026-02-24",
+      "exit_date": "2026-02-25",
+      "entry_price": 4.627,
+      "exit_price": 4.634,
+      "return_pct": 0.15,
+      "max_gain_pct": 7.41,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MIPH",
@@ -4034,7 +4743,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RMDA",
@@ -4051,7 +4762,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGCH",
@@ -4068,7 +4781,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "HELI",
@@ -4085,7 +4800,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GBCO",
@@ -4102,7 +4819,9 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "FCMD",
@@ -4119,7 +4838,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORHD",
@@ -4136,7 +4857,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ORAS",
@@ -4153,7 +4876,9 @@
       "holding_days": 5,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MFPC",
@@ -4170,7 +4895,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RAYA",
@@ -4187,7 +4914,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MTIE",
@@ -4204,7 +4933,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGX30",
@@ -4221,7 +4952,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COMI",
@@ -4238,7 +4971,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MASR",
@@ -4255,7 +4990,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TYCN",
@@ -4272,7 +5009,9 @@
       "holding_days": 2,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PHDC",
@@ -4289,7 +5028,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CRST",
@@ -4306,7 +5047,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EDBM",
@@ -4323,7 +5066,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EPCO",
@@ -4340,7 +5085,9 @@
       "holding_days": 9,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMIA",
@@ -4357,7 +5104,9 @@
       "holding_days": 6,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRCL",
@@ -4374,7 +5123,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "PRMH",
@@ -4391,7 +5142,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ABUK",
@@ -4408,7 +5161,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ICFC",
@@ -4425,7 +5180,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SAUD",
@@ -4442,7 +5199,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ETEL",
@@ -4459,7 +5218,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "POUL",
@@ -4476,24 +5237,28 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
-      "symbol": "EFID",
-      "name_ar": "إيديتا, ايديتا",
-      "name_en": "Edita Food Industries SAE",
+      "symbol": "ADIB",
+      "name_ar": "ابو ظبي",
+      "name_en": "Abu Dhabi Islamic Bank-Egypt",
       "sector": "عام",
-      "entry_date": "2026-02-09",
-      "exit_date": "2026-02-10",
-      "entry_price": 32.248,
-      "exit_price": 30.912,
-      "return_pct": -4.14,
-      "max_gain_pct": 0.78,
-      "sessions": 1,
-      "holding_days": 1,
-      "reason": "stop_loss",
-      "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "entry_date": "2026-01-20",
+      "exit_date": "2026-02-09",
+      "entry_price": 34.051,
+      "exit_price": 38.16,
+      "return_pct": 12.07,
+      "max_gain_pct": 21.55,
+      "sessions": 13,
+      "holding_days": 13,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RMDA",
@@ -4510,7 +5275,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "IEEC",
@@ -4527,7 +5294,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MASR",
@@ -4544,7 +5313,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MOED",
@@ -4561,7 +5332,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SPIN",
@@ -4578,7 +5351,9 @@
       "holding_days": 14,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "BINV",
@@ -4595,7 +5370,9 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CICH",
@@ -4612,7 +5389,9 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CIEB",
@@ -4629,7 +5408,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SWDY",
@@ -4646,7 +5427,47 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "UEGC",
+      "name_ar": "EGX Stock UEGC",
+      "name_en": "El-Saeed Contracting & Real Estate Investment Co. SCCD",
+      "sector": "عام",
+      "entry_date": "2026-01-22",
+      "exit_date": "2026-01-25",
+      "entry_price": 1.612,
+      "exit_price": 1.546,
+      "return_pct": -4.14,
+      "max_gain_pct": 0.47,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_loss",
+      "exit_reason": "وقف الخسارة الأولي (-4%)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
+    },
+    {
+      "symbol": "FNAR",
+      "name_ar": "El Fanar Contracting Construction Trade & Land Reclamation",
+      "name_en": "El Fanar Contracting Construction Trade & Land Reclamation",
+      "sector": "عام",
+      "entry_date": "2026-01-20",
+      "exit_date": "2026-01-21",
+      "entry_price": 7.251,
+      "exit_price": 7.239,
+      "return_pct": -0.16,
+      "max_gain_pct": 7.57,
+      "sessions": 1,
+      "holding_days": 1,
+      "reason": "stop_be",
+      "exit_reason": "وقف التعادل (حماية رأس المال)",
+      "trigger_type": "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EGAL",
@@ -4663,7 +5484,9 @@
       "holding_days": 15,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "UEGC",
@@ -4680,7 +5503,9 @@
       "holding_days": 13,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "JUFO",
@@ -4697,7 +5522,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EFIH",
@@ -4714,7 +5541,9 @@
       "holding_days": 4,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ABUK",
@@ -4731,7 +5560,9 @@
       "holding_days": 3,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ADIB",
@@ -4748,7 +5579,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COMI",
@@ -4765,7 +5598,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "UNIP",
@@ -4782,7 +5617,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "FNAR",
@@ -4799,7 +5636,9 @@
       "holding_days": 1,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "SVCE",
@@ -4816,7 +5655,9 @@
       "holding_days": 12,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "RREI",
@@ -4833,7 +5674,9 @@
       "holding_days": 3,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ELNA",
@@ -4850,7 +5693,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "CLHO",
@@ -4867,7 +5712,9 @@
       "holding_days": 11,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MCQE",
@@ -4884,7 +5731,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "COMI",
@@ -4901,7 +5750,9 @@
       "holding_days": 21,
       "reason": "max_time",
       "exit_reason": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "EHDR",
@@ -4918,7 +5769,9 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "MFPC",
@@ -4935,7 +5788,9 @@
       "holding_days": 8,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AREH",
@@ -4952,7 +5807,9 @@
       "holding_days": 4,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "TMGH",
@@ -4969,7 +5826,9 @@
       "holding_days": 2,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "GBCO",
@@ -4986,7 +5845,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ISPH",
@@ -5003,7 +5864,9 @@
       "holding_days": 1,
       "reason": "stop_loss",
       "exit_reason": "وقف الخسارة الأولي (-4%)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ROTO",
@@ -5020,7 +5883,9 @@
       "holding_days": 8,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة"
+      "trigger_type": "اختراق قمة 20 جلسة مع انفجار سيولة",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "ELKA",
@@ -5037,7 +5902,9 @@
       "holding_days": 6,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     },
     {
       "symbol": "AMER",
@@ -5054,1010 +5921,664 @@
       "holding_days": 5,
       "reason": "stop_be",
       "exit_reason": "وقف التعادل (حماية رأس المال)",
-      "trigger_type": "ارتداد زخم من متوسط 10 أيام"
+      "trigger_type": "ارتداد زخم من متوسط 10 أيام",
+      "entry_mode": null,
+      "observed_at": null
     }
   ],
-  "total_active": 1,
-  "total_closed": 1141,
-  "as_of": "2026-10-07",
-  "phase": "close",
-  "session_complete": true,
-  "computed_at": "2026-10-07T23:47:13.061496+00:00",
+  "total_active": 0,
+  "total_closed": 1182,
+  "as_of": "2026-10-19",
+  "phase": "midday",
+  "session_complete": false,
+  "computed_at": "2026-10-19T09:28:19.181909+00:00",
   "signal_audit": [
     {
-      "symbol": "ORAS",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.443,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.021,
-      "signal": false
-    },
-    {
-      "symbol": "ORHD",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.662,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.7126,
-      "signal": false
-    },
-    {
-      "symbol": "AMOC",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.72,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0063,
-      "signal": false
-    },
-    {
-      "symbol": "FWRY",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 3.073,
+      "symbol": "NIPH",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.686,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": true,
-      "return_20": -0.0073,
+      "return_20": -0.0933,
       "signal": false
     },
     {
-      "symbol": "ARAB",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.477,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0748,
-      "signal": false
-    },
-    {
-      "symbol": "MBSC",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.795,
+      "symbol": "MPCI",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.262,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1125,
-      "signal": false
-    },
-    {
-      "symbol": "EFIH",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.776,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
       "positive_candle": true,
-      "return_20": 0.0521,
+      "return_20": -0.2526,
       "signal": false
     },
     {
       "symbol": "EGAL",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.057,
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.564,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": true,
+      "return_20": -0.2102,
+      "signal": false
+    },
+    {
+      "symbol": "POUL",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 4.211,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": true,
+      "return_20": -0.7297,
+      "signal": false
+    },
+    {
+      "symbol": "PHGC",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.206,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.084,
+      "return_20": -0.0115,
       "signal": false
     },
     {
-      "symbol": "SIPC",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 3.384,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0164,
-      "signal": false
-    },
-    {
-      "symbol": "MCQE",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.71,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.1822,
-      "signal": false
-    },
-    {
-      "symbol": "AIH",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.29,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.045,
-      "signal": false
-    },
-    {
-      "symbol": "VLMRA",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.559,
+      "symbol": "WKOL",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.614,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1218,
+      "return_20": -0.2672,
       "signal": false
     },
     {
-      "symbol": "DAPH",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.916,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.1798,
-      "signal": false
-    },
-    {
-      "symbol": "QNBE",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.506,
+      "symbol": "CPCI",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 2.756,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0184,
+      "return_20": 0.0214,
       "signal": false
     },
     {
-      "symbol": "VALU",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.332,
+      "symbol": "EBSC",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.904,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": 0.0312,
+      "return_20": -0.3043,
       "signal": false
     },
     {
-      "symbol": "ELSH",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.312,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.1058,
-      "signal": false
-    },
-    {
-      "symbol": "AJWA",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.237,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0962,
-      "signal": false
-    },
-    {
-      "symbol": "LCSW",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.297,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.014,
-      "signal": false
-    },
-    {
-      "symbol": "UNIT",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.67,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0529,
-      "signal": false
-    },
-    {
-      "symbol": "TWSA",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 7.726,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.1841,
-      "signal": false
-    },
-    {
-      "symbol": "INFI",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.359,
+      "symbol": "SCFM",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.918,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1202,
+      "return_20": -0.2063,
       "signal": false
     },
     {
-      "symbol": "SNFC",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.346,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0699,
-      "signal": false
-    },
-    {
-      "symbol": "IRON",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.383,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0153,
-      "signal": false
-    },
-    {
-      "symbol": "ETRS",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.26,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.034,
-      "signal": false
-    },
-    {
-      "symbol": "ROTO",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.207,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0546,
-      "signal": false
-    },
-    {
-      "symbol": "CNFN",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.902,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0998,
-      "signal": false
-    },
-    {
-      "symbol": "ACAP",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.207,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1275,
-      "signal": false
-    },
-    {
-      "symbol": "MBEG",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.812,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.1201,
-      "signal": false
-    },
-    {
-      "symbol": "DOMT",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.216,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1501,
-      "signal": false
-    },
-    {
-      "symbol": "UEFM",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.987,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0057,
-      "signal": false
-    },
-    {
-      "symbol": "MENA",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.378,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.0059,
-      "signal": false
-    },
-    {
-      "symbol": "EDFM",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 2.105,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0144,
-      "signal": false
-    },
-    {
-      "symbol": "APSW",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.584,
+      "symbol": "SCTS",
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.37,
       "liquid": false,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0047,
+      "return_20": -0.2219,
       "signal": false
     },
     {
       "symbol": "EOSB",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.538,
-      "liquid": false,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0,
-      "signal": false
-    },
-    {
-      "symbol": "FAITA",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.542,
-      "liquid": false,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0192,
-      "signal": false
-    },
-    {
-      "symbol": "CFGH",
-      "date": "2026-10-07",
-      "breadth": 0.397,
-      "volume_ratio": 1.838,
+      "date": "2026-10-19",
+      "breadth": 0.1015,
+      "volume_ratio": 1.462,
       "liquid": false,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1,
+      "return_20": -0.0427,
+      "signal": false
+    },
+    {
+      "symbol": "CCAP",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.306,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1468,
+      "signal": false
+    },
+    {
+      "symbol": "KORA",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.577,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.5611,
       "signal": false
     },
     {
       "symbol": "ORHD",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 3.154,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.7154,
-      "signal": false
-    },
-    {
-      "symbol": "CERA",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.523,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.699,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1754,
-      "signal": false
-    },
-    {
-      "symbol": "AMOC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.286,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0077,
-      "signal": false
-    },
-    {
-      "symbol": "HRHO",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 3.204,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0344,
+      "return_20": -0.7683,
       "signal": false
     },
     {
       "symbol": "GBCO",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.111,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0457,
-      "signal": false
-    },
-    {
-      "symbol": "DTPP",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.82,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.043,
-      "signal": false
-    },
-    {
-      "symbol": "FWRY",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.762,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.239,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0321,
+      "return_20": -0.0652,
       "signal": false
     },
     {
-      "symbol": "BIOC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.614,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0587,
-      "signal": false
-    },
-    {
-      "symbol": "RUBX",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.521,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.3621,
-      "signal": false
-    },
-    {
-      "symbol": "EMFD",
-      "date": "2026-10-06",
-      "breadth": 0.42,
+      "symbol": "ARAB",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
       "volume_ratio": 1.53,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1239,
+      "return_20": -0.0234,
       "signal": false
     },
     {
-      "symbol": "MBSC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.257,
+      "symbol": "ZMID",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.998,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0733,
+      "return_20": -0.2849,
       "signal": false
     },
     {
-      "symbol": "ARAB",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.784,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0909,
-      "signal": false
-    },
-    {
-      "symbol": "ADIB",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.421,
+      "symbol": "EGCH",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.351,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0703,
+      "return_20": -0.2136,
       "signal": false
     },
     {
-      "symbol": "EFIH",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.485,
+      "symbol": "EGAL",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.854,
       "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0416,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2381,
       "signal": false
     },
     {
-      "symbol": "EAST",
-      "date": "2026-10-06",
-      "breadth": 0.42,
+      "symbol": "SCEM",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.422,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.0974,
+      "signal": false
+    },
+    {
+      "symbol": "MCQE",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.408,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2556,
+      "signal": false
+    },
+    {
+      "symbol": "MCRO",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.528,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2426,
+      "signal": false
+    },
+    {
+      "symbol": "UEGC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.463,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1299,
+      "signal": false
+    },
+    {
+      "symbol": "EFID",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.578,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.4103,
+      "signal": false
+    },
+    {
+      "symbol": "ORWE",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.402,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.0675,
+      "signal": false
+    },
+    {
+      "symbol": "BONY",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.219,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1161,
+      "signal": false
+    },
+    {
+      "symbol": "ASPI",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.293,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.3196,
+      "signal": false
+    },
+    {
+      "symbol": "RMDA",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.48,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2106,
+      "signal": false
+    },
+    {
+      "symbol": "HDBK",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.34,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1988,
+      "signal": false
+    },
+    {
+      "symbol": "MTIE",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.226,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1263,
+      "signal": false
+    },
+    {
+      "symbol": "INFI",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.958,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.0687,
+      "signal": false
+    },
+    {
+      "symbol": "JUFO",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.358,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1367,
+      "signal": false
+    },
+    {
+      "symbol": "MPRC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.95,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1345,
+      "signal": false
+    },
+    {
+      "symbol": "GGCC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 2.376,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2775,
+      "signal": false
+    },
+    {
+      "symbol": "ELKA",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.571,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1657,
+      "signal": false
+    },
+    {
+      "symbol": "AALR",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 2.693,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.3163,
+      "signal": false
+    },
+    {
+      "symbol": "IRON",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.657,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1215,
+      "signal": false
+    },
+    {
+      "symbol": "SUGR",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.333,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.071,
+      "signal": false
+    },
+    {
+      "symbol": "PHGC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 4.219,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": true,
+      "return_20": -0.0115,
+      "signal": false
+    },
+    {
+      "symbol": "MIPH",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.056,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1228,
+      "signal": false
+    },
+    {
+      "symbol": "ASCM",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.722,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2424,
+      "signal": false
+    },
+    {
+      "symbol": "AREH",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
       "volume_ratio": 1.321,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.1796,
-      "signal": false
-    },
-    {
-      "symbol": "OCDI",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.227,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1895,
-      "signal": false
-    },
-    {
-      "symbol": "SIPC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.15,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0035,
-      "signal": false
-    },
-    {
-      "symbol": "AMER",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.891,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0987,
-      "signal": false
-    },
-    {
-      "symbol": "AIH",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.961,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.03,
-      "signal": false
-    },
-    {
-      "symbol": "MCQE",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.348,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.2,
-      "signal": false
-    },
-    {
-      "symbol": "EXPA",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 4.491,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.2413,
-      "signal": false
-    },
-    {
-      "symbol": "PRDC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.025,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1536,
-      "signal": false
-    },
-    {
-      "symbol": "DAPH",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 6.155,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.1986,
-      "signal": false
-    },
-    {
-      "symbol": "QNBE",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.256,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.0148,
-      "signal": false
-    },
-    {
-      "symbol": "VALU",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 4.566,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0389,
-      "signal": false
-    },
-    {
-      "symbol": "AIDC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.26,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0662,
-      "signal": false
-    },
-    {
-      "symbol": "LCSW",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 4.516,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0057,
-      "signal": false
-    },
-    {
-      "symbol": "OLFI",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 3.441,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.091,
-      "signal": false
-    },
-    {
-      "symbol": "AJWA",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.434,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0935,
-      "signal": false
-    },
-    {
-      "symbol": "AMIA",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.615,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0189,
-      "signal": false
-    },
-    {
-      "symbol": "INFI",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.891,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.091,
-      "signal": false
-    },
-    {
-      "symbol": "ACAP",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.246,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0629,
-      "signal": false
-    },
-    {
-      "symbol": "RREI",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.387,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.0947,
-      "signal": false
-    },
-    {
-      "symbol": "CPME",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.54,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": 0.0972,
-      "signal": false
-    },
-    {
-      "symbol": "ETRS",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.241,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0324,
-      "signal": false
-    },
-    {
-      "symbol": "ICID",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.44,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0006,
-      "signal": false
-    },
-    {
-      "symbol": "RACC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 3.009,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0693,
+      "return_20": -0.2345,
       "signal": false
     },
     {
       "symbol": "MBEG",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 3.605,
-      "liquid": true,
-      "trend_aligned": true,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.1377,
-      "signal": false
-    },
-    {
-      "symbol": "ECAP",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.843,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.548,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0861,
+      "return_20": -0.2769,
       "signal": false
     },
     {
-      "symbol": "SMFR",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 2.949,
-      "liquid": true,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0851,
-      "signal": false
-    },
-    {
-      "symbol": "RTVC",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.618,
+      "symbol": "ATLC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.637,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": false,
-      "return_20": -0.0923,
+      "return_20": -0.3333,
+      "signal": false
+    },
+    {
+      "symbol": "WKOL",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.674,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2437,
+      "signal": false
+    },
+    {
+      "symbol": "SPIN",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.219,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1934,
+      "signal": false
+    },
+    {
+      "symbol": "EALR",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.401,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.238,
+      "signal": false
+    },
+    {
+      "symbol": "GSSC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.274,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.164,
+      "signal": false
+    },
+    {
+      "symbol": "EBSC",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.517,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.2696,
       "signal": false
     },
     {
       "symbol": "SEIG",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 4.789,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 3.882,
       "liquid": true,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": true,
-      "return_20": -0.0529,
+      "return_20": -0.1793,
+      "signal": false
+    },
+    {
+      "symbol": "UBEE",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 2.41,
+      "liquid": true,
+      "trend_aligned": false,
+      "breakout": false,
+      "positive_candle": false,
+      "return_20": -0.1048,
       "signal": false
     },
     {
       "symbol": "UTOP",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.409,
-      "liquid": false,
-      "trend_aligned": false,
-      "breakout": false,
-      "positive_candle": false,
-      "return_20": -0.1319,
-      "signal": false
-    },
-    {
-      "symbol": "APSW",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.611,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.362,
       "liquid": false,
       "trend_aligned": false,
       "breakout": false,
       "positive_candle": true,
-      "return_20": -0.0058,
+      "return_20": -0.2178,
       "signal": false
     },
     {
-      "symbol": "RAKT",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 4.106,
-      "liquid": false,
-      "trend_aligned": false,
-      "breakout": true,
-      "positive_candle": true,
-      "return_20": 0.0622,
-      "signal": false
-    },
-    {
-      "symbol": "MOIL",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.486,
+      "symbol": "NAHO",
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.635,
       "liquid": false,
       "trend_aligned": false,
       "breakout": false,
-      "positive_candle": false,
-      "return_20": 0.0149,
+      "positive_candle": true,
+      "return_20": -0.037,
       "signal": false
     },
     {
       "symbol": "TRTO",
-      "date": "2026-10-06",
-      "breadth": 0.42,
-      "volume_ratio": 1.475,
+      "date": "2026-10-18",
+      "breadth": 0.2081,
+      "volume_ratio": 1.287,
       "liquid": false,
-      "trend_aligned": true,
+      "trend_aligned": false,
       "breakout": false,
-      "positive_candle": true,
-      "return_20": -0.0282,
+      "positive_candle": false,
+      "return_20": -0.0154,
       "signal": false
     }
   ]

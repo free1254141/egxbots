@@ -123,10 +123,21 @@ export async function saveAdminConfig(config: AdminScannerConfig, client?: any) 
   });
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /** Send individual Telegram message with fallback to relay URL */
 export async function sendTelegramAlert(chatId: string | number, text: string): Promise<boolean> {
-  const token = process.env.ARTORO_AI_BOT?.trim();
-  if (!token || !chatId) return false;
+  const token = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
+  if (!token || !chatId) {
+    console.warn(`[SCANNER_ALERTS] Missing bot token or chatId: token=${Boolean(token)}, chatId=${chatId}`);
+    return false;
+  }
 
   const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
   const payload = {
@@ -147,8 +158,10 @@ export async function sendTelegramAlert(chatId: string | number, text: string): 
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) return true;
+      console.warn(`[SCANNER_ALERTS] Telegram send failed from ${base}:`, data?.description || res.statusText);
       if (base === relayUrl) continue;
-    } catch {
+    } catch (err: any) {
+      console.warn(`[SCANNER_ALERTS] Telegram send exception from ${base}:`, err?.message || err);
       if (base === relayUrl) continue;
     }
   }
@@ -414,7 +427,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       if (userDisclosures.length > 0) {
         lines.push(`📢 <b>إفصاحات وأخبار رسمية حديثة:</b>`);
         for (const d of userDisclosures) {
-          lines.push(`• ${d.title}`);
+          lines.push(`• ${escapeHtml(d.title)}`);
         }
         lines.push(``);
       }
