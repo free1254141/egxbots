@@ -371,10 +371,7 @@ export async function analyzeImage(
     diagnosticCapture?: (type: string, data: any) => void
 ): Promise<{ vision: VisionContext | null; error: string | null }> {
     const deepSeekKey = getDeepSeekApiKey();
-    const nvidiaKeys = getNvidiaApiKeys();
-    const deepSeekVisionModels = AI_CONFIG.models.planner.vision.filter(model => model === "deepseek-flash");
-    const nvidiaVisionModels = ["meta/llama-3.2-11b-vision-instruct"];
-    const visionModels = [...deepSeekVisionModels, ...nvidiaVisionModels];
+    const visionModels = ["deepseek-flash"];
 
     // System prompt goes in `system` role — putting it in the user message causes prose output.
     const imageUrls = (Array.isArray(imageUrl) ? imageUrl : [imageUrl]).filter(Boolean);
@@ -514,20 +511,9 @@ export async function analyzeImage(
     // timeout or HTTP failure. Both keys can hit a congested backend, so the
     // second attempt is bounded by whatever time remains in the total budget.
     const usableKeys = apiKeys.filter(Boolean).slice(0, 2);
-    const attempts: Array<{ provider: "deepseek" | "nvidia"; model: string; key: string }> = [];
-    for (const model of visionModels) {
-        const keys = model === "deepseek-flash" ? (deepSeekKey ? [deepSeekKey] : []) : nvidiaKeys.slice(0, 2);
-        const provider = model === "deepseek-flash" ? "deepseek" : "nvidia";
-        for (const key of keys) attempts.push({ provider, model, key });
-    }
-    // Preserve caller-supplied fallback keys (normally NVIDIA keys supplied by
-    // the route) after the provider-specific keys. This also keeps retry order
-    // explicit rather than silently dropping a route-level credential.
-    // Legacy fallback shape retained for route-level NVIDIA keys: for (const key of usableKeys)
-    for (const key of usableKeys) {
-        if (!attempts.some(attempt => attempt.key === key)) {
-            attempts.push({ provider: "nvidia", model: nvidiaVisionModels[0], key });
-        }
+    const attempts: Array<{ provider: "deepseek"; model: string; key: string }> = [];
+    if (deepSeekKey) {
+        attempts.push({ provider: "deepseek", model: "deepseek-flash", key: deepSeekKey });
     }
     // `visionModels` documents the complete configured model set; attempts are
     // ordered separately so DeepSeek is tried before the NVIDIA fallback.

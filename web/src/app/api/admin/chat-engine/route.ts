@@ -29,10 +29,11 @@ export async function POST(req: NextRequest) {
         const apiKeys = [...getNvidiaApiKeys(), ...(deepSeekKey ? [deepSeekKey] : [])];
 
         const sessionState = { current_symbol: null, last_symbols: [], summary: null, current_sector: null };
+        const images = Array.isArray(body.images) ? body.images : (typeof body.image === "string" ? [body.image] : []);
         const skipReview = body.skipReview !== undefined ? Boolean(body.skipReview) : true;
         const result = await runPipeline(
             message,
-            [],
+            images,
             sessionState,
             null,
             [],

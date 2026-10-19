@@ -455,13 +455,15 @@ export async function POST(req: NextRequest) {
 
         const rawImages: string[] = Array.isArray(images) && images.length > 0 
             ? images 
-            : (typeof image === "string" && image.startsWith("data:image/") ? [image] : []);
+            : (typeof image === "string" && (image.startsWith("data:image/") || image.startsWith("http://") || image.startsWith("https://")) ? [image] : []);
         
         const allowedImageMime = /^data:image\/(jpeg|jpg|png|webp);base64,/i;
         const maxImageBytes = 5 * 1024 * 1024;
-        const imageList = rawImages.filter(img =>
-            typeof img === "string" && allowedImageMime.test(img) && Buffer.from(img.split(",", 2)[1] || "", "base64").byteLength <= maxImageBytes
-        ).slice(0, 4);
+        const imageList = rawImages.filter(img => {
+            if (typeof img !== "string") return false;
+            if (img.startsWith("http://") || img.startsWith("https://")) return true;
+            return allowedImageMime.test(img) && Buffer.from(img.split(",", 2)[1] || "", "base64").byteLength <= maxImageBytes;
+        }).slice(0, 4);
         if (rawImages.length > 4 || imageList.length !== rawImages.length) {
             return NextResponse.json({ detail: "Images must be JPEG, PNG, or WebP and no larger than 5 MB each; maximum 4 images." }, { status: 400 });
         }
