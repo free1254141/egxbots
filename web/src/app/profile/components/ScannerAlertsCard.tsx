@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ScannerStatsCalendar from "./ScannerStatsCalendar";
+import ScannerDefinitionsGuide from "./ScannerDefinitionsGuide";
 
 interface ScannerPreferences {
   volume_surge: boolean;
@@ -414,6 +415,9 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         lastScan={lastScan}
         isAr={isAr}
       />
+
+      {/* ── Scanners Technical Guide & Definitions ── */}
+      <ScannerDefinitionsGuide isAr={isAr} />
     </div>
   );
 }
