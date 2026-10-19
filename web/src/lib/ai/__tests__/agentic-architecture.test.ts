@@ -1694,6 +1694,112 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const reasons = checkAgenticDraft(draftCommentary, [stockEv as any, levelsEv as any]);
         expect(reasons).toEqual([]);
     });
+
+    test("multi-stock comparison table with short dates, combined price/change, EPS, and secondary level distances passes checkAgenticDraft with 0 reasons", () => {
+        const afmcStock = {
+            tool: "get_stock",
+            symbols: ["AFMC"],
+            availability: "available",
+            data: {
+                stocks: [{
+                    symbol: "AFMC",
+                    date: "2026-10-18",
+                    close: 121.69,
+                    change_pct: -8.33,
+                    rsi_14: 36.91,
+                    macd: -10.41,
+                    eps: 1.6607,
+                    pe_ratio: 73.28,
+                    market_cap: 1500000000
+                }]
+            }
+        };
+        const afmcLive = {
+            tool: "get_live_quote",
+            symbols: ["AFMC"],
+            availability: "available",
+            data: {
+                stocks: [{
+                    symbol: "AFMC",
+                    close: 115,
+                    change_pct: -5.5,
+                    rsi_14: 26.95,
+                    live_quote_available: true
+                }]
+            }
+        };
+        const abukStock = {
+            tool: "get_stock",
+            symbols: ["ABUK"],
+            availability: "available",
+            data: {
+                stocks: [{
+                    symbol: "ABUK",
+                    date: "2026-10-18",
+                    close: 83.2,
+                    change_pct: -5.11,
+                    rsi_14: 41.64,
+                    macd: -0.39,
+                    eps: 8.5,
+                    pe_ratio: 9.78,
+                    market_cap: 105000000000
+                }]
+            }
+        };
+        const abukLive = {
+            tool: "get_live_quote",
+            symbols: ["ABUK"],
+            availability: "available",
+            data: {
+                stocks: [{
+                    symbol: "ABUK",
+                    close: 81.34,
+                    change_pct: -2.24,
+                    rsi_14: 39.97,
+                    live_quote_available: true
+                }]
+            }
+        };
+        const fwryLevels = {
+            tool: "get_stock_levels",
+            symbols: ["FWRY"],
+            availability: "available",
+            data: {
+                levels: [{
+                    symbol: "FWRY",
+                    date: "2026-10-18",
+                    close: 18.4,
+                    support: 17.5,
+                    resistance: 19.36,
+                    support_2: 16.8,
+                    resistance_2: 19.81
+                }]
+            }
+        };
+
+        const comparisonDraft = `### 📊 مقارنة الأسهم (AFMC vs ABUK)
+| وجه المقارنة | AFMC | ABUK |
+|---|---|---|
+| تاريخ الجلسة | 18-10 | 18-10 |
+| السعر الحالي والتغير | 115 ج.م (-5.5%) | 81.34 ج.م (-2.24%) |
+| إغلاق جلسة 18-10 | 121.69 (-8.33%) | 83.20 (-5.11%) |
+| مؤشر القوة النسبية (RSI) | - 26.95 | - 39.97 |
+| ربحية السهم (EPS) | 1.6607 ج.م | 8.5 ج.م |
+| مضاعف الربحية (P/E) | 73.28 | 9.78 |`;
+
+        const evidence = [afmcStock as any, afmcLive as any, abukStock as any, abukLive as any, fwryLevels as any];
+        const reasons = checkAgenticDraft(comparisonDraft, evidence);
+        expect(reasons).toEqual([]);
+
+        // Also verify distance from support_2 and resistance_2 for FWRY
+        const fwryFacts = agenticFacts([fwryLevels as any]);
+        const distSup2 = fwryFacts.find(f => f.symbol === "FWRY" && f.field === "distance_from_support_pct" && f.id.includes("support_2"));
+        const distRes2 = fwryFacts.find(f => f.symbol === "FWRY" && f.field === "distance_from_resistance_pct" && f.id.includes("resistance_2"));
+        expect(distSup2).toBeDefined();
+        expect(distRes2).toBeDefined();
+        expect(Number(distSup2!.value.toFixed(1))).toBe(-8.7);
+        expect(Number(distRes2!.value.toFixed(2))).toBe(7.66);
+    });
 });
 
 

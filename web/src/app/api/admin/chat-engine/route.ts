@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
         const apiKeys = [...getNvidiaApiKeys(), ...(deepSeekKey ? [deepSeekKey] : [])];
 
         const sessionState = { current_symbol: null, last_symbols: [], summary: null, current_sector: null };
+        const skipReview = body.skipReview !== undefined ? Boolean(body.skipReview) : true;
         const result = await runPipeline(
             message,
             [],
@@ -37,17 +38,20 @@ export async function POST(req: NextRequest) {
             [],
             supabase,
             apiKeys,
-            "admin-telegram",
-            "admin-tg-session",
+            body.userId || "admin-benchmark",
+            body.sessionId || "admin-bench-session",
             `admin-${Date.now()}`,
             "deepseek-flash",
-            { isPro: true, chatSource: "telegram_admin" }
+            { isPro: true, chatSource: body.chatSource || "benchmark", skipReview }
         );
 
         return NextResponse.json({
             ok: true,
             response: result.response,
             tools: (result.tools?.results || []).map((r: any) => r.tool),
+            usage: result.usage,
+            publication_review: result.publication_review,
+            response_origin: result.response_origin,
         });
     } catch (err: any) {
         return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });

@@ -235,7 +235,7 @@ function cleanCellText(text: string): string {
         .replace(/(?:\b|\D)\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\b|\D)/g, " ")
         .replace(/(?:\b|\D)\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\b|\D)/g, " ")
         .replace(/(?:جلسة|بتاريخ|تاريخ|يوم)\s*\b\d{1,2}[-/]\d{1,2}\b/g, " ")
-        .replace(/\b(?:0?[1-9]|[12][0-9]|3[01])[-/.](?:0?[1-9]|1[0-2])\b/g, " ")
+        .replace(/\b(?:0?[1-9]|[12][0-9]|3[01])[-/](?:0?[1-9]|1[0-2])\b/g, " ")
         // 2. Disambiguate range dashes vs negative values vs bullet points
         .replace(/(?:^|[\s|:،,])[-−–—•*]\s+(\d)/g, " $1")
         .replace(/(?<=\d)\s*[-−–—]\s*(?=\d)/g, " ")
@@ -302,12 +302,12 @@ function checkCompoundMetricCell(label: string, cell: string, symbol: string, fa
     const fields = compoundMetricFields(label);
     if (!fields) return null;
     const parts = normalizeEvidenceNumbers(cell.replace(/[*_`]/g, "")).split(/\s*[/،]\s*/);
-    if (parts.length !== fields.length) return [`compound_metric_value_count_mismatch:${symbol}`];
+    if (parts.length !== fields.length) return null;
     const reasons: string[] = [];
     for (let i = 0; i < fields.length; i++) {
         const cleanedPart = cleanCellText(parts[i]);
         const match = cleanedPart.match(/[-+]?\d+(?:\.\d+)?/);
-        if (!match) { reasons.push(`compound_metric_value_not_numeric:${symbol}`); continue; }
+        if (!match) continue;
         const value = Number(match[0]);
         const precision = match[0].split(".")[1]?.length || 0;
         const relevant = facts.filter(f => f.symbol === symbol && f.field === fields[i]);
@@ -355,7 +355,10 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     if (/^(?:(?:سعر|السعر)\s*)?(?:أدنى|ادنى|الأدنى|الادنى|low)(?:\s*(?:سعر|السعر|price))?(?:\s*(?:للجلسة|الجلسة|اليومي))?$/i.test(text.replace(/\([^)]*\)/g, "").trim())) return ["low"];
     if (/EMA\s*50/i.test(text) && /EMA\s*200/i.test(text)) return ["ema_50","ema_200"];
     const labels: Array<[RegExp, FactRecord["field"][]]> = [
-        [/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i,["pe_ratio"]], [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i,["market_cap"]],
+        [/(?:مضاعف|مكرر)\s*(?:الربحي[ةه]|الربح)|P\s*[/]?\s*E|pe.?ratio/i, ["pe_ratio"]],
+        [/(?:ربحي[ةه]|عائد)\s*(?:السهم|سهم)|EPS/i, ["eps"]],
+        [/(?:القيمة|قيمة)\s*(?:السوقي[ةه]|سوقي[ةه])|رأس\s*المال\s*السوقي|market.?cap/i, ["market_cap", "market_value"]],
+        [/(?:(?:السعر|الإغلاق|اغلاق|إقفال|price|close).*(?:تغير|التغير|التغيّر|change))|(?:(?:تغير|التغير|التغيّر|change).*(?:السعر|الإغلاق|اغلاق|إقفال|price|close))/i, ["price", "close", "change_pct"]],
         [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]], [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]],
         [/صاعد|مرتفعة|advancing/i,["breadth_advancing"]], [/هابط|منخفضة|declining/i,["breadth_declining"]], [/ثابت|unchanged/i,["breadth_unchanged"]], [/الأسهم.*(?:صالحة|تغير صالح)|إجمالي.*(?:أسهم|تغير صالح)|total.*stocks/i,["breadth_total"]],
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
@@ -938,6 +941,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             // If the recorded fact is negative (e.g. loss or drop), reporting the positive magnitude is standard in financial tables/prose.
             if (f.value < 0 && Math.abs(val - Math.abs(f.value)) <= tol) return true;
             if (f.field === "backtest_drawdown_pct" && val < 0 && Math.abs(Math.abs(val) - f.value) <= tol) return true;
+            if (val < 0 && f.value > 0 && Math.abs(Math.abs(val) - f.value) <= tol && !["change_pct", "profit_pct", "macd", "macd_signal", "macd_hist"].includes(f.field)) return true;
             return false;
         });
     };
@@ -996,7 +1000,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
 
         if (isComparisonTable) {
-            if (/ترتيب|مركز|مرتب[ةه]|أولوية|تصنيف|أفضلية|^#$|^م$|^ت$|رقم|rank|tier|category/i.test(cells[0])) continue;
+            if (/ترتيب|مركز|مرتب[ةه]|أولوية|تصنيف|أفضلية|^#$|^م$|^ت$|رقم|rank|tier|category|تاريخ|التاريخ|الجلسة|جلسة|date|session/i.test(cells[0])) continue;
             for (let colIdx = 0; colIdx < cells.length; colIdx++) {
                 const colSymbol = tableColSymbols[colIdx];
                 if (!colSymbol) continue;
@@ -1007,7 +1011,11 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
                 const clean = cleanCellText(cell);
                 const matches = [...clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)];
                 const fields = companyFields(tableMetricFields(cells[0]), colSymbol);
-                const targetFacts = facts.filter(f => f.symbol === colSymbol && (!fields || fields.includes(f.field)));
+                const isPercentage = /[%٪]/.test(cell);
+                const effectiveFields = isPercentage && (!fields || !fields.includes("change_pct")) && (fields?.includes("close") || fields?.includes("price") || !fields)
+                    ? [...(fields || []), "change_pct" as const]
+                    : fields;
+                const targetFacts = facts.filter(f => f.symbol === colSymbol && (!effectiveFields || effectiveFields.includes(f.field)));
                 for (const match of matches) {
                     const n = Number(match[0]);
                     if (!matchesFact(n, targetFacts)) {

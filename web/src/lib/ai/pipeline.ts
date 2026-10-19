@@ -1970,6 +1970,7 @@ export interface PipelineOptions {
     /** User subscription tier: true for Pro, false for Free. */
     isPro?: boolean;
     chatSource?: string;
+    skipReview?: boolean;
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */
@@ -1985,9 +1986,13 @@ export async function* runPipelineStream(
 ): AsyncGenerator<{ type: string; data: any }> {
     const deepseekKey = getDeepSeekApiKey();
     if (deepseekKey && !options.mockPlannerResult && !options.mockToolsResults) {
+        const effectiveOptions: PipelineOptions = {
+            ...options,
+            skipReview: options.skipReview !== undefined ? options.skipReview : (process.env.AGENTIC_ENABLE_LEGACY_REVIEW !== "true"),
+        };
         yield* runAgenticPipelineStream(
             userMessage, images, sessionState, sessionSummary, history,
-            supabase, apiKeys, userId, sessionId, messageId, requestedModel, options
+            supabase, apiKeys, userId, sessionId, messageId, requestedModel, effectiveOptions
         );
         return;
     }

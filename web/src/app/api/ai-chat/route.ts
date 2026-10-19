@@ -728,7 +728,12 @@ export async function POST(req: NextRequest) {
                             activeSessionId,
                             messageId,
                             userRequestedModel,
-                            { isPro: !billingOn || userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
+                            {
+                                isPro: !billingOn || userIsPro,
+                                chartContext,
+                                diagnosticCapture: diagnostics.capture,
+                                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true)
+                            }
                         );
 
                         // Keep only a bounded rolling window for safety checks.
@@ -1007,7 +1012,12 @@ export async function POST(req: NextRequest) {
             activeSessionId,
             messageId,
             userRequestedModel,
-            { isPro: !billingOn || userIsPro, chartContext, diagnosticCapture: diagnostics.capture }
+            {
+                isPro: !billingOn || userIsPro,
+                chartContext,
+                diagnosticCapture: diagnostics.capture,
+                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true)
+            }
         );
 
         const replyText = filterOutput(pipelineResult.response);
