@@ -1,4 +1,9 @@
-import { calculateScannerTradePlan, SCANNER_PROFILES, formatTelegramTradePlanSnippet } from "../scannerTradePlan";
+import {
+  calculateScannerTradePlan,
+  SCANNER_PROFILES,
+  formatTelegramTradePlanSnippet,
+  deriveTrackedSignalsFromHistory
+} from "../scannerTradePlan";
 
 describe("scannerTradePlan utility", () => {
   it("calculates accurate targets and stop loss for Volume Surge", () => {
@@ -39,5 +44,32 @@ describe("scannerTradePlan utility", () => {
     const snippet = formatTelegramTradePlanSnippet(20.0, "volume_surge");
     expect(snippet).toContain("🎯 <b>الهدف 1:</b> 20.70 ج.م (+3.5%)");
     expect(snippet).toContain("🛑 <b>الوقف:</b> 19.60 ج.م (-2%)");
+  });
+
+  it("derives active and closed signals accurately from lastScan", () => {
+    const mockLastScan = {
+      timestamp: "2026-10-19T13:45:00.000Z",
+      stage_results: {
+        volume_surge: [
+          { symbol: "MOIL", close: 0.67, change_pct: 1.51 }, // under 3.5% -> active
+          { symbol: "POUL", close: 10.3, change_pct: 5.10 }, // over 3.5% -> target hit
+        ],
+        breakout: [
+          { symbol: "NIPH", close: 296.0, change_pct: 17.58 }, // over 5.0% -> target hit
+        ],
+        rsi_oversold: [
+          { symbol: "TYCN", close: 10.84, change_pct: 2.65 }, // under 3.0% -> active
+        ],
+      },
+    };
+
+    const derived = deriveTrackedSignalsFromHistory([], mockLastScan);
+    expect(derived.activeSignals.length).toBe(2); // MOIL and TYCN
+    expect(derived.closedSignals.length).toBe(2); // POUL and NIPH
+    expect(derived.activeSignals.map((s) => s.symbol)).toEqual(["MOIL", "TYCN"]);
+    expect(derived.closedSignals.map((s) => s.symbol)).toEqual(["POUL", "NIPH"]);
+    expect(derived.kpis.total_active).toBe(2);
+    expect(derived.kpis.total_closed).toBe(2);
+    expect(derived.kpis.win_rate_pct).toBe(100);
   });
 });

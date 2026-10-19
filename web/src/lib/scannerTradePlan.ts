@@ -142,12 +142,30 @@ export interface ScannerSignalsKPIs {
 /**
  * Derives active and closed tracked scanner signals from scan history
  */
-export function deriveTrackedSignalsFromHistory(history: any[]): {
+export function deriveTrackedSignalsFromHistory(
+  history: any[],
+  lastScan?: any
+): {
   activeSignals: TrackedScannerSignal[];
   closedSignals: TrackedScannerSignal[];
   kpis: ScannerSignalsKPIs;
 } {
-  if (!Array.isArray(history) || history.length === 0) {
+  const allScans: any[] = [];
+  if (lastScan?.stage_results) {
+    allScans.push({
+      timestamp: lastScan.timestamp || new Date().toISOString(),
+      stage_results: lastScan.stage_results,
+    });
+  }
+  if (Array.isArray(history)) {
+    for (const h of history) {
+      if (h?.stage_results) {
+        allScans.push(h);
+      }
+    }
+  }
+
+  if (allScans.length === 0) {
     return {
       activeSignals: [],
       closedSignals: [],
@@ -168,7 +186,9 @@ export function deriveTrackedSignalsFromHistory(history: any[]): {
   const closedSignals: TrackedScannerSignal[] = [];
 
   // Sort history chronologically (newest first)
-  const sorted = [...history].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const sorted = [...allScans].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
   const latestDate = sorted[0]?.timestamp ? sorted[0].timestamp.split("T")[0] : "";
 
   for (const h of sorted) {
@@ -196,27 +216,32 @@ export function deriveTrackedSignalsFromHistory(history: any[]): {
         const changePct = Number(item.change_pct) || 0;
         const maxGainPct = Math.max(0, changePct);
 
-        // Simulated or realized high and low
-        const highPrice = Number((close * (1 + maxGainPct / 100)).toFixed(2));
         const isToday = dateStr === latestDate;
 
         let status: TrackedScannerSignal["status"] = "active";
         let exitPrice: number | undefined;
         let exitReason: string | undefined;
 
-        if (highPrice >= plan.target1) {
+        // Check if stock has reached Target 1 or Target 2
+        if (changePct >= plan.target2Pct) {
+          status = "target_hit";
+          exitPrice = plan.target2;
+          exitReason = "تحقق الهدف الثاني بنجاح 🎯🎯";
+        } else if (changePct >= plan.target1Pct) {
           status = "target_hit";
           exitPrice = plan.target1;
-          exitReason = "تحقق الهدف الأول 🎯";
+          exitReason = "تحقق الهدف الأول بنجاح 🎯";
         } else if (changePct <= -plan.stopLossPct) {
           status = "stopped_out";
           exitPrice = plan.stopLoss;
           exitReason = "ضرب وقف الخسارة 🛑";
         } else if (!isToday) {
-          // If not today and didn't hit target, consider expired/closed at session close
           status = changePct > 0 ? "target_hit" : "expired";
           exitPrice = close;
-          exitReason = changePct > 0 ? "تحقق هدف جزئي 🎯" : "إغلاق بنهاية المدة ⏱️";
+          exitReason = changePct > 0 ? "تحقق هدف جزئي 🎯" : "انتهاء مدة الاحتفاظ ⏱️";
+        } else {
+          // Fresh signal from today, still in progress towards targets
+          status = "active";
         }
 
         const signal: TrackedScannerSignal = {
@@ -232,8 +257,8 @@ export function deriveTrackedSignalsFromHistory(history: any[]): {
           target_2_pct: plan.target2Pct,
           stop_loss: plan.stopLoss,
           stop_loss_pct: plan.stopLossPct,
-          current_price: isToday ? close : exitPrice || close,
-          highest_price: highPrice,
+          current_price: close,
+          highest_price: Number((close * (1 + Math.max(changePct, 0) / 100)).toFixed(2)),
           lowest_price: Number((close * 0.99).toFixed(2)),
           return_pct: changePct,
           max_gain_pct: maxGainPct,

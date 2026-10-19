@@ -85,9 +85,9 @@ export async function GET() {
           activeSignals = botState.state.active_signals;
           closedSignals = botState.state.closed_signals || [];
           signalsKpis = botState.state.signals_kpis || null;
-        } else if (scannerHistory.length > 0) {
+        } else {
           const { deriveTrackedSignalsFromHistory } = await import("@/lib/scannerTradePlan");
-          const derived = deriveTrackedSignalsFromHistory(scannerHistory);
+          const derived = deriveTrackedSignalsFromHistory(scannerHistory, lastScanData);
           activeSignals = derived.activeSignals;
           closedSignals = derived.closedSignals;
           signalsKpis = derived.kpis;
