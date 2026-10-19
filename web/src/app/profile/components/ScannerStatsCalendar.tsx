@@ -409,22 +409,52 @@ export default function ScannerStatsCalendar({
   // Selected Day Details
   const selectedDayData = selectedDateStr ? dailyDataMap.get(selectedDateStr) : null;
 
-  // Pre-fetch intraday session charts in background for instantaneous modal opening
+  // Dynamic map holding post-signal peak metrics { symbol: { max_gain_pct, peak_price, peak_time } }
+  // to ensure cards outside and modal charts inside match 100%
+  const [intradayGains, setIntradayGains] = useState<
+    Record<string, { max_gain_pct: number; peak_price: number; peak_time: string }>
+  >({});
+
+  // Fetch exact post-signal peak gains for all stocks of the selected day so outside cards match the chart 100%
   useEffect(() => {
-    if (!isDialogOpen || !selectedDayData) return;
-    const stocksToPreload = [
-      ...selectedDayData.stocks.volume.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
-      ...selectedDayData.stocks.breakout.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
-      ...selectedDayData.stocks.oversold.map((s) => ({ symbol: s.symbol, time: getSignalHHMM((s as any).signal_time), price: s.close })),
+    if (!selectedDayData) return;
+    const items = [
+      ...selectedDayData.stocks.volume.map((s) => ({
+        symbol: s.symbol,
+        signal_time: getSignalHHMM((s as any).signal_time),
+        signal_price: s.close,
+      })),
+      ...selectedDayData.stocks.breakout.map((s) => ({
+        symbol: s.symbol,
+        signal_time: getSignalHHMM((s as any).signal_time),
+        signal_price: s.close,
+      })),
+      ...selectedDayData.stocks.oversold.map((s) => ({
+        symbol: s.symbol,
+        signal_time: getSignalHHMM((s as any).signal_time),
+        signal_price: s.close,
+      })),
     ];
-    // Warm up the cache for these symbols in the background
-    stocksToPreload.slice(0, 8).forEach(({ symbol, time, price }) => {
-      const p = new URLSearchParams({ symbol, date: selectedDateStr });
-      if (time) p.set("signal_time", time);
-      if (price) p.set("signal_price", String(price));
-      fetch(`/api/scanner/intraday-session?${p.toString()}`).catch(() => {});
-    });
-  }, [isDialogOpen, selectedDateStr, selectedDayData]);
+    if (items.length === 0) return;
+
+    let isSubscribed = true;
+    fetch("/api/scanner/intraday-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: selectedDateStr, items }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (isSubscribed && data?.gains) {
+          setIntradayGains((prev) => ({ ...prev, ...data.gains }));
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [selectedDateStr, selectedDayData]);
 
   // Filter categories config
   const categories: Array<{
@@ -896,55 +926,71 @@ export default function ScannerStatsCalendar({
                       </div>
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.volume.length > 0 ? (
-                          selectedDayData.stocks.volume.map((s, i) => (
-                            <div
-                              key={i}
-                              className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    {s.symbol}
-                                  </span>
-                                  <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                    {formatPrice(s.close)} ج.م
-                                  </span>
+                          selectedDayData.stocks.volume.map((s, i) => {
+                            const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
+                            const gainInfo = intradayGains[cleanSym];
+                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            return (
+                              <div
+                                key={i}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      {s.symbol}
+                                    </span>
+                                    <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
+                                      {formatPrice(s.close)} ج.م
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]"
+                                      title={
+                                        gainInfo
+                                          ? isAr
+                                            ? `أقصى ربح محقق بعد الإشارة: +${gainInfo.max_gain_pct}% (القمة ${gainInfo.peak_price} ج.م الساعة ${gainInfo.peak_time})`
+                                            : `Max gain after signal: +${gainInfo.max_gain_pct}%`
+                                          : isAr
+                                          ? "نسبة الارتفاع"
+                                          : "Gain %"
+                                      }
+                                    >
+                                      +{formatPct(displayPct)}%
+                                    </span>
+                                    <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      {formatVol(s.r_vol)}x سيولة
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    +{formatPct(s.change_pct)}%
+                                <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                  <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
+                                    <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                    <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                    <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
+                                      {formatSignalTime((s as any).signal_time)}
+                                    </span>
                                   </span>
-                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    {formatVol(s.r_vol)}x سيولة
-                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setChartModalStock({
+                                      symbol: s.symbol,
+                                      date: selectedDateStr,
+                                      signalTime: getSignalHHMM((s as any).signal_time),
+                                      signalPrice: s.close,
+                                      scannerType: "volume_surge"
+                                    })}
+                                    className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
-                                <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
-                                  <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
-                                  <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
-                                    {formatSignalTime((s as any).signal_time)}
-                                  </span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setChartModalStock({
-                                    symbol: s.symbol,
-                                    date: selectedDateStr,
-                                    signalTime: getSignalHHMM((s as any).signal_time),
-                                    signalPrice: s.close,
-                                    scannerType: "volume_surge"
-                                  })}
-                                  className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                >
-                                  <BarChart2 className="w-3.5 h-3.5" />
-                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                </button>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         ) : (
                           <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.volumeCount} إشارات تم رصدها وإرسالها للمشتركين` : `${selectedDayData.volumeCount} signals captured`}
@@ -975,55 +1021,71 @@ export default function ScannerStatsCalendar({
                       </div>
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.breakout.length > 0 ? (
-                          selectedDayData.stocks.breakout.map((s, i) => (
-                            <div
-                              key={i}
-                              className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    {s.symbol}
-                                  </span>
-                                  <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                    {formatPrice(s.close)} ج.م
-                                  </span>
+                          selectedDayData.stocks.breakout.map((s, i) => {
+                            const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
+                            const gainInfo = intradayGains[cleanSym];
+                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            return (
+                              <div
+                                key={i}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      {s.symbol}
+                                    </span>
+                                    <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
+                                      {formatPrice(s.close)} ج.م
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]"
+                                      title={
+                                        gainInfo
+                                          ? isAr
+                                            ? `أقصى ربح محقق بعد الإشارة: +${gainInfo.max_gain_pct}% (القمة ${gainInfo.peak_price} ج.م الساعة ${gainInfo.peak_time})`
+                                            : `Max gain after signal: +${gainInfo.max_gain_pct}%`
+                                          : isAr
+                                          ? "نسبة الارتفاع"
+                                          : "Gain %"
+                                      }
+                                    >
+                                      +{formatPct(displayPct)}%
+                                    </span>
+                                    <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      {formatVol(s.r_vol)}x سيولة
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    +{formatPct(s.change_pct)}%
+                                <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                  <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
+                                    <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                    <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                    <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
+                                      {formatSignalTime((s as any).signal_time)}
+                                    </span>
                                   </span>
-                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    {formatVol(s.r_vol)}x سيولة
-                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setChartModalStock({
+                                      symbol: s.symbol,
+                                      date: selectedDateStr,
+                                      signalTime: getSignalHHMM((s as any).signal_time),
+                                      signalPrice: s.close,
+                                      scannerType: "breakout"
+                                    })}
+                                    className="px-2.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
-                                <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
-                                  <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
-                                  <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
-                                    {formatSignalTime((s as any).signal_time)}
-                                  </span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setChartModalStock({
-                                    symbol: s.symbol,
-                                    date: selectedDateStr,
-                                    signalTime: getSignalHHMM((s as any).signal_time),
-                                    signalPrice: s.close,
-                                    scannerType: "breakout"
-                                  })}
-                                  className="px-2.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                >
-                                  <BarChart2 className="w-3.5 h-3.5" />
-                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                </button>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         ) : (
                           <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.breakoutCount} اختراقات تم رصدها` : `${selectedDayData.breakoutCount} breakouts captured`}
@@ -1054,57 +1116,73 @@ export default function ScannerStatsCalendar({
                       </div>
                       <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
                         {selectedDayData.stocks.oversold.length > 0 ? (
-                          selectedDayData.stocks.oversold.map((s, i) => (
-                            <div
-                              key={i}
-                              className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    {s.symbol}
-                                  </span>
-                                  <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
-                                    {formatPrice(s.close)} ج.م
-                                  </span>
+                          selectedDayData.stocks.oversold.map((s, i) => {
+                            const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
+                            const gainInfo = intradayGains[cleanSym];
+                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            return (
+                              <div
+                                key={i}
+                                className="p-3 bg-zinc-50 dark:bg-zinc-800/90 border-2 border-black dark:border-zinc-600 shadow-[2px_2px_0px_rgba(0,0,0,1)] flex flex-col gap-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-xs text-black bg-white px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      {s.symbol}
+                                    </span>
+                                    <span className="font-mono font-black text-xs text-zinc-900 dark:text-white">
+                                      {formatPrice(s.close)} ج.م
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-black text-xs px-2 py-0.5 bg-sky-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                                      RSI: {formatRsi(s.rsi_14)}
+                                    </span>
+                                    <span
+                                      className={`font-mono font-black text-xs px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] text-black ${
+                                        displayPct >= 0 ? "bg-emerald-400" : "bg-rose-400"
+                                      }`}
+                                      title={
+                                        gainInfo
+                                          ? isAr
+                                            ? `أقصى ربح محقق بعد الإشارة: +${gainInfo.max_gain_pct}% (القمة ${gainInfo.peak_price} ج.م الساعة ${gainInfo.peak_time})`
+                                            : `Max gain after signal: +${gainInfo.max_gain_pct}%`
+                                          : isAr
+                                          ? "نسبة الارتفاع"
+                                          : "Gain %"
+                                      }
+                                    >
+                                      {displayPct >= 0 ? `+${formatPct(displayPct)}%` : `${formatPct(displayPct)}%`}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono font-black text-xs px-2 py-0.5 bg-sky-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                                    RSI: {formatRsi(s.rsi_14)}
+                                <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
+                                  <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
+                                    <Clock className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                                    <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
+                                    <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
+                                      {formatSignalTime((s as any).signal_time)}
+                                    </span>
                                   </span>
-                                  <span className={`font-mono font-black text-xs px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] text-black ${
-                                    s.change_pct >= 0 ? "bg-emerald-400" : "bg-rose-400"
-                                  }`}>
-                                    {s.change_pct >= 0 ? `+${formatPct(s.change_pct)}%` : `${formatPct(s.change_pct)}%`}
-                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setChartModalStock({
+                                      symbol: s.symbol,
+                                      date: selectedDateStr,
+                                      signalTime: getSignalHHMM((s as any).signal_time),
+                                      signalPrice: s.close,
+                                      scannerType: "rsi_oversold"
+                                    })}
+                                    className="px-2.5 py-1 bg-sky-400 hover:bg-sky-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                    title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
+                                  >
+                                    <BarChart2 className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono">
-                                <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 font-bold">
-                                  <Clock className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                                  <span>{isAr ? "وقت الإشارة:" : "Signal:"}</span>
-                                  <span className="font-black text-black dark:text-white bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 border border-black dark:border-zinc-500">
-                                    {formatSignalTime((s as any).signal_time)}
-                                  </span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setChartModalStock({
-                                    symbol: s.symbol,
-                                    date: selectedDateStr,
-                                    signalTime: getSignalHHMM((s as any).signal_time),
-                                    signalPrice: s.close,
-                                    scannerType: "rsi_oversold"
-                                  })}
-                                  className="px-2.5 py-1 bg-sky-400 hover:bg-sky-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                  title={isAr ? "عرض شارت 15 دقيقة للجلسة وتتبع القمة" : "View 15m session chart & peak"}
-                                >
-                                  <BarChart2 className="w-3.5 h-3.5" />
-                                  <span>{isAr ? "شارت 15 دقيقة" : "15m Chart"}</span>
-                                </button>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         ) : (
                           <span className="text-xs text-zinc-500 font-bold block py-3 text-center">
                             {isAr ? `${selectedDayData.oversoldCount} فرص ارتداد قاع` : `${selectedDayData.oversoldCount} oversold bounces`}
@@ -1191,6 +1269,17 @@ export default function ScannerStatsCalendar({
           signalPrice={chartModalStock.signalPrice}
           scannerType={chartModalStock.scannerType}
           isAr={isAr}
+          onGainLoaded={(gain) => {
+            const clean = gain.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
+            setIntradayGains((prev) => ({
+              ...prev,
+              [clean]: {
+                max_gain_pct: gain.max_gain_pct,
+                peak_price: gain.peak_price,
+                peak_time: gain.peak_time,
+              },
+            }));
+          }}
         />
       )}
     </section>

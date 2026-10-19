@@ -25,6 +25,7 @@ interface ScannerIntradayChartModalProps {
   signalPrice?: number;
   scannerType?: string;
   isAr?: boolean;
+  onGainLoaded?: (data: { symbol: string; max_gain_pct: number; peak_price: number; peak_time: string }) => void;
 }
 
 interface IntradaySessionPayload {
@@ -63,6 +64,7 @@ export default function ScannerIntradayChartModal({
   signalPrice,
   scannerType = "volume_surge",
   isAr = true,
+  onGainLoaded,
 }: ScannerIntradayChartModalProps) {
   const [data, setData] = useState<IntradaySessionPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -110,6 +112,14 @@ export default function ScannerIntradayChartModal({
         const json = await res.json();
         if (!isCancelled) {
           setData(json);
+          if (json?.signal && typeof json.signal.max_gain_pct === "number") {
+            onGainLoaded?.({
+              symbol: json.symbol || symbol,
+              max_gain_pct: json.signal.max_gain_pct,
+              peak_price: json.session_high,
+              peak_time: json.peak_time,
+            });
+          }
         }
       } catch (err: any) {
         if (!isCancelled) {
