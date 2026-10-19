@@ -4,8 +4,8 @@ import { useEffect, useRef } from "react";
 import { Brain, Database, Bot, LineChart, History, Sparkles, Clock, Users, MessageSquare, Send, CreditCard, Zap, Image as ImageIcon } from "lucide-react";
 
 interface AdminHeaderProps {
-    activeMainTab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts" | "social_reports";
-    setActiveMainTab: (tab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts" | "social_reports") => void;
+    activeMainTab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts";
+    setActiveMainTab: (tab: "data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts") => void;
 }
 
 export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHeaderProps) {
@@ -21,7 +21,6 @@ export default function AdminHeader({ activeMainTab, setActiveMainTab }: AdminHe
         { id: "backtest", label: "BACKTEST", icon: LineChart, color: "yellow" },
         { id: "similarity", label: "SIMILARITY", icon: History, color: "pink" },
         { id: "jobs", label: "JOBS", icon: Clock, color: "orange" },
-        { id: "social_reports", label: "SOCIAL REPORTS", icon: ImageIcon, color: "purple" },
         { id: "schedule", label: "TELEGRAM", icon: Send, color: "amber" },
         { id: "alerts", label: "ALERTS RADAR", icon: Zap, color: "yellow" },
         { id: "users", label: "USERS", icon: Users, color: "blue" },

@@ -365,6 +365,14 @@ async def startup_event():
     except Exception as e:
         print(f"DEBUG ERROR: Failed to start Scanner Alerts Scheduler: {e}")
 
+    # Facebook Social Media Scheduler — autonomous 3-slot daily publisher at peak hours
+    try:
+        from api.social_scheduler import start_social_scheduler
+        start_social_scheduler()
+        print("DEBUG: Facebook Social Scheduler started successfully.")
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to start Facebook Social Scheduler: {e}")
+
 
 
 
@@ -389,6 +397,12 @@ async def shutdown_event():
     try:
         from api.scanner_alerts_scheduler import stop_scanner_alerts_scheduler
         stop_scanner_alerts_scheduler()
+    except Exception:
+        pass
+
+    try:
+        from api.social_scheduler import stop_social_scheduler
+        stop_social_scheduler()
     except Exception:
         pass
 
