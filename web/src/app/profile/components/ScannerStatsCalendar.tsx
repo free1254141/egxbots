@@ -793,51 +793,56 @@ export default function ScannerStatsCalendar({
           {/* Dialog Card */}
           <div className="relative w-full max-w-5xl bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col max-h-[90vh] z-10 animate-in zoom-in-95 duration-150">
             {/* Dialog Header - High Contrast Neobrutal Yellow */}
-            <div className="p-4 sm:p-5 border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="h-11 w-11 border-2 border-black bg-black text-[#FFE600] flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
-                  <CalendarIcon className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-lg sm:text-xl font-black text-black uppercase tracking-tight">
-                      {isAr ? "تفاصيل الفرص المرصودة ليوم:" : "Signals Ledger For Date:"}
-                    </h3>
-                    <span className="font-mono text-base sm:text-lg font-black text-[#FFE600] border-2 border-black bg-black px-3 py-0.5 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                      {selectedDateStr}
-                    </span>
+            <div className="p-2.5 sm:p-5 border-b-2 sm:border-b-4 border-black dark:border-white bg-[#FFE600] text-black">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  <div className="hidden sm:flex h-11 w-11 border-2 border-black bg-black text-[#FFE600] items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                    <CalendarIcon className="w-6 h-6" />
                   </div>
-                  {selectedDayData && (
-                    <div className="flex items-center gap-2 text-xs font-mono font-bold text-black mt-1.5 flex-wrap">
-                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                        ⚡ {selectedDayData.scansCount} {isAr ? "عمليات فحص" : "scans"}
-                      </span>
-                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                        ⏱️ {Math.round(selectedDayData.avgDurationMs)}ms {isAr ? "متوسط السرعة" : "avg speed"}
-                      </span>
-                      <span className="bg-white border-2 border-black px-2 py-0.5 shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                        🎯 {selectedDayData.totalOpportunities} {isAr ? "إجمالي الفرص" : "total signals"}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                      <h3 className="text-xs sm:text-lg font-black text-black uppercase tracking-tight">
+                        <span className="sm:hidden">{isAr ? "فرص يوم:" : "Signals:"}</span>
+                        <span className="hidden sm:inline">{isAr ? "تفاصيل الفرص المرصودة ليوم:" : "Signals Ledger For Date:"}</span>
+                      </h3>
+                      <span className="font-mono text-xs sm:text-base font-black text-[#FFE600] border-2 border-black bg-black px-2 py-0.5 sm:px-3 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                        {selectedDateStr}
                       </span>
                     </div>
-                  )}
+                  </div>
                 </div>
+
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsDialogOpen(false)}
+                  className="h-8 w-8 sm:h-10 sm:w-10 border-2 border-black bg-black hover:bg-rose-600 text-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 shrink-0"
+                  title={isAr ? "إغلاق (Esc)" : "Close (Esc)"}
+                >
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
               </div>
 
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => setIsDialogOpen(false)}
-                className="h-10 w-10 border-2 border-black bg-black hover:bg-rose-600 text-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 self-end sm:self-auto shrink-0"
-                title={isAr ? "إغلاق (Esc)" : "Close (Esc)"}
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {/* Stat Badges Row */}
+              {selectedDayData && (
+                <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-mono font-bold text-black mt-2 sm:mt-2.5 overflow-x-auto no-scrollbar">
+                  <span className="bg-white border sm:border-2 border-black px-1.5 py-0.5 sm:px-2 shadow-[1px_1px_0px_rgba(0,0,0,1)] shrink-0">
+                    ⚡ {selectedDayData.scansCount} <span className="hidden sm:inline">{isAr ? "عمليات فحص" : "scans"}</span><span className="sm:hidden">{isAr ? "فحص" : "scans"}</span>
+                  </span>
+                  <span className="bg-white border sm:border-2 border-black px-1.5 py-0.5 sm:px-2 shadow-[1px_1px_0px_rgba(0,0,0,1)] shrink-0">
+                    ⏱️ {Math.round(selectedDayData.avgDurationMs)}ms <span className="hidden sm:inline">{isAr ? "متوسط السرعة" : "avg speed"}</span>
+                  </span>
+                  <span className="bg-white border sm:border-2 border-black px-1.5 py-0.5 sm:px-2 shadow-[1px_1px_0px_rgba(0,0,0,1)] shrink-0">
+                    🎯 {selectedDayData.totalOpportunities} <span className="hidden sm:inline">{isAr ? "إجمالي الفرص" : "total signals"}</span><span className="sm:hidden">{isAr ? "فرصة" : "signals"}</span>
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Quick Category Filter Inside Dialog */}
-            <div className="px-4 sm:px-6 py-3 border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 flex items-center gap-2 overflow-x-auto">
-              <span className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 shrink-0">
-                {isAr ? "تصفية النوع:" : "Filter:"}
+            <div className="px-2.5 sm:px-6 py-2 sm:py-3 border-b-2 sm:border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
+              <span className="text-[11px] sm:text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 shrink-0">
+                {isAr ? "تصفية:" : "Filter:"}
               </span>
               {categories.map((cat) => {
                 const isSelected = selectedCategory === cat.id;
@@ -847,13 +852,13 @@ export default function ScannerStatsCalendar({
                     key={cat.id}
                     type="button"
                     onClick={() => setSelectedCategory(cat.id)}
-                    className={`h-8 px-3 border-2 border-black dark:border-white font-black text-xs uppercase tracking-wide flex items-center gap-1.5 shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] transition-all ${
+                    className={`h-7 sm:h-8 px-2 sm:px-3 border-2 border-black dark:border-white font-black text-[11px] sm:text-xs uppercase tracking-wide flex items-center gap-1 sm:gap-1.5 shrink-0 shadow-[1.5px_1.5px_0px_rgba(0,0,0,1)] sm:shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[1.5px_1.5px_0px_rgba(255,255,255,1)] transition-all ${
                       isSelected
                         ? cat.activeBg
                         : "bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
                     }`}
                   >
-                    <Icon className="w-3.5 h-3.5" />
+                    <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     <span>{isAr ? cat.nameAr : cat.nameEn}</span>
                   </button>
                 );

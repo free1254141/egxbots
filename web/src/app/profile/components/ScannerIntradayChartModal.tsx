@@ -275,25 +275,27 @@ export default function ScannerIntradayChartModal({
       {/* Modal Container */}
       <div className="relative w-full max-w-4xl bg-zinc-950 border-4 border-black dark:border-white shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_rgba(255,255,255,1)] flex flex-col max-h-[92vh] z-10 animate-in zoom-in-95 duration-150 overflow-hidden text-white">
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 border-2 border-black bg-black text-[#FFE600] flex items-center justify-center font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+        <div className="p-2.5 sm:p-5 border-b-2 sm:border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="hidden sm:flex h-10 w-10 border-2 border-black bg-black text-[#FFE600] items-center justify-center font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
               <TrendingUp className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-lg sm:text-xl font-black bg-black text-[#FFE600] px-2.5 py-0.5 border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <span className="font-mono text-sm sm:text-xl font-black bg-black text-[#FFE600] px-2 py-0.5 border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
                   {symbol}
                 </span>
-                <h3 className="text-base sm:text-lg font-black uppercase tracking-tight">
-                  {isAr ? "شارت شمع 15 دقيقة • جلسة التداول الكاملة" : "15M Candlestick • Full Trading Session"}
+                <h3 className="text-xs sm:text-lg font-black uppercase tracking-tight truncate">
+                  <span className="sm:hidden">{isAr ? "شارت 15 دقيقة • الجلسة" : "15M Candlestick"}</span>
+                  <span className="hidden sm:inline">{isAr ? "شارت شمع 15 دقيقة • جلسة التداول الكاملة" : "15M Candlestick • Full Trading Session"}</span>
                 </h3>
               </div>
-              <p className="text-xs font-mono font-bold text-black mt-1 flex items-center gap-2">
-                <CalendarIcon className="w-3.5 h-3.5" />
+              <p className="text-[10px] sm:text-xs font-mono font-bold text-black mt-0.5 sm:mt-1 flex items-center gap-1.5 sm:gap-2">
+                <CalendarIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
                 <span>{date}</span>
                 <span>•</span>
-                <span>10:00 ص إلى 02:30 م (EGX Session)</span>
+                <span className="hidden sm:inline">10:00 ص إلى 02:30 م (EGX Session)</span>
+                <span className="sm:hidden">10:00 - 14:30</span>
               </p>
             </div>
           </div>
@@ -301,10 +303,10 @@ export default function ScannerIntradayChartModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-10 w-10 border-2 border-black bg-black hover:bg-rose-600 text-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 shrink-0"
+            className="h-8 w-8 sm:h-10 sm:w-10 border-2 border-black bg-black hover:bg-rose-600 text-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] font-black transition-all active:translate-x-0.5 active:translate-y-0.5 shrink-0"
             title={isAr ? "إغلاق (Esc)" : "Close"}
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
@@ -327,49 +329,49 @@ export default function ScannerIntradayChartModal({
 
         {/* Content Body */}
         {!loading && data && (
-          <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+          <div className="p-3 sm:p-6 space-y-3 sm:space-y-4 overflow-y-auto flex-1">
             {/* Session Performance KPI Chips Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 font-mono text-xs font-bold">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2.5 font-mono text-xs font-bold">
               {/* Open */}
-              <div className="p-2.5 bg-zinc-900 border-2 border-zinc-700">
+              <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700">
                 <span className="text-[10px] text-zinc-400 block">{isAr ? "افتتاح الجلسة" : "Session Open"}</span>
-                <span className="text-sm font-black text-white">{data.session_open} ج.م</span>
+                <span className="text-xs sm:text-sm font-black text-white">{data.session_open} ج.م</span>
               </div>
 
               {/* Signal Trigger */}
-              <div className="p-2.5 bg-amber-950/40 border-2 border-amber-500 text-amber-300">
-                <span className="text-[10px] text-amber-400 block flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {isAr ? `وقت الإشارة (${data.signal.time})` : `Signal (${data.signal.time})`}
+              <div className="p-2 sm:p-2.5 bg-amber-950/40 border-2 border-amber-500 text-amber-300">
+                <span className="text-[10px] text-amber-400 block flex items-center gap-1 truncate">
+                  <Clock className="w-3 h-3 shrink-0" />
+                  {isAr ? `الإشارة (${data.signal.time})` : `Signal (${data.signal.time})`}
                 </span>
-                <span className="text-sm font-black">{data.signal.price} ج.م</span>
+                <span className="text-xs sm:text-sm font-black">{data.signal.price} ج.م</span>
               </div>
 
               {/* Peak High After Signal */}
-              <div className="p-2.5 bg-emerald-950/40 border-2 border-emerald-500 text-emerald-300">
-                <span className="text-[10px] text-emerald-400 block flex items-center gap-1">
-                  <Target className="w-3 h-3" />
-                  {isAr ? `أعلى قمة بعد الإشارة (${data.peak_time})` : `Peak After Signal (${data.peak_time})`}
+              <div className="p-2 sm:p-2.5 bg-emerald-950/40 border-2 border-emerald-500 text-emerald-300">
+                <span className="text-[10px] text-emerald-400 block flex items-center gap-1 truncate">
+                  <Target className="w-3 h-3 shrink-0" />
+                  {isAr ? `أعلى قمة (${data.peak_time})` : `Peak (${data.peak_time})`}
                 </span>
-                <span className="text-sm font-black">{data.session_high} ج.م</span>
+                <span className="text-xs sm:text-sm font-black">{data.session_high} ج.م</span>
               </div>
 
               {/* Max Gain from Signal */}
-              <div className="p-2.5 bg-emerald-500 text-black border-2 border-black font-black">
-                <span className="text-[10px] uppercase block">{isAr ? "أقصى ربح بعد الإشارة" : "Max Gain After Signal"}</span>
-                <span className="text-base font-black">+{data.signal.max_gain_pct}%</span>
+              <div className="p-2 sm:p-2.5 bg-emerald-500 text-black border-2 border-black font-black">
+                <span className="text-[10px] uppercase block truncate">{isAr ? "أقصى ربح للإشارة" : "Max Gain"}</span>
+                <span className="text-sm sm:text-base font-black">+{data.signal.max_gain_pct}%</span>
               </div>
 
               {/* Close */}
-              <div className="p-2.5 bg-zinc-900 border-2 border-zinc-700">
+              <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700 col-span-2 sm:col-span-1">
                 <span className="text-[10px] text-zinc-400 block">{isAr ? "إغلاق الجلسة" : "Session Close"}</span>
-                <span className="text-sm font-black text-white">{data.session_close} ج.م</span>
+                <span className="text-xs sm:text-sm font-black text-white">{data.session_close} ج.م</span>
               </div>
             </div>
 
             {/* Candlestick Chart Canvas */}
-            <div className="border-4 border-black dark:border-white p-2 bg-[#09090b] shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-              <div ref={chartContainerRef} className="w-full h-[360px]" />
+            <div className="border-2 sm:border-4 border-black dark:border-white p-1.5 sm:p-2 bg-[#09090b] shadow-[2px_2px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+              <div ref={chartContainerRef} className="w-full h-[280px] sm:h-[360px]" />
             </div>
 
             {/* Narrative Timeline Explanation */}
