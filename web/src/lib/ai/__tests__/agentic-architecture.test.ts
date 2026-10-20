@@ -1,6 +1,6 @@
 import { executeAgenticTool, runAgenticPipelineStream, AGENTIC_TOOLS_SCHEMA } from "../agentic-pipeline";
 import { cairoWeekBounds } from "../agentic-tools";
-import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts } from "../agentic-publication";
+import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts, type AgenticEvidence } from "../agentic-publication";
 import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
@@ -1804,6 +1804,7 @@ describe("Agentic tool correctness and failure boundaries", () => {
     it("grounds 15-minute intraday scanner signals with entry, targets 1 and 2, stop loss, and return %", () => {
         const scannerEvidence: AgenticEvidence = {
             tool: "get_recommendations",
+            arguments: { status: "open", timeframe: "all" },
             source: "15m_intraday_scanner+scan_results",
             symbols: ["CRST", "EGAL", "WCDF"],
             data_type: "historical",
