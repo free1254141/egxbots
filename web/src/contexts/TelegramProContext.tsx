@@ -42,7 +42,7 @@ export function TelegramProProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   // `usePathname` can be null while the router is not ready (and in isolated
   // tests); defer to the existing invite behavior for that transient state.
-  const needsProInvite = pathname === null || pathname.startsWith("/profile");
+  const needsProInvite = pathname === null || pathname.startsWith("/profile") || pathname.startsWith("/scanner/backtests");
   const userId = user?.id ?? null;
   const activeUserIdRef = useRef<string | null>(userId);
   const cacheRef = useRef<CachedInvite | null>(null);

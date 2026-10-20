@@ -4,6 +4,7 @@ import React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useNotification, type ServiceType } from "@/contexts/NotificationContext";
+import { useTelegramPro } from "@/contexts/TelegramProContext";
 import { Bell, BellOff, MessageCircle, Globe } from "lucide-react";
 import Link from "next/link";
 
@@ -25,6 +26,7 @@ export default function TelegramServiceToggle({
     const { user } = useAuth();
     const { language } = useLanguage();
     const isAr = language === "ar";
+    const { invite: proInvite, loading: proInviteLoading } = useTelegramPro();
     const {
         telegramLinked,
         telegramChatId: chatId,
@@ -119,9 +121,35 @@ export default function TelegramServiceToggle({
                                 : tDesc}
                         </p>
                     </div>
-                </div>
+            </div>
 
-                <div className="flex items-center gap-3">
+            {proInvite.is_pro && proInvite.invite_link && (
+                <div className="mt-3 flex flex-col gap-2 border-2 border-indigo-400/60 bg-indigo-500/10 p-3">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300">
+                        {isAr ? "رابط دعوة Pro الحالي" : "Current Pro invite link"}
+                    </span>
+                    <a
+                        href={proInvite.invite_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="break-all text-xs font-mono font-bold text-indigo-200 underline"
+                    >
+                        {proInvite.invite_link}
+                    </a>
+                    <span className="text-[10px] font-bold text-zinc-400">
+                        {isAr
+                            ? "استخدم هذا الرابط بدل أي رابط قديم محفوظ في Telegram."
+                            : "Use this link instead of an older Telegram-saved invite."}
+                    </span>
+                </div>
+            )}
+            {proInvite.is_pro && proInviteLoading && (
+                <p className="mt-2 text-[10px] font-bold text-amber-300">
+                    {isAr ? "جاري تجهيز رابط دعوة Pro الحالي..." : "Preparing the current Pro invite..."}
+                </p>
+            )}
+
+            <div className="flex items-center gap-3">
                     {!telegramLinked ? (
                         <div className="flex items-center gap-2">
                             <button
