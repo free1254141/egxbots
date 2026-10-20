@@ -146,13 +146,13 @@ export default function SupportChatWidget() {
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-5 right-[96px] sm:right-[102px] z-[9998] flex h-[72px] w-[72px] flex-col items-center justify-center rounded-[24px] border-2 border-black dark:border-white bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-2 shadow-[0_12px_34px_rgba(217,119,6,0.35)] dark:shadow-[0_12px_34px_rgba(0,0,0,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(217,119,6,0.48)] active:translate-y-0 animate-in fade-in zoom-in group"
+                className="fixed bottom-3 sm:bottom-5 right-[68px] sm:right-[102px] z-[9998] flex h-13 w-13 sm:h-[72px] sm:w-[72px] rounded-[18px] sm:rounded-[24px] flex-col items-center justify-center rounded-[24px] border-2 border-black dark:border-white bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-2 shadow-[0_12px_34px_rgba(217,119,6,0.35)] dark:shadow-[0_12px_34px_rgba(0,0,0,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(217,119,6,0.48)] active:translate-y-0 animate-in fade-in zoom-in group"
                 aria-label={isAr ? "خدمة عملاء VIP" : "VIP Customer Support"}
                 title={isAr ? "خدمة عملاء VIP للمشتركين" : "VIP Support for Pro Subscribers"}
             >
                 <div className="relative flex items-center justify-center">
-                    <Headphones className="h-6 w-6 text-black stroke-[2.4]" />
-                    <Crown className="h-4 w-4 text-amber-950 absolute -top-3 -right-3 fill-amber-200 stroke-[2]" />
+                    <Headphones className="h-4 w-4 sm:h-6 sm:w-6 text-black stroke-[2.4]" />
+                    <Crown className="h-3 w-3 sm:h-4 sm:w-4 text-amber-950 absolute -top-2.5 -right-2.5 sm:-top-3 sm:-right-3 fill-amber-200 stroke-[2]" />
                 </div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-black mt-1">
                     {isAr ? "دعم VIP" : "VIP"}

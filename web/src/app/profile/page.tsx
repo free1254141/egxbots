@@ -210,7 +210,7 @@ export default function ProfilePage() {
   if (!user) return null;
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} className="profile-page-shell neobrutal-layout flex flex-col gap-8 pb-20 max-w-[1600px] mx-auto mt-2 px-4 neobrutal-grid-bg min-h-screen">
+    <div dir={isAr ? "rtl" : "ltr"} className="profile-page-shell neobrutal-layout flex flex-col gap-5 sm:gap-8 pb-20 max-w-[1600px] mx-auto mt-2 px-2 sm:px-4 neobrutal-grid-bg min-h-screen">
       {/* ── Founding Member Announcement Banner ── */}
       {quotaData?.plan?.is_founding_member && (
         <div className="w-full relative z-20">
@@ -274,7 +274,7 @@ export default function ProfilePage() {
       </div>
 
       {/* ── Account + Telegram ── */}
-      <section className={`relative z-10 min-w-0 rounded-2xl p-4 sm:p-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${accountCollapsed ? "space-y-0" : "space-y-6"}`}>
+      <section className={`relative z-10 min-w-0 rounded-xl sm:rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${accountCollapsed ? "space-y-0" : "space-y-4 sm:space-y-6"}`}>
         <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${accountCollapsed ? "" : "border-b-4 border-black dark:border-white pb-5"}`}>
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">

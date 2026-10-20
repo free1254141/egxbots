@@ -286,16 +286,16 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   ];
 
   return (
-    <section className={`relative z-10 min-w-0 rounded-2xl p-4 sm:p-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-6"}`}>
+    <section className={`relative z-10 min-w-0 rounded-xl sm:rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-4 sm:space-y-6"}`}>
       {/* ── Section Header & Toggle Button ── */}
-      <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b-4 border-black dark:border-white pb-5"}`}>
+      <div className={`flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b-2 sm:border-b-4 border-black dark:border-white pb-3 sm:pb-5"}`}>
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
-              <Activity className="h-5 w-5" />
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="h-8 w-8 sm:h-10 sm:w-10 border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
+              <Activity className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
+              <h2 className="text-lg sm:text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
                 {isAr ? "رادار وإسكانر الصفقات اللحظية" : "Live Signals & Scanner Radar"}
               </h2>
               <span className="border-2 border-black dark:border-white bg-black text-[#FFE600] dark:bg-white dark:text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-widest shadow-[1px_1px_0px_rgba(0,0,0,1)]">
@@ -339,7 +339,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           <button
             type="button"
             onClick={toggleCollapse}
-            className="h-10 px-3 flex items-center justify-center gap-1.5 border-4 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
+            className="h-8 sm:h-10 px-2.5 sm:px-3 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
             title={isCollapsed ? (isAr ? "فتح السيكشن" : "Expand Section") : (isAr ? "طي السيكشن" : "Collapse Section")}
           >
             {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
@@ -351,18 +351,18 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       {!isCollapsed && (
         <div className="space-y-6 pt-1">
           {/* ── Main Tab Navigation Bar (Neobrutal) ── */}
-          <div className="flex flex-wrap items-center gap-2 p-2 bg-zinc-100 dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-zinc-100 dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
             <button
               type="button"
               onClick={() => setActiveMainTab("tracker")}
-              className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+              className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
             activeMainTab === "tracker"
               ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
               : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           }`}
         >
           <Activity className="w-4 h-4" />
-          <span>{isAr ? "متابعة الصفقات والإشارات" : "Signals & Trades"}</span>
+          <span className="truncate">{isAr ? "متابعة الصفقات" : "Signals"}</span>
           {activeSignals.length > 0 && (
             <span className="px-1.5 py-0.5 bg-emerald-500 text-black text-[11px] font-black border border-black rounded-full animate-pulse">
               {activeSignals.length}
@@ -373,40 +373,40 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         <button
           type="button"
           onClick={() => setActiveMainTab("calendar")}
-          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
             activeMainTab === "calendar"
               ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
               : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           }`}
         >
           <CalendarIcon className="w-4 h-4" />
-          <span>{isAr ? "سجل الجلسات التاريخي" : "Sessions Calendar"}</span>
+          <span className="truncate">{isAr ? "سجل الجلسات" : "Calendar"}</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveMainTab("settings")}
-          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
             activeMainTab === "settings"
               ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
               : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           }`}
         >
           <SlidersHorizontal className="w-4 h-4" />
-          <span>{isAr ? "تفضيلات التنبيهات" : "Alert Preferences"}</span>
+          <span className="truncate">{isAr ? "تفضيلات التنبيهات" : "Preferences"}</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveMainTab("guide")}
-          className={`flex items-center gap-2 px-4 py-2.5 font-black text-sm uppercase transition-all border-2 border-black dark:border-white ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
             activeMainTab === "guide"
               ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
               : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>{isAr ? "دليل استراتيجيات الإسكانر" : "Scanner Guide"}</span>
+          <span className="truncate">{isAr ? "دليل الاستراتيجيات" : "Guide"}</span>
         </button>
       </div>
 
@@ -437,16 +437,16 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       )}
 
       {activeMainTab === "settings" && (
-        <section className="neobrutal-card p-6 sm:p-8 space-y-6 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
+        <section className="neobrutal-card p-3 sm:p-8 space-y-4 sm:space-y-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
       {/* ── Section Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-4 border-black dark:border-white pb-5">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <div className="h-12 w-12 border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
             <Zap className="h-6 w-6 fill-black" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
+              <h2 className="text-lg sm:text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
                 {isAr ? "تفضيلات تنبيهات الإسكانر" : "Scanner Alerts Preferences"}
               </h2>
               <span className="border-2 border-black dark:border-white bg-black text-[#FFE600] dark:bg-white dark:text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-widest shadow-[1px_1px_0px_rgba(0,0,0,1)]">
@@ -474,7 +474,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       </div>
 
       {/* ── VIP Telegram Channel Access ── */}
-      <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black p-3 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-start gap-3">
           <div className="p-2.5 bg-black text-[#FFE600] border-2 border-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
             <Send className="w-6 h-6" />
@@ -519,7 +519,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       </div>
 
       {/* ── Scanner Alert Toggles Grid ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 pt-1 sm:pt-2">
         {alertTypes.map((item) => {
           const isEnabled = prefs[item.id];
           const isSaving = savingKey === item.id;
@@ -528,7 +528,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           return (
             <div
               key={item.id}
-              className={`border-4 border-black dark:border-white p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] flex flex-col justify-between transition-all ${
+              className={`border-2 sm:border-4 border-black dark:border-white p-3.5 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] flex flex-col justify-between transition-all ${
                 isEnabled && isPro
                   ? "bg-zinc-50 dark:bg-zinc-800/80"
                   : "bg-zinc-100/60 dark:bg-zinc-950/40 opacity-80"
@@ -536,18 +536,18 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             >
               <div>
                 {/* Card Top Row */}
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between gap-2.5 mb-2">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <div
-                      className={`h-10 w-10 border-4 border-black dark:border-white flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] ${item.color}`}
+                      className={`h-9 w-9 sm:h-10 sm:w-10 border-2 sm:border-4 border-black dark:border-white flex items-center justify-center shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)] ${item.color}`}
                     >
-                      <Icon className="h-5 w-5" />
+                      <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-black text-black dark:text-white uppercase tracking-tight">
+                      <h3 className="text-xs sm:text-sm font-black text-black dark:text-white uppercase tracking-tight leading-snug truncate">
                         {isAr ? item.titleAr : item.titleEn}
                       </h3>
-                      <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest block">
+                      <span className="text-[9px] sm:text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest block truncate">
                         {item.id}
                       </span>
                     </div>
@@ -566,7 +566,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
                         dir="ltr"
                         onClick={() => handleToggle(item.id)}
                         disabled={isSaving}
-                        className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer border-4 border-black dark:border-white transition-colors duration-200 ease-in-out focus:outline-none shadow-[2px_2px_0px_rgba(0,0,0,1)] ${
+                        className={`relative inline-flex h-6 w-12 sm:h-7 sm:w-14 shrink-0 cursor-pointer border-2 sm:border-4 border-black dark:border-white transition-colors duration-200 ease-in-out focus:outline-none shadow-[2px_2px_0px_rgba(0,0,0,1)] ${
                           isEnabled ? "bg-emerald-400" : "bg-zinc-300 dark:bg-zinc-700"
                         }`}
                         role="switch"
@@ -574,8 +574,8 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
                         title={isAr ? "تشغيل/إيقاف التنبيه" : "Toggle Alert"}
                       >
                         <span
-                          className={`pointer-events-none inline-block h-4 w-4 transform border-2 border-black bg-white transition duration-200 ease-in-out mt-0.5 ${
-                            isEnabled ? "translate-x-7" : "translate-x-0.5"
+                          className={`pointer-events-none inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 transform border-2 border-black bg-white transition duration-200 ease-in-out mt-0.5 ${
+                            isEnabled ? "translate-x-6 sm:translate-x-7" : "translate-x-0.5"
                           }`}
                         />
                       </button>
@@ -584,13 +584,13 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
                 </div>
 
                 {/* Description */}
-                <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed mt-2">
+                <p className="text-[11px] sm:text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed mt-1">
                   {isAr ? item.descAr : item.descEn}
                 </p>
               </div>
 
               {/* Status footer */}
-              <div className="mt-4 pt-3 border-t-2 border-black/10 dark:border-white/10 flex items-center justify-between text-[11px] font-mono font-bold">
+              <div className="mt-2.5 pt-2 border-t-2 border-black/10 dark:border-white/10 flex items-center justify-between text-[10px] sm:text-[11px] font-mono font-bold">
                 <span className="text-zinc-500">
                   {isAr ? "الحالة:" : "Status:"}
                 </span>

@@ -332,7 +332,7 @@ export default function ChatWidget() {
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-5 right-5 z-[9999] flex h-[72px] w-[72px] items-center justify-center rounded-[24px] border border-white/70 bg-white/85 p-2 shadow-[0_12px_34px_rgba(2,6,23,0.24)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(2,6,23,0.32)] active:translate-y-0 animate-in fade-in zoom-in"
+                className="fixed bottom-3 sm:bottom-5 right-3 sm:right-5 z-[9999] flex h-13 w-13 sm:h-[72px] sm:w-[72px] items-center justify-center rounded-[18px] sm:rounded-[24px] border border-white/70 bg-white/85 p-2 shadow-[0_12px_34px_rgba(2,6,23,0.24)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(2,6,23,0.32)] active:translate-y-0 animate-in fade-in zoom-in"
                 title="افتح ARTORO V3"
                 aria-label="افتح ARTORO V3"
             >
