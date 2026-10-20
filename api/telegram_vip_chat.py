@@ -129,8 +129,8 @@ def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
                 return ("stock", f"حلل سهم {cleaned}")
             return ("free", cleaned)
 
-    # 5. Check for analysis keywords (e.g. "حلل سهم ...", "تحليل ...", "سعر ...", "رايك في ...")
-    if re.search(r"(?:حلل|تحليل|سعر|اسعار|أسعار|رايك|رأيك|مستهدف|دعم|مقاومة|شراء|بيع|توصي|توصية|توصيات|محفظ|تجميع|مسح|مؤشر|سهم|اسهم|أسهم|البورصة|السوق)", cleaned):
+    # 5. Check for analysis keywords (e.g. "حلل سهم ...", "تحليل ...", "سعر ...", "رايك في ...", "اسهم شرعية")
+    if re.search(r"(?:حلل|تحليل|سعر|اسعار|أسعار|رايك|رأيك|مستهدف|دعم|مقاومة|شراء|بيع|توصي|توصية|توصيات|محفظ|تجميع|مسح|مؤشر|سهم|اسهم|أسهم|البورصة|السوق|شرع|شريع|شريعة|حلال|egx33)", cleaned):
         return ("free", cleaned)
 
     # 6. Questions directed at the room (e.g. ends with ? or contains question particles)

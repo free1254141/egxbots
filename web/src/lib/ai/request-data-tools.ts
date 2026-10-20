@@ -1,6 +1,7 @@
 import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
+import { isShariaCompliant } from '../shariaStocks';
 
 const readBatches = new Set(['get_stock', 'get_stock_levels', 'get_comparison', 'get_fundamentals']);
 export function requestToolCost(name: string, args: any): number {
@@ -47,6 +48,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             : timeframe === 'last_month' ? bounds.lastMonthEndIso
             : null;
         const filtered = (r: any) => (!args.symbols?.length || args.symbols.some((s: string) => s.toUpperCase().replace(/\.CA$/, '') === r.symbol))
+            && (!args.sharia_only || isShariaCompliant(r.symbol))
             && (!since || String(r.signal_date || '') >= since.slice(0, 10))
             && (!before || String(r.signal_date || '') < before.slice(0, 10));
         const shorts: any[] = [];
@@ -55,6 +57,8 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             for (const t of Array.isArray(trades) ? trades : []) {
                 const row = { source_kind: 'short_swings', recommendation_type: 'صفقة قصيرة', id: t.signal_id,
                     symbol: t.symbol, name: t.name_ar || t.name_en, signal: 'BUY', status: closed ? 'closed' : 'open',
+                    is_sharia_compliant: isShariaCompliant(t.symbol),
+                    sharia_index: isShariaCompliant(t.symbol) ? "EGX33" : null,
                     signal_date: t.signal_date || t.entry_date, entry_date: t.entry_date,
                     entry_price: t.is_pending_entry ? null : t.entry_price,
                     reference_close: t.is_pending_entry ? t.reference_close : null,
@@ -78,6 +82,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
         const truncated = offset + page.length < total;
         return { status: 'success', availability: completeSources && !truncated ? 'available' : 'partial',
             recommendations: page, count: page.length, returned_count: page.length, total_count: total, offset,
+            sharia_only: Boolean(args.sharia_only),
             performance_summary: legacy.performance_summary,
             next_offset: truncated ? offset + page.length : null, truncated, is_page: offset > 0 || page.length < total, sources_complete: completeSources,
             source_counts: { model_signals: legacy.total_count, short_swings: shortAvailable ? shorts.length : null },

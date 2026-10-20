@@ -75,6 +75,13 @@ export function evidenceRows(data: any): any[] {
             ...data.egx30,
         });
     }
+    if (data.egx33_shariah && typeof data.egx33_shariah === "object") {
+        rows.push({
+            symbol: "EGX33",
+            date: data.session_date ?? data.date ?? null,
+            ...data.egx33_shariah,
+        });
+    }
     return rows;
 }
 

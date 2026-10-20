@@ -1994,4 +1994,31 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(reasons).toEqual([]);
     });
 
+    test("recognizes EGX 33 Shariah index constituents and enforces Sharia filter protocol", () => {
+        const { isShariaCompliant, getShariaCompliantCount } = require("@/lib/shariaStocks");
+        expect(isShariaCompliant("SWDY")).toBe(true);
+        expect(isShariaCompliant("ABUK")).toBe(true);
+        expect(isShariaCompliant("MFPC")).toBe(true);
+        expect(isShariaCompliant("TMGH")).toBe(true);
+        expect(isShariaCompliant("EGAL")).toBe(true);
+        expect(isShariaCompliant("ADIB")).toBe(true);
+        expect(isShariaCompliant("ETEL")).toBe(true);
+        expect(isShariaCompliant("SKPC")).toBe(true);
+        expect(isShariaCompliant("AMOC")).toBe(true);
+        expect(isShariaCompliant("COMI")).toBe(false);
+        expect(isShariaCompliant("CIEB")).toBe(false);
+        expect(getShariaCompliantCount()).toBeGreaterThanOrEqual(33);
+
+        const { AGENTIC_SYSTEM_PROMPT, AGENTIC_TOOLS_SCHEMA } = require("../agentic-pipeline");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("EGX 33");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("قاعدة مؤشر الشريعة الإسلامية EGX 33 والأسهم المتوافقة مع الشريعة");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("STRICTLY PROHIBITED");
+
+        const recTool = AGENTIC_TOOLS_SCHEMA.find((t: any) => t.function.name === "get_recommendations");
+        expect(recTool?.function.parameters.properties.sharia_only).toBeDefined();
+
+        const scanTool = AGENTIC_TOOLS_SCHEMA.find((t: any) => t.function.name === "get_technical_scan");
+        expect(scanTool?.function.parameters.properties.sharia_only).toBeDefined();
+    });
+
 });

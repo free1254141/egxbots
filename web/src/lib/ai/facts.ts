@@ -380,6 +380,10 @@ export function buildFactRecords(toolResults: any[], fetchedAt = new Date().toIS
             const egxDate = validatedObservationDate(data.session_date) || validatedObservationDate(data.date) || meta.as_of;
             ingestObject("EGX", data.egx30, { ...meta, as_of: egxDate });
         }
+        if (data.egx33_shariah && typeof data.egx33_shariah === "object") {
+            const egx33Date = validatedObservationDate(data.session_date) || validatedObservationDate(data.date) || meta.as_of;
+            ingestObject("EGX33", data.egx33_shariah, { ...meta, as_of: egx33Date });
+        }
         if (Array.isArray(data.stocks)) {
             for (const stock of data.stocks) {
                 if (stock?.symbol) ingestObject(normalizeSymbol(stock.symbol), stock, meta);

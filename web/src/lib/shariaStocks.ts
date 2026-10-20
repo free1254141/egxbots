@@ -33,6 +33,9 @@ export const SHARIA_COMPLIANT_EGX_SYMBOLS: readonly string[] = [
   "MCQE",
   "EGAL",
   "ADIB",
+  "SWDY",
+  "ABUK",
+  "MFPC",
 ];
 
 const SHARIA_SET = new Set(SHARIA_COMPLIANT_EGX_SYMBOLS.map((s) => s.toUpperCase()));

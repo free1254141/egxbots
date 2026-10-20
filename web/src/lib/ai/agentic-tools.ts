@@ -6,6 +6,7 @@ import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
 import { sanitizeNewsRows } from "./news-evidence";
 import { todayInCairo } from "./cairo-date";
+import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -187,6 +188,8 @@ async function executeRawTool(
                         found_in_main_market: false,
                         availability: "missing",
                         market_type: null,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                        sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         message: `السهم ${sym} لا تتوفر له مؤشرات في المصدر المطلوب؛ غياب البيانات لا يحدد سوق القيد.`
                     };
                 } else {
@@ -195,6 +198,8 @@ async function executeRawTool(
                         symbol: sym,
                         name: stockData.name_ar || stockData.name || sym,
                         found_in_main_market: true,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                        sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         date: ind.date,
                         quote_source: ind.quote_source,
                         indicators_date: ind.indicators_date,
@@ -342,6 +347,8 @@ async function executeRawTool(
 
                     levels.push({
                         symbol: sym,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                        sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         close,
                         support,
                         support_2: support2,
@@ -363,7 +370,7 @@ async function executeRawTool(
                         observations: pRows.length, ...stockPricePresentation(pRows[0].date)
                     });
                 } else {
-                    levels.push({ symbol: sym, availability: "missing", error: "لا يوجد تاريخ أسعار متاح؛ سوق القيد غير محدد" });
+                    levels.push({ symbol: sym, is_sharia_compliant: isShariaCompliant(sym), sharia_index: isShariaCompliant(sym) ? "EGX33" : null, availability: "missing", error: "لا يوجد تاريخ أسعار متاح؛ سوق القيد غير محدد" });
                 }
             }
             return { status: "success", levels };
@@ -553,6 +560,15 @@ async function executeRawTool(
                     volume: latestEgx30?.volume,
                     market_regime: regime
                 },
+                egx33_shariah: {
+                    name: "EGX 33 Shariah Index",
+                    name_ar: "مؤشر الشريعة الإسلامية EGX 33",
+                    is_official: true,
+                    regulatory_body: "الهيئة العامة للرقابة المالية (FRA) والبورصة المصرية (EGX)",
+                    compliant_stocks_count: getShariaCompliantCount(),
+                    tracked_symbols_sample: Array.from(SHARIA_COMPLIANT_EGX_SYMBOLS).slice(0, 15),
+                    description: "المؤشر الشرعي الرسمي المعتمد من الهيئة العامة للرقابة المالية ويضم 33 شركة متوافقة مع معايير وضوابط الشريعة الإسلامية"
+                },
                 top_gainers: gainers || [],
                 top_losers: losers || []
             };
@@ -652,10 +668,16 @@ async function executeRawTool(
                 return true;
             };
 
+            const shariaOnly = Boolean(args.sharia_only);
+
             const filterScannerBySymbols = (list: any[]) => {
-                if (!args.symbols?.length) return list;
+                let filtered = list;
+                if (shariaOnly) {
+                    filtered = filtered.filter((item: any) => item.symbol && isShariaCompliant(item.symbol));
+                }
+                if (!args.symbols?.length) return filtered;
                 const set = new Set(args.symbols.map((s: string) => String(s).toUpperCase()));
-                return list.filter((item: any) => item.symbol && set.has(String(item.symbol).toUpperCase()));
+                return filtered.filter((item: any) => item.symbol && set.has(String(item.symbol).toUpperCase()));
             };
 
             // Deduplicate active scanner signals by symbol, prioritizing newest entry_date / entry_time
@@ -689,6 +711,8 @@ async function executeRawTool(
                     return {
                         id: s.id || `scanner_${s.symbol}_${s.entry_date}`,
                         symbol: s.symbol,
+                        is_sharia_compliant: isShariaCompliant(s.symbol),
+                        sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
                         signal: "BUY",
                         source: "15m_intraday_scanner",
                         recommendation_type: scannerTypeArabic,
@@ -718,6 +742,8 @@ async function executeRawTool(
                     return {
                         id: c.id || `closed_scanner_${c.symbol}_${c.exit_date}`,
                         symbol: c.symbol,
+                        is_sharia_compliant: isShariaCompliant(c.symbol),
+                        sharia_index: isShariaCompliant(c.symbol) ? "EGX33" : null,
                         signal: "BUY",
                         source: "15m_intraday_scanner",
                         recommendation_type: c.scanner_type === "volume_surge"
@@ -744,7 +770,10 @@ async function executeRawTool(
                 })
                 : [];
 
-            const allRows = allMatchingRows || [];
+            const rawAllRows = allMatchingRows || [];
+            const allRows = shariaOnly
+                ? rawAllRows.filter((r: any) => isShariaCompliant(r.symbol))
+                : rawAllRows;
 
             // Compute performance_summary over matching recommendations in timeframe
             let closedCount = 0;
@@ -821,6 +850,7 @@ async function executeRawTool(
                 swing_open_count: openCount,
                 win_count: combinedWins,
                 loss_count: combinedLosses,
+                sharia_filter_applied: shariaOnly,
                 win_rate_pct: combinedClosedCount > 0 ? Number(((combinedWins / combinedClosedCount) * 100).toFixed(1)) : null,
                 avg_return_pct: combinedClosedCount > 0 ? Number((combinedReturnPct / combinedClosedCount).toFixed(2)) : null,
                 avg_win_pct: (winCount > 0 || scannerWins > 0) ? Number(((totalWinPct + scannerWins * 3.1) / Math.max(1, winCount + scannerWins)).toFixed(2)) : null,
@@ -890,6 +920,8 @@ async function executeRawTool(
                 enrichedRecs.push({
                     id: r.id,
                     symbol: sym,
+                    is_sharia_compliant: isShariaCompliant(sym),
+                    sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                     signal: r.signal || "BUY",
                     source: "daily_swing_scanner",
                     recommendation_type: recType,
@@ -923,17 +955,18 @@ async function executeRawTool(
 
             let summaryNote = "";
             if (enrichedRecs.length === 0) {
-                summaryNote = `لا توجد توصيات أو إشارات شراء مفتوحة مسجلة خلال الفترة المطلوبة عبر جميع الأنظمة (إسكان 15 دقيقة اللحظي، وصفقات السوينغ اليومية والمتوسطة). ${effectiveLatestRecDate ? `أحدث إشارات مسجلة تعود لتاريخ ${effectiveLatestRecDate}.` : ""}`;
+                summaryNote = `لا توجد توصيات أو إشارات شراء مفتوحة مسجلة خلال الفترة المطلوبة عبر جميع الأنظمة (إسكان 15 دقيقة اللحظي، وصفقات السوينغ اليومية والمتوسطة)${shariaOnly ? " ضمن الأسهم المتوافقة مع الشريعة ومؤشر EGX 33" : ""}. ${effectiveLatestRecDate ? `أحدث إشارات مسجلة تعود لتاريخ ${effectiveLatestRecDate}.` : ""}`;
             } else if (statusFilter === "open") {
-                summaryNote = `يوجد ${performanceSummary.open_count} إشارة وتوصية شراء مفتوحة (منها ${activeScannerRecs.length} إشارة مضاربة لحظية نشطة من إسكان الـ 15 دقيقة، و${openCount} توصية سوينغ يومية مفتوحة). معروض ${enrichedRecs.length} إشارة نشطة.`;
+                summaryNote = `يوجد ${performanceSummary.open_count} إشارة وتوصية شراء مفتوحة${shariaOnly ? " متوافقة مع الشريعة (EGX 33)" : ""} (منها ${activeScannerRecs.length} إشارة مضاربة لحظية نشطة من إسكان الـ 15 دقيقة، و${openCount} توصية سوينغ يومية مفتوحة). معروض ${enrichedRecs.length} إشارة نشطة.`;
             } else {
-                summaryNote = `إجمالي توصيات الفترة ${totalRecsCount} (المفتوحة: ${performanceSummary.open_count}، المغلقة: ${performanceSummary.closed_count}، نسبة النجاح: ${performanceSummary.win_rate_pct != null ? `${performanceSummary.win_rate_pct}%` : "غير محدد"}، متوسط العائد: ${performanceSummary.avg_return_pct != null ? `${performanceSummary.avg_return_pct}%` : "غير محدد"}). معروض عينة من ${enrichedRecs.length} توصية.`;
+                summaryNote = `إجمالي توصيات الفترة ${totalRecsCount}${shariaOnly ? " (أسهم الشريعة EGX 33)" : ""} (المفتوحة: ${performanceSummary.open_count}، المغلقة: ${performanceSummary.closed_count}، نسبة النجاح: ${performanceSummary.win_rate_pct != null ? `${performanceSummary.win_rate_pct}%` : "غير محدد"}، متوسط العائد: ${performanceSummary.avg_return_pct != null ? `${performanceSummary.avg_return_pct}%` : "غير محدد"}). معروض عينة من ${enrichedRecs.length} توصية.`;
             }
 
             return {
                 status: "success",
                 timeframe,
                 status_filter: statusFilter,
+                sharia_only: shariaOnly,
                 count: enrichedRecs.length,
                 returned_count: enrichedRecs.length,
                 total_count: totalRecsCount,
@@ -971,7 +1004,8 @@ async function executeRawTool(
                 case "macd_cross": query = query.gt("macd_histogram",0).order("macd_histogram",{ascending:false}); break;
                 default: throw new Error("قالب المسح غير مدعوم");
             }
-            const { data } = await query.limit(preset === "macd_cross" ? 60 : 10);
+            const shariaScanOnly = Boolean(args.sharia_only);
+            const { data } = await query.limit(preset === "macd_cross" || shariaScanOnly ? 60 : 10);
             let stocks = data || [];
             if (preset === "macd_cross" && stocks.length) {
                 const { data: previousDates } = await supabase.from(table).select("date").eq("exchange","EGX")
@@ -982,11 +1016,19 @@ async function executeRawTool(
                     const { data: previous } = await supabase.from(table).select("symbol,date,macd_histogram").eq("exchange","EGX")
                         .eq("date",previousDate).in("symbol",stocks.map((s:any)=>s.symbol)).lte("macd_histogram",0).limit(60);
                     const crossed = new Set((previous || []).map((s:any)=>s.symbol));
-                    stocks = stocks.filter((s:any)=>crossed.has(s.symbol)).slice(0,10);
+                    stocks = stocks.filter((s:any)=>crossed.has(s.symbol));
                 }
             }
-            return { status:"success", preset, date, stocks, accumulation_stocks: toolName === "get_accumulation_stocks" ? stocks : undefined,
-                bounded_candidates: preset === "macd_cross" ? 60 : 10, methodology: preset === "macd_cross" ? "Histogram crossed from <=0 previous session to >0 latest session" : preset };
+            if (shariaScanOnly) {
+                stocks = stocks.filter((s: any) => isShariaCompliant(s.symbol));
+            }
+            stocks = stocks.slice(0, 10).map((s: any) => ({
+                ...s,
+                is_sharia_compliant: isShariaCompliant(s.symbol),
+                sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
+            }));
+            return { status:"success", preset, date, sharia_only: shariaScanOnly, stocks, accumulation_stocks: toolName === "get_accumulation_stocks" ? stocks : undefined,
+                bounded_candidates: preset === "macd_cross" || shariaScanOnly ? 60 : 10, methodology: preset === "macd_cross" ? "Histogram crossed from <=0 previous session to >0 latest session" : preset };
         }
 
         if (toolName === "screen_stocks") {
@@ -1027,7 +1069,8 @@ async function executeRawTool(
             const histories = new Map<string, any[]>();
             for (const row of history) { const list=histories.get(row.symbol)||[]; list.push(row); histories.set(row.symbol,list); }
             const insufficientHistory:string[]=[];
-            const stocks = rows.flatMap((row:any) => {
+            const shariaScreenOnly = Boolean(args.sharia_only);
+            let stocks = rows.flatMap((row:any) => {
                 const prices = (histories.get(normalizeSymbol(row.symbol))||[]).slice(0,20);
                 if (prices.length < 20) { insufficientHistory.push(row.symbol); return []; }
                 const highs = prices.map((p:any)=>finite(p.high ?? p.close)).filter((n:any)=>n != null && n > 0) as number[];
@@ -1042,8 +1085,16 @@ async function executeRawTool(
                     rsi_14:finite(row.rsi_14), resistance:Number(resistance.toFixed(6)), distance_from_resistance_pct:round(distance),
                     resistance_relation:close === resistance ? "at" : "below",
                     ...stockPricePresentation(row.date), resistance_sessions:20 }];
-            }).sort((a:any,b:any)=>(a.distance_from_resistance_pct-b.distance_from_resistance_pct)||(b.r_vol-a.r_vol)).slice(0,maxResults);
-            return { status:"success", date, filters:{rsi_min:rsiMin,rsi_max:rsiMax,relative_volume_min:volumeMin,
+            });
+            if (shariaScreenOnly) {
+                stocks = stocks.filter((s: any) => isShariaCompliant(s.symbol));
+            }
+            stocks = stocks.sort((a:any,b:any)=>(a.distance_from_resistance_pct-b.distance_from_resistance_pct)||(b.r_vol-a.r_vol)).slice(0,maxResults).map((s: any) => ({
+                ...s,
+                is_sharia_compliant: isShariaCompliant(s.symbol),
+                sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
+            }));
+            return { status:"success", date, sharia_only: shariaScreenOnly, filters:{rsi_min:rsiMin,rsi_max:rsiMax,relative_volume_min:volumeMin,
                 relative_volume_inclusive:volumeInclusive,max_resistance_distance_pct:distanceMax,resistance_distance_inclusive:distanceInclusive}, stocks, scan_complete:!truncated && insufficientHistory.length===0,
                 candidate_limit:250, candidates_checked:rows.length, truncated, insufficient_history_symbols:insufficientHistory,
                 methodology:`r_vol ${volumeInclusive ? ">=" : ">"} threshold; distance ${distanceInclusive ? "<=" : "<"} threshold; resistance is maximum high over latest 20 daily sessions including snapshot session; distance=(resistance-close)/close*100`,
@@ -1153,6 +1204,8 @@ async function executeRawTool(
                 if (quote) {
                     return {
                         symbol: sym,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                        sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         ...quote,
                         wyckoff_date: wyckoff.scan_date ?? null,
                         wyckoff_phase: wyckoff.wyckoff_phase ?? null,
@@ -1164,7 +1217,7 @@ async function executeRawTool(
                         consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
                     };
                 } else {
-                    return { symbol: sym, error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب" };
+                    return { symbol: sym, is_sharia_compliant: isShariaCompliant(sym), sharia_index: isShariaCompliant(sym) ? "EGX33" : null, error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب" };
                 }
             });
             return { status: "success", comparison: data, comparisons: data };
