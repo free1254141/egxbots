@@ -674,10 +674,44 @@ async function executeRawTool(
                     }
                 }
 
+                let recType = "قصيرة الأجل (Short-term Swing ⚡)";
+                let horizon = "2 - 5 جلسات تداول";
+                const holdingDays = r.holding_days ?? (r.isClosed && r.created_at && r.updated_at
+                    ? Math.max(1, Math.round((new Date(r.updated_at).getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24)))
+                    : null);
+
+                if (holdingDays !== null) {
+                    if (holdingDays <= 2) {
+                        recType = "سريعة (Momentum Scalp ⚡)";
+                        horizon = "1 - 2 جلسة تداول (مضاربة سريعة)";
+                    } else if (holdingDays <= 8) {
+                        recType = "قصيرة الأجل (Short-term Swing ⚡ PRO)";
+                        horizon = "2 - 5 جلسات تداول (سوينغ سريع)";
+                    } else {
+                        recType = "متوسطة الأجل (Medium-term Swing 📈)";
+                        horizon = "3 - 6 أسابيع (تتبع اتجاه)";
+                    }
+                } else if (r.stop_loss && r.entry > 0) {
+                    const stopPct = Math.abs((r.entry - Number(r.stop_loss)) / r.entry) * 100;
+                    if (stopPct <= 4.5) {
+                        recType = "قصيرة الأجل (Short-term Swing ⚡ PRO)";
+                        horizon = "2 - 5 جلسات (وقف صارم -4%)";
+                    } else if (stopPct > 7) {
+                        recType = "متوسطة الأجل (Medium-term Swing 📈)";
+                        horizon = "3 - 6 أسابيع (تتبع اتجاه)";
+                    } else {
+                        recType = "قصيرة الأجل (Short-term Swing ⚡ PRO)";
+                        horizon = "2 - 5 جلسات تداول";
+                    }
+                }
+
                 enrichedRecs.push({
                     id: r.id,
                     symbol: sym,
                     signal: r.signal || "BUY",
+                    recommendation_type: recType,
+                    time_horizon: horizon,
+                    holding_days: holdingDays,
                     entry_price: r.entry,
                     target_price: r.target_price,
                     stop_loss: r.stop_loss,
