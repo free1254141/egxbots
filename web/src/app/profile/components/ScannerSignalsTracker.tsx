@@ -579,13 +579,22 @@ export default function ScannerSignalsTracker({
                           {(c.exit_price || c.current_price).toFixed(2)} ج.م
                         </td>
                         <td className="p-3">
-                          <span
-                            className={`px-2 py-0.5 border text-black font-black text-xs ${
-                              isWin ? "bg-emerald-400 border-black" : "bg-rose-400 border-black"
-                            }`}
-                          >
-                            {isWin ? `+${c.return_pct.toFixed(2)}%` : `${c.return_pct.toFixed(2)}%`}
-                          </span>
+                          {(() => {
+                            const exitP = c.exit_price ?? c.current_price;
+                            const mathReturn = c.entry_price && exitP
+                              ? Number((((exitP - c.entry_price) / c.entry_price) * 100).toFixed(2))
+                              : c.return_pct;
+                            const isMathWin = mathReturn > 0;
+                            return (
+                              <span
+                                className={`px-2 py-0.5 border text-black font-black text-xs ${
+                                  isMathWin ? "bg-emerald-400 border-black" : "bg-rose-400 border-black"
+                                }`}
+                              >
+                                {isMathWin ? `+${mathReturn.toFixed(2)}%` : `${mathReturn.toFixed(2)}%`}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="p-3">
                           <span

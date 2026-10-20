@@ -239,6 +239,20 @@ export default function ScannerIntradayChartModal({
         secondsVisible: false,
         fixLeftEdge: true,
         fixRightEdge: true,
+        tickMarkFormatter: (time: number) => {
+          const d = new Date(time * 1000);
+          const hours = String(d.getUTCHours()).padStart(2, "0");
+          const mins = String(d.getUTCMinutes()).padStart(2, "0");
+          return `${hours}:${mins}`;
+        },
+      },
+      localization: {
+        timeFormatter: (time: number) => {
+          const d = new Date(time * 1000);
+          const hours = String(d.getUTCHours()).padStart(2, "0");
+          const mins = String(d.getUTCMinutes()).padStart(2, "0");
+          return `${hours}:${mins}`;
+        },
       },
       rightPriceScale: {
         borderColor: "#3f3f46",
@@ -369,8 +383,7 @@ export default function ScannerIntradayChartModal({
                 <CalendarIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
                 <span>{date}</span>
                 <span>•</span>
-                <span className="hidden sm:inline">10:00 ص إلى 02:30 م (EGX Session)</span>
-                <span className="sm:hidden">10:00 - 14:30</span>
+                <span dir="ltr" className="inline-block font-mono">10:00 AM - 02:30 PM (EGX Session)</span>
               </p>
             </div>
           </div>

@@ -91,8 +91,10 @@ export async function GET(request: NextRequest) {
     };
 
     // 1. In-memory fast cache (0ms instant hit)
+    const isToday = targetDate === today;
+    const cacheTtl = isToday ? 60_000 : 3_600_000;
     const mem = MEM_CACHE.get(cacheKey);
-    if (mem && now - mem.timestamp < 3600000) {
+    if (mem && now - mem.timestamp < cacheTtl) {
       const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
       if (payload) {
         return NextResponse.json(payload, { headers });
@@ -134,8 +136,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 3. Try Supabase market_cache
-    if (serviceClient) {
+    // 3. Try Supabase market_cache (only for past sessions)
+    if (serviceClient && !isToday) {
       try {
         const { data: cached } = await serviceClient
           .from("market_cache")

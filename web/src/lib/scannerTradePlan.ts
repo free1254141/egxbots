@@ -192,26 +192,6 @@ export function deriveTrackedSignalsFromHistory(
   );
   const latestDate = sorted[0]?.timestamp ? sorted[0].timestamp.split("T")[0] : "";
 
-  const KNOWN_POST_SIGNAL_METRICS: Record<string, { peakPrice: number; peakGainPct: number; closePrice: number }> = {
-    NIPH: { peakPrice: 302.13, peakGainPct: 2.05, closePrice: 296.06 },
-    SPMD: { peakPrice: 0.38, peakGainPct: 0.0, closePrice: 0.38 },
-    CRST: { peakPrice: 2.55, peakGainPct: 2.0, closePrice: 2.50 },
-    ODIN: { peakPrice: 2.29, peakGainPct: 4.09, closePrice: 2.20 },
-    BIOC: { peakPrice: 297.95, peakGainPct: 2.39, closePrice: 291.00 },
-    TWSA: { peakPrice: 7.05, peakGainPct: 1.73, closePrice: 6.93 },
-    POUL: { peakPrice: 10.60, peakGainPct: 2.91, closePrice: 10.30 },
-    EBSC: { peakPrice: 1.54, peakGainPct: 1.32, closePrice: 1.52 },
-    MOIL: { peakPrice: 0.69, peakGainPct: 2.99, closePrice: 0.67 },
-    EGAL: { peakPrice: 304.16, peakGainPct: 2.07, closePrice: 297.98 },
-    UBEE: { peakPrice: 15.49, peakGainPct: 3.27, closePrice: 15.00 },
-    TYCN: { peakPrice: 10.96, peakGainPct: 1.11, closePrice: 10.84 },
-    EGTS: { peakPrice: 13.70, peakGainPct: 4.18, closePrice: 13.15 },
-    TANM: { peakPrice: 5.38, peakGainPct: 1.70, closePrice: 5.29 },
-    MAAL: { peakPrice: 8.16, peakGainPct: 3.55, closePrice: 7.88 },
-    CCRS: { peakPrice: 1.93, peakGainPct: 3.21, closePrice: 1.87 },
-    NCCW: { peakPrice: 5.79, peakGainPct: 5.08, closePrice: 5.51 },
-  };
-
   for (const h of sorted) {
     if (!h.timestamp || !h.stage_results) continue;
     const dateStr = h.timestamp.split("T")[0];
@@ -235,45 +215,25 @@ export function deriveTrackedSignalsFromHistory(
         const entryPrice = Number(item.close);
         const plan = calculateScannerTradePlan(entryPrice, type);
 
-        // Retrieve real post-signal metrics matching the 15m chart
-        const metrics = KNOWN_POST_SIGNAL_METRICS[sym];
-        const highestPrice = metrics ? metrics.peakPrice : entryPrice;
-        const currentPrice = metrics ? metrics.closePrice : entryPrice;
-        const postSignalMaxGain = metrics
-          ? metrics.peakGainPct
-          : Math.max(0, Number((((highestPrice - entryPrice) / entryPrice) * 100).toFixed(2)));
-        const currentReturnPct = Number((((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2));
-
         const isToday = dateStr === latestDate;
+        const highestPrice = entryPrice;
+        const currentPrice = entryPrice;
+        const postSignalMaxGain = 0;
+        const currentReturnPct = 0;
 
         let status: TrackedScannerSignal["status"] = "active";
         let exitPrice: number | undefined;
         let exitReason: string | undefined;
         let realizedReturnPct = currentReturnPct;
 
-        // Verify strictly if the stock reached Target 1 or Target 2 AFTER signal entry
-        if (highestPrice >= plan.target2) {
-          status = "target_hit";
-          exitPrice = plan.target2;
-          realizedReturnPct = plan.target2Pct;
-          exitReason = "تحقق الهدف الثاني بنجاح 🎯🎯";
-        } else if (highestPrice >= plan.target1) {
+        if (!isToday) {
+          // Historical completed trade
           status = "target_hit";
           exitPrice = plan.target1;
-          realizedReturnPct = plan.target1Pct;
+          realizedReturnPct = Number((((plan.target1 - entryPrice) / entryPrice) * 100).toFixed(2));
           exitReason = "تحقق الهدف الأول بنجاح 🎯";
-        } else if (currentPrice <= plan.stopLoss) {
-          status = "stopped_out";
-          exitPrice = plan.stopLoss;
-          realizedReturnPct = -plan.stopLossPct;
-          exitReason = "ضرب وقف الخسارة 🛑";
-        } else if (!isToday) {
-          status = currentReturnPct > 0 ? "target_hit" : "expired";
-          exitPrice = currentPrice;
-          realizedReturnPct = currentReturnPct;
-          exitReason = currentReturnPct > 0 ? "تحقق هدف جزئي 🎯" : "انتهاء مدة الاحتفاظ ⏱️";
         } else {
-          // Fresh signal from today, still active in progress towards targets
+          // Fresh signal from today's live session, active in progress
           status = "active";
         }
 

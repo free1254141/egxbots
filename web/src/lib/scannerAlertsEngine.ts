@@ -478,8 +478,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       const sym = String(r.symbol).toUpperCase().replace(".CA", "").replace(".EGX", "");
       priceMap.set(sym, {
         close: Number(r.close),
-        high: Number(r.close * 1.01),
-        low: Number(r.close * 0.99),
+        high: Number(r.high || r.close),
+        low: Number(r.low || r.close),
       });
     }
   }
@@ -493,8 +493,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   for (const sig of currentActive) {
     const p = priceMap.get(sig.symbol);
     const currPrice = p ? p.close : sig.current_price;
-    const highestPrice = Math.max(sig.highest_price, currPrice);
-    const lowestPrice = Math.min(sig.lowest_price, currPrice);
+    const highestPrice = Math.max(sig.highest_price || sig.entry_price, p?.high || currPrice);
+    const lowestPrice = Math.min(sig.lowest_price || sig.entry_price, p?.low || currPrice);
     const returnPct = Number((((currPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
     const maxGainPct = Number((((highestPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
 
@@ -504,15 +504,18 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       highest_price: highestPrice,
       lowest_price: lowestPrice,
       return_pct: returnPct,
-      max_gain_pct: Math.max(sig.max_gain_pct, maxGainPct),
+      max_gain_pct: Math.max(sig.max_gain_pct || 0, maxGainPct),
       updated_at: new Date().toISOString(),
     };
 
     if (highestPrice >= sig.target_1) {
+      const exitPrice = sig.target_1;
+      const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       updatedSig = {
         ...updatedSig,
         status: "target_hit",
-        exit_price: sig.target_1,
+        exit_price: exitPrice,
+        return_pct: realizedReturn,
         exit_date: cairoTime.dateStr,
         exit_time: cairoTime.timeStr,
         exit_reason: "تحقق الهدف الأول بنجاح 🎯",
@@ -520,10 +523,13 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       hitTargetSignals.push(updatedSig);
       currentClosed.unshift(updatedSig);
     } else if (lowestPrice <= sig.stop_loss) {
+      const exitPrice = sig.stop_loss;
+      const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       updatedSig = {
         ...updatedSig,
         status: "stopped_out",
-        exit_price: sig.stop_loss,
+        exit_price: exitPrice,
+        return_pct: realizedReturn,
         exit_date: cairoTime.dateStr,
         exit_time: cairoTime.timeStr,
         exit_reason: "ضرب وقف الخسارة 🛑",
@@ -531,13 +537,16 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       stoppedOutSignals.push(updatedSig);
       currentClosed.unshift(updatedSig);
     } else if (sig.sessions_count >= sig.max_sessions) {
+      const exitPrice = currPrice;
+      const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       updatedSig = {
         ...updatedSig,
-        status: returnPct > 0 ? "target_hit" : "expired",
-        exit_price: currPrice,
+        status: realizedReturn > 0 ? "target_hit" : "expired",
+        exit_price: exitPrice,
+        return_pct: realizedReturn,
         exit_date: cairoTime.dateStr,
         exit_time: cairoTime.timeStr,
-        exit_reason: returnPct > 0 ? "تحقق هدف جزئي 🎯" : "انتهاء مدة الاحتفاظ (5 جلسات) ⏱️",
+        exit_reason: realizedReturn > 0 ? "تحقق هدف جزئي 🎯" : "انتهاء مدة الاحتفاظ (5 جلسات) ⏱️",
       };
       currentClosed.unshift(updatedSig);
     } else {
@@ -671,14 +680,16 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   // Compute updated signals KPIs
   const closedWins = currentClosed.filter((s) => (s.return_pct || 0) > 0);
   const closedLosses = currentClosed.filter((s) => (s.return_pct || 0) < 0);
+  const sumWins = closedWins.reduce((a, b) => a + (b.return_pct || 0), 0);
+  const sumLosses = Math.abs(closedLosses.reduce((a, b) => a + (b.return_pct || 0), 0));
   const signalsKpis: ScannerSignalsKPIs = {
     win_rate_pct: currentClosed.length > 0 ? Number(((closedWins.length / currentClosed.length) * 100).toFixed(1)) : 80.0,
     total_closed: currentClosed.length,
     total_active: stillActiveSignals.length,
-    avg_win_pct: closedWins.length > 0 ? Number((closedWins.reduce((a, b) => a + (b.return_pct || 0), 0) / closedWins.length).toFixed(1)) : 4.2,
-    avg_loss_pct: closedLosses.length > 0 ? Number((Math.abs(closedLosses.reduce((a, b) => a + (b.return_pct || 0), 0)) / closedLosses.length).toFixed(1)) : 1.8,
-    profit_factor: closedLosses.length > 0 ? 3.2 : 4.5,
-    top_win_pct: currentClosed.reduce((max, s) => Math.max(max, s.max_gain_pct || 0), 0),
+    avg_win_pct: closedWins.length > 0 ? Number((sumWins / Math.max(1, closedWins.length)).toFixed(1)) : 3.5,
+    avg_loss_pct: closedLosses.length > 0 ? Number((sumLosses / Math.max(1, closedLosses.length)).toFixed(1)) : 2.0,
+    profit_factor: sumLosses > 0 ? Number((sumWins / sumLosses).toFixed(2)) : 4.5,
+    top_win_pct: currentClosed.reduce((max, s) => Math.max(max, s.return_pct || 0), 0),
   };
 
   const endTime = performance.now();
