@@ -530,6 +530,15 @@ async def trigger_daily_bot(request: Request, background_tasks: BackgroundTasks)
     return {"status": "started", "message": "Daily bot run job has been started in the background."}
 
 
+@app.post("/api/admin/run-subscription-reminders")
+async def trigger_subscription_reminders(request: Request):
+    require_internal_admin(request)
+    from jobs.telegram_subscription_reminders import run_subscription_reminders
+    import asyncio
+    res = await asyncio.to_thread(run_subscription_reminders)
+    return {"status": "success", "result": res}
+
+
 @app.post("/api/run-accumulation-scan")
 async def trigger_accumulation_scan(request: Request):
     """

@@ -6,160 +6,224 @@ EGX BOTS private Telegram subscription reminders.
 Required environment:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  TELEGRAM_BOT_TOKEN
+  TELEGRAM_BOT_TOKEN or SUPPORT_BOT_TOKEN
 
-Runs once daily. Sends only to the user's private Telegram chat_id saved in
-public.profiles.telegram_chat_id. It never sends to a group/channel.
+Runs daily. Sends only to the user's private Telegram chat_id saved in
+public.profiles.telegram_chat_id. It never sends to groups or channels.
+Uses durable idempotency logging in public.telegram_subscription_reminder_log.
 """
 from __future__ import annotations
 
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
 
 CAIRO = ZoneInfo("Africa/Cairo")
-SITE_URL = os.getenv("EGXBOTS_BILLING_URL", "https://egxbots.com/profile")
+SITE_URL = os.getenv("EGXBOTS_BILLING_URL", "https://egxbots.com/profile#subscription")
 API_TIMEOUT = 20
-DAYS_TO_REMIND = {7, 3, 0}
-LIFETIME_PLAN_IDS = {"lifetime", "lifetime_vip", "lifetime-vip", "lifetime-vip-pro"}
+LIFETIME_KEYWORDS = {"lifetime", "pro_lifetime", "lifetime_vip", "lifetime-vip", "lifetime-vip-pro"}
 
 
-def required_env(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise RuntimeError(f"Missing required secret: {name}")
-    return value
+def get_supabase_config() -> Tuple[str, str, Dict[str, str]]:
+    url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not url or not key:
+        raise RuntimeError("Missing required SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    return url, key, headers
 
 
-SUPABASE_URL = required_env("SUPABASE_URL").rstrip("/")
-SUPABASE_KEY = required_env("SUPABASE_SERVICE_ROLE_KEY")
-TELEGRAM_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
-if not TELEGRAM_TOKEN:
-    raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUPPORT_BOT_TOKEN)")
-REST = f"{SUPABASE_URL}/rest/v1"
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-}
+def get_telegram_token() -> str:
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
+    if not token:
+        raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUPPORT_BOT_TOKEN)")
+    return token
 
 
-def supabase_get(table: str, params: dict) -> list[dict]:
-    response = requests.get(
-        f"{REST}/{table}", headers=HEADERS, params=params, timeout=API_TIMEOUT
-    )
-    response.raise_for_status()
-    data = response.json()
-    if not isinstance(data, list):
-        raise RuntimeError(f"Unexpected response from {table}")
-    return data
+def parse_chat_id(raw_chat_id: Any) -> Optional[int]:
+    """Safely parse Telegram private chat ID (rejects non-positive / channels)."""
+    if not raw_chat_id:
+        return None
+    s = str(raw_chat_id).strip()
+    if "_" in s:
+        s = s.split("_", 1)[0]
+    try:
+        cid = int(float(s))
+        return cid if cid > 0 else None
+    except (ValueError, TypeError):
+        return None
 
 
-def supabase_post(table: str, payload: dict, *, prefer: str = "return=representation"):
-    headers = {**HEADERS, "Prefer": prefer}
-    response = requests.post(
-        f"{REST}/{table}", headers=headers, json=payload, timeout=API_TIMEOUT
-    )
-    return response
+def send_private_telegram(chat_id: int, text: str, token: str) -> dict:
+    """Send private Telegram message with relay fallback for regional network reliability."""
+    if chat_id <= 0:
+        raise ValueError(f"Invalid private Telegram chat_id: {chat_id}")
+
+    relay = (os.getenv("TELEGRAM_RELAY_URL") or "https://api.telegram.org").strip().rstrip("/")
+    bases = [relay] if relay != "https://api.telegram.org" else []
+    bases.append("https://api.telegram.org")
+
+    last_exc = None
+    for base in bases:
+        try:
+            response = requests.post(
+                f"{base}/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                timeout=API_TIMEOUT,
+            )
+            if response.status_code == 200:
+                body = response.json()
+                if body.get("ok"):
+                    return body.get("result", {})
+                last_exc = RuntimeError(f"Telegram API rejected message: {body}")
+            else:
+                last_exc = RuntimeError(f"Telegram API HTTP {response.status_code}: {response.text[:250]}")
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    raise last_exc or RuntimeError("Failed to send Telegram message to all endpoints")
 
 
-def supabase_patch(table: str, params: dict, payload: dict):
-    response = requests.patch(
-        f"{REST}/{table}", headers=HEADERS, params=params,
-        json=payload, timeout=API_TIMEOUT
-    )
-    response.raise_for_status()
-
-
-def send_private_telegram(chat_id: str, text: str) -> dict:
-    # Only direct private chat IDs are accepted; groups/supergroups/channels are rejected.
-    cid = int(str(chat_id).strip())
-    if cid <= 0:
-        raise ValueError("Not a positive Telegram private chat_id")
-    response = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        json={"chat_id": cid, "text": text, "disable_web_page_preview": True},
-        timeout=API_TIMEOUT,
-    )
-    response.raise_for_status()
-    body = response.json()
-    if not body.get("ok"):
-        raise RuntimeError(f"Telegram API rejected message: {body}")
-    return body["result"]
-
-
-def message_for(days_left: int, end_date: str) -> str:
-    if days_left == 7:
-        lead = "🔔 تذكير من EGX BOTS PRO\n\nفاضل 7 أيام على انتهاء اشتراكك."
-    elif days_left == 3:
-        lead = "⏳ تذكير من EGX BOTS PRO\n\nفاضل 3 أيام على انتهاء اشتراكك."
+def message_for(stage: int, days_left: int, end_date: str) -> str:
+    """Compose clear, actionable Arabic renewal reminder."""
+    if stage == 7:
+        lead = f"🔔 تذكير من EGX BOTS PRO\n\nفاضل {days_left} أيام على انتهاء اشتراكك."
+    elif stage == 3:
+        if days_left == 1:
+            lead = "⏳ تذكير من EGX BOTS PRO\n\nفاضل يوم واحد على انتهاء اشتراكك."
+        elif days_left == 2:
+            lead = "⏳ تذكير من EGX BOTS PRO\n\nفاضل يومين على انتهاء اشتراكك."
+        else:
+            lead = f"⏳ تذكير من EGX BOTS PRO\n\nفاضل {days_left} أيام على انتهاء اشتراكك."
     else:
-        lead = "⚠️ تذكير من EGX BOTS PRO\n\nاشتراكك بينتهي النهارده."
+        if days_left < 0:
+            lead = "⚠️ تنبيه من EGX BOTS PRO\n\nاشتراكك انتهى مؤخراً."
+        else:
+            lead = "⚠️ تذكير من EGX BOTS PRO\n\nاشتراكك بينتهي النهارده."
+
     return (
         f"{lead}\n"
         f"تاريخ الانتهاء: {end_date}\n\n"
-        "للاستمرار في الاستفادة من الإشارات الفورية وأدوات Pro، "
+        "للاستمرار في الاستفادة من الإشارات الفورية وروبوتات التداول وأدوات Pro، "
         "تقدر تجدّد اشتراكك من هنا:\n"
         f"{SITE_URL}\n\n"
         "لو كنت جدّدت بالفعل، تجاهل الرسالة دي."
     )
 
 
-def main() -> int:
-    now = datetime.now(timezone.utc)
-    cairo_today = now.astimezone(CAIRO).date()
-    print(f"[start] Cairo date={cairo_today.isoformat()} UTC={now.isoformat()}")
+def determine_reminder_stage(days_left: int) -> Optional[int]:
+    """
+    Map remaining days to target reminder stage with catch-up windows
+    so skipped days (e.g. weekend/holidays) do not miss alerts:
+      - Stage 7: 4 to 7 days remaining
+      - Stage 3: 1 to 3 days remaining
+      - Stage 0: -1 to 0 days remaining (expired today or yesterday)
+    """
+    if 4 <= days_left <= 7:
+        return 7
+    if 1 <= days_left <= 3:
+        return 3
+    if -1 <= days_left <= 0:
+        return 0
+    return None
 
-    subscriptions = supabase_get(
-        "subscriptions",
-        {
+
+def is_lifetime_plan(plan_id: str) -> bool:
+    """Check if a plan should never receive expiration reminders."""
+    p = str(plan_id or "").lower().strip()
+    return "lifetime" in p or p in LIFETIME_KEYWORDS
+
+
+def run_subscription_reminders(
+    now: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """
+    Core executor for private Telegram renewal reminders.
+    Can be invoked programmatically (from daily job scheduler or API)
+    or as a standalone script.
+    """
+    now = now or datetime.now(timezone.utc)
+    cairo_today = now.astimezone(CAIRO).date()
+    print(f"[SUBSCRIPTION_REMINDERS] Starting run Cairo date={cairo_today.isoformat()} UTC={now.isoformat()}")
+
+    supabase_url, _, headers = get_supabase_config()
+    telegram_token = get_telegram_token()
+    rest = f"{supabase_url}/rest/v1"
+
+    # 1. Fetch active subscriptions with a set period end
+    resp = requests.get(
+        f"{rest}/subscriptions",
+        headers=headers,
+        params={
             "select": "id,user_id,plan_id,status,current_period_end",
             "status": "eq.active",
             "current_period_end": "not.is.null",
             "limit": "1000",
         },
+        timeout=API_TIMEOUT,
     )
+    resp.raise_for_status()
+    subscriptions = resp.json()
+
     eligible = []
     user_ids = set()
     for sub in subscriptions:
-        plan = str(sub.get("plan_id") or "").lower().strip()
-        if plan in LIFETIME_PLAN_IDS:
+        if is_lifetime_plan(sub.get("plan_id")):
             continue
         try:
-            end_dt = datetime.fromisoformat(sub["current_period_end"].replace("Z", "+00:00"))
+            raw_end = str(sub.get("current_period_end") or "")
+            end_dt = datetime.fromisoformat(raw_end.replace("Z", "+00:00"))
         except Exception:
-            print(f"[skip] invalid end date for subscription={sub.get('id')}")
+            print(f"[SUBSCRIPTION_REMINDERS] [skip] invalid end date for subscription={sub.get('id')}")
             continue
+
         days_left = (end_dt.astimezone(CAIRO).date() - cairo_today).days
-        if days_left in DAYS_TO_REMIND:
-            eligible.append((sub, end_dt, days_left))
+        stage = determine_reminder_stage(days_left)
+        if stage is not None:
+            eligible.append((sub, end_dt, days_left, stage))
             user_ids.add(sub["user_id"])
 
     if not eligible:
-        print("[done] no reminders due today")
-        return 0
+        print("[SUBSCRIPTION_REMINDERS] [done] No reminders due today")
+        return {"status": "completed", "sent": 0, "failed": 0, "skipped": 0, "eligible": 0}
 
-    profiles = supabase_get(
-        "profiles",
-        {
+    # 2. Fetch profiles for eligible users
+    prof_resp = requests.get(
+        f"{rest}/profiles",
+        headers=headers,
+        params={
             "select": "id,telegram_chat_id,display_name,username",
             "id": "in.(" + ",".join(sorted(user_ids)) + ")",
             "limit": "1000",
         },
+        timeout=API_TIMEOUT,
     )
+    prof_resp.raise_for_status()
+    profiles = prof_resp.json()
     profile_by_id = {p["id"]: p for p in profiles}
-    sent = failed = skipped = 0
 
-    for sub, end_dt, days_left in eligible:
+    sent = 0
+    failed = 0
+    skipped = 0
+
+    for sub, end_dt, days_left, stage in eligible:
         profile = profile_by_id.get(sub["user_id"], {})
-        chat_id = str(profile.get("telegram_chat_id") or "").strip()
+        raw_chat_id = profile.get("telegram_chat_id")
+        chat_id = parse_chat_id(raw_chat_id)
         if not chat_id:
             skipped += 1
-            print(f"[skip] no linked private Telegram chat for user={sub['user_id']}")
+            print(f"[SUBSCRIPTION_REMINDERS] [skip] no linked private Telegram chat for user={sub['user_id']}")
             continue
 
         period_end = end_dt.astimezone(timezone.utc).isoformat()
@@ -167,92 +231,129 @@ def main() -> int:
             "subscription_id": sub["id"],
             "user_id": sub["user_id"],
             "period_end": period_end,
-            "reminder_days": days_left,
+            "reminder_days": stage,
             "status": "pending",
         }
-        # Idempotency key: subscription + exact period end + reminder stage.
-        insert = supabase_post(
-            "telegram_subscription_reminder_log",
-            log_payload,
-            prefer="return=representation",
+
+        # Idempotency check via durable log
+        insert_res = requests.post(
+            f"{rest}/telegram_subscription_reminder_log",
+            headers={**headers, "Prefer": "return=representation"},
+            json=log_payload,
+            timeout=API_TIMEOUT,
         )
-        if insert.status_code == 409:
-            existing = supabase_get(
-                "telegram_subscription_reminder_log",
-                {
+
+        log_id = None
+        if insert_res.status_code == 409:
+            # Row already exists; inspect state
+            existing_res = requests.get(
+                f"{rest}/telegram_subscription_reminder_log",
+                headers=headers,
+                params={
                     "select": "id,status,created_at",
                     "subscription_id": f"eq.{sub['id']}",
                     "period_end": f"eq.{period_end}",
-                    "reminder_days": f"eq.{days_left}",
+                    "reminder_days": f"eq.{stage}",
                     "limit": "1",
                 },
+                timeout=API_TIMEOUT,
             )
+            existing = existing_res.json() if existing_res.ok else []
             if not existing:
                 failed += 1
-                print(f"[error] conflict but log row not found subscription={sub['id']}")
+                print(f"[SUBSCRIPTION_REMINDERS] [error] conflict but log row not found subscription={sub['id']}")
                 continue
             row = existing[0]
             if row.get("status") == "sent":
-                print(f"[skip] already sent subscription={sub['id']} days={days_left}")
+                print(f"[SUBSCRIPTION_REMINDERS] [skip] already sent subscription={sub['id']} stage={stage}")
                 continue
-            # Retry only a failed/pending row that is at least 20 minutes old,
-            # avoiding immediate duplicate sends after a transient request timeout.
-            created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if (now - created_at).total_seconds() < 1200:
-                print(f"[skip] recent pending attempt subscription={sub['id']}")
-                continue
-            supabase_patch(
-                "telegram_subscription_reminder_log",
-                {"id": f"eq.{row['id']}"},
-                {"status": "pending", "error": None},
+
+            # Retry only if previous pending/failed attempt is at least 20 minutes old
+            try:
+                created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                if (now - created_at).total_seconds() < 1200:
+                    print(f"[SUBSCRIPTION_REMINDERS] [skip] recent attempt pending subscription={sub['id']}")
+                    continue
+            except Exception:
+                pass
+
+            requests.patch(
+                f"{rest}/telegram_subscription_reminder_log",
+                headers=headers,
+                params={"id": f"eq.{row['id']}"},
+                json={"status": "pending", "error": None},
+                timeout=API_TIMEOUT,
             )
             log_id = row["id"]
-        elif insert.ok:
-            returned = insert.json()
+        elif insert_res.ok:
+            returned = insert_res.json()
             if not returned:
                 failed += 1
-                print(f"[error] log insert returned no row subscription={sub['id']}")
+                print(f"[SUBSCRIPTION_REMINDERS] [error] log insert returned empty row subscription={sub['id']}")
                 continue
             log_id = returned[0]["id"]
         else:
             failed += 1
-            print(f"[error] log insert failed status={insert.status_code} body={insert.text[:300]}")
+            print(f"[SUBSCRIPTION_REMINDERS] [error] log insert failed status={insert_res.status_code} body={insert_res.text[:200]}")
             continue
 
+        if dry_run:
+            print(f"[SUBSCRIPTION_REMINDERS] [dry-run] would send stage={stage} to chat_id={chat_id}")
+            continue
+
+        # Send Telegram notification
+        msg_text = message_for(stage, days_left, end_dt.astimezone(CAIRO).date().isoformat())
         try:
-            result = send_private_telegram(chat_id, message_for(days_left, end_dt.astimezone(CAIRO).date().isoformat()))
-            supabase_patch(
-                "telegram_subscription_reminder_log",
-                {"id": f"eq.{log_id}"},
-                {
+            tg_result = send_private_telegram(chat_id, msg_text, telegram_token)
+            requests.patch(
+                f"{rest}/telegram_subscription_reminder_log",
+                headers=headers,
+                params={"id": f"eq.{log_id}"},
+                json={
                     "status": "sent",
-                    "telegram_message_id": result.get("message_id"),
+                    "telegram_message_id": tg_result.get("message_id"),
                     "sent_at": datetime.now(timezone.utc).isoformat(),
                     "error": None,
                 },
+                timeout=API_TIMEOUT,
             )
             sent += 1
-            print(f"[sent] user={sub['user_id']} days_left={days_left}")
-        except Exception as exc:
+            print(f"[SUBSCRIPTION_REMINDERS] [sent] user={sub['user_id']} stage={stage} days_left={days_left}")
+        except Exception as send_err:
             failed += 1
             try:
-                supabase_patch(
-                    "telegram_subscription_reminder_log",
-                    {"id": f"eq.{log_id}"},
-                    {"status": "failed", "error": str(exc)[:1000]},
+                requests.patch(
+                    f"{rest}/telegram_subscription_reminder_log",
+                    headers=headers,
+                    params={"id": f"eq.{log_id}"},
+                    json={"status": "failed", "error": str(send_err)[:1000]},
+                    timeout=API_TIMEOUT,
                 )
-            except Exception as log_exc:
-                print(f"[error] unable to update failure log: {log_exc}")
-            print(f"[error] send failed user={sub['user_id']}: {exc}")
+            except Exception as patch_err:
+                print(f"[SUBSCRIPTION_REMINDERS] [error] unable to update failure log: {patch_err}")
+            print(f"[SUBSCRIPTION_REMINDERS] [error] send failed user={sub['user_id']}: {send_err}")
+
         time.sleep(0.15)
 
-    print(f"[summary] sent={sent} failed={failed} skipped_no_private_chat={skipped}")
-    return 0 if failed == 0 else 1
+    summary = {
+        "status": "completed" if failed == 0 else "partial_success",
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+        "eligible": len(eligible),
+    }
+    print(f"[SUBSCRIPTION_REMINDERS] Summary: {summary}")
+    return summary
+
+
+def main() -> int:
+    try:
+        res = run_subscription_reminders()
+        return 0 if res.get("failed", 0) == 0 else 1
+    except Exception as exc:
+        print(f"[SUBSCRIPTION_REMINDERS] [fatal] {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as exc:
-        print(f"[fatal] {type(exc).__name__}: {exc}", file=sys.stderr)
-        sys.exit(1)
+    sys.exit(main())

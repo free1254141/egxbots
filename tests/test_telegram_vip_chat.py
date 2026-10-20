@@ -527,3 +527,105 @@ def test_concurrent_users_in_same_minute_both_get_replies():
         assert "حلل سهم Phdc" in queries
         assert "حلل سهم ASCM" in queries
 
+
+def test_telegram_formatter_vertical_technical_levels():
+    """
+    Vertical Technical Levels tables must render cleanly:
+    - Numeric prices in <code>
+    - Descriptions in italics <i>
+    - No redundant column labels like 'القيمة (ج.م):' or 'الوصف الفني:' repeated on every line
+    - No wrapping of full Arabic sentences in <code>
+    """
+    sample = (
+        "### جدول المستويات الفنية\n"
+        "| المستوى / المؤشر | القيمة (ج.م) | الوصف الفني |\n"
+        "| :--- | :--- | :--- |\n"
+        "| آخر سعر متاح | 1.24 | لقطة جلسة 20-10-2026، غير مؤكدة كإغلاق نهائي |\n"
+        "| الدعم الأول | 1.18 | يبعد -4.84% عن السعر، كسره يضعف السيناريو |\n"
+        "| المقاومة الأولى | 1.51 | تبعد +21.77% عن السعر، العائق الرئيسي |\n"
+    )
+    formatted = format_pipeline_reply_for_telegram(sample, [], "Ahmed", 12345, True, 1, 350, 349, "monthly")
+
+    # Header emoji
+    assert "🎯 <b>جدول المستويات الفنية</b>" in formatted
+
+    # Clean lines without repetitive column labels
+    assert "القيمة (ج.م):" not in formatted
+    assert "الوصف الفني:" not in formatted
+
+    # Values in <code>, descriptions in <i>
+    assert "▫️ <b>آخر سعر متاح:</b> <code>1.24</code> — <i>لقطة جلسة 20-10-2026، غير مؤكدة كإغلاق نهائي</i>" in formatted
+    assert "▫️ <b>الدعم الأول:</b> <code>1.18</code> — <i>يبعد -4.84% عن السعر، كسره يضعف السيناريو</i>" in formatted
+    assert "▫️ <b>المقاومة الأولى:</b> <code>1.51</code> — <i>تبعد +21.77% عن السعر، العائق الرئيسي</i>" in formatted
+
+    # No full sentences wrapped in <code>
+    assert "<code>لقطة جلسة" not in formatted
+    assert "<code>يبعد" not in formatted
+
+
+def test_telegram_formatter_vertical_indicators():
+    """
+    Vertical Indicators tables must render cleanly:
+    - Numeric indicator values in <code>
+    - Metric descriptions in italics
+    - No redundant repeated labels
+    """
+    sample = (
+        "### المؤشرات والبيانات الأساسية\n"
+        "| المؤشر / المقياس | القيمة | القراءة والتقييم |\n"
+        "| :--- | :--- | :--- |\n"
+        "| مؤشر القوة النسبية (RSI) | 43.09 | منطقة محايدة، لا تشبع بيعي ولا شرائي |\n"
+        "| MACD | -0.0435 | سالبة أي تحت خط الصفر |\n"
+        "| مضاعف الربحية (P/E) | 37.74 | مرتفع نسبياً |\n"
+        "| ربحية السهم (EPS) | 0.0318 ج.م | ربحية صغيرة مقارنة بالسعر |\n"
+    )
+    formatted = format_pipeline_reply_for_telegram(sample, [], "Ahmed", 12345, True, 1, 350, 349, "monthly")
+
+    assert "📈 <b>المؤشرات والبيانات الأساسية</b>" in formatted
+    assert "القراءة والتقييم:" not in formatted
+    assert "▫️ <b>مؤشر القوة النسبية (RSI):</b> <code>43.09</code> — <i>منطقة محايدة، لا تشبع بيعي ولا شرائي</i>" in formatted
+    assert "▫️ <b>MACD:</b> <code>-0.0435</code> — <i>سالبة أي تحت خط الصفر</i>" in formatted
+    assert "<code>0.0318 ج.م</code>" in formatted
+
+
+def test_telegram_formatter_stock_cards_for_scanner_and_recs():
+    """
+    Multi-stock recommendations and intraday scanner alert tables must render
+    as sleek, structured Telegram mini-cards.
+    """
+    sample = (
+        "### إشارات وتوصيات المنصة اللحظية\n"
+        "| السهم | نوع الإشارة | وقت الدخول | سعر الدخول | السعر الحالي | العائد الحالي | المستهدف 1 | المستهدف 2 | وقف الخسارة | الأفق الزمني |\n"
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        "| CRST | اختراق 🚀 | 10:01 | 2.50 | 2.59 | +3.60% | 2.63 | 2.71 | 2.44 | 1 - 3 جلسات |\n"
+        "| POUL | انفجار سيولة ⚡ | 10:45 | 11.20 | 11.45 | +2.23% | 11.80 | 12.40 | 10.90 | 1 - 3 جلسات |\n"
+    )
+    formatted = format_pipeline_reply_for_telegram(sample, [], "Sameh", 9988, False, 2, 5, 3, "daily")
+
+    assert "🚀 <b>إشارات وتوصيات المنصة اللحظية</b>" in formatted
+    # Card Header
+    assert "🔹 <b>CRST</b> — <i>اختراق 🚀</i> — ⏱️ <code>10:01</code>" in formatted
+    # Price line
+    assert "▫️ الدخول: <code>2.50</code> ◂ الحالي: <code>2.59</code> ◂ <b>+3.60%</b> 🟢" in formatted
+    # Target and stop line
+    assert "▫️ الأهداف: <code>2.63</code> / <code>2.71</code> | الوقف: <code>2.44</code> | الأفق: <i>1 - 3 جلسات</i>" in formatted
+
+
+def test_telegram_formatter_blockquotes_and_headers():
+    """
+    Blockquotes (> ...) must be converted into native Telegram <blockquote>...</blockquote> tags.
+    """
+    sample = (
+        "### الرأي التوليفي وخطة التحرك\n\n"
+        "> 💡 **الرأي الفني:** السهم يتحرك في مسار صاعد.\n"
+        "> كسر الدعم 10.50 يلغي النظرة الإيجابية.\n\n"
+        "---\n\n"
+        "بالتوفيق للمستثمر."
+    )
+    formatted = format_pipeline_reply_for_telegram(sample, [], "Karim", 7766, True, 5, 350, 345, "monthly")
+
+    assert "💡 <b>الرأي التوليفي وخطة التحرك</b>" in formatted
+    assert "<blockquote>💡 <b>الرأي الفني:</b> السهم يتحرك في مسار صاعد.\nكسر الدعم 10.50 يلغي النظرة الإيجابية.</blockquote>" in formatted
+    assert "──────────────────" in formatted
+
+

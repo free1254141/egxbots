@@ -3747,26 +3747,17 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         if trigger == "scheduled" and phase == "close" and not dry_run and _stage_needed('telegram_subscription_reminders'):
             _start_step('telegram_subscription_reminders', 'Send private Telegram renewal reminders due today')
             try:
-                import subprocess
-                reminder_script = os.path.join(project_root, "jobs", "telegram_subscription_reminders.py")
-                reminder_result = await asyncio.to_thread(
-                    subprocess.run,
-                    [sys.executable, reminder_script],
-                    cwd=project_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=240,
-                    check=False,
-                )
-                reminder_output = ((reminder_result.stdout or "") + "\\n" + (reminder_result.stderr or "")).strip()
-                reminder_summary = "\\n".join(reminder_output.splitlines()[-8:])[:1200]
+                from jobs.telegram_subscription_reminders import run_subscription_reminders
+                reminder_res = await asyncio.to_thread(run_subscription_reminders)
+                status_ok = reminder_res.get("status") in ("completed", "partial_success")
+                summary_msg = f"Sent: {reminder_res.get('sent', 0)}, Failed: {reminder_res.get('failed', 0)}, Skipped: {reminder_res.get('skipped', 0)}"
                 _record_step(
                     "telegram_subscription_reminders",
-                    reminder_result.returncode == 0,
-                    reminder_summary or ("Completed" if reminder_result.returncode == 0 else "Reminder script failed without output"),
-                    0,
+                    status_ok,
+                    summary_msg,
+                    reminder_res.get("sent", 0),
                 )
-                print(f"[SUBSCRIPTION_REMINDERS] exit={reminder_result.returncode} {reminder_summary}")
+                print(f"[SUBSCRIPTION_REMINDERS] {summary_msg}")
             except Exception as reminder_error:
                 _record_step("telegram_subscription_reminders", False, str(reminder_error)[:500], 0)
                 print(f"[SUBSCRIPTION_REMINDERS] Failed: {reminder_error}")

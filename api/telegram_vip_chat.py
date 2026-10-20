@@ -578,76 +578,249 @@ def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[st
     return {"ok": False, "error": last_error}
 
 
+def _clean_arabic_label(text: str) -> str:
+    """Clean and standardize Arabic header labels for bullets and cards."""
+    t = (text or "").strip()
+    t = re.sub(r"\s*\(ج\.م\)", "", t)
+    t = re.sub(r"\s*\(EGP\)", "", t, flags=re.I)
+    t = re.sub(r"^\*+|\*+$", "", t).strip()
+    return t
+
+
+def _is_numeric_or_short_value(val: str) -> bool:
+    """Determine if a cell contains a numeric metric, price, percentage, or short tag (fit for <code>)."""
+    s = (val or "").strip()
+    if not s or s in ("—", "-"):
+        return False
+    # Pure numbers, decimals, +/- %, or currencies
+    if re.match(r"^[-+]?[\d,]+(?:\.\d+)?(?:\s*(?:%|ج\.م|EGP|x|X))?$", s):
+        return True
+    # Short dates or timestamps (e.g. 2026-10-20, 10:01, 15-10)
+    if re.match(r"^\d{4}-\d{2}-\d{2}$|^\d{2}:\d{2}$|^\d{1,2}[-/]\d{1,2}$", s):
+        return True
+    # Short status indicators
+    if len(s) <= 15 and any(k in s for k in ["إيجابي", "سلبي", "محايد", "صاعد", "هابط", "متعادل"]):
+        return True
+    return False
+
+
+def _format_cell_value(val: str, is_value_col: bool = False) -> str:
+    """Format cell value for Telegram HTML, applying <code> strictly to numbers/metrics."""
+    s = (val or "").strip()
+    s = re.sub(r"^\*+|\*+$", "", s).strip()
+    s = re.sub(r"^`+|`+$", "", s).strip()
+    if not s or s in ("—", "-"):
+        return "—"
+
+    esc = html.escape(s)
+
+    if _is_numeric_or_short_value(s):
+        m = re.match(r"^([-+]?[\d,]+(?:\.\d+)?)\s*(%|ج\.م|EGP|x|X)?$", s)
+        if m:
+            num = m.group(1)
+            unit = m.group(2) or ""
+            unit_str = f" {unit}" if unit else ""
+            return f"<code>{num}{unit_str}</code>"
+        return f"<code>{esc}</code>"
+
+    # Qualitative description or sentence: NEVER wrap in <code>!
+    if is_value_col and len(s) < 25:
+        return f"<b>{esc}</b>"
+    return f"<i>{esc}</i>"
+
+
+def _format_markdown_table_smart(buf: List[str]) -> List[str]:
+    """Parse and render a Markdown table buffer into sleek, mobile-optimized Telegram HTML."""
+    if len(buf) < 2:
+        return buf
+
+    parsed_rows: List[List[str]] = []
+    for r in buf:
+        stripped = r.strip().strip("|")
+        if re.match(r"^[\s:\-|]+$", stripped):
+            continue
+        cells = [c.strip() for c in stripped.split("|")]
+        if any(cells):
+            parsed_rows.append(cells)
+
+    if len(parsed_rows) < 2:
+        return buf
+
+    headers = [_clean_arabic_label(h) for h in parsed_rows[0]]
+    rows = parsed_rows[1:]
+    out: List[str] = []
+
+    # Detect Table Structure
+    # 1. Vertical Dashboard Table (2 or 3 columns: Item/Metric, Value, Description/Note)
+    is_vertical_levels_or_metrics = (
+        len(headers) in (2, 3) and
+        any(k in headers[0] for k in ["المستوى", "المؤشر", "المقياس", "البيان", "العنصر", "المتوسط", "Metric", "Level"])
+    )
+
+    # 2. Multi-Stock Recommendations / Scanner Alert Table
+    is_stock_cards_table = (
+        any(k in headers[0] for k in ["السهم", "الرمز", "Ticker", "Symbol"]) and
+        any(k in " ".join(headers) for k in ["دخول", "وقف", "هدف", "إشارة", "عائد", "Target", "Stop", "Entry"])
+    )
+
+    if is_vertical_levels_or_metrics:
+        for row in rows:
+            if not row or not any(row):
+                continue
+            item = html.escape(_clean_arabic_label(row[0]))
+            val = row[1] if len(row) > 1 else ""
+            desc = row[2] if len(row) > 2 else ""
+
+            if desc in ("—", "-", val, ""):
+                desc = ""
+
+            formatted_val = _format_cell_value(val, is_value_col=True)
+            line = f"▫️ <b>{item}:</b> {formatted_val}"
+            if desc:
+                # Strip markdown code marks and escape
+                clean_desc = html.escape(re.sub(r"[`\*]", "", desc).strip())
+                line += f" — <i>{clean_desc}</i>"
+            out.append(line)
+
+    elif is_stock_cards_table:
+        col_map = {}
+        for idx, h in enumerate(headers):
+            h_clean = h.lower()
+            if any(k in h_clean for k in ["سهم", "رمز", "symbol", "ticker"]):
+                col_map["symbol"] = idx
+            elif any(k in h_clean for k in ["إشارة", "نوع", "signal"]):
+                col_map["signal"] = idx
+            elif any(k in h_clean for k in ["وقت", "تاريخ", "time", "date"]):
+                col_map["time"] = idx
+            elif any(k in h_clean for k in ["سعر الدخول", "دخول", "entry"]):
+                col_map["entry"] = idx
+            elif any(k in h_clean for k in ["عائد", "تغير", "ربح", "return", "change"]):
+                col_map["return"] = idx
+            elif any(k in h_clean for k in ["هدف 1", "مستهدف 1", "target 1"]):
+                col_map["target1"] = idx
+            elif any(k in h_clean for k in ["هدف 2", "مستهدف 2", "target 2"]):
+                col_map["target2"] = idx
+            elif any(k in h_clean for k in ["سعر الحالي", "السعر الحالي", "إغلاق", "اغلاق", "سعر الإغلاق", "آخر سعر", "close"]):
+                col_map["current"] = idx
+            elif "حالي" in h_clean and "عائد" not in h_clean:
+                col_map["current"] = idx
+            elif any(k in h_clean for k in ["وقف", "stop"]):
+                col_map["stop"] = idx
+            elif any(k in h_clean for k in ["أفق", "مدى", "horizon"]):
+                col_map["horizon"] = idx
+            elif any(k in h_clean for k in ["هدف", "مستهدف", "target"]) and "target1" not in col_map:
+                col_map["target1"] = idx
+
+        for row in rows:
+            if not row or not any(row):
+                continue
+            sym = html.escape(re.sub(r"[`\*]", "", row[col_map.get("symbol", 0)]).strip())
+            signal = html.escape(re.sub(r"[`\*]", "", row[col_map["signal"]]).strip()) if "signal" in col_map and col_map["signal"] < len(row) else ""
+            time_val = html.escape(re.sub(r"[`\*]", "", row[col_map["time"]]).strip()) if "time" in col_map and col_map["time"] < len(row) else ""
+            entry = html.escape(re.sub(r"[`\*]", "", row[col_map["entry"]]).strip()) if "entry" in col_map and col_map["entry"] < len(row) else ""
+            current = html.escape(re.sub(r"[`\*]", "", row[col_map["current"]]).strip()) if "current" in col_map and col_map["current"] < len(row) else ""
+            ret = html.escape(re.sub(r"[`\*]", "", row[col_map["return"]]).strip()) if "return" in col_map and col_map["return"] < len(row) else ""
+            t1 = html.escape(re.sub(r"[`\*]", "", row[col_map["target1"]]).strip()) if "target1" in col_map and col_map["target1"] < len(row) else ""
+            t2 = html.escape(re.sub(r"[`\*]", "", row[col_map["target2"]]).strip()) if "target2" in col_map and col_map["target2"] < len(row) else ""
+            stop = html.escape(re.sub(r"[`\*]", "", row[col_map["stop"]]).strip()) if "stop" in col_map and col_map["stop"] < len(row) else ""
+            horizon = html.escape(re.sub(r"[`\*]", "", row[col_map["horizon"]]).strip()) if "horizon" in col_map and col_map["horizon"] < len(row) else ""
+
+            # Card Header
+            header_parts = [f"🔹 <b>{sym}</b>"]
+            if signal:
+                header_parts.append(f"<i>{signal}</i>")
+            if time_val and time_val != "—":
+                header_parts.append(f"⏱️ <code>{time_val}</code>")
+            out.append(" — ".join(header_parts))
+
+            # Row 1: Prices & Return
+            price_parts = []
+            if entry and entry != "—":
+                price_parts.append(f"الدخول: <code>{entry}</code>")
+            if current and current != "—":
+                price_parts.append(f"الحالي: <code>{current}</code>")
+            if ret and ret != "—":
+                ret_badge = "🟢" if "+" in ret or ("-" not in ret and ret != "0%") else "🔴"
+                price_parts.append(f"<b>{ret}</b> {ret_badge}")
+            if price_parts:
+                out.append("   ▫️ " + " ◂ ".join(price_parts))
+
+            # Row 2: Targets & Stop Loss
+            plan_parts = []
+            targets = []
+            if t1 and t1 != "—":
+                targets.append(f"<code>{t1}</code>")
+            if t2 and t2 != "—":
+                targets.append(f"<code>{t2}</code>")
+            if targets:
+                plan_parts.append(f"الأهداف: {' / '.join(targets)}")
+            if stop and stop != "—":
+                plan_parts.append(f"الوقف: <code>{stop}</code>")
+            if horizon and horizon != "—":
+                plan_parts.append(f"الأفق: <i>{horizon}</i>")
+            if plan_parts:
+                out.append("   ▫️ " + " | ".join(plan_parts))
+            out.append("")  # Empty separator between cards
+
+    else:
+        # Generic clean key-value bullets
+        for row in rows:
+            if not row or not any(row):
+                continue
+            first = html.escape(_clean_arabic_label(row[0]))
+            details: List[str] = []
+            for idx in range(1, len(row)):
+                val = row[idx]
+                if not val or val == "—":
+                    continue
+                col_name = html.escape(headers[idx]) if idx < len(headers) else ""
+                val_formatted = _format_cell_value(val)
+                if col_name:
+                    details.append(f"{col_name}: {val_formatted}")
+                else:
+                    details.append(val_formatted)
+            if details:
+                out.append(f"▫️ <b>{first}</b> — " + " | ".join(details))
+            else:
+                out.append(f"▫️ <b>{first}</b>")
+
+    return out
+
+
 def _format_table_for_telegram(table: Dict[str, Any]) -> str:
     """Render an ExcelTable object into sleek, mobile-readable Telegram HTML."""
     title = str(table.get("title") or "").strip()
     headers = [str(h).strip() for h in (table.get("headers") or [])]
     rows = table.get("rows") or []
-    if not rows:
+    if not rows or not headers:
         return ""
 
+    # Reconstruct as table buffer to leverage _format_markdown_table_smart
+    buf = ["| " + " | ".join(headers) + " |"]
+    buf.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    for r in rows[:15]:
+        if isinstance(r, list):
+            buf.append("| " + " | ".join(str(c) for c in r) + " |")
+
+    formatted_lines = _format_markdown_table_smart(buf)
     lines: List[str] = []
     if title:
         lines.append(f"\n📊 <b>{html.escape(title)}</b>")
-
-    for row in rows[:10]:
-        if not isinstance(row, list) or not row:
-            continue
-        cells = [str(c).strip() for c in row]
-        # Format first column as bullet header, and remaining columns as key: value pairs
-        head_label = html.escape(cells[0])
-        details: List[str] = []
-        for idx in range(1, len(cells)):
-            val = html.escape(cells[idx])
-            if not val or val == "—":
-                continue
-            col_name = html.escape(headers[idx]) if idx < len(headers) else ""
-            if col_name:
-                details.append(f"{col_name}: <code>{val}</code>")
-            else:
-                details.append(f"<code>{val}</code>")
-        if details:
-            lines.append(f"• <b>{head_label}</b> — " + " | ".join(details))
-        else:
-            lines.append(f"• <b>{head_label}</b>")
+    lines.extend(formatted_lines)
     return "\n".join(lines)
 
 
 def _convert_markdown_tables_to_bullets(md_text: str) -> str:
-    """Convert raw Markdown pipe tables in LLM text into clean Telegram bullet lists."""
+    """Convert raw Markdown pipe tables in LLM text into sleek Telegram HTML structures."""
     lines = md_text.split("\n")
     out: List[str] = []
     table_buffer: List[str] = []
 
-    def _flush_table(buf: List[str]) -> None:
-        if len(buf) < 2:
-            out.extend(buf)
-            return
-        parsed_rows: List[List[str]] = []
-        for r in buf:
-            stripped = r.strip().strip("|")
-            if re.match(r"^[\s:\-|]+$", stripped):
-                continue
-            cells = [c.strip() for c in stripped.split("|")]
-            if any(cells):
-                parsed_rows.append(cells)
-        if len(parsed_rows) < 2:
-            out.extend(buf)
-            return
-        headers = parsed_rows[0]
-        for row in parsed_rows[1:]:
-            first = row[0] if row else ""
-            parts: List[str] = []
-            for idx in range(1, len(row)):
-                val = row[idx]
-                if not val:
-                    continue
-                col = headers[idx] if idx < len(headers) else ""
-                parts.append(f"{col}: `{val}`" if col else f"`{val}`")
-            if parts:
-                out.append(f"• **{first}** — " + " | ".join(parts))
-            else:
-                out.append(f"• **{first}**")
+    def _flush_table() -> None:
+        nonlocal table_buffer
+        if table_buffer:
+            out.extend(_format_markdown_table_smart(table_buffer))
+            table_buffer = []
 
     for line in lines:
         s = line.strip()
@@ -655,11 +828,10 @@ def _convert_markdown_tables_to_bullets(md_text: str) -> str:
             table_buffer.append(line)
         else:
             if table_buffer:
-                _flush_table(table_buffer)
-                table_buffer = []
+                _flush_table()
             out.append(line)
     if table_buffer:
-        _flush_table(table_buffer)
+        _flush_table()
     return "\n".join(out)
 
 
@@ -682,35 +854,103 @@ def format_pipeline_reply_for_telegram(
     cleaned = re.sub(r"📢\s*\[قناة EGX Bots المجانية[^\]]*\]\([^\)]+\)", "", cleaned).rstrip()
     cleaned = re.sub(r"🌐\s*\[منصة EGX Bots[^\]]*\]\([^\)]+\)(?:\s*•\s*👑\s*\[ترقية باقة VIP\]\([^\)]+\))?", "", cleaned).rstrip()
     has_md_table = bool(re.search(r"^\|.+\|$", cleaned, flags=re.MULTILINE))
-    cleaned = _convert_markdown_tables_to_bullets(cleaned)
 
-    # Escape HTML first
-    escaped = html.escape(cleaned)
+    # Smart line-by-line conversion for tables, blockquotes, headers, and dividers
+    lines = cleaned.split("\n")
+    processed_lines: List[str] = []
+    table_buf: List[str] = []
+    quote_buf: List[str] = []
 
-    # Convert Markdown links [text](url) -> <a href="url">text</a>
-    escaped = re.sub(
-        r"\[([^\]]+)\]\((https?://[^\s\)]+)\)",
-        r'<a href="\2">\1</a>',
-        escaped,
-    )
-    # Convert Markdown headers ### Title -> \n<b>🔹 Title</b>
-    escaped = re.sub(
-        r"^\s*#{1,4}\s+(.+)$",
-        r"\n<b>🔹 \1</b>",
-        escaped,
-        flags=re.MULTILINE,
-    )
-    # Convert **bold** -> <b>bold</b>
-    escaped = re.sub(r"\*\*([^\*\n]+)\*\*", r"<b>\1</b>", escaped)
-    # Convert `code` -> <code>code</code>
-    escaped = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", escaped)
+    def _flush_table_buf() -> None:
+        nonlocal table_buf
+        if table_buf:
+            processed_lines.extend(_format_markdown_table_smart(table_buf))
+            table_buf = []
 
-    # If structured tables were returned and not already in the markdown text, append them
+    def _flush_quote_buf() -> None:
+        nonlocal quote_buf
+        if quote_buf:
+            quote_text = "\n".join(quote_buf)
+            processed_lines.append(f"<blockquote>{quote_text}</blockquote>")
+            quote_buf = []
+
+    for line in lines:
+        s = line.strip()
+
+        # 1. Pipe Table row
+        if s.startswith("|") and s.endswith("|"):
+            _flush_quote_buf()
+            table_buf.append(line)
+            continue
+        else:
+            _flush_table_buf()
+
+        # 2. Blockquote (> ...)
+        if s.startswith(">"):
+            content = re.sub(r"^>\s?", "", line).strip()
+            content_esc = html.escape(content)
+            content_esc = re.sub(r"\*\*([^\*\n]+)\*\*", r"<b>\1</b>", content_esc)
+            content_esc = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", content_esc)
+            quote_buf.append(content_esc)
+            continue
+        else:
+            _flush_quote_buf()
+
+        # 3. Headers (### Header)
+        m_h = re.match(r"^\s*#{1,4}\s+(.+)$", line)
+        if m_h:
+            h_text = m_h.group(1).strip()
+            h_esc = html.escape(h_text)
+            if any(k in h_text for k in ["مستو", "دعم", "مقاوم"]):
+                icon = "🎯"
+            elif any(k in h_text for k in ["مؤشر", "بيان", "مالي", "فني"]):
+                icon = "📈"
+            elif any(k in h_text for k in ["رأي", "خطة", "تحرك", "نصيح"]):
+                icon = "💡"
+            elif any(k in h_text for k in ["توصي", "إشار", "فرص"]):
+                icon = "🚀"
+            elif any(k in h_text for k in ["محفظ", "مركز"]):
+                icon = "💼"
+            elif any(k in h_text for k in ["سوق", "egx"]):
+                icon = "📊"
+            elif any(k in h_text for k in ["مقارن"]):
+                icon = "⚖️"
+            elif any(k in h_text for k in ["خبر", "أخبار", "إفصاح"]):
+                icon = "📰"
+            else:
+                icon = "🔹"
+            processed_lines.append(f"\n{icon} <b>{h_esc}</b>")
+            continue
+
+        # 4. Dividers (---, ***, ___)
+        if re.match(r"^[-*_]{3,}$", s):
+            processed_lines.append("──────────────────")
+            continue
+
+        # 5. Regular text lines: escape and format standard markdown tags
+        esc_line = html.escape(line)
+        esc_line = re.sub(
+            r"\[([^\]]+)\]\((https?://[^\s\)]+)\)",
+            r'<a href="\2">\1</a>',
+            esc_line,
+        )
+        esc_line = re.sub(r"\*\*([^\*\n]+)\*\*", r"<b>\1</b>", esc_line)
+        esc_line = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", esc_line)
+
+        processed_lines.append(esc_line)
+
+    _flush_table_buf()
+    _flush_quote_buf()
+
+    formatted_body = "\n".join(processed_lines)
+    formatted_body = re.sub(r"\n{3,}", "\n\n", formatted_body).strip()
+
+    # If structured tables were returned and not already present in the body, append them
     if tables and not has_md_table:
         rendered_tables = [_format_table_for_telegram(t) for t in tables[:3]]
         rendered_tables = [t for t in rendered_tables if t]
         if rendered_tables:
-            escaped += "\n" + "\n".join(rendered_tables)
+            formatted_body += "\n" + "\n".join(rendered_tables)
 
     safe_user = html.escape(user_name or "المستثمر")
     user_link = f'<a href="tg://user?id={tg_user_id}">{safe_user}</a>'
@@ -727,7 +967,7 @@ def format_pipeline_reply_for_telegram(
         f'🌐 <a href="{site_origin}">موقع EGX Bots</a> • 💎 <a href="{_pricing_url()}">صفحة التسعير والاشتراك</a>'
     )
 
-    return f"🤖 <b>رد أرتورو الذكي لـ {user_link}:</b>\n\n{escaped}{footer}"
+    return f"🤖 <b>رد أرتورو الذكي لـ {user_link}:</b>\n\n{formatted_body}{footer}"
 
 
 def is_vip_chat_update(data: Dict[str, Any]) -> bool:
