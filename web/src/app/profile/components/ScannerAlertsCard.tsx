@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useTelegramPro } from "@/contexts/TelegramProContext";
 import ScannerStatsCalendar from "./ScannerStatsCalendar";
 import ScannerDefinitionsGuide from "./ScannerDefinitionsGuide";
 import ScannerSignalsTracker from "./ScannerSignalsTracker";
@@ -53,6 +54,7 @@ interface ScannerAlertsCardProps {
 export default function ScannerAlertsCard({ initialTelegramLinked = false }: ScannerAlertsCardProps) {
   const { user } = useAuth();
   const { language } = useLanguage();
+  const { invite: proInvite, loading: proInviteLoading } = useTelegramPro();
   const isAr = language === "ar";
 
   const [activeMainTab, setActiveMainTab] = useState<"tracker" | "calendar" | "settings" | "guide">("tracker");
@@ -88,11 +90,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     });
   };
 
-  const botUsername = "egxbots_bot";
-  const connectBotUrl = user?.id ? `https://t.me/${botUsername}?start=${user.id}` : `https://t.me/${botUsername}`;
-  const connectBotWebUrl = user?.id
-    ? `https://web.telegram.org/a/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${botUsername}&start=${user.id}`)}`
-    : `https://web.telegram.org/a/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${botUsername}`)}`;
+  const vipChannelUrl = proInvite.is_pro && proInvite.invite_link ? proInvite.invite_link : "";
 
   useEffect(() => {
     if (initialTelegramLinked) {
@@ -478,75 +476,44 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         )}
       </div>
 
-      {/* ── Telegram Connection Banner (If Not Linked) ── */}
-      {!telegramLinked && (
-        <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 bg-black text-[#FFE600] border-2 border-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-black uppercase tracking-tight">
-                {isAr ? "⚠️ تنبيهات التليجرام غير متصلة بحسابك!" : "⚠️ Telegram Alerts Are Not Connected Yet!"}
-              </h3>
-              <p className="text-xs font-bold mt-1 text-black/80 leading-relaxed max-w-xl">
-                {isAr
-                  ? "لتصلك التنبيهات والإشارات الفورية لحظياً على هاتفك، اضغط على الزر أدناه لبدء المحادثة مع البوت وربطه بحسابك بضغطة زر واحدة مجاناً."
-                  : "To receive instant push alerts on your phone, click below to start a conversation with the bot and link your account in 1 click."}
-              </p>
-            </div>
+      {/* ── VIP Telegram Channel Access ── */}
+      <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 bg-black text-[#FFE600] border-2 border-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+            <Send className="w-6 h-6" />
           </div>
-
-          <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full md:w-auto">
-            <a
-              href={connectBotUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] transition-all w-full sm:w-auto"
-            >
-              <Send className="w-4 h-4 fill-[#FFE600]" />
-              {isAr ? "فتح التطبيق (App)" : "Open in App"}
-              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
-            </a>
-            <a
-              href={connectBotWebUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white text-black hover:bg-zinc-100 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-[1px] active:translate-y-[1px] transition-all w-full sm:w-auto"
-            >
-              <Globe className="w-4 h-4" />
-              {isAr ? "فتح ويب (Telegram Web)" : "Open in Web"}
-              <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
-            </a>
+          <div>
+            <h3 className="text-base font-black uppercase tracking-tight">
+              {isAr ? "إشارات إسكانر الـ 15 دقيقة تُنشر في قناة Telegram VIP" : "15-minute scanner signals are posted in the Telegram VIP channel"}
+            </h3>
+            <p className="text-xs font-bold mt-1 text-black/80 leading-relaxed max-w-2xl">
+              {isAr
+                ? "مش محتاج تربط بوت شخصي أو تبعت /start لاستقبال إشارات الإسكانر. اشترك في قناة VIP من رابط الدعوة الخاص باشتراكك، وتابع الإشارات هناك. إعدادات التنبيهات الشخصية هنا منفصلة عن نشر إشارات القناة."
+                : "You do not need to link a personal bot or send /start to receive scanner signals. Join the VIP channel using your subscription invite and follow the signals there. Personal alert preferences here are separate from channel publishing."}
+            </p>
           </div>
         </div>
-      )}
-
-      {/* ── Connected Confirmation (If Linked) ── */}
-      {telegramLinked && (
-        <div className="border-4 border-black dark:border-white bg-emerald-400 text-black px-4 py-3 shadow-[3px_3px_0px_rgba(0,0,0,1)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-black shrink-0" />
-            <span className="text-xs font-black uppercase tracking-wider">
-              {isAr ? "بوت التليجرام متصل بنجاح — التنبيهات المحددة ستصلك فورياً على هاتفك" : "Telegram bot connected — Selected alerts will be sent directly to your phone"}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <a
-              href={connectBotWebUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 border-2 border-black bg-white hover:bg-zinc-100 text-black px-2.5 py-1 text-[11px] font-black uppercase shadow-[1.5px_1.5px_0px_#000] transition-transform active:translate-y-0.5"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              {isAr ? "فتح تليجرام ويب" : "Open Web"}
-            </a>
-            <span className="text-[10px] font-mono font-black border-2 border-black bg-white px-2 py-0.5">
-              @{botUsername}
-            </span>
-          </div>
+        <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full md:w-auto">
+          {isPro ? (
+            vipChannelUrl ? (
+              <a href={vipChannelUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto">
+                <Send className="w-4 h-4" />
+                {isAr ? "فتح قناة VIP" : "Open VIP Channel"}
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              <span className="text-xs font-black border-2 border-black bg-white px-3 py-2">
+                {proInviteLoading ? (isAr ? "جاري تجهيز رابط الدعوة..." : "Loading invite...") : (isAr ? "رابط دعوة VIP غير متاح حالياً؛ حدّث الصفحة أو تواصل مع الدعم." : "VIP invite unavailable. Refresh or contact support.")}
+              </span>
+            )
+          ) : (
+            <Link href="/pricing" className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto">
+              <Sparkles className="w-4 h-4" />
+              {isAr ? "اشترك في Pro للوصول إلى VIP" : "Upgrade to Pro for VIP access"}
+            </Link>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ── Scanner Alert Toggles Grid ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
