@@ -21,7 +21,7 @@ concurrency:
 jobs:
   wake-space:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - name: Wake Hugging Face Space and wait for health endpoint
         shell: bash
@@ -30,7 +30,7 @@ jobs:
           URL="https://weeasdwee-ai-bot.hf.space/health"
           for attempt in 1 2 3 4 5 6; do
             echo "Wake attempt ${attempt}/6"
-            if curl --fail --silent --show-error --max-time 240 "${URL}"; then
+            if curl --fail --silent --show-error --max-time 60 "${URL}"; then
               echo
               echo "Space health endpoint responded."
               exit 0
