@@ -64,7 +64,7 @@ describe("VIP Telegram invitation route", () => {
     const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ telegram_pro_url: "https://t.me/+private-test-invite" }) }));
     global.fetch = fetchMock as any;
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/profile/telegram-pro"));
     const body = await response.json();
 
     expect(body.is_pro).toBe(true);
@@ -85,7 +85,7 @@ describe("VIP Telegram invitation route", () => {
         : table === "pro_telegram_invites" ? query(null) : query([])),
     });
     createInvite.mockResolvedValue("");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/profile/telegram-pro"));
     const body = await response.json();
 
     expect(body).toMatchObject({ is_pro: true, invite_link: "", invite_status: "unavailable" });
@@ -108,7 +108,7 @@ describe("VIP Telegram invitation route", () => {
     const fetchMock = jest.fn(async () => ({ ok: true, json: async () => ({ telegram_pro_url: "https://t.me/+private-test-invite" }) }));
     global.fetch = fetchMock as any;
 
-    await GET();
+    await GET(new Request("http://localhost/api/profile/telegram-pro"));
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("https://public-backend.example.test/payment/easykash/status"), expect.any(Object));
   });
 
@@ -123,7 +123,7 @@ describe("VIP Telegram invitation route", () => {
     });
     createInvite.mockResolvedValue("");
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/profile/telegram-pro"));
     expect(await response.json()).toMatchObject({ invite_link: "", invite_status: "unavailable" });
   });
 
@@ -132,7 +132,7 @@ describe("VIP Telegram invitation route", () => {
       from: jest.fn(() => query(null, { code: "PGRST205" })),
     });
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/profile/telegram-pro"));
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "subscription_unavailable" });
     expect(createInvite).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe("VIP Telegram invitation route", () => {
   it("does not disclose VIP invitations to an unauthenticated request", async () => {
     auth.mockReturnValue({ auth: { getUser: jest.fn(async () => ({ data: { user: null } })) } });
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/profile/telegram-pro"));
     expect(response.status).toBe(401);
     expect(serviceClient).not.toHaveBeenCalled();
   });

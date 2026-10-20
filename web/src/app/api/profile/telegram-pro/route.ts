@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
-import { createProTelegramInvite } from "@/lib/telegramProInvite";
+import { createProTelegramInvite, revokeProTelegramAccess } from "@/lib/telegramProInvite";
 
 export const dynamic = "force-dynamic";
 
@@ -115,7 +115,7 @@ async function recoverInviteFromPaymentService(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -143,6 +143,16 @@ export async function GET() {
 
   const subscriptionEnd = String(subscription.current_period_end);
   let saved = await loadSavedInvite(service, user.id, subscriptionEnd);
+  const forceRefresh = new URL(request.url).searchParams.get("refresh") === "1";
+
+  if (forceRefresh && saved?.invite_link) {
+    const refreshedInvite = await createProTelegramInvite(user.id, subscriptionEnd).catch(() => "");
+    if (refreshedInvite) {
+      await persistInvite(service, user.id, refreshedInvite, subscriptionEnd);
+      await revokeProTelegramAccess({ inviteLink: saved.invite_link });
+      saved = { invite_link: refreshedInvite, invite_expires_at: subscriptionEnd };
+    }
+  }
 
   if (!isInviteValid(saved)) {
     // The payment service owns the persisted invite and has the same Telegram

@@ -69,7 +69,7 @@ export function TelegramProProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const request = (async () => {
       try {
-        const response = await fetch("/api/profile/telegram-pro", { cache: "no-store" });
+        const response = await fetch(`/api/profile/telegram-pro${force ? "?refresh=1" : ""}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Invite request failed");
         const nextInvite = await response.json() as TelegramProInvite;
         const nextError = Boolean(nextInvite.is_pro && !nextInvite.invite_link);
