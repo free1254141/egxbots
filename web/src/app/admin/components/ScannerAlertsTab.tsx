@@ -166,7 +166,13 @@ export default function ScannerAlertsTab() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 border-2 border-black bg-white px-4 py-2 font-mono text-xs font-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+        <div className="flex flex-wrap items-center gap-4 border-2 border-black bg-white px-4 py-2 font-mono text-xs font-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+          <div className="border-l-2 border-black/20 pl-3">
+            <span className="text-zinc-500 block text-[10px]">وجهة البث المباشر:</span>
+            <span className="text-purple-700 text-sm font-black flex items-center gap-1">
+              ⭐ قناة VIP الرسمية
+            </span>
+          </div>
           <div>
             <span className="text-zinc-500 block text-[10px]">المشتركون المتصلون بالبوت:</span>
             <span className="text-emerald-700 text-sm">
@@ -497,7 +503,9 @@ export default function ScannerAlertsTab() {
                     <td className="p-3 text-emerald-600 font-bold">{h.breakout_count}</td>
                     <td className="p-3 text-sky-600 font-bold">{h.oversold_count}</td>
                     <td className="p-3 text-purple-600 font-bold">{h.disclosures_count}</td>
-                    <td className="p-3 font-bold">{h.recipients_count} مشترك</td>
+                    <td className="p-3 font-bold">
+                      {h.recipients_count > 0 ? "قناة VIP ⭐" : "0 (تخطي)"}
+                    </td>
                     <td className="p-3 text-zinc-500">{h.triggered_by}</td>
                   </tr>
                 ))

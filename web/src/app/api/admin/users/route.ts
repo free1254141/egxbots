@@ -5,10 +5,13 @@ import { requireAdmin } from "@/lib/admin-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const PRO_PLANS = new Set(["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"]);
+
 function preferredSubscription(rows: any[]): any | null {
   return [...rows].sort((a, b) => {
     const active = (value: any) => String(value?.status || "").toLowerCase() === "active" ? 1 : 0;
-    return active(b) - active(a) || new Date(b.current_period_end || b.created_at || 0).getTime() - new Date(a.current_period_end || a.created_at || 0).getTime();
+    const lifetime = (value: any) => ["lifetime", "pro_lifetime"].includes(String(value?.plan_id || "").toLowerCase()) ? 1 : 0;
+    return active(b) - active(a) || lifetime(b) - lifetime(a) || new Date(b.current_period_end || b.created_at || 0).getTime() - new Date(a.current_period_end || a.created_at || 0).getTime();
   })[0] || null;
 }
 
@@ -32,7 +35,7 @@ export async function GET(req: NextRequest) {
         .from("subscriptions")
         .select("user_id,plan_id,status,current_period_end,created_at");
       const activePro = new Set((subscriptionRows || [])
-        .filter((row: any) => String(row.plan_id || "").toLowerCase() === "pro" && String(row.status || "").toLowerCase() === "active")
+        .filter((row: any) => PRO_PLANS.has(String(row.plan_id || "").toLowerCase()) && String(row.status || "").toLowerCase() === "active")
         .map((row: any) => String(row.user_id)));
       if (plan === "PRO") cohortUserIds = Array.from(activePro) as string[];
       else {

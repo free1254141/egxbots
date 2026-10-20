@@ -83,6 +83,8 @@ export const DEFAULT_ADMIN_CONFIG: AdminScannerConfig = {
 };
 
 const BOT_STATE_KEY = "scanner_alerts";
+export const VIP_CHANNEL_CHAT_ID =
+  process.env.TELEGRAM_PRO_CHAT_ID || process.env.VIP_CHANNEL_CHAT_ID || "-1003906516349";
 
 export function getCairoNow() {
   const now = new Date();
@@ -337,7 +339,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   const hasAnyFreshMatches =
     freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0 || freshDisclosures.length > 0;
 
-  // ── STEP 4: Query Active Pro Subscribers ──────────────────────────────────
+  // ── STEP 4: Active Pro Subscribers Stats (Informational) ─────────────────
   const [subRes, profileRes] = await Promise.all([
     serviceClient.from("subscriptions").select("user_id").eq("status", "active"),
     serviceClient
@@ -349,118 +351,63 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   const activeProUids = new Set((subRes.data || []).map((s: any) => s.user_id));
   const proProfiles = (profileRes.data || []).filter((p: any) => activeProUids.has(p.id));
 
-  // If specific recipient requested (e.g. testing)
-  const targetProfiles = options.singleRecipientChatId
-    ? proProfiles.filter((p: any) => String(p.telegram_chat_id) === String(options.singleRecipientChatId))
-    : proProfiles;
+  // Destination Chat IDs: Always route to official VIP Channel unless a test recipient is specified
+  const targetChatIds = options.singleRecipientChatId
+    ? [String(options.singleRecipientChatId)]
+    : [VIP_CHANNEL_CHAT_ID];
 
-  // ── STEP 5: Dispatch Alerts to Telegram ───────────────────────────────────
+  // ── STEP 5: Dispatch Alerts to Telegram (VIP Channel) ─────────────────────
   let alertsDispatchedCount = 0;
 
-  if (hasAnyFreshMatches && targetProfiles.length > 0) {
-    // Fetch all user settings & portfolios in bulk for target users
-    const userIds = targetProfiles.map((p: any) => p.id);
-    const [settingsRes, portfolioRes] = await Promise.all([
-      serviceClient.from("user_settings").select("user_id, app_state").in("user_id", userIds),
-      serviceClient.from("positions").select("user_id, symbol").eq("status", "open").in("user_id", userIds),
-    ]);
+  if (hasAnyFreshMatches && targetChatIds.length > 0) {
+    // Construct Telegram Neobrutalist Arabic Message for VIP Channel
+    const lines: string[] = [
+      `⚡ <b>[EGX BOTS] رادار الإسكانر الفوري — قناة VIP</b>`,
+      `───────────────`,
+    ];
 
-    const settingsMap = new Map((settingsRes.data || []).map((s: any) => [s.user_id, s.app_state?.scanner_alerts]));
-    const portfolioMap = new Map<string, Set<string>>();
-    for (const item of portfolioRes.data || []) {
-      if (!portfolioMap.has(item.user_id)) portfolioMap.set(item.user_id, new Set());
-      portfolioMap.get(item.user_id)?.add(String(item.symbol).toUpperCase());
+    if (freshVolume.length > 0) {
+      lines.push(`🔥 <b>رادار السيولة غير الطبيعية (Volume Surge):</b>`);
+      for (const v of freshVolume) {
+        lines.push(`• <b>${v.symbol}</b>: ${v.close.toFixed(2)} ج.م (<b>${v.change_pct >= 0 ? "+" : ""}${v.change_pct}%</b>) | سيولة <b>${v.r_vol}x</b> 📊`);
+        lines.push(`  ${formatTelegramTradePlanSnippet(v.close, "volume_surge")}`);
+      }
+      lines.push(``);
     }
 
-    // Dispatch loop
-    for (const user of targetProfiles) {
-      const rawPrefs: any = settingsMap.get(user.id) || {};
-      const prefs: ScannerPreferences = {
-        volume_surge: rawPrefs.volume_surge ?? true,
-        breakout: rawPrefs.breakout ?? true,
-        rsi_oversold: rawPrefs.rsi_oversold ?? true,
-        portfolio_watchlist: rawPrefs.portfolio_watchlist ?? true,
-        disclosures: rawPrefs.disclosures ?? true,
-      };
-
-      const userPortfolio = portfolioMap.get(user.id) || new Set<string>();
-
-      // Filter matches per user preference
-      const userVolume = prefs.volume_surge ? freshVolume : [];
-      const userBreakout = prefs.breakout ? freshBreakout : [];
-      const userOversold = prefs.rsi_oversold ? freshOversold : [];
-      const userDisclosures = prefs.disclosures ? freshDisclosures : [];
-
-      // Check watchlist matches
-      const portfolioHits: string[] = [];
-      if (prefs.portfolio_watchlist && userPortfolio.size > 0) {
-        for (const v of userVolume) {
-          if (userPortfolio.has(v.symbol)) portfolioHits.push(`• السهم <b>${v.symbol}</b> في محفظتك رصد سيولة غير طبيعية (${v.r_vol}x)`);
-        }
-        for (const b of userBreakout) {
-          if (userPortfolio.has(b.symbol)) portfolioHits.push(`• السهم <b>${b.symbol}</b> في محفظتك يسجل اختراق فني (+${b.change_pct}%)`);
-        }
-        for (const o of userOversold) {
-          if (userPortfolio.has(o.symbol)) portfolioHits.push(`• السهم <b>${o.symbol}</b> في محفظتك يرتد من تشبع بيعي (RSI=${o.rsi_14})`);
-        }
+    if (freshBreakout.length > 0) {
+      lines.push(`🚀 <b>رادار الاختراقات الفنية (Breakout):</b>`);
+      for (const b of freshBreakout) {
+        lines.push(`• <b>${b.symbol}</b>: ${b.close.toFixed(2)} ج.م (<b>+${b.change_pct}%</b>) | اختراق قمة 20 جلسة 🎯`);
+        lines.push(`  ${formatTelegramTradePlanSnippet(b.close, "breakout")}`);
       }
+      lines.push(``);
+    }
 
-      const totalUserHits = userVolume.length + userBreakout.length + userOversold.length + userDisclosures.length;
-      if (totalUserHits === 0) continue;
-
-      // Construct Telegram Neobrutalist Arabic Message
-      const lines: string[] = [
-        `⚡ <b>[EGX BOTS] رادار الإسكانر الفوري — جلسة البورصة</b>`,
-        `───────────────`,
-      ];
-
-      if (userVolume.length > 0) {
-        lines.push(`🔥 <b>رادار السيولة غير الطبيعية (Volume Surge):</b>`);
-        for (const v of userVolume) {
-          lines.push(`• <b>${v.symbol}</b>: ${v.close.toFixed(2)} ج.م (<b>${v.change_pct >= 0 ? "+" : ""}${v.change_pct}%</b>) | سيولة <b>${v.r_vol}x</b> 📊`);
-          lines.push(`  ${formatTelegramTradePlanSnippet(v.close, "volume_surge")}`);
-        }
-        lines.push(``);
+    if (freshOversold.length > 0) {
+      lines.push(`💎 <b>ارتداد من تشبع بيعي (RSI Bounce):</b>`);
+      for (const o of freshOversold) {
+        lines.push(`• <b>${o.symbol}</b>: ${o.close.toFixed(2)} ج.م (<b>+${o.change_pct}%</b>) | مؤشر RSI: <b>${o.rsi_14}</b> 📈`);
+        lines.push(`  ${formatTelegramTradePlanSnippet(o.close, "rsi_oversold")}`);
       }
+      lines.push(``);
+    }
 
-      if (userBreakout.length > 0) {
-        lines.push(`🚀 <b>رادار الاختراقات الفنية (Breakout):</b>`);
-        for (const b of userBreakout) {
-          lines.push(`• <b>${b.symbol}</b>: ${b.close.toFixed(2)} ج.م (<b>+${b.change_pct}%</b>) | اختراق قمة 20 جلسة 🎯`);
-          lines.push(`  ${formatTelegramTradePlanSnippet(b.close, "breakout")}`);
-        }
-        lines.push(``);
+    if (freshDisclosures.length > 0) {
+      lines.push(`📢 <b>إفصاحات وأخبار رسمية حديثة:</b>`);
+      for (const d of freshDisclosures) {
+        lines.push(`• ${escapeHtml(d.title)}`);
       }
+      lines.push(``);
+    }
 
-      if (userOversold.length > 0) {
-        lines.push(`💎 <b>ارتداد من تشبع بيعي (RSI Bounce):</b>`);
-        for (const o of userOversold) {
-          lines.push(`• <b>${o.symbol}</b>: ${o.close.toFixed(2)} ج.م (<b>+${o.change_pct}%</b>) | مؤشر RSI: <b>${o.rsi_14}</b> 📈`);
-          lines.push(`  ${formatTelegramTradePlanSnippet(o.close, "rsi_oversold")}`);
-        }
-        lines.push(``);
-      }
+    lines.push(`───────────────`);
+    lines.push(`⏱️ التوقيت: <b>${cairoTime.timeStr} بتوقيت القاهرة</b>`);
+    lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات في بروفايلك</a>`);
 
-      if (portfolioHits.length > 0) {
-        lines.push(`💼 <b>تنبيه خاص لأسهم محفظتك:</b>`);
-        lines.push(...portfolioHits);
-        lines.push(``);
-      }
-
-      if (userDisclosures.length > 0) {
-        lines.push(`📢 <b>إفصاحات وأخبار رسمية حديثة:</b>`);
-        for (const d of userDisclosures) {
-          lines.push(`• ${escapeHtml(d.title)}`);
-        }
-        lines.push(``);
-      }
-
-      lines.push(`───────────────`);
-      lines.push(`⏱️ التوقيت: <b>${cairoTime.timeStr} بتوقيت القاهرة</b>`);
-      lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات في بروفايلك</a>`);
-
-      const text = lines.join("\n");
-      const sent = await sendTelegramAlert(user.telegram_chat_id, text);
+    const text = lines.join("\n");
+    for (const chatId of targetChatIds) {
+      const sent = await sendTelegramAlert(chatId, text);
       if (sent) alertsDispatchedCount++;
     }
 
@@ -640,12 +587,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
   }
 
-  // Send Telegram follow-up alerts for target hit or stopped out
-  if ((hitTargetSignals.length > 0 || stoppedOutSignals.length > 0) && targetProfiles.length > 0) {
-    for (const user of targetProfiles) {
+  // Send Telegram follow-up alerts for target hit or stopped out (VIP Channel)
+  if ((hitTargetSignals.length > 0 || stoppedOutSignals.length > 0) && targetChatIds.length > 0) {
+    for (const chatId of targetChatIds) {
       if (hitTargetSignals.length > 0) {
         const hitLines: string[] = [
-          `🎯 <b>[EGX BOTS] تحقيق أهداف إشارات الإسكانر!</b>`,
+          `🎯 <b>[EGX BOTS] تحقيق أهداف إشارات الإسكانر! (قناة VIP)</b>`,
           `───────────────`,
         ];
         for (const s of hitTargetSignals) {
@@ -656,12 +603,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         hitLines.push(`───────────────`);
         hitLines.push(`💡 <i>توصية: يفضل جني الأرباح جزئياً أو رفع أمر الوقف لسعر الدخول لحجز الأرباح.</i>`);
         hitLines.push(`📊 <b>متابعة النتائج والشارتات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
-        await sendTelegramAlert(user.telegram_chat_id, hitLines.join("\n"));
+        await sendTelegramAlert(chatId, hitLines.join("\n"));
       }
 
       if (stoppedOutSignals.length > 0) {
         const slLines: string[] = [
-          `🛑 <b>[EGX BOTS] تنبيه إدارة المخاطر — كسر وقف الخسارة</b>`,
+          `🛑 <b>[EGX BOTS] تنبيه إدارة المخاطر — كسر وقف الخسارة (قناة VIP)</b>`,
           `───────────────`,
         ];
         for (const s of stoppedOutSignals) {
@@ -672,7 +619,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         slLines.push(`───────────────`);
         slLines.push(`⚠️ <i>تنبيه: التزم بإدارة رأس المال وتجنب التمسك بالصفقات الخاسرة.</i>`);
         slLines.push(`📊 <b>متابعة النتائج وسجل الصفقات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
-        await sendTelegramAlert(user.telegram_chat_id, slLines.join("\n"));
+        await sendTelegramAlert(chatId, slLines.join("\n"));
       }
     }
   }

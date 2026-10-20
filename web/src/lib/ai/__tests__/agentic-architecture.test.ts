@@ -1800,7 +1800,100 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(Number(distSup2!.value.toFixed(1))).toBe(-8.7);
         expect(Number(distRes2!.value.toFixed(2))).toBe(7.66);
     });
+
+    it("grounds 15-minute intraday scanner signals with entry, targets 1 and 2, stop loss, and return %", () => {
+        const scannerEvidence: AgenticEvidence = {
+            tool: "get_recommendations",
+            source: "15m_intraday_scanner+scan_results",
+            symbols: ["CRST", "EGAL", "WCDF"],
+            data_type: "historical",
+            data_time: "2026-10-20",
+            availability: "available",
+            data: {
+                status: "success",
+                timeframe: "all",
+                status_filter: "open",
+                count: 3,
+                total_count: 3,
+                performance_summary: {
+                    total_recommendations: 3,
+                    open_count: 3,
+                    closed_count: 0,
+                    intraday_15m_active_count: 3
+                },
+                recommendations: [
+                    {
+                        id: "CRST_2026-10-20_breakout",
+                        symbol: "CRST",
+                        signal: "BUY",
+                        source: "15m_intraday_scanner",
+                        recommendation_type: "🚀 مضاربة لحظية (اختراق سعري)",
+                        time_horizon: "1 - 3 جلسات تداول (مضاربة سريعة)",
+                        holding_days: 1,
+                        entry_price: 2.50,
+                        target_price: 2.63,
+                        target_2: 2.71,
+                        stop_loss: 2.44,
+                        current_price: 2.59,
+                        unrealized_return_pct: 3.60,
+                        status: "active",
+                        signal_date: "2026-10-20"
+                    },
+                    {
+                        id: "EGAL_2026-10-20_volume_surge",
+                        symbol: "EGAL",
+                        signal: "BUY",
+                        source: "15m_intraday_scanner",
+                        recommendation_type: "⚡ مضاربة لحظية (انفجار سيولة)",
+                        time_horizon: "1 - 3 جلسات تداول (مضاربة سريعة)",
+                        holding_days: 1,
+                        entry_price: 297.98,
+                        target_price: 308.41,
+                        target_2: 315.86,
+                        stop_loss: 292.02,
+                        current_price: 301.50,
+                        unrealized_return_pct: 1.18,
+                        status: "active",
+                        signal_date: "2026-10-20"
+                    },
+                    {
+                        id: "WCDF_2026-10-20_rsi_oversold",
+                        symbol: "WCDF",
+                        signal: "BUY",
+                        source: "15m_intraday_scanner",
+                        recommendation_type: "🧲 مضاربة لحظية (تشبع بيعي)",
+                        time_horizon: "1 - 3 جلسات تداول (مضاربة سريعة)",
+                        holding_days: 1,
+                        entry_price: 502.00,
+                        target_price: 517.06,
+                        target_2: 529.61,
+                        stop_loss: 491.96,
+                        current_price: 502.00,
+                        unrealized_return_pct: 0.00,
+                        status: "active",
+                        signal_date: "2026-10-20"
+                    }
+                ]
+            }
+        };
+
+        const facts = agenticFacts([scannerEvidence]);
+        expect(facts.find(f => f.symbol === "CRST" && f.field === "entry_price")?.value).toBe(2.50);
+        expect(facts.find(f => f.symbol === "CRST" && f.field === "stop_loss")?.value).toBe(2.44);
+        expect(facts.find(f => f.symbol === "CRST" && f.field === "target_price" && f.value === 2.63)).toBeDefined();
+        expect(facts.find(f => f.symbol === "CRST" && f.field === "target_price" && f.value === 2.71)).toBeDefined();
+        expect(facts.find(f => f.symbol === "CRST" && f.field === "profit_pct")?.value).toBe(3.60);
+
+        const draft = `## 📋 التوصيات المفتوحة حالياً — 20-10-2026
+
+| السهم | نوع الإشارة | سعر الدخول | السعر الحالي | العائد الحالي % | المستهدف الأول | المستهدف الثاني | وقف الخسارة |
+|---|---|---:|---:|---:|---:|---:|---:|
+| CRST | اختراق 🚀 | 2.50 | 2.59 | +3.6% | 2.63 | 2.71 | 2.44 |
+| EGAL | انفجار سيولة ⚡ | 297.98 | 301.50 | +1.18% | 308.41 | 315.86 | 292.02 |
+| WCDF | تشبع بيعي 🧲 | 502.00 | 502.00 | 0.00% | 517.06 | 529.61 | 491.96 |`;
+
+        const reasons = checkAgenticDraft(draft, [scannerEvidence]);
+        expect(reasons).toEqual([]);
+    });
+
 });
-
-
-

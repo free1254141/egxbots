@@ -930,7 +930,7 @@ export default function UsersTab() {
                             </thead>
                             <tbody>
                                 {filteredUsers.map((u) => {
-                                    const isUserPro = ["pro", "lifetime", "pro_lifetime"].includes(u.subscription?.plan_id || "") && u.subscription?.status === "active";
+                                    const isUserPro = ["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(u.subscription?.plan_id || "") && u.subscription?.status === "active";
                                     const isLifetime = u.subscription?.plan_id === "lifetime" || u.subscription?.plan_id === "pro_lifetime";
                                     const subEnd = u.subscription?.current_period_end;
                                     return (
@@ -1036,7 +1036,17 @@ export default function UsersTab() {
 
                                             {/* Subscription Expiration Date */}
                                             <td data-label={isAr ? "نهاية الاشتراك" : "Sub Expiry"} className="px-3 py-3 whitespace-nowrap">
-                                                {isUserPro && subEnd ? (
+                                                {isUserPro && isLifetime ? (
+                                                    <div>
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-purple-500 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-[11px]">
+                                                            <Crown className="w-3 h-3 shrink-0 text-yellow-500 fill-yellow-500" />
+                                                            {isAr ? "مدى الحياة" : "Lifetime"}
+                                                        </span>
+                                                        <div className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5 font-bold">
+                                                            {isAr ? "دائم للأبد 👑" : "Forever 👑"}
+                                                        </div>
+                                                    </div>
+                                                ) : isUserPro && subEnd ? (
                                                     <div>
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]">
                                                             <Clock className="w-3 h-3 shrink-0" />

@@ -30,6 +30,12 @@ type PortfolioUser = {
   positions: PositionRow[];
 };
 
+const ADMIN_USER_IDS = new Set([
+  "ba9c27e8-f62d-452f-8a29-dc77fd092207", // weeessd57
+  "77f317e8-1df4-4cca-933b-bf4d3662c047", // user@gmail.com
+  "f3592b1c-ebe1-4fed-ba36-b92a58568df8", // weeeenew
+]);
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireAdmin(req);
@@ -42,7 +48,7 @@ export async function GET(req: NextRequest) {
       supabase.from("stock_prices").select("date").eq("exchange", "EGX").order("date", { ascending: false }).limit(1).maybeSingle(),
     ]);
     if (posRes.error) return NextResponse.json({ detail: posRes.error.message }, { status: 500 });
-    const positions = (posRes.data || []) as PositionRow[];
+    const positions = ((posRes.data || []) as PositionRow[]).filter((p) => !ADMIN_USER_IDS.has(String(p.user_id)));
     const latestDate = latestDateRes.data?.date || null;
     const symbols = Array.from(new Set(positions.map((p) => String(p.symbol || "").toUpperCase()).filter(Boolean)));
     const pricesRes = latestDate && symbols.length

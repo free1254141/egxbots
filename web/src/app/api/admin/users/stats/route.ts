@@ -104,6 +104,8 @@ export async function GET(req: NextRequest) {
       "weeeessd57@gmail.com",
       "weeasd57@gmail.com",
       "weeeenew@gmail.com",
+      "weessd57@gmail.com",
+      "user@gmail.com",
     ]);
 
     try {
@@ -112,6 +114,7 @@ export async function GET(req: NextRequest) {
         const email = String(user.email || "").toLowerCase().trim();
         if (ADMIN_EMAILS.has(email) || user.app_metadata?.role === "admin") {
           adminUserIds.add(String(user.id));
+          continue;
         }
         const atIdx = email.indexOf("@");
         if (atIdx > 0) {
@@ -124,6 +127,7 @@ export async function GET(req: NextRequest) {
     // Fallback hardcoded admin IDs to guarantee exclusion even if auth list fails
     adminUserIds.add("ba9c27e8-f62d-452f-8a29-dc77fd092207"); // weeessd57
     adminUserIds.add("f3592b1c-ebe1-4fed-ba36-b92a58568df8"); // weeeenew
+    adminUserIds.add("77f317e8-1df4-4cca-933b-bf4d3662c047"); // user@gmail.com
 
     const analytics = buildUserAnalytics({
       profiles: allProfiles,
@@ -140,11 +144,12 @@ export async function GET(req: NextRequest) {
       now,
     });
 
-    const newUsers30Days = allProfiles.filter((profile: any) => new Date(profile.created_at).getTime() >= now.getTime() - 30 * 24 * 60 * 60 * 1000).length;
-    const newUsers7Days = allProfiles.filter((profile: any) => new Date(profile.created_at).getTime() >= now.getTime() - 7 * 24 * 60 * 60 * 1000).length;
-    const withTelegram = allProfiles.filter((profile: any) => String(profile.telegram_chat_id || "").trim()).length;
+    const nonAdminProfiles = allProfiles.filter((p: any) => !adminUserIds.has(String(p.id)));
+    const newUsers30Days = nonAdminProfiles.filter((profile: any) => new Date(profile.created_at).getTime() >= now.getTime() - 30 * 24 * 60 * 60 * 1000).length;
+    const newUsers7Days = nonAdminProfiles.filter((profile: any) => new Date(profile.created_at).getTime() >= now.getTime() - 7 * 24 * 60 * 60 * 1000).length;
+    const withTelegram = nonAdminProfiles.filter((profile: any) => String(profile.telegram_chat_id || "").trim()).length;
     const langMap: Record<string, number> = {};
-    allProfiles.forEach((profile: any) => {
+    nonAdminProfiles.forEach((profile: any) => {
       const lang = String(profile.language || "en").toLowerCase();
       langMap[lang] = (langMap[lang] || 0) + 1;
     });
@@ -160,7 +165,7 @@ export async function GET(req: NextRequest) {
     });
 
     let earliestTime = now.getTime();
-    allProfiles.forEach((profile: any) => {
+    nonAdminProfiles.forEach((profile: any) => {
       const time = new Date(profile.created_at).getTime();
       if (Number.isFinite(time) && time < earliestTime) earliestTime = time;
     });
@@ -188,7 +193,7 @@ export async function GET(req: NextRequest) {
       proSignupsByDay[date] = 0;
       recsByDay[date] = 0;
     }
-    allProfiles.forEach((profile: any) => {
+    nonAdminProfiles.forEach((profile: any) => {
       const date = toCairoDate(profile.created_at);
       if (date in signupsByDay) signupsByDay[date] += 1;
     });
@@ -256,13 +261,13 @@ export async function GET(req: NextRequest) {
 
     const planMap = analytics.plans;
     return NextResponse.json({
-      totalUsers: totalProfileCount,
+      totalUsers: Math.max(nonAdminProfiles.length, totalProfileCount - adminUserIds.size),
       totalRecommendations: scanResults.length,
       currentEgx30: lastKnownEgx30,
       newUsers30Days,
       newUsers7Days,
       withTelegram,
-      telegramRate: allProfiles.length ? Math.round((withTelegram / allProfiles.length) * 100) : 0,
+      telegramRate: nonAdminProfiles.length ? Math.round((withTelegram / nonAdminProfiles.length) * 100) : 0,
       languages: langMap,
       plans: planMap,
       botServices: serviceMap,

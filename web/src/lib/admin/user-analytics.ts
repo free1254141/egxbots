@@ -164,19 +164,21 @@ export function buildUserAnalytics(input: {
   now?: Date;
 }) {
   const now = input.now || new Date();
+  const excludedIds = input.excludeUserIds || new Set<string>();
+
   const thirtyDaysAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
   const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-  const profiles = input.profiles || [];
+  const profiles = (input.profiles || []).filter((p) => !excludedIds.has(String(p.id)));
   const profileIds = unique(profiles.map((profile) => String(profile.id)));
-  const totalProfileCount = Math.max(profileIds.size, Number(input.totalProfileCount) || 0);
-  const excludedIds = input.excludeUserIds || new Set<string>();
+  const totalProfileCount = Math.max(profileIds.size, (Number(input.totalProfileCount) || 0) - excludedIds.size);
+
   const activeProIds = new Set([...unique(
     (input.subscriptions || [])
-      .filter((sub) => ["pro", "lifetime", "pro_lifetime"].includes(String(sub.plan_id || "").toLowerCase()) && String(sub.status || "").toLowerCase() === "active" && !excludedIds.has(String(sub.user_id)))
+      .filter((sub) => ["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub.plan_id || "").toLowerCase()) && String(sub.status || "").toLowerCase() === "active" && !excludedIds.has(String(sub.user_id)))
       .map((sub) => String(sub.user_id))
   )].filter((id) => profileIds.has(id)));
-  const pageEvents = (input.events || []).filter((event) => !event.event_name || event.event_name === "page_view");
-  const userChatMessages = (input.chatMessages || []).filter((message) => !message.role || message.role === "user");
+  const pageEvents = (input.events || []).filter((event) => (!event.event_name || event.event_name === "page_view") && !excludedIds.has(String(event.user_id || "")));
+  const userChatMessages = (input.chatMessages || []).filter((message) => (!message.role || message.role === "user") && !excludedIds.has(String(message.user_id || "")));
   const isCurrentActivity = (userId: string, createdAt?: string | null, since = 0) => {
     const time = validDate(createdAt);
     return profileIds.has(userId) && !excludedIds.has(userId) && time > 0 && time >= since && time <= now.getTime();
@@ -206,7 +208,7 @@ export function buildUserAnalytics(input: {
     plans[plan] = (plans[plan] || 0) + 1;
   }
 
-  // ── Revenue (Excluding Admin users and applying 4% payment gateway deduction) ──
+  // --- Revenue (Excluding Admin users and applying 4% payment gateway deduction) ---
   const successfulKashier = (input.kashierPayments || []).filter(
     (p) => String(p.status || "").toLowerCase() === "success" && !excludedIds.has(String(p.user_id || ""))
   );
@@ -234,7 +236,7 @@ export function buildUserAnalytics(input: {
   const avgOrderValue = totalPaidOrders ? Math.round(totalRevenue / totalPaidOrders) : 0;
 
   const allOrders = [
-    ...(input.paymentOrders || []).map((p) => ({
+    ...(input.paymentOrders || []).filter((p) => !excludedIds.has(String(p.user_id || ""))).map((p) => ({
       user_id: p.user_id,
       amount_egp: Number(p.amount_egp || 0),
       status: p.status,
@@ -242,7 +244,7 @@ export function buildUserAnalytics(input: {
       payment_review_status: p.payment_review_status,
       created_at: p.created_at,
     })),
-    ...(input.kashierPayments || []).map((p) => ({
+    ...(input.kashierPayments || []).filter((p) => !excludedIds.has(String(p.user_id || ""))).map((p) => ({
       user_id: p.user_id,
       amount_egp: Number(p.amount_paid || 0),
       status: p.status,
@@ -254,9 +256,9 @@ export function buildUserAnalytics(input: {
     .sort((a, b) => validDate(b.created_at) - validDate(a.created_at))
     .slice(0, 10);
 
-  // ── Portfolio ──
+  // --- Portfolio ---
   const openPositions = (input.positions || []).filter(
-    (p) => String(p.status || "").toLowerCase() === "open"
+    (p) => String(p.status || "").toLowerCase() === "open" && !excludedIds.has(String(p.user_id || ""))
   );
   const portfolioUserIds = unique(openPositions.map((p) => p.user_id));
   const symbolCount = new Map<string, number>();
@@ -269,18 +271,18 @@ export function buildUserAnalytics(input: {
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
-  // ── DAU (today) ──
+  // --- DAU (today) ---
   const todayStart = cairoDayStart(now);
   const dau = new Set([
     ...pageEvents.filter((e) => isCurrentActivity(String(e.user_id || ""), e.created_at, todayStart)).map((e) => String(e.user_id)),
     ...userChatMessages.filter((m) => isCurrentActivity(String(m.user_id || ""), m.created_at, todayStart)).map((m) => String(m.user_id)),
   ]).size;
 
-  // ── Growth velocity ──
+  // --- Growth velocity ---
   const fourteenDaysAgo = now.getTime() - 14 * 24 * 60 * 60 * 1000;
   const newUsers14Days = profiles.filter((p) => validDate(p.created_at) >= fourteenDaysAgo).length;
 
-  // ── Email domains ──
+  // --- Email domains ---
   const emailDomainList = Object.entries(input.emailDomains || {})
     .map(([domain, count]) => ({ domain, count }))
     .sort((a, b) => b.count - a.count)
@@ -307,7 +309,7 @@ export function buildUserAnalytics(input: {
     topPages: topPages(pageEvents, null),
     proTopPages: topPages(pageEvents, activeProIds),
     chatMessages: userChatMessages.length,
-    chatSessions: (input.chatSessions || []).length,
+    chatSessions: (input.chatSessions || []).filter((s) => !excludedIds.has(String(s.user_id || ""))).length,
     totalRevenue,
     totalPaidOrders,
     pendingOrders,

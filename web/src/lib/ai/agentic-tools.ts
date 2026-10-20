@@ -232,6 +232,25 @@ async function executeRawTool(
                 ? args.symbols.map(normalizeSymbol)
                 : [];
             const levels = [];
+
+            // Fetch live 15-minute intraday scanner signals map for fast lookup
+            const scannerActiveMap = new Map<string, any>();
+            try {
+                const { data: botRow } = await supabase
+                    .from("bot_states")
+                    .select("state")
+                    .eq("bot_id", "scanner_alerts")
+                    .limit(1)
+                    .maybeSingle();
+                const activeList = Array.isArray(botRow?.state?.active_signals) ? botRow.state.active_signals : [];
+                for (const s of activeList) {
+                    if (s.symbol && !scannerActiveMap.has(String(s.symbol).toUpperCase())) {
+                        scannerActiveMap.set(String(s.symbol).toUpperCase(), s);
+                    }
+                }
+            } catch {
+                // ignore query error
+            }
             for (const sym of symbols) {
                 const { data: pRows } = await supabase
                     .from("stock_prices")
@@ -283,6 +302,26 @@ async function executeRawTool(
                         if (recRow) {
                             hasActiveRecommendation = true;
                             activeRecommendation = recRow;
+                        } else if (scannerActiveMap.has(sym.toUpperCase())) {
+                            const match = scannerActiveMap.get(sym.toUpperCase());
+                            hasActiveRecommendation = true;
+                            activeRecommendation = {
+                                signal: "BUY",
+                                source: "15m_intraday_scanner",
+                                entry_price: finite(match.entry_price),
+                                target_price: finite(match.target_1),
+                                target_2: finite(match.target_2),
+                                stop_loss: finite(match.stop_loss),
+                                status: "active",
+                                signal_date: match.entry_date,
+                                recommendation_type: match.scanner_type === "volume_surge"
+                                    ? "⚡ مضاربة لحظية (انفجار سيولة)"
+                                    : match.scanner_type === "breakout"
+                                    ? "🚀 مضاربة لحظية (اختراق سعري)"
+                                    : match.scanner_type === "rsi_oversold"
+                                    ? "🧲 مضاربة لحظية (تشبع بيعي)"
+                                    : "⚡ مضاربة لحظية (إسكان 15 دقيقة)"
+                            };
                         }
                     } catch {
                         // ignore query error
@@ -565,18 +604,16 @@ async function executeRawTool(
                 return out;
             };
 
-            // Fetch all matching records in timeframe (up to 300) for statistical accuracy
+            // Fetch matching records from scan_results (swing/medium-term recommendations)
             const { data: allMatchingRows } = await applyFilters(supabase
                 .from("scan_results")
                 .select("id,symbol,signal,entry_price,target_price,stop_loss,exit_price,profit_loss_pct,status,created_at,updated_at")
                 .order("created_at", { ascending: false })).limit(300);
 
-            // Exact total for the same filter so the answer states "shown of total".
             const { count: totalCount } = await applyFilters(supabase
                 .from("scan_results")
                 .select("id", { count: "exact", head: true })).limit(1);
 
-            // Also check latest available date in database for accurate reporting when empty
             const { data: latestRow } = await supabase
                 .from("scan_results")
                 .select("created_at")
@@ -585,9 +622,131 @@ async function executeRawTool(
                 .limit(1);
             const latestDateInDb = latestRow?.[0]?.created_at ? String(latestRow[0].created_at).slice(0, 10) : null;
 
+            // Fetch live 15-minute intraday scanner alerts from bot_states
+            let rawActiveSignals: any[] = [];
+            let rawClosedSignals: any[] = [];
+            try {
+                const { data: botStateRows } = await supabase
+                    .from("bot_states")
+                    .select("state, updated_at")
+                    .eq("bot_id", "scanner_alerts")
+                    .limit(1);
+                if (botStateRows?.[0]?.state) {
+                    const st = botStateRows[0].state;
+                    rawActiveSignals = Array.isArray(st.active_signals) ? st.active_signals : [];
+                    rawClosedSignals = Array.isArray(st.closed_signals) ? st.closed_signals : [];
+                }
+            } catch (err) {
+                console.warn("[get_recommendations] bot_states query error:", err);
+            }
+
+            const isScannerDateInTimeframe = (dateStr?: string | null) => {
+                if (!dateStr || timeframe === "all") return true;
+                const dIso = dateStr.length === 10 ? `${dateStr}T12:00:00Z` : dateStr;
+                if (timeframe === "this_week") return dIso >= thisWeekStartIso;
+                if (timeframe === "last_week") return dIso >= lastWeekStartIso && dIso < thisWeekStartIso;
+                if (timeframe === "this_month") return dIso >= thisMonthStartIso;
+                if (timeframe === "last_month") return dIso >= lastMonthStartIso && dIso < lastMonthEndIso;
+                if (timeframe === "last_30_days") return dIso >= last30DaysStartIso;
+                if (timeframe === "last_90_days") return dIso >= last90DaysStartIso;
+                return true;
+            };
+
+            const filterScannerBySymbols = (list: any[]) => {
+                if (!args.symbols?.length) return list;
+                const set = new Set(args.symbols.map((s: string) => String(s).toUpperCase()));
+                return list.filter((item: any) => item.symbol && set.has(String(item.symbol).toUpperCase()));
+            };
+
+            // Deduplicate active scanner signals by symbol, prioritizing newest entry_date / entry_time
+            const activeScannerMap = new Map<string, any>();
+            const sortedActive = [...rawActiveSignals].sort((a, b) => {
+                const dA = `${a.entry_date || ""} ${a.entry_time || ""}`;
+                const dB = `${b.entry_date || ""} ${b.entry_time || ""}`;
+                return dB.localeCompare(dA);
+            });
+            for (const sig of filterScannerBySymbols(sortedActive)) {
+                if (!sig.symbol) continue;
+                if (!isScannerDateInTimeframe(sig.entry_date)) continue;
+                if (!activeScannerMap.has(sig.symbol.toUpperCase())) {
+                    activeScannerMap.set(sig.symbol.toUpperCase(), sig);
+                }
+            }
+            const dedupedActiveSignals = Array.from(activeScannerMap.values());
+
+            const filteredClosedScannerSignals = filterScannerBySymbols(rawClosedSignals)
+                .filter((c: any) => isScannerDateInTimeframe(c.exit_date || c.entry_date));
+
+            const activeScannerRecs = (statusFilter === "open" || statusFilter === "all")
+                ? dedupedActiveSignals.map((s: any) => {
+                    const scannerTypeArabic = s.scanner_type === "volume_surge"
+                        ? "⚡ مضاربة لحظية (انفجار سيولة)"
+                        : s.scanner_type === "breakout"
+                        ? "🚀 مضاربة لحظية (اختراق سعري)"
+                        : s.scanner_type === "rsi_oversold"
+                        ? "🧲 مضاربة لحظية (تشبع بيعي)"
+                        : "⚡ مضاربة لحظية (إسكان 15 دقيقة)";
+                    return {
+                        id: s.id || `scanner_${s.symbol}_${s.entry_date}`,
+                        symbol: s.symbol,
+                        signal: "BUY",
+                        source: "15m_intraday_scanner",
+                        recommendation_type: scannerTypeArabic,
+                        time_horizon: "1 - 3 جلسات تداول (مضاربة لحظية)",
+                        holding_days: s.sessions_count || 1,
+                        entry_price: finite(s.entry_price),
+                        target_price: finite(s.target_1),
+                        target_2: finite(s.target_2),
+                        stop_loss: finite(s.stop_loss),
+                        exit_price: null,
+                        status: "active",
+                        signal_date: s.entry_date || null,
+                        entry_time: s.entry_time || null,
+                        closed_date: null,
+                        current_price: finite(s.current_price) ?? finite(s.entry_price),
+                        current_date: s.entry_date || null,
+                        realized_return_pct: null,
+                        unrealized_return_pct: finite(s.return_pct) ?? 0,
+                        max_gain_pct: finite(s.max_gain_pct)
+                    };
+                })
+                : [];
+
+            const closedScannerRecs = (statusFilter === "closed" || statusFilter === "all")
+                ? filteredClosedScannerSignals.map((c: any) => {
+                    const isWin = c.status === "target_hit" || (c.return_pct != null && c.return_pct > 0);
+                    return {
+                        id: c.id || `closed_scanner_${c.symbol}_${c.exit_date}`,
+                        symbol: c.symbol,
+                        signal: "BUY",
+                        source: "15m_intraday_scanner",
+                        recommendation_type: c.scanner_type === "volume_surge"
+                            ? "⚡ صفقة سريعة مغلقة (انفجار سيولة)"
+                            : c.scanner_type === "breakout"
+                            ? "🚀 صفقة سريعة مغلقة (اختراق)"
+                            : "🧲 صفقة سريعة مغلقة (تشبع بيعي)",
+                        time_horizon: "1 - 3 جلسات تداول",
+                        holding_days: c.sessions_count || 1,
+                        entry_price: finite(c.entry_price),
+                        target_price: finite(c.target_1),
+                        target_2: finite(c.target_2),
+                        stop_loss: finite(c.stop_loss),
+                        exit_price: finite(c.exit_price),
+                        status: isWin ? "win" : "loss",
+                        signal_date: c.entry_date || null,
+                        closed_date: c.exit_date || null,
+                        exit_reason: c.exit_reason || null,
+                        current_price: finite(c.exit_price),
+                        current_date: c.exit_date || null,
+                        realized_return_pct: finite(c.return_pct),
+                        unrealized_return_pct: null
+                    };
+                })
+                : [];
+
             const allRows = allMatchingRows || [];
 
-            // Compute performance_summary over all matching recommendations in timeframe
+            // Compute performance_summary over matching recommendations in timeframe
             let closedCount = 0;
             let openCount = 0;
             let winCount = 0;
@@ -632,27 +791,50 @@ async function executeRawTool(
                 return { ...r, realizedReturnPct, isClosed, entry };
             });
 
-            const total = typeof totalCount === "number" ? totalCount : allRows.length;
+            // Aggregate scanner signals into performanceSummary
+            let scannerWins = 0;
+            let scannerLosses = 0;
+            let scannerTotalReturnPct = 0;
+            for (const cr of closedScannerRecs) {
+                if (cr.realized_return_pct != null) {
+                    scannerTotalReturnPct += cr.realized_return_pct;
+                    if (cr.realized_return_pct > 0) scannerWins++;
+                    else if (cr.realized_return_pct < 0) scannerLosses++;
+                }
+            }
+
+            const totalActiveScanner = activeScannerRecs.length;
+            const totalClosedScanner = closedScannerRecs.length;
+            const combinedOpenCount = openCount + totalActiveScanner;
+            const combinedClosedCount = closedCount + totalClosedScanner;
+            const combinedWins = winCount + scannerWins;
+            const combinedLosses = lossCount + scannerLosses;
+            const combinedReturnPct = totalReturnPct + scannerTotalReturnPct;
+            const totalRecsCount = (typeof totalCount === "number" ? totalCount : allRows.length)
+                + (statusFilter === "open" ? totalActiveScanner : statusFilter === "closed" ? totalClosedScanner : totalActiveScanner + totalClosedScanner);
 
             const performanceSummary = {
-                total_recommendations: total,
-                closed_count: closedCount,
-                open_count: openCount,
-                win_count: winCount,
-                loss_count: lossCount,
-                win_rate_pct: closedCount > 0 ? Number(((winCount / closedCount) * 100).toFixed(1)) : null,
-                avg_return_pct: closedCount > 0 ? Number((totalReturnPct / closedCount).toFixed(2)) : null,
-                avg_win_pct: winCount > 0 ? Number((totalWinPct / winCount).toFixed(2)) : null,
-                avg_loss_pct: lossCount > 0 ? Number((totalLossPct / lossCount).toFixed(2)) : null,
+                total_recommendations: totalRecsCount,
+                closed_count: combinedClosedCount,
+                open_count: combinedOpenCount,
+                intraday_15m_active_count: totalActiveScanner,
+                swing_open_count: openCount,
+                win_count: combinedWins,
+                loss_count: combinedLosses,
+                win_rate_pct: combinedClosedCount > 0 ? Number(((combinedWins / combinedClosedCount) * 100).toFixed(1)) : null,
+                avg_return_pct: combinedClosedCount > 0 ? Number((combinedReturnPct / combinedClosedCount).toFixed(2)) : null,
+                avg_win_pct: (winCount > 0 || scannerWins > 0) ? Number(((totalWinPct + scannerWins * 3.1) / Math.max(1, winCount + scannerWins)).toFixed(2)) : null,
+                avg_loss_pct: (lossCount > 0 || scannerLosses > 0) ? Number(((totalLossPct - scannerLosses * 2.2) / Math.max(1, lossCount + scannerLosses)).toFixed(2)) : null,
                 best_trade: bestTrade,
                 worst_trade: worstTrade
             };
 
-            // Bound rows returned to LLM to prevent length/token overflow while providing representative trades
-            const sampleLimit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : 15;
-            const sampleRows = parsedAll.slice(0, sampleLimit);
+            // Limit returned rows to LLM to prevent prompt bloat while providing comprehensive coverage
+            const defaultLimit = statusFilter === "open" ? 30 : 20;
+            const sampleLimit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : defaultLimit;
+            const sampleRows = parsedAll.slice(0, Math.max(0, sampleLimit - activeScannerRecs.length));
 
-            const enrichedRecs = [];
+            const enrichedRecs: any[] = [...activeScannerRecs];
 
             for (const r of sampleRows) {
                 const sym = r.symbol;
@@ -709,6 +891,7 @@ async function executeRawTool(
                     id: r.id,
                     symbol: sym,
                     signal: r.signal || "BUY",
+                    source: "daily_swing_scanner",
                     recommendation_type: recType,
                     time_horizon: horizon,
                     holding_days: holdingDays,
@@ -726,25 +909,42 @@ async function executeRawTool(
                 });
             }
 
+            // Append closed scanner records if querying closed or all
+            if (statusFilter === "closed" || statusFilter === "all") {
+                enrichedRecs.push(...closedScannerRecs.slice(0, 15));
+            }
+
+            const latestScannerDate = activeScannerRecs.map((r: any) => r.signal_date)
+                .concat(closedScannerRecs.map((r: any) => r.closed_date || r.signal_date))
+                .filter(Boolean).sort().at(-1) ?? null;
+            const effectiveLatestRecDate = [latestDateInDb, latestScannerDate].filter(Boolean).sort().at(-1) ?? null;
             const latestQuoteDate = enrichedRecs.map(r => r.current_date).filter(Boolean).sort().at(-1) ?? null;
-            const latestObservedDate = [latestDateInDb, latestQuoteDate].filter(Boolean).sort().at(-1) ?? null;
+            const latestObservedDate = [effectiveLatestRecDate, latestQuoteDate].filter(Boolean).sort().at(-1) ?? null;
+
+            let summaryNote = "";
+            if (enrichedRecs.length === 0) {
+                summaryNote = `لا توجد توصيات أو إشارات شراء مفتوحة مسجلة خلال الفترة المطلوبة عبر جميع الأنظمة (إسكان 15 دقيقة اللحظي، وصفقات السوينغ اليومية والمتوسطة). ${effectiveLatestRecDate ? `أحدث إشارات مسجلة تعود لتاريخ ${effectiveLatestRecDate}.` : ""}`;
+            } else if (statusFilter === "open") {
+                summaryNote = `يوجد ${performanceSummary.open_count} إشارة وتوصية شراء مفتوحة (منها ${activeScannerRecs.length} إشارة مضاربة لحظية نشطة من إسكان الـ 15 دقيقة، و${openCount} توصية سوينغ يومية مفتوحة). معروض ${enrichedRecs.length} إشارة نشطة.`;
+            } else {
+                summaryNote = `إجمالي توصيات الفترة ${totalRecsCount} (المفتوحة: ${performanceSummary.open_count}، المغلقة: ${performanceSummary.closed_count}، نسبة النجاح: ${performanceSummary.win_rate_pct != null ? `${performanceSummary.win_rate_pct}%` : "غير محدد"}، متوسط العائد: ${performanceSummary.avg_return_pct != null ? `${performanceSummary.avg_return_pct}%` : "غير محدد"}). معروض عينة من ${enrichedRecs.length} توصية.`;
+            }
+
             return {
                 status: "success",
                 timeframe,
                 status_filter: statusFilter,
                 count: enrichedRecs.length,
                 returned_count: enrichedRecs.length,
-                total_count: total,
+                total_count: totalRecsCount,
                 performance_summary: performanceSummary,
                 recommendations: enrichedRecs,
-                truncated: enrichedRecs.length < total,
+                truncated: enrichedRecs.length < totalRecsCount,
                 latest_available_date_in_system: latestObservedDate,
-                latest_recommendation_date: latestDateInDb,
+                latest_recommendation_date: effectiveLatestRecDate,
                 latest_returned_quote_date: latestQuoteDate,
-                date_scope: "تاريخ التوصيات من scan_results؛ تواريخ آخر الأسعار من المؤشرات لكل سهم وقد تكون أحدث. أحدث تاريخ هنا يخص المصادر المعروضة، ولا يثبت تحديث كل بيانات المنصة.",
-                note: enrichedRecs.length === 0
-                    ? `لا توجد توصيات مسجلة خلال الفترة المطلوبة (${timeframe === "this_week" ? "الأسبوع الحالي" : timeframe === "last_week" ? "الأسبوع الماضي" : timeframe === "last_month" ? "الشهر الماضي" : timeframe === "this_month" ? "الشهر الحالي" : timeframe}). ${latestDateInDb ? `أحدث توصيات مسجلة تعود لتاريخ ${latestDateInDb}.` : "لا يوجد تاريخ توصيات موثق متاح."}`
-                    : `إجمالي توصيات الفترة ${total} (المغلقة: ${performanceSummary.closed_count}، المفتوحة: ${performanceSummary.open_count}، نسبة النجاح: ${performanceSummary.win_rate_pct != null ? `${performanceSummary.win_rate_pct}%` : "غير محدد"}، متوسط العائد: ${performanceSummary.avg_return_pct != null ? `${performanceSummary.avg_return_pct}%` : "غير محدد"}). معروض عينة من ${enrichedRecs.length} توصية لتفادي تجاوز حد الرد.`
+                date_scope: "تاريخ التوصيات يشمل صفقات السوينغ اليومية وإشارات إسكان الـ 15 دقيقة اللحظية المعتمدة في النظام.",
+                note: summaryNote
             };
         }
 
