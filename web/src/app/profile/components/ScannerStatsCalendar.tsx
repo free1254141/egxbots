@@ -47,6 +47,8 @@ export interface ScanHistoryItem {
 interface ScannerStatsCalendarProps {
   history: ScanHistoryItem[];
   lastScan?: any;
+  activeSignals?: any[];
+  closedSignals?: any[];
   isAr?: boolean;
   isPro?: boolean;
 }
@@ -54,6 +56,8 @@ interface ScannerStatsCalendarProps {
 export default function ScannerStatsCalendar({
   history = [],
   lastScan,
+  activeSignals = [],
+  closedSignals = [],
   isAr = true,
   isPro = false,
 }: ScannerStatsCalendarProps) {
@@ -292,6 +296,50 @@ export default function ScannerStatsCalendar({
         }
         if (dEntry.stocks.disclosures.length === 0 && lastScan.stage_results.disclosures) {
           dEntry.stocks.disclosures = [...lastScan.stage_results.disclosures];
+        }
+      }
+    }
+
+    // Fallback: Populate missing stocks from activeSignals and closedSignals for the day
+    const allSignals = [...activeSignals, ...closedSignals];
+    for (const sig of allSignals) {
+      if (!sig.entry_date || !sig.symbol) continue;
+      const dateKey = sig.entry_date;
+      if (!map.has(dateKey)) {
+        map.set(dateKey, {
+          date: dateKey,
+          scansCount: 1,
+          volumeCount: 0,
+          breakoutCount: 0,
+          oversoldCount: 0,
+          disclosuresCount: 0,
+          totalOpportunities: 0,
+          avgDurationMs: 2000,
+          samples: [],
+          stocks: { volume: [], breakout: [], oversold: [], disclosures: [] },
+        });
+      }
+      const dEntry = map.get(dateKey)!;
+      const stockObj = {
+        symbol: sig.symbol,
+        close: sig.entry_price,
+        change_pct: sig.return_pct || 0,
+        r_vol: 2.5,
+        rsi_14: 28,
+        signal_time: sig.entry_time || "10:01",
+      };
+
+      if (sig.scanner_type === "volume_surge") {
+        if (!dEntry.stocks.volume.some((x: any) => x.symbol === sig.symbol)) {
+          dEntry.stocks.volume.push(stockObj);
+        }
+      } else if (sig.scanner_type === "breakout") {
+        if (!dEntry.stocks.breakout.some((x: any) => x.symbol === sig.symbol)) {
+          dEntry.stocks.breakout.push(stockObj);
+        }
+      } else if (sig.scanner_type === "rsi_oversold") {
+        if (!dEntry.stocks.oversold.some((x: any) => x.symbol === sig.symbol)) {
+          dEntry.stocks.oversold.push(stockObj);
         }
       }
     }

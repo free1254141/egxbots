@@ -430,6 +430,8 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
         <ScannerStatsCalendar
           history={history}
           lastScan={lastScan}
+          activeSignals={activeSignals}
+          closedSignals={closedSignals}
           isAr={isAr}
           isPro={isPro}
         />
