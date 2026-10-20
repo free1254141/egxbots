@@ -68,8 +68,13 @@ def generate_daily_social_reports(job_run_id, steps, trigger='scheduled', dry_ru
         try:
             from api.social_facebook_publisher import auto_publish_daily_report_to_facebook
             fb_publication = auto_publish_daily_report_to_facebook(client, date.date().isoformat(), job_run_id)
-        except Exception:
-            pass
+        except Exception as error:
+            # Preserve a useful diagnostic without logging provider responses,
+            # request URLs, access tokens, or other secrets.
+            import logging
+            logging.getLogger(__name__).error(
+                "[FB_AUTO] Auto-publish call failed (%s)", type(error).__name__
+            )
     # Reports are created after the general market invalidation. Refresh their
     # own cache only after all report writes finish; never invoke an LLM here.
     if any(r.get('status') == 'ready' for r in results.values()):
