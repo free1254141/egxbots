@@ -37,7 +37,9 @@ def required_env(name: str) -> str:
 
 SUPABASE_URL = required_env("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY = required_env("SUPABASE_SERVICE_ROLE_KEY")
-TELEGRAM_TOKEN = required_env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
+if not TELEGRAM_TOKEN:
+    raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUPPORT_BOT_TOKEN)")
 REST = f"{SUPABASE_URL}/rest/v1"
 HEADERS = {
     "apikey": SUPABASE_KEY,
