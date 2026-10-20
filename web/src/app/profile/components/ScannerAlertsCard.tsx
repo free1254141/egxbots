@@ -9,7 +9,6 @@ import {
   Newspaper, 
   Send, 
   CheckCircle2, 
-  AlertTriangle, 
   Lock, 
   Sparkles,
   ExternalLink,
@@ -24,7 +23,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
 import ScannerStatsCalendar from "./ScannerStatsCalendar";
@@ -52,7 +50,6 @@ interface ScannerAlertsCardProps {
 }
 
 export default function ScannerAlertsCard({ initialTelegramLinked = false }: ScannerAlertsCardProps) {
-  const { user } = useAuth();
   const { language } = useLanguage();
   const { invite: proInvite, loading: proInviteLoading } = useTelegramPro();
   const isAr = language === "ar";
