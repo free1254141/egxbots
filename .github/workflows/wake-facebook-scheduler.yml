@@ -2,10 +2,13 @@ name: Wake Facebook scheduler
 
 on:
   schedule:
-    # Cairo is UTC+3. Wake the Space shortly after each Facebook slot.
+    # Wake after each slot in both Egypt UTC offsets (UTC+3 summer, UTC+2 winter).
     - cron: "50 5 * * 0-4"
+    - cron: "50 6 * * 0-4"
     - cron: "50 15 * * 0-4"
+    - cron: "50 16 * * 0-4"
     - cron: "35 18 * * 0-4"
+    - cron: "35 19 * * 0-4"
   workflow_dispatch:
 
 permissions:
