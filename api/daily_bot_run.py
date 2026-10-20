@@ -3742,6 +3742,34 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as social_error:
                 _record_step("daily_social_reports", False, type(social_error).__name__, 0)
                 print(f"[SOCIAL_REPORTS] Generation unavailable: {type(social_error).__name__}")
+        # Subscription renewal reminders run once after the scheduled close job only.
+        # The reminder script is idempotent and records each delivery in Supabase.
+        if trigger == "scheduled" and phase == "close" and not dry_run and _stage_needed('telegram_subscription_reminders'):
+            _start_step('telegram_subscription_reminders', 'Send private Telegram renewal reminders due today')
+            try:
+                import subprocess
+                reminder_script = os.path.join(project_root, "jobs", "telegram_subscription_reminders.py")
+                reminder_result = await asyncio.to_thread(
+                    subprocess.run,
+                    [sys.executable, reminder_script],
+                    cwd=project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=240,
+                    check=False,
+                )
+                reminder_output = ((reminder_result.stdout or "") + "\\n" + (reminder_result.stderr or "")).strip()
+                reminder_summary = "\\n".join(reminder_output.splitlines()[-8:])[:1200]
+                _record_step(
+                    "telegram_subscription_reminders",
+                    reminder_result.returncode == 0,
+                    reminder_summary or ("Completed" if reminder_result.returncode == 0 else "Reminder script failed without output"),
+                    0,
+                )
+                print(f"[SUBSCRIPTION_REMINDERS] exit={reminder_result.returncode} {reminder_summary}")
+            except Exception as reminder_error:
+                _record_step("telegram_subscription_reminders", False, str(reminder_error)[:500], 0)
+                print(f"[SUBSCRIPTION_REMINDERS] Failed: {reminder_error}")
         print(f"\n--- Daily Bot Run Job Completed: {dt.datetime.now()} ---")
         return {"status": "completed", "job_run_id": job_run_id, **summarise_daily_steps(steps_log)}
 
