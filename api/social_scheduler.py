@@ -96,13 +96,19 @@ def resolve_session_date_for_slot(slot: Dict[str, Any], now_dt: datetime) -> Opt
 
 
 def is_slot_due(slot: Dict[str, Any], now_dt: datetime, window_minutes: int = 15) -> bool:
-    """Check if the slot is currently due within the given window."""
+    """Return true for a due slot, including a bounded same-day catch-up window.
+
+    A sleeping/restarting Space can miss the exact publication minute. The
+    caller may widen window_minutes to catch up, but never across midnight.
+    """
     slot_hour, slot_minute = map(int, slot["time"].split(":"))
     slot_time_today = now_dt.replace(
         hour=slot_hour, minute=slot_minute, second=0, microsecond=0
     )
     diff_minutes = (now_dt - slot_time_today).total_seconds() / 60.0
-    return 0 <= diff_minutes <= window_minutes
+    minutes_until_midnight = (23 * 60 + 59) - (slot_hour * 60 + slot_minute)
+    allowed_window = min(window_minutes, minutes_until_midnight)
+    return 0 <= diff_minutes <= allowed_window
 
 
 def execute_publication_slot(
@@ -251,7 +257,7 @@ def _scheduler_worker_loop():
             client = _get_supabase_client()
 
             for slot in SCHEDULED_SLOTS:
-                if is_slot_due(slot, now_dt):
+                if is_slot_due(slot, now_dt, window_minutes=900):
                     execute_publication_slot(client, slot, now_dt)
 
         except Exception as e:
