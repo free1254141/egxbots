@@ -52,11 +52,16 @@ def test_is_slot_due():
     within_window = datetime(2026, 10, 19, 18, 52, tzinfo=CAIRO_TZ)
     too_early = datetime(2026, 10, 19, 18, 30, tzinfo=CAIRO_TZ)
     too_late = datetime(2026, 10, 19, 19, 10, tzinfo=CAIRO_TZ)
+    catch_up_later = datetime(2026, 10, 19, 22, 30, tzinfo=CAIRO_TZ)
+    next_day = datetime(2026, 10, 20, 0, 5, tzinfo=CAIRO_TZ)
 
     assert is_slot_due(slot, at_time) is True
     assert is_slot_due(slot, within_window) is True
     assert is_slot_due(slot, too_early) is False
     assert is_slot_due(slot, too_late) is False
+    assert is_slot_due(slot, too_late, window_minutes=900) is True
+    assert is_slot_due(slot, catch_up_later, window_minutes=900) is True
+    assert is_slot_due(slot, next_day, window_minutes=900) is False
 
 
 def test_execute_publication_slot_skips_if_already_published():
