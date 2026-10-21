@@ -1,7 +1,7 @@
 import { executeAgenticTool, runAgenticPipelineStream, AGENTIC_TOOLS_SCHEMA } from "../agentic-pipeline";
 import { cairoWeekBounds } from "../agentic-tools";
 import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts, type AgenticEvidence } from "../agentic-publication";
-import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues } from "../agentic-runtime";
+import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues, withPortfolioFailureGuide } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
@@ -376,7 +376,7 @@ describe("Agentic architecture integration: current production path", () => {
         expect(context).toContain("لا يظهر متوسط الشراء أو عدد الوحدات");
         expect(AGENTIC_SYSTEM_PROMPT).toContain("لا تخلط بين قيمة المركز أو المكسب النقدي أو العائد % وبين عدد الأسهم أو متوسط الشراء");
         expect(AGENTIC_SYSTEM_PROMPT).toContain("[افتح البروفايل عند قسم محفظتي](/profile#portfolio)");
-        expect(AGENTIC_SYSTEM_PROMPT).toContain("لم تحفظ المراكز بسبب نقص متوسط الشراء");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("لا تقترح تسجيل البروفايل ولا رابطه قبل استدعاء manage_portfolio وفشله فعلياً");
         expect(r.events.filter(e=>e.type==="tools_data")).toHaveLength(0);
         expect(r.queries.some((q: Query)=>["positions","stock_prices","stock_technical_indicators"].includes(q.table))).toBe(false);
         expect(r.done.publication_review.final_passed).toBe(true);
@@ -425,10 +425,22 @@ describe("Agentic architecture integration: current production path", () => {
             uncertainties:["quantity and average purchase price are not visible"],technical_observations:[],market_depth:{},user_relevant_summary:"portfolio image"};
         const d=db();
         const r=await run([{tool_calls:[call("manage_portfolio",{operation:"add",symbol:"ETEL",quantity:749,price:148})]},
-            {content:'{"authorized":false}'},{content:"لم أسجل المركز لأن الصورة لا توضح متوسط الشراء."},verdict()],{
+            {content:"لم أسجل المركز لأن الصورة لا توضح متوسط الشراء."},verdict()],{
             userMessage:"قم بقراءة وتحليل هذه الصورة المرفقة.",images:["fixture"],db:d,options:{mockVisionResult:vision}});
         expect(d.queries.some(q=>q.table==="positions" && q.ops.some(o=>o[0]==="insert"))).toBe(false);
         expect(r.events.find(e=>e.type==="tools_data").data.results[0].data.persisted).toBe(false);
+    });
+    test("an explicit image-save request persists the exact model-extracted values when vision confirms them", async () => {
+        const vision={image_type:"portfolio",symbols:[{symbol:"ETEL",visible_values:{quantity:749,average_price:148}}],confidence:.98,
+            uncertainties:[],technical_observations:[],market_depth:{},user_relevant_summary:"ETEL quantity and average are visible"};
+        const d=db(q=>({data:q.table === "stocks" ? {symbol:"ETEL",name:"Telecom Egypt"}
+            : q.table === "positions" && q.ops.some(o=>o[0] === "insert") ? [{id:"etel-1",symbol:"ETEL",quantity:749,entry_price:148}]
+                : [],error:null}));
+        const r=await run([{tool_calls:[call("manage_portfolio",{operation:"add",symbol:"ETEL",quantity:749,price:148})]},
+            {content:"تم حفظ مركز ETEL بعد تأكيد العملية."},verdict()],{
+            userMessage:"سجل المراكز الظاهرة في الصورة",images:["fixture"],db:d,options:{mockVisionResult:vision}});
+        expect(r.events.find(e=>e.type === "tools_data").data.results[0].data).toMatchObject({persisted:true,symbol:"ETEL",quantity:749,entry_price:148});
+        expect(d.queries.some(q=>q.table === "positions" && q.ops.some(o=>o[0] === "insert"))).toBe(true);
     });
     test("an image follow-up retains tickers but does not reuse unverified numeric extraction", async () => {
         const r=await run([{content:"الصورة السابقة توضح رموز الأسهم، لكنها لا تثبت الكميات أو متوسطات الشراء. أرسل أول خمسة رموز مع الكمية ومتوسط الشراء لكل سهم."},verdict()],{
@@ -447,16 +459,19 @@ describe("Agentic architecture integration: current production path", () => {
         const r=await run([{tool_calls:[call("get_stock_levels",{symbols:["COMI"]})]},{content:"COMI سعره 100 جنيه"},verdict()],{db:stockDb()});
         const e=r.events.find(e=>e.type === "tools_data").data.results[0]; expect(e).toMatchObject({source:"supabase:stock_prices",data_time:price.date,availability:"available",symbols:["COMI"]});
     });
-    test("model-selected write cannot execute without contextual user authorization",async()=>{
-        const d=stockDb();const r=await run([{tool_calls:[call("manage_portfolio",{operation:"add",symbol:"COMI",quantity:10,price:100})]},
-            {content:'{"authorized":false}'},{content:"لم يتم الحفظ"},verdict()],{db:d,userMessage:"حلل COMI"});
-        expect(d.queries.some(q=>q.ops.some(o=>o[0] === "insert"))).toBe(false);expect(r.events.find(e=>e.type === "tools_data").data.results[0].data.persisted).toBe(false);
+    test("explicit model-selected portfolio write uses the model tool arguments without a second intent parser",async()=>{
+        const d=db(q=>({data:q.table === "stocks" ? {symbol:"COMI",name:"Bank"} : q.ops.some(o=>o[0] === "insert") && q.table === "positions" ? [{id:"p",symbol:"COMI",quantity:10,entry_price:100}] : [],error:null}));
+        const r=await run([{tool_calls:[call("manage_portfolio",{operation:"add",symbol:"COMI",quantity:10,price:100})]},
+            {content:"تم تسجيل COMI بعد تأكيد الحفظ."},verdict()],{db:d,userMessage:"سجل COMI عدد 10 بسعر 100"});
+        expect(d.queries.some(q=>q.table === "positions" && q.ops.some(o=>o[0] === "insert"))).toBe(true);
+        expect(r.events.find(e=>e.type === "tools_data").data.results[0].data).toMatchObject({persisted:true,symbol:"COMI",quantity:10,entry_price:100});
+        expect(r.fetchMock).toHaveBeenCalledTimes(3); // tool decision, final answer, publication review; no separate authorization call
     });
     test("duplicate portfolio calls write once and reuse confirmed result",async()=>{
         const d=db(q=>({data:q.table === "stocks" ? {symbol:"COMI",name:"Bank"} : q.ops.some(o=>o[0] === "insert") && q.table === "positions" ? [{id:"p",symbol:"COMI",quantity:10,entry_price:100}] : [],error:null}));
         const args={operation:"add",symbol:"COMI",quantity:10,price:100};
         const r=await run([{tool_calls:[call("manage_portfolio",args),call("manage_portfolio",args,"call-2")]},
-            {content:'{"authorized":true}'},{content:"تم تسجيل سهم COMI"},verdict()],{db:d,userMessage:"سجل COMI عدد 10 بسعر 100"});
+            {content:"تم تسجيل سهم COMI"},verdict()],{db:d,userMessage:"سجل COMI عدد 10 بسعر 100"});
         expect(d.queries.filter(q=>q.table === "positions" && q.ops.some(o=>o[0] === "insert"))).toHaveLength(1);expect(r.done.publication_review.final_passed).toBe(true);
     });
     test("positive review explanations no longer reject a valid answer",async()=>{
@@ -750,6 +765,21 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const d=db(q=>({data:q.table === "stocks" ? {symbol:"COMI",name:"Bank"} : q.ops.some(o=>o[0] === "insert") && q.table === "positions" ? [{id:"p",symbol:"COMI",quantity:10,entry_price:100}] : [],error:null}));
         const r=await executeAgenticTool("manage_portfolio",{operation:"add",symbol:"COMI.CA",quantity:10,price:100},d.client,"u");
         expect(r).toMatchObject({persisted:true,status:"success",audit_recorded:true}); expect(d.queries.find(q=>q.table === "positions" && q.ops.some(o=>o[0] === "insert"))?.ops.find(o=>o[0] === "insert")?.[1]).toMatchObject({user_id:"u",source:"chatbot",symbol:"COMI"});
+    });
+    test("failed portfolio write exposes the profile route only after the tool failure",async()=>{
+        const result=await executeAgenticTool("manage_portfolio",{operation:"add",symbol:"COMI",quantity:10},db().client,"u");
+        expect(result).toMatchObject({status:"error",persisted:false,failure_kind:"missing_or_invalid_position_values",profile_action:{url:"/profile#portfolio"}});
+        const evidence=[toAgenticEvidence("manage_portfolio",{operation:"add",symbol:"COMI",quantity:10},result)];
+        expect(withPortfolioFailureGuide("لم يتأكد الحفظ.",evidence)).toContain("/profile#portfolio");
+    });
+    test("chatbot respects the same portfolio capacity as the profile without replacing a holding",async()=>{
+        const prior=process.env.PAYMENTS_ENABLED; process.env.PAYMENTS_ENABLED="true";
+        try {
+            const d=db(q=>({data:q.table === "positions" ? Array.from({length:5},(_,i)=>({id:`p${i}`,symbol:`S${i}`,status:"open"})) : [],error:null}));
+            const result=await executeAgenticTool("manage_portfolio",{operation:"add",symbol:"COMI",quantity:10,price:100},d.client,"u");
+            expect(result).toMatchObject({status:"error",persisted:false,failure_kind:"portfolio_limit_reached",profile_action:{url:"/profile#portfolio"}});
+            expect(d.queries.some(q=>q.table === "positions" && q.ops.some(o=>o[0] === "insert"))).toBe(false);
+        } finally { if (prior === undefined) delete process.env.PAYMENTS_ENABLED; else process.env.PAYMENTS_ENABLED=prior; }
     });
     test("missing quote is null, not flat zero PnL",async()=>{
         const d=db(q=>({data:q.table === "positions" ? [{symbol:"COMI",quantity:10,entry_price:100}] : [],error:null}));

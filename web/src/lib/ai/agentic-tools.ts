@@ -6,12 +6,21 @@ import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
 import { sanitizeNewsRows } from "./news-evidence";
 import { todayInCairo } from "./cairo-date";
+import { hasActiveProSubscription, paymentsEnabled, planLimits } from "./plan-gate";
 import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
 const round = (value: number | null) => value == null ? null : Number(value.toFixed(2));
 function positive(value: unknown): number { const n = finite(value); if (n == null || n <= 0) throw new Error("الكمية والسعر يجب أن يكونا أرقاماً محدودة أكبر من صفر"); return n; }
+
+const PORTFOLIO_PROFILE_ACTION = { url: "/profile#portfolio", label: "افتح البروفايل عند قسم محفظتي" };
+
+/** The model supplies operation and values. This reports an attempted write outcome only. */
+function portfolioFailure(operation: string, failureKind: string, message: string) {
+    return { status: "error", ok: false, operation, persisted: false, failure_kind: failureKind,
+        message, profile_action: PORTFOLIO_PROFILE_ACTION };
+}
 
 /** One query boundary: Supabase resolves read failures instead of throwing them. */
 function checkedClient(client: any): any {
@@ -92,7 +101,12 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         if (PLANNED_READ_TOOL_NAMES.has(toolName)) return await executePlannedReadTool(toolName, normalized, checkedClient(executionSupabase(supabase)), todayInCairo());
         if (chartTool) return await executeChartStrategyTool(toolName, normalized, checkedClient(executionSupabase(supabase)), chartHistoryCache);
         return await executeRawTool(toolName,normalized,checkedClient(executionSupabase(supabase)),userId);
-    } catch (error:any) { return {status:"error", availability:"error", persisted:false, message:error.message}; }
+    } catch (error:any) {
+        if (toolName === "manage_portfolio") {
+            return portfolioFailure(String(args?.operation || "view").toLowerCase(), "tool_execution_failed", error?.message || "تعذر تنفيذ عملية المحفظة.");
+        }
+        return {status:"error", availability:"error", persisted:false, message:error.message};
+    }
 }
 
 async function mapStockReads<T>(symbols: string[], read: (symbol: string) => Promise<T>): Promise<T[]> {
@@ -377,9 +391,9 @@ async function executeRawTool(
         }
 
         if (toolName === "manage_portfolio") {
-            if (!userId) throw new Error("يلزم مستخدم مصادق عليه لإدارة المحفظة");
             const rawOp = String(args.operation || "view").toLowerCase();
             const operation = ["buy", "purchase", "add"].includes(rawOp) ? "add" : rawOp;
+            if (!userId) return portfolioFailure(operation, "authentication_required", "يلزم تسجيل الدخول لحفظ المراكز في المحفظة.");
             const symbol = args.symbol ? normalizeSymbol(args.symbol) : null;
 
             // Handle guest / unlinked Telegram users (userId is "tg_...") safely without querying Postgres with invalid UUID
@@ -406,7 +420,7 @@ async function executeRawTool(
                         message: "المستخدم غير مرتبط بحساب مسجل على الموقع؛ لا توجد محفظة محفوظة.",
                     };
                 }
-                throw new Error("لإدارة محفظتك الاستثمارية، يرجى تسجيل الدخول وربط حسابك في الموقع بالبوت أولاً من صفحة البروفايل.");
+                return portfolioFailure(operation, "account_link_required", "اربط حساب البوت بحساب الموقع أولاً حتى يمكن حفظ المراكز.");
             }
 
             const { data: posRows } = await supabase.from("positions")
@@ -441,13 +455,29 @@ async function executeRawTool(
                         total_market_value: market, unrealized_pl_val: market != null && invested != null ? round(market-invested) : null,
                         unrealized_pl_pct: market != null && invested != null && invested > 0 ? round((market-invested)/invested*100) : null } };
             }
-            if (positions.length > 100) throw new Error("المحفظة أكبر من حد المعالجة؛ لم يتم تعديلها");
-            if (!symbol) throw new Error("رمز السهم مطلوب");
+            if (positions.length > 100) return portfolioFailure(operation, "portfolio_too_large", "المحفظة أكبر من حد المعالجة الآمن؛ لم يتم تعديل أي مركز.");
+            if (!symbol) return portfolioFailure(operation, "missing_symbol", "لم يصل رمز السهم المطلوب حفظه.");
             const existing = positions.find((p: any) => p.symbol === symbol);
+            // Keep chatbot writes aligned with the profile's paid-plan capacity.
+            // This is an entitlement check, never a classifier or text parser.
+            if (operation === "add" && !existing && paymentsEnabled()) {
+                const { data: subscriptions } = await supabase.from("subscriptions")
+                    .select("plan_id,status,current_period_end")
+                    .eq("user_id", userId).in("status", ["active", "trialing"]).limit(5);
+                const maxPositions = planLimits(hasActiveProSubscription(subscriptions || []) ? "pro" : "free").portfolio_stocks;
+                if (positions.length >= maxPositions) {
+                    return portfolioFailure(operation, "portfolio_limit_reached", `وصلت المحفظة إلى حد ${maxPositions} مراكز لهذه الباقة؛ لم يتم استبدال أي مركز تلقائياً.`);
+                }
+            }
             let changed: any, eventType: string, payload: any;
             if (operation === "add" || operation === "update") {
-                const quantity = positive(args.quantity ?? args.shares ?? args.amount);
-                const price = positive(args.price ?? args.entry_price ?? args.buy_price ?? args.cost);
+                const quantityValue = finite(args.quantity ?? args.shares ?? args.amount);
+                const priceValue = finite(args.price ?? args.entry_price ?? args.buy_price ?? args.cost);
+                if (quantityValue == null || priceValue == null || quantityValue <= 0 || priceValue <= 0) {
+                    return portfolioFailure(operation, "missing_or_invalid_position_values", "لم تصل كمية صحيحة ومتوسط شراء صحيح للمركز، لذلك لم يتم حفظه.");
+                }
+                const quantity = quantityValue;
+                const price = priceValue;
                 let stockName = symbol;
                 const { data: stock } = await supabase.from("stocks").select("symbol,name,name_ar").eq("symbol", symbol).limit(1).maybeSingle();
                 if (stock) {
@@ -456,10 +486,10 @@ async function executeRawTool(
                     const { data: ind } = await supabase.from("stock_technical_indicators").select("symbol").eq("exchange", "EGX").eq("symbol", symbol).limit(1);
                     if (!ind?.length) {
                         const { data: prc } = await supabase.from("stock_prices").select("symbol").eq("exchange", "EGX").eq("symbol", symbol).limit(1);
-                        if (!prc?.length) throw new Error("الرمز غير موثق في دليل الأسهم؛ لم يتم الحفظ");
+                        if (!prc?.length) return portfolioFailure(operation, "symbol_not_verified", "تعذر التحقق من رمز السهم في دليل البيانات؛ لم يتم الحفظ.");
                     }
                 }
-                if (operation === "update" && !existing) throw new Error("لا يوجد مركز مفتوح لتحديثه");
+                if (operation === "update" && !existing) return portfolioFailure(operation, "position_not_found", "لا يوجد مركز مفتوح بهذا الرمز لتحديثه.");
                 const write = { quantity, entry_price: price, updated_at: new Date().toISOString() };
                 const { data } = existing
                     ? await lockPosition(supabase.from("positions").update(write).eq("user_id", userId).eq("id", existing.id)
@@ -469,14 +499,18 @@ async function executeRawTool(
                 changed = data?.[0]; eventType = existing ? "portfolio_update" : "portfolio_add";
                 payload = { symbol, quantity, entry_price: price };
             } else if (operation === "remove") {
-                if (!existing) throw new Error("لا يوجد مركز مفتوح لحذفه");
+                if (!existing) return portfolioFailure(operation, "position_not_found", "لا يوجد مركز مفتوح بهذا الرمز لحذفه.");
                 const { data } = await lockPosition(supabase.from("positions").delete().eq("user_id",userId).eq("id",existing.id)
                     .eq("status","open"),existing).select("id,symbol").limit(1);
                 changed = data?.[0]; eventType = "portfolio_remove"; payload = { symbol, quantity: existing.quantity };
             } else if (operation === "sell") {
-                if (!existing) throw new Error("لا يوجد مركز مفتوح لتسجيل بيعه");
-                const quantity = positive(args.quantity), price = positive(args.price), held = positive(existing.quantity);
-                if (quantity > held) throw new Error("كمية البيع أكبر من الكمية المسجلة؛ لم يتم البيع");
+                if (!existing) return portfolioFailure(operation, "position_not_found", "لا يوجد مركز مفتوح بهذا الرمز لتسجيل بيعه.");
+                const quantityValue = finite(args.quantity), priceValue = finite(args.price), held = finite(existing.quantity);
+                if (quantityValue == null || priceValue == null || held == null || quantityValue <= 0 || priceValue <= 0 || held <= 0) {
+                    return portfolioFailure(operation, "missing_or_invalid_position_values", "يلزم إدخال كمية البيع وسعر البيع بقيم موجبة مؤكدة؛ لم يتم البيع.");
+                }
+                const quantity = quantityValue, price = priceValue;
+                if (quantity > held) return portfolioFailure(operation, "sell_quantity_exceeds_holding", "كمية البيع أكبر من الكمية المسجلة؛ لم يتم البيع.");
                 const { data } = await lockPosition(supabase.from("positions").update(quantity === held
                     ? { status: "closed", status_price: price, status_at: new Date().toISOString(), updated_at: new Date().toISOString() }
                     : { quantity: held - quantity, updated_at: new Date().toISOString() })
@@ -484,8 +518,8 @@ async function executeRawTool(
                     ,existing).select("id,symbol,quantity,status").limit(1);
                 changed = data?.[0]; eventType = "portfolio_sell";
                 payload = { symbol, quantity, sell_price: price, proceeds: quantity * price, entry_price: finite(existing.entry_price) };
-            } else throw new Error("عملية المحفظة غير مدعومة");
-            if (!changed) throw new Error("لم يتأكد تعديل أي مركز؛ قد يكون تغير بالتزامن. راجع المحفظة قبل إعادة الطلب");
+            } else return portfolioFailure(operation, "unsupported_operation", "عملية المحفظة المطلوبة غير مدعومة.");
+            if (!changed) return portfolioFailure(operation, "write_not_confirmed", "لم يتأكد حفظ التعديل؛ ربما تغير المركز بالتزامن. لم يتم تأكيد العملية.");
             let quote: any = null;
             if (operation === "add" || operation === "update") {
                 const { data: ind } = await supabase.from("stock_technical_indicators")
