@@ -6,7 +6,7 @@ EGX BOTS private Telegram subscription reminders.
 Required environment:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  SUPPORT_BOT_TOKEN (preferred) or SUBSCRIPTION_REMINDER_BOT_TOKEN
+  ARTORO_AI_BOT (main bot) or SUBSCRIPTION_REMINDER_BOT_TOKEN
 
 Runs daily. Sends only to the user's private Telegram chat_id saved in
 public.profiles.telegram_chat_id. It never sends to groups or channels.
