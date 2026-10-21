@@ -3,25 +3,59 @@ import { getSupabaseServiceClient, getSupabaseClient } from "@/lib/supabase/rout
 
 const MEM_CACHE = new Map<string, { payload: any; timestamp: number }>();
 
+function normalizeCandlesToCairo(candles: any[]) {
+  if (!candles || candles.length === 0) return candles;
+  try {
+    const firstTime = String(candles[0].time || "10:00");
+    const firstHour = parseInt(firstTime.split(":")[0], 10);
+    if (firstHour < 9) {
+      return candles.map((c: any) => {
+        const parts = String(c.time || "10:00").split(":");
+        const newH = parseInt(parts[0], 10) + 3;
+        const newTime = `${String(newH).padStart(2, "0")}:${parts[1] || "00"}`;
+        const dtParts = String(c.datetime || "").split(" ");
+        const newDt = dtParts.length > 1 ? `${dtParts[0]} ${newTime}` : c.datetime;
+        return {
+          ...c,
+          time: newTime,
+          datetime: newDt,
+        };
+      });
+    }
+  } catch {}
+  return candles;
+}
+
 function computePostSignalPayload(
-  candles: any[],
+  rawCandles: any[],
   targetDate: string,
   cleanSymbol: string,
   signalTime?: string | null,
-  signalPrice?: string | null
+  signalPrice?: string | null,
+  toDate?: string | null
 ) {
-  if (!candles || candles.length === 0) return null;
+  if (!rawCandles || rawCandles.length === 0) return null;
+  const candles = normalizeCandlesToCairo(rawCandles);
+
   let targetSigTime = signalTime || "10:15";
   if (targetSigTime > "14:15" || targetSigTime < "10:00") {
     targetSigTime = "10:15";
   }
 
+  const targetSigDt = `${targetDate} ${targetSigTime}`;
+
   let sigIdx = 0;
+  let found = false;
   for (let i = 0; i < candles.length; i++) {
-    if (candles[i].time >= targetSigTime) {
+    const cDt = candles[i].datetime || `${targetDate} ${candles[i].time}`;
+    if (cDt >= targetSigDt) {
       sigIdx = i;
+      found = true;
       break;
     }
+  }
+  if (!found) {
+    sigIdx = Math.max(0, candles.length - 1);
   }
 
   const signalCandle = candles[sigIdx];
@@ -39,27 +73,35 @@ function computePostSignalPayload(
 
   const peakPrice = peakCandle.high;
   const peakTime = peakCandle.time;
+  const peakDatetime = peakCandle.datetime || `${targetDate} ${peakTime}`;
 
   const sessionOpen = candles[0].open;
   const sessionClose = candles[candles.length - 1].close;
-  const sessionGainPct = Number((((sessionClose - sessionOpen) / sessionOpen) * 100).toFixed(2));
-  const sessionMaxGainPct = Number((((Math.max(...candles.map((c) => c.high)) - sessionOpen) / sessionOpen) * 100).toFixed(2));
+  const sessionGainPct = Number((((sessionClose - sessionOpen) / Math.max(0.01, sessionOpen)) * 100).toFixed(2));
+  const sessionMaxGainPct = Number((((Math.max(...candles.map((c) => c.high)) - sessionOpen) / Math.max(0.01, sessionOpen)) * 100).toFixed(2));
 
-  let gainFromSignalPct = Number((((peakPrice - sPrice) / sPrice) * 100).toFixed(2));
-  if (gainFromSignalPct < 0) gainFromSignalPct = 0.0;
+  let gainFromSignalPct = peakPrice > sPrice
+    ? Number((((peakPrice - sPrice) / Math.max(0.01, sPrice)) * 100).toFixed(2))
+    : 0.0;
+
+  const isMultiday = Boolean(toDate && toDate > targetDate);
 
   return {
     symbol: cleanSymbol,
     date: targetDate,
+    to_date: toDate || targetDate,
+    is_multiday: isMultiday,
     session_open: sessionOpen,
     session_close: sessionClose,
     session_high: peakPrice,
     peak_time: peakTime,
+    peak_datetime: peakDatetime,
     session_low: Math.min(...candles.map((c) => c.low)),
     session_gain_pct: sessionGainPct,
     session_max_gain_pct: sessionMaxGainPct,
     signal: {
       time: targetSigTime,
+      datetime: targetSigDt,
       price: sPrice,
       max_gain_pct: gainFromSignalPct,
     },
@@ -73,6 +115,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const rawSymbol = searchParams.get("symbol") || "";
     const date = searchParams.get("date") || "";
+    const toDate = searchParams.get("to_date") || "";
     const signalTime = searchParams.get("signal_time") || "";
     const signalPrice = searchParams.get("signal_price") || "";
 
@@ -83,7 +126,11 @@ export async function GET(request: NextRequest) {
     const cleanSymbol = rawSymbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
     const today = new Date().toISOString().split("T")[0];
     const targetDate = date || today;
-    const cacheKey = `scanner_15m:${targetDate}:${cleanSymbol}`;
+    const endDate = toDate && toDate >= targetDate ? toDate : targetDate;
+    const isMultiday = endDate > targetDate;
+    const cacheKey = isMultiday
+      ? `scanner_15m:${targetDate}:${endDate}:${cleanSymbol}`
+      : `scanner_15m:${targetDate}:${cleanSymbol}`;
     const now = Date.now();
 
     const headers = {
@@ -91,11 +138,11 @@ export async function GET(request: NextRequest) {
     };
 
     // 1. In-memory fast cache (0ms instant hit)
-    const isToday = targetDate === today;
+    const isToday = targetDate === today || endDate === today;
     const cacheTtl = isToday ? 60_000 : 3_600_000;
     const mem = MEM_CACHE.get(cacheKey);
     if (mem && now - mem.timestamp < cacheTtl) {
-      const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
+      const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice, endDate);
       if (payload) {
         return NextResponse.json(payload, { headers });
       }
@@ -108,6 +155,7 @@ export async function GET(request: NextRequest) {
         symbol: cleanSymbol,
         date: targetDate,
       });
+      if (endDate && endDate !== targetDate) pyParams.set("to_date", endDate);
       if (signalTime) pyParams.set("signal_time", signalTime);
       if (signalPrice) pyParams.set("signal_price", signalPrice);
 

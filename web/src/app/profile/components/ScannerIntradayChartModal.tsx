@@ -21,8 +21,12 @@ interface ScannerIntradayChartModalProps {
   onClose: () => void;
   symbol: string;
   date: string;
+  toDate?: string;
   signalTime?: string;
   signalPrice?: number;
+  exitTime?: string;
+  exitPrice?: number;
+  status?: string;
   scannerType?: string;
   isAr?: boolean;
   onGainLoaded?: (data: { symbol: string; max_gain_pct: number; peak_price: number; peak_time: string }) => void;
@@ -31,15 +35,19 @@ interface ScannerIntradayChartModalProps {
 interface IntradaySessionPayload {
   symbol: string;
   date: string;
+  to_date?: string;
+  is_multiday?: boolean;
   session_open: number;
   session_close: number;
   session_high: number;
   peak_time: string;
+  peak_datetime?: string;
   session_low: number;
   session_gain_pct: number;
   session_max_gain_pct: number;
   signal: {
     time: string;
+    datetime?: string;
     price: number;
     max_gain_pct: number;
   };
@@ -61,14 +69,16 @@ export async function prefetchIntradaySession(
   symbol: string,
   date: string,
   signalTime?: string,
-  signalPrice?: number
+  signalPrice?: number,
+  toDate?: string
 ): Promise<IntradaySessionPayload | null> {
-  const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+  const cacheKey = `${symbol}_${date}_${toDate || date}_${signalTime || "10:15"}`;
   if (CLIENT_SESSION_CACHE.has(cacheKey)) {
     return CLIENT_SESSION_CACHE.get(cacheKey)!;
   }
   try {
     const params = new URLSearchParams({ symbol, date });
+    if (toDate && toDate !== date) params.set("to_date", toDate);
     if (signalTime) params.set("signal_time", signalTime);
     if (signalPrice) params.set("signal_price", String(signalPrice));
     const res = await fetch(`/api/scanner/intraday-session?${params.toString()}`);
@@ -89,8 +99,12 @@ export default function ScannerIntradayChartModal({
   onClose,
   symbol,
   date,
+  toDate,
   signalTime = "10:15",
   signalPrice,
+  exitTime,
+  exitPrice,
+  status,
   scannerType = "volume_surge",
   isAr = true,
   onGainLoaded,
@@ -123,7 +137,7 @@ export default function ScannerIntradayChartModal({
     if (!isOpen || !symbol) return;
 
     let isCancelled = false;
-    const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+    const cacheKey = `${symbol}_${date}_${toDate || date}_${signalTime || "10:15"}`;
 
     // 1. Instant cache check (in-memory or sessionStorage)
     let cached = CLIENT_SESSION_CACHE.get(cacheKey);
@@ -160,6 +174,7 @@ export default function ScannerIntradayChartModal({
           symbol,
           date,
         });
+        if (toDate && toDate !== date) params.set("to_date", toDate);
         if (signalTime) params.set("signal_time", signalTime);
         if (signalPrice) params.set("signal_price", String(signalPrice));
 
@@ -201,7 +216,7 @@ export default function ScannerIntradayChartModal({
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, symbol, date, signalTime, signalPrice, isAr]);
+  }, [isOpen, symbol, date, toDate, signalTime, signalPrice, isAr]);
 
   // Initialize and populate lightweight-chart
   useEffect(() => {
@@ -216,6 +231,7 @@ export default function ScannerIntradayChartModal({
     const container = chartContainerRef.current;
     const width = container.clientWidth || 800;
     const height = 360;
+    const isMultiDay = Boolean(data.is_multiday || (data.to_date && data.to_date !== data.date));
 
     const chart = createChart(container, {
       width,
@@ -241,16 +257,26 @@ export default function ScannerIntradayChartModal({
         fixRightEdge: true,
         tickMarkFormatter: (time: number) => {
           const d = new Date(time * 1000);
-          const hours = String(d.getUTCHours()).padStart(2, "0");
-          const mins = String(d.getUTCMinutes()).padStart(2, "0");
+          const hours = String(d.getHours()).padStart(2, "0");
+          const mins = String(d.getMinutes()).padStart(2, "0");
+          if (isMultiDay) {
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            return `${m}/${day} ${hours}:${mins}`;
+          }
           return `${hours}:${mins}`;
         },
       },
       localization: {
         timeFormatter: (time: number) => {
           const d = new Date(time * 1000);
-          const hours = String(d.getUTCHours()).padStart(2, "0");
-          const mins = String(d.getUTCMinutes()).padStart(2, "0");
+          const hours = String(d.getHours()).padStart(2, "0");
+          const mins = String(d.getMinutes()).padStart(2, "0");
+          if (isMultiDay) {
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            return `${m}/${day} ${hours}:${mins}`;
+          }
           return `${hours}:${mins}`;
         },
       },
@@ -275,28 +301,32 @@ export default function ScannerIntradayChartModal({
     seriesRef.current = series;
 
     // Convert candles to timestamp seconds
-    // Cairo is UTC+2 or UTC+3, we parse ISO date
-    const formattedData = data.candles.map((c) => {
-      const parsedTs = Math.floor(new Date(`${data.date}T${c.time}:00Z`).getTime() / 1000);
+    const formattedData = data.candles.map((c, index) => {
+      const dtStr = c.datetime ? c.datetime.replace(" ", "T") + ":00" : `${data.date}T${c.time}:00`;
+      const parsedTs = Math.floor(new Date(dtStr).getTime() / 1000);
       return {
-        time: (parsedTs || c.time) as any,
+        time: (parsedTs || index) as any,
         open: c.open,
         high: c.high,
         low: c.low,
         close: c.close,
         origTime: c.time,
+        origDatetime: c.datetime || `${data.date} ${c.time}`,
       };
     });
 
     series.setData(formattedData);
 
-    // Build markers for Signal Time and Peak High
+    // Build markers for Signal Time, Peak High, and Exit
     const markers: any[] = [];
 
-    // Find Signal Marker
-    const targetSigTime = data.signal.time || signalTime || "10:15";
-    const sigIndex = formattedData.findIndex((c) => c.origTime >= targetSigTime);
-    const signalCandle = sigIndex !== -1 ? formattedData[sigIndex] : formattedData[1] || formattedData[0];
+    // 1. Signal Marker
+    const targetSigDt = data.signal.datetime || `${data.date} ${data.signal.time || signalTime || "10:15"}`;
+    let sigIndex = formattedData.findIndex((c) => c.origDatetime >= targetSigDt);
+    if (sigIndex === -1) {
+      sigIndex = formattedData.findIndex((c) => c.origTime >= (data.signal.time || signalTime || "10:15"));
+    }
+    const signalCandle = sigIndex !== -1 ? formattedData[sigIndex] : formattedData[0];
 
     if (signalCandle) {
       markers.push({
@@ -305,27 +335,51 @@ export default function ScannerIntradayChartModal({
         color: "#FFE600",
         shape: "arrowUp",
         text: isAr
-          ? `📍 إشارة (${signalCandle.origTime}) • ${data.signal.price || signalCandle.close} ج.م`
-          : `📍 Signal (${signalCandle.origTime}) • ${data.signal.price || signalCandle.close} EGP`,
+          ? `📍 إشارة دخول (${signalCandle.origTime}) • ${data.signal.price || signalCandle.close} ج.م`
+          : `📍 Signal Entry (${signalCandle.origTime}) • ${data.signal.price || signalCandle.close} EGP`,
       });
     }
 
-    // Find Session High Peak Marker
-    const peakIndex = formattedData.findIndex((c) => c.origTime === data.peak_time);
-    const peakCandle = peakIndex !== -1 ? formattedData[peakIndex] : formattedData.reduce((max, c) => (c.high > max.high ? c : max), formattedData[0]);
+    // 2. Peak High Marker (strictly after signal)
+    const postCandles = formattedData.slice(sigIndex);
+    const peakCandle = postCandles.length > 0
+      ? postCandles.reduce((max, c) => (c.high > max.high ? c : max), signalCandle)
+      : signalCandle;
 
     if (peakCandle) {
+      const isPositiveGain = (data.signal.max_gain_pct || 0) > 0;
       markers.push({
         time: peakCandle.time,
         position: "aboveBar",
-        color: "#10b981",
+        color: isPositiveGain ? "#10b981" : "#a1a1aa",
         shape: "arrowDown",
         text: isAr
-          ? `🎯 أعلى قمة بعد الإشارة (${peakCandle.origTime}) • ${data.session_high} ج.م (+${data.signal.max_gain_pct}%)`
-          : `🎯 Peak After Signal (${peakCandle.origTime}) • ${data.session_high} EGP (+${data.signal.max_gain_pct}%)`,
+          ? (isPositiveGain
+              ? `🎯 أعلى قمة بعد الإشارة (${peakCandle.origTime}) • ${data.session_high} ج.م (+${data.signal.max_gain_pct}%)`
+              : `🔻 أعلى مستوى بعد الإشارة (${peakCandle.origTime}) • ${data.session_high} ج.م (0.0%)`)
+          : (isPositiveGain
+              ? `🎯 Peak After Signal (${peakCandle.origTime}) • ${data.session_high} EGP (+${data.signal.max_gain_pct}%)`
+              : `🔻 Highest After Signal (${peakCandle.origTime}) • ${data.session_high} EGP (0.0%)`),
       });
     }
 
+    // 3. Exit Marker (if closed or stopped out)
+    if (exitPrice || status === "target_hit" || status === "stopped_out") {
+      const exitCandle = formattedData[formattedData.length - 1];
+      const isWin = status === "target_hit" || (exitPrice && signalPrice && exitPrice > signalPrice);
+      markers.push({
+        time: exitCandle.time,
+        position: isWin ? "aboveBar" : "belowBar",
+        color: isWin ? "#10b981" : "#ef4444",
+        shape: isWin ? "arrowDown" : "arrowUp",
+        text: isAr
+          ? (isWin ? `🏁 خروج / جني أرباح • ${exitPrice || exitCandle.close} ج.م` : `🛑 كسر الوقف / خروج • ${exitPrice || exitCandle.close} ج.م`)
+          : (isWin ? `🏁 Exit / Target • ${exitPrice || exitCandle.close} EGP` : `🛑 Stop Loss Hit • ${exitPrice || exitCandle.close} EGP`),
+      });
+    }
+
+    // Sort markers by time
+    markers.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
     series.setMarkers(markers);
     chart.timeScale().fitContent();
 
@@ -346,7 +400,7 @@ export default function ScannerIntradayChartModal({
         chartInstanceRef.current = null;
       }
     };
-  }, [data, isAr, signalTime]);
+  }, [data, isAr, signalTime, toDate, status, exitPrice]);
 
   if (!isOpen) return null;
 
@@ -375,15 +429,23 @@ export default function ScannerIntradayChartModal({
                   {symbol}
                 </span>
                 <h3 className="text-xs sm:text-lg font-black uppercase tracking-tight truncate">
-                  <span className="sm:hidden">{isAr ? "شارت 15 دقيقة • الجلسة" : "15M Candlestick"}</span>
-                  <span className="hidden sm:inline">{isAr ? "شارت شمع 15 دقيقة • جلسة التداول الكاملة" : "15M Candlestick • Full Trading Session"}</span>
+                  <span className="sm:hidden">
+                    {data?.is_multiday ? (isAr ? "مسار الصفقة الكامل" : "Trade Journey") : (isAr ? "شارت 15 دقيقة • الجلسة" : "15M Candlestick")}
+                  </span>
+                  <span className="hidden sm:inline">
+                    {data?.is_multiday
+                      ? (isAr ? `شارت شمع 15 دقيقة • مسار الصفقة الكامل (${data.date} إلى ${data.to_date})` : `15M Candlestick • Full Trade Path (${data.date} to ${data.to_date})`)
+                      : (isAr ? `شارت شمع 15 دقيقة • جلسة التداول الكاملة (${date})` : `15M Candlestick • Full Trading Session (${date})`)}
+                  </span>
                 </h3>
               </div>
               <p className="text-[10px] sm:text-xs font-mono font-bold text-black mt-0.5 sm:mt-1 flex items-center gap-1.5 sm:gap-2">
                 <CalendarIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                <span>{date}</span>
+                <span>{data?.is_multiday ? `${data.date} ➔ ${data.to_date}` : date}</span>
                 <span>•</span>
-                <span dir="ltr" className="inline-block font-mono">10:00 AM - 02:30 PM (EGX Session)</span>
+                <span dir="ltr" className="inline-block font-mono">
+                  {data?.is_multiday ? (isAr ? "متابعة متواصلة من الدخول" : "Live Trajectory") : "10:00 AM - 02:30 PM (EGX Session)"}
+                </span>
               </p>
             </div>
           </div>
@@ -467,25 +529,43 @@ export default function ScannerIntradayChartModal({
               <Info className="w-4 h-4 text-[#FFE600] shrink-0 mt-0.5" />
               <p>
                 {isAr ? (
-                  <>
-                    <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
-                    <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
-                    <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. واصل السهم صعوده
-                    بعد الإشارة حتى سجل أعلى نقطة في تمام الساعة{" "}
-                    <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> بسعر{" "}
-                    <span className="text-emerald-400 font-mono font-black">{data.session_high} ج.م</span>، محققاً أقصى
-                    فرصة ربح للمضارب بعد التنبيه بلغت{" "}
-                    <span className="text-emerald-400 font-mono font-black">+{data.signal.max_gain_pct}%</span>.
-                  </>
+                  (data.signal.max_gain_pct || 0) > 0 ? (
+                    <>
+                      <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
+                      <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. وواصل السهم صعوده
+                      بعد الإشارة حتى سجل أعلى نقطة في تمام الساعة{" "}
+                      <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> بسعر{" "}
+                      <span className="text-emerald-400 font-mono font-black">{data.session_high} ج.م</span>، محققاً أقصى
+                      فرصة ربح للمضارب بعد التنبيه بلغت{" "}
+                      <span className="text-emerald-400 font-mono font-black">+{data.signal.max_gain_pct}%</span>.
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
+                      <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. لم يسجل السهم قمة
+                      صاعدة إضافية بعد التنبيه وتراجع/استقر دون سعر الدخول ملتزماً بحدود إدارة المخاطر ووقف الخسارة المحددة مسبقاً.
+                    </>
+                  )
                 ) : (
-                  <>
-                    <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
-                    <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
-                    <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. The stock moved
-                    to reach its subsequent peak at <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> hitting{" "}
-                    <span className="text-emerald-400 font-mono font-black">{data.session_high} EGP</span> (+
-                    {data.signal.max_gain_pct}% max gain after signal).
-                  </>
+                  (data.signal.max_gain_pct || 0) > 0 ? (
+                    <>
+                      <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
+                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
+                      <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. The stock moved
+                      to reach its subsequent peak at <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> hitting{" "}
+                      <span className="text-emerald-400 font-mono font-black">{data.session_high} EGP</span> (+
+                      {data.signal.max_gain_pct}% max gain after signal).
+                    </>
+                  ) : (
+                    <>
+                      <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
+                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
+                      <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. No higher peak
+                      was registered post-signal as the stock traded flat/lower, remaining within disciplined risk control limits.
+                    </>
+                  )
                 )}
               </p>
             </div>

@@ -48,8 +48,12 @@ export default function ScannerSignalsTracker({
   const [chartModalStock, setChartModalStock] = useState<{
     symbol: string;
     date: string;
+    toDate?: string;
     signalTime?: string;
     signalPrice?: number;
+    exitTime?: string;
+    exitPrice?: number;
+    status?: string;
     scannerType?: string;
   } | null>(null);
 
@@ -319,12 +323,15 @@ export default function ScannerSignalsTracker({
                   if (isLocked) {
                     setShowProModal(true);
                   } else {
+                    const todayStr = new Date().toISOString().split("T")[0];
                     setChartModalStock({
                       symbol: sig.symbol,
                       date: sig.entry_date,
+                      toDate: todayStr,
                       signalTime: sig.entry_time,
                       signalPrice: sig.entry_price,
                       scannerType: sig.scanner_type,
+                      status: "active",
                     });
                   }
                 };
@@ -491,12 +498,15 @@ export default function ScannerSignalsTracker({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            const todayStr = new Date().toISOString().split("T")[0];
                             setChartModalStock({
                               symbol: sig.symbol,
                               date: sig.entry_date,
+                              toDate: todayStr,
                               signalTime: sig.entry_time,
                               signalPrice: sig.entry_price,
                               scannerType: sig.scanner_type,
+                              status: "active",
                             });
                           }}
                           className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border-2 border-black font-black text-[11px] flex items-center gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 transition-all"
@@ -550,12 +560,16 @@ export default function ScannerSignalsTracker({
                           setChartModalStock({
                             symbol: c.symbol,
                             date: c.entry_date,
+                            toDate: c.exit_date,
                             signalTime: c.entry_time,
                             signalPrice: c.entry_price,
+                            exitTime: c.exit_time,
+                            exitPrice: c.exit_price,
+                            status: c.status,
                             scannerType: c.scanner_type,
                           })
                         }
-                        onMouseEnter={() => prefetchIntradaySession(c.symbol, c.entry_date, c.entry_time, c.entry_price)}
+                        onMouseEnter={() => prefetchIntradaySession(c.symbol, c.entry_date, c.entry_time, c.entry_price, c.exit_date)}
                         className="cursor-pointer hover:bg-[#FFE600]/15 dark:hover:bg-zinc-800/80 transition-colors"
                         title={isAr ? "اضغط لفتح الشارت وتفاصيل الصفقة" : "Click anywhere on row to open 15m chart"}
                       >
@@ -617,8 +631,12 @@ export default function ScannerSignalsTracker({
                               setChartModalStock({
                                 symbol: c.symbol,
                                 date: c.entry_date,
+                                toDate: c.exit_date,
                                 signalTime: c.entry_time,
                                 signalPrice: c.entry_price,
+                                exitTime: c.exit_time,
+                                exitPrice: c.exit_price,
+                                status: c.status,
                                 scannerType: c.scanner_type,
                               });
                             }}
@@ -703,8 +721,12 @@ export default function ScannerSignalsTracker({
           onClose={() => setChartModalStock(null)}
           symbol={chartModalStock.symbol}
           date={chartModalStock.date}
+          toDate={chartModalStock.toDate}
           signalTime={chartModalStock.signalTime}
           signalPrice={chartModalStock.signalPrice}
+          exitTime={chartModalStock.exitTime}
+          exitPrice={chartModalStock.exitPrice}
+          status={chartModalStock.status}
           scannerType={chartModalStock.scannerType}
           isAr={isAr}
         />
