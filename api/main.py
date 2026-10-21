@@ -7758,31 +7758,32 @@ def get_scanner_intraday_session(
     cache_ttl = 60 if is_today else 86400
 
     if mem_cached and (now_ts - mem_cached["timestamp"] < cache_ttl):
-        candles = mem_cached["payload"].get("candles", [])
-        if candles:
+        cached_payload = mem_cached["payload"]
+        candles = cached_payload.get("candles", [])
+        if cached_payload.get("data_source") == "tvdatafeed" and candles:
             payload = _compute_post_signal_metrics(
                 candles, target_date, clean_sym, signal_time, signal_price
             )
             if payload:
                 return JSONResponse(content=payload)
 
-    # 2. Check Supabase market_cache
-    if not is_today:
-        try:
-            _init_supabase()
-            sb = _get_thread_local_supabase()
-            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
-            if cached and cached.data and cached.data.get("payload"):
-                raw_payload = cached.data["payload"]
-                candles = raw_payload.get("candles", [])
-                if candles:
-                    payload = _compute_post_signal_metrics(
-                        candles, target_date, clean_sym, signal_time, signal_price
-                    )
-                    if payload:
-                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
-                        return JSONResponse(content=payload)
-        except Exception as e:
+    # 2. Check Supabase market_cache
+    if not is_today:
+        try:
+            _init_supabase()
+            sb = _get_thread_local_supabase()
+            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
+            if cached and cached.data and cached.data.get("payload"):
+                raw_payload = cached.data["payload"]
+                candles = raw_payload.get("candles", [])
+                if raw_payload.get("data_source") == "tvdatafeed" and candles:
+                    payload = _compute_post_signal_metrics(
+                        candles, target_date, clean_sym, signal_time, signal_price
+                    )
+                    if payload:
+                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
+                        return JSONResponse(content=payload)
+        except Exception as e:
             logging.warning(f"[SCANNER_INTRADAY] Cache lookup error: {e}")
 
     # 3. Fetch from TvDatafeed with timeout guard
@@ -7811,66 +7812,17 @@ def get_scanner_intraday_session(
     except Exception as e:
         logging.warning(f"[SCANNER_INTRADAY] tvDatafeed fetch error: {e}")
 
-    # 4. Fallback: Generate realistic session curve from daily row if needed
+    # Do not fabricate intraday OHLCV from daily data.
     if not candles:
-        base_p = signal_price or 10.0
-        try:
-            _init_supabase()
-            sb = _get_thread_local_supabase()
-            p_res = sb.table("stock_prices").select("open, high, low, close, volume").eq("symbol", clean_sym).eq("date", target_date).maybe_single().execute()
-            if p_res and p_res.data:
-                d = p_res.data
-                base_o = float(d.get("open") or base_p)
-                base_h = float(d.get("high") or base_p * 1.05)
-                base_l = float(d.get("low") or base_p * 0.98)
-                base_c = float(d.get("close") or base_p * 1.02)
-                base_v = int(d.get("volume") or 100000)
-            else:
-                base_o = base_p
-                base_h = round(base_p * 1.045, 2)
-                base_l = round(base_p * 0.99, 2)
-                base_c = round(base_p * 1.03, 2)
-                base_v = 150000
-        except Exception:
-            base_o = base_p
-            base_h = round(base_p * 1.045, 2)
-            base_l = round(base_p * 0.99, 2)
-            base_c = round(base_p * 1.03, 2)
-            base_v = 150000
-
-        times = ["10:00", "10:15", "10:30", "10:45", "11:00", "11:15", "11:30", "11:45",
-                 "12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30", "13:45", "14:00", "14:15"]
-        peak_idx = 7
-        curr = base_o
-        step_up = (base_h - base_o) / max(1, peak_idx)
-        step_down = (base_h - base_c) / max(1, (len(times) - 1 - peak_idx))
-
-        for idx, t in enumerate(times):
-            if idx <= peak_idx:
-                c_open = round(curr, 2)
-                c_close = round(base_o + step_up * (idx + 1), 2)
-                c_high = round(max(c_open, c_close) * 1.004, 2)
-                c_low = round(min(c_open, c_close) * 0.996, 2)
-                if idx == peak_idx:
-                    c_high = round(base_h, 2)
-                    c_close = round(base_h * 0.998, 2)
-                curr = c_close
-            else:
-                c_open = round(curr, 2)
-                c_close = round(base_h - step_down * (idx - peak_idx), 2)
-                c_high = round(max(c_open, c_close) * 1.002, 2)
-                c_low = round(min(c_open, c_close) * 0.998, 2)
-                curr = c_close
-
-            candles.append({
-                "time": t,
-                "datetime": f"{target_date} {t}",
-                "open": c_open,
-                "high": c_high,
-                "low": c_low,
-                "close": c_close,
-                "volume": int(base_v / len(times)),
-            })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "INTRADAY_DATA_UNAVAILABLE",
+                "message": "Authentic 15-minute candles are unavailable for this symbol/date.",
+                "symbol": clean_sym,
+                "date": target_date,
+            },
+        )
 
     # 5. Compute metrics with post-signal logic
     payload = _compute_post_signal_metrics(
@@ -7878,6 +7830,7 @@ def get_scanner_intraday_session(
     )
     if not payload:
         raise HTTPException(status_code=404, detail="No session data found")
+    payload["data_source"] = "tvdatafeed"
 
     # Store in memory cache
     _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
