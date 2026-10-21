@@ -7,6 +7,7 @@ import { sanitizeChartContext } from "@/lib/ai/chart-strategy-tools";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 // Lightweight test harness: runs the real pipeline (stream or non-stream) against
 // the live database without auth/quota/idempotency so fix verification is

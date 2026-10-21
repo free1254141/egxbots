@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 // The Python service owns both support messages and VIP membership updates.
 // This endpoint must never point the bot at the Vercel-only message handler.

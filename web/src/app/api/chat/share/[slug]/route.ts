@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
     const supabase = await createSupabaseServerClient();

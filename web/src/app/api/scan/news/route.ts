@@ -5,6 +5,7 @@ import { getNewsRows, newsLabel } from "@/lib/news-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 let symbolToSectorCache: Record<string, { ar: string; en: string }> | null = null;
 let lastCacheTime = 0;

@@ -4,6 +4,7 @@ import { getSupabaseClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin(req);

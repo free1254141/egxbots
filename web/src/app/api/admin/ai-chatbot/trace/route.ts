@@ -4,6 +4,7 @@ import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { isUuid } from "@/lib/ai/session";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 export async function GET(req: NextRequest) {
     const auth = await requireAdmin(req);
     if (auth instanceof Response) return auth;

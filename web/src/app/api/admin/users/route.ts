@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const PRO_PLANS = new Set(["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"]);
 

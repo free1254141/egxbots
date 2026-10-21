@@ -5,6 +5,7 @@ import { isChatAdminEmail } from "@/lib/chat-sharing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 function makeSlug(): string {
     return `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;

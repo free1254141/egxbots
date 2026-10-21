@@ -5,6 +5,7 @@ import { revokeProTelegramAccess } from "@/lib/telegramProInvite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 type AdminAction = "mark_payment_reviewed" | "cancel_subscription";
 

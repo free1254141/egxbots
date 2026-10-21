@@ -7,6 +7,7 @@ import { savedSignalReasons } from "@/lib/signal-explanation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 function paymentsEnabledSafe(): boolean {
   try {

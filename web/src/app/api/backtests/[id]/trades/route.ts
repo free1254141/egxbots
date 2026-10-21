@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 import fs from "node:fs";
 import path from "node:path";

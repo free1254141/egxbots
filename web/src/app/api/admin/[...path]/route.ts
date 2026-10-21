@@ -5,6 +5,7 @@ import { getSupabaseClient } from "@/lib/supabase/route-data";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel max for Hobby plan (60s)
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 function getBackendBaseUrl() {
   return (

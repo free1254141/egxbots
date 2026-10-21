@@ -3,6 +3,7 @@ import { getSupabaseClient, toNumber } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 function normalizeExchange(value?: string | null) {
   const exchange = String(value || "EGX").trim().toUpperCase();

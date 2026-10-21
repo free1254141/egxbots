@@ -4,6 +4,7 @@ import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const ALLOWED_EVENTS = new Set(["page_view", "feature_use"]);
 

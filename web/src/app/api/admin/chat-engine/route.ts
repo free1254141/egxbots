@@ -6,6 +6,7 @@ import { getDeepSeekApiKey, getNvidiaApiKeys } from "@/lib/ai/server-secrets";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function POST(req: NextRequest) {
     const adminKey = req.headers.get("x-admin-key") || req.headers.get("authorization")?.replace("Bearer ", "");

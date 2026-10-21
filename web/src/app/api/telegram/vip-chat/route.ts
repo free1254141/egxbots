@@ -9,6 +9,7 @@ import { SessionState, SessionSummary } from "@/lib/ai/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const ADMIN_TG_IDS = new Set(["5149631436"]);
 

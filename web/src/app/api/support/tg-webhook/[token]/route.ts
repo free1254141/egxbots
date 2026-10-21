@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const token = process.env.SUPPORT_BOT_TOKEN?.trim();

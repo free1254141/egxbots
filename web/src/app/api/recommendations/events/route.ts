@@ -5,6 +5,7 @@ import { hasActiveProSubscription } from "@/lib/ai/plan-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const PUBLIC_EVENT_TYPES = [
   "recommendation_closed",

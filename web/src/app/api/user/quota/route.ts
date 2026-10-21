@@ -5,6 +5,7 @@ import { hasActiveProSubscription, planLimits } from "@/lib/ai/plan-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET() {
   try {

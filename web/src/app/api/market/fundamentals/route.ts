@@ -3,6 +3,7 @@ import { getPublicMarketClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 // The chart needs public market data, never the privileged admin proxy.
 export async function GET(req: NextRequest) {

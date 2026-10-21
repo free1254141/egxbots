@@ -6,6 +6,7 @@ import { loadPortfolioPerformance } from "@/lib/portfolio-performance-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const preferredRegion = "fra1"; // Prevent cross-region cold starts
 const headers = {
   "Cache-Control": "private, no-store, max-age=0",
   "Vercel-CDN-Cache-Control": "no-store",

@@ -11,6 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 86400;
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);

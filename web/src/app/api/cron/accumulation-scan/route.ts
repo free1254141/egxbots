@@ -27,6 +27,22 @@ export async function GET(req: NextRequest) {
     const startedAt = new Date().toISOString();
     console.log(`[CRON] accumulation-scan started at ${startedAt}`);
 
+    // Health-check the backend before running the heavy scan.
+    // If the backend is down, bail out immediately to avoid wasting CPU waiting
+    // for a 55s timeout that will fail anyway.
+    try {
+        const healthRes = await fetch(`${backendUrl}/health`, {
+            signal: AbortSignal.timeout(5_000),
+        });
+        if (!healthRes.ok) {
+            console.warn(`[CRON] Backend health check failed (${healthRes.status}), skipping scan.`);
+            return NextResponse.json({ skipped: true, reason: "backend_unhealthy", status: healthRes.status, startedAt });
+        }
+    } catch (healthErr: any) {
+        console.warn(`[CRON] Backend unreachable during health check, skipping scan:`, healthErr?.message);
+        return NextResponse.json({ skipped: true, reason: "backend_unreachable", message: healthErr?.message, startedAt });
+    }
+
     try {
         const response = await fetch(`${backendUrl}/api/run-accumulation-scan`, {
             method: "POST",

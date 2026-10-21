@@ -25,6 +25,7 @@ import { createChatMessageTimestamps, orderChatMessages } from "@/lib/ai/chat-or
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+export const preferredRegion = "fra1"; // Pin to Frankfurt to avoid cold starts across regions
 
 const BLOCKED_INPUT_PATTERNS = [
     "system prompt", "ignore previous instructions", "ignore all previous",

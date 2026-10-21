@@ -5,6 +5,7 @@ import { summarizeUsage } from "@/lib/ai/usage-accounting";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 const PAGE_SIZE = 1000;
 const MAX_ROWS = 50000;
 

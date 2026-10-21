@@ -6,6 +6,7 @@ import { uploadChatImage } from "@/lib/ai/chat-storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function POST(req: NextRequest) {
   try {

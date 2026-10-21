@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 // Intentionally no `dynamic = "force-dynamic"` — daily cache headers below are sufficient.
 // Countries list is updated once per day by the daily pipeline.
 export const revalidate = 3600;
+export const preferredRegion = "fra1"; // Prevent cross-region cold starts
 
 const PUBLIC_CACHE_HEADERS = dailyCacheHeaders(DAILY_CACHE_TAGS.symbols);
 

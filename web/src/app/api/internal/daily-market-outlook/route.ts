@@ -8,6 +8,7 @@ import type { IntentPlan, ToolResult } from "@/lib/ai/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 type DailyContext = {
   date: string;
