@@ -2,6 +2,7 @@ import { IntentPlan, VisionContext, SessionState, SessionSummary, PlannerResult 
 import { analyzeImage, reconcileVisionWithMarket } from "./vision";
 import { retrieveRelevantMemory, MemoryResult, isStockFollowUpReference } from "./memory";
 import { getSyncStockMappings, getStocksList, getSyncValidSymbols, loadValidSymbols, isUnresolvedCompanyNameMention, LATIN_TICKER_ALIASES, runPlanner } from "./planner";
+import { fuzzyFindStockSymbol } from "./fuzzy-stocks";
 import { executeStructuredTools, StructuredToolOutput } from "./tools-v2";
 import { buildDeterministicResponse, buildDeterministicPortfolioAnalysisResponse, buildBothAccumulationDistributionResponse, generateV2Response, generateV2Stream, getResponderCooldownMs, normalizeStockFreshnessLanguage } from "./final-v2";
 import { validateResponse, autoFixNumbers } from "./validator";
@@ -2647,7 +2648,33 @@ async function* runPipelineCore(
             && (isExplicitRecommendationRequest(userMessage)
                 || deterministicPlannerResult?.intent === "historical_recall"))
         || Boolean(deterministicPlannerResult?.service_degraded_message || deterministicPlannerResult?.unresolved_stock);
+    // Fast-Path Fuzzy Matcher: If user explicitly mentioned a stock (even with typos or Arabic dialect),
+    // resolve directly without burning 12-18s on semantic DeepSeek planner.
+    const fuzzyMatch = !hasImages && !greetingOnly && !preserveDeterministicPlan
+        ? fuzzyFindStockSymbol(userMessage)
+        : null;
+
+    if (fuzzyMatch && !plannerResult.entities.symbols?.length) {
+        const symbol = fuzzyMatch.symbol;
+        const isFollowupIntent = /(?:اخبار|أخبار)/i.test(userMessage) ? ["get_stock", "get_news"] : ["get_stock", "get_stock_levels"];
+        plannerResult = {
+            intent: "stock_analysis",
+            confidence: 0.95,
+            entities: { symbols: [symbol], sector: null, wants_table: true, timeframe: "current" },
+            tools: isFollowupIntent,
+            request: { goal: userMessage, reference: "explicit", ranking_metric: "unspecified", required_facts: ["stock_quote", "technical_indicators"] },
+            clarification_needed: false,
+            session_update: {
+                current_symbol: symbol,
+                last_symbols: Array.from(new Set([symbol, ...(sessionState.last_symbols || [])])).slice(0, 15),
+                summary: userMessage
+            }
+        };
+        isSemanticPlanAuthoritative = true;
+    }
+
     const canUseSemanticPlanner = !hasImages
+        && !fuzzyMatch
         && portfolioAnalysisSymbols.length === 0
         && !options.mockToolsResults
         && !greetingOnly
