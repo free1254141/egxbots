@@ -9,6 +9,7 @@ from jobs.telegram_subscription_reminders import (
     parse_chat_id,
     send_private_telegram,
     run_subscription_reminders,
+    get_telegram_token,
 )
 
 
@@ -47,6 +48,24 @@ def test_determine_reminder_stage():
     assert determine_reminder_stage(30) is None
     assert determine_reminder_stage(-2) is None
     assert determine_reminder_stage(-10) is None
+
+
+def test_get_telegram_token_prefers_support_bot():
+    with patch.dict(os.environ, {
+        "SUBSCRIPTION_REMINDER_BOT_TOKEN": "",
+        "SUPPORT_BOT_TOKEN": "support-token",
+        "TELEGRAM_BOT_TOKEN": "other-token",
+    }, clear=False):
+        assert get_telegram_token() == "support-token"
+
+
+def test_get_telegram_token_allows_dedicated_override():
+    with patch.dict(os.environ, {
+        "SUBSCRIPTION_REMINDER_BOT_TOKEN": "reminder-token",
+        "SUPPORT_BOT_TOKEN": "support-token",
+        "TELEGRAM_BOT_TOKEN": "other-token",
+    }, clear=False):
+        assert get_telegram_token() == "reminder-token"
 
 
 def test_parse_chat_id():
