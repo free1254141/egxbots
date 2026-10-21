@@ -29,6 +29,7 @@ interface ScannerIntradayChartModalProps {
 }
 
 interface IntradaySessionPayload {
+  data_source: "tvdatafeed";
   symbol: string;
   date: string;
   session_open: number;
@@ -74,6 +75,7 @@ export async function prefetchIntradaySession(
     const res = await fetch(`/api/scanner/intraday-session?${params.toString()}`);
     if (res.ok) {
       const json = await res.json();
+      if (json?.data_source !== "tvdatafeed" || !Array.isArray(json?.candles) || json.candles.length === 0) return null;
       CLIENT_SESSION_CACHE.set(cacheKey, json);
       try {
         sessionStorage.setItem(`egx_intraday_${cacheKey}`, JSON.stringify(json));
@@ -137,7 +139,7 @@ export default function ScannerIntradayChartModal({
       } catch {}
     }
 
-    if (cached) {
+    if (cached?.data_source === "tvdatafeed" && Array.isArray(cached.candles) && cached.candles.length > 0) {
       setData(cached);
       setLoading(false);
       setError(null);
@@ -167,6 +169,9 @@ export default function ScannerIntradayChartModal({
         if (!res.ok) throw new Error("Failed to fetch session bars");
 
         const json: IntradaySessionPayload = await res.json();
+        if (json?.data_source !== "tvdatafeed" || !Array.isArray(json?.candles) || json.candles.length === 0) {
+          throw new Error("Authentic 15-minute candles are unavailable");
+        }
         CLIENT_SESSION_CACHE.set(cacheKey, json);
         try {
           sessionStorage.setItem(`egx_intraday_${cacheKey}`, JSON.stringify(json));
@@ -296,7 +301,7 @@ export default function ScannerIntradayChartModal({
     // Find Signal Marker
     const targetSigTime = data.signal.time || signalTime || "10:15";
     const sigIndex = formattedData.findIndex((c) => c.origTime >= targetSigTime);
-    const signalCandle = sigIndex !== -1 ? formattedData[sigIndex] : formattedData[1] || formattedData[0];
+    const signalCandle = sigIndex !== -1 ? formattedData[sigIndex] : formattedData[formattedData.length - 1];
 
     if (signalCandle) {
       markers.push({
@@ -495,7 +500,7 @@ export default function ScannerIntradayChartModal({
         {/* Modal Footer */}
         <div className="p-4 border-t-4 border-black dark:border-white bg-zinc-900 flex items-center justify-between">
           <span className="text-xs font-mono font-bold text-zinc-400">
-            {isAr ? "البيانات محفوظة ومؤرشفة سحابياً في Supabase (market_cache)" : "Intraday session data cached in Supabase (market_cache)"}
+            {isAr ? "مصدر الشارت: شموع 15 دقيقة فعلية من TradingView؛ لا يتم عرض بيانات مُنشأة عند تعذر المصدر." : "Chart source: actual TradingView 15-minute candles; generated fallback candles are never shown."}
           </span>
           <button
             type="button"
