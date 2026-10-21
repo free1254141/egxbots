@@ -54,9 +54,20 @@ def test_get_telegram_token_never_uses_support_bot():
     with patch.dict(os.environ, {
         "SUBSCRIPTION_REMINDER_BOT_TOKEN": "",
         "SUPPORT_BOT_TOKEN": "support-token",
+        "ARTORO_AI_BOT": "",
         "TELEGRAM_BOT_TOKEN": "subscription-token",
     }, clear=False):
         assert get_telegram_token() == "subscription-token"
+
+
+def test_get_telegram_token_uses_artoro_ai_bot():
+    with patch.dict(os.environ, {
+        "SUBSCRIPTION_REMINDER_BOT_TOKEN": "",
+        "SUPPORT_BOT_TOKEN": "support-token",
+        "ARTORO_AI_BOT": "artoro-main-bot-token",
+        "TELEGRAM_BOT_TOKEN": "fallback-token",
+    }, clear=False):
+        assert get_telegram_token() == "artoro-main-bot-token"
 
 
 def test_get_telegram_token_allows_dedicated_override():

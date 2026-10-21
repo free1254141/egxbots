@@ -23,6 +23,12 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 CAIRO = ZoneInfo("Africa/Cairo")
 SITE_URL = os.getenv("EGXBOTS_BILLING_URL", "https://egxbots.com/profile#subscription")
 API_TIMEOUT = 20
@@ -46,11 +52,12 @@ def get_telegram_token() -> str:
     """Return the bot token used for subscription reminders, never the support bot."""
     token = (
         os.getenv("SUBSCRIPTION_REMINDER_BOT_TOKEN")
+        or os.getenv("ARTORO_AI_BOT")
         or os.getenv("TELEGRAM_BOT_TOKEN")
         or ""
     ).strip()
     if not token:
-        raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUBSCRIPTION_REMINDER_BOT_TOKEN)")
+        raise RuntimeError("Missing required secret: ARTORO_AI_BOT / TELEGRAM_BOT_TOKEN (or SUBSCRIPTION_REMINDER_BOT_TOKEN)")
     return token
 
 
