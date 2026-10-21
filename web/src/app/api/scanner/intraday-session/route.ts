@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
     const isToday = targetDate === today;
     const cacheTtl = isToday ? 60_000 : 3_600_000;
     const mem = MEM_CACHE.get(cacheKey);
-    if (mem && now - mem.timestamp < cacheTtl) {
+    if (mem?.payload?.data_source === "tvdatafeed" && now - mem.timestamp < cacheTtl) {
       const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
       if (payload?.data_source === "tvdatafeed") {
         return NextResponse.json(payload, { headers });
