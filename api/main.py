@@ -7765,27 +7765,25 @@ def get_scanner_intraday_session(
                 candles, target_date, clean_sym, signal_time, signal_price
             )
             if payload:
-                payload["data_source"] = "tvdatafeed"
                 return JSONResponse(content=payload)
 
-    # 2. Check Supabase market_cache
-    if not is_today:
-        try:
-            _init_supabase()
-            sb = _get_thread_local_supabase()
-            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
+    # 2. Check Supabase market_cache
+    if not is_today:
+        try:
+            _init_supabase()
+            sb = _get_thread_local_supabase()
+            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
             if cached and cached.data and cached.data.get("payload"):
                 raw_payload = cached.data["payload"]
                 candles = raw_payload.get("candles", [])
-                if raw_payload.get("data_source") == "tvdatafeed" and candles:
-                    payload = _compute_post_signal_metrics(
-                        candles, target_date, clean_sym, signal_time, signal_price
-                    )
-                    if payload:
-                        payload["data_source"] = "tvdatafeed"
-                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
-                        return JSONResponse(content=payload)
-        except Exception as e:
+                if raw_payload.get("data_source") == "tvdatafeed" and candles:
+                    payload = _compute_post_signal_metrics(
+                        candles, target_date, clean_sym, signal_time, signal_price
+                    )
+                    if payload:
+                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
+                        return JSONResponse(content=payload)
+        except Exception as e:
             logging.warning(f"[SCANNER_INTRADAY] Cache lookup error: {e}")
 
     # 3. Fetch from TvDatafeed with timeout guard
