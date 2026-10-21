@@ -43,16 +43,14 @@ def get_supabase_config() -> Tuple[str, str, Dict[str, str]]:
 
 
 def get_telegram_token() -> str:
-    # Use the user-facing support bot by default so reminders arrive in the
-    # private chat users already opened. A dedicated reminder token can override it.
+    """Return the bot token used for subscription reminders, never the support bot."""
     token = (
         os.getenv("SUBSCRIPTION_REMINDER_BOT_TOKEN")
-        or os.getenv("SUPPORT_BOT_TOKEN")
         or os.getenv("TELEGRAM_BOT_TOKEN")
         or ""
     ).strip()
     if not token:
-        raise RuntimeError("Missing required secret: SUPPORT_BOT_TOKEN (or SUBSCRIPTION_REMINDER_BOT_TOKEN)")
+        raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUBSCRIPTION_REMINDER_BOT_TOKEN)")
     return token
 
 

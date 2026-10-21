@@ -50,13 +50,13 @@ def test_determine_reminder_stage():
     assert determine_reminder_stage(-10) is None
 
 
-def test_get_telegram_token_prefers_support_bot():
+def test_get_telegram_token_never_uses_support_bot():
     with patch.dict(os.environ, {
         "SUBSCRIPTION_REMINDER_BOT_TOKEN": "",
         "SUPPORT_BOT_TOKEN": "support-token",
-        "TELEGRAM_BOT_TOKEN": "other-token",
+        "TELEGRAM_BOT_TOKEN": "subscription-token",
     }, clear=False):
-        assert get_telegram_token() == "support-token"
+        assert get_telegram_token() == "subscription-token"
 
 
 def test_get_telegram_token_allows_dedicated_override():
