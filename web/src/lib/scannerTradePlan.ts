@@ -98,7 +98,7 @@ export function calculateScannerTradePlan(
  */
 export function formatTelegramTradePlanSnippet(entryPrice: number, scannerType: ScannerType): string {
   const plan = calculateScannerTradePlan(entryPrice, scannerType);
-  return `🎯 <b>الهدف 1:</b> ${plan.target1.toFixed(2)} ج.م (+${plan.target1Pct}%) | 🛑 <b>الوقف:</b> ${plan.stopLoss.toFixed(2)} ج.م (-${plan.stopLossPct}%)`;
+  return `🎯 <b>الهدف 1:</b> ${plan.target1.toFixed(2)} ج.م (+${plan.target1Pct.toFixed(1)}%) | 🛑 <b>الوقف:</b> ${plan.stopLoss.toFixed(2)} ج.م (-${plan.stopLossPct.toFixed(1)}%)`;
 }
 
 export interface TrackedScannerSignal {

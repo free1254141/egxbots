@@ -320,21 +320,46 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   const sentKeysSet = new Set(sentToday.sent_keys);
 
   // Filter out stocks already sent today (unless forced)
-  const freshVolume = options.forceDispatch
+  const rawFreshVolume = options.forceDispatch
     ? topVolume
     : topVolume.filter((s) => !sentKeysSet.has(`${s.symbol}:volume_surge`));
 
-  const freshBreakout = options.forceDispatch
+  const rawFreshBreakout = options.forceDispatch
     ? topBreakout
     : topBreakout.filter((s) => !sentKeysSet.has(`${s.symbol}:breakout`));
 
-  const freshOversold = options.forceDispatch
+  const rawFreshOversold = options.forceDispatch
     ? topOversold
     : topOversold.filter((s) => !sentKeysSet.has(`${s.symbol}:rsi_oversold`));
 
   const freshDisclosures = options.forceDispatch
     ? disclosuresMatches
     : disclosuresMatches.filter((d) => !sentKeysSet.has(`disclosure:${d.id}`));
+
+  // Cross-category symbol deduplication so the same stock is never repeated in an alert
+  const seenFreshSymbols = new Set<string>();
+  const freshVolume: typeof topVolume = [];
+  const freshBreakout: typeof topBreakout = [];
+  const freshOversold: typeof topOversold = [];
+
+  for (const v of rawFreshVolume) {
+    if (!seenFreshSymbols.has(v.symbol)) {
+      seenFreshSymbols.add(v.symbol);
+      freshVolume.push(v);
+    }
+  }
+  for (const b of rawFreshBreakout) {
+    if (!seenFreshSymbols.has(b.symbol)) {
+      seenFreshSymbols.add(b.symbol);
+      freshBreakout.push(b);
+    }
+  }
+  for (const o of rawFreshOversold) {
+    if (!seenFreshSymbols.has(o.symbol)) {
+      seenFreshSymbols.add(o.symbol);
+      freshOversold.push(o);
+    }
+  }
 
   const hasAnyFreshMatches =
     freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0 || freshDisclosures.length > 0;
@@ -360,7 +385,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   let alertsDispatchedCount = 0;
 
   if (hasAnyFreshMatches && targetChatIds.length > 0) {
-    // Construct Telegram Neobrutalist Arabic Message for VIP Channel
+    // Construct clean, BiDi-safe Arabic Message for VIP Channel
     const lines: string[] = [
       `⚡ <b>[EGX BOTS] رادار الإسكانر الفوري — قناة VIP</b>`,
       `───────────────`,
@@ -369,8 +394,14 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     if (freshVolume.length > 0) {
       lines.push(`🔥 <b>رادار السيولة غير الطبيعية (Volume Surge):</b>`);
       for (const v of freshVolume) {
-        lines.push(`• <b>${v.symbol}</b>: ${v.close.toFixed(2)} ج.م (<b>${v.change_pct >= 0 ? "+" : ""}${v.change_pct}%</b>) | سيولة <b>${v.r_vol}x</b> 📊`);
-        lines.push(`  ${formatTelegramTradePlanSnippet(v.close, "volume_surge")}`);
+        const plan = calculateScannerTradePlan(v.close, "volume_surge");
+        const changeStr = `${v.change_pct >= 0 ? "+" : ""}${Number(v.change_pct).toFixed(1)}%`;
+        lines.push(
+          `🔹 <b>${v.symbol}</b> — <b>${v.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
+          `   📊 حجم السيولة: <b>${Number(v.r_vol).toFixed(1)}x</b> الضعف\n` +
+          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+        );
       }
       lines.push(``);
     }
@@ -378,8 +409,14 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     if (freshBreakout.length > 0) {
       lines.push(`🚀 <b>رادار الاختراقات الفنية (Breakout):</b>`);
       for (const b of freshBreakout) {
-        lines.push(`• <b>${b.symbol}</b>: ${b.close.toFixed(2)} ج.م (<b>+${b.change_pct}%</b>) | اختراق قمة 20 جلسة 🎯`);
-        lines.push(`  ${formatTelegramTradePlanSnippet(b.close, "breakout")}`);
+        const plan = calculateScannerTradePlan(b.close, "breakout");
+        const changeStr = `${b.change_pct >= 0 ? "+" : ""}${Number(b.change_pct).toFixed(1)}%`;
+        lines.push(
+          `🔹 <b>${b.symbol}</b> — <b>${b.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
+          `   🎯 اختراق قمة 20 جلسة السابقة\n` +
+          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+        );
       }
       lines.push(``);
     }
@@ -387,8 +424,14 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     if (freshOversold.length > 0) {
       lines.push(`💎 <b>ارتداد من تشبع بيعي (RSI Bounce):</b>`);
       for (const o of freshOversold) {
-        lines.push(`• <b>${o.symbol}</b>: ${o.close.toFixed(2)} ج.م (<b>+${o.change_pct}%</b>) | مؤشر RSI: <b>${o.rsi_14}</b> 📈`);
-        lines.push(`  ${formatTelegramTradePlanSnippet(o.close, "rsi_oversold")}`);
+        const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
+        const changeStr = `${o.change_pct >= 0 ? "+" : ""}${Number(o.change_pct).toFixed(1)}%`;
+        lines.push(
+          `🔹 <b>${o.symbol}</b> — <b>${o.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
+          `   📈 مؤشر RSI: <b>${Math.round(Number(o.rsi_14))}</b> (تشبع بيعي وارتداد)\n` +
+          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+        );
       }
       lines.push(``);
     }
@@ -403,7 +446,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
     lines.push(`───────────────`);
     lines.push(`⏱️ التوقيت: <b>${cairoTime.timeStr} بتوقيت القاهرة</b>`);
-    lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات في بروفايلك</a>`);
+    lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات بالبروفايل</a>`);
 
     const text = lines.join("\n");
     for (const chatId of targetChatIds) {
@@ -501,119 +544,132 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
   }
 
-  // Add new fresh signals into stillActiveSignals
+  // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active)
   for (const v of freshVolume) {
+    if (stillActiveSignals.some((s) => s.symbol === v.symbol)) continue;
     const plan = calculateScannerTradePlan(v.close, "volume_surge");
-    if (!stillActiveSignals.some((s) => s.symbol === v.symbol && s.entry_date === cairoTime.dateStr)) {
-      stillActiveSignals.push({
-        id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
-        symbol: v.symbol,
-        scanner_type: "volume_surge",
-        entry_price: v.close,
-        entry_date: cairoTime.dateStr,
-        entry_time: cairoTime.timeStr,
-        target_1: plan.target1,
-        target_1_pct: plan.target1Pct,
-        target_2: plan.target2,
-        target_2_pct: plan.target2Pct,
-        stop_loss: plan.stopLoss,
-        stop_loss_pct: plan.stopLossPct,
-        current_price: v.close,
-        highest_price: v.close,
-        lowest_price: v.close,
-        return_pct: 0,
-        max_gain_pct: 0,
-        status: "active",
-        sessions_count: 1,
-        max_sessions: plan.maxHoldingSessions,
-        updated_at: new Date().toISOString(),
-      });
-    }
+    stillActiveSignals.push({
+      id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
+      symbol: v.symbol,
+      scanner_type: "volume_surge",
+      entry_price: v.close,
+      entry_date: cairoTime.dateStr,
+      entry_time: cairoTime.timeStr,
+      target_1: plan.target1,
+      target_1_pct: plan.target1Pct,
+      target_2: plan.target2,
+      target_2_pct: plan.target2Pct,
+      stop_loss: plan.stopLoss,
+      stop_loss_pct: plan.stopLossPct,
+      current_price: v.close,
+      highest_price: v.close,
+      lowest_price: v.close,
+      return_pct: 0,
+      max_gain_pct: 0,
+      status: "active",
+      sessions_count: 1,
+      max_sessions: plan.maxHoldingSessions,
+      updated_at: new Date().toISOString(),
+    });
   }
   for (const b of freshBreakout) {
+    if (stillActiveSignals.some((s) => s.symbol === b.symbol)) continue;
     const plan = calculateScannerTradePlan(b.close, "breakout");
-    if (!stillActiveSignals.some((s) => s.symbol === b.symbol && s.entry_date === cairoTime.dateStr)) {
-      stillActiveSignals.push({
-        id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
-        symbol: b.symbol,
-        scanner_type: "breakout",
-        entry_price: b.close,
-        entry_date: cairoTime.dateStr,
-        entry_time: cairoTime.timeStr,
-        target_1: plan.target1,
-        target_1_pct: plan.target1Pct,
-        target_2: plan.target2,
-        target_2_pct: plan.target2Pct,
-        stop_loss: plan.stopLoss,
-        stop_loss_pct: plan.stopLossPct,
-        current_price: b.close,
-        highest_price: b.close,
-        lowest_price: b.close,
-        return_pct: 0,
-        max_gain_pct: 0,
-        status: "active",
-        sessions_count: 1,
-        max_sessions: plan.maxHoldingSessions,
-        updated_at: new Date().toISOString(),
-      });
-    }
+    stillActiveSignals.push({
+      id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
+      symbol: b.symbol,
+      scanner_type: "breakout",
+      entry_price: b.close,
+      entry_date: cairoTime.dateStr,
+      entry_time: cairoTime.timeStr,
+      target_1: plan.target1,
+      target_1_pct: plan.target1Pct,
+      target_2: plan.target2,
+      target_2_pct: plan.target2Pct,
+      stop_loss: plan.stopLoss,
+      stop_loss_pct: plan.stopLossPct,
+      current_price: b.close,
+      highest_price: b.close,
+      lowest_price: b.close,
+      return_pct: 0,
+      max_gain_pct: 0,
+      status: "active",
+      sessions_count: 1,
+      max_sessions: plan.maxHoldingSessions,
+      updated_at: new Date().toISOString(),
+    });
   }
   for (const o of freshOversold) {
+    if (stillActiveSignals.some((s) => s.symbol === o.symbol)) continue;
     const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
-    if (!stillActiveSignals.some((s) => s.symbol === o.symbol && s.entry_date === cairoTime.dateStr)) {
-      stillActiveSignals.push({
-        id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,
-        symbol: o.symbol,
-        scanner_type: "rsi_oversold",
-        entry_price: o.close,
-        entry_date: cairoTime.dateStr,
-        entry_time: cairoTime.timeStr,
-        target_1: plan.target1,
-        target_1_pct: plan.target1Pct,
-        target_2: plan.target2,
-        target_2_pct: plan.target2Pct,
-        stop_loss: plan.stopLoss,
-        stop_loss_pct: plan.stopLossPct,
-        current_price: o.close,
-        highest_price: o.close,
-        lowest_price: o.close,
-        return_pct: 0,
-        max_gain_pct: 0,
-        status: "active",
-        sessions_count: 1,
-        max_sessions: plan.maxHoldingSessions,
-        updated_at: new Date().toISOString(),
-      });
-    }
+    stillActiveSignals.push({
+      id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,
+      symbol: o.symbol,
+      scanner_type: "rsi_oversold",
+      entry_price: o.close,
+      entry_date: cairoTime.dateStr,
+      entry_time: cairoTime.timeStr,
+      target_1: plan.target1,
+      target_1_pct: plan.target1Pct,
+      target_2: plan.target2,
+      target_2_pct: plan.target2Pct,
+      stop_loss: plan.stopLoss,
+      stop_loss_pct: plan.stopLossPct,
+      current_price: o.close,
+      highest_price: o.close,
+      lowest_price: o.close,
+      return_pct: 0,
+      max_gain_pct: 0,
+      status: "active",
+      sessions_count: 1,
+      max_sessions: plan.maxHoldingSessions,
+      updated_at: new Date().toISOString(),
+    });
   }
 
+  // Deduplicate target hit and stopped out signals so Telegram never sends repeat lines
+  const dedupHitSignals = Array.from(
+    new Map(hitTargetSignals.map((s) => [s.symbol, s])).values()
+  );
+  const dedupStoppedSignals = Array.from(
+    new Map(stoppedOutSignals.map((s) => [s.symbol, s])).values()
+  );
+
   // Send Telegram follow-up alerts for target hit or stopped out (VIP Channel)
-  if ((hitTargetSignals.length > 0 || stoppedOutSignals.length > 0) && targetChatIds.length > 0) {
+  if ((dedupHitSignals.length > 0 || dedupStoppedSignals.length > 0) && targetChatIds.length > 0) {
     for (const chatId of targetChatIds) {
-      if (hitTargetSignals.length > 0) {
+      if (dedupHitSignals.length > 0) {
         const hitLines: string[] = [
-          `🎯 <b>[EGX BOTS] تحقيق أهداف إشارات الإسكانر! (قناة VIP)</b>`,
+          `🎯 <b>[EGX BOTS] تحقيق أهداف إشارات الإسكانر (قناة VIP)</b>`,
           `───────────────`,
         ];
-        for (const s of hitTargetSignals) {
+        for (const s of dedupHitSignals) {
+          const retStr = s.return_pct >= 0 ? `+${Number(s.return_pct).toFixed(1)}%` : `${Number(s.return_pct).toFixed(1)}%`;
           hitLines.push(
-            `• <b>${s.symbol}</b> حقق الهدف الأول بنجاح عند <b>${s.current_price.toFixed(2)} ج.م</b> (ربح <b>+${s.return_pct.toFixed(1)}%</b> من سعر الدخول ${s.entry_price.toFixed(2)} ج.م) 🎉`
+            `✅ <b>${s.symbol}</b> — <b>تحقق الهدف الأول بنجاح!</b>\n` +
+            `   • سعر التحقق: <b>${s.current_price.toFixed(2)} ج.م</b>\n` +
+            `   • نسبة الربح: <b>${retStr}</b> 🎉\n` +
+            `   • سعر الدخول: ${s.entry_price.toFixed(2)} ج.م`
           );
         }
         hitLines.push(`───────────────`);
-        hitLines.push(`💡 <i>توصية: يفضل جني الأرباح جزئياً أو رفع أمر الوقف لسعر الدخول لحجز الأرباح.</i>`);
+        hitLines.push(`💡 <i>توصية: يفضل جني الأرباح جزئياً ورفع وقف الخسارة لسعر الدخول لحجز الأرباح.</i>`);
         hitLines.push(`📊 <b>متابعة النتائج والشارتات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
         await sendTelegramAlert(chatId, hitLines.join("\n"));
       }
 
-      if (stoppedOutSignals.length > 0) {
+      if (dedupStoppedSignals.length > 0) {
         const slLines: string[] = [
-          `🛑 <b>[EGX BOTS] تنبيه إدارة المخاطر — كسر وقف الخسارة (قناة VIP)</b>`,
+          `🛑 <b>[EGX BOTS] إدارة المخاطر — تفعيل وقف الخسارة (قناة VIP)</b>`,
           `───────────────`,
         ];
-        for (const s of stoppedOutSignals) {
+        for (const s of dedupStoppedSignals) {
+          const retStr = `${Number(s.return_pct).toFixed(1)}%`;
           slLines.push(
-            `• <b>${s.symbol}</b> كسر مستوى وقف الخسارة عند <b>${s.current_price.toFixed(2)} ج.م</b> (خسارة <b>${s.return_pct.toFixed(1)}%</b> من الدخول ${s.entry_price.toFixed(2)} ج.م).`
+            `⚠️ <b>${s.symbol}</b> — <b>تفعيل وقف الخسارة</b>\n` +
+            `   • سعر الخروج: <b>${s.current_price.toFixed(2)} ج.م</b>\n` +
+            `   • نسبة التراجع: <b>${retStr}</b>\n` +
+            `   • سعر الدخول: ${s.entry_price.toFixed(2)} ج.م`
           );
         }
         slLines.push(`───────────────`);
@@ -624,19 +680,36 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
   }
 
-  // Compute updated signals KPIs
-  const closedWins = currentClosed.filter((s) => (s.return_pct || 0) > 0);
-  const closedLosses = currentClosed.filter((s) => (s.return_pct || 0) < 0);
+  // Deduplicate active signals by symbol (keep the latest)
+  const activeMap = new Map<string, TrackedScannerSignal>();
+  for (const s of stillActiveSignals) {
+    activeMap.set(s.symbol, s);
+  }
+  const finalActiveSignals = Array.from(activeMap.values()).slice(0, 40);
+
+  // Deduplicate closed signals by (symbol, exit_date, scanner_type)
+  const closedMap = new Map<string, TrackedScannerSignal>();
+  for (const c of currentClosed) {
+    const key = `${c.symbol}_${c.exit_date}_${c.scanner_type}`;
+    if (!closedMap.has(key)) {
+      closedMap.set(key, c);
+    }
+  }
+  const finalClosedSignals = Array.from(closedMap.values()).slice(0, 100);
+
+  // Compute updated signals KPIs from deduplicated signals
+  const closedWins = finalClosedSignals.filter((s) => (s.return_pct || 0) > 0);
+  const closedLosses = finalClosedSignals.filter((s) => (s.return_pct || 0) < 0);
   const sumWins = closedWins.reduce((a, b) => a + (b.return_pct || 0), 0);
   const sumLosses = Math.abs(closedLosses.reduce((a, b) => a + (b.return_pct || 0), 0));
   const signalsKpis: ScannerSignalsKPIs = {
-    win_rate_pct: currentClosed.length > 0 ? Number(((closedWins.length / currentClosed.length) * 100).toFixed(1)) : 80.0,
-    total_closed: currentClosed.length,
-    total_active: stillActiveSignals.length,
+    win_rate_pct: finalClosedSignals.length > 0 ? Number(((closedWins.length / finalClosedSignals.length) * 100).toFixed(1)) : 80.0,
+    total_closed: finalClosedSignals.length,
+    total_active: finalActiveSignals.length,
     avg_win_pct: closedWins.length > 0 ? Number((sumWins / Math.max(1, closedWins.length)).toFixed(1)) : 3.5,
     avg_loss_pct: closedLosses.length > 0 ? Number((sumLosses / Math.max(1, closedLosses.length)).toFixed(1)) : 2.0,
     profit_factor: sumLosses > 0 ? Number((sumWins / sumLosses).toFixed(2)) : 4.5,
-    top_win_pct: currentClosed.reduce((max, s) => Math.max(max, s.return_pct || 0), 0),
+    top_win_pct: finalClosedSignals.reduce((max, s) => Math.max(max, s.return_pct || 0), 0),
   };
 
   const endTime = performance.now();
@@ -676,8 +749,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       sent_keys: Array.from(sentKeysSet).slice(-200),
     },
     history: [historyEntry, ...(config.history || [])].slice(0, 100),
-    active_signals: stillActiveSignals.slice(0, 40),
-    closed_signals: currentClosed.slice(0, 100),
+    active_signals: finalActiveSignals,
+    closed_signals: finalClosedSignals,
     signals_kpis: signalsKpis,
   };
 
