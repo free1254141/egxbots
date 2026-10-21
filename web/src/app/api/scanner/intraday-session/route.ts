@@ -12,17 +12,10 @@ function computePostSignalPayload(
 ) {
   if (!candles || candles.length === 0) return null;
   let targetSigTime = signalTime || "10:15";
-  if (targetSigTime > "14:15" || targetSigTime < "10:00") {
-    targetSigTime = "10:15";
-  }
+  if (targetSigTime < "10:00") targetSigTime = "10:00";
 
-  let sigIdx = 0;
-  for (let i = 0; i < candles.length; i++) {
-    if (candles[i].time >= targetSigTime) {
-      sigIdx = i;
-      break;
-    }
-  }
+  let sigIdx = candles.findIndex((c) => c.time >= targetSigTime);
+  if (sigIdx < 0) sigIdx = candles.length - 1;
 
   const signalCandle = candles[sigIdx];
   const parsedPrice = signalPrice ? parseFloat(signalPrice) : 0;
@@ -49,6 +42,7 @@ function computePostSignalPayload(
   if (gainFromSignalPct < 0) gainFromSignalPct = 0.0;
 
   return {
+    data_source: "tvdatafeed",
     symbol: cleanSymbol,
     date: targetDate,
     session_open: sessionOpen,
