@@ -7743,18 +7743,20 @@ def get_scanner_intraday_session(
     """
     import datetime as dt
     from datetime import timezone
+    from zoneinfo import ZoneInfo
     import time
     import pandas as pd
     from api.stock_ai import _init_supabase, _get_thread_local_supabase
 
     clean_sym = symbol.strip().upper().replace(".CA", "").replace(".EGX", "")
-    target_date = date or dt.date.today().strftime("%Y-%m-%d")
+    cairo_today = dt.datetime.now(ZoneInfo("Africa/Cairo")).date()
+    target_date = date or cairo_today.strftime("%Y-%m-%d")
     cache_key = f"scanner_15m:{target_date}:{clean_sym}"
     now_ts = time.time()
 
     # 1. Check in-memory process cache (0ms instant response)
     mem_cached = _INTRADAY_SESSION_CACHE.get(cache_key)
-    is_today = (target_date == dt.date.today().strftime("%Y-%m-%d"))
+    is_today = (target_date == cairo_today.strftime("%Y-%m-%d"))
     cache_ttl = 60 if is_today else 86400
 
     if mem_cached and (now_ts - mem_cached["timestamp"] < cache_ttl):
@@ -7767,23 +7769,23 @@ def get_scanner_intraday_session(
             if payload:
                 return JSONResponse(content=payload)
 
-    # 2. Check Supabase market_cache
-    if not is_today:
-        try:
-            _init_supabase()
-            sb = _get_thread_local_supabase()
-            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
+    # 2. Check Supabase market_cache
+    if not is_today:
+        try:
+            _init_supabase()
+            sb = _get_thread_local_supabase()
+            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
             if cached and cached.data and cached.data.get("payload"):
                 raw_payload = cached.data["payload"]
                 candles = raw_payload.get("candles", [])
-                if raw_payload.get("data_source") == "tvdatafeed" and candles:
-                    payload = _compute_post_signal_metrics(
-                        candles, target_date, clean_sym, signal_time, signal_price
-                    )
-                    if payload:
-                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
-                        return JSONResponse(content=payload)
-        except Exception as e:
+                if raw_payload.get("data_source") == "tvdatafeed" and candles:
+                    payload = _compute_post_signal_metrics(
+                        candles, target_date, clean_sym, signal_time, signal_price
+                    )
+                    if payload:
+                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
+                        return JSONResponse(content=payload)
+        except Exception as e:
             logging.warning(f"[SCANNER_INTRADAY] Cache lookup error: {e}")
 
     # 3. Fetch from TvDatafeed with timeout guard
