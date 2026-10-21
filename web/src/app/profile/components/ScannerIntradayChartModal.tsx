@@ -64,7 +64,7 @@ export async function prefetchIntradaySession(
   signalTime?: string,
   signalPrice?: number
 ): Promise<IntradaySessionPayload | null> {
-  const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+  const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}_${signalPrice ?? "auto"}`;
   if (CLIENT_SESSION_CACHE.has(cacheKey)) {
     return CLIENT_SESSION_CACHE.get(cacheKey)!;
   }
@@ -125,7 +125,7 @@ export default function ScannerIntradayChartModal({
     if (!isOpen || !symbol) return;
 
     let isCancelled = false;
-    const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}`;
+    const cacheKey = `${symbol}_${date}_${signalTime || "10:15"}_${signalPrice ?? "auto"}`;
 
     // 1. Instant cache check (in-memory or sessionStorage)
     let cached = CLIENT_SESSION_CACHE.get(cacheKey);
@@ -139,7 +139,11 @@ export default function ScannerIntradayChartModal({
       } catch {}
     }
 
-    if (cached?.data_source === "tvdatafeed" && Array.isArray(cached.candles) && cached.candles.length > 0) {
+    if (cached?.data_source !== "tvdatafeed" || !Array.isArray(cached.candles) || cached.candles.length === 0) {
+      cached = undefined;
+    }
+
+    if (cached) {
       setData(cached);
       setLoading(false);
       setError(null);
