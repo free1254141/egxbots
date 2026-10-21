@@ -632,6 +632,10 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         for s in day_signals:
             if (len(positions) >= 15 and not s.get('published')) or s["symbol"] in positions:
                 continue
+            # Live policy enforcement: when published signals are active in live era,
+            # unpublished signals cannot open ghost trades unless observed intraday.
+            if published_signals and str(day)[:10] >= "2026-10-01" and not s.get("published") and s.get("entry_kind") != "intraday_observed":
+                continue
             b = market.get((s["symbol"], day))
             preserved_observed = s.get('published') and s.get('entry_kind') == 'intraday_observed'
             if not preserved_observed and (not b or b.volume <= 0 or (b.high == b.low and s.get('entry_kind') != 'intraday_observed')):
