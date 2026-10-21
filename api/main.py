@@ -7765,6 +7765,7 @@ def get_scanner_intraday_session(
                 candles, target_date, clean_sym, signal_time, signal_price
             )
             if payload:
+                payload["data_source"] = "tvdatafeed"
                 return JSONResponse(content=payload)
 
     # 2. Check Supabase market_cache
@@ -7781,6 +7782,7 @@ def get_scanner_intraday_session(
                         candles, target_date, clean_sym, signal_time, signal_price
                     )
                     if payload:
+                        payload["data_source"] = "tvdatafeed"
                         _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
                         return JSONResponse(content=payload)
         except Exception as e:
