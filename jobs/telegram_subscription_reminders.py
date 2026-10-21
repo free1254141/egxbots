@@ -6,7 +6,7 @@ EGX BOTS private Telegram subscription reminders.
 Required environment:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
-  TELEGRAM_BOT_TOKEN or SUPPORT_BOT_TOKEN
+  SUPPORT_BOT_TOKEN (preferred) or SUBSCRIPTION_REMINDER_BOT_TOKEN
 
 Runs daily. Sends only to the user's private Telegram chat_id saved in
 public.profiles.telegram_chat_id. It never sends to groups or channels.
@@ -43,9 +43,16 @@ def get_supabase_config() -> Tuple[str, str, Dict[str, str]]:
 
 
 def get_telegram_token() -> str:
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
+    # Use the user-facing support bot by default so reminders arrive in the
+    # private chat users already opened. A dedicated reminder token can override it.
+    token = (
+        os.getenv("SUBSCRIPTION_REMINDER_BOT_TOKEN")
+        or os.getenv("SUPPORT_BOT_TOKEN")
+        or os.getenv("TELEGRAM_BOT_TOKEN")
+        or ""
+    ).strip()
     if not token:
-        raise RuntimeError("Missing required secret: TELEGRAM_BOT_TOKEN (or SUPPORT_BOT_TOKEN)")
+        raise RuntimeError("Missing required secret: SUPPORT_BOT_TOKEN (or SUBSCRIPTION_REMINDER_BOT_TOKEN)")
     return token
 
 
