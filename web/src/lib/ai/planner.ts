@@ -386,7 +386,7 @@ export async function runPlanner(
 
     const plannerSystemPrompt = `You are EGX Bots Master Planner for the Egyptian Stock Exchange.
 
-${compactSymbolHint ? `=== KEY EGX STOCKS (common symbols; full DB has 300+ symbols — use Arabic name lookup for unlisted ones) ===
+${compactSymbolHint ? `=== KEY EGX STOCKS (common symbols; full DB has 300+ symbols - use Arabic name lookup for unlisted ones) ===
 ${compactSymbolHint}
 === END OF LIST ===` : ""}
 
