@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     const cleanSymbol = rawSymbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     const targetDate = date || today;
     const cacheKey = `scanner_15m:${targetDate}:${cleanSymbol}`;
     const now = Date.now();
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
     const mem = MEM_CACHE.get(cacheKey);
     if (mem && now - mem.timestamp < cacheTtl) {
       const payload = computePostSignalPayload(mem.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
-      if (payload) {
+      if (payload?.data_source === "tvdatafeed") {
         return NextResponse.json(payload, { headers });
       }
     }
@@ -118,8 +118,10 @@ export async function GET(request: NextRequest) {
 
       if (pyRes.ok) {
         const payload = await pyRes.json();
-        MEM_CACHE.set(cacheKey, { payload, timestamp: now });
-        return NextResponse.json(payload, { headers });
+        if (payload?.data_source === "tvdatafeed" && Array.isArray(payload.candles) && payload.candles.length > 0) {
+          MEM_CACHE.set(cacheKey, { payload, timestamp: now });
+          return NextResponse.json(payload, { headers });
+        }
       }
     } catch {
       // Backend busy or timeout, check Supabase or fallback
@@ -145,7 +147,7 @@ export async function GET(request: NextRequest) {
           .eq("cache_key", cacheKey)
           .maybeSingle();
 
-        if (cached?.payload && cached.payload.candles?.length > 0) {
+        if (cached?.payload?.data_source === "tvdatafeed" && cached.payload.candles?.length > 0) {
           const payload = computePostSignalPayload(cached.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
           if (payload) {
             MEM_CACHE.set(cacheKey, { payload, timestamp: now });
@@ -157,102 +159,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 4. Fallback: Generate realistic session curve from daily records and cache
-    const sPrice = signalPrice ? parseFloat(signalPrice) : 10.0;
-    let baseO = sPrice;
-    let baseH = Number((sPrice * 1.048).toFixed(2));
-    let baseL = Number((sPrice * 0.99).toFixed(2));
-    let baseC = Number((sPrice * 1.032).toFixed(2));
-    let baseV = 250000;
-
-    if (serviceClient) {
-      try {
-        const { data: indRow } = await serviceClient
-          .from("stock_technical_indicators")
-          .select("close, volume")
-          .eq("symbol", cleanSymbol)
-          .eq("date", targetDate)
-          .maybeSingle();
-
-        if (indRow?.close) {
-          const c = parseFloat(indRow.close);
-          baseO = Number((c * 0.975).toFixed(2));
-          baseH = Number((c * 1.025).toFixed(2));
-          baseL = Number((c * 0.965).toFixed(2));
-          baseC = c;
-          if (indRow.volume) baseV = parseInt(indRow.volume, 10);
-        }
-      } catch {
-        // Ignore
-      }
-    }
-
-    const times = [
-      "10:00", "10:15", "10:30", "10:45", "11:00", "11:15", "11:30", "11:45",
-      "12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30", "13:45", "14:00", "14:15"
-    ];
-    const peakIdx = 7;
-    const stepUp = (baseH - baseO) / Math.max(1, peakIdx);
-    const stepDown = (baseH - baseC) / Math.max(1, times.length - 1 - peakIdx);
-
-    let curr = baseO;
-    const candles = times.map((t, idx) => {
-      let cOpen: number;
-      let cClose: number;
-      let cHigh: number;
-      let cLow: number;
-
-      if (idx <= peakIdx) {
-        cOpen = Number(curr.toFixed(2));
-        cClose = Number((baseO + stepUp * (idx + 1)).toFixed(2));
-        cHigh = Number((Math.max(cOpen, cClose) * 1.004).toFixed(2));
-        cLow = Number((Math.min(cOpen, cClose) * 0.996).toFixed(2));
-        if (idx === peakIdx) {
-          cHigh = baseH;
-          cClose = Number((baseH * 0.998).toFixed(2));
-        }
-        curr = cClose;
-      } else {
-        cOpen = Number(curr.toFixed(2));
-        cClose = Number((baseH - stepDown * (idx - peakIdx)).toFixed(2));
-        cHigh = Number((Math.max(cOpen, cClose) * 1.002).toFixed(2));
-        cLow = Number((Math.min(cOpen, cClose) * 0.998).toFixed(2));
-        curr = cClose;
-      }
-
-      return {
-        time: t,
-        datetime: `${targetDate} ${t}`,
-        open: cOpen,
-        high: cHigh,
-        low: cLow,
-        close: cClose,
-        volume: Math.round(baseV / times.length),
-      };
-    });
-
-    const payload = computePostSignalPayload(candles, targetDate, cleanSymbol, signalTime, signalPrice);
-    if (!payload) {
-      return NextResponse.json({ error: "Failed to generate session bars" }, { status: 500 });
-    }
-
-    MEM_CACHE.set(cacheKey, { payload, timestamp: now });
-
-    // Cache fallback into Supabase
-    if (serviceClient) {
-      try {
-        await serviceClient.from("market_cache").upsert({
-          cache_key: cacheKey,
-          country: "EG",
-          payload,
-          computed_at: new Date().toISOString(),
-        });
-      } catch {
-        // Ignore
-      }
-    }
-
-    return NextResponse.json(payload, { headers });
+    // Do not invent intraday candles from daily prices.
+    return NextResponse.json(
+      { error: "Authentic 15-minute candles are unavailable for this symbol/date.", code: "INTRADAY_DATA_UNAVAILABLE", symbol: cleanSymbol, date: targetDate },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
   } catch (err: any) {
     console.error("Error in GET /api/scanner/intraday-session:", err);
     return NextResponse.json({ error: "Failed to load session intraday data" }, { status: 500 });
@@ -279,7 +190,7 @@ export async function POST(request: NextRequest) {
       if (!cleanSymbol) continue;
       const cacheKey = `scanner_15m:${date}:${cleanSymbol}`;
       const mem = MEM_CACHE.get(cacheKey);
-      if (mem && now - mem.timestamp < 3600000 && mem.payload?.candles?.length > 0) {
+      if (mem && now - mem.timestamp < 3600000 && mem.payload?.data_source === "tvdatafeed" && mem.payload?.candles?.length > 0) {
         const payload = computePostSignalPayload(
           mem.payload.candles,
           date,
@@ -332,7 +243,7 @@ export async function POST(request: NextRequest) {
               const cleanSym = it.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
               const cKey = `scanner_15m:${date}:${cleanSym}`;
               const p = rowMap.get(cKey);
-              if (p?.candles?.length > 0) {
+              if (p?.data_source === "tvdatafeed" && p?.candles?.length > 0) {
                 const payload = computePostSignalPayload(
                   p.candles,
                   date,
@@ -340,7 +251,7 @@ export async function POST(request: NextRequest) {
                   it.signal_time,
                   it.signal_price ? String(it.signal_price) : undefined
                 );
-                if (payload?.signal) {
+                if (payload?.data_source === "tvdatafeed" && payload?.signal) {
                   MEM_CACHE.set(cKey, { payload, timestamp: now });
                   gains[cleanSym] = {
                     max_gain_pct: payload.signal.max_gain_pct,
@@ -383,42 +294,8 @@ export async function POST(request: NextRequest) {
               // Ignore
             }
 
-            if (!payload) {
-              const sPrice = it.signal_price ? parseFloat(String(it.signal_price)) : 10.0;
-              const baseO = sPrice;
-              const baseH = Number((sPrice * 1.048).toFixed(2));
-              const baseC = Number((sPrice * 1.032).toFixed(2));
-              const times = [
-                "10:00", "10:15", "10:30", "10:45", "11:00", "11:15", "11:30", "11:45",
-                "12:00", "12:15", "12:30", "12:45", "13:00", "13:15", "13:30", "13:45", "14:00", "14:15"
-              ];
-              const peakIdx = 7;
-              const stepUp = (baseH - baseO) / Math.max(1, peakIdx);
-              const stepDown = (baseH - baseC) / Math.max(1, times.length - 1 - peakIdx);
-              let curr = baseO;
-              const candles = times.map((t, idx) => {
-                let cOpen: number, cClose: number, cHigh: number, cLow: number;
-                if (idx <= peakIdx) {
-                  cOpen = Number(curr.toFixed(2));
-                  cClose = Number((baseO + stepUp * (idx + 1)).toFixed(2));
-                  cHigh = Number((Math.max(cOpen, cClose) * 1.004).toFixed(2));
-                  cLow = Number((Math.min(cOpen, cClose) * 0.996).toFixed(2));
-                  if (idx === peakIdx) {
-                    cHigh = baseH;
-                    cClose = Number((baseH * 0.998).toFixed(2));
-                  }
-                  curr = cClose;
-                } else {
-                  cOpen = Number(curr.toFixed(2));
-                  cClose = Number((baseH - stepDown * (idx - peakIdx)).toFixed(2));
-                  cHigh = Number((Math.max(cOpen, cClose) * 1.002).toFixed(2));
-                  cLow = Number((Math.min(cOpen, cClose) * 0.998).toFixed(2));
-                  curr = cClose;
-                }
-                return { time: t, datetime: `${date} ${t}`, open: cOpen, high: cHigh, low: cLow, close: cClose, volume: 20000 };
-              });
-              payload = computePostSignalPayload(candles, date, cleanSym, it.signal_time, it.signal_price ? String(it.signal_price) : undefined);
-            }
+            // Never synthesize OHLCV for chart metrics.
+            if (payload?.data_source !== "tvdatafeed") payload = null;
 
             if (payload?.signal) {
               MEM_CACHE.set(cacheKey, { payload, timestamp: now });
