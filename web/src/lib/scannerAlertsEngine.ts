@@ -406,16 +406,22 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات في بروفايلك</a>`);
 
     const text = lines.join("\n");
+    let successfulDestinations = 0;
     for (const chatId of targetChatIds) {
       const sent = await sendTelegramAlert(chatId, text);
-      if (sent) alertsDispatchedCount++;
+      if (sent) {
+        alertsDispatchedCount++;
+        successfulDestinations++;
+      }
     }
 
-    // Register newly sent keys into sentToday
-    for (const v of freshVolume) sentKeysSet.add(`${v.symbol}:volume_surge`);
-    for (const b of freshBreakout) sentKeysSet.add(`${b.symbol}:breakout`);
-    for (const o of freshOversold) sentKeysSet.add(`${o.symbol}:rsi_oversold`);
-    for (const d of freshDisclosures) sentKeysSet.add(`disclosure:${d.id}`);
+    // Only dedupe after confirmed delivery; failed Telegram sends are retried next run.
+    if (successfulDestinations === targetChatIds.length && targetChatIds.length > 0) {
+      for (const v of freshVolume) sentKeysSet.add(`${v.symbol}:volume_surge`);
+      for (const b of freshBreakout) sentKeysSet.add(`${b.symbol}:breakout`);
+      for (const o of freshOversold) sentKeysSet.add(`${o.symbol}:rsi_oversold`);
+      for (const d of freshDisclosures) sentKeysSet.add(`disclosure:${d.id}`);
+    }
   }
 
   // ── STEP 5.5: Tracked Signals Lifecycle & Targets/Stop-Loss Management ──────
