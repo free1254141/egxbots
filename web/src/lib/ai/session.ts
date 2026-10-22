@@ -5,29 +5,39 @@ export function isUuid(id: unknown): boolean {
     return typeof id === "string" && UUID_REGEX.test(id);
 }
 
-export async function loadSessionState(supabase: any, sessionId: string, userId: string): Promise<SessionState> {
+export interface SessionDataBundle {
+    sessionState: SessionState;
+    sessionSummary: SessionSummary | null;
+}
+
+export async function loadSessionBundle(supabase: any, sessionId: string, userId: string): Promise<SessionDataBundle> {
     if (!sessionId || !isUuid(sessionId)) {
-        return { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false };
+        return {
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        };
     }
 
     try {
         const { data: sessionData, error } = await supabase
             .from("ai_chat_sessions")
-            .select("title, state")
+            .select("title, state, summary_state")
             .eq("id", sessionId)
             .eq("user_id", userId)
             .maybeSingle();
 
-        if (error) {
-            console.warn("Failed to load session state from Supabase:", error);
-            return { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false };
+        if (error || !sessionData) {
+            if (error) console.warn("Failed to load session bundle from Supabase:", error);
+            return {
+                sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+                sessionSummary: null
+            };
         }
-        if (!sessionData) {
-            return { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false };
-        }
+
+        let sessionState: SessionState;
         if (sessionData.state) {
             const state = sessionData.state as any;
-            return {
+            sessionState = {
                 current_symbol: state.current_symbol || null,
                 last_symbols: Array.isArray(state.last_symbols) ? state.last_symbols : [],
                 summary: state.summary || sessionData.title || null,
@@ -40,19 +50,30 @@ export async function loadSessionState(supabase: any, sessionId: string, userId:
                 experience_level: state.experience_level || null,
                 persisted: true
             };
+        } else {
+            sessionState = {
+                current_symbol: null,
+                last_symbols: [],
+                summary: sessionData.title || null,
+                current_sector: null,
+                persisted: true
+            };
         }
 
-        return {
-            current_symbol: null,
-            last_symbols: [],
-            summary: sessionData.title || null,
-            current_sector: null,
-            persisted: true
-        };
+        const sessionSummary = (sessionData.summary_state as SessionSummary) || null;
+        return { sessionState, sessionSummary };
     } catch (e) {
-        console.warn("Failed to load session state from Supabase:", e);
-        return { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false };
+        console.warn("Failed to load session bundle from Supabase:", e);
+        return {
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        };
     }
+}
+
+export async function loadSessionState(supabase: any, sessionId: string, userId: string): Promise<SessionState> {
+    const bundle = await loadSessionBundle(supabase, sessionId, userId);
+    return bundle.sessionState;
 }
 
 export async function loadPersistentInvestorProfile(supabase: any, userId: string): Promise<Partial<SessionState>> {
@@ -74,25 +95,8 @@ export async function loadPersistentInvestorProfile(supabase: any, userId: strin
 }
 
 export async function loadSessionSummary(supabase: any, sessionId: string, userId: string): Promise<SessionSummary | null> {
-    if (!sessionId || !isUuid(sessionId)) return null;
-    try {
-        const { data, error } = await supabase
-            .from("ai_chat_sessions")
-            .select("summary_state")
-            .eq("id", sessionId)
-            .eq("user_id", userId)
-            .maybeSingle();
-        if (error) {
-            console.warn("Failed to load session summary:", error);
-            return null;
-        }
-        if (data?.summary_state) {
-            return data.summary_state as SessionSummary;
-        }
-    } catch (e) {
-        console.warn("Failed to load session summary:", e);
-    }
-    return null;
+    const bundle = await loadSessionBundle(supabase, sessionId, userId);
+    return bundle.sessionSummary;
 }
 
 export async function updateSessionSummary(

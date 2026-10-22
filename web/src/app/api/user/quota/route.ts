@@ -28,30 +28,50 @@ export async function GET() {
 
     const clientForData = serviceClient || supabase;
 
-    // Run the first three independent queries in parallel to cut latency.
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthStartStr = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
+    // Fetch subscription first — we need current_period_start to determine the
+    // correct quota window for PRO users who upgraded mid-month.
+    const subResult = await clientForData
+      .from("subscriptions")
+      .select("id, plan_id, status, current_period_start, current_period_end, created_at")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .order("current_period_end", { ascending: false })
+      .limit(5);
 
-    const [subResult, limitRowsRes, posResult] = await Promise.all([
-      // 1. Active subscriptions
-      clientForData
-        .from("subscriptions")
-        .select("id, plan_id, status, current_period_end, created_at")
-        .eq("user_id", user.id)
-        .eq("status", "active")
-        .order("current_period_end", { ascending: false })
-        .limit(5),
+    const subRows = subResult.data;
+    const subErr = subResult.error;
+    if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
 
-      // 2. Chat quota ledger for this month
+    // Derive plan status first — needed to choose the correct quota date window.
+    const pro = hasActiveProSubscription(subRows || []);
+    const activeSub = subRows?.[0];
+
+    // For PRO users: count only messages since their current subscription period
+    // started. This fixes the bug where users who upgraded Free → PRO mid-month
+    // had all their Free-tier messages counted against the PRO monthly quota.
+    const calMonthStart = new Date();
+    calMonthStart.setDate(1);
+    calMonthStart.setHours(0, 0, 0, 0);
+
+    let effectiveMonthStart: Date;
+    if (pro && activeSub?.current_period_start) {
+      const subPeriodStart = new Date(activeSub.current_period_start);
+      // Never go earlier than calendar month start (handles users PRO since last month)
+      effectiveMonthStart = subPeriodStart > calMonthStart ? subPeriodStart : calMonthStart;
+    } else {
+      effectiveMonthStart = calMonthStart;
+    }
+    const monthStartStr = effectiveMonthStart.toISOString().split("T")[0];
+
+    const [limitRowsRes, posResult] = await Promise.all([
+      // Chat quota ledger: only from effective subscription start (not calendar month start)
       serviceClient
         .from("ai_chatbot_limits")
         .select("date, chat_count")
         .eq("user_id", user.id)
         .gte("date", monthStartStr),
 
-      // 3. Open portfolio positions
+      // Open portfolio positions
       supabase
         .from("positions")
         .select("symbol")
@@ -59,15 +79,8 @@ export async function GET() {
         .eq("status", "open"),
     ]);
 
-    const subRows = subResult.data;
-    const subErr = subResult.error;
-    if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
     if (limitRowsRes.error) console.warn("[api/user/quota] limits count error:", limitRowsRes.error);
     if (posResult.error) console.warn("[api/user/quota] positions query error:", posResult.error);
-
-    // Derive plan status
-    const pro = hasActiveProSubscription(subRows || []);
-    const activeSub = subRows?.[0];
     const planName = pro ? (activeSub?.plan_id === "lifetime" ? "lifetime" : "pro") : "free";
     const limits = planLimits(planName);
 

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseClient, getSupabaseServiceClient } from "@/lib/supabase/route-data";
 
-import { loadSessionState, loadSessionSummary, updateSessionState, updateSessionSummary } from "@/lib/ai/session";
+import { loadSessionBundle, loadSessionState, loadSessionSummary, isUuid, updateSessionState, updateSessionSummary, SessionDataBundle } from "@/lib/ai/session";
 import { runPlanner } from "@/lib/ai/planner";
 import { executeTools } from "@/lib/ai/tools";
 import { selectOptimalModel } from "@/lib/ai/router";
@@ -320,6 +320,98 @@ function sanitizeSuggestedButtons(buttons: unknown): string[] | undefined {
     return clean.length ? clean : undefined;
 }
 
+async function resolveSessionBundleAndHistory(
+    supabase: any,
+    userId: string,
+    inputSessionId: string | null,
+    message: string | null,
+    hasImages: boolean,
+    authClient?: any
+): Promise<{
+    activeSessionId: string;
+    sessionState: any;
+    sessionSummary: any;
+    dbFormattedHistory: any[];
+}> {
+    const client = supabase || authClient;
+    const isGivenValidUuid = Boolean(inputSessionId && isUuid(inputSessionId));
+    const activeSessionId = isGivenValidUuid ? (inputSessionId as string) : crypto.randomUUID();
+
+    let sessionBundlePromise: Promise<SessionDataBundle>;
+    let historyPromise: Promise<any>;
+
+    if (isGivenValidUuid) {
+        // Parallel fetch for existing session: bundle (title, state, summary_state) + history in a single round-trip!
+        sessionBundlePromise = loadSessionBundle(client, activeSessionId, userId);
+        historyPromise = client
+            .from("ai_chat_messages")
+            .select("role, content")
+            .eq("session_id", activeSessionId)
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(30);
+    } else {
+        // Brand new session: no existing history or state
+        sessionBundlePromise = Promise.resolve({
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        });
+        historyPromise = Promise.resolve({ data: [] });
+    }
+
+    const [bundle, historyRes] = await Promise.all([sessionBundlePromise, historyPromise]);
+    let sessionState = bundle.sessionState;
+    const sessionSummary = bundle.sessionSummary;
+
+    // Ensure session is persisted in DB if it's new
+    if (!sessionState.persisted) {
+        const sessionTitle = message?.trim().substring(0, 32) || (hasImages ? "تحليل صورة محفظة" : "محادثة جديدة");
+        const insertPayload: any = {
+            id: activeSessionId,
+            title: sessionTitle,
+            user_id: userId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            await client.from("ai_chat_sessions").upsert(insertPayload, { onConflict: "id" });
+            sessionState.persisted = true;
+        } catch (insertError) {
+            console.warn("[resolveSessionBundleAndHistory] Session upsert failed:", insertError);
+        }
+    } else {
+        // Touch session updated_at in the background without awaiting
+        client
+            .from("ai_chat_sessions")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", activeSessionId)
+            .eq("user_id", userId)
+            .then(() => {})
+            .catch(() => {});
+    }
+
+    const rawHistory = Array.isArray(historyRes?.data) ? historyRes.data : [];
+    const dbFormattedHistory = rawHistory
+        .reverse()
+        .map((item: any) => {
+            let contentStr = stripEnvironmentMetadata(String(item.content))
+                .replace(/\s*✅\s*تحليل EGX Bots مبني على بيانات حية[^\n]*/g, "")
+                .trim();
+            if (contentStr.length > 500) {
+                contentStr = contentStr.substring(0, 500) + "...";
+            }
+            return { role: item.role, content: stripEnvironmentMetadata(contentStr) || "تحليل" };
+        });
+
+    return {
+        activeSessionId,
+        sessionState,
+        sessionSummary,
+        dbFormattedHistory
+    };
+}
+
 async function handleSessionResolution(
     supabase: any,
     userId: string,
@@ -328,75 +420,8 @@ async function handleSessionResolution(
     hasImages: boolean,
     authClient?: any
 ): Promise<string> {
-    const isUuidFormat = (id: unknown): boolean =>
-        typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-    let activeSessionId = inputSessionId && isUuidFormat(inputSessionId) ? inputSessionId : null;
-    let sessionExists = false;
-    const client = supabase || authClient;
-
-    if (activeSessionId) {
-        const { data: existing } = await client
-            .from("ai_chat_sessions")
-            .select("id")
-            .eq("id", activeSessionId)
-            .eq("user_id", userId)
-            .maybeSingle();
-        if (existing?.id) sessionExists = true;
-    }
-
-    if (!activeSessionId || !sessionExists) {
-        const sessionTitle = message?.trim().substring(0, 32) || (hasImages ? "تحليل صورة محفظة" : "محادثة جديدة");
-        const targetId = activeSessionId || crypto.randomUUID();
-        const insertPayload: any = {
-            id: targetId,
-            title: sessionTitle,
-            user_id: userId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        };
-
-        let { data: newSession, error: insertError } = await client
-            .from("ai_chat_sessions")
-            .upsert(insertPayload, { onConflict: "id" })
-            .select("id")
-            .maybeSingle();
-
-        if ((insertError || !newSession?.id) && authClient && authClient !== client) {
-            const authRetry = await authClient
-                .from("ai_chat_sessions")
-                .upsert(insertPayload, { onConflict: "id" })
-                .select("id")
-                .maybeSingle();
-            if (authRetry.data?.id) {
-                newSession = authRetry.data;
-                insertError = null;
-            }
-        }
-
-        if (newSession?.id) {
-            activeSessionId = newSession.id;
-        } else {
-            console.warn("[handleSessionResolution] Session upsert with targetId failed, generating fresh ID:", insertError);
-            const freshId = crypto.randomUUID();
-            insertPayload.id = freshId;
-            const fallbackClient = authClient || client;
-            const fallbackRes = await fallbackClient
-                .from("ai_chat_sessions")
-                .insert(insertPayload)
-                .select("id")
-                .maybeSingle();
-            activeSessionId = fallbackRes.data?.id || freshId;
-        }
-    } else {
-        await client
-            .from("ai_chat_sessions")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("id", activeSessionId)
-            .eq("user_id", userId);
-    }
-
-    return activeSessionId || crypto.randomUUID();
+    const res = await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
+    return res.activeSessionId;
 }
 
 export async function POST(req: NextRequest) {
@@ -429,15 +454,21 @@ export async function POST(req: NextRequest) {
         const isUnlimited = !billingOn && isUnlimitedChatUser(user);
         let userIsPro = false;
         let userMonthlyCap = Number.MAX_SAFE_INTEGER;
+        let proSubscriptionStart: string | null = null;
         if (billingOn) {
             try {
                 const { data: planRows } = await authClient
                     .from("subscriptions")
-                    .select("plan_id,status,current_period_end")
+                    .select("plan_id,status,current_period_start,current_period_end")
                     .eq("user_id", userId)
+                    .order("current_period_end", { ascending: false })
                     .limit(10);
                 userIsPro = gateIsPro(planRows || []);
                 userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
+                if (userIsPro && planRows) {
+                    const activePlan = planRows.find((r: any) => r.status === "active" && ["pro", "lifetime", "pro_lifetime"].includes(r.plan_id)) || planRows[0];
+                    proSubscriptionStart = activePlan?.current_period_start || null;
+                }
             } catch {
                 userIsPro = false;
                 userMonthlyCap = planLimits("free").chat_messages_per_month;
@@ -571,10 +602,20 @@ export async function POST(req: NextRequest) {
         // 1. Monthly budget gate (permanent ledger via ai_chatbot_limits and ai_chat_messages).
         // Deleting old chats must NEVER reduce or refund consumed quota.
         if (billingOn && !isUnlimited) {
-            const monthStart = new Date();
-            monthStart.setDate(1);
-            monthStart.setHours(0, 0, 0, 0);
-            const monthStartStr = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
+            const calMonthStart = new Date();
+            calMonthStart.setDate(1);
+            calMonthStart.setHours(0, 0, 0, 0);
+
+            // For PRO: count messages only from subscription start date (or month start, whichever is later)
+            // This prevents mid-month upgrades from being penalized for Free messages used earlier this month
+            let effectiveStart = calMonthStart;
+            if (userIsPro && proSubscriptionStart) {
+                const subStart = new Date(proSubscriptionStart);
+                if (subStart > calMonthStart) {
+                    effectiveStart = subStart;
+                }
+            }
+            const monthStartStr = effectiveStart.toISOString().split("T")[0];
 
             const [limitRowsRes, monthRowsRes] = await Promise.all([
                 supabase
@@ -587,7 +628,7 @@ export async function POST(req: NextRequest) {
                     .select("id, client_message_id")
                     .eq("user_id", userId)
                     .eq("role", "user")
-                    .gte("created_at", monthStart.toISOString()),
+                    .gte("created_at", effectiveStart.toISOString()),
             ]);
 
             const limitsSum = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
@@ -668,9 +709,10 @@ export async function POST(req: NextRequest) {
                     const heartbeat = setInterval(() => sendEvent({ type: "heartbeat", timestamp: Date.now() }), 12000);
 
                     try {
-                        // STEP 1: RESOLVE SESSION ID
+                        // STEP 1: RESOLVE SESSION ID & HISTORY IN PARALLEL
                         sendEvent({ type: "status", status: "session", message: "Resolving session..." });
-                        const activeSessionId = await handleSessionResolution(supabase, userId, inputSessionId, message, hasImages, authClient);
+                        const { activeSessionId, sessionState, sessionSummary, dbFormattedHistory } =
+                            await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
                         requestSessionId = activeSessionId;
                         streamSessionId = activeSessionId;
                         sendEvent({ type: "session_id", session_id: activeSessionId });
@@ -688,30 +730,6 @@ export async function POST(req: NextRequest) {
                         }
                         const finalSavedImageUrl = permanentImageUrls[0] || (imageList[0]?.length < 1000 ? imageList[0] : null);
 
-                        const { data: dbHistory } = await supabase
-                            .from("ai_chat_messages")
-                            .select("role, content")
-                            .eq("session_id", activeSessionId)
-                            .eq("user_id", userId)
-                            .order("created_at", { ascending: false })
-                            .limit(30);
-
-                        const dbFormattedHistory = Array.isArray(dbHistory)
-                            ? dbHistory
-                                .reverse()
-                                .map((item: any) => {
-                                    let contentStr = String(item.content)
-                                        .replace(/\s*✅\s*تحليل EGX Bots مبني على بيانات حية[^\n]*/g, "")
-                                        .trim();
-                                    if (contentStr.length > 500) {
-                                        contentStr = contentStr.substring(0, 500) + "...";
-                                    }
-                                    return { role: item.role, content: contentStr || "تحليل" };
-                                })
-                            : [];
-
-                        const sessionState = await loadSessionState(supabase, activeSessionId, userId);
-                        const sessionSummary = await loadSessionSummary(supabase, activeSessionId, userId);
                         const explicitSymbols = extractExplicitSymbols(message || "");
                         if (explicitSymbols.length > 0) {
                             sessionState.current_symbol = explicitSymbols[0];
@@ -959,7 +977,8 @@ export async function POST(req: NextRequest) {
 
         // --- NON-STREAMING JSON FALLBACK ---
         console.log(`[BOT STAGE] Starting non-streaming pipeline...`);
-        const activeSessionId = await handleSessionResolution(supabase, userId, inputSessionId, message, hasImages, authClient);
+        const { activeSessionId, sessionState, sessionSummary, dbFormattedHistory } =
+            await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
         requestSessionId = activeSessionId;
 
         let permanentImageUrls: string[] = [];
@@ -972,30 +991,6 @@ export async function POST(req: NextRequest) {
         }
         const finalSavedImageUrl = permanentImageUrls[0] || (imageList[0]?.length < 1000 ? imageList[0] : null);
 
-        const { data: dbHistory } = await supabase
-            .from("ai_chat_messages")
-            .select("role, content")
-            .eq("session_id", activeSessionId)
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-            .limit(30);
-
-        const dbFormattedHistory = Array.isArray(dbHistory)
-            ? dbHistory
-                .reverse()
-                .map((item: any) => {
-                    let contentStr = stripEnvironmentMetadata(String(item.content))
-                        .replace(/\s*✅\s*تحليل EGX Bots مبني على بيانات حية[^\n]*/g, "")
-                        .trim();
-                    if (contentStr.length > 500) {
-                        contentStr = contentStr.substring(0, 500) + "...";
-                    }
-                    return { role: item.role, content: stripEnvironmentMetadata(contentStr) || "تحليل" };
-                })
-            : [];
-
-        const sessionState = await loadSessionState(supabase, activeSessionId, userId);
-        const sessionSummary = await loadSessionSummary(supabase, activeSessionId, userId);
         const explicitSymbols = extractExplicitSymbols(message || "");
         if (explicitSymbols.length > 0) {
             sessionState.current_symbol = explicitSymbols[0];
@@ -1159,20 +1154,29 @@ export async function GET(req: NextRequest) {
             let userIsPro = false;
 
             if (billingOn) {
-                const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
+                const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_start,current_period_end").eq("user_id", userId).order("current_period_end", { ascending: false });
                 userIsPro = gateIsPro(planRows || []);
                 isUnlimited = false;
 
                 if (userIsPro) {
                     quotaLimit = planLimits("pro").chat_messages_per_month;
-                    const monthStart = new Date();
-                    monthStart.setDate(1);
-                    monthStart.setHours(0, 0, 0, 0);
-                    const monthStartStr = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
+                    const calMonthStart = new Date();
+                    calMonthStart.setDate(1);
+                    calMonthStart.setHours(0, 0, 0, 0);
+
+                    const activePlan = planRows?.find((r: any) => r.status === "active" && ["pro", "lifetime", "pro_lifetime"].includes(r.plan_id)) || planRows?.[0];
+                    let effectiveStart = calMonthStart;
+                    if (activePlan?.current_period_start) {
+                        const subStart = new Date(activePlan.current_period_start);
+                        if (subStart > calMonthStart) {
+                            effectiveStart = subStart;
+                        }
+                    }
+                    const monthStartStr = effectiveStart.toISOString().split("T")[0];
 
                     const [limitRowsRes, msgRowsRes] = await Promise.all([
                         supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
-                        supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", monthStart.toISOString()),
+                        supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
                     ]);
 
                     const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);

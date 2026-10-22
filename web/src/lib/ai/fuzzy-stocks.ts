@@ -26,8 +26,10 @@ const STOP_WORDS = new Set([
     "النهارده", "اليوم", "بكره", "بكرة", "امبارح", "أمس",
     "السوق", "البورصة", "البورصه", "اسهم", "الاسهم", "أسهم", "الأسهم", "سهم",
     "توصيات", "توصية", "توصيه", "فرص", "فرصة", "فرصه",
-    "سيولة", "سيوله", "تجميع", "تصريف",
-    "ازيك", "عامل", "شكرا", "تمام", "يا", "في", "من", "على", "الى", "إلى", "مع", "كل", "ده", "دي", "دا"
+    "سيولة", "سيوله", "تجميع", "تصريف", "طالع", "نازل",
+    "ازيك", "عامل", "شكرا", "تمام", "يا", "في", "من", "على", "الى", "إلى", "مع", "كل", "ده", "دي", "دا",
+    "فنان", "باشا", "كبير", "ياغالي", "حبيبي", "استاذ", "أستاذ", "اخبارك", "أخبارك",
+    "ابو", "أبو", "ابن", "بنك", "شركة", "شركه", "جروب", "مجموعة", "مجموعه"
 ]);
 
 function normalizeArabicText(text: string): string {
@@ -101,11 +103,14 @@ export function getFuzzyStockSearcher(): Fuse<FuzzyStockItem> {
  * to isolate the candidate stock name before searching.
  */
 function extractCandidateTerms(message: string): string[] {
-    const norm = normalizeArabicText(message);
-    const cleaned = norm
-        .replace(/^(?:حلل|تحليل|وريني|هات|اخبار|أخبار|سعر|سهم|معلومات|رايك في|رأيك في|ايه رايك في|إيه رأيك في|مستهدف|اهداف|أهداف|شركه|شركة|شراء|بيع|دخول)\s+/i, "")
-        .replace(/\s+(?:النهارده|اليوم|دلوقتي|حاليا|بكره|بكرة|السوق)$/i, "")
-        .trim();
+    let cleaned = normalizeArabicText(message);
+    const prefixRegex = /^(?:حلل|تحليل|وريني|هات|اخبار|أخبار|سعر|سهم|معلومات|رايك|رأيك|ايه|إيه|في|عن|مستهدف|اهداف|أهداف|شركه|شركة|شراء|بيع|دخول)\s+/i;
+    let prev = "";
+    while (prev !== cleaned) {
+        prev = cleaned;
+        cleaned = cleaned.replace(prefixRegex, "").trim();
+    }
+    cleaned = cleaned.replace(/\s+(?:النهارده|اليوم|دلوقتي|حاليا|بكره|بكرة|السوق)$/i, "").trim();
 
     const terms: string[] = [];
     if (cleaned && cleaned.length >= 3 && !STOP_WORDS.has(cleaned)) {
