@@ -194,7 +194,7 @@ export async function GET(request: NextRequest) {
           .maybeSingle();
 
         if (cached?.payload && cached.payload.candles?.length > 0) {
-          const payload = computePostSignalPayload(cached.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice);
+          const payload = computePostSignalPayload(cached.payload.candles, targetDate, cleanSymbol, signalTime, signalPrice, endDate);
           if (payload) {
             MEM_CACHE.set(cacheKey, { payload, timestamp: now });
             return NextResponse.json(payload, { headers });
@@ -279,7 +279,7 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const payload = computePostSignalPayload(candles, targetDate, cleanSymbol, signalTime, signalPrice);
+    const payload = computePostSignalPayload(candles, targetDate, cleanSymbol, signalTime, signalPrice, endDate);
     if (!payload) {
       return NextResponse.json({ error: "Failed to generate session bars" }, { status: 500 });
     }
