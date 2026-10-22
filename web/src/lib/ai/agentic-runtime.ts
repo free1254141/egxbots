@@ -269,10 +269,10 @@ export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Ev
             yield step.value;
         }
     } catch (error) {
-        input.options.diagnosticCapture?.("execution_failure", { error: error instanceof Error ? error.message : "unknown" });
-        console.error("[Agentic] request failed or deadline reached", error instanceof Error ? error.message : "unknown");
+        input.options.diagnosticCapture?.("execution_failure", { error: error instanceof Error ? error.stack || error.message : "unknown" });
+        console.error("[Agentic] request failed or deadline reached", error);
         const isPro = Boolean(input.options?.isPro);
-        const response = withChatFooter(input.images.length
+        const response = withChatFooter((input.images || []).length
             ? "وصلت الصورة، لكن انتهت مهلة المعالجة قبل إكمال قراءتها والتحقق من النتيجة. لم أعتمد أرقاماً غير مؤكدة؛ جرّب صورة واحدة واضحة أو أرسل الجزء المطلوب وحده."
             : safeAgenticFallback(fallbackEvidence(evidence, evidence.flatMap(e => e.symbols)), "انتهت مهلة المعالجة أو تعذر الاتصال بالخدمة.", input.userMessage), isPro, null, input.options?.chatSource);
         yield { type: "token", data: response };
@@ -287,7 +287,8 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const key = getDeepSeekApiKey();
     const experientialKey = typeof getExperientialApiKey === "function" ? getExperientialApiKey() : null;
     const isTestEnv = Boolean(process.env.JEST_WORKER_ID || process.env.NODE_ENV === "test");
-    const hasImages = input.images.length > 0;
+    const inputImages = Array.isArray(input.images) ? input.images : [];
+    const hasImages = inputImages.length > 0;
     let useLunaDecisions =
         !hasImages &&
         (input.requestedModel === LUNA_DECISIONS_MODEL ||
@@ -308,13 +309,13 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink, options?.chatSource);
     let vision: VisionContext | null = null;
     let visionError: string | null = null;
-    if (input.images.length) {
+    if (inputImages.length) {
         yield { type: "status", data: { status: "vision", message: "قراءة الصورة مع حفظ درجة الثقة وحدودها..." } };
         try {
             if (options.mockVisionResult) {
                 vision = options.mockVisionResult;
             } else {
-                const result = await analyzeImage(input.images, userMessage, input.apiKeys, input.messageId, (provider, model) => accounting.start(provider, model, "vision"), options.diagnosticCapture);
+                const result = await analyzeImage(inputImages, userMessage, input.apiKeys, input.messageId, (provider, model) => accounting.start(provider, model, "vision"), options.diagnosticCapture);
                 vision = result?.vision ?? null;
                 visionError = result?.error ?? null;
             }
@@ -343,8 +344,31 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     const visionSymbols = (sessionSummary?.last_vision_context?.symbols || []).map((s: any) => s.symbol).filter(Boolean);
     const imageSymbols = sessionSummary?.last_image_symbols || [];
     const allPortfolioSymbols = [...new Set([...proContext.userPortfolioSymbols, ...visionSymbols, ...imageSymbols])];
-    const context = { symbol_hints: knownSymbolHints(userMessage), user_portfolio_symbols: allPortfolioSymbols, user_saved_positions: proContext.userSavedPositions, state: { ...sessionState, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
-        current_symbols:sessionSummary.current_symbols, last_topic:sessionSummary.last_topic?.slice(0,600),
+    // For chart/table/market_depth images: push the symbols vision identified to the front of
+    // symbol_hints so the LLM tool-planner does NOT drift to the previously discussed ticker.
+    const currentVisionChartSymbols: string[] = (vision && vision.image_type !== "portfolio")
+        ? (vision.symbols || []).map((s: any) => s.symbol).filter(Boolean)
+        : [];
+    const baseSymbolHints = knownSymbolHints(userMessage);
+    const visionChartHints = currentVisionChartSymbols.map(sym => ({
+        name: sym,
+        symbol: sym,
+        symbols: [sym],
+    }));
+    const mergedSymbolHints = visionChartHints.length > 0
+        ? [...visionChartHints, ...baseSymbolHints]
+        : baseSymbolHints;
+    const effectiveLastSymbols = currentVisionChartSymbols.length > 0
+        ? currentVisionChartSymbols
+        : (sessionState.last_symbols || []);
+    const effectiveCurrentSymbols = currentVisionChartSymbols.length > 0
+        ? currentVisionChartSymbols
+        : (sessionSummary?.current_symbols || []);
+    const effectiveLastTopic = currentVisionChartSymbols.length > 0
+        ? `شارت ${currentVisionChartSymbols.join(", ")}`
+        : sessionSummary?.last_topic?.slice(0, 600);
+    const context = { symbol_hints: mergedSymbolHints, user_portfolio_symbols: allPortfolioSymbols, user_saved_positions: proContext.userSavedPositions, state: { ...sessionState, last_symbols: effectiveLastSymbols, summary:sessionState.summary?.slice(0,1000) }, summary: sessionSummary ? {
+        current_symbols: effectiveCurrentSymbols, last_topic: effectiveLastTopic,
         open_references:sessionSummary.open_references, last_image_symbols:sessionSummary.last_image_symbols,
         last_vision_context: sessionSummary.last_vision_context ? {
             image_type: sessionSummary.last_vision_context.image_type,
@@ -358,11 +382,21 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         portfolio_add_awaiting:sessionSummary.portfolio_add_awaiting, pending_portfolio_import:sessionSummary.pending_portfolio_import,
     } : null, vision:compactVision, previous_evidence:previousEvidence,
         chart_context: sanitizeChartContext(options.chartContext),
-        image_read_failed: input.images.length > 0 && !vision,
+        image_read_failed: inputImages.length > 0 && !vision,
         current_time_cairo: new Date().toLocaleString("en-GB", { timeZone: "Africa/Cairo" }) };
     const currentImageEvidence = (): AgenticEvidence | null => {
-        if (!vision || !vision.symbols?.length) return null;
+        if (!vision) return null;
         const portfolioImage = vision.image_type === "portfolio";
+        const chartImage = vision.image_type === "chart" || vision.image_type === "table" || vision.image_type === "market_depth";
+        // For chart images without individual stock symbols, create a minimal evidence entry
+        // so the verifier and draft have a record that image analysis was performed.
+        if (!vision.symbols?.length && chartImage) {
+            return { tool: "image_vision", arguments: { image_type: vision.image_type },
+                data: { positions: [], summary: vision.user_relevant_summary, confidence: vision.confidence,
+                    uncertainties: vision.uncertainties, technical_observations: vision.technical_observations },
+                source: "image-derived:vision-model", data_time: null, symbols: [], availability: "available", data_type: "image-derived" };
+        }
+        if (!vision.symbols?.length) return null;
         const positions = vision.symbols.map(({ symbol, source_image_index, asset_type, visible_values: value }) => ({
             symbol,
             source_image_index: source_image_index ?? null,
@@ -388,37 +422,72 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         { role: "system", content: input.systemPrompt },
         contextMessage ];
     if (vision) {
-        const positionsSummary = vision.symbols.map(s => {
+        const isPortfolioImage = vision.image_type === "portfolio";
+        const isChartImage = vision.image_type === "chart" || vision.image_type === "table" || vision.image_type === "market_depth";
+        const chartSymbolNames = currentVisionChartSymbols.join(", ") || "\u063a\u064a\u0631 \u0645\u062d\u062f\u062f";
+        const EGX_INDICES = ["EGX30", "EGX70", "EGX100", "EGX", "EGXALL", "EGX30TR", "EGX30R", "EGX30X"];
+        const isIndexChart = currentVisionChartSymbols.some(s => EGX_INDICES.includes(s.toUpperCase()));
+
+        const positionsSummary = (vision.symbols || []).map(s => {
             const v = s.visible_values || {};
             const parts = [
                 s.symbol,
-                s.asset_type === "fund" ? "(صندوق)" : "(سهم)",
-                v.market_value != null ? `قيمة: ${v.market_value}` : null,
-                v.profit_loss != null ? `ربح/خسارة: ${v.profit_loss}` : null,
-                v.return_pct != null ? `عائد: ${v.return_pct}%` : (v.change_pct != null ? `تغير: ${v.change_pct}%` : null),
-                v.price != null ? `سعر: ${v.price}` : null,
-                v.average_price != null ? `متوسط: ${v.average_price}` : null,
-                v.quantity != null ? `كمية: ${v.quantity}` : null,
+                s.asset_type === "fund" ? "(\u0635\u0646\u062f\u0648\u0642)" : "(\u0633\u0647\u0645)",
+                v.market_value != null ? `\u0642\u064a\u0645\u0629: ${v.market_value}` : null,
+                v.profit_loss != null ? `\u0631\u0628\u062d/\u062e\u0633\u0627\u0631\u0629: ${v.profit_loss}` : null,
+                v.return_pct != null ? `\u0639\u0627\u0626\u062f: ${v.return_pct}%` : (v.change_pct != null ? `\u062a\u063a\u064a\u0631: ${v.change_pct}%` : null),
+                v.price != null ? `\u0633\u0639\u0631: ${v.price}` : null,
+                v.average_price != null ? `\u0645\u062a\u0648\u0633\u0637: ${v.average_price}` : null,
+                v.quantity != null ? `\u0643\u0645\u064a\u0629: ${v.quantity}` : null,
             ].filter(Boolean).join(" | ");
             return `- ${parts}`;
         }).join("\n");
 
+        const prevSymbolsNote = sessionState.last_symbols?.slice(0,3).join(", ") || "\u0644\u0627 \u0634\u064a\u0621";
+        const chartDirective = isChartImage
+            ? (isIndexChart
+                ? `\u0647\u0630\u0627 \u0634\u0627\u0631\u062a \u0645\u0624\u0634\u0631 \u0645\u0635\u0631\u064a (Index Chart). \u0627\u0633\u062a\u062e\u062f\u0645 get_market \u0644\u062c\u0644\u0628 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u0624\u0634\u0631 \u0627\u0644\u0622\u0646.`
+                : `\u0627\u0633\u062a\u062e\u062f\u0645 get_stock \u0644\u0644\u0631\u0645\u0632 \u0627\u0644\u0638\u0627\u0647\u0631 \u0641\u064a \u0627\u0644\u0634\u0627\u0631\u062a: ${chartSymbolNames}`)
+            : "";
+
+        const visionTypeLabel = isPortfolioImage
+            ? "\u0645\u062d\u0641\u0638\u0629 \u0627\u0633\u062a\u062b\u0645\u0627\u0631\u064a\u0629 (Portfolio)"
+            : isChartImage
+            ? `\u0634\u0627\u0631\u062a/\u0631\u0633\u0645 \u0628\u064a\u0627\u0646\u064a \u2014 \u0627\u0644\u0631\u0645\u0632: ${chartSymbolNames}`
+            : vision.image_type;
+
+        const finalInstruction = isPortfolioImage
+            ? "\u0642\u0645 \u0641\u0648\u0631\u0627\u064b \u0628\u062a\u062d\u0644\u064a\u0644 \u0645\u062d\u0641\u0638\u0629 \u0627\u0644\u0635\u0648\u0631\u0629 \u0648\u0627\u0644\u0645\u0631\u0627\u0643\u0632 \u0648\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u0633\u062a\u062e\u0631\u062c\u0629 \u0623\u0639\u0644\u0627\u0647 \u0648\u062a\u0642\u062f\u064a\u0645 \u0642\u0631\u0627\u0621\u062a\u0643 \u0627\u0644\u0627\u0633\u062a\u062b\u0645\u0627\u0631\u064a\u0629 \u0627\u0644\u0646\u0648\u0639\u064a\u0629 \u0644\u0644\u0645\u0633\u062a\u062e\u062f\u0645."
+            : isChartImage
+            ? `\u0642\u0645 \u0641\u0648\u0631\u0627\u064b \u0628\u062c\u0644\u0628 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0631\u0645\u0632/\u0627\u0644\u0645\u0624\u0634\u0631 \u0627\u0644\u0638\u0627\u0647\u0631 \u0641\u064a \u0627\u0644\u0634\u0627\u0631\u062a (${chartSymbolNames}) \u0645\u0646 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0648\u062a\u0642\u062f\u064a\u0645 \u0642\u0631\u0627\u0621\u062a\u0643 \u0627\u0644\u0641\u0646\u064a\u0629 \u0628\u0646\u0627\u0621\u064b \u0639\u0644\u064a\u0647\u0627.`
+            : "\u0642\u0645 \u0641\u0648\u0631\u0627\u064b \u0628\u062a\u062d\u0644\u064a\u0644 \u0645\u062d\u062a\u0648\u0649 \u0627\u0644\u0635\u0648\u0631\u0629 \u0648\u062a\u0642\u062f\u064a\u0645 \u0642\u0631\u0627\u0621\u062a\u0643 \u0644\u0644\u0645\u0633\u062a\u062e\u062f\u0645.";
+
         messages.push({
             role: "system",
-            content: `📷 **بيانات الصورة المرفقة في هذا الدور الحالي (تمت قراءتها بواسطة DeepSeek Flash بنجاح):**
-- نوع الصورة: ${vision.image_type === "portfolio" ? "محفظة استثمارية (Portfolio)" : vision.image_type}
-- ملخص محتوى الصورة: ${vision.user_relevant_summary || "لقطة محفظة استثمارية"}
-- درجة الوضوح والثقة: ${(vision.confidence * 100).toFixed(0)}%
-- قائمة المراكز والأصول الظاهرة في الصورة:
-${positionsSummary}
-${vision.uncertainties?.length ? `- ملاحظات وضوح الصورة: ${vision.uncertainties.join(" | ")}` : ""}
-
-⚠️ **توجيه إلزامي حاسم للمساعد الذكي ARTORO:**
-الصورة المرفقة وصلت بالفعل في هذا الدور الحالي وتمت قراءتها بالكامل واستخراج أصولها ومراكزها أعلاه بواسطة محرك الرؤية (DeepSeek Flash).
-يمنع منعاً باتاً (STRICTLY PROHIBITED) أن تقول "لم تصلني صورة" أو "لا أرى أي مرفق في الدور الحالي" أو تطلب إعادة إرفاقها!
-قم فوراً بتحليل محفظة الصورة والمراكز والبيانات المستخرجة أعلاه وتقديم قراءتك الاستثمارية النوعية للمستخدم.`
+            content: [
+                `\u{1F4F7} **\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0631\u0641\u0642\u0629 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062f\u0648\u0631 \u0627\u0644\u062d\u0627\u0644\u064a (\u062a\u0645\u062a \u0642\u0631\u0627\u0621\u062a\u0647\u0627 \u0628\u0648\u0627\u0633\u0637\u0629 DeepSeek Flash \u0628\u0646\u062c\u0627\u062d):**`,
+                `- \u0646\u0648\u0639 \u0627\u0644\u0635\u0648\u0631\u0629: ${visionTypeLabel}`,
+                `- \u0645\u0644\u062e\u0635 \u0645\u062d\u062a\u0648\u0649 \u0627\u0644\u0635\u0648\u0631\u0629: ${vision.user_relevant_summary || "\u0635\u0648\u0631\u0629 \u0645\u0627\u0644\u064a\u0629"}`,
+                `- \u062f\u0631\u062c\u0629 \u0627\u0644\u0648\u0636\u0648\u062d \u0648\u0627\u0644\u062b\u0642\u0629: ${(vision.confidence * 100).toFixed(0)}%`,
+                positionsSummary ? `- \u0627\u0644\u0623\u0635\u0648\u0644 \u0627\u0644\u0638\u0627\u0647\u0631\u0629 \u0641\u064a \u0627\u0644\u0635\u0648\u0631\u0629:\n${positionsSummary}` : null,
+                vision.uncertainties?.length ? `- \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0648\u0636\u0648\u062d \u0627\u0644\u0635\u0648\u0631\u0629: ${vision.uncertainties.join(" | ")}` : null,
+                vision.technical_observations?.length ? `- \u0645\u0644\u0627\u062d\u0638\u0627\u062a \u0641\u0646\u064a\u0629: ${vision.technical_observations.slice(0,5).join(" | ")}` : null,
+                isChartImage ? [
+                    "",
+                    `\u{1F3AF} **\u062a\u0648\u062c\u064a\u0647 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0625\u0644\u0632\u0627\u0645\u064a \u0644\u0644\u0634\u0627\u0631\u062a \u0627\u0644\u0645\u0631\u0641\u0642:**`,
+                    `\u0627\u0644\u0635\u0648\u0631\u0629 \u0634\u0627\u0631\u062a/\u0631\u0633\u0645 \u0628\u064a\u0627\u0646\u064a \u2014 \u0648\u0644\u064a\u0633\u062a \u0645\u062d\u0641\u0638\u0629 \u0627\u0633\u062a\u062b\u0645\u0627\u0631\u064a\u0629. \u0645\u0648\u0636\u0648\u0639\u0647\u0627: **${chartSymbolNames}**`,
+                    chartDirective,
+                    `\u26D4 \u064a\u064f\u062d\u0638\u064e\u0631 \u062a\u0645\u0627\u0645\u064b\u0627 \u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0631\u0645\u0648\u0632 \u0627\u0644\u062c\u0644\u0633\u0629 \u0627\u0644\u0633\u0627\u0628\u0642\u0629 (${prevSymbolsNote}) \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062f\u0648\u0631 \u2014 \u0627\u0644\u0637\u0644\u0628 \u064a\u062e\u0635 \u0627\u0644\u0634\u0627\u0631\u062a \u0627\u0644\u0645\u0631\u0641\u0642 \u062d\u0635\u0631\u064b\u0627.`,
+                ].join("\n") : null,
+                "",
+                "\u26A0\uFE0F **\u062a\u0648\u062c\u064a\u0647 \u0625\u0644\u0632\u0627\u0645\u064a:**",
+                "\u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0631\u0641\u0642\u0629 \u0648\u0635\u0644\u062a \u0628\u0627\u0644\u0641\u0639\u0644 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062f\u0648\u0631 \u0627\u0644\u062d\u0627\u0644\u064a \u0648\u062a\u0645\u062a \u0642\u0631\u0627\u0621\u062a\u0647\u0627 \u0628\u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0648\u0627\u0633\u0637\u0629 \u0645\u062d\u0631\u0643 \u0627\u0644\u0631\u0624\u064a\u0629 (DeepSeek Flash).",
+                "\u064a\u0645\u0646\u0639 \u0645\u0646\u0639\u064b\u0627 \u0628\u0627\u062a\u064b\u0627 \u0623\u0646 \u062a\u0642\u0648\u0644 \"\u0644\u0645 \u062a\u0635\u0644\u0646\u064a \u0635\u0648\u0631\u0629\" \u0623\u0648 \"\u0644\u0627 \u0623\u0631\u0649 \u0623\u064a \u0645\u0631\u0641\u0642 \u0641\u064a \u0627\u0644\u062f\u0648\u0631 \u0627\u0644\u062d\u0627\u0644\u064a\" \u0623\u0648 \u062a\u0637\u0644\u0628 \u0625\u0639\u0627\u062f\u0629 \u0625\u0631\u0641\u0627\u0642\u0647\u0627!",
+                finalInstruction,
+            ].filter(Boolean).join("\n"),
         });
     }
+
     messages.push(...recentHistory, { role: "user", content: userMessage || "حلل الصورة المرفقة ضمن حدود وضوحها" });
     let providerCalls = 0, toolCalls = 0, draft = "", origin = "llm";
     let finishFailure: string | null = null;
@@ -746,7 +815,7 @@ ${vision.uncertainties?.length ? `- ملاحظات وضوح الصورة: ${visi
             }
         } else {
             if (finishFailure && finishFailure !== "incomplete_writer_draft") throw new Error(finishFailure);
-            const simpleSocial = social && !evidence.length && !previousEvidence.length && !vision && !input.images.length
+            const simpleSocial = social && !evidence.length && !previousEvidence.length && !vision && !inputImages.length
                 && draft.length <= 280 && !/\d|\|/.test(draft) && checkAgenticDraft(draft, []).length === 0;
             let initial;
             try { initial = finishFailure === "incomplete_writer_draft" ? {passed:false,reasons:[finishFailure]} : simpleSocial ? { passed:true, reasons:[] } : await review(draft); }
@@ -812,14 +881,14 @@ ${vision.uncertainties?.length ? `- ملاحظات وضوح الصورة: ${visi
             ? usedSymbols
             : (vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? sessionState.last_symbols ?? []);
         let deterministicDashboard: string | null = null;
-        if (!input.images.length) {
+        if (!inputImages.length) {
             try {
                 const dash = renderLunaStockDashboard(evidence, proContext.userSavedPositions);
                 if (dash && checkAgenticDraft(dash, verificationEvidence(), userMessage, evidence).length === 0) deterministicDashboard = dash;
             } catch { deterministicDashboard = null; }
         }
         if (deterministicDashboard) origin = "deterministic_dashboard";
-        draft = input.images.length && vision
+        draft = inputImages.length && vision
             ? safeImageEvidenceReply(vision, userMessage) || "وصلت الصورة، لكن لم أتمكن من استخراج حقائق مؤكدة منها. حدّد الجزء المطلوب أو أرسل صورة أوضح."
             : deterministicDashboard || safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
     }

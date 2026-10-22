@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
             body.sessionId || "admin-bench-session",
             `admin-${Date.now()}`,
             "deepseek-flash",
-            { isPro: true, chatSource: body.chatSource || "benchmark", skipReview }
+            { isPro: true, chatSource: body.chatSource || "benchmark", skipReview, mockVisionResult: body.mockVisionResult }
         );
 
         return NextResponse.json({

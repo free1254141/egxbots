@@ -68,8 +68,11 @@ export default function ScannerStatsCalendar({
   const [chartModalStock, setChartModalStock] = useState<{
     symbol: string;
     date: string;
+    toDate?: string;
     signalTime?: string;
     signalPrice?: number;
+    exitPrice?: number;
+    status?: string;
     scannerType?: string;
   } | null>(null);
 
@@ -327,6 +330,11 @@ export default function ScannerStatsCalendar({
         r_vol: 2.5,
         rsi_14: 28,
         signal_time: sig.entry_time || "10:01",
+        // Store actual trade outcome for display
+        realized_return_pct: sig.return_pct || 0,
+        exit_date: sig.exit_date || null,
+        exit_price: sig.exit_price || null,
+        trade_status: sig.status || "active",
       };
 
       if (sig.scanner_type === "volume_surge") {
@@ -516,11 +524,20 @@ export default function ScannerStatsCalendar({
       setShowProModal(true);
       return;
     }
+    // Use exit_date as toDate for multi-day closed signals
+    const today = new Date().toISOString().split("T")[0];
+    const exitDate = (s as any).exit_date || null;
+    const tradeStatus = (s as any).trade_status || "active";
+    // For closed signals: use exit_date; for active: use today
+    const toDate = exitDate && exitDate !== selectedDateStr ? exitDate : (tradeStatus === "active" ? today : undefined);
     setChartModalStock({
       symbol: s.symbol,
       date: selectedDateStr,
+      toDate,
       signalTime: getSignalHHMM((s as any).signal_time),
       signalPrice: s.close,
+      exitPrice: (s as any).exit_price || undefined,
+      status: tradeStatus,
       scannerType,
     });
   };
@@ -1020,7 +1037,13 @@ export default function ScannerStatsCalendar({
                             const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
-                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            // Prefer realized return from actual closed trade, then intraday peak, then raw change_pct
+                            const realizedPct = (s as any).realized_return_pct;
+                            const displayPct = gainInfo?.max_gain_pct !== undefined
+                              ? gainInfo.max_gain_pct
+                              : realizedPct !== undefined ? realizedPct : s.change_pct;
+                            const isWin = displayPct >= 0;
+                            const tradeStatus = (s as any).trade_status || "active";
                             return (
                               <div
                                 key={i}
@@ -1052,18 +1075,18 @@ export default function ScannerStatsCalendar({
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span
-                                      className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]"
+                                      className={`font-mono font-black text-xs px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] text-black ${isWin ? "bg-emerald-400" : "bg-rose-400"}`}
                                       title={
                                         gainInfo
                                           ? isAr
                                             ? `أقصى ربح محقق بعد الإشارة: +${gainInfo.max_gain_pct}% (القمة ${gainInfo.peak_price} ج.م الساعة ${gainInfo.peak_time})`
                                             : `Max gain after signal: +${gainInfo.max_gain_pct}%`
-                                          : isAr
-                                          ? "نسبة الارتفاع"
-                                          : "Gain %"
+                                          : tradeStatus !== "active"
+                                          ? isAr ? "النتيجة المحققة للصفقة" : "Realized trade return"
+                                          : isAr ? "نسبة الارتفاع" : "Gain %"
                                       }
                                     >
-                                      +{formatPct(displayPct)}%
+                                      {isWin ? `+${formatPct(displayPct)}%` : `${formatPct(displayPct)}%`}
                                     </span>
                                     <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                                       {formatVol(s.r_vol)}x سيولة
@@ -1142,7 +1165,12 @@ export default function ScannerStatsCalendar({
                             const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
-                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            const realizedPct = (s as any).realized_return_pct;
+                            const displayPct = gainInfo?.max_gain_pct !== undefined
+                              ? gainInfo.max_gain_pct
+                              : realizedPct !== undefined ? realizedPct : s.change_pct;
+                            const isWin = displayPct >= 0;
+                            const tradeStatus = (s as any).trade_status || "active";
                             return (
                               <div
                                 key={i}
@@ -1174,18 +1202,18 @@ export default function ScannerStatsCalendar({
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span
-                                      className="font-mono font-black text-xs px-2 py-0.5 bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]"
+                                      className={`font-mono font-black text-xs px-2 py-0.5 border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] text-black ${isWin ? "bg-emerald-400" : "bg-rose-400"}`}
                                       title={
                                         gainInfo
                                           ? isAr
                                             ? `أقصى ربح محقق بعد الإشارة: +${gainInfo.max_gain_pct}% (القمة ${gainInfo.peak_price} ج.م الساعة ${gainInfo.peak_time})`
                                             : `Max gain after signal: +${gainInfo.max_gain_pct}%`
-                                          : isAr
-                                          ? "نسبة الارتفاع"
-                                          : "Gain %"
+                                          : tradeStatus !== "active"
+                                          ? isAr ? "النتيجة المحققة للصفقة" : "Realized trade return"
+                                          : isAr ? "نسبة الارتفاع" : "Gain %"
                                       }
                                     >
-                                      +{formatPct(displayPct)}%
+                                      {isWin ? `+${formatPct(displayPct)}%` : `${formatPct(displayPct)}%`}
                                     </span>
                                     <span className="font-mono font-black text-xs px-2 py-0.5 bg-amber-400 text-black border-2 border-black shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                                       {formatVol(s.r_vol)}x سيولة
@@ -1264,7 +1292,11 @@ export default function ScannerStatsCalendar({
                             const isLocked = Boolean(s.is_locked || !isPro);
                             const cleanSym = s.symbol.trim().toUpperCase().replace(".CA", "").replace(".EGX", "");
                             const gainInfo = intradayGains[cleanSym];
-                            const displayPct = gainInfo?.max_gain_pct !== undefined ? gainInfo.max_gain_pct : s.change_pct;
+                            const realizedPct = (s as any).realized_return_pct;
+                            const displayPct = gainInfo?.max_gain_pct !== undefined
+                              ? gainInfo.max_gain_pct
+                              : realizedPct !== undefined ? realizedPct : s.change_pct;
+                            const tradeStatus = (s as any).trade_status || "active";
                             return (
                               <div
                                 key={i}
@@ -1485,8 +1517,11 @@ export default function ScannerStatsCalendar({
           onClose={() => setChartModalStock(null)}
           symbol={chartModalStock.symbol}
           date={chartModalStock.date}
+          toDate={chartModalStock.toDate}
           signalTime={chartModalStock.signalTime}
           signalPrice={chartModalStock.signalPrice}
+          exitPrice={chartModalStock.exitPrice}
+          status={chartModalStock.status}
           scannerType={chartModalStock.scannerType}
           isAr={isAr}
           onGainLoaded={(gain) => {

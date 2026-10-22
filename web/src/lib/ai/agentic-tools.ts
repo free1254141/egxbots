@@ -179,6 +179,45 @@ async function executeRawTool(
                     .order("date", { ascending: false })
                     .limit(1);
 
+                let baseInd = indRows?.[0] || null;
+                if (!baseInd && ["EGX30", "EGX", "EGX100", "EGX70"].includes(sym)) {
+                    try {
+                        const { data: cacheRow } = await supabase
+                            .from("market_cache")
+                            .select("payload")
+                            .eq("cache_key", "market_status_Egypt")
+                            .limit(1).maybeSingle();
+                        const payload = cacheRow?.payload || {};
+                        const historyList = (sym === "EGX100") ? (payload.egx100 || []) : (payload.egx30 || []);
+                        if (Array.isArray(historyList) && historyList.length > 0) {
+                            const latest = historyList[historyList.length - 1];
+                            const prev = historyList.length > 1 ? historyList[historyList.length - 2] : null;
+                            const changePct = (latest?.close != null && prev?.close != null && prev.close > 0)
+                                ? Number((((latest.close - prev.close) / prev.close) * 100).toFixed(2))
+                                : null;
+                            baseInd = {
+                                date: latest.date,
+                                close: latest.close,
+                                change_pct: changePct,
+                                volume: latest.volume,
+                                r_vol: 1.0,
+                                rsi_14: null,
+                                macd: null,
+                                macd_signal: null,
+                                macd_histogram: null,
+                                bb_upper: null,
+                                bb_lower: null,
+                                ema_50: null,
+                                ema_200: null,
+                                king_ai_score: null,
+                                egx_ai_score: null,
+                            };
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+
                 const { data: wyckoffRows } = await supabase
                     .from("stock_scans_summary")
                     .select("scan_date, acc_score, dist_score, wyckoff_phase, vol_ratio, signal, consecutive_acc_days, consecutive_dist_days")
