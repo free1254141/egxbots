@@ -24,4 +24,5 @@ export const getPublicStockSnapshot = cache(unstable_cache(async (symbol: string
     return { fundamentals: fund.data?.[0] || null, latestPrice: price.data?.[0] || null,
         latestTech: tech.data?.[0] || null, latestScan: scan.data?.[0] || null,
         historicalPrices: [...(history.data || [])].reverse() };
-}, ['public-egx-stock-snapshot-v1'], { revalidate: 3600, tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.recommendations] }));
+}, ['public-egx-stock-snapshot-v1'], { revalidate: 86400,
+    tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.recommendations] }));

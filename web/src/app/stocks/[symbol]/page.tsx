@@ -5,7 +5,16 @@ import { Metadata } from "next";
 import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
 import { selectStockLinks } from "@/lib/seo/sitemap-entries";
 
-export const revalidate = 3600;
+// Pin to Frankfurt so every ISR render shares the same market-query-cache
+// KV namespace. Without this, Vercel routes /stocks/* to the edge region
+// closest to the visitor (iad1, sfo1...) and each region cold-fills Supabase
+// independently -- wasting CPU and multiplying DB reads for identical data.
+export const preferredRegion = "fra1";
+
+// Stock price and technical data is updated once per day by the daily job.
+// 1-hour ISR was overly aggressive; 24h matches actual data cadence and
+// drastically cuts the number of re-renders Vercel has to run per symbol.
+export const revalidate = 86400;
 export async function generateStaticParams() { return []; }
 
 interface PageProps {
