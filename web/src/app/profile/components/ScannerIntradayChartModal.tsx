@@ -365,7 +365,19 @@ export default function ScannerIntradayChartModal({
 
     // 3. Exit Marker (if closed or stopped out)
     if (exitPrice || status === "target_hit" || status === "stopped_out") {
-      const exitCandle = formattedData[formattedData.length - 1];
+      let exitIdx = -1;
+      if (toDate && exitTime) {
+        exitIdx = formattedData.findIndex((c) => c.origDatetime >= `${toDate} ${exitTime}`);
+      }
+      if (exitIdx === -1 && toDate) {
+        for (let i = formattedData.length - 1; i >= 0; i--) {
+          if (formattedData[i].origDatetime.startsWith(toDate)) {
+            exitIdx = i;
+            break;
+          }
+        }
+      }
+      const exitCandle = exitIdx !== -1 ? formattedData[exitIdx] : formattedData[formattedData.length - 1];
       const isWin = status === "target_hit" || (exitPrice && signalPrice && exitPrice > signalPrice);
       markers.push({
         time: exitCandle.time,
@@ -478,99 +490,148 @@ export default function ScannerIntradayChartModal({
         )}
 
         {/* Content Body */}
-        {!loading && data && (
-          <div className="p-3 sm:p-6 space-y-3 sm:space-y-4 overflow-y-auto flex-1">
-            {/* Session Performance KPI Chips Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2.5 font-mono text-xs font-bold">
-              {/* Open */}
-              <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700">
-                <span className="text-[10px] text-zinc-400 block">{isAr ? "افتتاح الجلسة" : "Session Open"}</span>
-                <span className="text-xs sm:text-sm font-black text-white">{data.session_open} ج.م</span>
-              </div>
+        {!loading && data && (() => {
+          const isStoppedOut = status === "stopped_out";
+          const isTargetHit = status === "target_hit";
+          const isClosed = isStoppedOut || isTargetHit || status === "expired";
+          const entryP = signalPrice || data.signal.price || 1;
+          const finalExitP = exitPrice || data.session_close;
+          const realizedReturn = exitPrice
+            ? Number((((exitPrice - entryP) / entryP) * 100).toFixed(2))
+            : Number((((data.session_close - entryP) / entryP) * 100).toFixed(2));
+          const isRealizedWin = realizedReturn > 0;
 
-              {/* Signal Trigger */}
-              <div className="p-2 sm:p-2.5 bg-amber-950/40 border-2 border-amber-500 text-amber-300">
-                <span className="text-[10px] text-amber-400 block flex items-center gap-1 truncate">
-                  <Clock className="w-3 h-3 shrink-0" />
-                  {isAr ? `الإشارة (${data.signal.time})` : `Signal (${data.signal.time})`}
-                </span>
-                <span className="text-xs sm:text-sm font-black">{data.signal.price} ج.م</span>
-              </div>
+          return (
+            <div className="p-3 sm:p-6 space-y-3 sm:space-y-4 overflow-y-auto flex-1">
+              {/* Session Performance KPI Chips Bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2.5 font-mono text-xs font-bold">
+                {/* Open */}
+                <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700">
+                  <span className="text-[10px] text-zinc-400 block">{isAr ? "افتتاح الجلسة" : "Session Open"}</span>
+                  <span className="text-xs sm:text-sm font-black text-white">{data.session_open} ج.م</span>
+                </div>
 
-              {/* Peak High After Signal */}
-              <div className="p-2 sm:p-2.5 bg-emerald-950/40 border-2 border-emerald-500 text-emerald-300">
-                <span className="text-[10px] text-emerald-400 block flex items-center gap-1 truncate">
-                  <Target className="w-3 h-3 shrink-0" />
-                  {isAr ? `أعلى قمة (${data.peak_time})` : `Peak (${data.peak_time})`}
-                </span>
-                <span className="text-xs sm:text-sm font-black">{data.session_high} ج.م</span>
-              </div>
+                {/* Signal Trigger */}
+                <div className="p-2 sm:p-2.5 bg-amber-950/40 border-2 border-amber-500 text-amber-300">
+                  <span className="text-[10px] text-amber-400 block flex items-center gap-1 truncate">
+                    <Clock className="w-3 h-3 shrink-0" />
+                    {isAr ? `الإشارة (${data.signal.time})` : `Signal (${data.signal.time})`}
+                  </span>
+                  <span className="text-xs sm:text-sm font-black">{data.signal.price} ج.م</span>
+                </div>
 
-              {/* Max Gain from Signal */}
-              <div className="p-2 sm:p-2.5 bg-emerald-500 text-black border-2 border-black font-black">
-                <span className="text-[10px] uppercase block truncate">{isAr ? "أقصى ربح للإشارة" : "Max Gain"}</span>
-                <span className="text-sm sm:text-base font-black">+{data.signal.max_gain_pct}%</span>
-              </div>
+                {/* Peak High After Signal */}
+                <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700 text-zinc-300">
+                  <span className="text-[10px] text-zinc-400 block flex items-center gap-1 truncate">
+                    <Target className="w-3 h-3 shrink-0" />
+                    {isAr ? `أعلى قمة بعد الإشارة (${data.peak_time})` : `Peak (${data.peak_time})`}
+                  </span>
+                  <span className="text-xs sm:text-sm font-black text-white">{data.session_high} ج.م</span>
+                </div>
 
-              {/* Close */}
-              <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-zinc-400 block">{isAr ? "إغلاق الجلسة" : "Session Close"}</span>
-                <span className="text-xs sm:text-sm font-black text-white">{data.session_close} ج.م</span>
-              </div>
-            </div>
-
-            {/* Candlestick Chart Canvas */}
-            <div className="border-2 sm:border-4 border-black dark:border-white p-1.5 sm:p-2 bg-[#09090b] shadow-[2px_2px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-              <div ref={chartContainerRef} className="w-full h-[280px] sm:h-[360px]" />
-            </div>
-
-            {/* Narrative Timeline Explanation */}
-            <div className="p-3.5 bg-zinc-900 border-2 border-zinc-700 flex items-start gap-2.5 text-xs font-bold text-zinc-300 leading-relaxed">
-              <Info className="w-4 h-4 text-[#FFE600] shrink-0 mt-0.5" />
-              <p>
-                {isAr ? (
-                  (data.signal.max_gain_pct || 0) > 0 ? (
-                    <>
-                      <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
-                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
-                      <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. وواصل السهم صعوده
-                      بعد الإشارة حتى سجل أعلى نقطة في تمام الساعة{" "}
-                      <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> بسعر{" "}
-                      <span className="text-emerald-400 font-mono font-black">{data.session_high} ج.م</span>، محققاً أقصى
-                      فرصة ربح للمضارب بعد التنبيه بلغت{" "}
-                      <span className="text-emerald-400 font-mono font-black">+{data.signal.max_gain_pct}%</span>.
-                    </>
-                  ) : (
-                    <>
-                      <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
-                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
-                      <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. لم يسجل السهم قمة
-                      صاعدة إضافية بعد التنبيه وتراجع/استقر دون سعر الدخول ملتزماً بحدود إدارة المخاطر ووقف الخسارة المحددة مسبقاً.
-                    </>
-                  )
+                {/* Outcome Chip (Target Hit / Stopped Out / Active) */}
+                {isStoppedOut ? (
+                  <div className="p-2 sm:p-2.5 bg-rose-600 text-white border-2 border-black font-black">
+                    <span className="text-[10px] uppercase block truncate">{isAr ? "نتيجة الصفقة (وقف الخسارة)" : "Stop Loss Hit"}</span>
+                    <span className="text-sm sm:text-base font-black">{realizedReturn}%</span>
+                  </div>
+                ) : isTargetHit ? (
+                  <div className="p-2 sm:p-2.5 bg-emerald-500 text-black border-2 border-black font-black">
+                    <span className="text-[10px] uppercase block truncate">{isAr ? "نتيجة الصفقة (تحقق الهدف)" : "Target Hit"}</span>
+                    <span className="text-sm sm:text-base font-black">+{realizedReturn}%</span>
+                  </div>
                 ) : (
-                  (data.signal.max_gain_pct || 0) > 0 ? (
-                    <>
-                      <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
-                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
-                      <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. The stock moved
-                      to reach its subsequent peak at <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> hitting{" "}
-                      <span className="text-emerald-400 font-mono font-black">{data.session_high} EGP</span> (+
-                      {data.signal.max_gain_pct}% max gain after signal).
-                    </>
-                  ) : (
-                    <>
-                      <strong className="text-white">Signal Journey:</strong> Triggered at{" "}
-                      <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> at price{" "}
-                      <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. No higher peak
-                      was registered post-signal as the stock traded flat/lower, remaining within disciplined risk control limits.
-                    </>
-                  )
+                  <div className="p-2 sm:p-2.5 bg-amber-400 text-black border-2 border-black font-black">
+                    <span className="text-[10px] uppercase block truncate">{isAr ? "أقصى صعود لحظي (نشطة)" : "Max Peak Gain"}</span>
+                    <span className="text-sm sm:text-base font-black">+{data.signal.max_gain_pct}%</span>
+                  </div>
                 )}
-              </p>
+
+                {/* Close / Exit Price */}
+                <div className="p-2 sm:p-2.5 bg-zinc-900 border-2 border-zinc-700 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] text-zinc-400 block">
+                    {isClosed ? (isAr ? "سعر الخروج" : "Exit Price") : (isAr ? "آخر سعر لحظي" : "Current Price")}
+                  </span>
+                  <span className="text-xs sm:text-sm font-black text-white">{finalExitP} ج.م</span>
+                </div>
+              </div>
+
+              {/* Candlestick Chart Canvas */}
+              <div className="border-2 sm:border-4 border-black dark:border-white p-1.5 sm:p-2 bg-[#09090b] shadow-[2px_2px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+                <div ref={chartContainerRef} className="w-full h-[280px] sm:h-[360px]" />
+              </div>
+
+              {/* Narrative Timeline Explanation */}
+              <div className="p-3.5 bg-zinc-900 border-2 border-zinc-700 flex items-start gap-2.5 text-xs font-bold text-zinc-300 leading-relaxed">
+                <Info className="w-4 h-4 text-[#FFE600] shrink-0 mt-0.5" />
+                <p>
+                  {isAr ? (
+                    isStoppedOut ? (
+                      <>
+                        <strong className="text-rose-400">إغلاق الصفقة (وقف الخسارة):</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> بسعر{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>.
+                        {data.signal.max_gain_pct > 0 && (
+                          <> سجل السهم قمة مؤقتة عند <span className="text-zinc-300 font-mono font-black">{data.session_high} ج.م</span> (+{data.signal.max_gain_pct}%)، ثم تراجع </>
+                        )}
+                        وكسر مستوى وقف الخسارة المحدد عند{" "}
+                        <span className="text-rose-400 font-mono font-black">{exitPrice ? `${exitPrice} ج.م` : "نقطة الوقف"}</span> بنتيجة محققة{" "}
+                        <span className="text-rose-400 font-mono font-black">{realizedReturn}%</span>. تم تفعيل الخروج الإجباري الصارم لحماية رأس المال ومنع الانزلاق مع الهبوط المتتالي.
+                      </>
+                    ) : isTargetHit ? (
+                      <>
+                        <strong className="text-emerald-400">نجاح الصفقة (تحقيق الهدف):</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> بسعر{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. وواصل السهم صعوده بنجاح حتى حقق الهدف الأول عند سعر{" "}
+                        <span className="text-emerald-400 font-mono font-black">{exitPrice || data.session_high} ج.م</span> محققاً عائداً صافياً بلغ{" "}
+                        <span className="text-emerald-400 font-mono font-black">+{realizedReturn}%</span>.
+                      </>
+                    ) : (data.signal.max_gain_pct || 0) > 0 ? (
+                      <>
+                        <strong className="text-[#FFE600]">قراءة مسار الإشارة (صفقة نشطة):</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. وواصل السهم صعوده
+                        بعد الإشارة حتى سجل أعلى قمة حتى الآن في تمام الساعة{" "}
+                        <span className="text-emerald-400 font-mono font-black">{data.peak_time}</span> بسعر{" "}
+                        <span className="text-emerald-400 font-mono font-black">{data.session_high} ج.م</span> (+{data.signal.max_gain_pct}%)، والصفقة مستمرة قيد المتابعة الحية.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="text-white">قراءة مسار الإشارة:</strong> رصد الإسكانر السهم في تمام الساعة{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> عند سعر{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} ج.م</span>. لم يسجل السهم قمة
+                        صاعدة إضافية بعد التنبيه وتراجع/استقر دون سعر الدخول ملتزماً بحدود إدارة المخاطر ووقف الخسارة.
+                      </>
+                    )
+                  ) : (
+                    isStoppedOut ? (
+                      <>
+                        <strong className="text-rose-400">Trade Closed (Stop Loss):</strong> Entered at{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> @{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. Broke stop loss at{" "}
+                        <span className="text-rose-400 font-mono font-black">{exitPrice || "SL"} EGP</span> ({realizedReturn}%). Exited under disciplined capital protection.
+                      </>
+                    ) : isTargetHit ? (
+                      <>
+                        <strong className="text-emerald-400">Trade Successful (Target Hit):</strong> Entered at{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> @{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. Target 1 achieved at{" "}
+                        <span className="text-emerald-400 font-mono font-black">{exitPrice || data.session_high} EGP</span> (+{realizedReturn}%).
+                      </>
+                    ) : (
+                      <>
+                        <strong className="text-[#FFE600]">Active Signal:</strong> Entered at{" "}
+                        <span className="text-[#FFE600] font-mono font-black">{data.signal.time}</span> @{" "}
+                        <span className="text-white font-mono font-black">{data.signal.price} EGP</span>. Peak reached:{" "}
+                        <span className="text-emerald-400 font-mono font-black">{data.session_high} EGP</span> (+{data.signal.max_gain_pct}%).
+                      </>
+                    )
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Modal Footer */}
         <div className="p-4 border-t-4 border-black dark:border-white bg-zinc-900 flex items-center justify-between">

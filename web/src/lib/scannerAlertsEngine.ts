@@ -262,33 +262,63 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     const rsi = Number(r.rsi_14 || 50);
     const rVol = Number(r.r_vol || 1.0);
     const bbUpper = Number(r.bb_upper || 0);
+    const ema20 = Number(r.ema_20 || 0);
+    const turnover = close * vol;
 
-    // Stage 1: Volume Surge (>= 1.5x average volume with positive movement)
-    if (config.scanners_enabled.volume_surge && rVol >= 1.5 && vol >= 100_000 && change >= 0.5) {
+    // Trend filter: Stock must be trading at or above EMA20 (or EMA20 not available)
+    const isUptrend = ema20 <= 0 || close >= ema20 * 0.995;
+
+    // Stage 1: Volume Surge (Strict: rVol >= 2.2x, liquidity turnover >= 400k, change >= 1.5%, uptrend, healthy RSI)
+    if (
+      config.scanners_enabled.volume_surge &&
+      rVol >= 2.2 &&
+      vol >= 200_000 &&
+      turnover >= 400_000 &&
+      change >= 1.5 &&
+      isUptrend &&
+      rsi >= 35 &&
+      rsi <= 72
+    ) {
       volumeMatches.push({ symbol, close, change_pct: change, r_vol: rVol });
     }
 
-    // Stage 2: Breakout (close breaking BB upper or surge + >= 2.0% change)
-    const isBbBreakout = bbUpper > 0 && close >= bbUpper * 0.995;
-    if (config.scanners_enabled.breakout && (isBbBreakout || (rVol >= 1.5 && change >= 2.0))) {
+    // Stage 2: Breakout (Strict: True penetration of BB upper with volume confirmation rVol >= 1.8x, change >= 2.5%, uptrend)
+    const isConfirmedBreakout =
+      bbUpper > 0 &&
+      close >= bbUpper &&
+      rVol >= 1.8 &&
+      vol >= 250_000 &&
+      turnover >= 500_000 &&
+      change >= 2.5 &&
+      isUptrend;
+    if (config.scanners_enabled.breakout && isConfirmedBreakout) {
       breakoutMatches.push({ symbol, close, change_pct: change, r_vol: rVol });
     }
 
-    // Stage 3: RSI Oversold Bounce (RSI <= 35 with positive movement)
-    if (config.scanners_enabled.rsi_oversold && rsi > 0 && rsi <= 35 && change >= 0.2) {
+    // Stage 3: RSI Oversold Bounce (Strict: Deep oversold RSI <= 28, solid bounce change >= 1.0%, not in freefall)
+    const notCrashingCliff = ema20 <= 0 || close >= ema20 * 0.85;
+    if (
+      config.scanners_enabled.rsi_oversold &&
+      rsi > 0 &&
+      rsi <= 28 &&
+      change >= 1.0 &&
+      notCrashingCliff &&
+      vol >= 100_000 &&
+      turnover >= 250_000
+    ) {
       oversoldMatches.push({ symbol, close, rsi_14: rsi, change_pct: change });
     }
   }
 
-  // Sort and limit to top 6 per category
+  // Sort and limit to top 2 highest-conviction setups per category (Quality > Quantity)
   volumeMatches.sort((a, b) => b.r_vol - a.r_vol);
-  const topVolume = volumeMatches.slice(0, 6);
+  const topVolume = volumeMatches.slice(0, 2);
 
   breakoutMatches.sort((a, b) => b.change_pct - a.change_pct);
-  const topBreakout = breakoutMatches.slice(0, 6);
+  const topBreakout = breakoutMatches.slice(0, 2);
 
   oversoldMatches.sort((a, b) => a.rsi_14 - b.rsi_14);
-  const topOversold = oversoldMatches.slice(0, 6);
+  const topOversold = oversoldMatches.slice(0, 2);
 
   // Stage 4: Disclosures & News
   let disclosuresMatches: Array<{ id: string; title: string; symbol?: string; published_at?: string }> = [];
@@ -498,6 +528,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       updated_at: new Date().toISOString(),
     };
 
+    // Breakeven Trail: If stock reached >= +2.5% gain towards target, raise stop loss to entry price
+    const hasBreakevenProtection = (sig.highest_price || highestPrice) >= sig.entry_price * 1.025;
+    const effectiveStopLoss = hasBreakevenProtection
+      ? Math.max(sig.stop_loss, sig.entry_price)
+      : sig.stop_loss;
+
     if (highestPrice >= sig.target_1) {
       const exitPrice = sig.target_1;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
@@ -512,19 +548,24 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       };
       hitTargetSignals.push(updatedSig);
       currentClosed.unshift(updatedSig);
-    } else if (lowestPrice <= sig.stop_loss) {
-      const exitPrice = sig.stop_loss;
+    } else if (lowestPrice <= effectiveStopLoss) {
+      const exitPrice = effectiveStopLoss;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
+      const isBreakeven = hasBreakevenProtection && effectiveStopLoss >= sig.entry_price;
       updatedSig = {
         ...updatedSig,
-        status: "stopped_out",
+        status: isBreakeven ? "target_hit" : "stopped_out",
         exit_price: exitPrice,
         return_pct: realizedReturn,
         exit_date: cairoTime.dateStr,
         exit_time: cairoTime.timeStr,
-        exit_reason: "ضرب وقف الخسارة 🛑",
+        exit_reason: isBreakeven ? "حماية الأرباح / تفعيل وقف التعادل 🛡️" : "ضرب وقف الخسارة 🛑",
       };
-      stoppedOutSignals.push(updatedSig);
+      if (isBreakeven) {
+        hitTargetSignals.push(updatedSig);
+      } else {
+        stoppedOutSignals.push(updatedSig);
+      }
       currentClosed.unshift(updatedSig);
     } else if (sig.sessions_count >= sig.max_sessions) {
       const exitPrice = currPrice;
@@ -544,8 +585,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
   }
 
-  // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active)
+  // Portfolio Cap: Maximum 8 simultaneously active swing trades to prevent portfolio overwhelm
+  const MAX_PORTFOLIO_ACTIVE = 8;
+
+  // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active and portfolio has room)
   for (const v of freshVolume) {
+    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
     if (stillActiveSignals.some((s) => s.symbol === v.symbol)) continue;
     const plan = calculateScannerTradePlan(v.close, "volume_surge");
     stillActiveSignals.push({
@@ -573,6 +618,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     });
   }
   for (const b of freshBreakout) {
+    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
     if (stillActiveSignals.some((s) => s.symbol === b.symbol)) continue;
     const plan = calculateScannerTradePlan(b.close, "breakout");
     stillActiveSignals.push({
@@ -600,6 +646,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     });
   }
   for (const o of freshOversold) {
+    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
     if (stillActiveSignals.some((s) => s.symbol === o.symbol)) continue;
     const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
     stillActiveSignals.push({

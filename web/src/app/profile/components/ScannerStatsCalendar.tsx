@@ -71,6 +71,7 @@ export default function ScannerStatsCalendar({
     toDate?: string;
     signalTime?: string;
     signalPrice?: number;
+    exitTime?: string;
     exitPrice?: number;
     status?: string;
     scannerType?: string;
@@ -352,6 +353,38 @@ export default function ScannerStatsCalendar({
       }
     }
 
+    // Enrich all stock entries with official tracked signals data (exit_date, status, return_pct, signal_time, exit_price)
+    const signalLookup = new Map<string, any>();
+    for (const sig of allSignals) {
+      if (sig.symbol && sig.entry_date) {
+        signalLookup.set(`${sig.symbol}_${sig.entry_date}`, sig);
+        if (!signalLookup.has(sig.symbol)) {
+          signalLookup.set(sig.symbol, sig);
+        }
+      }
+    }
+
+    for (const dEntry of map.values()) {
+      const enrichStock = (s: any) => {
+        const sig = signalLookup.get(`${s.symbol}_${dEntry.date}`) || signalLookup.get(s.symbol);
+        if (sig) {
+          return {
+            ...s,
+            signal_time: sig.entry_time || s.signal_time,
+            exit_date: sig.exit_date || null,
+            exit_price: sig.exit_price || null,
+            trade_status: sig.status || "active",
+            realized_return_pct: sig.return_pct !== undefined ? sig.return_pct : s.change_pct,
+          };
+        }
+        return s;
+      };
+
+      dEntry.stocks.volume = dEntry.stocks.volume.map(enrichStock);
+      dEntry.stocks.breakout = dEntry.stocks.breakout.map(enrichStock);
+      dEntry.stocks.oversold = dEntry.stocks.oversold.map(enrichStock);
+    }
+
     // Compute averages and normalize daily counts to UNIQUE stock opportunities (avoiding inflated repeating snapshot sums)
     for (const entry of map.values()) {
       if (entry.scansCount > 0) {
@@ -536,6 +569,7 @@ export default function ScannerStatsCalendar({
       toDate,
       signalTime: getSignalHHMM((s as any).signal_time),
       signalPrice: s.close,
+      exitTime: (s as any).exit_time || undefined,
       exitPrice: (s as any).exit_price || undefined,
       status: tradeStatus,
       scannerType,
@@ -1520,6 +1554,7 @@ export default function ScannerStatsCalendar({
           toDate={chartModalStock.toDate}
           signalTime={chartModalStock.signalTime}
           signalPrice={chartModalStock.signalPrice}
+          exitTime={chartModalStock.exitTime}
           exitPrice={chartModalStock.exitPrice}
           status={chartModalStock.status}
           scannerType={chartModalStock.scannerType}
