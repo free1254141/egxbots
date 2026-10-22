@@ -147,13 +147,16 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         };
     }, [sessionId, supabase]);
 
-    // Fallback polling while the chat is open. Realtime (above) delivers new
-    // messages instantly; this only covers dropped websocket events, so it runs
-    // every 30s and pauses while the tab is hidden.
+    // Fallback polling ONLY while the chat is open AND the tab is visible.
+    // Realtime (above) delivers new messages instantly via WebSocket — this
+    // only covers rare dropped WS events. Interval raised to 120s (was 30s)
+    // to further reduce Vercel Serverless invocations.
+    // Additionally, a visibilitychange listener re-fetches on tab focus so
+    // the user always sees fresh messages when returning to the tab.
     useEffect(() => {
         if (!sessionId || !isOpen) return;
 
-        const interval = setInterval(async () => {
+        const syncMessages = async () => {
             if (typeof document !== "undefined" && document.hidden) return;
             try {
                 const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
@@ -171,38 +174,22 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             } catch {
                 // silent background catch
             }
-        }, 30000);
+        };
 
-        return () => clearInterval(interval);
+        // Re-sync when the user returns to this tab (free — no extra Vercel call while hidden)
+        const onVisibilityChange = () => {
+            if (typeof document !== "undefined" && !document.hidden) void syncMessages();
+        };
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        // Periodic safety-net: 120s (was 30s) — Realtime handles the real-time part
+        const interval = setInterval(syncMessages, 120000);
+
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+        };
     }, [sessionId, isOpen]);
-
-    // Background fallback while closed (every 60 seconds, visible tabs only) to
-    // update the unread badge if a realtime event was missed.
-    useEffect(() => {
-        if (!sessionId || isOpen || !isPro) return;
-
-        const interval = setInterval(async () => {
-            if (typeof document !== "undefined" && document.hidden) return;
-            try {
-                const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
-                const data = await res.json();
-                if (data.messages && Array.isArray(data.messages)) {
-                    setMessages((prev) => {
-                        const prevIds = new Set(prev.map((m) => m.id));
-                        const newAdminMessages = data.messages.filter((m: any) => m.sender === "admin" && !prevIds.has(m.id));
-                        if (newAdminMessages.length > 0) {
-                            setUnreadCount((c) => c + newAdminMessages.length);
-                        }
-                        return data.messages;
-                    });
-                }
-            } catch {
-                // silent
-            }
-        }, 60000);
-
-        return () => clearInterval(interval);
-    }, [sessionId, isOpen, isPro]);
 
     // Reset unread count when opening the widget
     useEffect(() => {
