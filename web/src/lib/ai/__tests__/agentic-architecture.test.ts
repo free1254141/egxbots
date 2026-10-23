@@ -2080,7 +2080,7 @@ describe("Agentic tool correctness and failure boundaries", () => {
         };
 
         // When a user asks "حلل دى" with a chart of EGX30 after previous conversation was about ABUK
-        const stream = (runAgenticPipelineStream as any)({
+        const stream = (runAgenticPipelineStream as unknown as (args: any) => any)({
             userMessage: "حلل دى",
             images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             sessionState: {

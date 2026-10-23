@@ -7,6 +7,16 @@ const nextConfig = {
     localeDetection: false,
   },
 
+  async redirects() {
+    return [
+      {
+        source: '/scanner/comparison',
+        destination: '/scanner/technical',
+        permanent: true,
+      },
+    ];
+  },
+
   async rewrites() {
     console.log("Using Python Path:", process.env.PYTHON_PATH || "Default System Python");
     // Rewrites must target the Python backend only — never the Next.js origin.
