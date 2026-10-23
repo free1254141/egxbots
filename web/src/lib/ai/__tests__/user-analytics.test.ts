@@ -117,4 +117,18 @@ describe("admin user analytics", () => {
     });
     expect(rows.at(-1)).toMatchObject({ fullDate: "2026-12-02", activeUsers: 2, newActiveUsers: 1, returningActiveUsers: 0, unknownSignupUsers: 1 });
   });
+
+  it("excludes expired subscriptions from active Pro subscribers", () => {
+    const result = buildUserAnalytics({
+      now,
+      profiles: [{ id: "active-pro" }, { id: "expired-pro" }],
+      subscriptions: [
+        { user_id: "active-pro", plan_id: "pro", status: "active", current_period_end: "2026-09-25T12:00:00.000Z" },
+        { user_id: "expired-pro", plan_id: "pro", status: "active", current_period_end: "2026-09-20T12:00:00.000Z" },
+      ],
+      events: [],
+      chatMessages: [],
+    });
+    expect(result.activeProUsers).toBe(1);
+  });
 });

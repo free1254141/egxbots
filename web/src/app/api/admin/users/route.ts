@@ -35,8 +35,15 @@ export async function GET(req: NextRequest) {
       const { data: subscriptionRows } = await supabase
         .from("subscriptions")
         .select("user_id,plan_id,status,current_period_end,created_at");
+      const nowMs = Date.now();
       const activePro = new Set((subscriptionRows || [])
-        .filter((row: any) => PRO_PLANS.has(String(row.plan_id || "").toLowerCase()) && String(row.status || "").toLowerCase() === "active")
+        .filter((row: any) => {
+          if (!PRO_PLANS.has(String(row.plan_id || "").toLowerCase())) return false;
+          if (String(row.status || "").toLowerCase() !== "active") return false;
+          if (!row.current_period_end) return true;
+          const end = new Date(String(row.current_period_end)).getTime();
+          return Number.isFinite(end) && end > nowMs;
+        })
         .map((row: any) => String(row.user_id)));
       if (plan === "PRO") cohortUserIds = Array.from(activePro) as string[];
       else {

@@ -338,8 +338,32 @@ def _expired_pro_user_ids() -> Set[str]:
     return set(_expired_pro_subscriptions())
 
 
+def sync_expired_subscriptions_status() -> int:
+    """Transition any subscription with past current_period_end to 'canceled' in Supabase."""
+    _init_supabase()
+    if not supabase:
+        return 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        res = (
+            supabase.table("subscriptions")
+            .update({"status": "canceled", "updated_at": now_iso})
+            .eq("status", "active")
+            .lt("current_period_end", now_iso)
+            .execute()
+        )
+        updated = len(res.data or [])
+        if updated > 0:
+            print(f"[SUBSCRIPTIONS] Marked {updated} expired subscription(s) as canceled.")
+        return updated
+    except Exception as exc:
+        print(f"[SUBSCRIPTIONS] Failed to sync expired subscriptions: {exc}")
+        return 0
+
+
 def revoke_expired_pro_members() -> int:
     """Remove users whose Pro entitlement expired from the VIP Telegram chat."""
+    sync_expired_subscriptions_status()
     chat_id = pro_chat_id()
     if not chat_id:
         return 0

@@ -31,11 +31,16 @@ export async function GET() {
 
     // Count linked pro subscribers ready to receive
     const [subRes, profileRes] = await Promise.all([
-      serviceClient.from("subscriptions").select("user_id").eq("status", "active"),
+      serviceClient.from("subscriptions").select("user_id, current_period_end").eq("status", "active"),
       serviceClient.from("profiles").select("id, telegram_chat_id").not("telegram_chat_id", "is", null),
     ]);
 
-    const activeProUids = new Set((subRes.data || []).map((s: any) => s.user_id));
+    const nowMs = Date.now();
+    const activeProUids = new Set(
+      (subRes.data || [])
+        .filter((s: any) => !s.current_period_end || new Date(s.current_period_end).getTime() > nowMs)
+        .map((s: any) => s.user_id)
+    );
     const linkedProCount = (profileRes.data || []).filter((p: any) => activeProUids.has(p.id)).length;
 
     return NextResponse.json({

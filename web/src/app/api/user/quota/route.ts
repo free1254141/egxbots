@@ -137,7 +137,7 @@ export async function GET() {
         label: isLifetime ? "مدى الحياة (Lifetime)" : (pro ? "Pro" : "مجاني"),
         is_pro: pro,
         is_lifetime: isLifetime,
-        status: activeSub?.status || "active",
+        status: pro ? (activeSub?.status || "active") : (activeSub ? "canceled" : "none"),
         current_period_end: activeSub?.current_period_end || null,
         created_at: activeSub?.created_at || null,
         is_founding_member: isFoundingMember,

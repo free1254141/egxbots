@@ -396,14 +396,19 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
   // ── STEP 4: Active Pro Subscribers Stats (Informational) ─────────────────
   const [subRes, profileRes] = await Promise.all([
-    serviceClient.from("subscriptions").select("user_id").eq("status", "active"),
+    serviceClient.from("subscriptions").select("user_id, current_period_end").eq("status", "active"),
     serviceClient
       .from("profiles")
       .select("id, telegram_chat_id")
       .not("telegram_chat_id", "is", null),
   ]);
 
-  const activeProUids = new Set((subRes.data || []).map((s: any) => s.user_id));
+  const nowMs = Date.now();
+  const activeProUids = new Set(
+    (subRes.data || [])
+      .filter((s: any) => !s.current_period_end || new Date(s.current_period_end).getTime() > nowMs)
+      .map((s: any) => s.user_id)
+  );
   const proProfiles = (profileRes.data || []).filter((p: any) => activeProUids.has(p.id));
 
   // Destination Chat IDs: Always route to official VIP Channel unless a test recipient is specified

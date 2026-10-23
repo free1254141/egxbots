@@ -1,5 +1,5 @@
 export type AnalyticsProfile = { id: string; created_at?: string | null };
-export type AnalyticsSubscription = { user_id: string; plan_id?: string | null; status?: string | null };
+export type AnalyticsSubscription = { user_id: string; plan_id?: string | null; status?: string | null; current_period_end?: string | null };
 export type AnalyticsEvent = {
   user_id: string;
   event_name?: string | null;
@@ -174,7 +174,16 @@ export function buildUserAnalytics(input: {
 
   const activeProIds = new Set([...unique(
     (input.subscriptions || [])
-      .filter((sub) => ["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub.plan_id || "").toLowerCase()) && String(sub.status || "").toLowerCase() === "active" && !excludedIds.has(String(sub.user_id)))
+      .filter((sub) => {
+        if (!["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub.plan_id || "").toLowerCase())) return false;
+        if (String(sub.status || "").toLowerCase() !== "active") return false;
+        if (excludedIds.has(String(sub.user_id))) return false;
+        if (sub.current_period_end) {
+          const end = new Date(String(sub.current_period_end)).getTime();
+          if (Number.isFinite(end) && end <= now.getTime()) return false;
+        }
+        return true;
+      })
       .map((sub) => String(sub.user_id))
   )].filter((id) => profileIds.has(id)));
   const pageEvents = (input.events || []).filter((event) => (!event.event_name || event.event_name === "page_view") && !excludedIds.has(String(event.user_id || "")));

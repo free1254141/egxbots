@@ -147,6 +147,31 @@ class TelegramProInviteTests(unittest.TestCase):
         with patch.object(invites, "_init_supabase"), patch.object(invites, "supabase", FakeSupabase()):
             self.assertEqual(set(invites._expired_pro_subscriptions()), {"expired"})
 
+    def test_sync_expired_subscriptions_status(self):
+        class Query:
+            def update(self, values):
+                self.values = values
+                return self
+            def eq(self, col, val):
+                self.eq_col = col
+                self.eq_val = val
+                return self
+            def lt(self, col, val):
+                self.lt_col = col
+                self.lt_val = val
+                return self
+            def execute(self):
+                return type("Response", (), {"data": [{"id": "sub_1"}]})()
+
+        class FakeSupabase:
+            def table(self, name):
+                self.table_name = name
+                return Query()
+
+        with patch.object(invites, "_init_supabase"), patch.object(invites, "supabase", FakeSupabase()):
+            count = invites.sync_expired_subscriptions_status()
+            self.assertEqual(count, 1)
+
     def test_revocation_does_not_repeat_after_successful_marker(self):
         past = datetime.now(timezone.utc) - timedelta(days=1)
 
@@ -165,7 +190,8 @@ class TelegramProInviteTests(unittest.TestCase):
         class FakeSupabase:
             def table(self, name): return Query(name)
 
-        with patch.object(invites, "_expired_pro_subscriptions", return_value={"expired": past}), \
+        with patch.object(invites, "sync_expired_subscriptions_status"), \
+             patch.object(invites, "_expired_pro_subscriptions", return_value={"expired": past}), \
              patch.object(invites, "_init_supabase"), patch.object(invites, "supabase", FakeSupabase()), \
              patch.object(invites, "pro_chat_id", return_value="-100123"), \
              patch.object(invites, "telegram_api") as telegram_api:
