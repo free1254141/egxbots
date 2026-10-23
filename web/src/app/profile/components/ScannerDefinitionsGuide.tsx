@@ -15,7 +15,10 @@ import {
   HelpCircle,
   ExternalLink,
   Sliders,
-  CheckCircle2
+  CheckCircle2,
+  ShieldCheck,
+  Lock,
+  Layers,
 } from "lucide-react";
 
 interface ScannerDefinitionsGuideProps {
@@ -31,27 +34,27 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
       id: "volume_surge",
       titleAr: "رادار السيولة الذكية والتجميع",
       titleEn: "Smart Money & Volume Surge",
-      subtitleAr: "انفجار أحجام التداول وتدفق السيولة المؤسسية غير المعتادة",
-      subtitleEn: "Unusual institutional liquidity injection and accumulation",
+      subtitleAr: "انفجار أحجام التداول وتدفق السيولة المؤسسية في مسار صاعد مؤكد",
+      subtitleEn: "Institutional liquidity injection and accumulation in confirmed uptrends",
       icon: Zap,
       colorBg: "bg-amber-400 text-black",
       badgeClass: "bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-950 dark:text-amber-200",
       borderAccent: "border-amber-400",
-      formula: "rVol = Volume / SMA(Volume, 20) ≥ 2.5x  AND  Change% ≥ 0.0%",
-      formulaAr: "مضاعف السيولة النسبية (rVol) أكبر من أو يساوي 2.5 ضعف متوسط 20 جلسة مع ثبات أو صعود في السعر.",
+      formula: "Close ≥ EMA(20)  AND  rVol ≥ 2.2x  AND  Turnover ≥ 400K EGP  AND  Change% ≥ +1.5%  AND  RSI ∈ [35, 72]",
+      formulaAr: "شرط اتجاه صاعد رئيسي (السعر أعلى من متوسط EMA 20) + انفجار سيولة نسبية (rVol ≥ 2.2x) + قيمة تداول لا تقل عن 400 ألف جنيه + صعود فعلي بنسبة +1.5% مع مؤشر RSI معتدل وغير متضخم.",
       explanationAr:
-        "يرصد هذا الإسكانر الأسهم التي يدخلها صانع السوق أو مؤسسات مالية بأحجام تداول ضخمة تفوق المعدل الطبيعي بـ 150% إلى 300% في وقت مبكر من الجلسة. عندما يرتفع حجم التداول دون هبوط في السعر، فهذا يعني وجود امتصاص وتجميع للكميات المعروضة تمهيداً لحركة صاعدة.",
+        "يرصد هذا الإسكانر التدفقات النقدية المؤسسية الحقيقية؛ حيث يشترط وجود تجميع بأحجام تداول تفوق المعدل بـ 120% على الأقل وقيمة تداول تتجاوز 400 ألف جنيه، مع ضرورة أن يكون السعر في اتجاه صاعد فوق متوسط 20 يوماً لضمان عدم الوقوع في مصائد التصريف والأسهم الهابطة.",
       explanationEn:
-        "Tracks stocks experiencing massive buying volume 2.5x higher than the 20-day moving average, signaling smart money accumulation before the price takes off.",
+        "Tracks confirmed smart money inflows: requiring relative volume ≥ 2.2x, turnover ≥ 400K EGP, and price sustaining above EMA(20) to filter out fake spikes in downtrends.",
       tradingTipsAr: [
-        "راقب أول 30 إلى 60 دقيقة من ظهور الإشارة للتأكد من استمرار تدفق عروض الشراء في دفتر الأوامر (Market Depth).",
-        "يكون الدخول الأمثل مع اختراق السهم لأعلى سعر حققته شمعة السيولة الانفجارية.",
-        "وقف الخسارة المثالي: كسر قاع الشمعة التي ظهر فيها انفجار السيولة مع إغلاق نصف ساعة."
+        "الهدف الربحي المقترح: +4.5% | وقف الخسارة الأولي: -3.0%.",
+        "تأمين التعادل الذكي (Breakeven): بمجرد وصول السهم إلى ربح +2.5%، يتحول وقف الخسارة تلقائياً إلى سعر الدخول لضمان عدم تحول أي صفقة رابحة إلى خسارة.",
+        "الدخول الأمثل مع اختراق قمة شمعة السيولة الانفجارية في أول 30 دقيقة من ظهور الإشارة مع متابعة عمق دفتر الأوامر."
       ],
       tradingTipsEn: [
-        "Monitor order book depth in the first 30-60 mins to confirm steady bid pressure.",
-        "Best entry is on a break above the volume candle's high.",
-        "Stop-loss: Under the low of the surge candle."
+        "Target: +4.5% | Initial Stop-Loss: -3.0%.",
+        "Smart Breakeven Protection: Once the trade reaches +2.5% gain, the stop-loss automatically moves to entry price (0.0% risk).",
+        "Optimal entry on breakout above the volume surge candle high with steady bid depth."
       ],
       scanIntervalAr: "فحص لحظي كل 5 دقائق طوال ساعات جلسة البورصة المصرية.",
     },
@@ -59,27 +62,27 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
       id: "breakout",
       titleAr: "ماسح الاختراقات الفنية وكسر القمم",
       titleEn: "Technical Breakouts & Highs",
-      subtitleAr: "تجاوز المقاومات التاريخية وقمم 20 جلسة بزخم سيولة مؤكد",
-      subtitleEn: "Clearing 20-day high resistance with confirming trading volume",
+      subtitleAr: "اختراق المقاومات العلوية للبولينجر باند وتجاوز القمم بزخم وسيولة مؤكدة",
+      subtitleEn: "Bollinger Upper Band breakout clearing resistance with confirmed volume",
       icon: ArrowUpRight,
       colorBg: "bg-emerald-400 text-black",
       badgeClass: "bg-emerald-100 text-emerald-900 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-200",
       borderAccent: "border-emerald-500",
-      formula: "Close > High(20)  AND  Close ≥ (High × 0.98)  AND  rVol ≥ 1.5x",
-      formulaAr: "سعر الإغلاق يتجاوز أعلى قمة خلال 20 جلسة تداول سابقة، والإغلاق بالقرب من أعلى نقطة في الشمعة مع حجم تداول لا يقل عن 1.5x.",
+      formula: "Close ≥ BB_Upper  AND  rVol ≥ 1.8x  AND  Turnover ≥ 500K EGP  AND  Change% ≥ +2.5%  AND  Close ≥ EMA(20)",
+      formulaAr: "اختراق حقيقي للشريط العلوي لمؤشر بولينجر باند (BB Upper) مع سيولة قوية (rVol ≥ 1.8x) وقيمة تداول ≥ 500 ألف جنيه وارتفاع لا يقل عن +2.5% مع تأكيد المسار الصاعد فوق EMA(20).",
       explanationAr:
-        "يعتبر كسر القمم والمقاومات الفنية الرئيسية من أقوى الإشارات الكلاسيكية في التحليل الفني. يضمن الإسكانر عدم الوقوع في فخ الاختراق الوهمي (Fakeout) باشتراط تأكيد السيولة ($rVol \ge 1.5$) وإغلاق السعر قرب أعلى مستوى يومي.",
+        "يعتبر اختراق القمم والشريط العلوي لمؤشر بولينجر باند إشارة كلاسيكية لبداية موجة اندفاع سعرية حادة. يضمن هذا الإسكانر استبعاد الاختراقات الوهمية (Fakeouts) عبر فرض شروط سيولة صارمة (500 ألف جنيه كحد أدنى) وزخم نسبي لا يقل عن 1.8 ضعف الطبيعي.",
       explanationEn:
-        "Detects true bullish breakouts clearing 20-day resistance levels with confirmed volume to filter out fake breakouts.",
+        "Detects true bullish breakouts above the upper Bollinger Band with confirmed institutional turnover (≥ 500K EGP) to filter out deceptive fakeouts.",
       tradingTipsAr: [
-        "شراء الاختراق المباشر للمضاربين السريعين، أو انتظار اختبار المقاومة المخترقة بعد تحولها لدعم (Retest).",
-        "تأكد من عدم وجود مقاومات عنيفة قريبة على الفاصل الزمني الأسبوعي (Weekly).",
-        "وقف الخسارة: الإغلاق العكسي أسفل خط المقاومة المخترقة."
+        "الهدف الربحي المقترح: +6.0% | وقف الخسارة الأولي: -3.5%.",
+        "تأمين التعادل الذكي (Breakeven): يرتفع وقف الخسارة إلى سعر الشراء فور وصول الربح إلى +2.5% لتأمين رأس المال.",
+        "يفضل الشراء الفوري مع الإغلاق فوق المقاومة، أو الدخول مع إعادة الاختبار (Retest) إذا كان السوق في حالة تذبذب عام."
       ],
       tradingTipsEn: [
-        "Aggressive entry at breakout trigger, or conservative entry on retest of broken resistance.",
-        "Ensure no major weekly resistances are directly overhead.",
-        "Stop-loss: Daily close back below the broken resistance level."
+        "Target: +6.0% | Initial Stop-Loss: -3.5%.",
+        "Smart Breakeven: Stop-loss automatically moves to breakeven at +2.5% gain.",
+        "Buy breakout directly or on retest of the broken resistance level."
       ],
       scanIntervalAr: "فحص لحظي كل 5 دقائق طوال ساعات الجلسة.",
     },
@@ -87,29 +90,59 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
       id: "rsi_oversold",
       titleAr: "ماسح التشبع البيعي وصيد القيعان",
       titleEn: "RSI Oversold & Bottom Fishing",
-      subtitleAr: "اقتناص الأسهم التي بالغت في الهبوط عند مستويات ارتداد قوية",
-      subtitleEn: "Spotting deeply oversold stocks hitting historical support zones",
+      subtitleAr: "اقتناص الارتدادات السريعة للأسهم المتشبعة بيعياً مع حماية الهاوية السعرية",
+      subtitleEn: "Precision bottom-fishing for deeply oversold stocks with cliff guard protection",
       icon: Target,
       colorBg: "bg-sky-400 text-black",
       badgeClass: "bg-sky-100 text-sky-900 border-sky-500 dark:bg-sky-950 dark:text-sky-200",
       borderAccent: "border-sky-500",
-      formula: "RSI(14) ≤ 30.0  AND  Price near Support",
-      formulaAr: "مؤشر القوة النسبية RSI لفترة 14 شمعة أقل من أو يساوي 30 نقطة، مع تواجد السعر قرب دعوم تاريخية.",
+      formula: "RSI(14) ≤ 28.0  AND  Reversal Change% ≥ +1.0%  AND  Close ≥ EMA(20) × 0.85  AND  Turnover ≥ 250K EGP",
+      formulaAr: "تشبع بيعي عميق وحقيقي (RSI ≤ 28) مع ظهور شمعة ارتداد خضراء مؤكدة (+1.0% على الأقل) وشرط أمان الهاوية (السعر لا يقل عن 85% من متوسط EMA 20 لمنع صيد السكاكين الساقطة).",
       explanationAr:
-        "يحدث التشبع البيعي عندما تسيطر موجة خوف أو بيع عاطفي مفرط على السهم. وصول مؤشر RSI إلى ما دون 30 نقطة يعكس استنزاف قوى البائعين واقتراب حدوث ارتداد فني سريع (Mean Reversion) نحو متوسطات السعر الطبيعية.",
+        "يحدث التشبع البيعي الحقيقي عندما يصل السهم لمرحلة استنزاف تام للبيع العاطفي. اشترطنا نزول RSI لما دون 28 مع بداية ارتداد سعري فعلي بنسبة 1%+، والأهم هو 'فلتر حماية الهاوية' الذي يستبعد الأسهم المنهارة كلياً التي تكسر متوسطاتها السعرية بعنف وتستمر في السقوط الحر.",
       explanationEn:
-        "Identifies heavily oversold stocks where selling exhaustion is reached, preparing for a strong mean-reversion technical bounce.",
+        "Catches strong technical bounces from deep oversold levels (RSI ≤ 28) with a confirmed green reversal tick (+1.0%) and a strict cliff guard to avoid falling knives.",
       tradingTipsAr: [
-        "لا تدخل بمجرد ملامسة RSI للرقم 30؛ انتظر ظهور أول شمعة خضراء انعكاسية (مطرقة Hammer أو ابتلاع شرائي Engulfing).",
-        "قسّم الدخول على دفعتين؛ دفعة عند بداية الانعكاس ودفعة ثانية بعد تأكيد كسر خط اتجاه هابط فرعي.",
-        "الأهداف الأولية: الوصول لمستوى RSI = 50 أو متوسط الحركة 20 يوم (SMA20)."
+        "الهدف الربحي المقترح: +4.0% | وقف الخسارة الأولي الصارم: -2.8%.",
+        "تأمين التعادل الذكي (Breakeven): يرتفع الوقف لسعر الدخول فورياً بمجرد لمس +2.5% ربح.",
+        "هذه الاستراتيجية للمضاربة السريعة (Mean Reversion)؛ ينصح بجني الأرباح فور الوصول للهدف أو عودة RSI لمستوى 45-50."
       ],
       tradingTipsEn: [
-        "Do not enter blindly; wait for a confirmed bullish reversal candle (Hammer or Engulfing).",
-        "Scale in with 2 tranches: first upon reversal signal, second upon crossing RSI 40.",
-        "Primary targets: SMA(20) or RSI returning to 50 midpoint."
+        "Target: +4.0% | Strict Stop-Loss: -2.8%.",
+        "Smart Breakeven: Stops trail to cost basis at +2.5% gain.",
+        "Quick mean-reversion swing: take profits as RSI rebounds towards 45-50."
       ],
       scanIntervalAr: "فحص دوري كل 5 دقائق لحساب مستويات RSI بدقة.",
+    },
+    {
+      id: "risk_rules",
+      titleAr: "منظومة حماية رأس المال والتعادل الذكي",
+      titleEn: "Capital Protection & Breakeven Guard",
+      subtitleAr: "تأمين الأرباح التلقائي، سقف الصفقات المفتوحة، وفلاتر حماية المحفظة",
+      subtitleEn: "Automated breakeven trails, portfolio exposure capping, and low-float traps exclusion",
+      icon: ShieldCheck,
+      colorBg: "bg-rose-500 text-white",
+      badgeClass: "bg-rose-100 text-rose-900 border-rose-500 dark:bg-rose-950 dark:text-rose-200",
+      borderAccent: "border-rose-500",
+      formula: "Breakeven Stop at +2.5% Gain  |  Max Active Signals = 8  |  Min Turnover ≥ 400K EGP",
+      formulaAr: "نقل الوقف لسعر الدخول فورياً عند +2.5% ربح، حد أقصى 8 صفقات مفتوحة متزامنة، وفلترة سيولة مؤسسية لمنع الأسهم الميتة.",
+      explanationAr:
+        "الهدف الأساسي للرادار ليس كثرة الصفقات بل استدامة نمو المحفظة وحماية رأس المال. تعتمد المنظومة على 4 حواجز دفاعية حديدية تمنع النزيف وتضمن أن أي صفقة حققت ربحاً مبدئياً لا تتحول أبداً إلى خسارة، مع عدم توريط المحفظة في عشرات الأسهم الضعيفة في نفس الوقت.",
+      explanationEn:
+        "Engineered for portfolio longevity and aggressive risk containment: automated breakeven stop-trail at +2.5%, maximum of 8 open positions, and institutional liquidity gating.",
+      tradingTipsAr: [
+        "وقف التعادل الذكي (Breakeven Stop): بمجرد أن يحقق السهم ربحاً يصل إلى +2.5%، يرتفع وقف الخسارة فورياً لسعر الشراء لتصبح مخاطرة الصفقة (0.0%).",
+        "سقف الصفقات المفتوحة (Portfolio Cap): لا يسمح الرادار بفتح أكثر من 8 صفقات نشطة في نفس الوقت لمنع تكديس المخاطر وتشتيت رأس المال في فترات تقلب السوق.",
+        "فلتر السيولة الإلزامي (Turnover Gate): استبعاد فوري لأي سهم يقل حجم تداوله عن 200,000 سهم أو قيمة تداوله عن 400,000 جنيه لحمايتك من الأسهم الميتة ومصائد المصيدة السعرية.",
+        "فلتر الاتجاه الصارم (Trend Shield): اشتراط تواجد السعر فوق متوسط 20 يوم (EMA 20) لمنع شراء الأسهم الواقعة في مسار هابط رئيسي مهما كانت الإغراءات."
+      ],
+      tradingTipsEn: [
+        "Breakeven Stop: Reaching +2.5% gain immediately adjusts stop-loss to entry price (0.0% capital risk).",
+        "Portfolio Cap: Hard cap of 8 simultaneously open signals prevents overexposure and liquidity dilution.",
+        "Turnover Gate: Mandatory minimum 200K volume and 400K EGP turnover keeps low-float traps away.",
+        "Trend Shield: Mandatory Close ≥ EMA(20) prevents catching falling knives in established downtrends."
+      ],
+      scanIntervalAr: "مراقبة مستمرة كل ثانية لأوامر الوقف والأهداف.",
     },
     {
       id: "disclosures",
@@ -207,6 +240,51 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
                 </button>
               );
             })}
+          </div>
+
+          {/* Institutional Guard Pillars Banner */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="border-2 border-black dark:border-white bg-emerald-500/10 dark:bg-emerald-950/40 p-3 flex items-center gap-3">
+              <div className="h-8 w-8 bg-emerald-500 text-white font-black flex items-center justify-center shrink-0 border border-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-black uppercase text-emerald-800 dark:text-emerald-300">
+                  {isAr ? "تأمين التعادل الذكي" : "Breakeven Stop Trail"}
+                </div>
+                <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">
+                  {isAr ? "رفع الوقف لسعر الدخول فور صعود +2.5%" : "Auto trail to entry upon +2.5% gain"}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-2 border-black dark:border-white bg-amber-500/10 dark:bg-amber-950/40 p-3 flex items-center gap-3">
+              <div className="h-8 w-8 bg-amber-500 text-black font-black flex items-center justify-center shrink-0 border border-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-black uppercase text-amber-800 dark:text-amber-300">
+                  {isAr ? "سقف صفقات المحفظة" : "Portfolio Exposure Cap"}
+                </div>
+                <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">
+                  {isAr ? "حد أقصى 8 صفقات مفتوحة متزامنة" : "Max 8 concurrent open signals"}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-2 border-black dark:border-white bg-blue-500/10 dark:bg-blue-950/40 p-3 flex items-center gap-3">
+              <div className="h-8 w-8 bg-blue-500 text-white font-black flex items-center justify-center shrink-0 border border-black shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-black uppercase text-blue-800 dark:text-blue-300">
+                  {isAr ? "حماية الاتجاه والسيولة" : "Trend & Liquidity Gate"}
+                </div>
+                <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400">
+                  {isAr ? "قيمة تداول ≥ 400K وسعر > EMA 20" : "Turnover ≥ 400K & Close > EMA20"}
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Active Scanner Detailed Card */}
