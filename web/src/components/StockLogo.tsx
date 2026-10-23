@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { hasLocalStockLogo } from "@/lib/stock-logo-manifest";
 
 interface StockLogoProps {
     symbol: string;
@@ -15,8 +16,9 @@ export default function StockLogo({
     size = "md",
     className = ""
 }: StockLogoProps) {
-    // logoStatus: 'local' -> 'remote' -> 'error'
-    const [logoStatus, setLogoStatus] = useState<'local' | 'remote' | 'error'>('local');
+    // Sources are tried in order: bundled local file (only if it exists), then the
+    // remote URL. A source that failed to load is remembered so we never retry it.
+    const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
 
     const sizeClasses = {
         sm: "h-6 w-6 text-[10px]",
@@ -38,19 +40,17 @@ export default function StockLogo({
     const bgColor = colors[colorIndex];
 
     // Source selection logic
-    let src = `/logos/${symbol}.svg`;
-    if (logoStatus === 'remote') src = logoUrl || "";
+    const upper = symbol.toUpperCase();
+    const candidates: string[] = [];
+    if (hasLocalStockLogo(upper)) candidates.push(`/logos/${upper}.svg`);
+    if (logoUrl) candidates.push(logoUrl);
+    const src = candidates.find((c) => !failedSrcs.includes(c));
 
     const handleError = () => {
-        if (logoStatus === 'local') {
-            if (logoUrl) setLogoStatus('remote');
-            else setLogoStatus('error');
-        } else {
-            setLogoStatus('error');
-        }
+        if (src) setFailedSrcs((prev) => (prev.includes(src) ? prev : [...prev, src]));
     };
 
-    if (logoStatus === 'error' || (!logoUrl && logoStatus === 'remote')) {
+    if (!src) {
         return (
             <div className={`flex-shrink-0 flex items-center justify-center rounded-xl font-black text-white ${bgColor} ${currentSize} ${className} shadow-inner`}>
                 {initial}

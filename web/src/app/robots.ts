@@ -34,7 +34,22 @@ export default function robots(): MetadataRoute.Robots {
           '/llms-full.txt'
         ],
         disallow: ['/admin', '/api', '/profile'],
-      }
+      },
+      {
+        // SEO-tool / bulk scrapers: no search or AI-answer visibility, but each
+        // crawl of /stocks/* can trigger an on-demand render (Vercel CPU).
+        userAgent: [
+          'AhrefsBot',
+          'SemrushBot',
+          'MJ12bot',
+          'DotBot',
+          'PetalBot',
+          'Bytespider',
+          'DataForSeoBot',
+          'BLEXBot'
+        ],
+        disallow: '/',
+      },
     ],
     sitemap: 'https://egxbots.com/sitemap.xml',
   }

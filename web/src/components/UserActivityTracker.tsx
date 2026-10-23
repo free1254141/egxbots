@@ -19,6 +19,25 @@ function getTrackingSessionId(): string {
   }
 }
 
+// After a 401 the server cannot see this browser's session (expired token). Every
+// further page view would be another failed serverless call, so pause for a while.
+const BLOCK_KEY = "egxbots_activity_blocked_until_v1";
+const BLOCK_MS = 10 * 60 * 1000;
+function trackingBlocked(): boolean {
+  try {
+    return Number(sessionStorage.getItem(BLOCK_KEY) || 0) > Date.now();
+  } catch {
+    return false;
+  }
+}
+function blockTracking() {
+  try {
+    sessionStorage.setItem(BLOCK_KEY, String(Date.now() + BLOCK_MS));
+  } catch {
+    // storage unavailable
+  }
+}
+
 function Tracker() {
   const { user } = useAuth();
   const pathname = usePathname();
@@ -33,6 +52,7 @@ function Tracker() {
     const cleanPath = basePath === "/scanner/backtests" ? `${basePath}?tab=${tab}` : basePath;
     const key = `${user.id}:${cleanPath}`;
     if (lastTracked.current === key) return;
+    if (trackingBlocked()) return;
     lastTracked.current = key;
     void fetch("/api/analytics/events", {
       method: "POST",
@@ -44,7 +64,7 @@ function Tracker() {
         metadata: { title: typeof document !== "undefined" ? document.title : "", ...(basePath === "/scanner/backtests" ? { tab } : {}) },
       }),
       keepalive: true,
-    }).catch(() => undefined);
+    }).then((res) => { if (res.status === 401) blockTracking(); }).catch(() => undefined);
   }, [pathname, tab, user]);
 
   return null;

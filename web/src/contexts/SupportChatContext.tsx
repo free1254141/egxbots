@@ -45,13 +45,29 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             setIsPro(false);
             return;
         }
+        // The plan rarely changes within a session; reuse a recent answer instead of
+        // invoking /api/user/quota (a serverless function) on every full page load.
+        const cacheKey = `egxbots_support_pro_v1:${user.id}`;
+        try {
+            const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+            if (cached && typeof cached.pro === "boolean" && Date.now() - cached.at < 5 * 60 * 1000) {
+                setIsPro(cached.pro);
+                return;
+            }
+        } catch {
+            // ignore storage/JSON errors and fall through to the network
+        }
         fetch("/api/user/quota", { cache: "no-store" })
             .then((res) => res.json())
             .then((data) => {
-                if (data?.ok && data?.plan?.is_pro) {
-                    setIsPro(true);
-                } else {
-                    setIsPro(false);
+                const pro = Boolean(data?.ok && data?.plan?.is_pro);
+                setIsPro(pro);
+                if (data?.ok) {
+                    try {
+                        sessionStorage.setItem(cacheKey, JSON.stringify({ pro, at: Date.now() }));
+                    } catch {
+                        // storage unavailable
+                    }
                 }
             })
             .catch(() => setIsPro(false));
@@ -71,6 +87,11 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         }
     }, [user]);
 
+    // /api/support/messages only answers for the signed-in owner of the session.
+    // Guests (random localStorage id) and the render where `user` is set but
+    // `sessionId` still holds the old guest id only produced 401/403 invocations.
+    const canReadHistory = Boolean(user) && sessionId === user?.id;
+
     const isOpenRef = useRef(isOpen);
     useEffect(() => {
         isOpenRef.current = isOpen;
@@ -81,6 +102,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         if (!sessionId) return;
 
         const fetchHistory = async () => {
+            if (!canReadHistory) return;
             try {
                 const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
                 const data = await res.json();
@@ -145,7 +167,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         return () => {
             void supabase.removeChannel(channel);
         };
-    }, [sessionId, supabase]);
+    }, [sessionId, supabase, canReadHistory]);
 
     // Fallback polling ONLY while the chat is open AND the tab is visible.
     // Realtime (above) delivers new messages instantly via WebSocket — this
@@ -154,7 +176,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
     // Additionally, a visibilitychange listener re-fetches on tab focus so
     // the user always sees fresh messages when returning to the tab.
     useEffect(() => {
-        if (!sessionId || !isOpen) return;
+        if (!sessionId || !isOpen || !canReadHistory) return;
 
         const syncMessages = async () => {
             if (typeof document !== "undefined" && document.hidden) return;
@@ -189,7 +211,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
             clearInterval(interval);
             document.removeEventListener("visibilitychange", onVisibilityChange);
         };
-    }, [sessionId, isOpen]);
+    }, [sessionId, isOpen, canReadHistory]);
 
     // Reset unread count when opening the widget
     useEffect(() => {

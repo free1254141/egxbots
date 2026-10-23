@@ -986,6 +986,7 @@ export default function StockDetailClient({
           {relatedStocks.map((stock) => {
             return (
               <Link
+                prefetch={false}
                 key={stock.symbol}
                 href={`/stocks/${stock.symbol.toLowerCase()}`}
                 className="p-3 border-2 border-black bg-[var(--app-surface-strong)] hover:bg-yellow-400 dark:hover:bg-yellow-500 hover:text-black font-mono transition-all text-center flex flex-col justify-center items-center gap-1 cursor-pointer active:translate-x-[2px] active:translate-y-[2px]"
