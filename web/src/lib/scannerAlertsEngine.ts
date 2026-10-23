@@ -235,15 +235,46 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
     const asOfDate = latestDateRow?.date || cairoTime.dateStr;
 
-    const { data: indicators, error: indErr } = await serviceClient
-      .from("stock_technical_indicators")
-      .select("symbol, close, change_pct, volume, vol_sma20, r_vol, rsi_14, bb_upper, ema_20")
-      .eq("exchange", "EGX")
-      .eq("date", asOfDate)
-      .limit(300);
+    const [indRes, priceRes] = await Promise.all([
+      serviceClient
+        .from("stock_technical_indicators")
+        .select("symbol, close, change_pct, volume, vol_sma20, r_vol, rsi_14, bb_upper, ema_20")
+        .eq("exchange", "EGX")
+        .eq("date", asOfDate)
+        .limit(300),
+      serviceClient
+        .from("stock_prices")
+        .select("symbol, open, high, low, close, volume")
+        .eq("exchange", "EGX")
+        .eq("date", asOfDate)
+        .limit(300),
+    ]);
 
-    if (!indErr && indicators && indicators.length > 0) {
-      rows = indicators;
+    const ohlcBySym = new Map<string, { open: number; high: number; low: number; close: number; volume: number }>();
+    for (const p of priceRes.data || []) {
+      if (p.symbol) {
+        const s = String(p.symbol).toUpperCase().replace(".CA", "").replace(".EGX", "");
+        ohlcBySym.set(s, {
+          open: Number(p.open || p.close || 0),
+          high: Number(p.high || p.close || 0),
+          low: Number(p.low || p.close || 0),
+          close: Number(p.close || 0),
+          volume: Number(p.volume || 0),
+        });
+      }
+    }
+
+    if (!indRes.error && indRes.data && indRes.data.length > 0) {
+      rows = indRes.data.map((r: any) => {
+        const s = String(r.symbol || "").toUpperCase().replace(".CA", "").replace(".EGX", "");
+        const ohlc = ohlcBySym.get(s);
+        return {
+          ...r,
+          open: ohlc?.open || Number(r.close || 0),
+          high: Math.max(Number(r.close || 0), ohlc?.high || Number(r.close || 0)),
+          low: ohlc?.low ? Math.min(Number(r.close || 0), ohlc.low) : Number(r.close || 0),
+        };
+      });
     }
   } catch (err) {
     console.warn("stock_technical_indicators query fallback:", err);
@@ -257,6 +288,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   for (const r of rows) {
     const symbol = String(r.symbol || "").toUpperCase();
     const close = Number(r.close || 0);
+    const open = Number(r.open || close);
     const change = Number(r.change_pct || 0);
     const vol = Number(r.volume || 0);
     const rsi = Number(r.rsi_14 || 50);
@@ -265,6 +297,9 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     const ema20 = Number(r.ema_20 || 0);
     const turnover = close * vol;
 
+    // Exclude penny stock traps (< 1.50 EGP) and red distribution candles
+    if (close < 1.5 || close < open * 0.995) continue;
+
     // Trend filter: Stock must be trading at or above EMA20 (or EMA20 not available)
     const isUptrend = ema20 <= 0 || close >= ema20 * 0.995;
 
@@ -272,7 +307,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     if (
       config.scanners_enabled.volume_surge &&
       rVol >= 2.2 &&
-      vol >= 200_000 &&
+      vol >= 50_000 &&
       turnover >= 400_000 &&
       change >= 1.5 &&
       isUptrend &&
@@ -287,7 +322,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       bbUpper > 0 &&
       close >= bbUpper &&
       rVol >= 1.8 &&
-      vol >= 250_000 &&
+      vol >= 50_000 &&
       turnover >= 500_000 &&
       change >= 2.5 &&
       isUptrend;
@@ -303,7 +338,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       rsi <= 28 &&
       change >= 1.0 &&
       notCrashingCliff &&
-      vol >= 100_000 &&
+      vol >= 50_000 &&
       turnover >= 250_000
     ) {
       oversoldMatches.push({ symbol, close, rsi_14: rsi, change_pct: change });
@@ -534,10 +569,20 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     };
 
     // Breakeven Trail: If stock reached >= +2.5% gain towards target, raise stop loss to entry price
-    const hasBreakevenProtection = (sig.highest_price || highestPrice) >= sig.entry_price * 1.025;
+    const hasBreakevenProtection = Math.max(sig.highest_price || 0, highestPrice) >= sig.entry_price * 1.025;
     const effectiveStopLoss = hasBreakevenProtection
       ? Math.max(sig.stop_loss, sig.entry_price)
       : sig.stop_loss;
+
+    if (hasBreakevenProtection) {
+      updatedSig.stop_loss = effectiveStopLoss;
+      updatedSig.stop_loss_pct = 0;
+    }
+
+    const barLow = p ? p.low : currPrice;
+    const hitStop = hasBreakevenProtection
+      ? currPrice <= effectiveStopLoss
+      : barLow <= effectiveStopLoss;
 
     if (highestPrice >= sig.target_1) {
       const exitPrice = sig.target_1;
@@ -553,7 +598,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       };
       hitTargetSignals.push(updatedSig);
       currentClosed.unshift(updatedSig);
-    } else if (lowestPrice <= effectiveStopLoss) {
+    } else if (hitStop) {
       const exitPrice = effectiveStopLoss;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       const isBreakeven = hasBreakevenProtection && effectiveStopLoss >= sig.entry_price;

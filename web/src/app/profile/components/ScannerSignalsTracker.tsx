@@ -81,27 +81,39 @@ export default function ScannerSignalsTracker({
   }, [closedSignals, categoryFilter]);
 
   const computedKpis = useMemo(() => {
-    if (kpis) return kpis;
-    const totalClosed = closedSignals.length;
-    const wins = closedSignals.filter((s) => (s.return_pct || 0) > 0);
-    const losses = closedSignals.filter((s) => (s.return_pct || 0) < 0);
+    const sourceClosed = categoryFilter === "all" ? closedSignals : filteredClosed;
+    const sourceActive = categoryFilter === "all" ? activeSignals : filteredActive;
+    const totalClosed = sourceClosed.length;
+    if (totalClosed === 0 && kpis && categoryFilter === "all") return kpis;
+
+    const getRet = (s: TrackedScannerSignal) => {
+      if (typeof s.return_pct === "number") return s.return_pct;
+      const ex = s.exit_price ?? s.current_price;
+      if (s.entry_price && ex) {
+        return Number((((ex - s.entry_price) / s.entry_price) * 100).toFixed(2));
+      }
+      return 0;
+    };
+
+    const wins = sourceClosed.filter((s) => getRet(s) > 0 || s.status === "target_hit");
+    const losses = sourceClosed.filter((s) => getRet(s) < 0 && s.status !== "target_hit");
     const winRate = totalClosed > 0 ? Number(((wins.length / totalClosed) * 100).toFixed(1)) : 80.0;
-    const sumWins = wins.reduce((sum, s) => sum + (s.return_pct || 0), 0);
-    const sumLosses = Math.abs(losses.reduce((sum, s) => sum + (s.return_pct || 0), 0));
+    const sumWins = wins.reduce((sum, s) => sum + Math.max(0, getRet(s)), 0);
+    const sumLosses = Math.abs(losses.reduce((sum, s) => sum + Math.min(0, getRet(s)), 0));
     const avgWin = wins.length > 0 ? Number((sumWins / wins.length).toFixed(1)) : 4.2;
-    const avgLoss = losses.length > 0 ? Number((sumLosses / losses.length).toFixed(1)) : 1.8;
+    const avgLoss = losses.length > 0 ? Number((sumLosses / losses.length).toFixed(1)) : 2.5;
     const profitFactor = sumLosses > 0 ? Number((sumWins / sumLosses).toFixed(2)) : 3.2;
-    const topWin = closedSignals.reduce((max, s) => Math.max(max, s.max_gain_pct || 0), 0);
+    const topWin = sourceClosed.reduce((max, s) => Math.max(max, getRet(s), s.max_gain_pct || 0), 0);
     return {
       win_rate_pct: winRate,
       total_closed: totalClosed,
-      total_active: activeSignals.length,
+      total_active: sourceActive.length,
       avg_win_pct: avgWin,
       avg_loss_pct: avgLoss,
       profit_factor: profitFactor,
       top_win_pct: Number(topWin.toFixed(1)),
     };
-  }, [kpis, closedSignals, activeSignals]);
+  }, [kpis, closedSignals, activeSignals, filteredClosed, filteredActive, categoryFilter]);
 
   const getScannerBadge = (type: ScannerType) => {
     switch (type) {
@@ -439,18 +451,37 @@ export default function ScannerSignalsTracker({
                             </div>
 
                             {/* Stop Loss */}
-                            <div className="p-2 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-600 text-rose-700 dark:text-rose-300">
-                              <span className="text-[9px] block uppercase font-bold flex items-center justify-center gap-0.5">
-                                <ShieldAlert className="w-2.5 h-2.5" />
-                                {isAr ? "الوقف" : "SL"}
-                              </span>
-                              <span className="text-xs font-black">
-                                {sig.stop_loss?.toFixed(2)}
-                              </span>
-                              <span className="text-[9px] block font-black">
-                                (-{sig.stop_loss_pct}%)
-                              </span>
-                            </div>
+                            {(() => {
+                              const isBreakevenProtected =
+                                sig.stop_loss_pct === 0 ||
+                                Boolean(sig.stop_loss && sig.entry_price && sig.stop_loss >= sig.entry_price);
+                              return (
+                                <div
+                                  className={`p-2 border-2 ${
+                                    isBreakevenProtected
+                                      ? "bg-sky-50 dark:bg-sky-950/60 border-sky-600 text-sky-700 dark:text-sky-300"
+                                      : "bg-rose-50 dark:bg-rose-950/60 border-rose-600 text-rose-700 dark:text-rose-300"
+                                  }`}
+                                >
+                                  <span className="text-[9px] block uppercase font-bold flex items-center justify-center gap-0.5">
+                                    <ShieldAlert className="w-2.5 h-2.5" />
+                                    {isBreakevenProtected
+                                      ? isAr
+                                        ? "تأمين تعادل"
+                                        : "Breakeven"
+                                      : isAr
+                                      ? "الوقف"
+                                      : "SL"}
+                                  </span>
+                                  <span className="text-xs font-black">
+                                    {sig.stop_loss?.toFixed(2)}
+                                  </span>
+                                  <span className="text-[9px] block font-black">
+                                    {isBreakevenProtected ? "(0.0% 🛡️)" : `(-${sig.stop_loss_pct}%)`}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Target 1 Progress Bar */}
@@ -599,10 +630,15 @@ export default function ScannerSignalsTracker({
                               ? Number((((exitP - c.entry_price) / c.entry_price) * 100).toFixed(2))
                               : c.return_pct;
                             const isMathWin = mathReturn > 0;
+                            const isBreakeven = mathReturn === 0;
                             return (
                               <span
                                 className={`px-2 py-0.5 border text-black font-black text-xs ${
-                                  isMathWin ? "bg-emerald-400 border-black" : "bg-rose-400 border-black"
+                                  isMathWin
+                                    ? "bg-emerald-400 border-black"
+                                    : isBreakeven
+                                    ? "bg-amber-300 border-black"
+                                    : "bg-rose-400 border-black"
                                 }`}
                               >
                                 {isMathWin ? `+${mathReturn.toFixed(2)}%` : `${mathReturn.toFixed(2)}%`}
