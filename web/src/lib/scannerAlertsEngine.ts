@@ -294,16 +294,19 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   const breadthAboveEma20Pct = (aboveEma20Count / totalMarketStocks) * 100;
   const greenRatioPct = (greenStocksCount / totalMarketStocks) * 100;
 
-  // Market Crash Guard (Cash is King):
-  // Halt new buy signals if market breadth (< 30% above EMA20) or severe selloff (< 25% green or avg drop <= -1.2%)
+  // Adaptive Market Regime (Smart Sniper Mode vs Full Momentum Mode):
+  // Unlike Medium & Short Swings (which freeze completely in falling markets),
+  // the Fast Scanner switches to "Selective Sniper Mode" (max 1 elite counter-trend/bounce per category)
+  // when market breadth is weak (< 30% above EMA20 or < 25% green).
   const isMarketHealthyForBuying =
     breadthAboveEma20Pct >= 30 && greenRatioPct >= 25 && avgMarketChangePct > -1.2;
+  const maxPerCategory = isMarketHealthyForBuying ? 2 : 1;
 
-  const volumeMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }> = [];
-  const breakoutMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }> = [];
-  const oversoldMatches: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }> = [];
+  const volumeMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; rsi_14?: number }> = [];
+  const breakoutMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number; rsi_14?: number }> = [];
+  const oversoldMatches: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number; r_vol?: number }> = [];
 
-  for (const r of isMarketHealthyForBuying ? rows : []) {
+  for (const r of rows) {
     const symbol = String(r.symbol || "").toUpperCase();
     const close = Number(r.close || 0);
     const open = Number(r.open || close);
@@ -319,59 +322,62 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     if (close < 1.5 || close < open * 0.995) continue;
 
     // Trend filter: Stock must be trading at or above EMA20 (or EMA20 not available)
-    const isUptrend = ema20 <= 0 || close >= ema20 * 0.995;
+    const isUptrend = ema20 <= 0 || close >= ema20 * 0.99;
 
-    // Stage 1: Volume Surge (Strict: rVol >= 2.2x, liquidity turnover >= 400k, change >= 1.5%, uptrend, healthy RSI)
+    // Stage 1: Volume Surge (Normal vs Sniper Mode in falling market)
+    const minVolSurgeRvol = isMarketHealthyForBuying ? 2.0 : 2.2;
+    const minVolSurgeTurnover = isMarketHealthyForBuying ? 400_000 : 500_000;
     if (
       config.scanners_enabled.volume_surge &&
-      rVol >= 2.2 &&
+      rVol >= minVolSurgeRvol &&
       vol >= 50_000 &&
-      turnover >= 400_000 &&
+      turnover >= minVolSurgeTurnover &&
       change >= 1.5 &&
       isUptrend &&
       rsi >= 35 &&
       rsi <= 72
     ) {
-      volumeMatches.push({ symbol, close, change_pct: change, r_vol: rVol });
+      volumeMatches.push({ symbol, close, change_pct: change, r_vol: rVol, rsi_14: rsi });
     }
 
-    // Stage 2: Breakout (Strict: True penetration of BB upper with volume confirmation rVol >= 1.8x, change >= 2.5%, uptrend)
+    // Stage 2: Breakout (True penetration of BB upper with volume confirmation)
     const isConfirmedBreakout =
       bbUpper > 0 &&
-      close >= bbUpper &&
+      close >= bbUpper * 0.998 &&
       rVol >= 1.8 &&
       vol >= 50_000 &&
       turnover >= 500_000 &&
-      change >= 2.5 &&
+      change >= (isMarketHealthyForBuying ? 2.2 : 2.5) &&
       isUptrend;
     if (config.scanners_enabled.breakout && isConfirmedBreakout) {
-      breakoutMatches.push({ symbol, close, change_pct: change, r_vol: rVol });
+      breakoutMatches.push({ symbol, close, change_pct: change, r_vol: rVol, rsi_14: rsi });
     }
 
-    // Stage 3: RSI Oversold Bounce (Strict: Deep oversold RSI <= 28, solid bounce change >= 1.0%, not in freefall)
+    // Stage 3: RSI Oversold Bounce (Ideal for catching institutional rebounds during market dips)
     const notCrashingCliff = ema20 <= 0 || close >= ema20 * 0.85;
+    const maxOversoldRsi = isMarketHealthyForBuying ? 28 : 26;
     if (
       config.scanners_enabled.rsi_oversold &&
       rsi > 0 &&
-      rsi <= 28 &&
+      rsi <= maxOversoldRsi &&
       change >= 1.0 &&
       notCrashingCliff &&
       vol >= 50_000 &&
       turnover >= 250_000
     ) {
-      oversoldMatches.push({ symbol, close, rsi_14: rsi, change_pct: change });
+      oversoldMatches.push({ symbol, close, rsi_14: rsi, change_pct: change, r_vol: rVol });
     }
   }
 
-  // Sort and limit to top 2 highest-conviction setups per category (Quality > Quantity)
+  // Sort and limit to top convictions per category (2 in normal market, 1 Sniper in falling market)
   volumeMatches.sort((a, b) => b.r_vol - a.r_vol);
-  const topVolume = volumeMatches.slice(0, 2);
+  const topVolume = volumeMatches.slice(0, maxPerCategory);
 
   breakoutMatches.sort((a, b) => b.change_pct - a.change_pct);
-  const topBreakout = breakoutMatches.slice(0, 2);
+  const topBreakout = breakoutMatches.slice(0, maxPerCategory);
 
   oversoldMatches.sort((a, b) => a.rsi_14 - b.rsi_14);
-  const topOversold = oversoldMatches.slice(0, 2);
+  const topOversold = oversoldMatches.slice(0, maxPerCategory);
 
   // Stage 4: Disclosures & News
   let disclosuresMatches: Array<{ id: string; title: string; symbol?: string; published_at?: string }> = [];
@@ -473,68 +479,90 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   let alertsDispatchedCount = 0;
 
   if (hasAnyFreshMatches && targetChatIds.length > 0) {
-    // Construct clean, BiDi-safe Arabic Message for VIP Channel
+    // Construct sleek, smart institutional Arabic Message for VIP Channel
+    const regimeBadge = isMarketHealthyForBuying
+      ? `إيجابي داعم للمضاربة 🟢`
+      : `حذر انتقائي — وضع القناص 🎯`;
+    const totalSignalsInBatch = freshVolume.length + freshBreakout.length + freshOversold.length;
+
     const lines: string[] = [
-      `⚡ <b>[EGX BOTS] رادار الإسكانر الفوري — قناة VIP</b>`,
-      `───────────────`,
+      `⚡ <b>رادار التدفقات اللحظي الذكي — EGX BOTS VIP</b>`,
+      `🧭 <b>حالة السوق:</b> ${regimeBadge} <i>(السيولة الصاعدة: ${breadthAboveEma20Pct.toFixed(0)}%)</i>`,
+      `━━━━━━━━━━━━━━━━━━━━`,
     ];
 
     if (freshVolume.length > 0) {
-      lines.push(`🔥 <b>رادار السيولة غير الطبيعية (Volume Surge):</b>`);
+      lines.push(`🔥 <b>اقتناص سيولة مؤسسية غير معتادة (Volume Surge)</b>`);
       for (const v of freshVolume) {
         const plan = calculateScannerTradePlan(v.close, "volume_surge");
         const changeStr = `${v.change_pct >= 0 ? "+" : ""}${Number(v.change_pct).toFixed(1)}%`;
+        const breakevenTrigger = (v.close * 1.025).toFixed(2);
+        const rrRatio = (plan.target1Pct / Math.max(0.5, plan.stopLossPct)).toFixed(1);
+        const rsiVal = v.rsi_14 ? Math.round(Number(v.rsi_14)) : 56;
         lines.push(
-          `🔹 <b>${v.symbol}</b> — <b>${v.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
-          `   📊 حجم السيولة: <b>${Number(v.r_vol).toFixed(1)}x</b> الضعف\n` +
-          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
-          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+          `💎 <b>#${v.symbol}</b>  |  <b>${v.close.toFixed(2)} ج.م</b>  (<b>${changeStr}</b>)\n` +
+          `   📊 السيولة: <b>${Number(v.r_vol).toFixed(1)}x</b>  •  📈 RSI: <b>${rsiVal}</b>  •  ⚖️ العائد/المخاطرة: <b>1:${rrRatio}</b>\n` +
+          `   🎯 الهدف الأول: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🚀 الهدف الممتد: <b>${plan.target2.toFixed(2)} ج.م</b> (+${plan.target2Pct.toFixed(1)}%)\n` +
+          `   🛡️ تأمين التعادل: تلقائياً عند <b>${breakevenTrigger} ج.م</b> (+2.5%)\n` +
+          `   🛑 وقف الخسارة: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
         );
       }
       lines.push(``);
     }
 
     if (freshBreakout.length > 0) {
-      lines.push(`🚀 <b>رادار الاختراقات الفنية (Breakout):</b>`);
+      lines.push(`🚀 <b>اختراق فني مؤكد بالسيولة (Price Breakout)</b>`);
       for (const b of freshBreakout) {
         const plan = calculateScannerTradePlan(b.close, "breakout");
         const changeStr = `${b.change_pct >= 0 ? "+" : ""}${Number(b.change_pct).toFixed(1)}%`;
+        const breakevenTrigger = (b.close * 1.025).toFixed(2);
+        const rrRatio = (plan.target1Pct / Math.max(0.5, plan.stopLossPct)).toFixed(1);
         lines.push(
-          `🔹 <b>${b.symbol}</b> — <b>${b.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
-          `   🎯 اختراق قمة 20 جلسة السابقة\n` +
-          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
-          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+          `⚡ <b>#${b.symbol}</b>  |  <b>${b.close.toFixed(2)} ج.م</b>  (<b>${changeStr}</b>)\n` +
+          `   📊 سيولة الاختراق: <b>${Number(b.r_vol).toFixed(1)}x</b>  •  ⚖️ العائد/المخاطرة: <b>1:${rrRatio}</b>\n` +
+          `   🎯 الهدف الأول: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🚀 الهدف الممتد: <b>${plan.target2.toFixed(2)} ج.م</b> (+${plan.target2Pct.toFixed(1)}%)\n` +
+          `   🛡️ تأمين التعادل: تلقائياً عند <b>${breakevenTrigger} ج.م</b> (+2.5%)\n` +
+          `   🛑 وقف الخسارة: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
         );
       }
       lines.push(``);
     }
 
     if (freshOversold.length > 0) {
-      lines.push(`💎 <b>ارتداد من تشبع بيعي (RSI Bounce):</b>`);
+      lines.push(`💎 <b>ارتداد ذكي من تشبع بيعي عميق (RSI Sniper Bounce)</b>`);
       for (const o of freshOversold) {
         const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
         const changeStr = `${o.change_pct >= 0 ? "+" : ""}${Number(o.change_pct).toFixed(1)}%`;
+        const breakevenTrigger = (o.close * 1.025).toFixed(2);
+        const rrRatio = (plan.target1Pct / Math.max(0.5, plan.stopLossPct)).toFixed(1);
         lines.push(
-          `🔹 <b>${o.symbol}</b> — <b>${o.close.toFixed(2)} ج.م</b> (<b>${changeStr}</b>)\n` +
-          `   📈 مؤشر RSI: <b>${Math.round(Number(o.rsi_14))}</b> (تشبع بيعي وارتداد)\n` +
-          `   🎯 الهدف: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
-          `   🛑 الوقف: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
+          `🟢 <b>#${o.symbol}</b>  |  <b>${o.close.toFixed(2)} ج.م</b>  (<b>${changeStr}</b>)\n` +
+          `   📈 مؤشر RSI: <b>${Math.round(Number(o.rsi_14))}</b> (ارتداد شرائي)  •  ⚖️ العائد/المخاطرة: <b>1:${rrRatio}</b>\n` +
+          `   🎯 الهدف الأول: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
+          `   🚀 الهدف الممتد: <b>${plan.target2.toFixed(2)} ج.م</b> (+${plan.target2Pct.toFixed(1)}%)\n` +
+          `   🛡️ تأمين التعادل: تلقائياً عند <b>${breakevenTrigger} ج.م</b> (+2.5%)\n` +
+          `   🛑 وقف الخسارة: <b>${plan.stopLoss.toFixed(2)} ج.م</b> (-${plan.stopLossPct.toFixed(1)}%)`
         );
       }
       lines.push(``);
     }
 
     if (freshDisclosures.length > 0) {
-      lines.push(`📢 <b>إفصاحات وأخبار رسمية حديثة:</b>`);
+      lines.push(`📢 <b>إفصاحات البورصة الجوهرية اللحظية:</b>`);
       for (const d of freshDisclosures) {
         lines.push(`• ${escapeHtml(d.title)}`);
       }
       lines.push(``);
     }
 
-    lines.push(`───────────────`);
-    lines.push(`⏱️ التوقيت: <b>${cairoTime.timeStr} بتوقيت القاهرة</b>`);
-    lines.push(`📊 <b>لمتابعة النتائج والشارت اللحظي:</b> <a href="https://egxbots.com/profile#scanner-signals">لوحة تتبع الإشارات بالبروفايل</a>`);
+    lines.push(`━━━━━━━━━━━━━━━━━━━━`);
+    if (totalSignalsInBatch > 0) {
+      lines.push(`⏱️ <b>أفق الاحتفاظ:</b> 1 إلى 4 جلسات  |  🛡️ <b>حماية آلية عند +2.5%</b>`);
+    }
+    lines.push(`🕒 <b>توقيت الرصد:</b> ${cairoTime.timeStr} بتوقيت القاهرة`);
+    lines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">فتح الشارت التفاعلي (15 دقيقة) ولوحة التتبع الحية</a>`);
 
     const text = lines.join("\n");
     for (const chatId of targetChatIds) {
@@ -755,41 +783,51 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     for (const chatId of targetChatIds) {
       if (dedupHitSignals.length > 0) {
         const hitLines: string[] = [
-          `🎯 <b>[EGX BOTS] تحقيق أهداف إشارات الإسكانر (قناة VIP)</b>`,
-          `───────────────`,
+          `🎯 <b>حصاد أهداف رادار التدفقات اللحظي — EGX BOTS VIP</b>`,
+          `━━━━━━━━━━━━━━━━━━━━`,
         ];
         for (const s of dedupHitSignals) {
+          const isBreakevenExit = Math.abs(Number(s.return_pct || 0)) < 0.2;
           const retStr = s.return_pct >= 0 ? `+${Number(s.return_pct).toFixed(1)}%` : `${Number(s.return_pct).toFixed(1)}%`;
-          hitLines.push(
-            `✅ <b>${s.symbol}</b> — <b>تحقق الهدف الأول بنجاح!</b>\n` +
-            `   • سعر التحقق: <b>${s.current_price.toFixed(2)} ج.م</b>\n` +
-            `   • نسبة الربح: <b>${retStr}</b> 🎉\n` +
-            `   • سعر الدخول: ${s.entry_price.toFixed(2)} ج.م`
-          );
+          const exitPrice = Number(s.exit_price || s.current_price || s.target_1).toFixed(2);
+          const peakGainStr = s.max_gain_pct ? `+${Number(s.max_gain_pct).toFixed(1)}%` : retStr;
+          if (isBreakevenExit) {
+            hitLines.push(
+              `🛡️ <b>#${s.symbol}</b> — <b>خروج آمن بتفعيل وقف التعادل (0.0%)</b>\n` +
+              `   • سعر الدخول والخروج: <b>${s.entry_price.toFixed(2)} ج.م</b>\n` +
+              `   • أعلى قمة وصلها السهم: <b>${peakGainStr}</b> (تم تأمين رأس المال بالكامل)`
+            );
+          } else {
+            hitLines.push(
+              `✅ <b>#${s.symbol}</b> — <b>تحقق الهدف الأول بنجاح! 🎉</b>\n` +
+              `   • سعر الدخول: <b>${s.entry_price.toFixed(2)} ج.م</b>  ←  الإغلاق: <b>${exitPrice} ج.م</b>\n` +
+              `   • العائد المحقق: <b>${retStr}</b>  (أعلى قمة: <b>${peakGainStr}</b>)`
+            );
+          }
         }
-        hitLines.push(`───────────────`);
-        hitLines.push(`💡 <i>توصية: يفضل جني الأرباح جزئياً ورفع وقف الخسارة لسعر الدخول لحجز الأرباح.</i>`);
-        hitLines.push(`📊 <b>متابعة النتائج والشارتات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
+        hitLines.push(`━━━━━━━━━━━━━━━━━━━━`);
+        hitLines.push(`💡 <i>إدارة المحفظة: جني الأرباح أولاً بأول وتأمين نقطة الدخول سر استدامة النمو.</i>`);
+        hitLines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">عرض الشارت التفاعلي للصفقات المغلقة بالبروفايل</a>`);
         await sendTelegramAlert(chatId, hitLines.join("\n"));
       }
 
       if (dedupStoppedSignals.length > 0) {
         const slLines: string[] = [
-          `🛑 <b>[EGX BOTS] إدارة المخاطر — تفعيل وقف الخسارة (قناة VIP)</b>`,
-          `───────────────`,
+          `🛡️ <b>تقرير إدارة المخاطر وحماية السيولة — EGX BOTS VIP</b>`,
+          `━━━━━━━━━━━━━━━━━━━━`,
         ];
         for (const s of dedupStoppedSignals) {
           const retStr = `${Number(s.return_pct).toFixed(1)}%`;
+          const exitPrice = Number(s.exit_price || s.current_price || s.stop_loss).toFixed(2);
           slLines.push(
-            `⚠️ <b>${s.symbol}</b> — <b>تفعيل وقف الخسارة</b>\n` +
-            `   • سعر الخروج: <b>${s.current_price.toFixed(2)} ج.م</b>\n` +
-            `   • نسبة التراجع: <b>${retStr}</b>\n` +
-            `   • سعر الدخول: ${s.entry_price.toFixed(2)} ج.م`
+            `🛑 <b>#${s.symbol}</b> — <b>تفعيل وقف الخسارة الصارم</b>\n` +
+            `   • سعر الدخول: <b>${s.entry_price.toFixed(2)} ج.م</b>  ←  الخروج: <b>${exitPrice} ج.م</b>\n` +
+            `   • صافي التراجع المحدود: <b>${retStr}</b> (تحرير السيولة لفرصة أقوى)`
           );
         }
-        slLines.push(`───────────────`);
-        slLines.push(`⚠️ <i>تنبيه: التزم بإدارة رأس المال وتجنب التمسك بالصفقات الخاسرة.</i>`);
-        slLines.push(`📊 <b>متابعة النتائج وسجل الصفقات:</b> <a href="https://egxbots.com/profile#scanner-signals">سجل إشارات الإسكانر بالبروفايل</a>`);
+        slLines.push(`━━━━━━━━━━━━━━━━━━━━`);
+        slLines.push(`⚖️ <i>قاعدة ذهبية: قطع الخسارة مبكراً عند -2.5% / -3.0% يحمي المحفظة من أي تصحيح عنيف.</i>`);
+        slLines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">مراجعة سجل الصفقات والشارت اللحظي بالبروفايل</a>`);
         await sendTelegramAlert(chatId, slLines.join("\n"));
       }
     }

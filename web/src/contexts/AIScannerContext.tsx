@@ -149,6 +149,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     }, []);
     const loadedLandingRef = useRef<boolean | null>(null);
     const recommendationsLoadedAtRef = useRef(0);
+    const recommendationsReqVersionRef = useRef(0);
     // The daily worker is the source of truth. Keep the browser snapshot for
     // one day and only refresh explicitly or after the next daily cycle.
     const RECOMMENDATIONS_FRESH_MS = 24 * 60 * 60 * 1000;
@@ -831,6 +832,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         if (recommendationsRef.current.length > 0 && !force && sameViewer && loadedLandingRef.current === isLandingPage) {
             return;
         }
+        const reqVersion = ++recommendationsReqVersionRef.current;
         setRecsLoading(true);
         setRecsError(null);
         try {
@@ -855,12 +857,13 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 scanData = await response.json();
             }
 
+            if (reqVersion !== recommendationsReqVersionRef.current) return;
             if (scanErr) throw new Error(scanErr.message);
             if (!scanData || scanData.length === 0) {
-            setRecommendations([]);
-            recommendationsUserRef.current = userId;
-            loadedLandingRef.current = isLandingPage;
-            recommendationsLoadedAtRef.current = Date.now();
+                setRecommendations([]);
+                recommendationsUserRef.current = userId;
+                loadedLandingRef.current = isLandingPage;
+                recommendationsLoadedAtRef.current = Date.now();
                 setRecsLoading(false);
                 return;
             }
@@ -1052,16 +1055,19 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 };
             });
 
+            if (reqVersion !== recommendationsReqVersionRef.current) return;
             let visibleRecommendations = mapped;
             if (!isLandingPage) {
                 // The recommendations route row-masks fresh and high-safety
                 // picks for Free users (locked=true rows) and never returns
-                // them to anonymous visitors; no extra quota round trip here.
+                // them to anonymous visitors; settled closed rows (win/loss) are public.
                 if (!user) {
-                    // Anonymous visitors get only API-sanitized encrypted rows;
-                    // never fall back to a row carrying a stock identity.
                     visibleRecommendations = mapped.filter((row: any) =>
-                        row.locked === true || row.identity_locked === true
+                        row.locked === true ||
+                        row.identity_locked === true ||
+                        row.anonymous === true ||
+                        row.status === "win" ||
+                        row.status === "loss"
                     );
                 }
             }
@@ -1070,10 +1076,13 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             loadedLandingRef.current = isLandingPage;
             recommendationsLoadedAtRef.current = Date.now();
         } catch (err: any) {
+            if (reqVersion !== recommendationsReqVersionRef.current) return;
             console.error("Error loading recommendations in context:", err);
             setRecsError(err.message || "Failed to fetch data");
         } finally {
-            setRecsLoading(false);
+            if (reqVersion === recommendationsReqVersionRef.current) {
+                setRecsLoading(false);
+            }
         }
     }, [supabase, user]);
 

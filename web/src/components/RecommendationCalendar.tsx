@@ -519,7 +519,20 @@ export default function RecommendationCalendar({
     const todayDateStr = formatYMD(new Date());
 
     const monthStats = useMemo(() => {
+        if (filterPreset === "all" || filterPreset === "30days") {
+            return {
+                total: globalStats.closedCount,
+                createdTotal: globalStats.createdCount,
+                wins: globalStats.winCount,
+                losses: globalStats.lossCount,
+                winRate: globalStats.winRate,
+                netReturn: globalStats.netProfitPct,
+                bestTrade: globalStats.bestTrade,
+            };
+        }
+
         let total = 0;
+        let createdTotal = 0;
         let wins = 0;
         let losses = 0;
         let netReturn = 0;
@@ -530,6 +543,7 @@ export default function RecommendationCalendar({
             const info = dayMap.get(cell.dateStr);
             if (!info) return;
             total += info.closed.length;
+            createdTotal += info.created.length;
             wins += info.wins.length;
             losses += info.losses.length;
             netReturn += info.netProfitPct;
@@ -543,8 +557,27 @@ export default function RecommendationCalendar({
         });
 
         const winRate = total > 0 ? (wins / total) * 100 : 0;
-        return { total, wins, losses, winRate, netReturn, bestTrade };
-    }, [calendarDays, dayMap]);
+        return { total, createdTotal, wins, losses, winRate, netReturn, bestTrade };
+    }, [calendarDays, dayMap, filterPreset, globalStats]);
+
+    const totalAllClosedCount = useMemo(
+        () => closureTimeline.filter((r) => ["win", "loss"].includes(String(r.status || "").toLowerCase())).length,
+        [closureTimeline]
+    );
+
+    const agendaDays = useMemo(() => {
+        const currentMonthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+        return Array.from(dayMap.entries())
+            .filter(([dateStr]) => {
+                if (filterPreset === "all") return true;
+                if (filterPreset === "30days" && dateRangeBoundaries) {
+                    const d = new Date(dateStr);
+                    return d >= dateRangeBoundaries.start && d <= dateRangeBoundaries.end;
+                }
+                return dateStr.startsWith(currentMonthPrefix);
+            })
+            .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
+    }, [dayMap, filterPreset, dateRangeBoundaries, year, month]);
 
     return (
         <div className="w-full space-y-4 sm:space-y-6 select-text text-zinc-900 dark:text-zinc-100" dir={isAr ? "rtl" : "ltr"}>
@@ -556,388 +589,407 @@ export default function RecommendationCalendar({
                 </div>
             )}
 
-            {/* ── CALENDAR VIEW (Neo-Brutalist Design matching Short Swings) ── */}
-            {viewMode === "calendar" ? (
-                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] space-y-6">
-                    {/* ── 1. Top Control Bar: Title, Presets & View Switcher ── */}
-                    <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 border-b-2 border-black dark:border-white pb-4">
-                        <div className="flex items-center gap-2.5">
-                            <div className="w-9 h-9 border-2 border-black bg-amber-400 flex items-center justify-center font-black shrink-0">
-                                <CalendarIcon className="w-5 h-5 text-black" />
-                            </div>
-                            <div>
-                                <h3 className="text-base sm:text-lg font-black text-black dark:text-white">
-                                    {isAr ? "تقويم أرباح وإحصائيات الصفقات المتوسطة" : "Medium Swings Calendar & Performance"}
-                                </h3>
-                                <p className="text-[11px] font-bold text-zinc-500">
-                                    {isAr
-                                        ? "تتبع الأرباح اليومية، والصفقات الرابحة والخاسرة لشهري 8 و 9 وكامل عام 2026"
-                                        : "Track daily returns, win/loss trades for Aug, Sep and full 2026"}
-                                </p>
-                            </div>
+            {/* ── UNIFIED CALENDAR & AGENDA CONTAINER (Neo-Brutalist Design matching Short Swings) ── */}
+            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] space-y-6">
+                {/* ── 1. Top Control Bar: Title, Presets & View Switcher ── */}
+                <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 border-b-2 border-black dark:border-white pb-4">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 border-2 border-black bg-amber-400 flex items-center justify-center font-black shrink-0">
+                            <CalendarIcon className="w-5 h-5 text-black" />
                         </div>
-
-                        {/* Presets, Sharia Toggle, and View Switcher */}
-                        <div className="flex flex-wrap items-center gap-2">
-                            {/* Presets buttons */}
-                            <div className="flex items-center border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 text-xs font-bold overflow-x-auto">
-                                <button
-                                    onClick={goToToday}
-                                    className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
-                                        filterPreset === "this_month" && month === new Date().getMonth() && year === new Date().getFullYear()
-                                            ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    {isAr ? "اليوم" : "Today"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        selectCalendarMonth(new Date(2026, 8, 1));
-                                        setSelectedDayDateStr(null);
-                                    }}
-                                    className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
-                                        year === 2026 && month === 8
-                                            ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    {isAr ? "شهر 9 (سبتمبر 2026)" : "Sep 2026"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        selectCalendarMonth(new Date(2026, 7, 1));
-                                        setSelectedDayDateStr(null);
-                                    }}
-                                    className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
-                                        year === 2026 && month === 7
-                                            ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    {isAr ? "شهر 8 (أغسطس 2026)" : "Aug 2026"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setFilterPreset("30days");
-                                        setCurrentDate(new Date());
-                                        setSelectedDayDateStr(null);
-                                    }}
-                                    className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
-                                        filterPreset === "30days"
-                                            ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    {isAr ? "آخر 30 يوم" : "Last 30 Days"}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setFilterPreset("all");
-                                        setSelectedDayDateStr(null);
-                                    }}
-                                    className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
-                                        filterPreset === "all"
-                                            ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
-                                            : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    {isAr ? "كامل عام 2026" : "Full 2026"}
-                                </button>
-                            </div>
-
-                            {/* Sharia Toggle Button */}
-                            <button
-                                onClick={() => setShariaOnly(!shariaOnly)}
-                                className={`h-8 px-2.5 border-2 border-black text-xs font-black flex items-center gap-1.5 transition-all shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
-                                    shariaOnly ? "bg-emerald-400 text-black" : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
-                                }`}
-                            >
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                                <span>{isAr ? "حلال فقط" : "Halal Only"}</span>
-                            </button>
-
-                            {/* View Switcher: Grid vs List */}
-                            <div className="flex items-center border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 shrink-0">
-                                <button
-                                    onClick={() => setViewMode("calendar")}
-                                    title={isAr ? "عرض التقويم" : "Calendar View"}
-                                    className={`p-1.5 transition-all ${
-                                        viewMode === "calendar"
-                                            ? "bg-[#FFE600] text-black font-black border border-black"
-                                            : "text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    <Grid className="w-4 h-4" />
-                                </button>
-                                <button
-                                    onClick={() => setViewMode("agenda")}
-                                    title={isAr ? "عرض القائمة" : "List View"}
-                                    className={`p-1.5 transition-all ${
-                                        (viewMode as string) === "agenda"
-                                            ? "bg-[#FFE600] text-black font-black border border-black"
-                                            : "text-zinc-400 hover:text-black dark:hover:text-white"
-                                    }`}
-                                >
-                                    <List className="w-4 h-4" />
-                                </button>
-                            </div>
+                        <div>
+                            <h3 className="text-base sm:text-lg font-black text-black dark:text-white">
+                                {isAr ? "تقويم أرباح وإحصائيات الصفقات المتوسطة" : "Medium Swings Calendar & Performance"}
+                            </h3>
+                            <p className="text-[11px] font-bold text-zinc-500">
+                                {isAr
+                                    ? "تتبع الأرباح اليومية، والصفقات الرابحة والخاسرة لشهري 8 و 9 وكامل عام 2026"
+                                    : "Track daily returns, win/loss trades for Aug, Sep and full 2026"}
+                            </p>
                         </div>
                     </div>
 
-                    {/* ── 2. Month Navigation Bar ── */}
-                    <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3 sm:pb-4">
-                        <div className="flex items-center gap-2 sm:gap-3">
-                            <h3 className="text-base sm:text-lg md:text-xl font-black text-black dark:text-white">
-                                {currentMonthName} {year}
-                            </h3>
-                            <span className="text-[10px] sm:text-xs font-bold text-black dark:text-white bg-zinc-100 dark:bg-zinc-800 px-2 sm:px-2.5 py-0.5 sm:py-1 border border-black dark:border-white">
-                                {monthStats.total} {isAr ? "صفقة مغلقة في الشهر" : "monthly closed trades"}
-                            </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 sm:gap-2">
-                            <button
-                                onClick={prevMonth}
-                                className="p-1.5 sm:p-2 border-2 border-black bg-white dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-                                title={isAr ? "الشهر السابق" : "Previous Month"}
-                            >
-                                {isAr ? <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />}
-                            </button>
+                    {/* Presets, Sharia Toggle, and View Switcher */}
+                    <div className="flex flex-wrap items-center gap-2">
+                        {/* Presets buttons */}
+                        <div className="flex items-center border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 text-xs font-bold overflow-x-auto">
                             <button
                                 onClick={goToToday}
-                                className="px-2.5 sm:px-3 py-1 sm:py-1.5 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-200 text-xs font-black shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    filterPreset === "this_month" && month === new Date().getMonth() && year === new Date().getFullYear()
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
                             >
                                 {isAr ? "اليوم" : "Today"}
                             </button>
                             <button
-                                onClick={nextMonth}
-                                className="p-1.5 sm:p-2 border-2 border-black bg-white dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-                                title={isAr ? "الشهر التالي" : "Next Month"}
+                                onClick={() => {
+                                    selectCalendarMonth(new Date(2026, 8, 1));
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    year === 2026 && month === 8 && filterPreset !== "30days" && filterPreset !== "all"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
                             >
-                                {isAr ? <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />}
+                                {isAr ? "شهر 9 (سبتمبر 2026)" : "Sep 2026"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    selectCalendarMonth(new Date(2026, 7, 1));
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    year === 2026 && month === 7 && filterPreset !== "30days" && filterPreset !== "all"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {isAr ? "شهر 8 (أغسطس 2026)" : "Aug 2026"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    selectCalendarMonth(new Date(2026, 6, 1));
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    year === 2026 && month === 6 && filterPreset !== "30days" && filterPreset !== "all"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {isAr ? "شهر 7 (يوليو 2026)" : "Jul 2026"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setFilterPreset("30days");
+                                    setCurrentDate(new Date());
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    filterPreset === "30days"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {isAr ? "آخر 30 يوم" : "Last 30 Days"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setFilterPreset("all");
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    filterPreset === "all"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {isAr ? `كامل عام 2026 (${totalAllClosedCount} صفقة)` : `Full 2026 (${totalAllClosedCount})`}
+                            </button>
+                        </div>
+
+                        {/* Sharia Toggle Button */}
+                        <button
+                            onClick={() => setShariaOnly(!shariaOnly)}
+                            className={`h-8 px-2.5 border-2 border-black text-xs font-black flex items-center gap-1.5 transition-all shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
+                                shariaOnly ? "bg-emerald-400 text-black" : "bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+                            }`}
+                        >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>{isAr ? "حلال فقط" : "Halal Only"}</span>
+                        </button>
+
+                        {/* View Switcher: Grid vs List */}
+                        <div className="flex items-center border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 shrink-0">
+                            <button
+                                onClick={() => setViewMode("calendar")}
+                                title={isAr ? "عرض التقويم" : "Calendar View"}
+                                className={`p-1.5 transition-all ${
+                                    viewMode === "calendar"
+                                        ? "bg-[#FFE600] text-black font-black border border-black"
+                                        : "text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                <Grid className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode("agenda")}
+                                title={isAr ? "عرض القائمة" : "List View"}
+                                className={`p-1.5 transition-all ${
+                                    viewMode === "agenda"
+                                        ? "bg-[#FFE600] text-black font-black border border-black"
+                                        : "text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                <List className="w-4 h-4" />
                             </button>
                         </div>
                     </div>
+                </div>
 
-                    {/* ── 3. Month Summary Bar (With LTR formatting) ── */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 p-3 sm:p-4">
-                        <div>
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase block">{isAr ? "صفقات الشهر" : "Month Trades"}</span>
-                            <span className="text-xl font-black font-mono text-black dark:text-white">{monthStats.total} {isAr ? "صفقة" : "trades"}</span>
-                        </div>
-                        <div>
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase block">{isAr ? "نسبة النجاح للشهر" : "Month Win Rate"}</span>
-                            <div className="flex items-center gap-1.5" dir="ltr">
-                                <span className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-                                    {Number(monthStats.winRate || 0).toFixed(1)}%
-                                </span>
-                                <span className="text-xs font-bold text-zinc-500 font-sans">
-                                    ({monthStats.wins} {isAr ? "رابحة" : "wins"})
-                                </span>
-                            </div>
-                        </div>
-                        <div>
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase block">{isAr ? "صافي العائد الإجمالي" : "Net Total Return"}</span>
-                            <span
-                                dir="ltr"
-                                className={`text-xl font-black font-mono block ${
-                                    (monthStats.netReturn || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-                                }`}
-                            >
-                                {(monthStats.netReturn || 0) >= 0 ? "+" : ""}{Number(monthStats.netReturn || 0).toFixed(1)}%
+                {/* ── 2. Month Navigation Bar ── */}
+                <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3 sm:pb-4">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                        <h3 className="text-base sm:text-lg md:text-xl font-black text-black dark:text-white">
+                            {filterPreset === "all"
+                                ? (isAr ? "إحصائيات كامل عام 2026" : "Full Year 2026")
+                                : filterPreset === "30days"
+                                ? (isAr ? "آخر 30 يوم" : "Last 30 Days")
+                                : `${currentMonthName} ${year}`}
+                        </h3>
+                        <span className="text-[10px] sm:text-xs font-bold text-black dark:text-white bg-zinc-100 dark:bg-zinc-800 px-2 sm:px-2.5 py-0.5 sm:py-1 border border-black dark:border-white">
+                            {monthStats.total} {isAr ? (filterPreset === "all" ? "صفقة مغلقة في العام" : "صفقة مغلقة في الشهر") : "closed trades"}
+                        </span>
+                        {monthStats.createdTotal > 0 && (
+                            <span className="text-[10px] sm:text-xs font-black text-black bg-amber-300 px-2 sm:px-2.5 py-0.5 sm:py-1 border border-black">
+                                +{monthStats.createdTotal} {isAr ? "توصية صادرة" : "created signals"}
                             </span>
-                        </div>
-                        <div>
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase block">{isAr ? "أفضل صفقة في الشهر" : "Best Trade"}</span>
-                            <span className="text-base sm:text-lg font-black font-mono text-indigo-600 dark:text-indigo-400 truncate block">
-                                {monthStats.bestTrade ? (
-                                    <span dir="ltr">
-                                        {monthStats.bestTrade.symbol} ({(monthStats.bestTrade.profit_loss_pct || 0) >= 0 ? "+" : ""}{Number(monthStats.bestTrade.profit_loss_pct || 0).toFixed(1)}%)
-                                    </span>
-                                ) : (
-                                    "—"
-                                )}
-                            </span>
-                        </div>
+                        )}
                     </div>
 
-                    {/* ── 4. Day Names Header ── */}
-                    <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center font-black text-xs text-zinc-600 dark:text-zinc-400">
-                        <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأحد</div>
-                        <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الإثنين</div>
-                        <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الثلاثاء</div>
-                        <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأربعاء</div>
-                        <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الخميس</div>
-                        <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">الجمعة (عطلة)</div>
-                        <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">السبت (عطلة)</div>
-                    </div>
-
-                    {/* ── 5. Grid of Calendar Days ── */}
-                    <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-                        {calendarDays.map((cell, idx) => {
-                            const dayInfo = dayMap.get(cell.dateStr);
-                            const hasClosed = dayInfo && dayInfo.closed.length > 0;
-                            const hasCreated = dayInfo && dayInfo.created.length > 0;
-                            const hasAdjusted = dayInfo && dayInfo.adjusted.length > 0;
-                            const wins = dayInfo ? dayInfo.wins.length : 0;
-                            const losses = dayInfo ? dayInfo.losses.length : 0;
-                            const netPl = dayInfo ? dayInfo.netProfitPct : 0;
-                            const isToday = cell.dateStr === todayDateStr;
-                            const isSelected = cell.dateStr === selectedDayDateStr;
-                            const isDelayed = isDelayedForPlan(cell.dateStr);
-
-                            let maxGainTrade: any = null;
-                            if (dayInfo && dayInfo.closed.length > 0) {
-                                maxGainTrade = [...dayInfo.closed].sort((a, b) => (Number(b.profit_loss_pct) || 0) - (Number(a.profit_loss_pct) || 0))[0];
-                            }
-                            const isBigRunnerDay = maxGainTrade && Number(maxGainTrade.profit_loss_pct) >= 15;
-
-                            return (
-                                <div
-                                    key={`${cell.dateStr}-${idx}`}
-                                    onClick={() => {
-                                        setSelectedDayDateStr(cell.dateStr);
-                                    }}
-                                    className={`min-h-[75px] sm:min-h-[100px] p-2 border-2 flex flex-col justify-between transition-all select-none relative cursor-pointer ${
-                                        isToday
-                                            ? "ring-4 ring-amber-400 dark:ring-amber-300 shadow-md shadow-amber-400/20 z-10"
-                                            : ""
-                                    } ${
-                                        isSelected && !isToday
-                                            ? "ring-2 ring-indigo-500 shadow-sm"
-                                            : ""
-                                    } ${
-                                        !cell.isCurrentMonth
-                                            ? "border-zinc-200 dark:border-zinc-800/60 bg-zinc-100/30 dark:bg-zinc-900/20 text-zinc-400 dark:text-zinc-600 opacity-30"
-                                            : cell.isWeekend
-                                            ? "border-zinc-300 dark:border-zinc-800 bg-zinc-100/70 dark:bg-zinc-900/40 text-zinc-400"
-                                            : hasClosed
-                                            ? netPl >= 0
-                                                ? "border-black dark:border-white bg-emerald-50/70 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_#fff] hover:-translate-x-0.5 hover:-translate-y-0.5"
-                                                : "border-black dark:border-white bg-rose-50/70 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_#fff] hover:-translate-x-0.5 hover:-translate-y-0.5"
-                                            : "border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-950/40 text-zinc-400"
-                                    }`}
-                                >
-                                    {/* Top: Day Number & Trades Badge */}
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1">
-                                            <span
-                                                className={`text-xs font-black font-mono px-1 py-0.5 ${
-                                                    isToday
-                                                        ? "bg-amber-400 text-black border border-black shadow-[1px_1px_0px_#000]"
-                                                        : cell.isCurrentMonth
-                                                        ? hasClosed
-                                                            ? "text-black dark:text-white"
-                                                            : "text-zinc-500"
-                                                        : "text-zinc-400"
-                                                }`}
-                                            >
-                                                {cell.dayNum}
-                                            </span>
-                                            {isToday && (
-                                                <span className="px-1.5 py-0.5 border border-black bg-[#FFE600] text-black text-[9px] font-black uppercase shadow-[1px_1px_0px_#000]">
-                                                    {isAr ? "اليوم" : "TODAY"}
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="flex items-center gap-1">
-                                            {isDelayed && (hasClosed || hasCreated) && (
-                                                <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                            )}
-                                            {hasClosed && (
-                                                <span className="px-1.5 py-0.2 border border-black bg-black text-[#FFE600] text-[9px] font-black">
-                                                    {dayInfo!.closed.length} صفقات
-                                                </span>
-                                            )}
-                                            {hasCreated && !hasClosed && (
-                                                <span className="px-1.5 py-0.2 border border-black bg-amber-400 text-black text-[9px] font-black">
-                                                    +{dayInfo!.created.length}
-                                                </span>
-                                            )}
-                                            {hasAdjusted && !hasClosed && !hasCreated && (
-                                                <span className="px-1.5 py-0.2 border border-black bg-sky-400 text-black text-[9px] font-black">
-                                                    {dayInfo!.adjusted.length}🔧
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Middle: Win/Loss & Return */}
-                                    {hasClosed ? (
-                                        <div className="space-y-1 my-1">
-                                            <div className="flex items-center justify-between text-[10px] font-black">
-                                                <span className="text-emerald-600 dark:text-emerald-400">{wins} رابحة</span>
-                                                {losses > 0 && <span className="text-rose-500">{losses} خاسرة</span>}
-                                            </div>
-
-                                            <div
-                                                dir="ltr"
-                                                className={`text-xs font-black font-mono text-center px-1 py-0.5 border border-black ${
-                                                    netPl >= 0
-                                                        ? "bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100"
-                                                        : "bg-rose-200 dark:bg-rose-900 text-rose-900 dark:text-rose-100"
-                                                }`}
-                                            >
-                                                {netPl >= 0 ? "+" : ""}{netPl.toFixed(1)}%
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-[10px] text-zinc-400 dark:text-zinc-600 font-bold text-center">
-                                            {!cell.isCurrentMonth ? "" : cell.isWeekend ? "عطلة" : hasCreated ? `${dayInfo!.created.length} نشطة` : "لا إغلاقات"}
-                                        </div>
-                                    )}
-
-                                    {/* Bottom: Big Runner highlight */}
-                                    {isBigRunnerDay && (
-                                        <div
-                                            dir="ltr"
-                                            className="text-[9px] font-black bg-amber-400 text-black px-1 py-0.5 border border-black text-center truncate"
-                                        >
-                                            🔥 {maxGainTrade.symbol} +{Number(maxGainTrade.profit_loss_pct).toFixed(0)}%
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                        <button
+                            onClick={prevMonth}
+                            className="p-1.5 sm:p-2 border-2 border-black bg-white dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                            title={isAr ? "الشهر السابق" : "Previous Month"}
+                        >
+                            {isAr ? <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />}
+                        </button>
+                        <button
+                            onClick={goToToday}
+                            className="px-2.5 sm:px-3 py-1 sm:py-1.5 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-200 text-xs font-black shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                        >
+                            {isAr ? "اليوم" : "Today"}
+                        </button>
+                        <button
+                            onClick={nextMonth}
+                            className="p-1.5 sm:p-2 border-2 border-black bg-white dark:bg-zinc-900 text-black dark:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                            title={isAr ? "الشهر التالي" : "Next Month"}
+                        >
+                            {isAr ? <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" /> : <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />}
+                        </button>
                     </div>
                 </div>
-            ) : (
-                /* ── AGENDA / LIST VIEW (Neo-Brutalist) ── */
-                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] space-y-4">
-                    <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3">
-                        <div className="flex items-center gap-2">
-                            <List className="w-5 h-5 text-amber-500 dark:text-amber-400" />
-                            <h3 className="text-base sm:text-lg font-black text-black dark:text-white">
-                                {isAr ? "جدول التوصيات اليومية الحية" : "Live Recommendations Table"}
-                            </h3>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="flex items-center border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 shrink-0">
-                                <button
-                                    onClick={() => setViewMode("calendar")}
-                                    title={isAr ? "عرض التقويم" : "Calendar View"}
-                                    className="p-1.5 transition-all text-zinc-400 hover:text-black dark:hover:text-white"
-                                >
-                                    <Grid className="w-4 h-4" />
-                                </button>
-                                <button
-                                    onClick={() => setViewMode("agenda")}
-                                    title={isAr ? "عرض القائمة" : "List View"}
-                                    className="p-1.5 transition-all bg-[#FFE600] text-black font-black border border-black"
-                                >
-                                    <List className="w-4 h-4" />
-                                </button>
-                            </div>
+
+                {/* ── 3. Month Summary Bar (Single Dynamic Bar inside Calendar) ── */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 p-3 sm:p-4">
+                    <div>
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase block">
+                            {isAr ? (filterPreset === "all" ? "إجمالي الصفقات المغلقة" : "صفقات الشهر") : "Closed Trades"}
+                        </span>
+                        <span className="text-xl font-black font-mono text-black dark:text-white">
+                            {monthStats.total} {isAr ? "صفقة" : "trades"}
+                        </span>
+                    </div>
+                    <div>
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase block">
+                            {isAr ? (filterPreset === "all" ? "نسبة النجاح الإجمالية" : "نسبة النجاح للشهر") : "Win Rate"}
+                        </span>
+                        <div className="flex items-center gap-1.5" dir="ltr">
+                            <span className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                                {Number(monthStats.winRate || 0).toFixed(1)}%
+                            </span>
+                            <span className="text-xs font-bold text-zinc-500 font-sans">
+                                ({monthStats.wins} {isAr ? "رابحة" : "wins"})
+                            </span>
                         </div>
                     </div>
+                    <div>
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase block">{isAr ? "صافي العائد الإجمالي" : "Net Total Return"}</span>
+                        <span
+                            dir="ltr"
+                            className={`text-xl font-black font-mono block ${
+                                (monthStats.netReturn || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                            }`}
+                        >
+                            {(monthStats.netReturn || 0) >= 0 ? "+" : ""}{Number(monthStats.netReturn || 0).toFixed(1)}%
+                        </span>
+                    </div>
+                    <div>
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase block">
+                            {isAr ? (filterPreset === "all" ? "أفضل صفقة في العام" : "أفضل صفقة في الشهر") : "Best Trade"}
+                        </span>
+                        <span className="text-base sm:text-lg font-black font-mono text-indigo-600 dark:text-indigo-400 truncate block">
+                            {monthStats.bestTrade ? (
+                                <span dir="ltr">
+                                    {monthStats.bestTrade.symbol} ({(monthStats.bestTrade.profit_loss_pct || 0) >= 0 ? "+" : ""}{Number(monthStats.bestTrade.profit_loss_pct || 0).toFixed(1)}%)
+                                </span>
+                            ) : (
+                                "—"
+                            )}
+                        </span>
+                    </div>
+                </div>
 
+                {viewMode === "calendar" ? (
+                    <>
+                        {/* ── 4. Day Names Header ── */}
+                        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center font-black text-xs text-zinc-600 dark:text-zinc-400">
+                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأحد</div>
+                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الإثنين</div>
+                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الثلاثاء</div>
+                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأربعاء</div>
+                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الخميس</div>
+                            <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">الجمعة (عطلة)</div>
+                            <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">السبت (عطلة)</div>
+                        </div>
+
+                        {/* ── 5. Grid of Calendar Days ── */}
+                        <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                            {calendarDays.map((cell, idx) => {
+                                const dayInfo = dayMap.get(cell.dateStr);
+                                const hasClosed = dayInfo && dayInfo.closed.length > 0;
+                                const hasCreated = dayInfo && dayInfo.created.length > 0;
+                                const hasAdjusted = dayInfo && dayInfo.adjusted.length > 0;
+                                const wins = dayInfo ? dayInfo.wins.length : 0;
+                                const losses = dayInfo ? dayInfo.losses.length : 0;
+                                const netPl = dayInfo ? dayInfo.netProfitPct : 0;
+                                const isToday = cell.dateStr === todayDateStr;
+                                const isSelected = cell.dateStr === selectedDayDateStr;
+                                const isDelayed = isDelayedForPlan(cell.dateStr);
+
+                                let maxGainTrade: any = null;
+                                if (dayInfo && dayInfo.closed.length > 0) {
+                                    maxGainTrade = [...dayInfo.closed].sort((a, b) => (Number(b.profit_loss_pct) || 0) - (Number(a.profit_loss_pct) || 0))[0];
+                                }
+                                const isBigRunnerDay = maxGainTrade && Number(maxGainTrade.profit_loss_pct) >= 15;
+
+                                return (
+                                    <div
+                                        key={`${cell.dateStr}-${idx}`}
+                                        onClick={() => {
+                                            setSelectedDayDateStr(cell.dateStr);
+                                        }}
+                                        className={`min-h-[75px] sm:min-h-[100px] p-2 border-2 flex flex-col justify-between transition-all select-none relative cursor-pointer ${
+                                            isToday
+                                                ? "ring-4 ring-amber-400 dark:ring-amber-300 shadow-md shadow-amber-400/20 z-10"
+                                                : ""
+                                        } ${
+                                            isSelected && !isToday
+                                                ? "ring-2 ring-indigo-500 shadow-sm"
+                                                : ""
+                                        } ${
+                                            !cell.isCurrentMonth
+                                                ? "border-zinc-200 dark:border-zinc-800/60 bg-zinc-100/30 dark:bg-zinc-900/20 text-zinc-400 dark:text-zinc-600 opacity-30"
+                                                : cell.isWeekend
+                                                ? "border-zinc-300 dark:border-zinc-800 bg-zinc-100/70 dark:bg-zinc-900/40 text-zinc-400"
+                                                : hasClosed
+                                                ? netPl >= 0
+                                                    ? "border-black dark:border-white bg-emerald-50/70 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_#fff] hover:-translate-x-0.5 hover:-translate-y-0.5"
+                                                    : "border-black dark:border-white bg-rose-50/70 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/30 shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_#fff] hover:-translate-x-0.5 hover:-translate-y-0.5"
+                                                : hasCreated
+                                                ? "border-amber-400 dark:border-amber-400 bg-amber-50/70 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 shadow-[2px_2px_0px_#f59e0b] hover:-translate-x-0.5 hover:-translate-y-0.5"
+                                                : "border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-950/40 text-zinc-400"
+                                        }`}
+                                    >
+                                        {/* Top: Day Number & Trades Badge */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1">
+                                                <span
+                                                    className={`text-xs font-black font-mono px-1 py-0.5 ${
+                                                        isToday
+                                                            ? "bg-amber-400 text-black border border-black shadow-[1px_1px_0px_#000]"
+                                                            : cell.isCurrentMonth
+                                                            ? (hasClosed || hasCreated)
+                                                                ? "text-black dark:text-white"
+                                                                : "text-zinc-500"
+                                                            : "text-zinc-400"
+                                                    }`}
+                                                >
+                                                    {cell.dayNum}
+                                                </span>
+                                                {isToday && (
+                                                    <span className="px-1.5 py-0.5 border border-black bg-[#FFE600] text-black text-[9px] font-black uppercase shadow-[1px_1px_0px_#000]">
+                                                        {isAr ? "اليوم" : "TODAY"}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <div className="flex items-center gap-1">
+                                                {isDelayed && (hasClosed || hasCreated) && (
+                                                    <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                                )}
+                                                {hasClosed && (
+                                                    <span className="px-1.5 py-0.2 border border-black bg-black text-[#FFE600] text-[9px] font-black">
+                                                        {dayInfo!.closed.length} صفقات
+                                                    </span>
+                                                )}
+                                                {hasCreated && !hasClosed && (
+                                                    <span className="px-1.5 py-0.2 border border-black bg-amber-400 text-black text-[9px] font-black">
+                                                        +{dayInfo!.created.length} توصية
+                                                    </span>
+                                                )}
+                                                {hasAdjusted && !hasClosed && !hasCreated && (
+                                                    <span className="px-1.5 py-0.2 border border-black bg-sky-400 text-black text-[9px] font-black">
+                                                        {dayInfo!.adjusted.length}🔧
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Middle: Win/Loss & Return */}
+                                        {hasClosed ? (
+                                            <div className="space-y-1 my-1">
+                                                <div className="flex items-center justify-between text-[10px] font-black">
+                                                    <span className="text-emerald-600 dark:text-emerald-400">{wins} رابحة</span>
+                                                    {losses > 0 && <span className="text-rose-500">{losses} خاسرة</span>}
+                                                </div>
+
+                                                <div
+                                                    dir="ltr"
+                                                    className={`text-xs font-black font-mono text-center px-1 py-0.5 border border-black ${
+                                                        netPl >= 0
+                                                            ? "bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100"
+                                                            : "bg-rose-200 dark:bg-rose-900 text-rose-900 dark:text-rose-100"
+                                                    }`}
+                                                >
+                                                    {netPl >= 0 ? "+" : ""}{netPl.toFixed(1)}%
+                                                </div>
+                                            </div>
+                                        ) : hasCreated ? (
+                                            <div className="space-y-1 my-1">
+                                                <div className="text-[10px] font-black text-amber-700 dark:text-amber-300 text-center">
+                                                    {isAr ? `إصدار ${dayInfo!.created.length} توصيات` : `${dayInfo!.created.length} signals`}
+                                                </div>
+                                                <div
+                                                    dir="ltr"
+                                                    className="text-[10px] font-black font-mono text-center px-1 py-0.5 border border-black bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-100 truncate"
+                                                >
+                                                    {dayInfo!.created.slice(0, 3).map((t) => t.symbol).join(", ")}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-[10px] text-zinc-400 dark:text-zinc-600 font-bold text-center">
+                                                {!cell.isCurrentMonth ? "" : cell.isWeekend ? "عطلة" : "لا إغلاقات"}
+                                            </div>
+                                        )}
+
+                                        {/* Bottom: Big Runner highlight */}
+                                        {isBigRunnerDay && (
+                                            <div
+                                                dir="ltr"
+                                                className="text-[9px] font-black bg-amber-400 text-black px-1 py-0.5 border border-black text-center truncate"
+                                            >
+                                                🔥 {maxGainTrade.symbol} +{Number(maxGainTrade.profit_loss_pct).toFixed(0)}%
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </>
+                ) : (
+                    /* ── AGENDA / LIST VIEW (Neo-Brutalist) ── */
                     <div className="divide-y-2 divide-black dark:divide-white border-2 border-black dark:border-white">
-                        {Array.from(dayMap.entries())
-                            .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
-                            .slice(0, 30)
-                            .map(([dateStr, dayData]) => {
+                        {agendaDays.length === 0 ? (
+                            <div className="p-6 text-center text-xs font-bold text-zinc-500">
+                                {isAr ? "لا توجد صفقات في هذا الشهر. اختر شهر 8 أو شهر 9 أو كامل عام 2026." : "No trades in this period."}
+                            </div>
+                        ) : (
+                            agendaDays.map(([dateStr, dayData]) => {
                                 const netPl = dayData.netProfitPct;
                                 const isPos = netPl > 0;
                                 const isNeg = netPl < 0;
@@ -992,10 +1044,11 @@ export default function RecommendationCalendar({
                                         </div>
                                     </div>
                                 );
-                            })}
+                            })
+                        )}
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* ── SELECTED DAY DETAILS FULLSCREEN PORTAL MODAL (Neo-Brutalist) ── */}
             {mounted && selectedDayData && createPortal(
