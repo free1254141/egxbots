@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useWatchlist, type SavedSymbol } from "@/contexts/WatchlistContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
-import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone, ChevronDown, ChevronUp, Bot } from "lucide-react";
 import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
@@ -475,6 +475,15 @@ export default function ProfilePage() {
                 >
                   <Send className="w-4 h-4 shrink-0" />
                   {proInviteUrl ? (isAr ? "دخول قناة Pro" : "Join Pro Telegram") : (isAr ? "القناة المجانية" : "Free Channel")}
+                </a>
+                <a
+                  href="https://t.me/egxbots_bot?start=alerts"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                >
+                  <Bot className="w-4 h-4 shrink-0" />
+                  {isAr ? "تفعيل البوت في الخاص" : "Activate Bot Alerts"}
                 </a>
                 <a
                   href={telegramWebUrl}
