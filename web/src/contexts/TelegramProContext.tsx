@@ -19,6 +19,8 @@ export type TelegramProInvite = {
   invite_link?: string;
   invite_expires_at?: string | null;
   invite_status?: "ready" | "unavailable";
+  bot_active?: boolean;
+  telegram_chat_id?: string | null;
 };
 
 type CachedInvite = {
@@ -34,7 +36,7 @@ type TelegramProContextValue = {
   refresh: () => Promise<void>;
 };
 
-const EMPTY_INVITE: TelegramProInvite = { is_pro: false };
+const EMPTY_INVITE: TelegramProInvite = { is_pro: false, bot_active: false, telegram_chat_id: null };
 const TelegramProContext = createContext<TelegramProContextValue | null>(null);
 
 export function TelegramProProvider({ children }: { children: ReactNode }) {

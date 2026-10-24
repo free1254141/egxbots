@@ -43,6 +43,8 @@ export default function ProfilePage() {
       ? `https://web.telegram.org/k/#?tgaddr=${encodeURIComponent(`tg://join?invite=${match[1]}`)}`
       : url;
   })();
+  const botAppUrl = userId ? `https://t.me/egxbots_bot?start=${userId}` : "https://t.me/egxbots_bot?start=alerts";
+  const botWebUrl = `https://web.telegram.org/k/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=egxbots_bot&start=${userId || "alerts"}`)}`;
   const [editingSymbolId, setEditingSymbolId] = useState<string | null>(null);
   const [watchlistDraft, setWatchlistDraft] = useState({ name: "" });
   const [portfolioVersion, setPortfolioVersion] = useState(0);
@@ -257,6 +259,120 @@ export default function ProfilePage() {
         </div>
       </header>
 
+      {/* ── Telegram Bot Activation Banner (تفعيل بوت التليجرام في الخاص) ── */}
+      {proInvite.bot_active ? (
+        <section className="relative z-20 w-full rounded-xl sm:rounded-2xl p-4 sm:p-5 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)]">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="h-11 w-11 border-4 border-black bg-black text-emerald-400 flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <span className="border-2 border-black bg-black text-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                    {isAr ? "البوت مفعل بنجاح" : "Bot Active"}
+                  </span>
+                  <span className="text-xs font-black text-black uppercase tracking-wider">
+                    {isAr ? "إشارات وتنبيهات الخاص متصلة" : "Private DM Alerts Active"}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-bold text-zinc-950 leading-snug max-w-2xl">
+                  {isAr
+                    ? "حسابك متصل ومفعل في الخاص مع بوت (@egxbots_bot). تصلك إشارات الإسكانر اللحظية وتنبيهات الأهداف وتذكيرات التجديد مباشرة."
+                    : "Your account is linked and active in private with @egxbots_bot. You receive instant scanner signals, target alerts, and renewal reminders."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+              <a
+                href={botAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 px-4 items-center justify-center gap-2 border-3 border-black bg-black text-emerald-400 font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
+              >
+                <Smartphone className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "فتح في التطبيق (App)" : "Open in App"}</span>
+              </a>
+              <a
+                href={botWebUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 px-4 items-center justify-center gap-2 border-3 border-black bg-white text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
+              >
+                <Globe className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "فتح في الويب (Web)" : "Open in Web"}</span>
+              </a>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="relative z-20 w-full rounded-xl sm:rounded-2xl p-4 sm:p-5 border-4 border-black dark:border-white bg-[#FFE600] dark:bg-yellow-400 text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)]">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="h-11 w-11 border-4 border-black bg-black text-[#FFE600] flex items-center justify-center shadow-[2px_2px_0px_rgba(0,0,0,1)] shrink-0">
+                <Bot className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <span className="border-2 border-black bg-black text-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                    {isAr ? "خطوة هامة لتفعيل التنبيهات" : "Action Required"}
+                  </span>
+                  <span className="text-xs font-black text-black uppercase tracking-wider">
+                    {(telegramLinked || proInvite.telegram_chat_id)
+                      ? (isAr ? "مسجل في القناة — مطلوب تفعيل شات البوت في الخاص" : "In Channel — Activate Bot DM")
+                      : (isAr ? "تفعيل إشارات وتنبيهات البوت في الخاص" : "Activate Private Telegram Bot Alerts")}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-bold text-zinc-950 leading-snug max-w-2xl">
+                  {(telegramLinked || proInvite.telegram_chat_id)
+                    ? (isAr
+                      ? "⚠️ البوت لا يستطيع إرسال إشارات الإسكانر أو تنبيهات الأهداف إليك حتى تبدأ المحادثة معه في الخاص. افتح البوت واضغط زر Start (بدء):"
+                      : "⚠️ The bot cannot send scanner signals or target alerts until you start a private chat with it. Open the bot and press Start:")
+                    : (isAr
+                      ? "⚠️ لاستلام إشارات الإسكانر اللحظية وتنبيهات الأهداف وتذكيرات اشتراكك مباشرة في الخاص، افتح البوت واضغط زر Start (بدء):"
+                      : "⚠️ To receive instant scanner signals, target alerts, and renewal reminders in private DM, open the bot and press Start:")}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+              <a
+                href={botAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-black text-[#FFE600] font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
+              >
+                <Smartphone className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "تطبيق تليجرام (App)" : "Telegram App"}</span>
+              </a>
+              <a
+                href={botWebUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 px-4 items-center justify-center gap-2 border-3 border-black bg-white text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer"
+              >
+                <Globe className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "ويب تليجرام (Web)" : "Telegram Web"}</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  void refreshProInvite();
+                  void reloadProfile();
+                  toast.info(isAr ? "جاري التحقق من تفعيل البوت..." : "Checking bot status...");
+                }}
+                className="inline-flex h-11 px-3 items-center justify-center gap-1.5 border-3 border-black bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-all cursor-pointer"
+                title={isAr ? "اضغط بعد تفعيل البوت للتحقق الفوري" : "Click after starting bot to verify"}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isAr ? "تحقق" : "Verify"}</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* ── Plan & Quota (الخطة والكوتا) ── */}
       <PlanQuotaCard key={`quota-${portfolioVersion}`} refreshTrigger={portfolioVersion} />
 
@@ -358,15 +474,25 @@ export default function ProfilePage() {
                     {isAr ? "نشط" : "Active"}
                   </span>
                 </div>
-                {telegramLinked && (
-                  <div>
-                    <span className="text-zinc-500 uppercase text-[10px] tracking-wider block">{isAr ? "بوت التليجرام" : "Telegram Bot"}</span>
+                <div>
+                  <span className="text-zinc-500 uppercase text-[10px] tracking-wider block">{isAr ? "بوت التليجرام في الخاص" : "Private Telegram Bot"}</span>
+                  {proInvite.bot_active ? (
                     <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-black">
-                      <Send className="w-3.5 h-3.5" />
-                      {isAr ? "متصل" : "Linked"}
+                      <CheckCircle2 className="w-4 h-4" />
+                      {isAr ? "مفعل وشغال في الخاص ✅" : "Active & Linked (DM) ✅"}
                     </span>
-                  </div>
-                )}
+                  ) : (telegramLinked || proInvite.telegram_chat_id) ? (
+                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-yellow-400 font-black">
+                      <Bot className="w-4 h-4" />
+                      {isAr ? "مسجل بالقناة لكن غير مفعل بالخاص ⚠️" : "In Channel / DM Not Active ⚠️"}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-black">
+                      <X className="w-4 h-4" />
+                      {isAr ? "غير مفعل ❌" : "Not Linked ❌"}
+                    </span>
+                  )}
+                </div>
                 <div>
                   <span className="text-zinc-500 uppercase text-[10px] tracking-wider block">
                     {isAr ? "رقم الواتساب / الموبايل" : "WhatsApp / Mobile"}
@@ -477,13 +603,26 @@ export default function ProfilePage() {
                   {proInviteUrl ? (isAr ? "دخول قناة Pro" : "Join Pro Telegram") : (isAr ? "القناة المجانية" : "Free Channel")}
                 </a>
                 <a
-                  href={userId ? `https://t.me/egxbots_bot?start=${userId}` : "https://t.me/egxbots_bot?start=alerts"}
+                  href={botAppUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
                 >
-                  <Bot className="w-4 h-4 shrink-0" />
-                  {isAr ? "تفعيل البوت في الخاص" : "Activate Bot Alerts"}
+                  <Smartphone className="w-4 h-4 shrink-0" />
+                  {proInvite.bot_active
+                    ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
+                    : (isAr ? "تفعيل البوت (App)" : "Activate Bot (App)")}
+                </a>
+                <a
+                  href={botWebUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-teal-300 dark:bg-teal-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                >
+                  <Globe className="w-4 h-4 shrink-0" />
+                  {proInvite.bot_active
+                    ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
+                    : (isAr ? "تفعيل البوت (Web)" : "Activate Bot (Web)")}
                 </a>
                 <a
                   href={telegramWebUrl}

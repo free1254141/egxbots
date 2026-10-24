@@ -122,6 +122,54 @@ async function recoverInviteFromPaymentService(
   }
 }
 
+
+async function checkBotActive(service: ReturnType<typeof getSupabaseServiceClient>, userId: string): Promise<{ botActive: boolean; telegramChatId: string | null }> {
+  try {
+    const { data: profile } = await service
+      .from("profiles")
+      .select("telegram_chat_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const tgChatId = profile?.telegram_chat_id ? String(profile.telegram_chat_id).trim() : null;
+    if (!tgChatId) {
+      return { botActive: false, telegramChatId: null };
+    }
+
+    const botToken = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
+    if (!botToken) {
+      return { botActive: false, telegramChatId: tgChatId };
+    }
+
+    const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+    const bases = [relayUrl];
+    if (relayUrl !== "https://api.telegram.org") {
+      bases.push("https://api.telegram.org");
+    }
+
+    for (const base of bases) {
+      try {
+        const ping = await fetch(`${base}/bot${botToken}/sendChatAction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: tgChatId, action: "typing" }),
+          signal: AbortSignal.timeout(3500),
+          cache: "no-store",
+        });
+        const payload = await ping.json().catch(() => ({}));
+        if (payload?.ok) {
+          return { botActive: true, telegramChatId: tgChatId };
+        }
+      } catch {
+        continue;
+      }
+    }
+    return { botActive: false, telegramChatId: tgChatId };
+  } catch {
+    return { botActive: false, telegramChatId: null };
+  }
+}
+
 export async function GET(request: Request) {
   const supabase = await createSupabaseServerClient();
   const {
@@ -130,6 +178,7 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const service = getSupabaseServiceClient();
+  const { botActive, telegramChatId } = await checkBotActive(service, user.id);
   const { data: subscription, error: subscriptionError } = await service
     .from("subscriptions")
     .select("plan_id,status,current_period_end")
@@ -145,7 +194,7 @@ export async function GET(request: Request) {
   }
   const end = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : 0;
   if (!subscription || !Number.isFinite(end) || end <= Date.now()) {
-    return NextResponse.json({ is_pro: false });
+    return NextResponse.json({ is_pro: false, bot_active: botActive, telegram_chat_id: telegramChatId });
   }
 
   const subscriptionEnd = String(subscription.current_period_end);
@@ -186,5 +235,7 @@ export async function GET(request: Request) {
     invite_link: validInvite?.invite_link?.trim() || "",
     invite_expires_at: validInvite?.invite_expires_at || null,
     invite_status: validInvite ? "ready" : "unavailable",
+    bot_active: botActive,
+    telegram_chat_id: telegramChatId,
   });
 }
