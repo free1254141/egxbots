@@ -917,6 +917,15 @@ def _send_telegram_exit(
         actual_day = closed_on or dt.datetime.now(dt.timezone.utc).date().isoformat()
         late_notice = (f"⚠️ *تصحيح متابعة متأخر:* تحقق شرط الإغلاق في جلسة `{actual_day}`؛ هذا إشعار تصحيح اليوم، وليس خروجًا جديدًا اليوم.\n"
                        if closed_on and closed_on < dt.datetime.now(dt.timezone.utc).date().isoformat() else "")
+        promo_hook = ""
+        if status == "win" or exit_reason == "target_hit":
+            promo_hook = (
+                "\n━━━━━━━━━━━━━━━━━━━━\n"
+                "🔥 *الصفقة دي وصلت لمشتركي VIP لحظياً وقت انطلاق السهم!*\n"
+                "⚡ اشترك في باقة المؤسسين بـ 50 ج.م شهرياً واستقبل صفقات السوينج أولاً بأول:\n"
+                f"👉 {web_origin}/pricing"
+            )
+
         msg = (
             f"{emoji} *إغلاق توصية / Trade Closed* 🏁\n"
             f"{late_notice}"
@@ -930,6 +939,7 @@ def _send_telegram_exit(
             f"{duration_line}"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"🔗 رابط سجل الصفقات: {web_origin}/scanner/backtests?tab=bots"
+            f"{promo_hook}"
         )
 
         return _notify_central_telegram(msg, "recommendation_exit")

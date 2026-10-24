@@ -85,6 +85,8 @@ export const DEFAULT_ADMIN_CONFIG: AdminScannerConfig = {
 const BOT_STATE_KEY = "scanner_alerts";
 export const VIP_CHANNEL_CHAT_ID =
   process.env.TELEGRAM_PRO_CHAT_ID || process.env.VIP_CHANNEL_CHAT_ID || "-1003906516349";
+export const FREE_CHANNEL_CHAT_ID =
+  process.env.TELEGRAM_FREE_CHAT_ID || process.env.TELEGRAM_CHAT_ID || "-1002083067817_153";
 
 export function getCairoNow() {
   const now = new Date();
@@ -161,13 +163,26 @@ export async function sendTelegramAlert(chatId: string | number, text: string): 
     return false;
   }
 
+  let targetChatId: string | number = chatId;
+  let targetThreadId: number | undefined = undefined;
+  if (typeof chatId === "string" && !chatId.startsWith("@") && chatId.includes("_")) {
+    const [c, t] = chatId.split("_", 2);
+    targetChatId = c;
+    if (t && !isNaN(Number(t))) {
+      targetThreadId = Number(t);
+    }
+  }
+
   const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
-  const payload = {
-    chat_id: chatId,
+  const payload: any = {
+    chat_id: targetChatId,
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
   };
+  if (targetThreadId !== undefined) {
+    payload.message_thread_id = targetThreadId;
+  }
 
   for (const base of [relayUrl, "https://api.telegram.org"]) {
     try {
@@ -809,6 +824,31 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         hitLines.push(`💡 <i>إدارة المحفظة: جني الأرباح أولاً بأول وتأمين نقطة الدخول سر استدامة النمو.</i>`);
         hitLines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">عرض الشارت التفاعلي للصفقات المغلقة بالبروفايل</a>`);
         await sendTelegramAlert(chatId, hitLines.join("\n"));
+
+        // Dispatch winning target hits to the Free channel as Social Proof / Subscription Hook
+        const winningHits = dedupHitSignals.filter((s) => Number(s.return_pct || 0) > 0);
+        if (winningHits.length > 0 && !options.singleRecipientChatId) {
+          const freeLines: string[] = [
+            `🎯 <b>تحقيق هدف جديد في صفقات السوينج السريع — EGX BOTS</b> 🚀`,
+            `━━━━━━━━━━━━━━━━━━━━`,
+          ];
+          for (const s of winningHits) {
+            const retStr = `+${Number(s.return_pct).toFixed(1)}%`;
+            const exitPrice = Number(s.exit_price || s.current_price || s.target_1).toFixed(2);
+            const peakGainStr = s.max_gain_pct ? `+${Number(s.max_gain_pct).toFixed(1)}%` : retStr;
+            freeLines.push(
+              `✅ <b>#${s.symbol}</b> — <b>حقق الهدف بنجاح! 🎉</b>\n` +
+              `   • سعر الدخول في الإشارة: <b>${s.entry_price.toFixed(2)} ج.م</b>\n` +
+              `   • سعر الخروج / الهدف: <b>${exitPrice} ج.م</b>\n` +
+              `   • <b>صافي العائد المحقق: ${retStr}</b> 📈 (أعلى قمة وصلها: <b>${peakGainStr}</b>)`
+            );
+          }
+          freeLines.push(`━━━━━━━━━━━━━━━━━━━━`);
+          freeLines.push(`⚡ <i>هذه التوصية أُرسلت لحظياً لمشتركي VIP وقت انطلاق السهم بنقاط الدخول والوقف المحسوب بدقة.</i>\n`);
+          freeLines.push(`🔥 لا تفوّت صفقات الجلسة القادمة — احجز مقعدك الآن في <b>باقة المؤسسين بـ 50 ج.م فقط شهرياً</b> بدلاً من 200 ج.م!`);
+          freeLines.push(`👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing`);
+          await sendTelegramAlert(FREE_CHANNEL_CHAT_ID, freeLines.join("\n"));
+        }
       }
 
       if (dedupStoppedSignals.length > 0) {
