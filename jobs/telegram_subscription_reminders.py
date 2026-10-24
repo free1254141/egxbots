@@ -238,6 +238,10 @@ def run_subscription_reminders(
             print(f"[SUBSCRIPTION_REMINDERS] [skip] no linked private Telegram chat for user={sub['user_id']}")
             continue
 
+        if dry_run:
+            print(f"[SUBSCRIPTION_REMINDERS] [dry-run] would send stage={stage} to chat_id={chat_id}")
+            continue
+
         period_end = end_dt.astimezone(timezone.utc).isoformat()
         log_payload = {
             "subscription_id": sub["id"],
@@ -307,10 +311,6 @@ def run_subscription_reminders(
         else:
             failed += 1
             print(f"[SUBSCRIPTION_REMINDERS] [error] log insert failed status={insert_res.status_code} body={insert_res.text[:200]}")
-            continue
-
-        if dry_run:
-            print(f"[SUBSCRIPTION_REMINDERS] [dry-run] would send stage={stage} to chat_id={chat_id}")
             continue
 
         # Send Telegram notification
