@@ -124,22 +124,24 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
       colorBg: "bg-rose-500 text-white",
       badgeClass: "bg-rose-100 text-rose-900 border-rose-500 dark:bg-rose-950 dark:text-rose-200",
       borderAccent: "border-rose-500",
-      formula: "Breakeven Stop at +2.5% Gain  |  Max Active Signals = 8  |  Min Turnover ≥ 400K EGP",
-      formulaAr: "نقل الوقف لسعر الدخول فورياً عند +2.5% ربح، حد أقصى 8 صفقات مفتوحة متزامنة، وفلترة سيولة مؤسسية لمنع الأسهم الميتة.",
+      formula: "Market Breadth ≥ 30%  |  Breakeven at +2.5% Gain  |  Max Active = 8  |  Min Turnover ≥ 400K EGP",
+      formulaAr: "تجميد الشراء آلياً وقت انهيار السوق (Breadth < 30%)، ونقل الوقف لسعر الدخول فورياً عند +2.5% ربح، وحد أقصى 8 صفقات مفتوحة.",
       explanationAr:
-        "الهدف الأساسي للرادار ليس كثرة الصفقات بل استدامة نمو المحفظة وحماية رأس المال. تعتمد المنظومة على 4 حواجز دفاعية حديدية تمنع النزيف وتضمن أن أي صفقة حققت ربحاً مبدئياً لا تتحول أبداً إلى خسارة، مع عدم توريط المحفظة في عشرات الأسهم الضعيفة في نفس الوقت.",
+        "الهدف الأساسي للرادار ليس كثرة الصفقات بل استدامة نمو المحفظة وحماية رأس المال. تعتمد المنظومة على 5 حواجز دفاعية حديدية تمنع الشراء أثناء موجات الهبوط العام للسوق وتضمن أن أي صفقة حققت ربحاً مبدئياً لا تتحول أبداً إلى خسارة.",
       explanationEn:
-        "Engineered for portfolio longevity and aggressive risk containment: automated breakeven stop-trail at +2.5%, maximum of 8 open positions, and institutional liquidity gating.",
+        "Engineered for portfolio longevity and aggressive risk containment: market breadth crash lockout (< 30%), automated breakeven stop-trail at +2.5%, maximum of 8 open positions, and institutional liquidity gating.",
       tradingTipsAr: [
+        "حارس اتجاه السوق العام (Market Crash Gate): إذا كانت نسبة الأسهم المتداولة فوق EMA(20) أقل من 30% أو نسبة الأسهم الصاعدة أقل من 25%، يتوقف الرادار فوراً عن فتح أي صفقات شراء جديدة (Cash is King) لحين تعافي السوق، مع الاكتفاء بإدارة وتأمين الصفقات المفتوحة.",
         "وقف التعادل الذكي (Breakeven Stop): بمجرد أن يحقق السهم ربحاً يصل إلى +2.5%، يرتفع وقف الخسارة فورياً لسعر الشراء لتصبح مخاطرة الصفقة (0.0%).",
         "سقف الصفقات المفتوحة (Portfolio Cap): لا يسمح الرادار بفتح أكثر من 8 صفقات نشطة في نفس الوقت لمنع تكديس المخاطر وتشتيت رأس المال في فترات تقلب السوق.",
-        "فلتر السيولة الإلزامي (Turnover Gate): استبعاد فوري لأي سهم يقل حجم تداوله عن 200,000 سهم أو قيمة تداوله عن 400,000 جنيه لحمايتك من الأسهم الميتة ومصائد المصيدة السعرية.",
-        "فلتر الاتجاه الصارم (Trend Shield): اشتراط تواجد السعر فوق متوسط 20 يوم (EMA 20) لمنع شراء الأسهم الواقعة في مسار هابط رئيسي مهما كانت الإغراءات."
+        "فلتر السيولة والسعر الإلزامي (Turnover Gate): استبعاد أي سهم يقل سعره عن 1.50 ج.م أو تقل قيمة تداوله عن 400,000 جنيه لحمايتك من الأسهم القروشية والميتة.",
+        "فلتر الاتجاه الصارم (Trend Shield): اشتراط تواجد السعر فوق متوسط 20 يوم (EMA 20) لمنع شراء الأسهم الواقعة في مسار هابط رئيسي."
       ],
       tradingTipsEn: [
+        "Market Crash Gate: Automatically halts new buy signals when market breadth (< 30% above EMA20 or < 25% advancing) indicates a broad market selloff.",
         "Breakeven Stop: Reaching +2.5% gain immediately adjusts stop-loss to entry price (0.0% capital risk).",
         "Portfolio Cap: Hard cap of 8 simultaneously open signals prevents overexposure and liquidity dilution.",
-        "Turnover Gate: Mandatory minimum 200K volume and 400K EGP turnover keeps low-float traps away.",
+        "Turnover Gate: Minimum price 1.50 EGP and 400K EGP turnover keeps penny-stock traps away.",
         "Trend Shield: Mandatory Close ≥ EMA(20) prevents catching falling knives in established downtrends."
       ],
       scanIntervalAr: "مراقبة مستمرة كل ثانية لأوامر الوقف والأهداف.",

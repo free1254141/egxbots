@@ -280,12 +280,30 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     console.warn("stock_technical_indicators query fallback:", err);
   }
 
-  // ── STEP 2: Filter Matches ────────────────────────────────────────────────
+  // ── STEP 2: Market Breadth Gate & Filter Matches ──────────────────────────
+  // Compute real-time EGX Market Breadth (% of stocks above EMA20 and % green)
+  const validRows = rows.filter((r) => Number(r.close || 0) > 0);
+  const totalMarketStocks = Math.max(1, validRows.length);
+  const aboveEma20Count = validRows.filter(
+    (r) => Number(r.ema_20 || 0) > 0 && Number(r.close || 0) >= Number(r.ema_20 || 0)
+  ).length;
+  const greenStocksCount = validRows.filter((r) => Number(r.change_pct || 0) > 0).length;
+  const avgMarketChangePct =
+    validRows.reduce((sum, r) => sum + Number(r.change_pct || 0), 0) / totalMarketStocks;
+
+  const breadthAboveEma20Pct = (aboveEma20Count / totalMarketStocks) * 100;
+  const greenRatioPct = (greenStocksCount / totalMarketStocks) * 100;
+
+  // Market Crash Guard (Cash is King):
+  // Halt new buy signals if market breadth (< 30% above EMA20) or severe selloff (< 25% green or avg drop <= -1.2%)
+  const isMarketHealthyForBuying =
+    breadthAboveEma20Pct >= 30 && greenRatioPct >= 25 && avgMarketChangePct > -1.2;
+
   const volumeMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }> = [];
   const breakoutMatches: Array<{ symbol: string; close: number; change_pct: number; r_vol: number }> = [];
   const oversoldMatches: Array<{ symbol: string; close: number; rsi_14: number; change_pct: number }> = [];
 
-  for (const r of rows) {
+  for (const r of isMarketHealthyForBuying ? rows : []) {
     const symbol = String(r.symbol || "").toUpperCase();
     const close = Number(r.close || 0);
     const open = Number(r.open || close);
