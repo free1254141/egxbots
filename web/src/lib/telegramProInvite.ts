@@ -4,13 +4,23 @@ export async function createProTelegramInvite(userId: string, expiresAt: string)
   if (!token || !chatId) return "";
 
   const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
-  const expireDate = Math.floor(new Date(expiresAt).getTime() / 1000);
-  const body = JSON.stringify({
+  const now = Date.now();
+  const rawExpireMs = new Date(expiresAt).getTime();
+  const maxExpireMs = now + 365 * 86_400_000;
+
+  const payload: Record<string, unknown> = {
     chat_id: chatId,
     name: `Pro ${userId.slice(0, 8)}`,
-    expire_date: expireDate,
     member_limit: 1,
-  });
+  };
+
+  // Only pass expire_date if it is within Telegram's allowed window (up to 365 days).
+  // If subscription is longer (e.g. lifetime or >1 year), omit expire_date for a permanent single-use link.
+  if (Number.isFinite(rawExpireMs) && rawExpireMs > now && rawExpireMs <= maxExpireMs) {
+    payload.expire_date = Math.floor(rawExpireMs / 1000);
+  }
+
+  const body = JSON.stringify(payload);
 
   for (const base of [relayUrl, "https://api.telegram.org"]) {
     try {

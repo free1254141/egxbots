@@ -1589,8 +1589,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         return True
 
     # Command to show/pin the interactive ARTORO Control Panel (or /start in private DM)
-    if clean_lower in (
-        "/start",
+    if clean_lower.startswith("/start") or clean_lower in (
         "/panel",
         "/vippanel",
         "/artoro",

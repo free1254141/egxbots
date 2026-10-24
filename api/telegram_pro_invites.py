@@ -106,15 +106,19 @@ def create_invite_link(user_id: str, subscription_end: str) -> str:
     if not chat_id:
         return ""
     expires_at = _parse_dt(subscription_end) or datetime.now(timezone.utc)
-    result = telegram_api(
-        "createChatInviteLink",
-        {
-            "chat_id": chat_id,
-            "name": f"Pro {user_id[:8]}",
-            "expire_date": int(expires_at.timestamp()),
-            "member_limit": 1,
-        },
-    )
+    now = datetime.now(timezone.utc)
+    max_expire = now + timedelta(days=365)
+    
+    payload: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "name": f"Pro {user_id[:8]}",
+        "member_limit": 1,
+    }
+    # Only send expire_date if within Telegram's allowed 365-day maximum window
+    if now < expires_at <= max_expire:
+        payload["expire_date"] = int(expires_at.timestamp())
+        
+    result = telegram_api("createChatInviteLink", payload)
     return str((result.get("result") or {}).get("invite_link") or "")
 
 
@@ -201,11 +205,13 @@ def ensure_pro_invite(user_id: str, subscription_end: str) -> Dict[str, Any]:
         # A link can still be technically valid while belonging to a shorter
         # plan (for example, a 30-day link left after a 180-day renewal).
         # Reuse it only when it covers the complete current subscription.
-        if link and invite_end and invite_end > now and invite_end >= end_dt - timedelta(seconds=60):
-            return {
-                "invite_link": link,
-                "invite_expires_at": existing.get("invite_expires_at"),
-            }
+        if link and invite_end and invite_end > now:
+            one_year_ahead = now + timedelta(days=365)
+            if end_dt > one_year_ahead or invite_end >= end_dt - timedelta(seconds=60):
+                return {
+                    "invite_link": link,
+                    "invite_expires_at": existing.get("invite_expires_at"),
+                }
 
     invite = create_invite_link(user_id, subscription_end)
     if not invite:

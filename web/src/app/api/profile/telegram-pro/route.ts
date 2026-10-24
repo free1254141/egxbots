@@ -12,9 +12,16 @@ type InviteRow = {
 
 function isInviteValid(row: InviteRow | null | undefined, minimumExpiresAt?: string): row is InviteRow {
   if (!row?.invite_link?.trim()) return false;
+  const now = Date.now();
   const end = row.invite_expires_at ? new Date(row.invite_expires_at).getTime() : 0;
-  const minimum = minimumExpiresAt ? new Date(minimumExpiresAt).getTime() - 60_000 : 0;
-  return Number.isFinite(end) && end > Date.now() && (!minimum || (Number.isFinite(minimum) && end >= minimum));
+  if (!Number.isFinite(end) || end <= now) return false;
+  if (!minimumExpiresAt) return true;
+  const minimum = new Date(minimumExpiresAt).getTime() - 60_000;
+  const oneYearFromNow = now + 365 * 86_400_000;
+  if (minimum > oneYearFromNow) {
+    return end > now;
+  }
+  return end >= minimum;
 }
 
 async function loadSavedInvite(service: ReturnType<typeof getSupabaseServiceClient>, userId: string, subscriptionEnd: string): Promise<InviteRow | null> {

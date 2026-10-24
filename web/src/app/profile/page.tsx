@@ -477,7 +477,7 @@ export default function ProfilePage() {
                   {proInviteUrl ? (isAr ? "دخول قناة Pro" : "Join Pro Telegram") : (isAr ? "القناة المجانية" : "Free Channel")}
                 </a>
                 <a
-                  href="https://t.me/egxbots_bot?start=alerts"
+                  href={userId ? `https://t.me/egxbots_bot?start=${userId}` : "https://t.me/egxbots_bot?start=alerts"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"

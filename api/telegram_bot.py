@@ -598,7 +598,7 @@ class TelegramBot:
             parts = text.split()
             if len(parts) > 1:
                 user_id_param = parts[1].strip()
-                if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip"):
+                if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot"):
                     self._handle_start_with_user_id(chat_id, user_id_param, msg)
                     if is_priv:
                         send_vip_message(
@@ -751,9 +751,9 @@ class TelegramBot:
             self._reply(
                 chat_id,
                 "❌ *رابط التفعيل غير صالح*\n\n"
-                "يرجى الضغط على زر *CONNECT TELEGRAM BOT* في صفحة الإعدادات على الموقع\\.\n\n"
+                "يرجى الدخول إلى صفحة حسابك في الموقع والضغط على زر *تفعيل البوت في الخاص* لربط حسابك تلقائياً\\.\n\n"
                 "❌ *Invalid activation link*\n\n"
-                "Please click *CONNECT TELEGRAM BOT* from your profile settings\\.",
+                "Please click *Activate Bot* from your profile settings on the website\\.",
             )
         except Exception as e:
             self._log(f"Error handling start parameter: {e}")
