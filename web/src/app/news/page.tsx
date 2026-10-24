@@ -368,6 +368,7 @@ export default function NewsPage() {
                                     <StockLogo symbol={item.symbol} size="sm" className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]" />
                                     <div className="flex items-center gap-2">
                                         <Link
+                                            prefetch={false}
                                             href={`/stocks/${item.symbol.toLowerCase()}`}
                                             className="px-2.5 py-1 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black hover:border-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                                         >
@@ -426,6 +427,7 @@ export default function NewsPage() {
                                 </div>
                                 <div className="shrink-0 flex items-center">
                                     <Link
+                                        prefetch={false}
                                         href={`/stocks/${item.symbol.toLowerCase()}`}
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black bg-white dark:bg-zinc-800 border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                                     >

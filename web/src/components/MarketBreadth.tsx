@@ -176,7 +176,7 @@ export function TopMovers({ gainers = [], losers = [], isAr }: { gainers?: Mover
                     {items.map((m, i) => (
                         <a
                             key={m.symbol}
-                            href={`/stocks/${m.symbol}`}
+                            href={`/stocks/${m.symbol.toLowerCase()}`}
                             className={`flex items-center px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors ${isAr ? "flex-row-reverse text-right" : "text-left"}`}
                         >
                             <span className="text-[10px] font-mono font-black text-zinc-500 w-5">{i + 1}</span>

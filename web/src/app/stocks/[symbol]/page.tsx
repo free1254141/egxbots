@@ -1,5 +1,5 @@
 import { getPublicStockSnapshot } from "@/lib/seo/stock-snapshot";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
 import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
@@ -15,7 +15,20 @@ export const preferredRegion = "fra1";
 // 1-hour ISR was overly aggressive; 24h matches actual data cadence and
 // drastically cuts the number of re-renders Vercel has to run per symbol.
 export const revalidate = 86400;
-export async function generateStaticParams() { return []; }
+
+// Pre-render the top Egyptian stocks at build time for instant 0ms responses to
+// search engine crawlers and users. The remaining symbols are statically cached
+// on first hit via ISR.
+const TOP_EGX_SYMBOLS = [
+  "comi", "fwry", "hrho", "east", "tmgh", "swdy", "ekho", "abuk",
+  "amoc", "mfpc", "etel", "cich", "heli", "btfh", "alfa",
+  "acro", "adib", "cieb", "efid", "efih", "egal", "egas", "oras",
+  "talm", "esrs", "clho", "orwe", "phdc", "spmd", "alcn"
+];
+
+export async function generateStaticParams() {
+  return TOP_EGX_SYMBOLS.map((symbol) => ({ symbol }));
+}
 
 interface PageProps {
   params: Promise<{
@@ -25,7 +38,8 @@ interface PageProps {
 
 // Generate dynamic metadata for SEO search indexers
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const symbol = (await params).symbol.toUpperCase();
+  const raw = (await params).symbol;
+  const symbol = raw.toUpperCase();
   const snapshot = await getPublicStockSnapshot(symbol);
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
   const fundRow = snapshot.fundamentals;
@@ -70,7 +84,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function StockDetailPage({ params }: PageProps) {
-  const symbol = (await params).symbol.toUpperCase();
+  const rawSymbol = (await params).symbol;
+  // Enforce lowercase canonical URL: redirect uppercase visits (e.g. /stocks/COMI -> /stocks/comi)
+  if (rawSymbol !== rawSymbol.toLowerCase()) {
+    redirect(`/stocks/${rawSymbol.toLowerCase()}`);
+  }
+
+  const symbol = rawSymbol.toUpperCase();
   const snapshot = await getPublicStockSnapshot(symbol);
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
   if (!fundRow && !latestPrice) notFound();
@@ -80,16 +100,30 @@ export default async function StockDetailPage({ params }: PageProps) {
   const companyName = fund.name || fund.Name || symbol;
   const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || ""));
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
-  // Describe the actual dataset, without inventing a second hidden buy/sell score.
+
+  // Complete Schema.org Breadcrumbs + WebPage structure for Google Search Console
   const structuredDataGraph = {
     "@context": "https://schema.org",
-    "@type": "WebPage",
-    name: `بيانات وتحليل سهم ${companyName} (${symbol})`,
-    url: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
-    ...(priceDate ? { dateModified: priceDate } : {}),
-    description: "إغلاقات ومؤشرات يومية محفوظة؛ بيانات تعليمية وليست أسعارًا لحظية.",
-    publisher: { "@type": "Organization", name: "EGX BOTS" }
+    "@graph": [
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "الرئيسية", "item": "https://egxbots.com" },
+          { "@type": "ListItem", "position": 2, "name": "الأسهم", "item": "https://egxbots.com/stocks" },
+          { "@type": "ListItem", "position": 3, "name": companyName, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
+        ]
+      },
+      {
+        "@type": "WebPage",
+        "name": `بيانات وتحليل سهم ${companyName} (${symbol})`,
+        "url": `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
+        ...(priceDate ? { dateModified: priceDate } : {}),
+        "description": "إغلاقات ومؤشرات يومية محفوظة؛ بيانات تعليمية وليست أسعارًا لحظية.",
+        "publisher": { "@type": "Organization", "name": "EGX BOTS" }
+      }
+    ]
   };
+
   return (
     <>
       <script

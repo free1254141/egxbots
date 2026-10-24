@@ -68,7 +68,7 @@ export function ActiveAISignals({ signals, isAr }: { signals: AISignal[]; isAr: 
                                 <div className={`mb-4 flex items-start justify-between gap-3 ${isAr ? "flex-row-reverse text-right" : "text-left"}`}>
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <a href={`/stocks/${sig.symbol}`} className="text-lg font-extrabold tracking-tight text-zinc-950 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-300">{sig.symbol}</a>
+                                            <a href={`/stocks/${sig.symbol.toLowerCase()}`} className="text-lg font-extrabold tracking-tight text-zinc-950 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-300">{sig.symbol}</a>
                                             <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
                                                 isBuy 
                                                     ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400" 
