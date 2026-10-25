@@ -472,3 +472,12 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
         "total_sent": total_sent,
         "sent_today": daily_count + total_sent,
     }
+
+
+class MarketingLifecycleEngine:
+    """Class wrapper for Marketing Lifecycle operations."""
+    run = staticmethod(run_marketing_lifecycle)
+    send_email = staticmethod(send_resend_email)
+    process_abandoned = staticmethod(process_abandoned_checkouts)
+    process_trials = staticmethod(process_trial_expiring)
+

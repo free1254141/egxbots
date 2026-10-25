@@ -47,14 +47,71 @@ def get_facebook_credentials(client=None):
     return None
 
 
+def is_report_publishable_with_content(report):
+    """Validate that a daily social report contains non-empty, actionable data.
+
+    Prevents publishing placeholder cards or zero-match scans to official feeds.
+    """
+    if not report or not isinstance(report, dict):
+        return False
+
+    # Image must be ready and present
+    if not report.get("image_url") or report.get("image_status") != "ready":
+        return False
+
+    kind = report.get("kind")
+    caption = report.get("social_caption") or report.get("social_title") or report.get("content") or ""
+
+    # Never publish empty scans that mention zero results
+    empty_phrases = (
+        "لا توجد نتائج",
+        "لا توجد نتائج مطابقة",
+        "صفر نتائج",
+        "لم تظهر إشارات",
+        "لا توجد أي أسهم",
+        "لا يوجد أسهم",
+        "لا توجد أسهم",
+        "0 أسهم",
+    )
+    if any(phrase in caption for phrase in empty_phrases):
+        logger.info(f"[FB_VALIDATOR] Rejected report ({kind}): caption indicates empty results")
+        return False
+
+    # Check evidence data if present
+    evidence = report.get("evidence")
+    if evidence and isinstance(evidence, list):
+        if kind == "accumulation":
+            for item in evidence:
+                if item.get("tool") == "get_accumulation_stocks":
+                    stocks = (item.get("data") or {}).get("stocks") or []
+                    if len(stocks) == 0:
+                        logger.info("[FB_VALIDATOR] Rejected accumulation report: 0 stocks in evidence")
+                        return False
+        elif kind in ("stock", "follow_up"):
+            for item in evidence:
+                if item.get("tool") == "get_stock":
+                    data = item.get("data") or {}
+                    if not data.get("price") or data.get("price") == "—":
+                        logger.info("[FB_VALIDATOR] Rejected stock report: missing price in evidence")
+                        return False
+
+    # For stock/follow_up, symbol must be defined
+    if kind in ("stock", "follow_up") and not report.get("symbol"):
+        logger.info(f"[FB_VALIDATOR] Rejected {kind} report: missing symbol")
+        return False
+
+    return True
+
+
 def select_primary_daily_report(reports_dict):
     """Select the best report of the session (stock or market) to publish."""
     # Priority order for social feed
     for kind in ("market", "stock", "accumulation", "follow_up"):
         r = reports_dict.get(kind)
-        if r and r.get("status") == "ready":
+        if r and is_report_publishable_with_content(r):
             return kind, r
     return None, None
+
 
 
 def publish_photo_to_facebook_page(image_url, caption, page_id, token, opener=None):
@@ -125,7 +182,7 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
     try:
         query = (
             client.table("daily_social_reports")
-            .select("session_date, kind, symbol, image_status, image_url, social_caption, social_title")
+            .select("session_date, kind, symbol, image_status, image_url, social_caption, social_title, evidence")
             .eq("session_date", session_date)
             .eq("image_status", "ready")
         )
@@ -140,13 +197,16 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
         logger.info(f"[FB_AUTO] No ready report images found for session {session_date}")
         return {"status": "skipped", "reason": "No ready images"}
 
-    # Prefer market or stock
-    reports_by_kind = {r["kind"]: r for r in reports}
-    kind, selected_report = select_primary_daily_report(
-        {k: {"status": "ready", **v} for k, v in reports_by_kind.items()}
-    )
+    # Filter only reports that have genuine content
+    valid_reports = [r for r in reports if is_report_publishable_with_content(r)]
+    if not valid_reports:
+        logger.info(f"[FB_AUTO] No publishable reports with content found for session {session_date}")
+        return {"status": "skipped", "reason": "No publishable reports with content"}
+
+    reports_by_kind = {r["kind"]: r for r in valid_reports}
+    kind, selected_report = select_primary_daily_report(reports_by_kind)
     if not selected_report:
-        selected_report = reports[0]
+        selected_report = valid_reports[0]
         kind = selected_report.get("kind", "stock")
 
     image_url = selected_report.get("image_url")

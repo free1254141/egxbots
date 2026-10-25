@@ -79,6 +79,8 @@ def card_rows(report, previous=None):
     if kind == 'accumulation':
         data = evidence_data(report, 'get_accumulation_stocks')
         stocks = data.get('stocks') or []
+        if not stocks:
+            raise ValueError('Empty accumulation scan — no matching stocks')
         if any(s.get('scan_date') != report['session_date'] for s in stocks):
             raise ValueError('Stale scan')
         return ['أيام التجميع', 'الحجم النسبي', 'درجة التجميع', 'السهم'], [
@@ -111,6 +113,8 @@ def card_rows(report, previous=None):
 
 def render_report_image(report, previous=None):
     headings, rows = card_rows(report, previous)
+    if not rows:
+        raise ValueError(f'Empty card rows for report {report.get("kind")}')
     image = Image.new('RGB', (1200, 1200), BG)
     draw = ImageDraw.Draw(image)
 
@@ -162,12 +166,11 @@ def render_report_image(report, previous=None):
     for i in range(1, columns):
         x = 45+i*1110/columns
         draw.line((x, 375, x, 778), fill=WHITE, width=2)
-    if not rows: text('لا توجد نتائج مطابقة في العينة', 600, 550, 34)
     box(35, 820, 550, 128)
     box(610, 820, 555, 128)
     left_title, left_value = 'بيانات موثقة', 'قراءة إغلاق وليست سعراً لحظياً'
     right_title, right_value = 'التحليل الكامل', 'متاح على الموقع مع الأدلة والمخاطر'
-    if report['kind'] == 'accumulation' and rows:
+    if report['kind'] == 'accumulation':
         stocks = evidence_data(report, 'get_accumulation_stocks')['stocks']
         best_score = max(float(s.get('acc_score') or 0) for s in stocks)
         longest_days = max(int(s.get('consecutive_acc_days') or 0) for s in stocks)

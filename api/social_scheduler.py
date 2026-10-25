@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from api.social_facebook_publisher import (
     get_facebook_credentials,
     publish_photo_to_facebook_page,
+    is_report_publishable_with_content,
 )
 
 logger = logging.getLogger("social_scheduler")
@@ -130,6 +131,8 @@ def execute_publication_slot(
     with _completed_slots_lock:
         if not force and slot_key in _completed_slots_today:
             return {"status": "skipped", "reason": f"Slot {slot_key} already published in memory"}
+        # Pre-claim in memory immediately to eliminate double-posting race conditions across concurrent ticks
+        _completed_slots_today.add(slot_key)
 
     # 1. Check database idempotency
     try:
@@ -158,6 +161,8 @@ def execute_publication_slot(
     # 2. Check credentials from market_cache / env
     creds = get_facebook_credentials(client)
     if not creds or not creds.get("token"):
+        with _completed_slots_lock:
+            _completed_slots_today.discard(slot_key)
         logger.warning("[FB_SCHEDULER] Skipping slot: Facebook Page Access Token not configured")
         return {"status": "skipped", "reason": "Token not configured"}
 
@@ -170,21 +175,25 @@ def execute_publication_slot(
         try:
             res = (
                 client.table("daily_social_reports")
-                .select("kind, symbol, image_url, image_status, social_caption, social_title")
+                .select("kind, symbol, image_url, image_status, social_caption, social_title, evidence")
                 .eq("session_date", session_date)
                 .eq("kind", kind)
                 .maybe_single()
                 .execute()
             )
             r = res.data if res else None
-            if r and r.get("image_url") and r.get("image_status") == "ready":
+            if r and is_report_publishable_with_content(r):
                 selected_report = r
                 selected_kind = kind
                 break
+            elif r:
+                logger.info(f"[FB_SCHEDULER] Report {kind} on {session_date} rejected: empty content or scan. Checking fallback...")
         except Exception as e:
             logger.warning(f"[FB_SCHEDULER] Error fetching report {kind}: {e}")
 
     if not selected_report:
+        with _completed_slots_lock:
+            _completed_slots_today.discard(slot_key)
         logger.info(
             f"[FB_SCHEDULER] No ready report found for {candidate_kinds} on {session_date}"
         )
@@ -233,6 +242,8 @@ def execute_publication_slot(
             "slot_id": slot["slot_id"],
         }
     except Exception as exc:
+        with _completed_slots_lock:
+            _completed_slots_today.discard(slot_key)
         logger.error(f"[FB_SCHEDULER] Publication failed for {slot['slot_id']}: {exc}")
         return {"status": "failed", "error": str(exc), "slot_id": slot["slot_id"]}
 

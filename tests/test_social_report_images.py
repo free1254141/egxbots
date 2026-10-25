@@ -35,6 +35,15 @@ def test_accumulation_uses_filtered_stocks_not_aliases():
     assert rows[0][-1] == 'GBCO'
 
 
+def test_empty_accumulation_raises_value_error():
+    row = report('accumulation')
+    row['evidence'][0]['data']['stocks'] = []
+    with pytest.raises(ValueError, match='Empty accumulation scan'):
+        card_rows(row)
+    with pytest.raises(ValueError):
+        render_report_image(row)
+
+
 def test_unverified_and_stale_reports_fail_closed():
     row = report()
     row['validation'] = {'ok': False}
