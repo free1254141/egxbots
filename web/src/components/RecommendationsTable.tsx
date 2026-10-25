@@ -13,7 +13,6 @@ import SignalExplanation from "./SignalExplanation";
 import { explainSignal, finiteNumber } from "@/lib/signal-explanation";
 import { useTheme } from "@/contexts/ThemeContext";
 import TradingViewChart from "./TradingViewChartDynamic";
-import TelegramServiceToggle from "./TelegramServiceToggle";
 import RecommendationCalendar from "./RecommendationCalendar";
 import ShortSwingsTab from "./ShortSwingsTab";
 import FastScannerTab from "./FastScannerTab";
@@ -2138,100 +2137,6 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             {/* Share Dialog */}
             {renderShareDialog()}
 
-            {mainTab === "medium_swings" && <>
-            {/* Header Content Info Box */}
-            <SpotlightCard 
-                radius={450}
-                className="flex flex-col gap-3 p-8 border-4 border-black dark:border-white bg-zinc-950 text-white shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:shadow-[6px_6px_0px_rgba(245,158,11,1)] transition-all duration-300"
-            >
-                <div className="flex flex-col gap-3 w-full z-10">
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                        <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-xl bg-amber-500/10 dark:bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.25)] flex-shrink-0">
-                                <Layers className="w-6 h-6 text-amber-500" />
-                            </div>
-                            <h2 className="text-2xl font-black uppercase tracking-tight">{translate("title")}</h2>
-                        </div>
-                        {limit === Infinity && (
-                            <button
-                                onClick={refreshRecommendationData}
-                                disabled={recsLoading}
-                                className="h-10 px-4 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-black dark:text-white font-bold uppercase text-xs flex items-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100"
-                            >
-                                <RefreshCw className={`w-3.5 h-3.5 ${recsLoading ? "animate-spin" : ""}`} />
-                                {isAr ? "تحديث" : "Refresh"}
-                            </button>
-                        )}
-                    </div>
-                    <p className="text-xs font-bold leading-relaxed text-zinc-400 max-w-3xl">{translate("subtitle")}</p>
-
-                    {!isLandingPage && !hideTelegramToggle && (
-                        <TelegramServiceToggle
-                            serviceType="stock_score"
-                            botId="stock_score"
-                            className="mt-4"
-                        />
-                    )}
-                </div>
-            </SpotlightCard>
-
-            {/* Outdated Warning Panel */}
-            {isDelayedView && (
-                <div className="space-y-3" dir={isAr ? "rtl" : "ltr"}>
-                    {!user && (
-                        <div className="p-4 border-4 border-black dark:border-white bg-sky-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-                            <div className="flex items-center gap-2 text-black">
-                                <Clock className="w-4 h-4 shrink-0 text-black" />
-                                <span className="text-black font-bold">{isAr ? "نتائج الإشارات المغلقة ظاهرة فوراً دون رمز السهم؛ الإشارات المفتوحة متأخرة 15 يوماً." : "Closed signal results appear immediately without stock symbols; open signals are delayed by 15 days."}</span>
-                            </div>
-                            <a
-                                href="/login?redirect=%2Fscanner%2Fbacktests%3Ftab%3Dbots"
-                                className="btn-banner-action inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 font-black uppercase tracking-wide hover:bg-zinc-800 shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
-                                style={{ color: "#ffffff", backgroundColor: "#000000" }}
-                            >
-                                <span className="font-black" style={{ color: "#ffffff" }}>
-                                    {isAr ? "تسجيل الدخول" : "Sign in"}
-                                </span>
-                            </a>
-                        </div>
-                    )}
-                    <div className="p-4 border-4 border-black dark:border-white bg-amber-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
-                        <div className="flex items-center gap-2 text-black">
-                            <Clock className="w-4 h-4 shrink-0 text-black" />
-                            <span className="text-black font-bold">{isAr ? "Free: الإشارات المفتوحة متأخرة 15 يوماً، والمغلقة بلا رمز، والعوائد فوق 50% غير مدرجة؛ لذلك إحصاءات Free ليست سجل الأداء الكامل. Pro يعرض السجل الكامل." : "Free: open signals are delayed 15 days, closed symbols are hidden, and wins above 50% are excluded. Free statistics are not the full performance record; Pro shows the complete history."}</span>
-                        </div>
-                        <a
-                            href="/pricing"
-                            className="btn-banner-action inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 font-black uppercase tracking-wide hover:bg-zinc-800 shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
-                            style={{ color: "#ffffff", backgroundColor: "#000000" }}
-                        >
-                            <span className="font-black" style={{ color: "#ffffff" }}>
-                                {isAr ? "اشترك في Pro" : "Subscribe to Pro"}
-                            </span>
-                        </a>
-                    </div>
-                </div>
-            )}
-            {isOutdated && (
-                <div className="p-4 border-4 border-black dark:border-white neobrutal-bg-pink text-black dark:text-black font-bold flex items-center justify-between text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-                    <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        <span>{translate("outdated")}</span>
-                    </div>
-                    {limit === Infinity && (
-                        <button
-                            onClick={refreshRecommendationData}
-                            className="underline font-black uppercase tracking-wider text-black"
-                            style={{ color: "#000000" }}
-                        >
-                            {translate("retryBtn")}
-                        </button>
-                    )}
-                </div>
-            )}
-
-            </>}
-
             {/* Performance Summary Cards */}
             {limit === Infinity && (!isLandingPage || user) && (
                 <MarketOverviewSummary isAr={isAr} onOpen={() => router.push("/scanner/market")} />
@@ -2470,6 +2375,61 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         </div>
                                     </div>
                                 </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Outdated / Delayed Warning Panel */}
+                    {isDelayedView && (
+                        <div className="space-y-3" dir={isAr ? "rtl" : "ltr"}>
+                            {!user && (
+                                <div className="p-4 border-4 border-black dark:border-white bg-sky-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+                                    <div className="flex items-center gap-2 text-black">
+                                        <Clock className="w-4 h-4 shrink-0 text-black" />
+                                        <span className="text-black font-bold">{isAr ? "نتائج الإشارات المغلقة ظاهرة فوراً دون رمز السهم؛ الإشارات المفتوحة متأخرة 15 يوماً." : "Closed signal results appear immediately without stock symbols; open signals are delayed by 15 days."}</span>
+                                    </div>
+                                    <a
+                                        href="/login?redirect=%2Fscanner%2Fbacktests%3Ftab%3Dbots"
+                                        className="btn-banner-action inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 font-black uppercase tracking-wide hover:bg-zinc-800 shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
+                                        style={{ color: "#ffffff", backgroundColor: "#000000" }}
+                                    >
+                                        <span className="font-black" style={{ color: "#ffffff" }}>
+                                            {isAr ? "تسجيل الدخول" : "Sign in"}
+                                        </span>
+                                    </a>
+                                </div>
+                            )}
+                            <div className="p-4 border-4 border-black dark:border-white bg-amber-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
+                                <div className="flex items-center gap-2 text-black">
+                                    <Clock className="w-4 h-4 shrink-0 text-black" />
+                                    <span className="text-black font-bold">{isAr ? "Free: الإشارات المفتوحة متأخرة 15 يوماً، والمغلقة بلا رمز، والعوائد فوق 50% غير مدرجة؛ لذلك إحصاءات Free ليست سجل الأداء الكامل. Pro يعرض السجل الكامل." : "Free: open signals are delayed 15 days, closed symbols are hidden, and wins above 50% are excluded. Free statistics are not the full performance record; Pro shows the complete history."}</span>
+                                </div>
+                                <a
+                                    href="/pricing"
+                                    className="btn-banner-action inline-flex shrink-0 items-center justify-center border-2 border-black bg-black px-4 py-2 font-black uppercase tracking-wide hover:bg-zinc-800 shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
+                                    style={{ color: "#ffffff", backgroundColor: "#000000" }}
+                                >
+                                    <span className="font-black" style={{ color: "#ffffff" }}>
+                                        {isAr ? "اشترك في Pro" : "Subscribe to Pro"}
+                                    </span>
+                                </a>
+                            </div>
+                        </div>
+                    )}
+                    {isOutdated && (
+                        <div className="p-4 border-4 border-black dark:border-white neobrutal-bg-pink text-black dark:text-black font-bold flex items-center justify-between text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 shrink-0" />
+                                <span>{translate("outdated")}</span>
+                            </div>
+                            {limit === Infinity && (
+                                <button
+                                    onClick={refreshRecommendationData}
+                                    className="underline font-black uppercase tracking-wider text-black"
+                                    style={{ color: "#000000" }}
+                                >
+                                    {translate("retryBtn")}
+                                </button>
                             )}
                         </div>
                     )}
