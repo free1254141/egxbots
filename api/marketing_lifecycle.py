@@ -20,6 +20,8 @@ import hmac
 import hashlib
 import urllib.request
 import urllib.error
+import urllib.parse
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
@@ -53,7 +55,30 @@ def verify_unsub_token(user_id: str, email: str, token: str) -> bool:
     return hmac.compare_digest(expected, token)
 
 
-def send_resend_email(to_email: str, subject: str, html_body: str) -> bool:
+def _click_sig(channel: str, campaign: str, message_id: str, target: str) -> str:
+    msg = f"click:{channel}:{campaign}:{message_id}:{target}".encode("utf-8")
+    return hmac.new(UNSUB_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()[:32]
+
+
+def build_tracked_url(target: str, channel: str, campaign: str, message_id: str = "") -> str:
+    """Wraps a destination in a signed /api/marketing/click redirect so clicks are recorded.
+
+    `target` is either an internal path (/pricing) or a full URL; internal full URLs are
+    reduced to their path. The signature prevents the endpoint from being used as an open redirect.
+    """
+    if target.startswith(APP_URL):
+        target = target[len(APP_URL):] or "/"
+    qs = urllib.parse.urlencode({
+        "ch": channel,
+        "c": campaign,
+        "m": message_id or "",
+        "to": target,
+        "sig": _click_sig(channel, campaign, message_id or "", target),
+    })
+    return f"{APP_URL}/api/marketing/click?{qs}"
+
+
+def send_resend_email(to_email: str, subject: str, html_body: str, out: Optional[dict] = None) -> bool:
     """
     Sends an email using Resend API.
     If RESEND_API_KEY is missing or dummy, acts as a safe no-op and logs.
@@ -83,6 +108,8 @@ def send_resend_email(to_email: str, subject: str, html_body: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+            if out is not None:
+                out["provider_message_id"] = data.get("id")
             print(f"[MARKETING-EMAIL-SENT] ID: {data.get('id')} to {to_email}")
             return True
     except urllib.error.HTTPError as e:
@@ -180,25 +207,34 @@ def get_user_email(uid: str) -> Optional[str]:
     return None
 
 
-def record_marketing_message(user_id: str, email: str, message_type: str, metadata: dict = None):
+def record_marketing_message(user_id: str, email: str, message_type: str, metadata: dict = None, message_id: str = None, provider_message_id: str = None):
     """Logs sent message for cooldown and tracking."""
     if not supabase:
         return
     try:
-        supabase.table("marketing_message_log").insert({
+        row = {
             "user_id": user_id,
             "email": email,
             "message_type": message_type,
             "channel": "email",
             "status": "sent",
             "metadata": metadata or {},
-        }).execute()
+        }
+        if message_id:
+            row["id"] = message_id
+        if provider_message_id:
+            row["provider_message_id"] = provider_message_id
+        supabase.table("marketing_message_log").insert(row).execute()
     except Exception as e:
         print(f"[MARKETING] Error recording message log: {e}")
 
 
-def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str], cta_text: str, cta_url: str, user_id: str, email: str) -> str:
+def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str], cta_text: str, cta_url: str, user_id: str, email: str, campaign: str = "", message_id: str = "") -> str:
     """Builds a responsive, high-converting Arabic HTML email with styling and unsubscribe footer."""
+    support_url = "https://t.me/egxbots_bot"
+    if campaign:
+        cta_url = build_tracked_url(cta_url, "email", campaign, message_id)
+        support_url = build_tracked_url(support_url, "email", f"{campaign}:support", message_id)
     unsub_token = generate_unsub_token(user_id, email)
     unsub_url = f"{APP_URL}/api/marketing/unsubscribe?uid={user_id}&email={urllib.request.quote(email)}&token={unsub_token}"
 
@@ -242,7 +278,7 @@ def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str
               </table>
 
               <div style="border-top: 2px dashed #e5e7eb; padding-top: 20px; margin-top: 24px; font-size: 12px; color: #6b7280; text-align: center;">
-                <p style="margin: 0 0 8px 0;">هل لديك أي استفسار؟ تواصل مباشرة مع فريق الدعم الفني على تليجرام: <a href="https://t.me/egxbots_bot" style="color: #2563eb; font-weight: bold;">@egxbots_bot</a></p>
+                <p style="margin: 0 0 8px 0;">هل لديك أي استفسار؟ تواصل مباشرة مع فريق الدعم الفني على تليجرام: <a href="{support_url}" style="color: #2563eb; font-weight: bold;">@egxbots_bot</a></p>
               </div>
             </td>
           </tr>
@@ -348,9 +384,11 @@ def process_abandoned_checkouts() -> int:
                 cta_text = "استكمال الاشتراك وتثبيت السعر (50 ج.م)"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
-                html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email)
-                if send_resend_email(user_email, subject, html):
-                    record_marketing_message(uid, user_email, "abandoned_checkout", {"order_id": order.get("id")})
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email, "abandoned_checkout", message_id)
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(uid, user_email, "abandoned_checkout", {"order_id": order.get("id")}, message_id, send_info.get("provider_message_id"))
                     sent_count += 1
             except Exception as user_err:
                 print(f"[MARKETING] Error processing order {order.get('id')}: {user_err}")
@@ -435,9 +473,11 @@ def process_trial_expiring() -> int:
                 cta_text = "تثبيت اشتراك Pro بـ 50 ج.م شهرياً"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
-                html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email)
-                if send_resend_email(user_email, subject, html):
-                    record_marketing_message(uid, user_email, "trial_expiring", {"expires_at": trial.get("expires_at")})
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email, "trial_expiring", message_id)
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(uid, user_email, "trial_expiring", {"expires_at": trial.get("expires_at")}, message_id, send_info.get("provider_message_id"))
                     sent_count += 1
             except Exception as trial_err:
                 print(f"[MARKETING] Error processing trial for user {trial.get('user_id')}: {trial_err}")

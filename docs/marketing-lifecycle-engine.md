@@ -144,3 +144,17 @@ python jobs/send_founders_emails.py --send --max 35
 2. **صندوق التنويه القانوني الإلزامي:** يظهر في كافة رسائل تليجرام وفي الصندوق الأصفر المخصص أعلى تذييل كل إيميل مرسل:
 > ⚠️ **تنبيه قانوني وإخلاء مسؤولية (FRA):** مخرجات النماذج الكمية وشات بوت الذكاء الاصطناعي هي مؤشرات وأدوات فنية وإحصائية لأغراض البحث والتحليل الفني والتعليم الشخصي فقط، ولا تمثل توصية استثمارية أو دعوة لشراء أو بيع أي ورقة مالية أو إدارة محافظ. قرارات التداول مسؤوليتك المستقلة عبر شركة سمسرة مرخصة من الهيئة العامة للرقابة المالية (FRA).
 
+
+---
+
+## 7. تتبع الإعلانات (Ad Tracking)
+
+| الطبقة | الآلية |
+| :--- | :--- |
+| **نقرات الإيميل** | كل زر ورابط في الإيميل يمر عبر `/api/marketing/click` برابط موقّع HMAC (يمنع Open Redirect)، ويُسجَّل حدث `clicked` مرتبطاً بـ `marketing_message_log.id`. |
+| **نقرات التليجرام** | روابط `/pricing` في رسائل `daily_bot_run.py` تمر عبر `telegram_tracked_url()` (حملات: `tg_adjustment`, `tg_exit`, `tg_free_summary`, `tg_market_buy_hold`) وتُسجَّل كـ `clicked` بقناة `telegram`. |
+| **التسليم / الفتح / الارتداد** | Resend Webhook على `/api/marketing/resend-webhook` (تحقق Svix عبر `RESEND_WEBHOOK_SECRET`). الفتح يتطلب تفعيل Open Tracking على الدومين في لوحة Resend. |
+| **التحويل** | اشتراك Pro مدفوع (active) يبدأ خلال 7 أيام من إرسال الرسالة. |
+| **التقرير** | `GET /api/admin/marketing-report?days=30` (أدمن فقط) من دالة `marketing_campaign_report`. |
+
+الجداول: `marketing_events` وعمود `marketing_message_log.provider_message_id` (migration `20261026001800_marketing_tracking.sql`).

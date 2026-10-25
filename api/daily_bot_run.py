@@ -46,6 +46,7 @@ from api.intraday_downloader import _fetch_egx_symbols
 from api.routers.scan_ai_fast import fast_scan
 from api.market_status_gate import should_reject_new_buys
 from api.web_origin import get_web_origin
+from api.marketing_links import telegram_tracked_url
 from api.fundamentals_refresh import (
     should_run_quarterly_fundamentals as _should_run_quarterly_fundamentals,
     quarterly_fundamentals_due as _quarterly_fundamentals_due_for_client,
@@ -790,7 +791,7 @@ def _send_telegram_adjustment(
                 "📢 *إعلان: تحديث جوهري على إحدى التوصيات*\n"
                 f"تم تعديل مستوى التوصية بنسبة تتجاوز `{material_change_pct:.1f}%`، "
                 "والتفاصيل الكاملة متاحة حصرياً في قناة VIP.\n"
-                f"🔗 اشترك الآن: {get_web_origin()}/pricing"
+                f"🔗 اشترك الآن: {telegram_tracked_url('/pricing', 'tg_adjustment')}"
             )
             _notify_free_telegram(free_msg, "material_adjustment_teaser")
 
@@ -923,7 +924,7 @@ def _send_telegram_exit(
                 "\n━━━━━━━━━━━━━━━━━━━━\n"
                 "🔥 *الصفقة دي وصلت لمشتركي VIP لحظياً وقت انطلاق السهم!*\n"
                 "⚡ اشترك في باقة المؤسسين بـ 50 ج.م شهرياً واستقبل صفقات السوينج أولاً بأول:\n"
-                f"👉 {web_origin}/pricing"
+                f"👉 {telegram_tracked_url('/pricing', 'tg_exit')}"
             )
 
         msg = (
@@ -1226,7 +1227,7 @@ def _notify_free_telegram(message: str, service_type: str = "free_summary", *, m
         "📢 *إعلان Pro:* كل الإشارات الفنية وتعديلاتها والتفاصيل الكاملة تصل فوراً إلى قناة المشتركين.\n"
         "القناة المجانية تعرض الإغلاقات والملخص الأسبوعي والإعلانات المهمة فقط.\n"
         "⚠️ تنويه: إشارات مؤتمتة لأغراض الدراسة والبحث فقط وليست توصيات استثمارية.\n"
-        f"🔗 التفاصيل والاشتراك: {web_origin}/pricing"
+        f"🔗 التفاصيل والاشتراك: {telegram_tracked_url('/pricing', 'tg_free_summary')}"
     )
     message_with_footer = message.rstrip()
     if "كل الإشارات الفنية وتعديلاتها والتفاصيل الكاملة تصل" not in message_with_footer:
@@ -1359,7 +1360,7 @@ def _send_market_buy_hold(gate: Dict[str, Any], market_date: str) -> bool:
         day_delivery["vip"] = bool(_notify_vip_telegram(message, "market_buy_hold"))
         _mark_daily_cache_payload(cache_key, payload)
     if int(gate.get("active_recommendations") or 0) > 0:
-        message += "\n\nالتوصيات القائمة وتحديثاتها التفصيلية متاحة في قناة VIP: " + get_web_origin() + "/pricing"
+        message += "\n\nالتوصيات القائمة وتحديثاتها التفصيلية متاحة في قناة VIP: " + telegram_tracked_url("/pricing", "tg_market_buy_hold")
     if not day_delivery.get("free"):
         day_delivery["free"] = bool(_notify_free_telegram(message, "market_buy_hold"))
         _mark_daily_cache_payload(cache_key, payload)
