@@ -126,6 +126,8 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
             email = get_user_email(uid)
             if not email or "@" not in email:
                 continue
+            if is_user_unsubscribed(uid, email) or has_recent_message(uid, "renewal_reminder", cooldown_days=3):
+                continue
             prof = supabase.table("profiles").select("display_name, username").eq("id", uid).maybe_single().execute().data or {}
             dname = prof.get("display_name") or prof.get("username") or "صديقنا العزيز"
 
@@ -146,7 +148,7 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         supabase.table("profiles")
         .select("id, username, display_name, updated_at")
         .order("updated_at", desc=True)
-        .limit(100)
+        .limit(200)
         .execute()
         .data or []
     )
@@ -160,6 +162,9 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
 
         email = get_user_email(uid)
         if not email or "@" not in email:
+            continue
+
+        if is_user_unsubscribed(uid, email) or has_recent_message(uid, "founders_offer", cooldown_days=7):
             continue
 
         dname = p.get("display_name") or p.get("username") or "صديقنا العزيز"
