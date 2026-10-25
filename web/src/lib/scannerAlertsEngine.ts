@@ -239,6 +239,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
   // ── STEP 1: Query Indicators ──────────────────────────────────────────────
   let rows: any[] = [];
+  let asOfDate = cairoTime.dateStr;
   try {
     const { data: latestDateRow } = await serviceClient
       .from("stock_technical_indicators")
@@ -248,7 +249,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       .limit(1)
       .maybeSingle();
 
-    const asOfDate = latestDateRow?.date || cairoTime.dateStr;
+    asOfDate = latestDateRow?.date || cairoTime.dateStr;
 
     const [indRes, priceRes] = await Promise.all([
       serviceClient
@@ -614,8 +615,15 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   for (const sig of currentActive) {
     const p = priceMap.get(sig.symbol);
     const currPrice = p ? p.close : sig.current_price;
-    const highestPrice = Math.max(sig.highest_price || sig.entry_price, p?.high || currPrice);
-    const lowestPrice = Math.min(sig.lowest_price || sig.entry_price, p?.low || currPrice);
+
+    // CRITICAL GUARD: Prior-session data (asOfDate < sig.entry_date) must NEVER be used to evaluate
+    // intraday high/low or stop-loss for a signal created today or later!
+    const isPriceCurrentForSignal = asOfDate >= sig.entry_date;
+    const barHigh = (p && isPriceCurrentForSignal) ? Math.max(p.high, p.close) : currPrice;
+    const barLow = (p && isPriceCurrentForSignal) ? Math.min(p.low, p.close) : currPrice;
+
+    const highestPrice = Math.max(sig.highest_price || sig.entry_price, barHigh);
+    const lowestPrice = Math.min(sig.lowest_price || sig.entry_price, barLow);
     const returnPct = Number((((currPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
     const maxGainPct = Number((((highestPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
 
@@ -640,11 +648,11 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       updatedSig.stop_loss_pct = 0;
     }
 
-    const barLow = p ? p.low : currPrice;
     const hitStop = hasBreakevenProtection
       ? currPrice <= effectiveStopLoss
       : barLow <= effectiveStopLoss;
 
+    // Target 1 check takes absolute priority over stop-loss if highestPrice achieved target_1
     if (highestPrice >= sig.target_1) {
       const exitPrice = sig.target_1;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
@@ -659,7 +667,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       };
       hitTargetSignals.push(updatedSig);
       currentClosed.unshift(updatedSig);
-    } else if (hitStop) {
+    } else if (hitStop && isPriceCurrentForSignal) {
       const exitPrice = effectiveStopLoss;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       const isBreakeven = hasBreakevenProtection && effectiveStopLoss >= sig.entry_price;
@@ -699,10 +707,21 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   // Portfolio Cap: Maximum 8 simultaneously active swing trades to prevent portfolio overwhelm
   const MAX_PORTFOLIO_ACTIVE = 8;
 
+  // Deduplication guard: No stock can be alerted or added more than ONCE per day across any scanner type
+  const isSymbolAlreadyLoggedToday = (sym: string) => {
+    return (
+      stillActiveSignals.some((s) => s.symbol === sym) ||
+      currentClosed.some((s) => s.symbol === sym && s.entry_date === cairoTime.dateStr) ||
+      sentKeysSet.has(`${sym}:volume_surge`) ||
+      sentKeysSet.has(`${sym}:breakout`) ||
+      sentKeysSet.has(`${sym}:rsi_oversold`)
+    );
+  };
+
   // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active and portfolio has room)
   for (const v of freshVolume) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (stillActiveSignals.some((s) => s.symbol === v.symbol)) continue;
+    if (isSymbolAlreadyLoggedToday(v.symbol)) continue;
     const plan = calculateScannerTradePlan(v.close, "volume_surge");
     stillActiveSignals.push({
       id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
@@ -730,7 +749,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   }
   for (const b of freshBreakout) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (stillActiveSignals.some((s) => s.symbol === b.symbol)) continue;
+    if (isSymbolAlreadyLoggedToday(b.symbol)) continue;
     const plan = calculateScannerTradePlan(b.close, "breakout");
     stillActiveSignals.push({
       id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
@@ -758,7 +777,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   }
   for (const o of freshOversold) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (stillActiveSignals.some((s) => s.symbol === o.symbol)) continue;
+    if (isSymbolAlreadyLoggedToday(o.symbol)) continue;
     const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
     stillActiveSignals.push({
       id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,

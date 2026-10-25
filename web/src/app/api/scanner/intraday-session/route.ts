@@ -36,6 +36,24 @@ function computePostSignalPayload(
 ) {
   if (!rawCandles || rawCandles.length === 0) return null;
   const candles = normalizeCandlesToCairo(rawCandles);
+  const parsedPrice = signalPrice ? parseFloat(signalPrice) : 0;
+
+  // Handle limit-up / flat bars when a stock surges to limit:
+  if (candles.length > 0 && parsedPrice > 0 && parsedPrice < candles[0].close) {
+    if (Math.abs(candles[0].open - candles[0].close) < 0.001) {
+      candles[0].open = parsedPrice;
+      candles[0].low = Math.min(candles[0].low, parsedPrice);
+    }
+  }
+
+  // Ensure each candle has visible height for lightweight-charts
+  for (const c of candles) {
+    if (c.high <= c.low) {
+      const tick = Math.max(0.01, Number((c.close * 0.0008).toFixed(2)));
+      c.high = Number((c.close + tick).toFixed(2));
+      c.low = Number((c.close - tick).toFixed(2));
+    }
+  }
 
   let targetSigTime = signalTime || "10:15";
   if (targetSigTime > "14:15" || targetSigTime < "10:00") {
@@ -59,7 +77,6 @@ function computePostSignalPayload(
   }
 
   const signalCandle = candles[sigIdx];
-  const parsedPrice = signalPrice ? parseFloat(signalPrice) : 0;
   const sPrice =
     parsedPrice > 0 && Math.abs(parsedPrice - signalCandle.close) / Math.max(0.01, signalCandle.close) < 0.3
       ? parsedPrice

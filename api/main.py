@@ -7721,6 +7721,20 @@ def _compute_post_signal_metrics(candles, target_date, clean_sym, signal_time=No
 
     target_sig_dt = f"{target_date} {target_sig_time}"
 
+    # Handle limit-up / flat bars from datafeed when a stock surges to limit:
+    # 1. If signal price is lower than the lock price, set bar 0 open & low to signal price
+    if candles and signal_price and float(signal_price) > 0 and float(signal_price) < candles[0]["close"]:
+        if abs(candles[0]["open"] - candles[0]["close"]) < 0.001:
+            candles[0]["open"] = round(float(signal_price), 2)
+            candles[0]["low"] = min(candles[0]["low"], round(float(signal_price), 2))
+
+    # 2. Ensure each candle has visible height for lightweight-charts (avoid 0-height invisible points)
+    for c in candles:
+        if c["high"] <= c["low"]:
+            tick = max(0.01, round(float(c["close"]) * 0.0008, 2))
+            c["high"] = round(float(c["close"]) + tick, 2)
+            c["low"] = round(float(c["close"]) - tick, 2)
+
     # 2. Find the candle at or immediately after signal moment
     sig_idx = 0
     found = False
@@ -7973,23 +7987,40 @@ def get_scanner_intraday_session(
 
     return JSONResponse(content=payload)
 
-    # 2. Check Supabase market_cache
-    if not is_today:
-        try:
-            _init_supabase()
-            sb = _get_thread_local_supabase()
-            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
-            if cached and cached.data and cached.data.get("payload"):
-                raw_payload = cached.data["payload"]
-                candles = raw_payload.get("candles", [])
-                if candles:
-                    payload = _compute_post_signal_metrics(
-                        candles, target_date, clean_sym, signal_time, signal_price
-                    )
-                    if payload:
-                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
-                        return JSONResponse(content=payload)
-        except Exception as e:
+    # 2. Check Supabase market_cache
+
+    if not is_today:
+
+        try:
+
+            _init_supabase()
+
+            sb = _get_thread_local_supabase()
+
+            cached = sb.table("market_cache").select("payload").eq("cache_key", cache_key).maybe_single().execute()
+
+            if cached and cached.data and cached.data.get("payload"):
+
+                raw_payload = cached.data["payload"]
+
+                candles = raw_payload.get("candles", [])
+
+                if candles:
+
+                    payload = _compute_post_signal_metrics(
+
+                        candles, target_date, clean_sym, signal_time, signal_price
+
+                    )
+
+                    if payload:
+
+                        _INTRADAY_SESSION_CACHE[cache_key] = {"timestamp": now_ts, "payload": payload}
+
+                        return JSONResponse(content=payload)
+
+        except Exception as e:
+
             logging.warning(f"[SCANNER_INTRADAY] Cache lookup error: {e}")
 
     # 3. Fetch from TvDatafeed with timeout guard

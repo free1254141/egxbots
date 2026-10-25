@@ -304,11 +304,18 @@ export default function ScannerIntradayChartModal({
     const formattedData = data.candles.map((c, index) => {
       const dtStr = c.datetime ? c.datetime.replace(" ", "T") + ":00" : `${data.date}T${c.time}:00`;
       const parsedTs = Math.floor(new Date(dtStr).getTime() / 1000);
+      let high = c.high;
+      let low = c.low;
+      if (high <= low) {
+        const tick = Math.max(0.01, Number((c.close * 0.0008).toFixed(2)));
+        high = Number((c.close + tick).toFixed(2));
+        low = Number((c.close - tick).toFixed(2));
+      }
       return {
         time: (parsedTs || index) as any,
         open: c.open,
-        high: c.high,
-        low: c.low,
+        high,
+        low,
         close: c.close,
         origTime: c.time,
         origDatetime: c.datetime || `${data.date} ${c.time}`,
