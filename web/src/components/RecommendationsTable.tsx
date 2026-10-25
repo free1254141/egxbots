@@ -16,6 +16,7 @@ import TradingViewChart from "./TradingViewChartDynamic";
 import TelegramServiceToggle from "./TelegramServiceToggle";
 import RecommendationCalendar from "./RecommendationCalendar";
 import ShortSwingsTab from "./ShortSwingsTab";
+import FastScannerTab from "./FastScannerTab";
 import SystemsComparisonTab from "./SystemsComparisonTab";
 import {
     Search, Filter, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Clock,
@@ -374,8 +375,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedSector, setSelectedSector] = useState("");
     const [selectedSignal, setSelectedSignal] = useState("");
-    const [mainTab, setMainTab] = useState<"medium_swings" | "short_swings" | "comparison">(() => {
+    const [mainTab, setMainTab] = useState<"medium_swings" | "short_swings" | "fast_scanner" | "comparison">(() => {
         if (tabParam === "short_swings") return "short_swings";
+        if (tabParam === "fast_scanner" || tabParam === "scanner" || tabParam === "scanner_signals") return "fast_scanner";
         if (tabParam === "comparison") return "comparison";
         return "medium_swings";
     });
@@ -385,6 +387,8 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     useEffect(() => {
         if (tabParam === "short_swings") {
             setMainTab("short_swings");
+        } else if (tabParam === "fast_scanner" || tabParam === "scanner" || tabParam === "scanner_signals") {
+            setMainTab("fast_scanner");
         } else if (tabParam === "comparison") {
             setMainTab("comparison");
         } else if (tabParam === "analytics") {
@@ -2133,7 +2137,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             {/* Share Dialog */}
             {renderShareDialog()}
 
-            {mainTab !== "short_swings" && <>
+            {mainTab === "medium_swings" && <>
             {/* Header Content Info Box */}
             <SpotlightCard 
                 radius={450}
@@ -2177,7 +2181,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                         <div className="p-4 border-4 border-black dark:border-white bg-sky-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
                             <div className="flex items-center gap-2 text-black">
                                 <Clock className="w-4 h-4 shrink-0 text-black" />
-                                <span className="text-black font-bold">{isAr ? "نتائج الصفقات المغلقة ظاهرة فوراً دون رمز السهم؛ الصفقات المفتوحة متأخرة 15 يوماً." : "Closed trade results appear immediately without stock symbols; open trades are delayed by 15 days."}</span>
+                                <span className="text-black font-bold">{isAr ? "نتائج الإشارات المغلقة ظاهرة فوراً دون رمز السهم؛ الإشارات المفتوحة متأخرة 15 يوماً." : "Closed signal results appear immediately without stock symbols; open signals are delayed by 15 days."}</span>
                             </div>
                             <a
                                 href="/login?redirect=%2Fscanner%2Fbacktests%3Ftab%3Dbots"
@@ -2193,7 +2197,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                     <div className="p-4 border-4 border-black dark:border-white bg-amber-300 text-black font-bold flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs shadow-[4px_4px_0px_rgba(0,0,0,1)]">
                         <div className="flex items-center gap-2 text-black">
                             <Clock className="w-4 h-4 shrink-0 text-black" />
-                            <span className="text-black font-bold">{isAr ? "Free: الإشارات المفتوحة متأخرة 15 يوماً، والمغلقة بلا رمز، والأرباح فوق 50% غير مدرجة؛ لذلك إحصاءات Free ليست سجل الأداء الكامل. Pro يعرض السجل الكامل." : "Free: open signals are delayed 15 days, closed symbols are hidden, and wins above 50% are excluded. Free statistics are not the full performance record; Pro shows the complete history."}</span>
+                            <span className="text-black font-bold">{isAr ? "Free: الإشارات المفتوحة متأخرة 15 يوماً، والمغلقة بلا رمز، والعوائد فوق 50% غير مدرجة؛ لذلك إحصاءات Free ليست سجل الأداء الكامل. Pro يعرض السجل الكامل." : "Free: open signals are delayed 15 days, closed symbols are hidden, and wins above 50% are excluded. Free statistics are not the full performance record; Pro shows the complete history."}</span>
                         </div>
                         <a
                             href="/pricing"
@@ -2232,32 +2236,41 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                 <MarketOverviewSummary isAr={isAr} onOpen={() => router.push("/scanner/market")} />
             )}
 
-            {/* ── Top-Level Systems Navigation Bar ────────────────────────── */}
+            {/* ── Top-Level Systems Navigation Bar (4 Unified Systems Tabs) ────────────────────────── */}
             {limit === Infinity && (!isLandingPage || user) && (
                 <div className="sticky top-[var(--header-offset,68px)] z-40 mb-4 sm:mb-6 px-1 sm:px-2 md:px-4 lg:px-6">
-                    <div className="grid grid-cols-3 border-2 sm:border-4 border-black dark:border-white bg-zinc-100/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] dark:sm:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 sm:p-2 md:p-2.5 gap-1.5 sm:gap-2.5 select-none">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 border-2 sm:border-4 border-black dark:border-white bg-zinc-100/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] dark:sm:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 sm:p-2 md:p-2.5 gap-1.5 sm:gap-2 select-none">
                         {[
                             {
                                 id: "medium_swings",
-                                shortLabel: isAr ? "المتوسطة 📈" : "Medium 📈",
-                                label: isAr ? "الصفقات المتوسطة 📈" : "Medium Swings 📈",
-                                subtitle: isAr ? "النظام الأساسي (أفق هادئ وتجميع)" : "Core System (Swing Trend)",
+                                shortLabel: isAr ? "إشارات المدى المتوسط 📈" : "Medium Signals 📈",
+                                label: isAr ? "إشارات المدى المتوسط 📈" : "Medium-Term Signals 📈",
+                                subtitle: isAr ? "تحليل الاتجاه الفني (2 إلى 6 أسابيع)" : "Trend Technical Analysis (2–6 Weeks)",
                                 icon: Layers,
                             },
                             {
                                 id: "short_swings",
-                                shortLabel: isAr ? "القصيرة ⚡" : "Short ⚡",
-                                label: isAr ? "الصفقات القصيرة ⚡" : "Short Swings ⚡",
-                                subtitle: isAr ? "نظام الزخم (سرعة وتدوير سيولة)" : "Momentum Runners (Fast)",
+                                shortLabel: isAr ? "إشارات المدى القصير ⚡" : "Short Signals ⚡",
+                                label: isAr ? "إشارات المدى القصير ⚡" : "Short-Term Signals ⚡",
+                                subtitle: isAr ? "رصد الزخم الفني (3 إلى 10 جلسات)" : "Momentum Technical Scan (3–10 Sessions)",
                                 icon: Zap,
                                 isSpecial: true,
                                 isShortSwings: true,
                             },
                             {
+                                id: "fast_scanner",
+                                shortLabel: isAr ? "إشارات الرصد اللحظي 🎯" : "Intraday Signals 🎯",
+                                label: isAr ? "إشارات الرصد اللحظي 🎯" : "Intraday Fast Signals 🎯",
+                                subtitle: isAr ? "رادار السيولة السريع (1 إلى 4 جلسات)" : "15m Liquidity Radar (1–4 Sessions)",
+                                icon: Target,
+                                isSpecial: true,
+                                isFastScanner: true,
+                            },
+                            {
                                 id: "comparison",
-                                shortLabel: isAr ? "المقارنة ⚖️" : "Compare ⚖️",
-                                label: isAr ? "مقارنة أداء النظامين ⚖️" : "Systems Comparison ⚖️",
-                                subtitle: isAr ? "أرقام وتفاصيل شهور 8 و 9 و 2026" : "Head-to-head empirical metrics",
+                                shortLabel: isAr ? "مقارنة الأنظمة ⚖️" : "3-Systems Compare ⚖️",
+                                label: isAr ? "مقارنة الأنظمة الثلاثة ⚖️" : "3-Systems Comparison ⚖️",
+                                subtitle: isAr ? "مقارنة الأداء والإحصائيات التاريخية" : "Head-to-head empirical metrics",
                                 icon: Scale,
                             },
                         ].map(tab => {
@@ -2271,7 +2284,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         setCurrentPage(1);
                                         if (typeof window !== "undefined" && window.history?.replaceState) {
                                             const url = new URL(window.location.href);
-                                            if (tab.id === "short_swings" || tab.id === "comparison") {
+                                            if (tab.id === "short_swings" || tab.id === "fast_scanner" || tab.id === "comparison") {
                                                 url.searchParams.set("tab", tab.id);
                                             } else {
                                                 if (activeTab === "analytics") {
@@ -2283,24 +2296,28 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             window.history.replaceState({}, "", url.toString());
                                         }
                                     }}
-                                    className={`py-2 px-1.5 sm:py-3.5 sm:px-4 md:px-6 font-black text-xs sm:text-sm flex items-center justify-between gap-1 sm:gap-2 transition-all duration-100 active:scale-98 border-2 ${
+                                    className={`py-2 px-2 sm:py-3 sm:px-3.5 md:px-4 font-black text-xs sm:text-sm flex items-center justify-between gap-1 sm:gap-2 transition-all duration-100 active:scale-98 border-2 cursor-pointer ${
                                         isSelected
                                             ? ((tab as any).isShortSwings
                                                 ? "bg-gradient-to-r from-amber-500 to-orange-500 text-black border-black shadow-[2px_2px_0px_#000]"
+                                                : (tab as any).isFastScanner
+                                                ? "bg-gradient-to-r from-emerald-400 to-teal-400 text-black border-black shadow-[2px_2px_0px_#000]"
                                                 : tab.id === "comparison"
                                                 ? "bg-[#FFE600] text-black border-black shadow-[2px_2px_0px_#000]"
                                                 : "bg-black dark:bg-white border-black dark:border-white text-white dark:text-black shadow-[2px_2px_0px_rgba(0,0,0,0.2)]")
                                             : ((tab as any).isShortSwings
                                                 ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/20"
+                                                : (tab as any).isFastScanner
+                                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/20"
                                                 : "bg-white dark:bg-zinc-950 text-black dark:text-white border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800")
                                     }`}
                                 >
-                                    <div className="flex items-center gap-1.5 sm:gap-2.5 truncate">
-                                        <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${isSelected ? ((tab as any).isShortSwings ? "text-black" : tab.id === "comparison" ? "text-black" : "text-amber-400 dark:text-zinc-900") : (tab as any).isShortSwings ? "text-amber-500" : "text-zinc-500"}`} />
+                                    <div className="flex items-center gap-1.5 sm:gap-2 truncate">
+                                        <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${isSelected ? ((tab as any).isShortSwings || (tab as any).isFastScanner || tab.id === "comparison" ? "text-black" : "text-amber-400 dark:text-zinc-900") : (tab as any).isShortSwings ? "text-amber-500" : (tab as any).isFastScanner ? "text-emerald-500" : "text-zinc-500"}`} />
                                         <div className="truncate text-start">
                                             <span className="font-black truncate block sm:hidden text-[10px] leading-tight">{tab.shortLabel}</span>
                                             <span className="font-black truncate hidden sm:block text-xs sm:text-sm">{tab.label}</span>
-                                            <span className={`text-[10px] font-bold hidden md:block truncate opacity-80 ${isSelected ? ((tab as any).isShortSwings ? "text-zinc-900" : tab.id === "comparison" ? "text-zinc-900" : "text-zinc-300 dark:text-zinc-700") : "text-zinc-500"}`}>
+                                            <span className={`text-[10px] font-bold hidden md:block truncate opacity-80 ${isSelected ? ((tab as any).isShortSwings || (tab as any).isFastScanner || tab.id === "comparison" ? "text-zinc-900" : "text-zinc-300 dark:text-zinc-700") : "text-zinc-500"}`}>
                                                 {tab.subtitle}
                                             </span>
                                         </div>
@@ -2324,6 +2341,8 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             {/* ── Main View Switching ─────────────────────────────────────── */}
             {mainTab === "short_swings" ? (
                 <ShortSwingsTab key={user?.id || "anonymous"} viewerKey={user?.id || "anonymous"} viewerReady={!authLoading} isPro={isProView} onSelectStock={handleStockClick} />
+            ) : mainTab === "fast_scanner" ? (
+                <FastScannerTab isAr={isAr} isPro={isProView} />
             ) : mainTab === "comparison" ? (
                 <SystemsComparisonTab isAr={isAr} isPro={isProView} />
             ) : (
@@ -2332,10 +2351,10 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                     {limit === Infinity && (!isLandingPage || user) && (
                         <div className="grid grid-cols-2 sm:grid-cols-4 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 gap-2 select-none">
                             {[
-                                { id: "active", label: isAr ? "الصفقات النشطة (المفتوحة)" : "Active Swings", count: tabCounts.activeCount, icon: Activity },
-                                { id: "closed", label: isAr ? "أرشيف الصفقات (المغلقة)" : "Closed Trades", count: tabCounts.closedCount, icon: History },
-                                { id: "all", label: isAr ? "جميع الصفقات" : "All Trades", count: tabCounts.totalCount, icon: Layers },
-                                { id: "analytics", label: isAr ? "تقويم الأرباح" : "Profit Calendar", count: null, icon: Calendar, isSpecial: true },
+                                { id: "active", label: isAr ? "الإشارات النشطة (المفتوحة)" : "Active Signals", count: tabCounts.activeCount, icon: Activity },
+                                { id: "closed", label: isAr ? "أرشيف الإشارات (المغلقة)" : "Closed Signals", count: tabCounts.closedCount, icon: History },
+                                { id: "all", label: isAr ? "جميع الإشارات" : "All Signals", count: tabCounts.totalCount, icon: Layers },
+                                { id: "analytics", label: isAr ? "تقويم الأداء والإحصائيات" : "Performance Calendar", count: null, icon: Calendar, isSpecial: true },
                             ].map(tab => {
                                 const isSelected = activeTab === tab.id;
                                 const Icon = tab.icon;

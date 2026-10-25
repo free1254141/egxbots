@@ -521,11 +521,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 border-2 border-black bg-black text-[#FFE600] text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000]">
                 <Flame className="w-4 h-4 fill-[#FFE600]" />
-                <span>الصفقات القصيرة ⚡ PRO</span>
+                <span>إشارات المدى القصير ⚡ PRO</span>
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-1 border-2 border-black bg-white text-black text-xs font-black shadow-[2px_2px_0px_#000]">
                 <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
-                <span>خطف الزخم والاتجاه (1 - 20 جلسة تداول)</span>
+                <span>رصد الزخم والاتجاه الفني (3 - 10 جلسات تداول)</span>
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-1 border-2 border-black bg-emerald-400 text-black text-xs font-black shadow-[2px_2px_0px_#000]">
                 <ShieldCheck className="w-3.5 h-3.5" />
@@ -534,12 +534,12 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
             </div>
 
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-black tracking-tight leading-tight">
-              نظام الصفقات القصيرة وركوب موجات الصعود ومقارنة الأنظمة
+              نظام إشارات المدى القصير ورصد موجات الصعود الفائقة
             </h1>
 
             {!isGuideOpen && (
               <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed max-w-2xl">
-                استراتيجية رقمية صارمة لا تدخل إلا مع انفجار السيولة المؤسسية (&gt;140%) بعد كسر قمم تماسك 20 جلسة ومقارنتها مع التوصيات المتوسطة.
+                منهجية خوارزمية كمية ترصد انفجار السيولة المؤسسية (&gt;140%) بعد كسر قمم تماسك 20 جلسة مع إدارة مخاطر صارمة.
               </p>
             )}
           </div>
@@ -635,7 +635,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-blue-500 font-black">•</span>
-                      <span><strong>الأنسب لـ:</strong> المستثمر والمضارب الهادئ الذي يفضل متابعة أسبوعية وعدد صفقات أقل.</span>
+                      <span><strong>الأنسب لـ:</strong> المستثمر والمتابع الهادئ الذي يفضل متابعة أسبوعية وعدد صفقات أقل.</span>
                     </li>
                   </ul>
                 </div>
@@ -669,7 +669,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
-                      <span><strong>الأنسب لـ:</strong> المضارب اليومي والنشط الباحث عن تدوير السيولة واقتناص الطفرات السريعة.</span>
+                      <span><strong>الأنسب لـ:</strong> المتداول النشط الباحث عن تدوير السيولة واقتناص الطفرات السريعة.</span>
                     </li>
                   </ul>
                 </div>
@@ -723,10 +723,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       {/* ── 4. SUB-TABS NAVIGATION BAR (Identical to Medium Swings) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 gap-2 select-none">
         {[
-          { id: "active", label: isAr ? "الصفقات النشطة (المفتوحة)" : "Active Swings", count: activeTrades.length, icon: Zap },
-          { id: "closed", label: isAr ? "أرشيف الصفقات (المغلقة)" : "Closed Trades", count: closedTrades.length, icon: History },
-          { id: "all", label: isAr ? "جميع الصفقات" : "All Trades", count: activeTrades.length + closedTrades.length, icon: Layers },
-          { id: "calendar", label: isAr ? "تقويم الأرباح" : "Profit Calendar", count: null, icon: CalendarIcon, isSpecial: true },
+          { id: "active", label: isAr ? "الإشارات النشطة (المفتوحة)" : "Active Swings", count: activeTrades.length, icon: Zap },
+          { id: "closed", label: isAr ? "أرشيف الإشارات (المغلقة)" : "Closed Trades", count: closedTrades.length, icon: History },
+          { id: "all", label: isAr ? "جميع الإشارات" : "All Trades", count: activeTrades.length + closedTrades.length, icon: Layers },
+          { id: "calendar", label: isAr ? "تقويم الأداء والإحصائيات" : "Profit Calendar", count: null, icon: CalendarIcon, isSpecial: true },
         ].map(tab => {
           const isSelected = viewMode === tab.id;
           const Icon = tab.icon;
@@ -1881,13 +1881,13 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
         </div>
       )}
 
-      {/* ── 9. VIEW 4: ALL TRADES (جميع الصفقات) ── */}
+      {/* ── 9. VIEW 4: ALL TRADES (جميع الإشارات) ── */}
       {viewMode === "all" && (
         <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] space-y-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b-2 border-black dark:border-white pb-4">
             <h3 className="text-lg font-black text-black dark:text-white flex items-center gap-2">
               <Layers className="w-5 h-5 text-amber-500" />
-              <span>سجل جميع الصفقات ({allTrades.length} صفقة)</span>
+              <span>سجل جميع الإشارات ({allTrades.length} صفقة)</span>
             </h3>
 
             {/* Filters */}

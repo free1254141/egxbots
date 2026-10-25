@@ -1,23 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { 
-  Zap, 
-  ArrowUpRight, 
-  Target, 
-  Star, 
-  Newspaper, 
-  Send, 
-  CheckCircle2, 
-  Lock, 
+import {
+  Zap,
+  ArrowUpRight,
+  Target,
+  Star,
+  Newspaper,
+  Send,
+  Lock,
   Sparkles,
   ExternalLink,
   Loader2,
-  Globe,
-  Calendar as CalendarIcon,
-  Activity,
   SlidersHorizontal,
-  BookOpen,
   ChevronDown,
   ChevronUp
 } from "lucide-react";
@@ -25,9 +20,6 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
-import ScannerStatsCalendar from "./ScannerStatsCalendar";
-import ScannerDefinitionsGuide from "./ScannerDefinitionsGuide";
-import ScannerSignalsTracker from "./ScannerSignalsTracker";
 
 interface ScannerPreferences {
   volume_surge: boolean;
@@ -54,14 +46,10 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
   const { invite: proInvite, loading: proInviteLoading, refresh: refreshProInvite } = useTelegramPro();
   const isAr = language === "ar";
 
-  const [activeMainTab, setActiveMainTab] = useState<"tracker" | "calendar" | "settings" | "guide">("tracker");
-  const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [isPro, setIsPro] = useState(false);
   const [telegramLinked, setTelegramLinked] = useState(initialTelegramLinked);
   const [prefs, setPrefs] = useState<ScannerPreferences>(DEFAULT_PREFS);
-  const [history, setHistory] = useState<any[]>([]);
-  const [lastScan, setLastScan] = useState<any>(null);
   const [activeSignals, setActiveSignals] = useState<any[]>([]);
   const [closedSignals, setClosedSignals] = useState<any[]>([]);
   const [signalsKpis, setSignalsKpis] = useState<any>(null);
@@ -95,14 +83,12 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     }
   }, [initialTelegramLinked]);
 
-  // Listen for #scanner-signals anchor in URL to auto-expand and switch to Tracker tab
   useEffect(() => {
     if (typeof window === "undefined") return;
     const checkHash = () => {
       const hash = window.location.hash;
       if (hash === "#scanner-signals" || hash === "#scanner-alerts" || hash === "#scanner") {
         setIsCollapsed(false);
-        setActiveMainTab("tracker");
         setTimeout(() => {
           const el = document.getElementById("scanner-signals");
           if (el) el.scrollIntoView({ behavior: "smooth" });
@@ -114,119 +100,94 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     return () => window.removeEventListener("hashchange", checkHash);
   }, []);
 
-  // Intelligent Cache: initialize from localStorage immediately for 0ms load delay
+  const SCANNER_ALERTS_CACHE_KEY = "egx_scanner_alerts_cache_v2";
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    let active = true;
+
     try {
-      const cachedStr = localStorage.getItem("egx_scanner_alerts_cache_v2");
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr);
-        if (cached && typeof cached === "object") {
-          if (typeof cached.is_pro === "boolean") setIsPro(cached.is_pro);
-          if (typeof cached.telegram_linked === "boolean") setTelegramLinked(cached.telegram_linked);
-          if (cached.preferences) setPrefs(cached.preferences);
-          if (Array.isArray(cached.history)) setHistory(cached.history);
-          if (cached.last_scan) setLastScan(cached.last_scan);
+      const cachedRaw = localStorage.getItem(SCANNER_ALERTS_CACHE_KEY);
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw);
+        if (cached && cached.ok && active) {
+          setIsPro(Boolean(cached.is_pro));
+          if (cached.telegram_linked) setTelegramLinked(true);
+          if (cached.preferences) setPrefs({ ...DEFAULT_PREFS, ...cached.preferences });
           if (Array.isArray(cached.active_signals)) setActiveSignals(cached.active_signals);
           if (Array.isArray(cached.closed_signals)) setClosedSignals(cached.closed_signals);
           if (cached.signals_kpis) setSignalsKpis(cached.signals_kpis);
-          setLoading(false);
         }
       }
-    } catch {}
-  }, []);
+    } catch {
+      // ignore cache errors
+    }
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadAlerts() {
+    async function fetchPrefs() {
       try {
-        const res = await fetch("/api/user/scanner-alerts", { cache: "no-store" });
+        const res = await fetch("/api/user/scanner-alerts", {
+          cache: "no-store",
+        });
+        if (!active) return;
         if (res.ok) {
           const data = await res.json();
-          if (isMounted && data.ok) {
+          if (data.ok) {
             setIsPro(Boolean(data.is_pro));
-            setTelegramLinked(Boolean(data.telegram_linked));
-            if (data.preferences) setPrefs(data.preferences);
-            if (data.history) setHistory(data.history);
-            if (data.last_scan) setLastScan(data.last_scan);
-            if (data.active_signals) setActiveSignals(data.active_signals);
-            if (data.closed_signals) setClosedSignals(data.closed_signals);
+            if (data.telegram_linked) setTelegramLinked(true);
+            if (data.preferences) {
+              setPrefs({ ...DEFAULT_PREFS, ...data.preferences });
+            }
+            if (Array.isArray(data.active_signals)) setActiveSignals(data.active_signals);
+            if (Array.isArray(data.closed_signals)) setClosedSignals(data.closed_signals);
             if (data.signals_kpis) setSignalsKpis(data.signals_kpis);
-
-            // Persist into smart cache
             try {
-              localStorage.setItem("egx_scanner_alerts_cache_v2", JSON.stringify(data));
+              localStorage.setItem(SCANNER_ALERTS_CACHE_KEY, JSON.stringify(data));
             } catch {}
           }
         }
-      } catch (e) {
-        console.error("Failed to load scanner alerts:", e);
-      } finally {
-        if (isMounted) setLoading(false);
+      } catch (err) {
+        console.error("Failed to fetch scanner preferences:", err);
       }
     }
 
-    loadAlerts();
-
-    // Listen to entitlement updates (e.g. user upgraded to Pro or subscribed)
-    const handleEntitlements = () => {
-      try {
-        localStorage.removeItem("egx_scanner_alerts_cache_v2");
-      } catch {}
-      void loadAlerts();
-    };
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
-        handleEntitlements();
-      }
-    };
-    window.addEventListener("egx:entitlements-updated", handleEntitlements);
-    window.addEventListener("storage", handleStorage);
-
+    void fetchPrefs();
     return () => {
-      isMounted = false;
-      window.removeEventListener("egx:entitlements-updated", handleEntitlements);
-      window.removeEventListener("storage", handleStorage);
+      active = false;
     };
   }, []);
 
   const handleToggle = async (key: keyof ScannerPreferences) => {
     if (!isPro) {
-      toast.info(
-        isAr 
-          ? "🔒 تنبيهات الإسكانر الفورية حصرية لمشتركي باقة Pro. اشترك لتفعيل الرادار اللحظي!" 
-          : "🔒 Live scanner alerts are exclusive to Pro members. Upgrade to activate!"
+      toast.error(
+        isAr
+          ? "تنبيهات الرادار اللحظية متاحة حصرياً لمشتركي باقة Pro."
+          : "Live Scanner Alerts are exclusively available for Pro subscribers."
       );
       return;
     }
 
-    const updated = { ...prefs, [key]: !prefs[key] };
-    setPrefs(updated);
+    const nextValue = !prefs[key];
+    const updatedPrefs = { ...prefs, [key]: nextValue };
+    setPrefs(updatedPrefs);
     setSavingKey(key);
 
     try {
       const res = await fetch("/api/user/scanner-alerts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferences: updated }),
+        body: JSON.stringify({ preferences: updatedPrefs }),
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.preferences) setPrefs(data.preferences);
-        toast.success(
-          isAr 
-            ? `تم ${updated[key] ? "تفعيل" : "إيقاف"} التنبيه بنجاح` 
-            : `Alert ${updated[key] ? "activated" : "deactivated"} successfully`
-        );
-      } else {
-        // Revert on error
-        setPrefs(prefs);
-        toast.error(isAr ? "تعذر حفظ التغييرات، حاول مجدداً" : "Failed to save settings");
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to update");
       }
+      toast.success(
+        isAr ? "تم تحديث تفضيلات تنبيهات الرادار بنجاح" : "Scanner alert preferences updated"
+      );
     } catch {
       setPrefs(prefs);
-      toast.error(isAr ? "حدث خطأ في الاتصال" : "Connection error");
+      toast.error(
+        isAr ? "تعذر حفظ الإعدادات، يرجى المحاولة مرة أخرى" : "Could not save preferences, please try again"
+      );
     } finally {
       setSavingKey(null);
     }
@@ -236,19 +197,17 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     {
       id: "volume_surge" as const,
       icon: Zap,
-      color: "bg-amber-300 text-black",
-      badgeColor: "bg-amber-400 text-black",
-      titleAr: "رادار السيولة الذكية والتجميع",
-      titleEn: "Smart Money & Volume Surge",
-      descAr: "رصد فوري للأسهم التي تشهد قفزة غير معتادة في أحجام التنفيذ والسيولة (أعلى من 150% من متوسط 20 جلسة) مع اتجاه صاعد.",
-      descEn: "Real-time alert for stocks experiencing unusual volume surge (>150% of 20-day average) with upward momentum.",
+      color: "bg-amber-400 text-black",
+      titleAr: "رادار السيولة المؤسسية غير المعتادة",
+      titleEn: "Unusual Institutional Volume Surge",
+      descAr: "إشعار فوري عندما يشهد السهم تدفق سيولة يتجاوز ضعف المتوسط اليومي (2x+) أثناء الجلسة.",
+      descEn: "Instant alert when a stock experiences 2x+ normal trading volume with institutional inflow.",
     },
     {
       id: "breakout" as const,
       icon: ArrowUpRight,
       color: "bg-emerald-400 text-black",
-      badgeColor: "bg-emerald-500 text-black",
-      titleAr: "ماسح الاختراق وكسر المقاومات",
+      titleAr: "ماسح الاختراق الفني وكسر المقاومات",
       titleEn: "Breakout & Resistance Scanner",
       descAr: "تنبيه لحظي عند اختراق سهم لقمته السابقة أو مقاومة فنية رئيسية بشمعة إيجابية قوية.",
       descEn: "Instant alert when a stock breaks through key resistance levels or 30-day highs with strong confirmation.",
@@ -257,372 +216,275 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       id: "rsi_oversold" as const,
       icon: Target,
       color: "bg-sky-400 text-black",
-      badgeColor: "bg-sky-500 text-black",
-      titleAr: "ماسح الارتداد والتشبع البيعي (RSI)",
-      titleEn: "Oversold Bounce & Reversal",
-      descAr: "رصد الأسهم القوية التي هبطت لمناطق تشبع بيعي حاد (RSI أقل من 30) وبدأت في تكوين شمعة ارتداد إيجابية.",
-      descEn: "Catches quality stocks entering severe oversold territory (RSI < 30) forming reversal candlestick patterns.",
+      titleAr: "ماسح الارتداد الفني والتشبع البيعي (RSI)",
+      titleEn: "Oversold Technical Rebound (RSI)",
+      descAr: "رصد الأسهم التي وصلت لمناطق تشبع بيعي حاد (RSI أقل من 28) وبدأت في تكوين شمعة ارتداد فني.",
+      descEn: "Detects stocks entering deep oversold territory (RSI <= 28) forming technical reversal patterns.",
     },
     {
       id: "portfolio_watchlist" as const,
       icon: Star,
       color: "bg-purple-400 text-black",
-      badgeColor: "bg-purple-500 text-white",
-      titleAr: "تنبيهات محفظتي وقائمتي الخاصة فقط",
+      titleAr: "تنبيهات محفظتي وقائمة المتابعة فقط",
       titleEn: "My Portfolio & Watchlist Alerts",
-      descAr: "تنبيهات مخصصة حصراً للأسهم التي تمتلكها في محفظتك أو تتابعها في قائمتك عند كسر الدعم أو اقترابها من الهدف.",
-      descEn: "Custom alerts strictly filtered for stocks in your portfolio or watchlist approaching key targets or stop-loss.",
+      descAr: "تنبيهات مخصصة للأسهم المدرجة في محفظتك أو قائمة متابعتك عند اقترابها من المستويات الفنية الهامة.",
+      descEn: "Custom alerts filtered for stocks in your portfolio or watchlist approaching key technical levels.",
     },
     {
       id: "disclosures" as const,
       icon: Newspaper,
       color: "bg-rose-400 text-black",
-      badgeColor: "bg-rose-500 text-white",
       titleAr: "رادار الإفصاحات والأخبار الرسمية",
       titleEn: "Official Disclosures & Corporate News",
       descAr: "إشعار فوري بأي إفصاح رسمي لشركات البورصة (توزيعات أرباح، زيادة رأسمال، صفقات استحواذ، نتائج أعمال).",
-      descEn: "Instant push notification for official EGX disclosures (dividends, capital increases, M&A, earnings releases).",
+      descEn: "Instant notification for official EGX disclosures (dividends, capital increases, M&A, earnings releases).",
     },
   ];
 
   return (
-    <section className={`relative z-10 min-w-0 rounded-xl sm:rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${isCollapsed ? "space-y-0" : "space-y-4 sm:space-y-6"}`}>
+    <section
+      className={`relative z-10 min-w-0 rounded-xl sm:rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${
+        isCollapsed ? "space-y-0" : "space-y-4 sm:space-y-6"
+      }`}
+    >
       {/* ── Section Header & Toggle Button ── */}
-      <div className={`flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between ${isCollapsed ? "" : "border-b-2 sm:border-b-4 border-black dark:border-white pb-3 sm:pb-5"}`}>
+      <div
+        className={`flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between ${
+          isCollapsed ? "" : "border-b-2 sm:border-b-4 border-black dark:border-white pb-3 sm:pb-5"
+        }`}
+      >
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="h-8 w-8 sm:h-10 sm:w-10 border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] shrink-0">
-              <Activity className="h-4 w-4 sm:h-5 sm:w-5" />
+              <SlidersHorizontal className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg sm:text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
-                {isAr ? "رادار وإسكانر الصفقات اللحظية" : "Live Signals & Scanner Radar"}
+                {isAr ? "تفضيلات تنبيهات الرصد اللحظي وتليجرام" : "Intraday Radar & Telegram Alert Preferences"}
               </h2>
               <span className="border-2 border-black dark:border-white bg-black text-[#FFE600] dark:bg-white dark:text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-widest shadow-[1px_1px_0px_rgba(0,0,0,1)]">
                 {isPro ? "PRO VIP" : "PRO RADAR"}
               </span>
-              {isCollapsed && (
-                <span className="border-2 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                  {isAr ? "مطوي" : "Collapsed"}
-                </span>
-              )}
             </div>
           </div>
-          {!isCollapsed ? (
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 font-black uppercase tracking-widest leading-relaxed">
-              {isAr
-                ? "متابعة دقيقة للصفقات اللحظية المفتوحة والمغلقة، سجل الجلسات، وتنبيهات التليجرام الفورية"
-                : "Live tracking of active & closed trades, historical calendar sessions, and Telegram alerts"}
-            </p>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2 text-xs font-bold mt-1 text-zinc-600 dark:text-zinc-400">
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-black border border-emerald-500/40 rounded">
-                {activeSignals.length} {isAr ? "إشارة مفتوحة حالياً" : "Active Signals"}
-              </span>
-              <span className="text-zinc-300 dark:text-zinc-600">•</span>
-              <span className="px-2 py-0.5 bg-sky-500/20 text-sky-600 dark:text-sky-400 font-black border border-sky-500/40 rounded">
-                {closedSignals.length} {isAr ? "صفقة مغلقة" : "Closed Trades"}
-              </span>
-              {signalsKpis?.winRate != null && (
-                <>
-                  <span className="text-zinc-300 dark:text-zinc-600">•</span>
-                  <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
-                    {isAr ? "نسبة النجاح:" : "Win Rate:"} {signalsKpis.winRate}%
-                  </span>
-                </>
-              )}
-            </div>
-          )}
+          <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold leading-relaxed">
+            {isAr
+              ? "تحكم في إشعارات التليجرام اللحظية، وانتقل مباشرة إلى لوحة إشارات الرصد اللحظي الموحدة بجانب إشارات المدى المتوسط والقصير."
+              : "Manage instant Telegram notifications and jump directly to the unified Intraday Fast Signals hub."}
+          </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/scanner/backtests?tab=fast_scanner"
+            className="h-8 sm:h-10 px-3 sm:px-4 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black bg-emerald-400 hover:bg-emerald-300 text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
+          >
+            <Target className="w-4 h-4" />
+            <span>{isAr ? "فتح لوحة إشارات الرصد اللحظي 🎯" : "Open Intraday Signals Hub 🎯"}</span>
+          </Link>
+
           <button
             type="button"
             onClick={toggleCollapse}
-            className="h-8 sm:h-10 px-2.5 sm:px-3 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
-            title={isCollapsed ? (isAr ? "فتح السيكشن" : "Expand Section") : (isAr ? "طي السيكشن" : "Collapse Section")}
+            className="h-8 sm:h-10 px-2.5 sm:px-3 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] transition-all cursor-pointer"
           >
             {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            <span>{isCollapsed ? (isAr ? "عرض الإسكانر" : "Expand") : (isAr ? "طي السيكشن" : "Collapse")}</span>
+            <span>{isCollapsed ? (isAr ? "عرض الإعدادات" : "Expand") : (isAr ? "طي السيكشن" : "Collapse")}</span>
           </button>
         </div>
       </div>
 
       {!isCollapsed && (
-        <div className="space-y-6 pt-1">
-          {/* ── Main Tab Navigation Bar (Neobrutal) ── */}
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-zinc-100 dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-            <button
-              type="button"
-              onClick={() => setActiveMainTab("tracker")}
-              className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
-            activeMainTab === "tracker"
-              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
-              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-          }`}
-        >
-          <Activity className="w-4 h-4" />
-          <span className="truncate">{isAr ? "متابعة الصفقات" : "Signals"}</span>
-          {activeSignals.length > 0 && (
-            <span className="px-1.5 py-0.5 bg-emerald-500 text-black text-[11px] font-black border border-black rounded-full animate-pulse">
-              {activeSignals.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveMainTab("calendar")}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
-            activeMainTab === "calendar"
-              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
-              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-          }`}
-        >
-          <CalendarIcon className="w-4 h-4" />
-          <span className="truncate">{isAr ? "سجل الجلسات" : "Calendar"}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveMainTab("settings")}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
-            activeMainTab === "settings"
-              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
-              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-          }`}
-        >
-          <SlidersHorizontal className="w-4 h-4" />
-          <span className="truncate">{isAr ? "تفضيلات التنبيهات" : "Preferences"}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveMainTab("guide")}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 sm:py-2.5 font-black text-xs sm:text-sm uppercase transition-all border-2 border-black dark:border-white ${
-            activeMainTab === "guide"
-              ? "bg-[#FFE600] text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] -translate-x-0.5 -translate-y-0.5"
-              : "bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span className="truncate">{isAr ? "دليل الاستراتيجيات" : "Guide"}</span>
-        </button>
-      </div>
-
-      {/* ── Active Main Tab View ── */}
-      {activeMainTab === "tracker" && (
-        <ScannerSignalsTracker
-          activeSignals={activeSignals}
-          closedSignals={closedSignals}
-          kpis={signalsKpis}
-          isAr={isAr}
-          isPro={isPro}
-        />
-      )}
-
-      {activeMainTab === "calendar" && (
-        <ScannerStatsCalendar
-          history={history}
-          lastScan={lastScan}
-          activeSignals={activeSignals}
-          closedSignals={closedSignals}
-          isAr={isAr}
-          isPro={isPro}
-        />
-      )}
-
-      {activeMainTab === "guide" && (
-        <ScannerDefinitionsGuide isAr={isAr} />
-      )}
-
-      {activeMainTab === "settings" && (
-        <section className="neobrutal-card p-3 sm:p-8 space-y-4 sm:space-y-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] relative z-10">
-      {/* ── Section Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-4 border-black dark:border-white pb-5">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <div className="h-12 w-12 border-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
-            <Zap className="h-6 w-6 fill-black" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-2xl font-black text-black dark:text-white uppercase tracking-tight italic">
-                {isAr ? "تفضيلات تنبيهات الإسكانر" : "Scanner Alerts Preferences"}
-              </h2>
-              <span className="border-2 border-black dark:border-white bg-black text-[#FFE600] dark:bg-white dark:text-black px-2 py-0.5 text-[10px] font-black uppercase tracking-widest shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                {isPro ? "PRO VIP" : "PRO FEATURE"}
-              </span>
+        <div className="space-y-5 pt-1">
+          {/* ── Unified Hub Relocation Callout Banner ── */}
+          <div className="border-2 sm:border-4 border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/30 p-3.5 sm:p-4 shadow-[3px_3px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2 py-0.5 bg-emerald-400 text-black border border-black text-[11px] font-black">
+                  {isAr ? "تحديث جديد ✨" : "New Unified View ✨"}
+                </span>
+                <h3 className="text-sm sm:text-base font-black text-black dark:text-white">
+                  {isAr
+                    ? "تم توحيد «إشارات الرصد اللحظي 🎯» بجانب إشارات المدى المتوسط والقصير!"
+                    : "Intraday Fast Signals 🎯 is now unified alongside Medium & Short-Term Signals!"}
+                </h3>
+              </div>
+              <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                {isAr
+                  ? `يمكنك الآن متابعة الـ ${activeSignals.length} إشارة نشطة، الـ ${closedSignals.length} إشارة مغلقة، شارت الـ 15 دقيقة، وتقويم الأداء في صفحة الأنظمة الموحدة.`
+                  : `Track all ${activeSignals.length} active signals, ${closedSignals.length} closed signals, 15m charts, and performance calendar in the unified systems hub.`}
+              </p>
             </div>
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold mt-1">
-              {isAr
-                ? "حدد أنواع الإشارات والتنبيهات الفنية والإفصاحات التي تريد استلامها فورياً على تليجرام."
-                : "Choose which technical signals and disclosure alerts you want to receive directly on Telegram."}
-            </p>
-          </div>
-        </div>
-
-        {/* Pro / Free Badge */}
-        {!isPro && (
-          <Link
-            href="/pricing"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#FFE600] hover:bg-amber-400 text-black border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 transition-all shrink-0"
-          >
-            <Sparkles className="w-4 h-4 fill-black" />
-            {isAr ? "ترقية لتفعيل التنبيهات (50 ج.م)" : "Upgrade to Activate (50 EGP)"}
-          </Link>
-        )}
-      </div>
-
-      {/* ── VIP Telegram Channel Access ── */}
-      <div className="border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black p-3 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-start gap-3">
-          <div className="p-2.5 bg-black text-[#FFE600] border-2 border-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-            <Send className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-base font-black uppercase tracking-tight">
-              {isAr ? "إشارات إسكانر الـ 15 دقيقة تُنشر في قناة Telegram VIP" : "15-minute scanner signals are posted in the Telegram VIP channel"}
-            </h3>
-            <p className="text-xs font-bold mt-1 text-black/80 leading-relaxed max-w-2xl">
-              {isAr
-                ? "مش محتاج تربط بوت شخصي أو تبعت /start لاستقبال إشارات الإسكانر. اشترك في قناة VIP من رابط الدعوة الخاص باشتراكك، وتابع الإشارات هناك. إعدادات التنبيهات الشخصية هنا منفصلة عن نشر إشارات القناة."
-                : "You do not need to link a personal bot or send /start to receive scanner signals. Join the VIP channel using your subscription invite and follow the signals there. Personal alert preferences here are separate from channel publishing."}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full md:w-auto">
-          {isPro ? (
-            vipChannelUrl ? (
-              <>
-                <a href={vipChannelUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto">
-                  <Send className="w-4 h-4" />
-                  {isAr ? "فتح قناة VIP" : "Open VIP Channel"}
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-                <button type="button" onClick={() => void refreshProInvite()} disabled={proInviteLoading} className="inline-flex items-center justify-center gap-2 px-3 py-3 bg-white text-black hover:bg-zinc-100 border-4 border-black font-black text-[10px] uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] disabled:opacity-50 w-full sm:w-auto">
-                  <Loader2 className={`w-3.5 h-3.5 ${proInviteLoading ? "animate-spin" : ""}`} />
-                  {isAr ? "تجديد الرابط" : "Refresh Link"}
-                </button>
-              </>
-            ) : (
-              <span className="text-xs font-black border-2 border-black bg-white px-3 py-2">
-                {proInviteLoading ? (isAr ? "جاري تجهيز رابط الدعوة..." : "Loading invite...") : (isAr ? "رابط دعوة VIP غير متاح حالياً؛ حدّث الصفحة أو تواصل مع الدعم." : "VIP invite unavailable. Refresh or contact support.")}
-              </span>
-            )
-          ) : (
-            <Link href="/pricing" className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto">
-              <Sparkles className="w-4 h-4" />
-              {isAr ? "اشترك في Pro للوصول إلى VIP" : "Upgrade to Pro for VIP access"}
-            </Link>
-          )}
-        </div>
-      </div>
-
-      {/* ── Scanner Alert Toggles Grid ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 pt-1 sm:pt-2">
-        {alertTypes.map((item) => {
-          const isEnabled = prefs[item.id];
-          const isSaving = savingKey === item.id;
-          const Icon = item.icon;
-
-          return (
-            <div
-              key={item.id}
-              className={`border-2 sm:border-4 border-black dark:border-white p-3.5 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] flex flex-col justify-between transition-all ${
-                isEnabled && isPro
-                  ? "bg-zinc-50 dark:bg-zinc-800/80"
-                  : "bg-zinc-100/60 dark:bg-zinc-950/40 opacity-80"
-              }`}
+            <Link
+              href="/scanner/backtests?tab=fast_scanner"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-[#FFE600] hover:bg-zinc-800 border-2 border-black font-black text-xs uppercase shrink-0 shadow-[2px_2px_0px_#000]"
             >
+              <Target className="w-4 h-4" />
+              <span>{isAr ? "الانتقال إلى إشارات الرصد اللحظي" : "Go to Intraday Signals"}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {/* ── VIP Telegram Channel Access ── */}
+          <div className="border-2 sm:border-4 border-black dark:border-white bg-[#FFE600] text-black p-3 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-black text-[#FFE600] border-2 border-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                <Send className="w-6 h-6" />
+              </div>
               <div>
-                {/* Card Top Row */}
-                <div className="flex items-center justify-between gap-2.5 mb-2">
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div
-                      className={`h-9 w-9 sm:h-10 sm:w-10 border-2 sm:border-4 border-black dark:border-white flex items-center justify-center shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)] ${item.color}`}
+                <h3 className="text-base font-black uppercase tracking-tight">
+                  {isAr
+                    ? "إشارات الرصد اللحظي (فريم 15 دقيقة) تُنشر فورياً في قناة Telegram VIP"
+                    : "15-minute intraday radar signals are posted in the Telegram VIP channel"}
+                </h3>
+                <p className="text-xs font-bold mt-1 text-black/80 leading-relaxed max-w-2xl">
+                  {isAr
+                    ? "اشترك في قناة VIP من رابط الدعوة الخاص باشتراكك لمتابعة الإشارات لحظة بلحظة أثناء الجلسة."
+                    : "Join the VIP channel using your subscription invite to follow intraday signals in real time."}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full md:w-auto">
+              {isPro ? (
+                vipChannelUrl ? (
+                  <>
+                    <a
+                      href={vipChannelUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto"
                     >
-                      <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+                      <Send className="w-4 h-4" />
+                      {isAr ? "فتح قناة VIP" : "Open VIP Channel"}
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void refreshProInvite()}
+                      disabled={proInviteLoading}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-3 bg-white text-black hover:bg-zinc-100 border-4 border-black font-black text-[10px] uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] disabled:opacity-50 w-full sm:w-auto cursor-pointer"
+                    >
+                      <Loader2 className={`w-3.5 h-3.5 ${proInviteLoading ? "animate-spin" : ""}`} />
+                      {isAr ? "تجديد الرابط" : "Refresh Link"}
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs font-black border-2 border-black bg-white px-3 py-2">
+                    {proInviteLoading
+                      ? isAr
+                        ? "جاري تجهيز رابط الدعوة..."
+                        : "Loading invite..."
+                      : isAr
+                      ? "رابط دعوة VIP غير متاح حالياً؛ حدّث الصفحة."
+                      : "VIP invite unavailable. Refresh page."}
+                  </span>
+                )
+              ) : (
+                <Link
+                  href="/pricing"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {isAr ? "اشترك في Pro للوصول إلى VIP" : "Upgrade to Pro for VIP access"}
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* ── Scanner Alert Toggles Grid ── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 pt-1 sm:pt-2">
+            {alertTypes.map((item) => {
+              const isEnabled = prefs[item.id];
+              const isSaving = savingKey === item.id;
+              const Icon = item.icon;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`border-2 sm:border-4 border-black dark:border-white p-3.5 sm:p-5 shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] flex flex-col justify-between transition-all ${
+                    isEnabled && isPro
+                      ? "bg-zinc-50 dark:bg-zinc-800/80"
+                      : "bg-zinc-100/60 dark:bg-zinc-950/40 opacity-80"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2.5 mb-2">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div
+                          className={`h-9 w-9 sm:h-10 sm:w-10 border-2 sm:border-4 border-black dark:border-white flex items-center justify-center shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)] ${item.color}`}
+                        >
+                          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs sm:text-sm font-black text-black dark:text-white uppercase tracking-tight leading-snug truncate">
+                            {isAr ? item.titleAr : item.titleEn}
+                          </h3>
+                          <span className="text-[9px] sm:text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest block truncate">
+                            {item.id}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center">
+                        {!isPro ? (
+                          <span className="inline-flex items-center gap-1 border-2 border-black bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 px-2 py-1 text-[10px] font-black uppercase shadow-[1px_1px_0px_rgba(0,0,0,1)]">
+                            <Lock className="w-3 h-3" />
+                            PRO
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            dir="ltr"
+                            onClick={() => handleToggle(item.id)}
+                            disabled={isSaving}
+                            className={`relative inline-flex h-6 w-12 sm:h-7 sm:w-14 shrink-0 cursor-pointer border-2 sm:border-4 border-black dark:border-white transition-colors duration-200 ease-in-out focus:outline-none shadow-[2px_2px_0px_rgba(0,0,0,1)] ${
+                              isEnabled ? "bg-emerald-400" : "bg-zinc-300 dark:bg-zinc-700"
+                            }`}
+                            role="switch"
+                            aria-checked={isEnabled}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 transform border-2 border-black bg-white transition duration-200 ease-in-out mt-0.5 ${
+                                isEnabled ? "translate-x-6 sm:translate-x-7" : "translate-x-0.5"
+                              }`}
+                            />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-xs sm:text-sm font-black text-black dark:text-white uppercase tracking-tight leading-snug truncate">
-                        {isAr ? item.titleAr : item.titleEn}
-                      </h3>
-                      <span className="text-[9px] sm:text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest block truncate">
-                        {item.id}
-                      </span>
-                    </div>
+
+                    <p className="text-[11px] sm:text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed mt-1">
+                      {isAr ? item.descAr : item.descEn}
+                    </p>
                   </div>
 
-                  {/* Toggle Switch */}
-                  <div className="shrink-0 flex items-center">
-                    {!isPro ? (
-                      <span className="inline-flex items-center gap-1 border-2 border-black bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 px-2 py-1 text-[10px] font-black uppercase shadow-[1px_1px_0px_rgba(0,0,0,1)]">
-                        <Lock className="w-3 h-3" />
-                        PRO
+                  <div className="mt-2.5 pt-2 border-t-2 border-black/10 dark:border-white/10 flex items-center justify-between text-[10px] sm:text-[11px] font-mono font-bold">
+                    <span className="text-zinc-500">{isAr ? "الحالة:" : "Status:"}</span>
+                    {isSaving ? (
+                      <span className="flex items-center gap-1 text-zinc-600 dark:text-zinc-400">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        {isAr ? "جاري الحفظ..." : "Saving..."}
                       </span>
+                    ) : isPro ? (
+                      isEnabled ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          {isAr ? "مفعّل ونشط" : "Active & Armed"}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400 font-black">{isAr ? "متوقف" : "Muted"}</span>
+                      )
                     ) : (
-                      <button
-                        type="button"
-                        dir="ltr"
-                        onClick={() => handleToggle(item.id)}
-                        disabled={isSaving}
-                        className={`relative inline-flex h-6 w-12 sm:h-7 sm:w-14 shrink-0 cursor-pointer border-2 sm:border-4 border-black dark:border-white transition-colors duration-200 ease-in-out focus:outline-none shadow-[2px_2px_0px_rgba(0,0,0,1)] ${
-                          isEnabled ? "bg-emerald-400" : "bg-zinc-300 dark:bg-zinc-700"
-                        }`}
-                        role="switch"
-                        aria-checked={isEnabled}
-                        title={isAr ? "تشغيل/إيقاف التنبيه" : "Toggle Alert"}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 transform border-2 border-black bg-white transition duration-200 ease-in-out mt-0.5 ${
-                            isEnabled ? "translate-x-6 sm:translate-x-7" : "translate-x-0.5"
-                          }`}
-                        />
-                      </button>
+                      <span className="text-amber-600 dark:text-amber-400 font-black flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        {isAr ? "متاح مع باقة Pro" : "Pro Plan Required"}
+                      </span>
                     )}
                   </div>
                 </div>
-
-                {/* Description */}
-                <p className="text-[11px] sm:text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed mt-1">
-                  {isAr ? item.descAr : item.descEn}
-                </p>
-              </div>
-
-              {/* Status footer */}
-              <div className="mt-2.5 pt-2 border-t-2 border-black/10 dark:border-white/10 flex items-center justify-between text-[10px] sm:text-[11px] font-mono font-bold">
-                <span className="text-zinc-500">
-                  {isAr ? "الحالة:" : "Status:"}
-                </span>
-                {isSaving ? (
-                  <span className="flex items-center gap-1 text-zinc-600 dark:text-zinc-400">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    {isAr ? "جاري الحفظ..." : "Saving..."}
-                  </span>
-                ) : isPro ? (
-                  isEnabled ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      {isAr ? "مفعّل ونشط" : "Active & Armed"}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-400 font-black">
-                      {isAr ? "متوقف" : "Muted"}
-                    </span>
-                  )
-                ) : (
-                  <span className="text-amber-600 dark:text-amber-400 font-black flex items-center gap-1">
-                    <Lock className="w-3 h-3" />
-                    {isAr ? "متاح مع باقة Pro" : "Pro Plan Required"}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-      )}
+              );
+            })}
+          </div>
         </div>
       )}
     </section>
