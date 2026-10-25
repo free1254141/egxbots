@@ -280,7 +280,7 @@ def process_abandoned_checkouts() -> int:
         res = (
             supabase.table("local_payment_orders")
             .select("id, user_id, plan_id, created_at, status")
-            .eq("status", "submitted")
+            .in_("status", ["pending", "submitted"])
             .gte("created_at", seventy_two_hours_ago)
             .lte("created_at", two_hours_ago)
             .limit(20)
