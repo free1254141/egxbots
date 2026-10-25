@@ -15,10 +15,12 @@ def test_build_founders_announcement_text():
     assert "أحمد" in text_named
     assert "50 ج.م" in text_named
     assert "عرض الـ 100 مؤسس الأوائل" in text_named
-    assert "توصيات صفقات السوينج السريع" in text_named
+    assert "مساعد الشات بوت الذكي" in text_named
+    assert "إشارات ونماذج السوينج الفنية" in text_named
+    assert "الهيئة العامة للرقابة المالية" in text_named
 
     text_default = build_founders_announcement_text(None)
-    assert "صديقنا المستثمر" in text_default
+    assert "صديقنا العزيز" in text_default
     assert "50 ج.م" in text_default
 
 

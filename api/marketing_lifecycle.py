@@ -247,6 +247,13 @@ def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str
             </td>
           </tr>
 
+          <!-- FRA Regulatory Disclaimer -->
+          <tr>
+            <td style="padding: 14px 24px; background-color: #fefce8; border-top: 1px solid #fef08a; font-size: 11px; line-height: 1.6; color: #854d0e; text-align: justify; direction: rtl;">
+              <strong>⚠️ تنبيه قانوني وإخلاء مسؤولية (FRA):</strong> مخرجات النماذج الكمية وشات بوت الذكاء الاصطناعي هي مؤشرات وأدوات فنية وإحصائية لأغراض البحث والتحليل الفني والتعليم الشخصي فقط، ولا تمثل توصية استثمارية أو دعوة لشراء أو بيع أي ورقة مالية أو إدارة محافظ. قرارات التداول مسؤوليتك المستقلة عبر شركة سمسرة مرخصة من الهيئة العامة للرقابة المالية (FRA).
+            </td>
+          </tr>
+
           <!-- Footer -->
           <tr>
             <td style="padding: 16px 24px; background-color: #f9fafb; border-top: 2px solid #e5e7eb; text-align: center; font-size: 11px; color: #9ca3af;">
@@ -320,7 +327,7 @@ def process_abandoned_checkouts() -> int:
                     .execute()
                 )
                 profile = user_res.data or {}
-                display_name = profile.get("display_name") or profile.get("username") or "صديقنا المستثمر"
+                display_name = profile.get("display_name") or profile.get("username") or "صديقنا العزيز"
 
                 # Get email using resilient RPC with admin API fallback
                 user_email = get_user_email(uid)
@@ -335,7 +342,7 @@ def process_abandoned_checkouts() -> int:
                 paragraphs = [
                     "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة Pro للمؤسسين</strong> ولم تستكمل عملية الدفع بعد.",
                     "نود تذكيرك أن <strong>عرض المؤسسين الأوائل متاح لـ 100 مشترك فقط بسعر 50 ج.م شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — وتبقى عدد قليل جداً من المقاعد قبل إغلاق العرض نهائياً.",
-                    "باشتراكك في Pro، ستحصل فوراً على: <strong>توصيات صفقات السوينج السريع اللحظية، نقاط الدخول والأهداف ووقف الخسارة، وقناة الـ VIP الخاصة على تليجرام</strong>.",
+                    "باشتراكك في Pro، ستحصل فوراً على: <strong>شات بوت الذكاء الاصطناعي (AI Chatbot) للتحليل الفني اللحظي، إشارات ونماذج السوينج الفنية المؤتمتة، نقاط المراقبة والأهداف الاسترشادية ووقف الخسارة، وقناة تنبيهات VIP الخاصة على تليجرام</strong>.",
                     "إذا كنت ترغب في تجربة المنصة أولاً دون أي التزام، يمكنك تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> بضغطة زر واحدة من صفحة الباقات!",
                 ]
                 cta_text = "استكمال الاشتراك وتثبيت السعر (50 ج.م)"
@@ -409,7 +416,7 @@ def process_trial_expiring() -> int:
                     .execute()
                 )
                 profile = user_res.data or {}
-                display_name = profile.get("display_name") or profile.get("username") or "صديقنا المستثمر"
+                display_name = profile.get("display_name") or profile.get("username") or "صديقنا العزيز"
 
                 user_email = get_user_email(uid)
                 if not user_email or "@" not in user_email:
@@ -422,8 +429,8 @@ def process_trial_expiring() -> int:
                 greeting = f"أهلاً {display_name} ⚡"
                 paragraphs = [
                     "نود إعلامك أن <strong>تجربتك المجانية لباقة Pro ستنتهي خلال الساعات القادمة</strong>.",
-                    "نتمنى أن تكون قد استفدت من إشارات الذكاء الاصطناعي وتوصيات السوينج السريع خلال الأيام الماضية.",
-                    "لتستمر في استلام صفقات الـ VIP دون انقطاع، احجز الآن ضمن <strong>عرض المؤسسين بـ 50 ج.م فقط شهرياً مدى الحياة</strong> قبل عودة السعر الرسمي إلى 200 ج.م.",
+                    "نتمنى أن تكون قد استفدت من شات بوت الذكاء الاصطناعي ونماذج وإشارات السوينج الفنية خلال الأيام الماضية.",
+                    "لتستمر في استخدام الشات بوت واستلام إشعارات النماذج الفنية دون انقطاع، احجز الآن ضمن <strong>عرض المؤسسين بـ 50 ج.م فقط شهرياً مدى الحياة</strong> قبل عودة السعر الرسمي إلى 200 ج.م.",
                 ]
                 cta_text = "تثبيت اشتراك Pro بـ 50 ج.م شهرياً"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
