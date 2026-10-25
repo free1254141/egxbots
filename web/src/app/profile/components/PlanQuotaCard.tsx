@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { broadcastEntitlements } from "@/lib/entitlements";
 import {
   Zap,
   MessageSquare,
@@ -266,7 +267,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
                   const res = await fetch("/api/subscription/trial", { method: "POST" });
                   const body = await res.json();
                   if (res.ok && body?.success) {
-                    window.dispatchEvent(new Event("egx:entitlements-updated"));
+                    broadcastEntitlements(true);
                     void fetchQuota(true);
                   }
                 } catch {}

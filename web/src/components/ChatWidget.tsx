@@ -12,6 +12,7 @@ import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
+import { broadcastEntitlements } from "@/lib/entitlements";
 
 function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
     return (
@@ -94,9 +95,7 @@ export default function ChatWidget() {
             if (res.ok && data?.success) {
                 toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
                 setShowUpgradeModal(false);
-                if (typeof window !== "undefined") {
-                    window.dispatchEvent(new CustomEvent("egx:entitlements-updated", { detail: { is_pro: true } }));
-                }
+                broadcastEntitlements(true);
             } else {
                 toast.error(data?.message || "تعذر تفعيل التجربة");
             }

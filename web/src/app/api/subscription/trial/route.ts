@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
+import { invalidateViewerPlanCache } from "@/lib/supabase/viewer-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,6 +120,12 @@ export async function POST() {
         { ok: false, error: data?.error, message: data?.message },
         { status: 400 }
       );
+    }
+
+    try {
+      invalidateViewerPlanCache(user.id);
+    } catch {
+      // ignore
     }
 
     return NextResponse.json({

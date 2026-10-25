@@ -36,18 +36,10 @@ import {
 import { toast } from "sonner";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type Step = "plans" | "payment" | "submitted";
+import { broadcastEntitlements } from "@/lib/entitlements";
+export { broadcastEntitlements };
 
-export function broadcastEntitlements(isPro: boolean) {
-  if (typeof window === "undefined") return;
-  try {
-    window.dispatchEvent(new CustomEvent("egx:entitlements-updated", { detail: { is_pro: isPro } }));
-    localStorage.setItem("egx_pro_active", isPro ? "true" : "false");
-    localStorage.setItem("egx_entitlements_timestamp", String(Date.now()));
-  } catch {
-    // Graceful fallback if storage is restricted
-  }
-}
+type Step = "plans" | "payment" | "submitted";
 
 export default function PricingClient() {
   const { language } = useLanguage();

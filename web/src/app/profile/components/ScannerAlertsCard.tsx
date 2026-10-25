@@ -150,8 +150,13 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     }
 
     void fetchPrefs();
+    const handleUpdated = () => { void fetchPrefs(); };
+    window.addEventListener("egx:entitlements-updated", handleUpdated);
+    window.addEventListener("storage", handleUpdated);
     return () => {
       active = false;
+      window.removeEventListener("egx:entitlements-updated", handleUpdated);
+      window.removeEventListener("storage", handleUpdated);
     };
   }, []);
 
