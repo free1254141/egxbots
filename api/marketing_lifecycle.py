@@ -26,7 +26,11 @@ from typing import Dict, Any, List, Optional
 from api.stock_ai import supabase
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
-MARKETING_EMAIL_FROM = os.getenv("MARKETING_EMAIL_FROM", "EGX Bots <support@egxbots.com>").strip()
+MARKETING_EMAIL_FROM = (
+    os.getenv("MARKETING_EMAIL_FROM")
+    or os.getenv("MARKETING_FROM_EMAIL")
+    or "EGX Bots <onboarding@resend.dev>"
+).strip()
 MARKETING_DAILY_EMAIL_CAP = int(os.getenv("MARKETING_DAILY_EMAIL_CAP", "90"))
 APP_URL = os.getenv("NEXT_PUBLIC_APP_URL", "https://egxbots.com").rstrip("/")
 
