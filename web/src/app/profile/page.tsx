@@ -12,7 +12,6 @@ import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
 import FoundingMemberBanner from "./components/FoundingMemberBanner";
-import ScannerAlertsCard from "./components/ScannerAlertsCard";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -95,7 +94,6 @@ export default function ProfilePage() {
     try {
       localStorage.setItem("egx_portfolio_section_collapsed", String(collapse));
       localStorage.setItem("egx_profile_plan_collapsed", String(collapse));
-      localStorage.setItem("egx_profile_scanner_collapsed", String(collapse));
       localStorage.setItem("egx_profile_account_collapsed", String(collapse));
       localStorage.setItem("egx_profile_watchlist_collapsed", String(collapse));
     } catch {}
@@ -386,12 +384,6 @@ export default function ProfilePage() {
           onPortfolioUpdated={() => setPortfolioVersion((v) => v + 1)}
         />
       </div>
-
-      {/* ── Scanner Alerts Preferences & Live Signals Tracker (تفضيلات وتتبع إشارات الإسكانر) ── */}
-      <div id="scanner-signals" className="scroll-mt-24">
-        <ScannerAlertsCard key={`scanner-${portfolioVersion}`} initialTelegramLinked={telegramLinked} />
-      </div>
-
       {/* ── Account + Telegram ── */}
       <section className={`relative z-10 min-w-0 rounded-xl sm:rounded-2xl p-3 sm:p-6 bg-white dark:bg-zinc-900 border-2 sm:border-4 border-black dark:border-white shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] sm:dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] transition-all duration-200 ${accountCollapsed ? "space-y-0" : "space-y-4 sm:space-y-6"}`}>
         <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${accountCollapsed ? "" : "border-b-4 border-black dark:border-white pb-5"}`}>

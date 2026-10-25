@@ -19,7 +19,7 @@ import ShortSwingsTab from "./ShortSwingsTab";
 import FastScannerTab from "./FastScannerTab";
 import SystemsComparisonTab from "./SystemsComparisonTab";
 import {
-    Search, Filter, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Clock,
+    Search, Filter, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Clock,
     TrendingUp, TrendingDown, Layers, Info, CheckCircle2, X, BarChart2,
     Target, ShieldAlert, Cpu, BookOpen, TrendingUp as Bullish, Calendar,
     Award, ArrowUpRight, ArrowDownRight, Minus, ExternalLink, ShieldCheck,
@@ -411,6 +411,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     const [shariaOnly, setShariaOnly] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [calendarRefreshToken, setCalendarRefreshToken] = useState(0);
+    const [isMediumGuideOpen, setIsMediumGuideOpen] = useState(false);
     const itemsPerPage = 20;
 
     // Share card state
@@ -2347,6 +2348,132 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                 <SystemsComparisonTab isAr={isAr} isPro={isProView} />
             ) : (
                 <div className="space-y-6">
+                    {/* ── 1. COLLAPSIBLE DEFINITION & METHODOLOGY BANNER (Matching Short & Fast Swings) ── */}
+                    {limit === Infinity && (!isLandingPage || user) && (
+                        <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black shadow-[6px_6px_0px_#000] dark:shadow-[6px_6px_0px_#fff] overflow-hidden">
+                            <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                                <div className="space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 border-2 border-black bg-black text-[#FFE600] text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000]">
+                                            <Layers className="w-4 h-4 text-[#FFE600]" />
+                                            <span>{isAr ? "إشارات المدى المتوسط 📈" : "Medium-Term Signals 📈"}</span>
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 border-2 border-black bg-white text-black text-xs font-black shadow-[2px_2px_0px_#000]">
+                                            <LineChart className="w-3.5 h-3.5 text-blue-600" />
+                                            <span>{isAr ? "تحليل الاتجاه الفني والاستثماري (2 إلى 6 أسابيع)" : "Trend & Technical Analysis (2–6 Weeks)"}</span>
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 border-2 border-black bg-emerald-400 text-black text-xs font-black shadow-[2px_2px_0px_#000]">
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                            <span>{isAr ? "نماذج فنية كلاسيكية • تقييم كمي شامل" : "Classic Chart Patterns • Multi-Factor Scoring"}</span>
+                                        </span>
+                                    </div>
+
+                                    <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-black tracking-tight leading-tight">
+                                        {isAr ? "نظام إشارات المدى المتوسط ورصد الاتجاه الفني والأساسي" : "Medium-Term Signals & Technical Trend Scanning System"}
+                                    </h1>
+
+                                    {!isMediumGuideOpen && (
+                                        <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed max-w-3xl">
+                                            {isAr
+                                                ? "استراتيجية فنية واستثمارية تراكمية تفحص أسهم البورصة المصرية لرصد نماذج القيعان والتجميع وموجات الصعود على مدى 2 إلى 6 أسابيع مع تقييم كمي شامل."
+                                                : "Algorithmic technical and investment strategy scanning EGX stocks to spot accumulation bases, bottoming patterns, and trend breakouts over 2–6 weeks."}
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                                    <button
+                                        onClick={() => refreshRecommendationData()}
+                                        disabled={recsLoading}
+                                        className="h-10 px-4 border-2 border-black bg-white hover:bg-zinc-100 text-black font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
+                                    >
+                                        <RefreshCw className={`w-3.5 h-3.5 ${recsLoading ? "animate-spin" : ""}`} />
+                                        <span>{recsLoading ? (isAr ? "جار التحديث..." : "Refreshing...") : (isAr ? "تحديث الإشارات" : "Refresh")}</span>
+                                    </button>
+
+                                    {!isProView && (
+                                        <Link
+                                            href="/pricing"
+                                            className="h-10 px-4 border-2 border-black bg-black hover:bg-zinc-900 text-[#FFE600] font-black text-xs uppercase flex items-center justify-center gap-2 shadow-[2px_2px_0px_#000] transition-all"
+                                        >
+                                            <Crown className="w-3.5 h-3.5 text-[#FFE600]" />
+                                            <span>{isAr ? "ترقية إلى PRO" : "Upgrade to PRO"}</span>
+                                        </Link>
+                                    )}
+
+                                    <button
+                                        onClick={() => setIsMediumGuideOpen(prev => !prev)}
+                                        className="h-10 px-4 border-2 border-black bg-black text-[#FFE600] hover:bg-zinc-900 font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] transition-all cursor-pointer"
+                                    >
+                                        <span>{isMediumGuideOpen ? (isAr ? "إغلاق السيكشن ▴" : "Close Guide ▴") : (isAr ? "عرض الدليل والمعادلات ▾" : "Show Guide ▾")}</span>
+                                        {isMediumGuideOpen ? <ChevronUp className="w-4 h-4 text-[#FFE600]" /> : <ChevronDown className="w-4 h-4 text-[#FFE600]" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Collapsible Content */}
+                            {isMediumGuideOpen && (
+                                <div className="border-t-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 space-y-6" dir={isAr ? "rtl" : "ltr"}>
+                                    <div className="border-2 border-black dark:border-zinc-700 bg-blue-50 dark:bg-blue-950/20 p-4 sm:p-5 space-y-2">
+                                        <div className="flex items-center gap-2 text-blue-800 dark:text-blue-400 font-black text-sm uppercase">
+                                            <Layers className="w-4 h-4" />
+                                            <span>{isAr ? "منهجية وقواعد إشارات المدى المتوسط" : "Medium-Term Strategy Methodology"}</span>
+                                        </div>
+                                        <p className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed max-w-4xl">
+                                            {isAr
+                                                ? "تعتمد الاستراتيجية على رصد موجات الصعود الهادئة ونماذج الانعكاس الإيجابي وتجاوز القمم السعرية مع تدفق سيولة تدريجي، وتهدف إلى تحقيق عوائد متوازنة عبر الصبر على الصفقة مع حماية رأس المال عبر وقف خسارة مرن يتناسب مع تقلبات السوق الأسبوعية."
+                                                : "Focuses on steady trend waves, reversal confirmations, and structural breakouts with sustained institutional volume over multi-week holding periods."}
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/70 p-4 space-y-2.5">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-6 h-6 border-2 border-black bg-[#FFE600] flex items-center justify-center font-black text-xs text-black">1</div>
+                                                <h3 className="font-black text-xs sm:text-sm text-black dark:text-white">
+                                                    {isAr ? "الأفق الزمني وإدارة الصبر" : "Time Horizon"}
+                                                </h3>
+                                            </div>
+                                            <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                                {isAr
+                                                    ? "من 2 إلى 6 أسابيع (متوسط 25 - 45 يوم عمل). الصفقات مصممة للمتداول والمستثمر الذي لا يرغب في المتابعة اللحظية أمام الشاشة ويفضل إعطاء السهم الوقت الكافي لاكتمال النموذج."
+                                                    : "2 to 6 weeks holding horizon. Designed for non-screen watchers seeking structured multi-week swing moves."}
+                                            </p>
+                                        </div>
+
+                                        <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/70 p-4 space-y-2.5">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-6 h-6 border-2 border-black bg-blue-400 flex items-center justify-center font-black text-xs text-black">2</div>
+                                                <h3 className="font-black text-xs sm:text-sm text-black dark:text-white">
+                                                    {isAr ? "قواعد الفحص والرصد الفني" : "Technical Selection"}
+                                                </h3>
+                                            </div>
+                                            <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                                {isAr
+                                                    ? "فحص كمي يدمج نماذج القيعان المزدوجة، كسر قنوات التجميع، مؤشرات الزخم والسيولة (RSI, ADX, MACD)، وتقييم مالي وقطاعي لحصر الأسهم ذات الجدارة الفنية العالية."
+                                                    : "Combines classic bottom patterns, accumulation breakouts, trend momentum indicators, and multi-factor quantitative scores."}
+                                            </p>
+                                        </div>
+
+                                        <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/70 p-4 space-y-2.5">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-6 h-6 border-2 border-black bg-emerald-400 flex items-center justify-center font-black text-xs text-black">3</div>
+                                                <h3 className="font-black text-xs sm:text-sm text-black dark:text-white">
+                                                    {isAr ? "الأهداف وإدارة المخاطر" : "Targets & Risk Plan"}
+                                                </h3>
+                                            </div>
+                                            <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                                {isAr
+                                                    ? "تحديد مستهدفين استرشاديين (هدف أول T1 وهدف ثانٍ T2) مع وقف خسارة استرشادي واسع (-7% إلى -12%) لتجنب خروج التذبذب العادي مع تحديث حالة الإشارة رقمياً."
+                                                    : "Preset dual target levels (T1 & T2) with wide protective stops (-7% to -12%) to absorb routine volatility without premature exits."}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Medium Swings Sub-Tabs Navigation Bar (At Top) */}
                     {limit === Infinity && (!isLandingPage || user) && (
                         <div className="grid grid-cols-2 sm:grid-cols-4 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 gap-2 select-none">
