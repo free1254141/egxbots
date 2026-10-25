@@ -19,6 +19,7 @@ import {
   Award,
   RefreshCw,
   Search,
+  Filter,
   X,
   Target,
   ExternalLink,
@@ -59,11 +60,14 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
   const [closedSignals, setClosedSignals] = useState<TrackedScannerSignal[]>([]);
   const [signalsKpis, setSignalsKpis] = useState<ScannerSignalsKPIs | null>(null);
 
-  // Filters
+  // Filters & Sorting
   const [categoryFilter, setCategoryFilter] = useState<"all" | ScannerType>("all");
   const [resultFilter, setResultFilter] = useState<"all" | "win" | "loss">("all");
   const [shariaOnly, setShariaOnly] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [timeRange, setTimeRange] = useState<"all" | "7d" | "30d">("all");
+  const [sortBy, setSortBy] = useState<string>("entry_date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Modals
   const [showProModal, setShowProModal] = useState(false);
@@ -193,24 +197,107 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
     return 0;
   }, []);
 
+  // Sort Signals helper
+  const sortSignalsList = useCallback((list: any[]) => {
+    return [...list].sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortBy === "symbol") {
+        return sortOrder === "asc"
+          ? String(a.symbol || "").localeCompare(String(b.symbol || ""))
+          : String(b.symbol || "").localeCompare(String(a.symbol || ""));
+      }
+      if (sortBy === "scanner_type") {
+        return sortOrder === "asc"
+          ? String(a.scanner_type || "").localeCompare(String(b.scanner_type || ""))
+          : String(b.scanner_type || "").localeCompare(String(a.scanner_type || ""));
+      }
+      if (sortBy === "entry_date") {
+        valA = String(a.entry_date || "") + String(a.entry_time || "");
+        valB = String(b.entry_date || "") + String(b.entry_time || "");
+        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      if (sortBy === "entry_price") {
+        valA = Number(a.entry_price || 0);
+        valB = Number(b.entry_price || 0);
+        return sortOrder === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortBy === "target_1") {
+        valA = Number(a.target_1 || 0);
+        valB = Number(b.target_1 || 0);
+        return sortOrder === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortBy === "stop_loss") {
+        valA = Number(a.stop_loss || 0);
+        valB = Number(b.stop_loss || 0);
+        return sortOrder === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortBy === "current_price") {
+        valA = Number(a.current_price || a.exit_price || a.entry_price || 0);
+        valB = Number(b.current_price || b.exit_price || b.entry_price || 0);
+        return sortOrder === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortBy === "return") {
+        valA = getSignalReturn(a);
+        valB = getSignalReturn(b);
+        return sortOrder === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortBy === "status") {
+        valA = String(a.status || "");
+        valB = String(b.status || "");
+        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return 0;
+    });
+  }, [sortBy, sortOrder, getSignalReturn]);
+
+  const handleHeaderClick = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "symbol" || field === "scanner_type" ? "asc" : "desc");
+    }
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortBy !== field) return <span className="opacity-30 text-[10px] ml-1">⇅</span>;
+    return <span className="ml-1 text-amber-500 font-black text-xs">{sortOrder === "asc" ? "▲" : "▼"}</span>;
+  };
+
   // Filtered Active Signals
   const filteredActive = useMemo(() => {
-    return activeSignals.filter((s) => {
+    const list = activeSignals.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
       if (shariaOnly && !isShariaCompliant(s.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        if ((s.entry_date || "") < cutoffStr) return false;
+      }
       if (searchTerm.trim()) {
         const q = searchTerm.trim().toLowerCase();
         if (!s.symbol.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [activeSignals, categoryFilter, shariaOnly, searchTerm]);
+    return sortSignalsList(list);
+  }, [activeSignals, categoryFilter, shariaOnly, searchTerm, timeRange, sortSignalsList]);
 
   // Filtered Closed Signals
   const filteredClosed = useMemo(() => {
-    return closedSignals.filter((s) => {
+    const list = closedSignals.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
       if (shariaOnly && !isShariaCompliant(s.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        const d = s.exit_date || s.entry_date || "";
+        if (d < cutoffStr) return false;
+      }
       const ret = getSignalReturn(s);
       if (resultFilter === "win" && ret <= 0 && s.status !== "target_hit") return false;
       if (resultFilter === "loss" && (ret >= 0 || s.status === "target_hit")) return false;
@@ -220,7 +307,8 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       }
       return true;
     });
-  }, [closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, getSignalReturn]);
+    return sortSignalsList(list);
+  }, [closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
 
   // Combined All Signals
   const filteredAll = useMemo(() => {
@@ -228,9 +316,16 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       ...activeSignals.map((s) => ({ ...s, _isActive: true })),
       ...closedSignals.map((s) => ({ ...s, _isActive: false })),
     ];
-    return combined.filter((s) => {
+    const list = combined.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
       if (shariaOnly && !isShariaCompliant(s.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        const d = s.exit_date || s.entry_date || "";
+        if (d < cutoffStr) return false;
+      }
       const ret = getSignalReturn(s);
       if (resultFilter === "win" && (s._isActive || (ret <= 0 && s.status !== "target_hit"))) return false;
       if (resultFilter === "loss" && (s._isActive || ret >= 0 || s.status === "target_hit")) return false;
@@ -240,7 +335,8 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       }
       return true;
     });
-  }, [activeSignals, closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, getSignalReturn]);
+    return sortSignalsList(list);
+  }, [activeSignals, closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
 
   // Summary Stats matching Medium Swings & Short Swings:
   // 1: Active Count, 2: Closed Count, 3: Win Rate %, 4: Avg Return %
@@ -645,59 +741,120 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
         </div>
       )}
 
-      {/* ── 4. FILTER TOOLBAR (For Active / Closed / All Views) ── */}
+      {/* ── 4. SMART FILTER TOOLBAR (For Active / Closed / All Views) ── */}
       {viewMode !== "calendar" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 p-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-          {/* Search */}
-          <div className="relative flex items-center">
-            <Search className="absolute left-3 w-4 h-4 text-zinc-500" />
-            <input
-              type="text"
-              placeholder={isAr ? "ابحث برمز السهم أو الاسم..." : "Search symbol..."}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-11 pl-10 pr-4 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-sm focus:outline-none"
-            />
-          </div>
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-3 sm:p-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 text-black dark:text-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+            {/* 1. Search */}
+            <div className="relative flex items-center">
+              <Search className="absolute left-3 w-4 h-4 text-zinc-500" />
+              <input
+                type="text"
+                placeholder={isAr ? "ابحث بالرمز..." : "Search symbol..."}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-11 pl-10 pr-3 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-xs focus:outline-none"
+              />
+            </div>
 
-          {/* Scanner Category Select */}
-          <div className="relative flex items-center">
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value as any)}
-              className="w-full h-11 pl-3 pr-8 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-sm focus:outline-none"
+            {/* 2. Scanner Category */}
+            <div className="relative flex items-center">
+              <Filter className="absolute left-3 w-4 h-4 text-zinc-500 pointer-events-none" />
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value as any)}
+                className="w-full h-11 pl-9 pr-4 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-xs focus:outline-none appearance-none"
+              >
+                <option value="all">{isAr ? "جميع أنواع الرصد" : "All Types"}</option>
+                <option value="volume_surge">{isAr ? "سيولة مؤسسية ⚡" : "Volume Surge ⚡"}</option>
+                <option value="breakout">{isAr ? "اختراق فني 🚀" : "Breakout 🚀"}</option>
+                <option value="rsi_oversold">{isAr ? "ارتداد RSI 🎯" : "RSI Rebound 🎯"}</option>
+              </select>
+            </div>
+
+            {/* 3. Result Filter */}
+            <div className="relative flex items-center">
+              <Filter className="absolute left-3 w-4 h-4 text-zinc-500 pointer-events-none" />
+              <select
+                value={resultFilter}
+                onChange={(e) => setResultFilter(e.target.value as any)}
+                className="w-full h-11 pl-9 pr-4 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-xs focus:outline-none appearance-none"
+              >
+                <option value="all">{isAr ? "جميع النتائج" : "All Results"}</option>
+                <option value="win">{isAr ? "محققة للهدف ✅" : "Target Hit ✅"}</option>
+                <option value="loss">{isAr ? "وقف الخسارة 🛑" : "Stopped Out 🛑"}</option>
+              </select>
+            </div>
+
+            {/* 4. Time Range */}
+            <div className="relative flex items-center">
+              <CalendarIcon className="absolute left-3 w-4 h-4 text-zinc-500 pointer-events-none" />
+              <select
+                value={timeRange}
+                onChange={(e) => setTimeRange(e.target.value as any)}
+                className="w-full h-11 pl-9 pr-4 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-xs focus:outline-none appearance-none"
+              >
+                <option value="all">{isAr ? "كل الأوقات" : "All Time"}</option>
+                <option value="7d">{isAr ? "آخر 7 أيام" : "Last 7 Days"}</option>
+                <option value="30d">{isAr ? "آخر 30 يوم" : "Last 30 Days"}</option>
+              </select>
+            </div>
+
+            {/* 5. Sort Selector */}
+            <div className="relative flex items-center">
+              <Filter className="absolute left-3 w-4 h-4 text-zinc-500 pointer-events-none" />
+              <select
+                value={`${sortBy}:${sortOrder}`}
+                onChange={(e) => {
+                  const [f, o] = e.target.value.split(":");
+                  setSortBy(f);
+                  setSortOrder(o as "asc" | "desc");
+                }}
+                className="w-full h-11 pl-9 pr-4 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-xs focus:outline-none appearance-none"
+              >
+                <option value="entry_date:desc">{isAr ? "ترتيب: التاريخ (الأحدث)" : "Sort: Date (Newest)"}</option>
+                <option value="entry_date:asc">{isAr ? "ترتيب: التاريخ (الأقدم)" : "Sort: Date (Oldest)"}</option>
+                <option value="return:desc">{isAr ? "ترتيب: العائد (الأعلى)" : "Sort: Return (Highest)"}</option>
+                <option value="return:asc">{isAr ? "ترتيب: العائد (الأقل)" : "Sort: Return (Lowest)"}</option>
+                <option value="symbol:asc">{isAr ? "ترتيب: الرمز (أ-ي)" : "Sort: Symbol (A-Z)"}</option>
+                <option value="entry_price:desc">{isAr ? "ترتيب: السعر (الأعلى)" : "Sort: Price (Highest)"}</option>
+              </select>
+            </div>
+
+            {/* 6. Sharia Toggle */}
+            <button
+              type="button"
+              onClick={() => setShariaOnly((prev) => !prev)}
+              className={`h-11 px-3 border-2 border-black dark:border-white font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] cursor-pointer ${
+                shariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white"
+              }`}
             >
-              <option value="all">{isAr ? "جميع أنواع الرصد الفني" : "All Scanner Types"}</option>
-              <option value="volume_surge">{isAr ? "سيولة مؤسسية ⚡ (Volume Surge)" : "Volume Surge ⚡"}</option>
-              <option value="breakout">{isAr ? "اختراق فني 🚀 (Breakout)" : "Breakout 🚀"}</option>
-              <option value="rsi_oversold">{isAr ? "ارتداد RSI 🎯 (Oversold)" : "RSI Rebound 🎯"}</option>
-            </select>
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span className="truncate">{isAr ? "حلال فقط" : "Sharia Only"}</span>
+            </button>
           </div>
 
-          {/* Result Filter (Wins / Losses) */}
-          <div className="relative flex items-center">
-            <select
-              value={resultFilter}
-              onChange={(e) => setResultFilter(e.target.value as any)}
-              className="w-full h-11 pl-3 pr-8 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white font-bold text-sm focus:outline-none"
-            >
-              <option value="all">{isAr ? "جميع النتائج (الكل)" : "All Results"}</option>
-              <option value="win">{isAr ? "الإشارات المحققة للهدف ✅" : "Target Hit ✅"}</option>
-              <option value="loss">{isAr ? "إشارات وقف الخسارة 🛑" : "Stopped Out 🛑"}</option>
-            </select>
-          </div>
-
-          {/* Sharia Toggle Button */}
-          <button
-            type="button"
-            onClick={() => setShariaOnly((prev) => !prev)}
-            className={`h-11 px-4 border-2 border-black dark:border-white font-black text-sm flex items-center justify-center gap-2 transition-all shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] cursor-pointer ${
-              shariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-50 dark:bg-zinc-900 text-black dark:text-white"
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 shrink-0" />
-            <span className="truncate">{isAr ? "المتوافقة شرعياً فقط (حلال)" : "Sharia-Compliant Only"}</span>
-          </button>
+          {/* Reset Filters Bar */}
+          {(searchTerm || categoryFilter !== "all" || resultFilter !== "all" || timeRange !== "all" || shariaOnly || sortBy !== "entry_date" || sortOrder !== "desc") && (
+            <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 dark:bg-amber-950/20 border-2 border-black text-xs font-bold text-zinc-700 dark:text-zinc-300">
+              <span>{isAr ? "تم تطبيق فلاتر أو ترتيب مخصص على القائمة" : "Custom filters or sorting active"}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setCategoryFilter("all");
+                  setResultFilter("all");
+                  setTimeRange("all");
+                  setShariaOnly(false);
+                  setSortBy("entry_date");
+                  setSortOrder("desc");
+                }}
+                className="text-amber-700 dark:text-amber-400 hover:underline font-black cursor-pointer"
+              >
+                {isAr ? "مسح جميع الفلاتر ✕" : "Clear all filters ✕"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -729,32 +886,86 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                     <thead>
                       <tr className="text-xs font-black uppercase text-black dark:text-white bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white select-none">
                         <th className="px-4 py-3.5 text-center w-12 border-r border-zinc-200 dark:border-zinc-800">#</th>
-                        <th className="px-6 py-3.5 text-left border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "السهم والشركة" : "Stock & Symbol"}
+                        <th 
+                          onClick={() => handleHeaderClick("symbol")}
+                          className="px-6 py-3.5 text-left border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span>{isAr ? "السهم والشركة" : "Stock & Symbol"}</span>
+                            {renderSortIcon("symbol")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "نوع الرصد الفني" : "Scanner"}
+                        <th 
+                          onClick={() => handleHeaderClick("scanner_type")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "نوع الرصد الفني" : "Scanner"}</span>
+                            {renderSortIcon("scanner_type")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "توقيت الرصد" : "Detected Time"}
+                        <th 
+                          onClick={() => handleHeaderClick("entry_date")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "توقيت الرصد" : "Detected Time"}</span>
+                            {renderSortIcon("entry_date")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "سعر الرصد" : "Entry"}
+                        <th 
+                          onClick={() => handleHeaderClick("entry_price")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "سعر الرصد" : "Entry"}</span>
+                            {renderSortIcon("entry_price")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "المستهدف الفني 1" : "Target 1"}
+                        <th 
+                          onClick={() => handleHeaderClick("target_1")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "المستهدف الفني 1" : "Target 1"}</span>
+                            {renderSortIcon("target_1")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "إيقاف الخسارة" : "Stop Loss"}
+                        <th 
+                          onClick={() => handleHeaderClick("stop_loss")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "إيقاف الخسارة" : "Stop Loss"}</span>
+                            {renderSortIcon("stop_loss")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "السعر الحالي / الخروج" : "Current / Exit"}
+                        <th 
+                          onClick={() => handleHeaderClick("current_price")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "السعر الحالي / الخروج" : "Current / Exit"}</span>
+                            {renderSortIcon("current_price")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "العائد الفني" : "Return"}
+                        <th 
+                          onClick={() => handleHeaderClick("return")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "العائد الفني" : "Return"}</span>
+                            {renderSortIcon("return")}
+                          </div>
                         </th>
-                        <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">
-                          {isAr ? "حالة الإشارة" : "Status"}
+                        <th 
+                          onClick={() => handleHeaderClick("status")}
+                          className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            <span>{isAr ? "حالة الإشارة" : "Status"}</span>
+                            {renderSortIcon("status")}
+                          </div>
                         </th>
                         <th className="px-4 py-3.5 text-center">{isAr ? "أدوات التحليل" : "Tools"}</th>
                       </tr>

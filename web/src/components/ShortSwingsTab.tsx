@@ -216,6 +216,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   const [filterResult, setFilterResult] = useState<"all" | "win" | "loss">("all");
   const [page, setPage] = useState(1);
   const pageSize = 15;
+  const [shariaOnly, setShariaOnly] = useState(false);
+  const [timeRange, setTimeRange] = useState<"all" | "7d" | "30d">("all");
+  const [sortBy, setSortBy] = useState<string>("entry_date");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [allFilterResult, setAllFilterResult] = useState<"all" | "active" | "win" | "loss">("all");
   const [allPage, setAllPage] = useState(1);
@@ -440,11 +444,81 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
     return Array.from(set).sort();
   }, [closedTrades, activeTrades]);
 
+  const handleHeaderClick = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "symbol" || field === "sector" ? "asc" : "desc");
+    }
+    setPage(1);
+    setAllPage(1);
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortBy !== field) return <span className="opacity-30 text-[10px] ml-1">⇅</span>;
+    return <span className="ml-1 text-amber-500 font-black text-xs">{sortOrder === "asc" ? "▲" : "▼"}</span>;
+  };
+
+  const sortTradesList = useCallback((list: any[]) => {
+    return [...list].sort((a, b) => {
+      if (sortBy === "symbol") {
+        return sortOrder === "asc"
+          ? String(a.symbol || "").localeCompare(String(b.symbol || ""))
+          : String(b.symbol || "").localeCompare(String(a.symbol || ""));
+      } else if (sortBy === "sector") {
+        return sortOrder === "asc"
+          ? String(a.sector || "").localeCompare(String(b.sector || ""))
+          : String(b.sector || "").localeCompare(String(a.sector || ""));
+      } else if (sortBy === "entry_date") {
+        const dA = String(a.entry_date || a.signal_date || "");
+        const dB = String(b.entry_date || b.signal_date || "");
+        return sortOrder === "asc" ? dA.localeCompare(dB) : dB.localeCompare(dA);
+      } else if (sortBy === "exit_date") {
+        const dA = String(a.exit_date || "");
+        const dB = String(b.exit_date || "");
+        return sortOrder === "asc" ? dA.localeCompare(dB) : dB.localeCompare(dA);
+      } else if (sortBy === "entry_price") {
+        return sortOrder === "asc"
+          ? (Number(a.entry_price) || 0) - (Number(b.entry_price) || 0)
+          : (Number(b.entry_price) || 0) - (Number(a.entry_price) || 0);
+      } else if (sortBy === "current_price" || sortBy === "exit_price") {
+        const pA = Number(a.exit_price || a.current_price || a.entry_price || 0);
+        const pB = Number(b.exit_price || b.current_price || b.entry_price || 0);
+        return sortOrder === "asc" ? pA - pB : pB - pA;
+      } else if (sortBy === "trailing_stop") {
+        const sA = Number(a.trailing_stop || a.stop_loss || 0);
+        const sB = Number(b.trailing_stop || b.stop_loss || 0);
+        return sortOrder === "asc" ? sA - sB : sB - sA;
+      } else if (sortBy === "return") {
+        const rA = safeNum(a.return_pct);
+        const rB = safeNum(b.return_pct);
+        return sortOrder === "asc" ? rA - rB : rB - rA;
+      } else if (sortBy === "holding_days") {
+        return sortOrder === "asc"
+          ? (Number(a.holding_days) || 0) - (Number(b.holding_days) || 0)
+          : (Number(b.holding_days) || 0) - (Number(a.holding_days) || 0);
+      } else if (sortBy === "status") {
+        const sA = String(a.exit_reason || a.status || "");
+        const sB = String(b.exit_reason || b.status || "");
+        return sortOrder === "asc" ? sA.localeCompare(sB) : sB.localeCompare(sA);
+      }
+      return 0;
+    });
+  }, [sortBy, sortOrder]);
+
   // Filtered active trades
   const filteredActiveTrades = useMemo(() => {
-    return activeTrades.filter((t) => {
+    const list = activeTrades.filter((t) => {
       if (activeSector && t.sector !== activeSector) return false;
       if (activeShariaOnly && !isShariaCompliant(t.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        const d = t.entry_date || t.signal_date || "";
+        if (d < cutoffStr) return false;
+      }
       if (activeSearchTerm.trim()) {
         const q = activeSearchTerm.toLowerCase();
         const sym = (t.symbol || "").toLowerCase();
@@ -454,7 +528,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       }
       return true;
     });
-  }, [activeTrades, activeSector, activeShariaOnly, activeSearchTerm]);
+    return sortTradesList(list);
+  }, [activeTrades, activeSector, activeShariaOnly, activeSearchTerm, timeRange, sortTradesList]);
 
   // Combined all trades
   const allTrades = useMemo(() => {
@@ -466,8 +541,16 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
   // Filtered closed trades for table view
   const filteredClosedTrades = useMemo(() => {
-    return closedTrades.filter((t) => {
+    const list = closedTrades.filter((t) => {
       if (selectedSector && t.sector !== selectedSector) return false;
+      if (shariaOnly && !isShariaCompliant(t.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        const d = t.exit_date || t.entry_date || "";
+        if (d < cutoffStr) return false;
+      }
       if (filterResult === "win" && (t.return_pct == null || t.return_pct <= 0)) return false;
       if (filterResult === "loss" && (t.return_pct == null || t.return_pct > 0)) return false;
       if (searchTerm.trim()) {
@@ -479,7 +562,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       }
       return true;
     });
-  }, [closedTrades, filterResult, searchTerm, selectedSector]);
+    return sortTradesList(list);
+  }, [closedTrades, filterResult, searchTerm, selectedSector, shariaOnly, timeRange, sortTradesList]);
 
   const totalPages = Math.ceil(filteredClosedTrades.length / pageSize) || 1;
   const paginatedTrades = useMemo(() => {
@@ -489,8 +573,16 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
   // Filtered all trades for table view
   const filteredAllTrades = useMemo(() => {
-    return allTrades.filter((t) => {
+    const list = allTrades.filter((t) => {
       if (selectedSector && t.sector !== selectedSector) return false;
+      if (shariaOnly && !isShariaCompliant(t.symbol)) return false;
+      if (timeRange !== "all") {
+        const days = timeRange === "7d" ? 7 : 30;
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const cutoffStr = formatYMD(cutoff);
+        const d = t.exit_date || t.entry_date || "";
+        if (d < cutoffStr) return false;
+      }
       if (allFilterResult === "active" && !t.is_active) return false;
       if (allFilterResult === "win" && (t.is_active || t.return_pct == null || t.return_pct <= 0)) return false;
       if (allFilterResult === "loss" && (t.is_active || t.return_pct == null || t.return_pct > 0)) return false;
@@ -503,7 +595,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       }
       return true;
     });
-  }, [allTrades, allFilterResult, searchTerm, selectedSector]);
+    return sortTradesList(list);
+  }, [allTrades, allFilterResult, searchTerm, selectedSector, shariaOnly, timeRange, sortTradesList]);
 
   const allTotalPages = Math.ceil(filteredAllTrades.length / pageSize) || 1;
   const paginatedAllTrades = useMemo(() => {
@@ -1374,41 +1467,98 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
             </span>
           </div>
 
-          {/* Filters Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff]">
-            <div className="relative flex items-center">
-              <Search className="absolute right-3 w-4 h-4 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="بحث برمز السهم أو الاسم..."
-                value={activeSearchTerm}
-                onChange={(e) => setActiveSearchTerm(e.target.value)}
-                className="w-full h-10 pr-9 pl-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
-              />
-            </div>
+          {/* Smart Filters Bar for Active Trades */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 p-3 sm:p-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff]">
+              <div className="relative flex items-center">
+                <Search className="absolute right-3 w-4 h-4 text-zinc-400" />
+                <input
+                  type="text"
+                  placeholder="بحث بالرمز أو الاسم..."
+                  value={activeSearchTerm}
+                  onChange={(e) => setActiveSearchTerm(e.target.value)}
+                  className="w-full h-11 pr-9 pl-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                />
+              </div>
 
-            <div className="relative flex items-center">
-              <select
-                value={activeSector}
-                onChange={(e) => setActiveSector(e.target.value)}
-                className="w-full h-10 px-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+              <div className="relative flex items-center">
+                <Filter className="absolute right-3 w-4 h-4 text-zinc-400 pointer-events-none" />
+                <select
+                  value={activeSector}
+                  onChange={(e) => setActiveSector(e.target.value)}
+                  className="w-full h-11 pr-9 pl-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none appearance-none"
+                >
+                  <option value="">جميع القطاعات ({sectors.length})</option>
+                  {sectors.map((sec) => (
+                    <option key={sec} value={sec}>{sec}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="relative flex items-center">
+                <CalendarIcon className="absolute right-3 w-4 h-4 text-zinc-400 pointer-events-none" />
+                <select
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value as any)}
+                  className="w-full h-11 pr-9 pl-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none appearance-none"
+                >
+                  <option value="all">كل الأوقات</option>
+                  <option value="7d">آخر 7 أيام</option>
+                  <option value="30d">آخر 30 يوم</option>
+                </select>
+              </div>
+
+              <div className="relative flex items-center">
+                <Filter className="absolute right-3 w-4 h-4 text-zinc-400 pointer-events-none" />
+                <select
+                  value={`${sortBy}:${sortOrder}`}
+                  onChange={(e) => {
+                    const [f, o] = e.target.value.split(":");
+                    setSortBy(f);
+                    setSortOrder(o as "asc" | "desc");
+                  }}
+                  className="w-full h-11 pr-9 pl-3 border-2 border-black bg-zinc-50 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none appearance-none"
+                >
+                  <option value="entry_date:desc">ترتيب: التاريخ (الأحدث)</option>
+                  <option value="entry_date:asc">ترتيب: التاريخ (الأقدم)</option>
+                  <option value="return:desc">ترتيب: العائد (الأعلى)</option>
+                  <option value="return:asc">ترتيب: العائد (الأقل)</option>
+                  <option value="symbol:asc">ترتيب: الرمز (أ-ي)</option>
+                  <option value="entry_price:desc">ترتيب: السعر (الأعلى)</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveShariaOnly(!activeShariaOnly)}
+                className={`h-11 px-3 border-2 border-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] cursor-pointer ${
+                  activeShariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+                }`}
               >
-                <option value="">جميع القطاعات ({sectors.length})</option>
-                {sectors.map((sec) => (
-                  <option key={sec} value={sec}>{sec}</option>
-                ))}
-              </select>
+                <ShieldCheck className="w-4 h-4" />
+                <span>حلال فقط</span>
+              </button>
             </div>
 
-            <button
-              onClick={() => setActiveShariaOnly(!activeShariaOnly)}
-              className={`h-10 px-4 border-2 border-black font-black text-xs flex items-center justify-center gap-2 transition-all shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
-                activeShariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>المتوافقة شرعياً فقط (حلال)</span>
-            </button>
+            {(activeSearchTerm || activeSector || timeRange !== "all" || activeShariaOnly || sortBy !== "entry_date" || sortOrder !== "desc") && (
+              <div className="flex items-center justify-between px-3 py-1.5 bg-amber-50 dark:bg-amber-950/20 border-2 border-black text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                <span>تم تطبيق فلاتر مخصصة</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSearchTerm("");
+                    setActiveSector("");
+                    setTimeRange("all");
+                    setActiveShariaOnly(false);
+                    setSortBy("entry_date");
+                    setSortOrder("desc");
+                  }}
+                  className="text-amber-700 dark:text-amber-400 hover:underline font-black cursor-pointer"
+                >
+                  مسح الفلاتر ✕
+                </button>
+              </div>
+            )}
           </div>
 
           {filteredActiveTrades.length === 0 ? (
@@ -1546,14 +1696,78 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                   <thead>
                     <tr className="text-xs font-black uppercase text-black dark:text-white bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white select-none">
                       <th className="px-4 py-3.5 text-center w-12 border-r border-zinc-200 dark:border-zinc-800">#</th>
-                      <th className="px-6 py-3.5 text-left border-r border-zinc-200 dark:border-zinc-800">السهم والشركة</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">القطاع</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">تاريخ الدخول</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">سعر الدخول</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">السعر الحالي</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">الوقف المتحرك (EMA10)</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">العائد الحالي</th>
-                      <th className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800">حماية رأس المال</th>
+                      <th 
+                        onClick={() => handleHeaderClick("symbol")}
+                        className="px-6 py-3.5 text-left border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span>السهم والشركة</span>
+                          {renderSortIcon("symbol")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("sector")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>القطاع</span>
+                          {renderSortIcon("sector")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("entry_date")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>تاريخ الدخول</span>
+                          {renderSortIcon("entry_date")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("entry_price")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>سعر الدخول</span>
+                          {renderSortIcon("entry_price")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("current_price")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>السعر الحالي</span>
+                          {renderSortIcon("current_price")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("trailing_stop")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>الوقف المتحرك (EMA10)</span>
+                          {renderSortIcon("trailing_stop")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("return")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>العائد الحالي</span>
+                          {renderSortIcon("return")}
+                        </div>
+                      </th>
+                      <th 
+                        onClick={() => handleHeaderClick("status")}
+                        className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>حماية رأس المال</span>
+                          {renderSortIcon("status")}
+                        </div>
+                      </th>
                       <th className="px-4 py-3.5 text-center">إجراء</th>
                     </tr>
                   </thead>
@@ -1716,23 +1930,23 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
               <span>أرشيف صفقات 2026 المغلقة ({closedTrades.length} صفقة)</span>
             </h3>
 
-            {/* Filters */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute right-2.5 top-2.5 text-zinc-400" />
-                <input
-                  type="text"
-                  placeholder="بحث برمز السهم أو القطاع..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setPage(1);
-                  }}
-                  className="h-9 pr-8 pl-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
-                />
-              </div>
+            {/* Smart Filters Bar for Closed Trades */}
+            <div className="flex flex-col gap-2 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 w-full">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute right-2.5 top-2.5 text-zinc-400" />
+                  <input
+                    type="text"
+                    placeholder="بحث برمز السهم..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setPage(1);
+                    }}
+                    className="w-full h-9 pr-8 pl-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  />
+                </div>
 
-              {sectors.length > 0 && (
                 <div className="relative">
                   <select
                     value={selectedSector}
@@ -1740,56 +1954,188 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       setSelectedSector(e.target.value);
                       setPage(1);
                     }}
-                    className="h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
                   >
                     <option value="">{isAr ? "جميع القطاعات" : "All Sectors"} ({sectors.length})</option>
                     {sectors.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {sec}
-                      </option>
+                      <option key={sec} value={sec}>{sec}</option>
                     ))}
                   </select>
                 </div>
-              )}
 
-              <div className="flex border-2 border-black">
+                <div className="relative">
+                  <select
+                    value={filterResult}
+                    onChange={(e) => {
+                      setFilterResult(e.target.value as any);
+                      setPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="all">جميع النتائج</option>
+                    <option value="win">صفقات رابحة ✅</option>
+                    <option value="loss">صفقات خاسرة 🛑</option>
+                  </select>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={timeRange}
+                    onChange={(e) => {
+                      setTimeRange(e.target.value as any);
+                      setPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="all">كل الأوقات</option>
+                    <option value="7d">آخر 7 أيام</option>
+                    <option value="30d">آخر 30 يوم</option>
+                  </select>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={`${sortBy}:${sortOrder}`}
+                    onChange={(e) => {
+                      const [f, o] = e.target.value.split(":");
+                      setSortBy(f);
+                      setSortOrder(o as "asc" | "desc");
+                      setPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="entry_date:desc">ترتيب: التاريخ (الأحدث)</option>
+                    <option value="entry_date:asc">ترتيب: التاريخ (الأقدم)</option>
+                    <option value="return:desc">ترتيب: العائد (الأعلى)</option>
+                    <option value="return:asc">ترتيب: العائد (الأقل)</option>
+                    <option value="symbol:asc">ترتيب: الرمز (أ-ي)</option>
+                    <option value="entry_price:desc">ترتيب: السعر (الأعلى)</option>
+                  </select>
+                </div>
+
                 <button
-                  onClick={() => { setFilterResult("all"); setPage(1); }}
-                  className={`px-3 py-1.5 text-xs font-black ${filterResult === "all" ? "bg-black text-white" : "bg-white text-black"}`}
+                  type="button"
+                  onClick={() => { setShariaOnly(!shariaOnly); setPage(1); }}
+                  className={`h-9 px-3 border-2 border-black font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    shariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+                  }`}
                 >
-                  الكل
-                </button>
-                <button
-                  onClick={() => { setFilterResult("win"); setPage(1); }}
-                  className={`px-3 py-1.5 text-xs font-black ${filterResult === "win" ? "bg-emerald-400 text-black" : "bg-white text-black"}`}
-                >
-                  رابحة
-                </button>
-                <button
-                  onClick={() => { setFilterResult("loss"); setPage(1); }}
-                  className={`px-3 py-1.5 text-xs font-black ${filterResult === "loss" ? "bg-rose-400 text-black" : "bg-white text-black"}`}
-                >
-                  خاسرة
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>حلال فقط</span>
                 </button>
               </div>
+
+              {(searchTerm || selectedSector || filterResult !== "all" || timeRange !== "all" || shariaOnly || sortBy !== "entry_date" || sortOrder !== "desc") && (
+                <div className="flex items-center justify-between px-2 py-1 bg-amber-50 dark:bg-amber-950/20 border border-black text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                  <span>تم تطبيق فلاتر على أرشيف الصفقات</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setSelectedSector("");
+                      setFilterResult("all");
+                      setTimeRange("all");
+                      setShariaOnly(false);
+                      setSortBy("entry_date");
+                      setSortOrder("desc");
+                      setPage(1);
+                    }}
+                    className="text-amber-700 dark:text-amber-400 hover:underline font-black cursor-pointer"
+                  >
+                    مسح الفلاتر ✕
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Table */}
           <div className="overflow-x-auto border-2 border-black">
             <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black">
+              <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black select-none">
                 <tr>
                   <th className="p-3 text-center w-12 border-r border-zinc-300 dark:border-zinc-800">#</th>
-                  <th className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800">السهم</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">القطاع</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الدخول</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الخروج</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الدخول</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الخروج</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">المدة</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">العائد</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سبب الخروج</th>
+                  <th 
+                    onClick={() => handleHeaderClick("symbol")}
+                    className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span>السهم</span>
+                      {renderSortIcon("symbol")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("sector")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>القطاع</span>
+                      {renderSortIcon("sector")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("entry_date")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>تاريخ الدخول</span>
+                      {renderSortIcon("entry_date")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("exit_date")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>تاريخ الخروج</span>
+                      {renderSortIcon("exit_date")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("entry_price")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>سعر الدخول</span>
+                      {renderSortIcon("entry_price")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("exit_price")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>سعر الخروج</span>
+                      {renderSortIcon("exit_price")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("holding_days")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>المدة</span>
+                      {renderSortIcon("holding_days")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("return")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>العائد</span>
+                      {renderSortIcon("return")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("status")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>سبب الخروج</span>
+                      {renderSortIcon("status")}
+                    </div>
+                  </th>
                   <th className="p-3 text-center">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>
@@ -1890,23 +2236,23 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
               <span>سجل جميع الإشارات ({allTrades.length} صفقة)</span>
             </h3>
 
-            {/* Filters */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute right-2.5 top-2.5 text-zinc-400" />
-                <input
-                  type="text"
-                  placeholder="بحث برمز السهم أو القطاع..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setAllPage(1);
-                  }}
-                  className="h-9 pr-8 pl-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
-                />
-              </div>
+            {/* Smart Filters Bar for All Trades */}
+            <div className="flex flex-col gap-2 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 w-full">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute right-2.5 top-2.5 text-zinc-400" />
+                  <input
+                    type="text"
+                    placeholder="بحث برمز السهم..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setAllPage(1);
+                    }}
+                    className="w-full h-9 pr-8 pl-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  />
+                </div>
 
-              {sectors.length > 0 && (
                 <div className="relative">
                   <select
                     value={selectedSector}
@@ -1914,63 +2260,198 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       setSelectedSector(e.target.value);
                       setAllPage(1);
                     }}
-                    className="h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
                   >
                     <option value="">{isAr ? "جميع القطاعات" : "All Sectors"} ({sectors.length})</option>
                     {sectors.map((sec) => (
-                      <option key={sec} value={sec}>
-                        {sec}
-                      </option>
+                      <option key={sec} value={sec}>{sec}</option>
                     ))}
                   </select>
                 </div>
-              )}
 
-              <div className="flex border-2 border-black">
+                <div className="relative">
+                  <select
+                    value={allFilterResult}
+                    onChange={(e) => {
+                      setAllFilterResult(e.target.value as any);
+                      setAllPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="all">جميع الحالات</option>
+                    <option value="active">النشطة ({activeTrades.length})</option>
+                    <option value="win">صفقات رابحة ✅</option>
+                    <option value="loss">صفقات خاسرة 🛑</option>
+                  </select>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={timeRange}
+                    onChange={(e) => {
+                      setTimeRange(e.target.value as any);
+                      setAllPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="all">كل الأوقات</option>
+                    <option value="7d">آخر 7 أيام</option>
+                    <option value="30d">آخر 30 يوم</option>
+                  </select>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={`${sortBy}:${sortOrder}`}
+                    onChange={(e) => {
+                      const [f, o] = e.target.value.split(":");
+                      setSortBy(f);
+                      setSortOrder(o as "asc" | "desc");
+                      setAllPage(1);
+                    }}
+                    className="w-full h-9 px-3 border-2 border-black bg-zinc-100 dark:bg-zinc-900 text-xs font-bold text-black dark:text-white focus:outline-none"
+                  >
+                    <option value="entry_date:desc">ترتيب: التاريخ (الأحدث)</option>
+                    <option value="entry_date:asc">ترتيب: التاريخ (الأقدم)</option>
+                    <option value="return:desc">ترتيب: العائد (الأعلى)</option>
+                    <option value="return:asc">ترتيب: العائد (الأقل)</option>
+                    <option value="symbol:asc">ترتيب: الرمز (أ-ي)</option>
+                    <option value="entry_price:desc">ترتيب: السعر (الأعلى)</option>
+                  </select>
+                </div>
+
                 <button
-                  onClick={() => { setAllFilterResult("all"); setAllPage(1); }}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs font-black ${allFilterResult === "all" ? "bg-black text-white" : "bg-white text-black"}`}
+                  type="button"
+                  onClick={() => { setShariaOnly(!shariaOnly); setAllPage(1); }}
+                  className={`h-9 px-3 border-2 border-black font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    shariaOnly ? "bg-emerald-400 text-black" : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+                  }`}
                 >
-                  الكل
-                </button>
-                <button
-                  onClick={() => { setAllFilterResult("active"); setAllPage(1); }}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs font-black ${allFilterResult === "active" ? "bg-amber-400 text-black" : "bg-white text-black"}`}
-                >
-                  النشطة ({activeTrades.length})
-                </button>
-                <button
-                  onClick={() => { setAllFilterResult("win"); setAllPage(1); }}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs font-black ${allFilterResult === "win" ? "bg-emerald-400 text-black" : "bg-white text-black"}`}
-                >
-                  رابحة
-                </button>
-                <button
-                  onClick={() => { setAllFilterResult("loss"); setAllPage(1); }}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs font-black ${allFilterResult === "loss" ? "bg-rose-400 text-black" : "bg-white text-black"}`}
-                >
-                  خاسرة
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>حلال فقط</span>
                 </button>
               </div>
+
+              {(searchTerm || selectedSector || allFilterResult !== "all" || timeRange !== "all" || shariaOnly || sortBy !== "entry_date" || sortOrder !== "desc") && (
+                <div className="flex items-center justify-between px-2 py-1 bg-amber-50 dark:bg-amber-950/20 border border-black text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                  <span>تم تطبيق فلاتر على جميع الصفقات</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setSelectedSector("");
+                      setAllFilterResult("all");
+                      setTimeRange("all");
+                      setShariaOnly(false);
+                      setSortBy("entry_date");
+                      setSortOrder("desc");
+                      setAllPage(1);
+                    }}
+                    className="text-amber-700 dark:text-amber-400 hover:underline font-black cursor-pointer"
+                  >
+                    مسح الفلاتر ✕
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Table */}
           <div className="overflow-x-auto border-2 border-black">
             <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black">
+              <thead className="bg-zinc-200 dark:bg-zinc-900 border-b-2 border-black text-zinc-900 dark:text-zinc-100 font-black select-none">
                 <tr>
                   <th className="p-3 text-center w-12 border-r border-zinc-300 dark:border-zinc-800">#</th>
-                  <th className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800">السهم</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">الحالة</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">القطاع</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الدخول</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">تاريخ الخروج</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الدخول</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">سعر الخروج / الحالي</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">المدة</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">العائد</th>
-                  <th className="p-3 border-r border-zinc-300 dark:border-zinc-800">الاستراتيجية / السبب</th>
+                  <th 
+                    onClick={() => handleHeaderClick("symbol")}
+                    className="p-3 text-left border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span>السهم</span>
+                      {renderSortIcon("symbol")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("status")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>الحالة</span>
+                      {renderSortIcon("status")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("sector")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>القطاع</span>
+                      {renderSortIcon("sector")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("entry_date")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>تاريخ الدخول</span>
+                      {renderSortIcon("entry_date")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("exit_date")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>تاريخ الخروج</span>
+                      {renderSortIcon("exit_date")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("entry_price")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>سعر الدخول</span>
+                      {renderSortIcon("entry_price")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("current_price")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>سعر الخروج / الحالي</span>
+                      {renderSortIcon("current_price")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("holding_days")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>المدة</span>
+                      {renderSortIcon("holding_days")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("return")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>العائد</span>
+                      {renderSortIcon("return")}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleHeaderClick("status")}
+                    className="p-3 border-r border-zinc-300 dark:border-zinc-800 cursor-pointer hover:bg-zinc-300 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>الاستراتيجية / السبب</span>
+                      {renderSortIcon("status")}
+                    </div>
+                  </th>
                   <th className="p-3 text-center">{isAr ? "التفاصيل" : "Details"}</th>
                 </tr>
               </thead>

@@ -734,7 +734,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                 if (valA == null) return 1;
                 if (valB == null) return -1;
                 
-                if (sortBy === "symbol") {
+                if (sortBy === "symbol" || sortBy === "sector") {
                     return sortOrder === "asc" 
                         ? String(valA).localeCompare(String(valB))
                         : String(valB).localeCompare(String(valA));
@@ -2919,8 +2919,14 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     <th className="hidden md:table-cell bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-4 py-4 w-24 text-center">
                                         {translate("lowRisk")}
                                     </th>
-                                    <th className="bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-4 py-4 w-36 text-center">
-                                        {isAr ? "التغير منذ التوصية" : "Since Rec."}
+                                    <th 
+                                        onClick={() => handleHeaderClick("profit_loss_pct")}
+                                        className="bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-4 py-4 w-36 text-center cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                                    >
+                                        <div className="flex items-center justify-center gap-1">
+                                            <span>{isAr ? "التغير منذ التوصية" : "Since Rec."}</span>
+                                            {renderSortIcon("profit_loss_pct")}
+                                        </div>
                                     </th>
                                     <th 
                                         onClick={() => handleHeaderClick("profit_loss_pct")}
@@ -2943,8 +2949,14 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     <th className="bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-4 py-4 w-20 text-center select-none">
                                         {isAr ? "مشاركة" : "Share"}
                                     </th>
-                                    <th className="hidden lg:table-cell bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-6 py-4 text-left">
-                                        {translate("sector")}
+                                    <th 
+                                        onClick={() => handleHeaderClick("sector")}
+                                        className="hidden lg:table-cell bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white px-6 py-4 text-left cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
+                                    >
+                                        <div className="flex items-center justify-between gap-1">
+                                            <span>{translate("sector")}</span>
+                                            {renderSortIcon("sector")}
+                                        </div>
                                     </th>
                                 </tr>
                             </thead>
