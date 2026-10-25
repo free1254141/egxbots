@@ -99,9 +99,10 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
   const [calendarViewType, setCalendarViewType] = useState<"grid" | "list">("grid");
   const [selectedDaySignals, setSelectedDaySignals] = useState<{
     date: string;
-    signals: TrackedScannerSignal[];
-    activeSignals: TrackedScannerSignal[];
+    closedSignals: TrackedScannerSignal[];
+    createdSignals: TrackedScannerSignal[];
   } | null>(null);
+  const [dayModalFilter, setDayModalFilter] = useState<"all" | "closed" | "created">("all");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -266,9 +267,39 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
     return <span className="ml-1 text-amber-500 font-black text-xs">{sortOrder === "asc" ? "▲" : "▼"}</span>;
   };
 
+  // Strict Deduplication & Integrity Guard for Fast Scanner
+  const cleanClosedSignals = useMemo(() => {
+    const seen = new Set<string>();
+    const list: TrackedScannerSignal[] = [];
+    closedSignals.forEach((s) => {
+      if (!s || !s.symbol) return;
+      const key = s.id || `${s.symbol}_${s.entry_date}_${s.scanner_type}_${s.exit_date || ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(s);
+      }
+    });
+    return list;
+  }, [closedSignals]);
+
+  const cleanActiveSignals = useMemo(() => {
+    const closedKeys = new Set(cleanClosedSignals.map((s) => `${s.symbol}_${s.entry_date}_${s.scanner_type}`));
+    const seen = new Set<string>();
+    const list: TrackedScannerSignal[] = [];
+    activeSignals.forEach((s) => {
+      if (!s || !s.symbol) return;
+      const key = s.id || `${s.symbol}_${s.entry_date}_${s.scanner_type}`;
+      if (!seen.has(key) && !closedKeys.has(key) && s.status === "active") {
+        seen.add(key);
+        list.push(s);
+      }
+    });
+    return list;
+  }, [activeSignals, cleanClosedSignals]);
+
   // Filtered Active Signals
   const filteredActive = useMemo(() => {
-    const list = activeSignals.filter((s) => {
+    const list = cleanActiveSignals.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
       if (shariaOnly && !isShariaCompliant(s.symbol)) return false;
       if (timeRange !== "all") {
@@ -284,11 +315,11 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       return true;
     });
     return sortSignalsList(list);
-  }, [activeSignals, categoryFilter, shariaOnly, searchTerm, timeRange, sortSignalsList]);
+  }, [cleanActiveSignals, categoryFilter, shariaOnly, searchTerm, timeRange, sortSignalsList]);
 
   // Filtered Closed Signals
   const filteredClosed = useMemo(() => {
-    const list = closedSignals.filter((s) => {
+    const list = cleanClosedSignals.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
       if (shariaOnly && !isShariaCompliant(s.symbol)) return false;
       if (timeRange !== "all") {
@@ -308,13 +339,13 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       return true;
     });
     return sortSignalsList(list);
-  }, [closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
+  }, [cleanClosedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
 
-  // Combined All Signals
+  // Combined All Signals (Strictly zero duplicates and zero active/closed overlap)
   const filteredAll = useMemo(() => {
     const combined = [
-      ...activeSignals.map((s) => ({ ...s, _isActive: true })),
-      ...closedSignals.map((s) => ({ ...s, _isActive: false })),
+      ...cleanActiveSignals.map((s) => ({ ...s, _isActive: true })),
+      ...cleanClosedSignals.map((s) => ({ ...s, _isActive: false })),
     ];
     const list = combined.filter((s) => {
       if (categoryFilter !== "all" && s.scanner_type !== categoryFilter) return false;
@@ -336,69 +367,77 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       return true;
     });
     return sortSignalsList(list);
-  }, [activeSignals, closedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
+  }, [cleanActiveSignals, cleanClosedSignals, categoryFilter, shariaOnly, resultFilter, searchTerm, timeRange, getSignalReturn, sortSignalsList]);
 
   // Summary Stats matching Medium Swings & Short Swings:
-  // 1: Active Count, 2: Closed Count, 3: Win Rate %, 4: Avg Return %
   const summaryStats = useMemo(() => {
-    const totalClosed = closedSignals.length;
-    const wins = closedSignals.filter((s) => getSignalReturn(s) > 0 || s.status === "target_hit");
+    const totalClosed = cleanClosedSignals.length;
+    const wins = cleanClosedSignals.filter((s) => getSignalReturn(s) > 0 || s.status === "target_hit");
     const winRate = totalClosed > 0 ? (wins.length / totalClosed) * 100 : 70.0;
-    const netReturn = closedSignals.reduce((acc, s) => acc + getSignalReturn(s), 0);
+    const netReturn = cleanClosedSignals.reduce((acc, s) => acc + getSignalReturn(s), 0);
     const avgReturn = totalClosed > 0 ? netReturn / totalClosed : 3.5;
     return {
-      activeCount: activeSignals.length,
+      activeCount: cleanActiveSignals.length,
       closedCount: totalClosed,
       winRate,
       avgReturn,
     };
-  }, [activeSignals, closedSignals, getSignalReturn]);
+  }, [cleanActiveSignals, cleanClosedSignals, getSignalReturn]);
 
-  // Calendar groupings and stats
-  const closedByDate = useMemo(() => {
+  // Closed signals grouped by exit_date (when they actually finished)
+  const closedByExitDate = useMemo(() => {
     const map = new Map<string, TrackedScannerSignal[]>();
-    closedSignals.forEach((s) => {
-      const d = s.exit_date || s.entry_date;
+    cleanClosedSignals.forEach((s) => {
+      const d = s.exit_date;
       if (!d) return;
       const arr = map.get(d) || [];
       arr.push(s);
       map.set(d, arr);
     });
     return map;
-  }, [closedSignals]);
+  }, [cleanClosedSignals]);
 
-  const activeByDate = useMemo(() => {
+  // All signals grouped by entry_date (when they were initially scanned/detected)
+  const allByEntryDate = useMemo(() => {
     const map = new Map<string, TrackedScannerSignal[]>();
-    activeSignals.forEach((s) => {
+    cleanClosedSignals.forEach((s) => {
       if (!s.entry_date) return;
       const arr = map.get(s.entry_date) || [];
       arr.push(s);
       map.set(s.entry_date, arr);
     });
+    cleanActiveSignals.forEach((s) => {
+      if (!s.entry_date) return;
+      const arr = map.get(s.entry_date) || [];
+      if (!arr.some((ex) => ex.id === s.id)) {
+        arr.push(s);
+      }
+      map.set(s.entry_date, arr);
+    });
     return map;
-  }, [activeSignals]);
+  }, [cleanClosedSignals, cleanActiveSignals]);
 
   const viewedClosedSignals = useMemo(() => {
-    if (filterPreset === "all") return closedSignals;
+    if (filterPreset === "all") return cleanClosedSignals;
     if (filterPreset === "30days") {
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const cutoffStr = formatYMD(thirtyDaysAgo);
-      return closedSignals.filter((s) => (s.exit_date || s.entry_date || "") >= cutoffStr);
+      return cleanClosedSignals.filter((s) => (s.exit_date || s.entry_date || "") >= cutoffStr);
     }
-    return closedSignals.filter((s) => (s.exit_date || s.entry_date || "").startsWith(currentMonthStr));
-  }, [closedSignals, currentMonthStr, filterPreset]);
+    return cleanClosedSignals.filter((s) => (s.exit_date || s.entry_date || "").startsWith(currentMonthStr));
+  }, [cleanClosedSignals, currentMonthStr, filterPreset]);
 
   const viewedActiveSignals = useMemo(() => {
-    if (filterPreset === "all") return activeSignals;
+    if (filterPreset === "all") return cleanActiveSignals;
     if (filterPreset === "30days") {
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const cutoffStr = formatYMD(thirtyDaysAgo);
-      return activeSignals.filter((s) => s.entry_date >= cutoffStr);
+      return cleanActiveSignals.filter((s) => s.entry_date >= cutoffStr);
     }
-    return activeSignals.filter((s) => s.entry_date.startsWith(currentMonthStr));
-  }, [activeSignals, currentMonthStr, filterPreset]);
+    return cleanActiveSignals.filter((s) => s.entry_date.startsWith(currentMonthStr));
+  }, [cleanActiveSignals, currentMonthStr, filterPreset]);
 
   const monthStats = useMemo(() => {
     const total = viewedClosedSignals.length;
@@ -1097,7 +1136,16 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
 
                             {/* Current / Exit Price */}
                             <td className="px-4 py-4 text-center font-mono font-black text-black dark:text-white border-r border-zinc-200 dark:border-zinc-800">
-                              {isLocked ? "•••" : `${(sig.exit_price || sig.current_price)?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : (
+                                <>
+                                  <span>{(sig.exit_price || sig.current_price)?.toFixed(2)} ج.م</span>
+                                  {sig.exit_date && (
+                                    <span className="block text-[10px] text-zinc-500 font-bold">
+                                      {sig.exit_date} ({sig.exit_time || "14:15"})
+                                    </span>
+                                  )}
+                                </>
+                              )}
                             </td>
 
                             {/* Return */}
@@ -1398,10 +1446,10 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
 
               <div className="grid grid-cols-7 gap-1 sm:gap-2">
                 {calendarDays.map((cell) => {
-                  const dayClosed = closedByDate.get(cell.dateStr) || [];
-                  const dayActive = activeByDate.get(cell.dateStr) || [];
+                  const dayClosed = closedByExitDate.get(cell.dateStr) || [];
+                  const dayCreated = allByEntryDate.get(cell.dateStr) || [];
                   const hasClosed = dayClosed.length > 0;
-                  const hasActive = dayActive.length > 0;
+                  const hasCreated = dayCreated.length > 0;
                   const netDailyPct = dayClosed.reduce((acc, s) => acc + getSignalReturn(s), 0);
                   const isToday = cell.dateStr === todayDateStr;
 
@@ -1409,16 +1457,17 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                     <div
                       key={cell.dateStr}
                       onClick={() => {
-                        if (hasClosed || hasActive) {
+                        if (hasClosed || hasCreated) {
                           setSelectedDaySignals({
                             date: cell.dateStr,
-                            signals: dayClosed,
-                            activeSignals: dayActive,
+                            closedSignals: dayClosed,
+                            createdSignals: dayCreated,
                           });
+                          setDayModalFilter("all");
                         }
                       }}
                       className={`min-h-[70px] sm:min-h-[85px] p-1.5 sm:p-2 border-2 flex flex-col justify-between transition-all ${
-                        hasClosed || hasActive ? "cursor-pointer" : ""
+                        hasClosed || hasCreated ? "cursor-pointer" : ""
                       } ${
                         isToday ? "border-amber-500 bg-amber-500/15" : ""
                       } ${
@@ -1430,7 +1479,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                           ? netDailyPct >= 0
                             ? "border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/20 shadow-[2px_2px_0px_#000]"
                             : "border-black dark:border-white bg-rose-50 dark:bg-rose-950/20 shadow-[2px_2px_0px_#000]"
-                          : hasActive
+                          : hasCreated
                           ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20 shadow-[2px_2px_0px_#f59e0b]"
                           : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-400"
                       }`}
@@ -1439,16 +1488,18 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                         <span className={`text-xs font-black font-mono ${isToday ? "bg-amber-400 text-black px-1" : ""}`}>
                           {cell.dayNum}
                         </span>
-                        {hasClosed && (
-                          <span className="px-1 py-0.2 bg-black text-[#FFE600] text-[8px] font-black">
-                            {dayClosed.length} إشارة
-                          </span>
-                        )}
-                        {hasActive && !hasClosed && (
-                          <span className="px-1 py-0.2 bg-amber-400 text-black text-[8px] font-black">
-                            ⚡ {dayActive.length}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {hasClosed && (
+                            <span className="px-1 py-0.2 bg-black text-[#FFE600] text-[8px] font-black">
+                              {dayClosed.length} إغلاق
+                            </span>
+                          )}
+                          {hasCreated && (
+                            <span className="px-1 py-0.2 bg-amber-400 text-black text-[8px] font-black">
+                              ⚡ {dayCreated.length}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {hasClosed ? (
@@ -1463,9 +1514,9 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                             {netDailyPct >= 0 ? "+" : ""}{netDailyPct.toFixed(1)}%
                           </span>
                         </div>
-                      ) : hasActive ? (
+                      ) : hasCreated ? (
                         <div className="text-[10px] font-black text-amber-600 text-center">
-                          رصد لحظي ⚡
+                          رصد جديد ⚡
                         </div>
                       ) : (
                         <div className="text-[9px] text-zinc-400 text-center">
@@ -1476,8 +1527,8 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                       <div className="text-[9px] text-zinc-500 truncate font-mono text-center">
                         {hasClosed
                           ? dayClosed.map((s) => s.symbol).slice(0, 2).join(", ")
-                          : hasActive
-                          ? dayActive.map((s) => s.symbol).slice(0, 2).join(", ")
+                          : hasCreated
+                          ? dayCreated.map((s) => s.symbol).slice(0, 2).join(", ")
                           : ""}
                       </div>
                     </div>
@@ -1537,82 +1588,321 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       {/* ── 7. DAY SIGNALS MODAL (When clicking any calendar cell) ── */}
       {selectedDaySignals && (
         <div
-          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
           onClick={() => setSelectedDaySignals(null)}
         >
           <div
-            className="relative w-full max-w-lg bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_#000] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+            className="relative w-full max-w-xl bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] p-4 sm:p-6 space-y-4 max-h-[88vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             dir={isAr ? "rtl" : "ltr"}
           >
-            <div className="flex items-center justify-between border-b-2 border-black pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-8 h-8 bg-[#FFE600] border-2 border-black flex items-center justify-center font-black">
-                  <CalendarIcon className="w-4 h-4 text-black" />
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 bg-[#FFE600] border-2 border-black flex items-center justify-center font-black">
+                  <CalendarIcon className="w-5 h-5 text-black" />
                 </span>
-                <h3 className="font-black text-base text-black dark:text-white">
-                  إشارات جلسة {selectedDaySignals.date}
-                </h3>
+                <div>
+                  <h3 className="font-black text-base text-black dark:text-white">
+                    {isAr ? `تفاصيل جلسة ${selectedDaySignals.date}` : `Session Details: ${selectedDaySignals.date}`}
+                  </h3>
+                  <span className="text-[10px] text-zinc-500 font-bold block">
+                    {isAr
+                      ? "الصفقات المغلقة في الجلسة والإشارات التي تم رصدها"
+                      : "Closed trades and signals detected on this session"}
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedDaySignals(null)}
-                className="p-1 border-2 border-black bg-zinc-100 hover:bg-zinc-200 cursor-pointer"
+                className="p-1.5 border-2 border-black bg-zinc-100 hover:bg-zinc-200 cursor-pointer"
               >
                 <X className="w-4 h-4 text-black" />
               </button>
             </div>
 
-            <div className="space-y-3 font-mono text-xs">
-              {[...selectedDaySignals.signals, ...selectedDaySignals.activeSignals].map((s, idx) => {
-                const ret = getSignalReturn(s);
-                const isGain = ret >= 0;
-                return (
-                  <div
-                    key={`${s.symbol}-${idx}`}
-                    className="p-3 border-2 border-black bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <StockLogo symbol={s.symbol} size="sm" />
-                      <div>
-                        <span className="font-black text-sm">{s.symbol}</span>
-                        <span className="text-[10px] text-zinc-500 block">
-                          رصد: {s.entry_price?.toFixed(2)} ج.م ({s.entry_time})
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-0.5 font-black border border-black ${
-                          isGain ? "bg-emerald-300 text-black" : "bg-rose-300 text-black"
-                        }`}
-                      >
-                        {isGain ? "+" : ""}{ret.toFixed(2)}%
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setChartModalStock({
-                            symbol: s.symbol,
-                            date: s.entry_date,
-                            toDate: s.exit_date,
-                            signalTime: s.entry_time,
-                            signalPrice: s.entry_price,
-                            exitTime: s.exit_time,
-                            exitPrice: s.exit_price,
-                            status: s.status,
-                            scannerType: s.scanner_type,
-                          });
-                        }}
-                        className="p-1 bg-[#FFE600] border border-black cursor-pointer"
-                        title="شارت 15 دقيقة"
-                      >
-                        <BarChart2 className="w-4 h-4 text-black" />
-                      </button>
-                    </div>
+            {/* Modal Filter Tabs */}
+            <div className="flex items-center gap-1.5 border-2 border-black bg-zinc-100 dark:bg-zinc-950 p-1 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setDayModalFilter("all")}
+                className={`px-3 py-1 transition-all cursor-pointer ${
+                  dayModalFilter === "all"
+                    ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400"
+                }`}
+              >
+                {isAr ? "الكل" : "All"} ({selectedDaySignals.closedSignals.length + selectedDaySignals.createdSignals.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDayModalFilter("closed")}
+                className={`px-3 py-1 transition-all cursor-pointer ${
+                  dayModalFilter === "closed"
+                    ? "bg-black text-[#FFE600] font-black border border-black shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400"
+                }`}
+              >
+                {isAr ? "صفقات أُغلقت بالجلسة" : "Closed Today"} ({selectedDaySignals.closedSignals.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDayModalFilter("created")}
+                className={`px-3 py-1 transition-all cursor-pointer ${
+                  dayModalFilter === "created"
+                    ? "bg-amber-400 text-black font-black border border-black shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400"
+                }`}
+              >
+                {isAr ? "إشارات رُصدت بالجلسة" : "Detected Today"} ({selectedDaySignals.createdSignals.length})
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="space-y-4">
+              {/* SECTION 1: Closed Trades */}
+              {(dayModalFilter === "all" || dayModalFilter === "closed") && selectedDaySignals.closedSignals.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-black text-zinc-700 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-800 pb-1">
+                    <span>{isAr ? "صفقات أُغلقت في هذه الجلسة" : "Trades Closed in this Session"}</span>
+                    <span className="font-mono text-[11px] text-zinc-500">
+                      {isAr ? "الصافي:" : "Net:"}{" "}
+                      <strong className={selectedDaySignals.closedSignals.reduce((acc, s) => acc + getSignalReturn(s), 0) >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                        {selectedDaySignals.closedSignals.reduce((acc, s) => acc + getSignalReturn(s), 0) >= 0 ? "+" : ""}
+                        {selectedDaySignals.closedSignals.reduce((acc, s) => acc + getSignalReturn(s), 0).toFixed(2)}%
+                      </strong>
+                    </span>
                   </div>
-                );
-              })}
+
+                  <div className="space-y-2.5">
+                    {selectedDaySignals.closedSignals.map((s, idx) => {
+                      const ret = getSignalReturn(s);
+                      const isGain = ret > 0 || s.status === "target_hit";
+                      const isBreakeven = ret === 0;
+                      const badge = getScannerBadge(s.scanner_type);
+
+                      return (
+                        <div
+                          key={`modal-closed-${s.symbol}-${s.entry_date}-${idx}`}
+                          className="p-3 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 space-y-2 shadow-[2px_2px_0px_#000]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <StockLogo symbol={s.symbol} size="sm" />
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono font-black text-sm text-black dark:text-white">{s.symbol}</span>
+                                  <span className={`px-1.5 py-0.2 text-[9px] font-black border ${badge.pillBg}`}>
+                                    {badge.label}
+                                  </span>
+                                  {isShariaCompliant(s.symbol) && (
+                                    <span className="px-1.5 py-0.2 border border-black bg-emerald-400 text-black text-[8px] font-black">
+                                      حلال
+                                    </span>
+                                  )}
+                                  <span className="px-1.5 py-0.2 bg-black text-[#FFE600] text-[9px] font-black border border-black">
+                                    صفقة مغلقة
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-zinc-500 font-bold block">
+                                  {s.name_ar || s.sector}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2.5 py-0.5 font-mono font-black text-xs border border-black ${
+                                  isGain ? "bg-emerald-300 text-black" : isBreakeven ? "bg-amber-300 text-black" : "bg-rose-300 text-black"
+                                }`}
+                              >
+                                {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChartModalStock({
+                                    symbol: s.symbol,
+                                    date: s.entry_date,
+                                    toDate: s.exit_date,
+                                    signalTime: s.entry_time,
+                                    signalPrice: s.entry_price,
+                                    exitTime: s.exit_time,
+                                    exitPrice: s.exit_price,
+                                    status: s.status,
+                                    scannerType: s.scanner_type,
+                                  });
+                                }}
+                                className="p-1 bg-[#FFE600] border border-black cursor-pointer shadow-[1px_1px_0px_#000]"
+                                title="شارت 15 دقيقة"
+                              >
+                                <BarChart2 className="w-4 h-4 text-black" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Chronological Breakdown: Entry Date/Time vs Exit Date/Time */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">توقيت الرصد والدخول</span>
+                              <span className="font-mono text-black dark:text-white text-[11px]">
+                                {s.entry_date} ({s.entry_time})
+                              </span>
+                              <span className="font-mono text-zinc-600 dark:text-zinc-400 text-[10px] block">
+                                عند {s.entry_price?.toFixed(2)} ج.م
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">توقيت وسعر الخروج</span>
+                              <span className="font-mono text-black dark:text-white text-[11px]">
+                                {s.exit_date} ({s.exit_time || "14:15"})
+                              </span>
+                              <span className="font-mono text-zinc-600 dark:text-zinc-400 text-[10px] block">
+                                عند {(s.exit_price || s.current_price)?.toFixed(2)} ج.م
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">مدة الصفقة</span>
+                              <span className="font-mono text-black dark:text-white text-[11px]">
+                                {s.sessions_count || 1} جلسات
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">سبب الإغلاق</span>
+                              <span className="text-black dark:text-white text-[11px]">
+                                {s.exit_reason || (isGain ? "تحقق الهدف الأول 🎯" : "ضرب وقف الخسارة 🛑")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 2: Signals Detected Today */}
+              {(dayModalFilter === "all" || dayModalFilter === "created") && selectedDaySignals.createdSignals.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-black text-zinc-700 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-800 pb-1">
+                    <span>{isAr ? "إشارات تم رصدها في هذه الجلسة" : "Signals Detected in this Session"}</span>
+                    <span className="font-mono text-[11px] text-zinc-500">
+                      {selectedDaySignals.createdSignals.length} {isAr ? "إشارة" : "signals"}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {selectedDaySignals.createdSignals.map((s, idx) => {
+                      const ret = getSignalReturn(s);
+                      const isGain = ret > 0 || s.status === "target_hit";
+                      const badge = getScannerBadge(s.scanner_type);
+                      const isStillActive = s.status === "active";
+
+                      return (
+                        <div
+                          key={`modal-created-${s.symbol}-${s.entry_date}-${idx}`}
+                          className="p-3 border-2 border-black dark:border-zinc-700 bg-amber-50/60 dark:bg-amber-950/20 space-y-2 shadow-[2px_2px_0px_#000]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <StockLogo symbol={s.symbol} size="sm" />
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono font-black text-sm text-black dark:text-white">{s.symbol}</span>
+                                  <span className={`px-1.5 py-0.2 text-[9px] font-black border ${badge.pillBg}`}>
+                                    {badge.label}
+                                  </span>
+                                  {isShariaCompliant(s.symbol) && (
+                                    <span className="px-1.5 py-0.2 border border-black bg-emerald-400 text-black text-[8px] font-black">
+                                      حلال
+                                    </span>
+                                  )}
+                                  <span className={`px-1.5 py-0.2 text-[9px] font-black border border-black ${
+                                    isStillActive ? "bg-[#FFE600] text-black" : "bg-zinc-200 text-zinc-800"
+                                  }`}>
+                                    {isStillActive ? "قيد المتابعة ⚡" : "أُغلقت لاحقاً"}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-zinc-500 font-bold block">
+                                  {s.name_ar || s.sector}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2.5 py-0.5 font-mono font-black text-xs border border-black ${
+                                  isGain ? "bg-emerald-300 text-black" : "bg-rose-300 text-black"
+                                }`}
+                              >
+                                {ret >= 0 ? "+" : ""}{ret.toFixed(2)}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChartModalStock({
+                                    symbol: s.symbol,
+                                    date: s.entry_date,
+                                    toDate: s.exit_date,
+                                    signalTime: s.entry_time,
+                                    signalPrice: s.entry_price,
+                                    exitTime: s.exit_time,
+                                    exitPrice: s.exit_price,
+                                    status: s.status,
+                                    scannerType: s.scanner_type,
+                                  });
+                                }}
+                                className="p-1 bg-[#FFE600] border border-black cursor-pointer shadow-[1px_1px_0px_#000]"
+                                title="شارت 15 دقيقة"
+                              >
+                                <BarChart2 className="w-4 h-4 text-black" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Target and Stop Loss Information */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">وقت وسعر الرصد</span>
+                              <span className="font-mono text-black dark:text-white text-[11px]">
+                                {s.entry_time} • {s.entry_price?.toFixed(2)} ج.م
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">المستهدف الأول 🎯</span>
+                              <span className="font-mono text-emerald-600 dark:text-emerald-400 text-[11px]">
+                                {s.target_1?.toFixed(2)} (+{s.target_1_pct}%)
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">وقف الخسارة 🛑</span>
+                              <span className="font-mono text-rose-600 dark:text-rose-400 text-[11px]">
+                                {s.stop_loss?.toFixed(2)} (-{s.stop_loss_pct}%)
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] text-zinc-500 block">الحالة الحالية</span>
+                              <span className="text-black dark:text-white text-[11px]">
+                                {isStillActive ? "نشطة بالجلسة" : s.exit_reason || "أُغلقت لاحقاً"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {selectedDaySignals.closedSignals.length === 0 && selectedDaySignals.createdSignals.length === 0 && (
+                <div className="py-8 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-800">
+                  <p className="text-xs font-bold text-zinc-500">
+                    {isAr ? "لا توجد صفقات أو إشارات مسجلة في هذا اليوم." : "No signals recorded on this day."}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -161,6 +161,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
     date: string;
     trades: ShortSwingTrade[];
     activeTrades?: ShortSwingTrade[];
+    createdTrades?: ShortSwingTrade[];
   } | null>(null);
   const [dayModalFilter, setDayModalFilter] = useState<"all" | "active" | "closed">("all");
 
@@ -292,11 +293,42 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
     };
   }, [data?.kpis]);
 
-  const activeTrades = data?.active_trades || [];
-  const closedTrades = data?.closed_trades || [];
+  // Strict Deduplication & Integrity Guard for Short Swings
+  const cleanClosedTrades = useMemo(() => {
+    const seen = new Set<string>();
+    const list: ShortSwingTrade[] = [];
+    (data?.closed_trades || []).forEach((t) => {
+      if (!t || !t.symbol) return;
+      const key = (t as any).id || `${t.symbol}_${t.entry_date || t.signal_date}_${t.exit_date}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(t);
+      }
+    });
+    return list;
+  }, [data?.closed_trades]);
+
+  const cleanActiveTrades = useMemo(() => {
+    const closedKeys = new Set(cleanClosedTrades.map((t) => `${t.symbol}_${t.entry_date || t.signal_date}`));
+    const seen = new Set<string>();
+    const list: ShortSwingTrade[] = [];
+    (data?.active_trades || []).forEach((t) => {
+      if (!t || !t.symbol) return;
+      const entryD = t.entry_date || t.signal_date;
+      const key = (t as any).id || `${t.symbol}_${entryD}`;
+      if (!seen.has(key) && !closedKeys.has(`${t.symbol}_${entryD}`)) {
+        seen.add(key);
+        list.push(t);
+      }
+    });
+    return list;
+  }, [data?.active_trades, cleanClosedTrades]);
+
+  const activeTrades = cleanActiveTrades;
+  const closedTrades = cleanClosedTrades;
   const userHasPro = data?.is_pro ?? isPro;
 
-  // Group closed trades by month & date
+  // Group closed trades by exit_date (when trade finished)
   const tradesByDate = useMemo(() => {
     const map = new Map<string, ShortSwingTrade[]>();
     closedTrades.forEach((t) => {
@@ -320,6 +352,28 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
     });
     return map;
   }, [activeTrades]);
+
+  // Group all trades by entry_date (when trade was initiated)
+  const allTradesByEntryDate = useMemo(() => {
+    const map = new Map<string, ShortSwingTrade[]>();
+    closedTrades.forEach((t) => {
+      const d = t.entry_date || t.signal_date;
+      if (!d) return;
+      const arr = map.get(d) || [];
+      arr.push(t);
+      map.set(d, arr);
+    });
+    activeTrades.forEach((t) => {
+      const d = t.entry_date || t.signal_date;
+      if (!d) return;
+      const arr = map.get(d) || [];
+      if (!arr.some((ex) => (ex as any).id && (t as any).id ? (ex as any).id === (t as any).id : ex.symbol === t.symbol && (ex.entry_date || ex.signal_date) === (t.entry_date || t.signal_date))) {
+        arr.push(t);
+      }
+      map.set(d, arr);
+    });
+    return map;
+  }, [closedTrades, activeTrades]);
 
   // Active trades in current viewed month / preset trades
   const viewedActiveTrades = useMemo(() => {
@@ -1200,10 +1254,12 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <div
                       key={`${cell.dateStr}-${idx}`}
                       onClick={() => {
+                        const dayCreated = allTradesByEntryDate.get(cell.dateStr) || [];
                         setSelectedDayTrades({
                           date: cell.dateStr,
                           trades: dayTrades,
-                          activeTrades: dayActive.length > 0 ? dayActive : (isToday ? activeTrades : [])
+                          activeTrades: dayActive.length > 0 ? dayActive : (isToday ? activeTrades : []),
+                          createdTrades: dayCreated,
                         });
                         setDayModalFilter(dayActive.length > 0 && dayTrades.length === 0 ? "active" : "all");
                       }}
@@ -2762,15 +2818,15 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
 
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold pt-2 border-t border-zinc-200 dark:border-zinc-800">
                           <div>
-                            <span className="text-zinc-500 text-[10px] block">سعر الدخول</span>
+                            <span className="text-zinc-500 text-[10px] block">تاريخ وسعر الدخول</span>
                             <span className="font-mono text-black dark:text-white">
-                              {t.is_locked ? "🔒 مشفر" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
+                              {t.is_locked ? "🔒 مشفر" : `${t.entry_date || t.signal_date ? `${t.entry_date || t.signal_date} • ` : ""}${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
                             </span>
                           </div>
                           <div>
-                            <span className="text-zinc-500 text-[10px] block">سعر الخروج</span>
+                            <span className="text-zinc-500 text-[10px] block">تاريخ وسعر الخروج</span>
                             <span className="font-mono text-black dark:text-white">
-                              {t.is_locked ? "🔒 مشفر" : `${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ج.م`}
+                              {t.is_locked ? "🔒 مشفر" : `${t.exit_date ? `${t.exit_date} • ` : ""}${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ج.م`}
                             </span>
                           </div>
                           <div>

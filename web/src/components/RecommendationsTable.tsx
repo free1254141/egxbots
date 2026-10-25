@@ -638,7 +638,15 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     );
 
     const tabCounts = useMemo(() => {
-        let items = recommendations;
+        const seenKeys = new Set<string>();
+        const deduped = recommendations.filter(r => {
+            if (r.locked === true) return true;
+            const key = r.id || `${r.symbol}_${r.created_at}_${r.status}`;
+            if (seenKeys.has(key)) return false;
+            seenKeys.add(key);
+            return true;
+        });
+        let items = deduped;
         if (shariaOnly) {
             items = items.filter(r => r.locked === true || isShariaCompliant(r.symbol));
         }
@@ -673,7 +681,15 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
 
     // Client-side filtering and sorting
     const processedRows = useMemo(() => {
-        let items = [...recommendations];
+        const seenKeys = new Set<string>();
+        const deduped = recommendations.filter(r => {
+            if (isLockedRow(r)) return true;
+            const key = r.id || `${r.symbol}_${r.created_at}_${r.status}`;
+            if (seenKeys.has(key)) return false;
+            seenKeys.add(key);
+            return true;
+        });
+        let items = [...deduped];
 
         if (searchTerm.trim()) {
             const q = searchTerm.toLowerCase();

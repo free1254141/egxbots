@@ -93,6 +93,28 @@ export async function GET() {
           closedSignals = derived.closedSignals;
           signalsKpis = derived.kpis;
         }
+
+        // Strict Deduplication & Integrity Guard:
+        const closedMap = new Map<string, any>();
+        for (const s of (closedSignals || [])) {
+          if (!s || !s.symbol) continue;
+          const key = s.id || `${s.symbol}_${s.entry_date}_${s.scanner_type}_${s.exit_date || ""}`;
+          if (!closedMap.has(key)) {
+            closedMap.set(key, s);
+          }
+        }
+        closedSignals = Array.from(closedMap.values());
+        const closedKeys = new Set(closedSignals.map((s: any) => `${s.symbol}_${s.entry_date}_${s.scanner_type}`));
+
+        const activeMap = new Map<string, any>();
+        for (const s of (activeSignals || [])) {
+          if (!s || !s.symbol) continue;
+          const key = s.id || `${s.symbol}_${s.entry_date}_${s.scanner_type}`;
+          if (!activeMap.has(key) && !closedKeys.has(key) && s.status === "active") {
+            activeMap.set(key, s);
+          }
+        }
+        activeSignals = Array.from(activeMap.values());
       }
     } catch (e) {
       console.warn("Could not load bot_states for user calendar:", e);

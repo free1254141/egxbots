@@ -104,6 +104,9 @@ export function formatTelegramTradePlanSnippet(entryPrice: number, scannerType: 
 export interface TrackedScannerSignal {
   id: string;
   symbol: string;
+  name_ar?: string;
+  name_en?: string;
+  sector?: string;
   scanner_type: ScannerType;
   entry_price: number;
   entry_date: string;

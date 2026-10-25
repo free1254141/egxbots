@@ -1071,7 +1071,15 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     );
                 }
             }
-            setRecommendations(visibleRecommendations);
+            // Strict Deduplication Guard
+            const seenRecKeys = new Set<string>();
+            const dedupedRecommendations = visibleRecommendations.filter((row: any) => {
+                const key = row.id || `${row.symbol}_${row.created_at}_${row.status}`;
+                if (seenRecKeys.has(key)) return false;
+                seenRecKeys.add(key);
+                return true;
+            });
+            setRecommendations(dedupedRecommendations);
             recommendationsUserRef.current = userId;
             loadedLandingRef.current = isLandingPage;
             recommendationsLoadedAtRef.current = Date.now();
