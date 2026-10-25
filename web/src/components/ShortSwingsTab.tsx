@@ -163,7 +163,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
     activeTrades?: ShortSwingTrade[];
     createdTrades?: ShortSwingTrade[];
   } | null>(null);
-  const [dayModalFilter, setDayModalFilter] = useState<"all" | "active" | "closed">("all");
+  const [dayModalFilter, setDayModalFilter] = useState<"all" | "created" | "closed">("all");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -202,7 +202,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       trades: dayTrades,
       activeTrades: dayActive.length > 0 ? dayActive : activeTrades,
     });
-    setDayModalFilter(dayActive.length > 0 && dayTrades.length === 0 ? "active" : "all");
+    setDayModalFilter("all");
   };
 
   // Active trades state
@@ -1261,7 +1261,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                           activeTrades: dayActive.length > 0 ? dayActive : (isToday ? activeTrades : []),
                           createdTrades: dayCreated,
                         });
-                        setDayModalFilter(dayActive.length > 0 && dayTrades.length === 0 ? "active" : "all");
+                        setDayModalFilter("all");
                       }}
                       className={`min-h-[75px] sm:min-h-[100px] p-2 border-2 flex flex-col justify-between transition-all select-none relative cursor-pointer ${
                         isToday
@@ -2657,7 +2657,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
             </div>
 
             {/* Filter tabs if both exist */}
-            {selectedDayTrades.trades.length > 0 && (selectedDayTrades.activeTrades?.length || 0) > 0 && (
+            {(selectedDayTrades.trades.length > 0 || (selectedDayTrades.createdTrades?.length || 0) > 0 || (selectedDayTrades.activeTrades?.length || 0) > 0) && (
               <div className="flex items-center gap-1.5 border-2 border-black bg-zinc-100 dark:bg-zinc-900 p-0.5 text-xs font-bold">
                 <button
                   onClick={() => setDayModalFilter("all")}
@@ -2665,15 +2665,15 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     dayModalFilter === "all" ? "bg-[#FFE600] text-black font-black border border-black" : "text-zinc-500"
                   }`}
                 >
-                  الكل ({selectedDayTrades.trades.length + (selectedDayTrades.activeTrades?.length || 0)})
+                  الكل ({selectedDayTrades.trades.length + (selectedDayTrades.createdTrades?.length || 0)})
                 </button>
                 <button
-                  onClick={() => setDayModalFilter("active")}
+                  onClick={() => setDayModalFilter("created")}
                   className={`px-3 py-1 transition-all ${
-                    dayModalFilter === "active" ? "bg-amber-400 text-black font-black border border-black" : "text-zinc-500"
+                    dayModalFilter === "created" ? "bg-amber-400 text-black font-black border border-black" : "text-zinc-500"
                   }`}
                 >
-                  قيد التداول ({selectedDayTrades.activeTrades?.length || 0})
+                  إشارات رُصدت بالجلسة ({selectedDayTrades.createdTrades?.length || 0})
                 </button>
                 <button
                   onClick={() => setDayModalFilter("closed")}
@@ -2681,7 +2681,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     dayModalFilter === "closed" ? "bg-black text-[#FFE600] font-black border border-black" : "text-zinc-500"
                   }`}
                 >
-                  المغلقة ({selectedDayTrades.trades.length})
+                  صفقات أُغلقت بالجلسة ({selectedDayTrades.trades.length})
                 </button>
               </div>
             )}
@@ -2778,7 +2778,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                   ))}
 
                   {/* Closed Trades */}
-                  {dayModalFilter !== "active" && selectedDayTrades.trades.map((t, i) => {
+                  {(dayModalFilter === "created" ? (selectedDayTrades.createdTrades || []).filter((x) => x.exit_date) : selectedDayTrades.trades).map((t, i) => {
                     const isWin = t.return_pct != null && t.return_pct > 0;
                     return (
                       <div
