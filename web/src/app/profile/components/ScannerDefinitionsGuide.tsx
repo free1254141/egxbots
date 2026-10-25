@@ -103,9 +103,9 @@ export default function ScannerDefinitionsGuide({ isAr = true }: ScannerDefiniti
       explanationEn:
         "Catches strong technical bounces from deep oversold levels (RSI ≤ 28) with a confirmed green reversal tick (+1.0%) and a strict cliff guard to avoid falling knives.",
       tradingTipsAr: [
-        "الهدف الربحي المقترح: +4.0% | وقف الخسارة الأولي الصارم: -2.8%.",
-        "تأمين التعادل الذكي (Breakeven): يرتفع الوقف لسعر الدخول فورياً بمجرد لمس +2.5% ربح.",
-        "هذه الاستراتيجية للمضاربة السريعة (Mean Reversion)؛ ينصح بجني الأرباح فور الوصول للهدف أو عودة RSI لمستوى 45-50."
+        "المستهدف الفني الاسترشادي: +4.0% | مستوى إيقاف الخسارة الصارم: -2.8%.",
+        "تأمين التعادل الذكي (Breakeven): يرتفع الوقف لسعر الرصد فورياً بمجرد لمس +2.5% صعود.",
+        "هذه المنهجية مخصصة للارتداد الفني قصير الأجل (Mean Reversion)؛ يُفضل متابعة المستهدفات أو عودة مؤشر RSI لمستوى 45-50."
       ],
       tradingTipsEn: [
         "Target: +4.0% | Strict Stop-Loss: -2.8%.",

@@ -497,12 +497,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   if (hasAnyFreshMatches && targetChatIds.length > 0) {
     // Construct sleek, smart institutional Arabic Message for VIP Channel
     const regimeBadge = isMarketHealthyForBuying
-      ? `إيجابي داعم للمضاربة 🟢`
-      : `حذر انتقائي — وضع القناص 🎯`;
+      ? `إيجابي داعم للزخم الفني 🟢`
+      : `حذر انتقائي — فلترة السيولة الذكية 🎯`;
     const totalSignalsInBatch = freshVolume.length + freshBreakout.length + freshOversold.length;
 
     const lines: string[] = [
-      `⚡ <b>رادار التدفقات اللحظي الذكي — EGX BOTS VIP</b>`,
+      `⚡ <b>رادار الرصد اللحظي الذكي — EGX BOTS VIP</b>`,
       `🧭 <b>حالة السوق:</b> ${regimeBadge} <i>(السيولة الصاعدة: ${breadthAboveEma20Pct.toFixed(0)}%)</i>`,
       `━━━━━━━━━━━━━━━━━━━━`,
     ];
@@ -547,7 +547,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
 
     if (freshOversold.length > 0) {
-      lines.push(`💎 <b>ارتداد ذكي من تشبع بيعي عميق (RSI Sniper Bounce)</b>`);
+      lines.push(`💎 <b>ارتداد فني من تشبع بيعي عميق (RSI Technical Rebound)</b>`);
       for (const o of freshOversold) {
         const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
         const changeStr = `${o.change_pct >= 0 ? "+" : ""}${Number(o.change_pct).toFixed(1)}%`;
@@ -555,7 +555,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         const rrRatio = (plan.target1Pct / Math.max(0.5, plan.stopLossPct)).toFixed(1);
         lines.push(
           `🟢 <b>#${o.symbol}</b>  |  <b>${o.close.toFixed(2)} ج.م</b>  (<b>${changeStr}</b>)\n` +
-          `   📈 مؤشر RSI: <b>${Math.round(Number(o.rsi_14))}</b> (ارتداد شرائي)  •  ⚖️ العائد/المخاطرة: <b>1:${rrRatio}</b>\n` +
+          `   📈 مؤشر RSI: <b>${Math.round(Number(o.rsi_14))}</b> (ارتداد فني)  •  ⚖️ العائد/المخاطرة: <b>1:${rrRatio}</b>\n` +
           `   🎯 الهدف الأول: <b>${plan.target1.toFixed(2)} ج.م</b> (+${plan.target1Pct.toFixed(1)}%)\n` +
           `   🚀 الهدف الممتد: <b>${plan.target2.toFixed(2)} ج.م</b> (+${plan.target2Pct.toFixed(1)}%)\n` +
           `   🛡️ تأمين التعادل: تلقائياً عند <b>${breakevenTrigger} ج.م</b> (+2.5%)\n` +
@@ -575,10 +575,10 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
     lines.push(`━━━━━━━━━━━━━━━━━━━━`);
     if (totalSignalsInBatch > 0) {
-      lines.push(`⏱️ <b>أفق الاحتفاظ:</b> 1 إلى 4 جلسات  |  🛡️ <b>حماية آلية عند +2.5%</b>`);
+      lines.push(`⏱️ <b>أفق المتابعة:</b> 1 إلى 4 جلسات  |  🛡️ <b>حماية آلية عند +2.5%</b>`);
     }
     lines.push(`🕒 <b>توقيت الرصد:</b> ${cairoTime.timeStr} بتوقيت القاهرة`);
-    lines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">فتح الشارت التفاعلي (15 دقيقة) ولوحة التتبع الحية</a>`);
+    lines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">فتح الشارت التفاعلي (15 دقيقة) ولوحة إشارات الرصد اللحظي</a>`);
 
     const text = lines.join("\n");
     for (const chatId of targetChatIds) {
@@ -854,15 +854,15 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
           }
         }
         hitLines.push(`━━━━━━━━━━━━━━━━━━━━`);
-        hitLines.push(`💡 <i>إدارة المحفظة: جني الأرباح أولاً بأول وتأمين نقطة الدخول سر استدامة النمو.</i>`);
-        hitLines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">عرض الشارت التفاعلي للصفقات المغلقة بالبروفايل</a>`);
+        hitLines.push(`💡 <i>إدارة المحفظة: متابعة المستهدفات الفنية وتأمين نقطة الدخول سر استدامة النمو.</i>`);
+        hitLines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">عرض الشارت التفاعلي للإشارات المغلقة بلوحة الرصد اللحظي</a>`);
         await sendTelegramAlert(chatId, hitLines.join("\n"));
 
         // Dispatch winning target hits to the Free channel as Social Proof / Subscription Hook
         const winningHits = dedupHitSignals.filter((s) => Number(s.return_pct || 0) > 0);
         if (winningHits.length > 0 && !options.singleRecipientChatId) {
           const freeLines: string[] = [
-            `🎯 <b>تحقيق هدف جديد في صفقات السوينج السريع — EGX BOTS</b> 🚀`,
+            `🎯 <b>تحقيق مستهدف فني في إشارات الرصد اللحظي — EGX BOTS</b> 🚀`,
             `━━━━━━━━━━━━━━━━━━━━`,
           ];
           for (const s of winningHits) {
@@ -870,15 +870,15 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
             const exitPrice = Number(s.exit_price || s.current_price || s.target_1).toFixed(2);
             const peakGainStr = s.max_gain_pct ? `+${Number(s.max_gain_pct).toFixed(1)}%` : retStr;
             freeLines.push(
-              `✅ <b>#${s.symbol}</b> — <b>حقق الهدف بنجاح! 🎉</b>\n` +
-              `   • سعر الدخول في الإشارة: <b>${s.entry_price.toFixed(2)} ج.م</b>\n` +
-              `   • سعر الخروج / الهدف: <b>${exitPrice} ج.م</b>\n` +
+              `✅ <b>#${s.symbol}</b> — <b>حقق المستهدف الفني بنجاح! 🎉</b>\n` +
+              `   • سعر رصد الإشارة: <b>${s.entry_price.toFixed(2)} ج.م</b>\n` +
+              `   • سعر الإغلاق / المستهدف: <b>${exitPrice} ج.م</b>\n` +
               `   • <b>صافي العائد المحقق: ${retStr}</b> 📈 (أعلى قمة وصلها: <b>${peakGainStr}</b>)`
             );
           }
           freeLines.push(`━━━━━━━━━━━━━━━━━━━━`);
-          freeLines.push(`⚡ <i>هذه التوصية أُرسلت لحظياً لمشتركي VIP وقت انطلاق السهم بنقاط الدخول والوقف المحسوب بدقة.</i>\n`);
-          freeLines.push(`🔥 لا تفوّت صفقات الجلسة القادمة — احجز مقعدك الآن في <b>باقة المؤسسين بـ 50 ج.م فقط شهرياً</b> بدلاً من 200 ج.م!`);
+          freeLines.push(`⚡ <i>تم رصد هذه الإشارة الفنية الخوارزمية لحظياً لمشتركي VIP وقت انطلاق السهم بمستويات الرصد والوقف المحسوبة آلياً.</i>\n`);
+          freeLines.push(`🔥 لا تفوّت إشارات الجلسة القادمة — احجز مقعدك الآن في <b>باقة المؤسسين بـ 50 ج.م فقط شهرياً</b> بدلاً من 200 ج.م!`);
           freeLines.push(`👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing`);
           await sendTelegramAlert(FREE_CHANNEL_CHAT_ID, freeLines.join("\n"));
         }
@@ -894,13 +894,13 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
           const exitPrice = Number(s.exit_price || s.current_price || s.stop_loss).toFixed(2);
           slLines.push(
             `🛑 <b>#${s.symbol}</b> — <b>تفعيل وقف الخسارة الصارم</b>\n` +
-            `   • سعر الدخول: <b>${s.entry_price.toFixed(2)} ج.م</b>  ←  الخروج: <b>${exitPrice} ج.م</b>\n` +
+            `   • سعر الرصد: <b>${s.entry_price.toFixed(2)} ج.م</b>  ←  الإغلاق: <b>${exitPrice} ج.م</b>\n` +
             `   • صافي التراجع المحدود: <b>${retStr}</b> (تحرير السيولة لفرصة أقوى)`
           );
         }
         slLines.push(`━━━━━━━━━━━━━━━━━━━━`);
         slLines.push(`⚖️ <i>قاعدة ذهبية: قطع الخسارة مبكراً عند -2.5% / -3.0% يحمي المحفظة من أي تصحيح عنيف.</i>`);
-        slLines.push(`📲 <a href="https://egxbots.com/profile#scanner-signals">مراجعة سجل الصفقات والشارت اللحظي بالبروفايل</a>`);
+        slLines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">مراجعة سجل الإشارات والشارت اللحظي بلوحة الرصد</a>`);
         await sendTelegramAlert(chatId, slLines.join("\n"));
       }
     }
