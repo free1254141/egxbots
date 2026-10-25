@@ -49,7 +49,7 @@ export async function GET() {
         .from("subscriptions")
         .select("plan_id, status, current_period_end")
         .eq("user_id", user.id)
-        .eq("status", "active")
+        .in("status", ["active", "trialing"])
         .limit(1),
       client
         .from("profiles")
@@ -115,7 +115,10 @@ export async function GET() {
       ? activeSignals.map((s: any) => ({ ...s, is_locked: false }))
       : activeSignals.map((s: any) => ({
           ...s,
-          symbol: "••••",
+          symbol: s.symbol,
+          name_ar: s.name_ar || s.symbol,
+          name_en: s.name_en || s.symbol,
+          sector: s.sector || null,
           entry_price: null,
           current_price: null,
           target_1: null,
@@ -145,19 +148,28 @@ export async function GET() {
             stage_results: {
               volume_surge: (stageResults.volume_surge || []).map((s: any) => ({
                 ...s,
-                symbol: "••••",
+                symbol: s.symbol,
+          name_ar: s.name_ar || s.symbol,
+          name_en: s.name_en || s.symbol,
+          sector: s.sector || null,
                 close: null,
                 is_locked: true,
               })),
               breakout: (stageResults.breakout || []).map((s: any) => ({
                 ...s,
-                symbol: "••••",
+                symbol: s.symbol,
+          name_ar: s.name_ar || s.symbol,
+          name_en: s.name_en || s.symbol,
+          sector: s.sector || null,
                 close: null,
                 is_locked: true,
               })),
               rsi_oversold: (stageResults.rsi_oversold || []).map((s: any) => ({
                 ...s,
-                symbol: "••••",
+                symbol: s.symbol,
+          name_ar: s.name_ar || s.symbol,
+          name_en: s.name_en || s.symbol,
+          sector: s.sector || null,
                 close: null,
                 is_locked: true,
               })),

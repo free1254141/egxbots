@@ -82,6 +82,25 @@ export function cairoWeekBounds(now = new Date()) {
     return { thisWeekStartIso, lastWeekStartIso };
 }
 
+/**
+ * 15-minute intraday scanner signals have a 1–3 session horizon.
+ * Filter out stale signals that remained in active_signals beyond max_sessions (default 3 EGX sessions).
+ */
+export function isFreshIntradayScannerSignal(sig: any, cairoDateStr: string): boolean {
+    const entryDate = String(sig?.entry_date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate) || !/^\d{4}-\d{2}-\d{2}$/.test(cairoDateStr)) return true;
+    const startMs = Date.parse(`${entryDate}T00:00:00Z`);
+    const endMs = Date.parse(`${cairoDateStr}T00:00:00Z`);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return true;
+    let egxSessions = 0;
+    for (let ms = startMs; ms <= endMs; ms += 86400_000) {
+        const day = new Date(ms).getUTCDay();
+        if (day !== 5 && day !== 6) egxSessions++;
+    }
+    const maxSessions = Number(sig?.max_sessions) > 0 ? Number(sig.max_sessions) : 3;
+    return egxSessions <= maxSessions;
+}
+
 export async function executeAgenticTool(toolName:string,args:Record<string,any>,supabase:any,userId:string,chartHistoryCache?:ChartHistoryCache):Promise<any> {
     try {
         const enums:Record<string,string[]> = {
@@ -302,7 +321,7 @@ async function executeRawTool(
                     .maybeSingle();
                 const activeList = Array.isArray(botRow?.state?.active_signals) ? botRow.state.active_signals : [];
                 for (const s of activeList) {
-                    if (s.symbol && !scannerActiveMap.has(String(s.symbol).toUpperCase())) {
+                    if (s.symbol && isFreshIntradayScannerSignal(s, cairoTimeframeBounds().cairoDate) && !scannerActiveMap.has(String(s.symbol).toUpperCase())) {
                         scannerActiveMap.set(String(s.symbol).toUpperCase(), s);
                     }
                 }
@@ -351,7 +370,7 @@ async function executeRawTool(
                     try {
                         const { data: recRow } = await supabase
                             .from("scan_results")
-                            .select("signal, entry_price, target_price, stop_loss, status, signal_date")
+                            .select("signal, entry_price, target_price, stop_loss, status, created_at")
                             .eq("exchange", "EGX").eq("symbol", sym)
                             .in("status", ["open", "active"])
                             .order("created_at", { ascending: false })
@@ -359,7 +378,10 @@ async function executeRawTool(
                             .maybeSingle();
                         if (recRow) {
                             hasActiveRecommendation = true;
-                            activeRecommendation = recRow;
+                            activeRecommendation = {
+                                ...recRow,
+                                signal_date: String(recRow.created_at || "").slice(0, 10),
+                            };
                         } else if (scannerActiveMap.has(sym.toUpperCase())) {
                             const match = scannerActiveMap.get(sym.toUpperCase());
                             hasActiveRecommendation = true;
@@ -762,6 +784,7 @@ async function executeRawTool(
             });
             for (const sig of filterScannerBySymbols(sortedActive)) {
                 if (!sig.symbol) continue;
+                if (!isFreshIntradayScannerSignal(sig, cairoTimeframeBounds().cairoDate)) continue;
                 if (!isScannerDateInTimeframe(sig.entry_date)) continue;
                 if (!activeScannerMap.has(sig.symbol.toUpperCase())) {
                     activeScannerMap.set(sig.symbol.toUpperCase(), sig);

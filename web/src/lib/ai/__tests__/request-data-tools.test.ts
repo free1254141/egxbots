@@ -1,4 +1,5 @@
 import { executeRequestTool, knownSymbolHints, requestToolCost, recommendationVisibility } from '../request-data-tools';
+import { isFreshIntradayScannerSignal } from '../agentic-tools';
 import { advisoryFactRelations } from '../fact-relations';
 import { checkAgenticDraft, safeAgenticFallback, toAgenticEvidence } from '../agentic-publication';
 import { AGENTIC_TOOLS_SCHEMA } from '../agentic-pipeline';
@@ -151,4 +152,18 @@ test('checkAgenticDraft allows dates and descriptive percentages in commentary c
     });
     const table = '### AMOC\n| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |\n|---|---:|---|\n| الإغلاق الحالي | 13.48 | آخر إغلاق مسجل (جلسة 15-10) بنسبة 2.85% |\n| الدعم الأول | 12.18 | احتمال ارتداد 80% وحماية رأس المال |\n| المقاومة الأولى | 14.10 | حاجز فني قوي لآخر 20 جلسة |';
     expect(checkAgenticDraft(table, [e])).toEqual([]);
+
+    const hints = knownSymbolHints('اعملي تحليل لسهم اوراسكوم وبالتون شريعه');
+    const symbols = hints.flatMap(h => h.symbols);
+    expect(symbols).toContain('BTFH');
+    expect(symbols).toEqual(expect.arrayContaining(['ORAS', 'ORHD', 'OFH', 'OIH']));
+    expect(symbols).not.toContain('ELNA');
+    expect(knownSymbolHints('حلل سهم أوراسكوم للتنمية').flatMap(h => h.symbols)).toEqual(['ORHD']);
+    expect(knownSymbolHints('تحليل للنساجون الشرقيون').map(h => h.name)).toHaveLength(1);
+
+    const ungroundedReply = '### 📊 تحليل سهم أوراسكوم للتنمية (ORHD)\n| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |\n|---|---|---|\n| السعر الحالي | 9.80 | لقطة الجلسة |\n| الدعم الأول | 9.20 | قاع قريب |\n| RSI (14) | 18.50 | تشبع بيعي |';
+    expect(checkAgenticDraft(ungroundedReply, []).some(r => r.startsWith('table_value_not_grounded:ORHD:'))).toBe(true);
+
+    expect(isFreshIntradayScannerSignal({ entry_date: '2026-10-19', max_sessions: 3 }, '2026-10-25')).toBe(false);
+    expect(isFreshIntradayScannerSignal({ entry_date: '2026-10-22', max_sessions: 3 }, '2026-10-25')).toBe(true);
 });

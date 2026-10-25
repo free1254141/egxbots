@@ -627,6 +627,19 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     const returnPct = Number((((currPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
     const maxGainPct = Number((((highestPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
 
+    let elapsedSessions = sig.sessions_count || 1;
+    if (sig.entry_date && /^\d{4}-\d{2}-\d{2}$/.test(sig.entry_date) && /^\d{4}-\d{2}-\d{2}$/.test(cairoTime.dateStr)) {
+      const startMs = Date.parse(`${sig.entry_date}T00:00:00Z`);
+      const endMs = Date.parse(`${cairoTime.dateStr}T00:00:00Z`);
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+        let count = 0;
+        for (let ms = startMs; ms <= endMs; ms += 86400_000) {
+          const d = new Date(ms).getUTCDay();
+          if (d !== 5 && d !== 6) count++;
+        }
+        elapsedSessions = Math.max(elapsedSessions, count);
+      }
+    }
     let updatedSig: TrackedScannerSignal = {
       ...sig,
       current_price: currPrice,
@@ -634,6 +647,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       lowest_price: lowestPrice,
       return_pct: returnPct,
       max_gain_pct: Math.max(sig.max_gain_pct || 0, maxGainPct),
+      sessions_count: elapsedSessions,
       updated_at: new Date().toISOString(),
     };
 
@@ -686,7 +700,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         stoppedOutSignals.push(updatedSig);
       }
       currentClosed.unshift(updatedSig);
-    } else if (sig.sessions_count >= sig.max_sessions) {
+    } else if (updatedSig.sessions_count >= sig.max_sessions) {
       const exitPrice = currPrice;
       const realizedReturn = Number((((exitPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
       updatedSig = {

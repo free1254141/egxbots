@@ -15,9 +15,9 @@ function maskTradesForFreeUser(trades: any[], cutoffDate: string) {
         // The backend signal id contains the real ticker/date; do not expose
         // it to free users alongside the masked symbol.
         signal_id: null,
-        symbol: sym.length > 2 ? `${sym.slice(0, 2)}**` : "**",
-        name_ar: "سهم قيادي مشفر (متاح لـ PRO)",
-        name_en: "PRO Signal",
+        symbol: sym,
+        name_ar: t.name_ar || sym,
+        name_en: t.name_en || sym,
         sector: t.sector || "عام",
         entry_date: t.entry_date,
         signal_date: t.signal_date,
@@ -30,7 +30,7 @@ function maskTradesForFreeUser(trades: any[], cutoffDate: string) {
         return_pct: t.return_pct ?? 0,
         is_breakeven_protected: Boolean(t.is_breakeven_protected),
         max_gain_pct: t.max_gain_pct ?? 0,
-        trigger_type: "صفقة زخم وليدة مشفرة",
+        trigger_type: t.trigger_type || "إشارة زخم وليدة",
         status: t.status,
         is_pending_entry: isPending,
         is_locked: true,

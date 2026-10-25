@@ -107,15 +107,16 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
             .select("state, post_id, kind")
             .eq("session_date", session_date)
             .eq("platform", "facebook")
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if existing and existing.data and existing.data.get("state") == "published":
-            logger.info(f"[FB_AUTO] Session {session_date} already published on Facebook ({existing.data.get('post_id')})")
+        existing_row = existing.data[0] if (existing and existing.data and len(existing.data) > 0) else None
+        if existing_row and existing_row.get("state") == "published":
+            logger.info(f"[FB_AUTO] Session {session_date} already published on Facebook ({existing_row.get('post_id')})")
             return {
                 "status": "cached",
-                "post_id": existing.data.get("post_id"),
-                "kind": existing.data.get("kind"),
+                "post_id": existing_row.get("post_id"),
+                "kind": existing_row.get("kind"),
             }
     except Exception as e:
         logger.warning(f"[FB_AUTO] Check publication query warning: {e}")

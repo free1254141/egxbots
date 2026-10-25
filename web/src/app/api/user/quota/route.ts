@@ -34,7 +34,7 @@ export async function GET() {
       .from("subscriptions")
       .select("id, plan_id, status, current_period_start, current_period_end, created_at")
       .eq("user_id", user.id)
-      .eq("status", "active")
+      .in("status", ["active", "trialing"])
       .order("current_period_end", { ascending: false })
       .limit(5);
 
@@ -130,11 +130,37 @@ export async function GET() {
 
     const isLifetime = activeSub?.plan_id === "lifetime" || activeSub?.plan_id === "pro_lifetime";
 
+    // Query trial status and bonus balance
+    const [trialRes, bonusRes, profileRes] = await Promise.all([
+      clientForData
+        .from("subscription_trials")
+        .select("started_at, expires_at")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      clientForData.rpc("get_chat_bonus_balance", { p_user_id: user.id }),
+      clientForData
+        .from("profiles")
+        .select("telegram_chat_id")
+        .eq("id", user.id)
+        .maybeSingle(),
+    ]);
+
+    const hasUsedTrial = Boolean(trialRes.data);
+    const isTrialActive = trialRes.data?.expires_at
+      ? new Date(trialRes.data.expires_at).getTime() > Date.now()
+      : false;
+    const isTrial = activeSub?.status === "trialing" || activeSub?.provider === "trial" || isTrialActive;
+    const bonusBalance = Number(bonusRes.data || 0);
+    const telegramLinked = Boolean(profileRes.data?.telegram_chat_id);
+    const trialEligible = !hasUsedTrial && !pro;
+
     return NextResponse.json({
       ok: true,
       plan: {
         id: planName,
-        label: isLifetime ? "مدى الحياة (Lifetime)" : (pro ? "Pro" : "مجاني"),
+        label: isLifetime ? "مدى الحياة (Lifetime)" : (isTrial ? "تجربة Pro مجانية" : (pro ? "Pro" : "مجاني")),
+        is_trial: isTrial,
+        trial_eligible: trialEligible,
         is_pro: pro,
         is_lifetime: isLifetime,
         status: pro ? (activeSub?.status || "active") : (activeSub ? "canceled" : "none"),
@@ -142,12 +168,15 @@ export async function GET() {
         created_at: activeSub?.created_at || null,
         is_founding_member: isFoundingMember,
         founding_member_number: foundingMemberNumber,
+        bonus_credits: bonusBalance,
+        telegram_linked: telegramLinked,
       },
       quota: {
         chat_messages: {
           used: chatUsed,
           limit: chatLimit,
-          remaining: Math.max(0, chatLimit - chatUsed),
+          bonus_credits: bonusBalance,
+          remaining: Math.max(0, chatLimit - chatUsed) + (pro ? 0 : bonusBalance),
           percent: Math.min(100, Math.round((chatUsed / Math.max(1, chatLimit)) * 100)),
           period: quotaPeriod,
         },

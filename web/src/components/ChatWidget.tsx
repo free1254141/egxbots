@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -53,6 +53,59 @@ export default function ChatWidget() {
     } = useChat();
 
     const { language } = useLanguage();
+    const [foundersSeatsRemaining, setFoundersSeatsRemaining] = useState<number>(84);
+    const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
+    const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
+    const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (!showUpgradeModal) return;
+        let active = true;
+        fetch("/api/user/quota", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!active || !data?.ok) return;
+                if (data.plan?.trial_eligible !== undefined) {
+                    setTrialEligibleModal(Boolean(data.plan.trial_eligible));
+                }
+                if (data.plan?.telegram_linked !== undefined) {
+                    setTelegramLinkedModal(Boolean(data.plan.telegram_linked));
+                }
+            })
+            .catch(() => {});
+
+        fetch("/api/payment/easykash/config", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : null)
+            .then(cfg => {
+                if (active && cfg?.founders?.remaining !== undefined) {
+                    setFoundersSeatsRemaining(Number(cfg.founders.remaining));
+                }
+            })
+            .catch(() => {});
+
+        return () => { active = false; };
+    }, [showUpgradeModal]);
+
+    const handleActivateTrialFromModal = async () => {
+        setTrialStartingModal(true);
+        try {
+            const res = await fetch("/api/subscription/trial", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
+                setShowUpgradeModal(false);
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("egx:entitlements-updated", { detail: { is_pro: true } }));
+                }
+            } else {
+                toast.error(data?.message || "تعذر تفعيل التجربة");
+            }
+        } catch {
+            toast.error("حدث خطأ في الاتصال");
+        } finally {
+            setTrialStartingModal(false);
+        }
+    };
     const { user } = useAuth();
     const router = useRouter();
     let pathname = "";
@@ -959,7 +1012,7 @@ export default function ChatWidget() {
                                 لقد استهلكت رصيدك اليومي المجاني (5/5)
                             </h3>
                             <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
-                                🔥 <strong>عرض المؤسسين الأوائل:</strong> احجز مقعدك الآن بـ <strong>50 ج.م فقط شهرياً</strong> مدى الحياة (بدلاً من 200 ج.م) لأول 100 مشترك فقط!
+                                🔥 <strong>عرض المؤسسين:</strong> احجز مقعدك الآن بـ <strong>50 ج.م فقط شهرياً</strong> مدى الحياة (بدلاً من 200 ج.م) — باقي {foundersSeatsRemaining} مقعداً فقط!
                             </div>
                             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
                                 تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ انضم الآن لقناة الـ VIP واحصل على جميع مميزات Pro بدون قيود.
@@ -986,8 +1039,37 @@ export default function ChatWidget() {
                             </div>
                         </div>
 
-                        {/* CTA Buttons */}
-                        <div className="space-y-2 pt-2">
+                        {/* Conversion & Action Buttons */}
+                        <div className="space-y-2.5 pt-2">
+                            {trialEligibleModal && !isPro && (
+                                <button
+                                    onClick={handleActivateTrialFromModal}
+                                    disabled={trialStartingModal}
+                                    className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-xs sm:text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                    {trialStartingModal ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <>
+                                            <Sparkles className="w-4 h-4 text-yellow-300" />
+                                            <span>جرّب Pro الآن لمدة 3 أيام مجاناً ⚡</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
+
+                            {!telegramLinkedModal && (
+                                <a
+                                    href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "https://t.me/egxbots_bot"}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full py-2.5 px-3 bg-[#0088cc] hover:bg-[#0077b5] text-white font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                    <span>🎁 احصل على +10 رسائل فوراً عبر ربط تليجرام</span>
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                            )}
+
                             <button
                                 onClick={() => {
                                     setShowUpgradeModal(false);
@@ -996,12 +1078,13 @@ export default function ChatWidget() {
                                 }}
                                 className="w-full py-3 px-4 bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
                             >
-                                <span>اشترك الآن في Pro بـ 50 ج.م فقط ⚡</span>
+                                <span>احجز مقعد المؤسسين بـ 50 ج.م فقط شهرياً ⚡</span>
                                 <span>←</span>
                             </button>
+
                             <button
                                 onClick={() => setShowUpgradeModal(false)}
-                                className="w-full py-2 px-4 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                                className="w-full py-1.5 px-4 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                             >
                                 المتابعة غداً مع تجدد الرصيد المجاني
                             </button>

@@ -803,7 +803,7 @@ export async function executeTools(supabase: any, plannerResult: PlannerResult, 
             const compareSymbols = symbols.length >= 2 ? symbols.slice(0, 2) : [];
             if (compareSymbols.length === 2) {
                 const [sym1, sym2] = compareSymbols;
-                const [pricesData, techsData, stocksData] = await Promise.all([
+                const [pricesData, techsData, stocksData, heatmapData] = await Promise.all([
                     Promise.all([
                         supabase.from("stock_prices").select("symbol, close, volume, date").ilike("symbol", sym1).order("date", { ascending: false }).limit(1).maybeSingle(),
                         supabase.from("stock_prices").select("symbol, close, volume, date").ilike("symbol", sym2).order("date", { ascending: false }).limit(1).maybeSingle()
@@ -812,7 +812,8 @@ export async function executeTools(supabase: any, plannerResult: PlannerResult, 
                         supabase.from("stock_technical_indicators").select("symbol, rsi_14, macd_signal, change_pct, volume, vol_sma20, adx_14").ilike("symbol", sym1).order("date", { ascending: false }).limit(1).maybeSingle(),
                         supabase.from("stock_technical_indicators").select("symbol, rsi_14, macd_signal, change_pct, volume, vol_sma20, adx_14").ilike("symbol", sym2).order("date", { ascending: false }).limit(1).maybeSingle()
                     ]),
-                    supabase.from("stocks").select("symbol, name, sector").or(`symbol.ilike.${sym1},symbol.ilike.${sym2}`)
+                    supabase.from("stocks").select("symbol, name").or(`symbol.ilike.${sym1},symbol.ilike.${sym2}`),
+                    supabase.from("market_heatmap").select("symbol, sector").or(`symbol.ilike.${sym1},symbol.ilike.${sym2}`).limit(10)
                 ]);
 
                 const p1 = pricesData[0]?.data;
@@ -820,7 +821,12 @@ export async function executeTools(supabase: any, plannerResult: PlannerResult, 
                 const t1 = techsData[0]?.data;
                 const t2 = techsData[1]?.data;
                 const sMap = new Map<string, any>();
-                (stocksData.data || []).forEach((s: any) => { if (s?.symbol) sMap.set(s.symbol.toUpperCase(), s); });
+                (stocksData.data || []).forEach((s: any) => { if (s?.symbol) sMap.set(s.symbol.toUpperCase(), { ...s }); });
+                (heatmapData.data || []).forEach((h: any) => {
+                    if (h?.symbol && sMap.has(h.symbol.toUpperCase())) {
+                        sMap.get(h.symbol.toUpperCase()).sector = h.sector;
+                    }
+                });
 
                 if (p1 || p2 || t1 || t2) {
                     outputText += `\n📊 [مقارنة بين ${sym1} و ${sym2}]:\n`;

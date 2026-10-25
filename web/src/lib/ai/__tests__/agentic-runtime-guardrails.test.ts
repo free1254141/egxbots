@@ -75,13 +75,14 @@ describe("agentic-runtime pure guardrails (offline; no provider or chatbot calls
         test("session memory excludes stale, errored, unsupported-source, and non-memory evidence", () => {
             const now = new Date("2026-10-10T12:00:00.000Z");
             const recent = { ...stockEvidence("COMI", 124), captured_at: "2026-10-10T11:00:00.000Z" };
+            const liveReconciled = { ...stockEvidence("ORHD", 9.8), source: "tradingview:provider-snapshot", captured_at: "2026-10-10T11:30:00.000Z" };
             const stale = { ...stockEvidence("SWDY", 80), captured_at: "2026-10-09T11:00:00.000Z" };
             const errored = { ...stockEvidence("TMGH", 88), availability: "error" as const, captured_at: now.toISOString() };
             const untrustedSource = { ...stockEvidence("EAST", 25), source: "external:fixture", captured_at: now.toISOString() };
             const writeTool = { ...stockEvidence("AFMC", 152), tool: "manage_portfolio", captured_at: now.toISOString() };
 
-            expect(evidenceMemory([recent, stale, errored, untrustedSource, writeTool], now).map(item => item.symbols[0]))
-                .toEqual(["COMI"]);
+            expect(evidenceMemory([recent, liveReconciled, stale, errored, untrustedSource, writeTool], now).map(item => item.symbols[0]))
+                .toEqual(["COMI", "ORHD"]);
         });
 
         test("session memory stays within both the six-record and eight-kilobyte limits", () => {

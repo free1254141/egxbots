@@ -139,15 +139,16 @@ def execute_publication_slot(
             .eq("session_date", session_date)
             .eq("platform", "facebook")
             .eq("kind", slot["preferred_kind"])
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if existing and existing.data and existing.data.get("state") == "published":
+        existing_row = existing.data[0] if (existing and existing.data and len(existing.data) > 0) else None
+        if existing_row and existing_row.get("state") == "published":
             with _completed_slots_lock:
                 _completed_slots_today.add(slot_key)
             return {
                 "status": "already_published",
-                "post_id": existing.data.get("post_id"),
+                "post_id": existing_row.get("post_id"),
                 "session_date": session_date,
                 "kind": slot["preferred_kind"],
             }

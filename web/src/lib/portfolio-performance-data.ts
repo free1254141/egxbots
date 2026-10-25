@@ -39,9 +39,8 @@ export async function loadPortfolioPerformance(
   const holdings: PerformanceHolding[] = positions || [];
   if (holdings.length) {
     const { data: sectors, error: sectorError } = await market
-      .from("stocks")
+      .from("market_heatmap")
       .select("symbol,sector")
-      .eq("exchange", "EGX")
       .in(
         "symbol",
         holdings.map((p) => p.symbol),

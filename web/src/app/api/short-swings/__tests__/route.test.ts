@@ -35,8 +35,8 @@ describe("GET /api/short-swings Route", () => {
         name_ar: "البنك التجاري الدولي",
         name_en: "CIB",
         sector: "بنوك",
-        entry_date: "2026-10-06",
-        signal_date: "2026-10-06",
+        entry_date: new Date().toISOString().slice(0, 10),
+        signal_date: new Date().toISOString().slice(0, 10),
         entry_price: 100.0,
         current_price: 105.0,
         reference_close: 100.0,
@@ -93,7 +93,7 @@ describe("GET /api/short-swings Route", () => {
     expect(body.active_trades).toHaveLength(1);
     const active = body.active_trades[0];
     expect(active.is_locked).toBe(true);
-    expect(active.symbol).toBe("CO**");
+    expect(active.symbol).toBe("COMI");
     expect(active.entry_price).toBeNull();
     expect(active.current_price).toBeNull();
     expect(active.reference_close).toBeNull();

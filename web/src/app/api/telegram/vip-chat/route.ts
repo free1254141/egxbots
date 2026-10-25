@@ -474,7 +474,7 @@ export async function POST(req: NextRequest) {
             .slice(-14)
             .map((h: any) => ({
                 role: h.role === "assistant" ? "assistant" : "user",
-                content: String(h.content || "").slice(0, 500),
+                content: String(h.content || "").slice(0, 1600),
             }));
 
         const deepSeekKey = getDeepSeekApiKey();
@@ -514,7 +514,7 @@ export async function POST(req: NextRequest) {
             { role: "user", content: rawMessage, created_at: new Date().toISOString() },
             {
                 role: "assistant",
-                content: String(result.response || "").slice(0, 1200),
+                content: String(result.response || "").slice(0, 1600),
                 created_at: new Date().toISOString(),
             },
         ];
@@ -531,7 +531,7 @@ export async function POST(req: NextRequest) {
                         ? Number(userInfo.stateRow?.daily_count || 0) + 1
                         : 1,
                 session_state: updatedSessionState,
-                session_summary: sessionSummary || {},
+                session_summary: (result as any).summary_state || sessionSummary || {},
                 chat_history: updatedHistory,
                 pending_prompt: null,
                 updated_at: new Date().toISOString(),
@@ -552,6 +552,7 @@ export async function POST(req: NextRequest) {
                     user_id: auditUserId,
                     title: `${roomPrefix} ${rawMessage.slice(0, 28)}`,
                     state: updatedSessionState,
+                    summary_state: (result as any).summary_state || sessionSummary || {},
                     is_deleted_by_user: false,
                     updated_at: new Date().toISOString(),
                 },

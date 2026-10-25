@@ -608,7 +608,24 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 const calls: AgenticToolCall[] = assistant.tool_calls || [];
                 yield { type: "plan", data: { intent: calls.length ? "agentic_tools" : "general_chat",
                     tools: calls.map(c => c.function?.name), entities: { symbols: [...usedSymbols] }, round } };
-                if (!calls.length) { const decoded=decodeAnswer(assistant); draft=decoded.answer; social=decoded.social; if (assistant.incomplete) finishFailure="incomplete_writer_draft"; break; }
+                if (!calls.length) {
+                    const decoded = decodeAnswer(assistant);
+                    draft = decoded.answer;
+                    social = decoded.social;
+                    if (assistant.incomplete) finishFailure = "incomplete_writer_draft";
+                    if (round === 0 && !social && !assistant.incomplete && providerCalls < AGENTIC_BUDGET.providerCalls && remainingExecutionMs() > 3500) {
+                        const earlyEvidence = [...previousEvidence, ...evidence, ...(currentImageEvidence() ? [currentImageEvidence()!] : [])];
+                        const earlyIssues = checkAgenticDraft(draft, earlyEvidence, userMessage, evidence);
+                        if (earlyIssues.some(r => r.startsWith("table_value_not_grounded:") || r === "ungrounded_technical_table_without_evidence" || r === "claimed_refresh_without_current_tool")) {
+                            messages.push(assistant, {
+                                role: "user",
+                                content: "المسودة تحتوي على جداول أو أرقام فنية غير مسندة لأدلة موثقة في هذه الجولة. استدعِ الآن الأدوات اللازمة للسؤال (مثل get_stock وget_stock_levels للتحليل والمستويات، أو get_recommendations للتوصيات، أو get_sector_peers للبدائل القطاعية) ولا تكتب أرقاماً من الذاكرة."
+                            });
+                            continue;
+                        }
+                    }
+                    break;
+                }
                 if (round === AGENTIC_BUDGET.toolRounds || toolCalls + calls.length > AGENTIC_BUDGET.toolCalls) {
                     finishFailure = "انتهى الحد المحدد لاستدعاءات الأدوات قبل إكمال الطلب."; break;
                 }
@@ -803,10 +820,12 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 draft = decodeAnswer(fixed).answer;
             }
             if (draft && draft.trim().length > 0) {
-                firstPassed = true;
-                finalPassed = true;
-                acceptedDraft = draft;
-                reasons = [];
+                const detReasons = checkAgenticDraft(draft, verificationEvidence(), userMessage, evidence);
+                if (detReasons.length > 0) {
+                    reasons = detReasons; firstPassed = false; finalPassed = false;
+                } else {
+                    firstPassed = true; finalPassed = true; acceptedDraft = draft; reasons = [];
+                }
                 advisoryIssues = [];
             } else {
                 firstPassed = false;
@@ -903,19 +922,19 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         summary: userMessage.slice(0,1000),
         persisted: false
     };
+    const updatedSummary = {
+        ...sessionSummary,
+        last_tool_evidence: evidenceMemory([...previousEvidence,...evidence]),
+        current_symbols: sessionUpdate.last_symbols,
+        last_topic: userMessage,
+        last_data_date: evidence.find(e => e.data_time)?.data_time ?? sessionSummary?.last_data_date ?? null,
+        last_image_symbols: vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? [],
+        last_vision_context: vision ?? sessionSummary?.last_vision_context ?? null,
+        updated_at: new Date().toISOString()
+    };
     if (isUuid(input.sessionId) && isUuid(input.userId) && remainingExecutionMs() > 1000) {
         try {
-            const summary = {
-                ...sessionSummary,
-                last_tool_evidence: evidenceMemory([...previousEvidence,...evidence]),
-                current_symbols: sessionUpdate.last_symbols,
-                last_topic: userMessage,
-                last_data_date: evidence.find(e => e.data_time)?.data_time ?? sessionSummary?.last_data_date ?? null,
-                last_image_symbols: vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? [],
-                last_vision_context: vision ?? sessionSummary?.last_vision_context ?? null,
-                updated_at: new Date().toISOString()
-            };
-            const { data, error } = await client.from("ai_chat_sessions").update({ state: { ...sessionState, ...sessionUpdate }, summary_state: summary,
+            const { data, error } = await client.from("ai_chat_sessions").update({ state: { ...sessionState, ...sessionUpdate }, summary_state: updatedSummary,
                 updated_at: new Date().toISOString() }).eq("id", input.sessionId).eq("user_id", input.userId).select("id").limit(1);
             sessionUpdate.persisted = !error && Boolean(data?.[0]?.id);
             if (!sessionUpdate.persisted) console.warn("[Agentic] session persistence not confirmed");
@@ -926,6 +945,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     yield { type: "done", data: { response, tables: [], response_origin: origin, vision,
         chart_actions: finalPassed ? chartActions : [],
         session_update: sessionUpdate,
+        summary_state: updatedSummary,
         usage: accounting.summary(toolCalls),
         publication_review: { passed: firstPassed, final_passed: finalPassed, repaired, reasons, advisory_issues: advisoryIssues,
             data_coverage: evidence.some(e => e.availability !== 'available') ? 'partial' : 'complete',

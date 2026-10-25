@@ -47,7 +47,7 @@ export function evidenceMemory(records: AgenticEvidence[], now = new Date()): Ar
     const dedup = new Map<string, AgenticEvidence & { captured_at: string }>();
     for (const record of records) {
         if (!record || typeof record.source !== "string" || !record.data || typeof record.arguments !== "object") continue;
-        if (!memoryTools.has(record.tool) || record.availability === "error" || !record.source.startsWith("supabase:")) continue;
+        if (!memoryTools.has(record.tool) || record.availability === "error" || !/^(?:supabase|tradingview|mixed):/.test(record.source)) continue;
         const captured = record.captured_at || now.toISOString();
         if (!Number.isFinite(Date.parse(captured)) || now.getTime() - Date.parse(captured) > 24 * 3600_000 || Date.parse(captured) > now.getTime() + 60_000) continue;
         dedup.set(record.tool + JSON.stringify(record.arguments), { ...compactEvidence(record), captured_at: captured });
@@ -920,7 +920,10 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
     }
     // Check numbers in markdown rows against the named stock, including rows with no currency unit.
-    const allSymbols = [...new Set(evidence.flatMap(e => e.symbols))];
+    const headingSymbols = [...reply.matchAll(/(?:^|\n)\s*(?:#{1,4}[^\n]*|[^\n]*(?:تحليل سهم|سهم)\s+[^\n]*)\(([A-Z]{3,6})\)/g)]
+        .map(m => m[1].toUpperCase())
+        .filter(s => !["RSI", "MACD", "EMA", "EPS", "EGX", "PRO", "VIP", "USD", "EGP", "DCF", "SME"].includes(s));
+    const allSymbols = [...new Set([...evidence.flatMap(e => e.symbols), ...headingSymbols])];
     const portfolioFacts = facts.filter(f => f.symbol === "PORTFOLIO" || !f.symbol);
     let currentSymbol: string | null = allSymbols.length === 1 ? allSymbols[0] : null;
     let rankColIdx: number = -1;
@@ -1067,7 +1070,14 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         const scenarioRow = scenarioTableRow(evidence, cells, lineSymbols, headers);
         if (scenarioRow?.symbol === "PORTFOLIO") symbol = "PORTFOLIO";
         else if (!symbol && scenarioRow) symbol = scenarioRow.symbol || "PORTFOLIO";
-        if (!symbol) continue;
+        if (!symbol) {
+            const metricFields = !tableHadStockRow ? tableMetricFields(cells[0]) : undefined;
+            const strictTechnicalMetric = metricFields?.some(f => ["support", "resistance", "rsi", "macd", "macd_signal", "macd_hist", "ema_50", "ema_200", "pe_ratio", "eps", "market_cap"].includes(f));
+            if (strictTechnicalMetric && facts.filter(f => metricFields!.includes(f.field)).length === 0) {
+                reasons.push("ungrounded_technical_table_without_evidence");
+            }
+            continue;
+        }
         const dates = evidence.flatMap(e => evidenceRows(e.data)).filter(r => r.symbol === symbol)
                 .flatMap(r => [
                     r.date, r.current_date, r.scan_date, r.signal_date, r.indicators_date,

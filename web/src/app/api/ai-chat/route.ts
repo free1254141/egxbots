@@ -657,14 +657,21 @@ export async function POST(req: NextRequest) {
             if (quotaError) return NextResponse.json({ detail: "Unable to reserve chat quota" }, { status: 503 });
             const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
             if (!quota?.allowed) {
-                return NextResponse.json({
-                    error: "LIMIT_REACHED",
-                    limit_type: "daily",
-                    daily_limit: effectiveDailyLimit,
-                    detail: "لقد استهلكت رصيدك اليومي المجاني (5/5). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على تحليل غير محدود لمحفظتك وقناة توصيات VIP!"
-                }, { status: 429 });
+                // If daily limit reached, check if the user has bonus credits (e.g. from linking Telegram)
+                const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
+                if (bonusRes && bonusRes.allowed === true) {
+                    limitData = { chat_count: Number(quota.chat_count || effectiveDailyLimit) };
+                } else {
+                    return NextResponse.json({
+                        error: "LIMIT_REACHED",
+                        limit_type: "daily",
+                        daily_limit: effectiveDailyLimit,
+                        detail: "لقد استهلكت رصيدك اليومي المجاني (5/5). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على تحليل غير محدود لمحفظتك وقناة توصيات VIP!"
+                    }, { status: 429 });
+                }
+            } else {
+                limitData = { chat_count: Number(quota.chat_count || 0) };
             }
-            limitData = { chat_count: Number(quota.chat_count || 0) };
             monthlyUsed += 1;
         }
 

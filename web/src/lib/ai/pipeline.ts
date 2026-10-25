@@ -4153,6 +4153,7 @@ export async function runPipeline(
             result.response_origin = event.data.response_origin;
             result.response_task = event.data.response_task ?? null;
             result.session_update = event.data.session_update ?? result.session_update;
+            (result as any).summary_state = event.data.summary_state ?? (result as any).summary_state;
             result.tables = event.data.tables ?? [];
             result.chart_actions = event.data.chart_actions ?? [];
         }

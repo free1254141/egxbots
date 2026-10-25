@@ -35,6 +35,7 @@ _stop_event = threading.Event()
 _last_recommendation_retry_at = 0.0
 _last_vip_revocation_at = 0.0
 _last_subscription_reminders_at = 0.0
+_last_marketing_lifecycle_at = 0.0
 _last_short_swings_retry_at = 0.0
 _last_phase_attempts = {}
 _completed_phases = set()
@@ -422,7 +423,7 @@ def _retry_short_swings(now):
 
 
 def _scheduler_worker():
-    global _scheduler_state, _last_recommendation_retry_at, _last_vip_revocation_at, _last_subscription_reminders_at, _last_short_swings_retry_at
+    global _scheduler_state, _last_recommendation_retry_at, _last_vip_revocation_at, _last_subscription_reminders_at, _last_marketing_lifecycle_at, _last_short_swings_retry_at
     print("[DAILY-JOB-SCHEDULER] Worker started.")
 
     # Pending Telegram events are exceptional retries, not a realtime queue.
@@ -430,6 +431,7 @@ def _scheduler_worker():
     retry_interval = _positive_interval_seconds("TELEGRAM_RETRY_INTERVAL_SECONDS", 900)
     vip_revocation_interval = _positive_interval_seconds("VIP_REVOCATION_INTERVAL_SECONDS", 21600, 300)
     subscription_reminders_interval = _positive_interval_seconds("SUBSCRIPTION_REMINDERS_INTERVAL_SECONDS", 43200, 3600)
+    marketing_lifecycle_interval = _positive_interval_seconds("MARKETING_LIFECYCLE_INTERVAL_SECONDS", 3600, 600)
 
     while not _stop_event.is_set():
         try:
@@ -463,6 +465,14 @@ def _scheduler_worker():
                 except Exception as reminder_err:
                     print(f"[DAILY-JOB-SCHEDULER] Subscription reminders check failed: {reminder_err}")
                 _last_subscription_reminders_at = now_monotonic
+
+            if now_monotonic - _last_marketing_lifecycle_at >= marketing_lifecycle_interval:
+                try:
+                    from api.marketing_lifecycle import run_marketing_lifecycle
+                    run_marketing_lifecycle()
+                except Exception as mkt_err:
+                    print(f"[DAILY-JOB-SCHEDULER] Marketing lifecycle check failed: {mkt_err}")
+                _last_marketing_lifecycle_at = now_monotonic
 
             if not enabled:
                 with _scheduler_lock:

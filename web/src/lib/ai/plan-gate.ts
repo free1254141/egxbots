@@ -68,7 +68,7 @@ export function isPro(rows: Array<{ plan_id?: unknown; status?: unknown; current
   const now = Date.now();
   for (const row of rows || []) {
     const plan = String(row.plan_id || "").toLowerCase();
-    if (!["pro", "lifetime", "pro_lifetime"].includes(plan) || String(row.status || "").toLowerCase() !== "active") {
+    if (!["pro", "lifetime", "pro_lifetime"].includes(plan) || !["active", "trialing"].includes(String(row.status || "").toLowerCase())) {
       continue;
     }
     if (row.current_period_end) {

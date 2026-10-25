@@ -11,10 +11,36 @@ const normalizeArabic = (s: string) => s.replace(/[أإآ]/g, 'ا').replace(/ة/
 /** Name evidence for the LLM; never replace an explicit ticker or route intent. */
 export function knownSymbolHints(message: string): Array<{ name: string; symbols: string[] }> {
     const text = normalizeArabic(message);
+    const matchedNorms: string[] = [];
+    const buildAliasRegex = (normAlias: string) => {
+        const escaped = normAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (normAlias.length < 3) {
+            return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u');
+        }
+        if (normAlias.startsWith('ال') && normAlias.length >= 5) {
+            const withoutAl = normAlias.slice(2).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:(?:و|ف|ب|ل|ك)?${escaped}|(?:و|ف)?لل${withoutAl})(?=$|[^\\p{L}\\p{N}])`, 'u');
+        }
+        return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:و|ف|ب|ل|ك|ال)?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u');
+    };
     return Object.entries(ARABIC_STOCK_MAPPINGS).filter(([name]) => /[\u0600-\u06FF]/.test(name))
         .sort(([a], [b]) => b.length - a.length).filter(([name]) => {
-            const alias = normalizeArabic(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp(`(?:^|[^\\p{L}\\p{N}])${alias}(?=$|[^\\p{L}\\p{N}])`, 'u').test(text);
+            const normAlias = normalizeArabic(name);
+            const re = buildAliasRegex(normAlias);
+            if (!re.test(text)) return false;
+            const covering = matchedNorms.filter(longer => longer.includes(normAlias));
+            if (covering.length > 0) {
+                let residual = text;
+                for (const longer of covering) {
+                    residual = residual.split(longer).join(' ');
+                    if (longer.startsWith('ال') && longer.length >= 5) {
+                        residual = residual.split('لل' + longer.slice(2)).join(' ');
+                    }
+                }
+                if (!re.test(residual)) return false;
+            }
+            matchedNorms.push(normAlias);
+            return true;
         }).slice(0, 30).map(([name, value]) => ({ name, symbols: Array.isArray(value) ? value : [value] }));
 }
 

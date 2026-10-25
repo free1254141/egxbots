@@ -68,6 +68,57 @@ export default function PricingClient() {
   const [selectedPlan, setSelectedPlan] = useState("pro_6m");
   const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro_6m");
 
+  const [trialEligible, setTrialEligible] = useState(false);
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setTrialEligible(true);
+      return;
+    }
+    let active = true;
+    fetch("/api/subscription/trial", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.eligible) {
+          setTrialEligible(true);
+        } else if (active) {
+          setTrialEligible(false);
+          if (data?.expires_at) setTrialExpiresAt(data.expires_at);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  const handleStartTrial = async () => {
+    if (!user) {
+      router.push("/login?redirect=/pricing");
+      return;
+    }
+    setTrialLoading(true);
+    try {
+      const res = await fetch("/api/subscription/trial", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        toast.success(isAr ? "تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!" : "Pro 3-day trial activated successfully!");
+        setIsPro(true);
+        broadcastEntitlements(true);
+        setTrialEligible(false);
+        setTrialExpiresAt(data.expires_at || null);
+      } else {
+        toast.error(data?.message || (isAr ? "تعذر تفعيل التجربة" : "Could not activate trial"));
+      }
+    } catch {
+      toast.error(isAr ? "حدث خطأ في الاتصال" : "Network error");
+    } finally {
+      setTrialLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -1153,13 +1204,36 @@ export default function PricingClient() {
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled
-              className="w-full border-3 border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 py-3.5 text-xs font-black uppercase tracking-wider cursor-not-allowed mt-4"
-            >
-              {isPro ? (isAr ? "الخطة المجانية متاحة" : "Free plan available") : (isAr ? "خطتك الحالية" : "Current Plan")}
-            </button>
+            {trialEligible && !isPro ? (
+              <div className="space-y-2 mt-4">
+                <button
+                  type="button"
+                  onClick={handleStartTrial}
+                  disabled={trialLoading}
+                  className="w-full border-3 border-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {trialLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-yellow-300" />
+                      <span>{isAr ? "جرّب Pro مجاناً لمدة 3 أيام ⚡" : "Try Pro Free for 3 Days ⚡"}</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-center font-bold text-emerald-600 dark:text-emerald-400">
+                  {isAr ? "✨ تجربة كاملة وفورية بدون أي دفع أو بطاقة بنكية" : "Instant full access, no card required"}
+                </p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="w-full border-3 border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 py-3.5 text-xs font-black uppercase tracking-wider cursor-not-allowed mt-4"
+              >
+                {isPro ? (isAr ? "الخطة المجانية متاحة" : "Free plan available") : (isAr ? "خطتك الحالية" : "Current Plan")}
+              </button>
+            )}
           </div>
 
           {/* ── 02. Pro Plan Card (with Dynamic Duration Switcher) ── */}
