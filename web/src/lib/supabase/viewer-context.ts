@@ -146,7 +146,7 @@ async function resolvePro(userId: string | null): Promise<boolean> {
         .from("subscriptions")
         .select("plan_id,status,current_period_end")
         .eq("user_id", userId)
-        .eq("status", "active")
+        .in("status", ["active", "trialing"])
         .order("current_period_end", { ascending: false, nullsFirst: true })
         .limit(20);
       if (error) return false; // transient lookup failures must not cache Free

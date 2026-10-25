@@ -471,7 +471,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
   // ── STEP 4: Active Pro Subscribers Stats (Informational) ─────────────────
   const [subRes, profileRes] = await Promise.all([
-    serviceClient.from("subscriptions").select("user_id, current_period_end").eq("status", "active"),
+    serviceClient.from("subscriptions").select("user_id, current_period_end").in("status", ["active", "trialing"]),
     serviceClient
       .from("profiles")
       .select("id, telegram_chat_id")

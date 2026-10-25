@@ -32,6 +32,10 @@ interface QuotaData {
     created_at: string | null;
     is_founding_member?: boolean;
     founding_member_number?: number | null;
+    is_trial?: boolean;
+    trial_eligible?: boolean;
+    bonus_credits?: number;
+    telegram_linked?: boolean;
   };
   quota: {
     chat_messages: {
@@ -183,12 +187,14 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
                 className={`text-xs font-black uppercase px-2.5 py-0.5 border-2 border-black dark:border-white shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] ${
                   data?.plan?.is_lifetime
                     ? "bg-purple-600 text-yellow-300"
+                    : data?.plan?.is_trial
+                    ? "bg-[#FFE600] text-black"
                     : isPro
                     ? "bg-emerald-500 text-white"
                     : "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
                 }`}
               >
-                {data?.plan?.is_lifetime ? "LIFETIME VIP 👑" : isPro ? "PRO" : isAr ? "مجاني" : "FREE"}
+                {data?.plan?.is_lifetime ? "LIFETIME VIP 👑" : data?.plan?.is_trial ? (isAr ? "تجربة PRO مجانية ⚡" : "PRO TRIAL ⚡") : isPro ? "PRO" : isAr ? "مجاني" : "FREE"}
               </span>
               {data?.plan?.is_founding_member && (
                 <span className="text-[10px] font-black uppercase px-2 py-0.5 border-2 border-black bg-gradient-to-r from-amber-400 to-[#FFE600] text-black shadow-[2px_2px_0px_rgba(0,0,0,1)] flex items-center gap-1">
@@ -207,6 +213,10 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
                   ? isAr
                     ? "عضوية مدى الحياة نشطة للأبد (بدون تجديد أو انتهاء)"
                     : "Permanent lifetime membership (never expires)"
+                  : data?.plan?.is_trial
+                  ? isAr
+                    ? `فترة تجريبية مجانية لـ Pro نشطة حتى ${data?.plan?.current_period_end ? formatDate(data.plan.current_period_end) : "3 أيام"} (كامل ميزات VIP والشات والإسكانر)`
+                    : `Active Pro trial until ${data?.plan?.current_period_end ? formatDate(data.plan.current_period_end) : "3 days"} (all VIP features unlocked)`
                   : isPro
                   ? isAr
                     ? "اشتراك Pro نشط مع كامل الصلاحيات"
@@ -248,6 +258,25 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
             {isAr ? "تحديث" : "Refresh"}
           </button>
 
+          {!isPro && data?.plan?.trial_eligible && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/subscription/trial", { method: "POST" });
+                  const body = await res.json();
+                  if (res.ok && body?.success) {
+                    window.dispatchEvent(new Event("egx:entitlements-updated"));
+                    void fetchQuota(true);
+                  }
+                } catch {}
+              }}
+              className="h-9 px-3.5 border-2 border-black dark:border-white bg-[#FFE600] hover:bg-amber-300 text-black font-black text-xs flex items-center gap-1.5 uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 text-black" />
+              {isAr ? "جرّب Pro مجاناً (3 أيام) ⚡" : "Try Pro Free (3 Days) ⚡"}
+            </button>
+          )}
           {!isPro && (
             <Link
               href="/pricing"
