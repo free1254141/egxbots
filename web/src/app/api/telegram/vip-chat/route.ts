@@ -315,31 +315,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ ok: false, error: "Message is required" }, { status: 400 });
         }
 
-        // Check if message asks for Pro-only recommendations when user is on Free plan
-        const normalizedMsg = normalizeArabicIntent(rawMessage);
-        const asksProRecs =
-            /(?:توصيات|توصيه|اشارات|اشاره|ترشيحات|recommendations?|signals?)/i.test(normalizedMsg) &&
-            !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedMsg);
-
-        if (!userInfo.isPro && !detectPortfolioIntent(rawMessage) && asksProRecs) {
-            return NextResponse.json(
-                {
-                    ok: false,
-                    error_code: "PRO_REQUIRED",
-                    linked: Boolean(userInfo.linkedUserId),
-                    display_name: userInfo.displayName,
-                    is_pro: false,
-                    used: userInfo.used,
-                    limit: userInfo.limit,
-                    remaining: userInfo.remaining,
-                    period: userInfo.period,
-                    detail: "التوصيات وإشارات الشراء الفورية متاحة حصرياً لمشتركي باقة PRO.",
-                },
-                { status: 403 }
-            );
-        }
-
-        // Check portfolio tool requirement for unlinked users
+        // Check portfolio tool requirement for unlinked users (requires linking account to read user's positions)
         if (!userInfo.linkedUserId && detectPortfolioIntent(rawMessage)) {
             return NextResponse.json(
                 {
