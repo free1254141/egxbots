@@ -1689,17 +1689,14 @@ export default function MarketClient() {
                 </div>
             )}
             {!breadthLoading && breadthData && (
-                <>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                        <div className="lg:col-span-1">
-                            <MarketHealthScore data={breadthData} isAr={isAr} />
-                        </div>
-                        <div className="lg:col-span-2">
-                            <MarketBreadthStrip data={breadthData} isAr={isAr} />
-                        </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <div className="lg:col-span-1">
+                        <MarketHealthScore data={breadthData} isAr={isAr} />
                     </div>
-                    <DailyLiquidityUpdateCard data={breadthData} isAr={isAr} />
-                </>
+                    <div className="lg:col-span-2">
+                        <MarketBreadthStrip data={breadthData} isAr={isAr} />
+                    </div>
+                </div>
             )}
 
             {/* Metrics Cards Grid */}
@@ -1906,6 +1903,11 @@ export default function MarketClient() {
                     )}
                 </div>
             </div>
+
+            {/* Daily Market-Wide Liquidity Update Section (below Chart & Recommendations) */}
+            {!breadthLoading && breadthData && (
+                <DailyLiquidityUpdateCard data={breadthData} isAr={isAr} />
+            )}
 
             {/* Smart Money Heatmap Section */}
             <div ref={heatmapSectionRef} className="mb-10 rounded-3xl border border-zinc-200 bg-white/80 p-5 shadow-sm dark:border-white/10 dark:bg-zinc-950/55 sm:p-7">
