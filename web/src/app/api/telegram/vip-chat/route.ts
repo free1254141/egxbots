@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseClient, getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { extractExplicitSymbols, runPipeline } from "@/lib/ai/pipeline";
 import { getDeepSeekApiKey, getNvidiaApiKeys } from "@/lib/ai/server-secrets";
-import { hasActiveProSubscription, planLimits } from "@/lib/ai/plan-gate";
+import {
+    getCairoDateString,
+    planLimits,
+    resolveSubscriptionQuotaWindow,
+} from "@/lib/ai/plan-gate";
 import { detectPortfolioIntent, normalizeArabicIntent } from "@/lib/ai/intent-policy";
 import { SessionState, SessionSummary } from "@/lib/ai/types";
 
@@ -12,20 +16,6 @@ export const maxDuration = 120;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const ADMIN_TG_IDS = new Set(["5149631436"]);
-
-function getCairoDateString(date: Date = new Date()): string {
-    try {
-        return new Intl.DateTimeFormat("en-CA", {
-            timeZone: "Africa/Cairo",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-        }).format(date);
-    } catch {
-        const cairoMs = date.getTime() + 3 * 60 * 60 * 1000;
-        return new Date(cairoMs).toISOString().split("T")[0];
-    }
-}
 
 function isAuthorizedRequest(req: NextRequest): boolean {
     const adminKey =
@@ -118,22 +108,22 @@ async function resolveTelegramUser(
     let period: "daily" | "monthly" = "daily";
 
     if (linkedUserId) {
-        const monthStart = `${todayCairo.slice(0, 7)}-01`;
-        const [subRes, limitsRes] = await Promise.all([
-            supabase
-                .from("subscriptions")
-                .select("plan_id, status, current_period_end")
-                .eq("user_id", linkedUserId)
-                .eq("status", "active")
-                .limit(10),
-            supabase
-                .from("ai_chatbot_limits")
-                .select("date, chat_count")
-                .eq("user_id", linkedUserId)
-                .gte("date", monthStart),
-        ]);
+        const subRes = await supabase
+            .from("subscriptions")
+            .select("plan_id, status, current_period_start, current_period_end")
+            .eq("user_id", linkedUserId)
+            .in("status", ["active", "trialing"])
+            .order("current_period_end", { ascending: false })
+            .limit(10);
 
-        isPro = hasActiveProSubscription(subRes?.data || []);
+        const quotaWin = resolveSubscriptionQuotaWindow(subRes?.data || []);
+        isPro = quotaWin.isPro;
+
+        const limitsRes = await supabase
+            .from("ai_chatbot_limits")
+            .select("date, chat_count")
+            .eq("user_id", linkedUserId)
+            .gte("date", quotaWin.effectiveMonthStartStr);
 
         const limitRows = limitsRes?.data || [];
         const todayRow = limitRows.find((r: any) => String(r.date) === todayCairo);

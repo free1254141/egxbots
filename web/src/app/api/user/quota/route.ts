@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
-import { hasActiveProSubscription, planLimits } from "@/lib/ai/plan-gate";
+import { planLimits, resolveSubscriptionQuotaWindow } from "@/lib/ai/plan-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,26 +42,11 @@ export async function GET() {
     const subErr = subResult.error;
     if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
 
-    // Derive plan status first — needed to choose the correct quota date window.
-    const pro = hasActiveProSubscription(subRows || []);
-    const activeSub = subRows?.[0];
-
-    // For PRO users: count only messages since their current subscription period
-    // started. This fixes the bug where users who upgraded Free → PRO mid-month
-    // had all their Free-tier messages counted against the PRO monthly quota.
-    const calMonthStart = new Date();
-    calMonthStart.setDate(1);
-    calMonthStart.setHours(0, 0, 0, 0);
-
-    let effectiveMonthStart: Date;
-    if (pro && activeSub?.current_period_start) {
-      const subPeriodStart = new Date(activeSub.current_period_start);
-      // Never go earlier than calendar month start (handles users PRO since last month)
-      effectiveMonthStart = subPeriodStart > calMonthStart ? subPeriodStart : calMonthStart;
-    } else {
-      effectiveMonthStart = calMonthStart;
-    }
-    const monthStartStr = effectiveMonthStart.toISOString().split("T")[0];
+    // Derive plan status & effective monthly window via the shared single-source helper.
+    const quotaWin = resolveSubscriptionQuotaWindow(subRows || []);
+    const pro = quotaWin.isPro;
+    const activeSub = quotaWin.activeSub;
+    const monthStartStr = quotaWin.effectiveMonthStartStr;
 
     const [limitRowsRes, posResult] = await Promise.all([
       // Chat quota ledger: only from effective subscription start (not calendar month start)
@@ -85,7 +70,7 @@ export async function GET() {
     const limits = planLimits(planName);
 
     // Derive chat quota
-    const today = new Date().toISOString().split("T")[0];
+    const today = quotaWin.todayStr;
     const todayLimitRow = (limitRowsRes.data || []).find((r: any) => r.date === today);
     const todayChatCount = Number(todayLimitRow?.chat_count || 0);
     const monthlyLimitsCount = (limitRowsRes.data || []).reduce(

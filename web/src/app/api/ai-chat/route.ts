@@ -446,7 +446,7 @@ export async function POST(req: NextRequest) {
         }
         
         userId = user.id;
-        const { paymentsEnabled, planLimits, isPro: gateIsPro } = await import("@/lib/ai/plan-gate");
+        const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
         const billingOn = paymentsEnabled();
         // Legacy unlimited allow-list is only valid while billing is disabled.
         // Once plans are active, every account must have an active Pro
@@ -454,7 +454,7 @@ export async function POST(req: NextRequest) {
         const isUnlimited = !billingOn && isUnlimitedChatUser(user);
         let userIsPro = false;
         let userMonthlyCap = Number.MAX_SAFE_INTEGER;
-        let proSubscriptionStart: string | null = null;
+        let quotaWin = resolveSubscriptionQuotaWindow([]);
         if (billingOn) {
             try {
                 const { data: planRows } = await authClient
@@ -465,10 +465,7 @@ export async function POST(req: NextRequest) {
                     .limit(10);
                 userIsPro = gateIsPro(planRows || []);
                 userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
-                if (userIsPro && planRows) {
-                    const activePlan = planRows.find((r: any) => r.status === "active" && ["pro", "lifetime", "pro_lifetime"].includes(r.plan_id)) || planRows[0];
-                    proSubscriptionStart = activePlan?.current_period_start || null;
-                }
+                quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
             } catch {
                 userIsPro = false;
                 userMonthlyCap = planLimits("free").chat_messages_per_month;
@@ -595,27 +592,15 @@ export async function POST(req: NextRequest) {
             if (reserveError) return NextResponse.json({ detail: "Request already in progress" }, { status: 409 });
         }
 
-        const today = new Date().toISOString().split("T")[0];
+        const today = getCairoDateString();
         let limitData: { chat_count: number } | null = null;
         let monthlyUsed = 0;
 
         // 1. Monthly budget gate (permanent ledger via ai_chatbot_limits and ai_chat_messages).
         // Deleting old chats must NEVER reduce or refund consumed quota.
         if (billingOn && !isUnlimited) {
-            const calMonthStart = new Date();
-            calMonthStart.setDate(1);
-            calMonthStart.setHours(0, 0, 0, 0);
-
-            // For PRO: count messages only from subscription start date (or month start, whichever is later)
-            // This prevents mid-month upgrades from being penalized for Free messages used earlier this month
-            let effectiveStart = calMonthStart;
-            if (userIsPro && proSubscriptionStart) {
-                const subStart = new Date(proSubscriptionStart);
-                if (subStart > calMonthStart) {
-                    effectiveStart = subStart;
-                }
-            }
-            const monthStartStr = effectiveStart.toISOString().split("T")[0];
+            const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
+            const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
 
             const [limitRowsRes, monthRowsRes] = await Promise.all([
                 supabase
@@ -1152,8 +1137,8 @@ export async function GET(req: NextRequest) {
                 .or("is_deleted_by_user.is.null,is_deleted_by_user.eq.false")
                 .order("updated_at", { ascending: false });
 
-            const today = new Date().toISOString().split("T")[0];
-            const { paymentsEnabled, planLimits, isPro: gateIsPro } = await import("@/lib/ai/plan-gate");
+            const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
+            const today = getCairoDateString();
             const billingOn = paymentsEnabled();
             let isUnlimited = !billingOn && isUnlimitedChatUser(user);
             let quotaLimit = AI_CONFIG.limits.dailyMessages;
@@ -1167,19 +1152,9 @@ export async function GET(req: NextRequest) {
 
                 if (userIsPro) {
                     quotaLimit = planLimits("pro").chat_messages_per_month;
-                    const calMonthStart = new Date();
-                    calMonthStart.setDate(1);
-                    calMonthStart.setHours(0, 0, 0, 0);
-
-                    const activePlan = planRows?.find((r: any) => r.status === "active" && ["pro", "lifetime", "pro_lifetime"].includes(r.plan_id)) || planRows?.[0];
-                    let effectiveStart = calMonthStart;
-                    if (activePlan?.current_period_start) {
-                        const subStart = new Date(activePlan.current_period_start);
-                        if (subStart > calMonthStart) {
-                            effectiveStart = subStart;
-                        }
-                    }
-                    const monthStartStr = effectiveStart.toISOString().split("T")[0];
+                    const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
+                    const monthStartStr = quotaWin.effectiveMonthStartStr;
+                    const effectiveStart = quotaWin.effectiveStartDate;
 
                     const [limitRowsRes, msgRowsRes] = await Promise.all([
                         supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),

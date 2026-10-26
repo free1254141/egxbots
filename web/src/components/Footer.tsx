@@ -15,8 +15,147 @@ export default function Footer() {
   }
 
   return (
-    <footer className="app-footer-surface w-full py-12 mt-20">
-      <div className="mx-auto max-w-5xl px-6">
+    <footer className="app-footer-surface relative overflow-hidden w-full py-12 mt-20">
+      {/* Left-side Hanging Palestine Watermelon Pennant (0% -> 75% of footer height, positioned next to logo on large screens) */}
+      <div
+        dir="ltr"
+        aria-label={isAr ? "تضامناً مع إخوتنا في فلسطين" : "Standing in solidarity with Palestine"}
+        title={isAr ? "في القلب يا فلسطين" : "Standing with Palestine"}
+        className="pointer-events-none select-none absolute left-2 sm:left-4 md:left-6 lg:left-[max(1.5rem,calc(50%-33rem))] xl:left-[max(2rem,calc(50%-34.5rem))] top-0 h-[75%] w-11 sm:w-16 md:w-20 lg:w-24 z-10 flex flex-col items-stretch drop-shadow-[0_6px_12px_rgba(0,0,0,0.32)]"
+      >
+        {/* Top Section: Stripes + Red Downward Triangle (aspect-ratio preserved) */}
+        <svg
+          viewBox="0 0 128 68"
+          className="w-full h-auto shrink-0 block"
+          aria-hidden="true"
+        >
+          <rect x="0" y="0" width="43" height="68" fill="#15803D" />
+          <rect x="43" y="0" width="42" height="68" fill="#F8FAFC" />
+          <rect x="85" y="0" width="43" height="68" fill="#18181B" />
+          <polygon points="0,0 128,0 64,66" fill="#B91C1C" />
+          <polyline
+            points="0,0 64,66 128,0"
+            fill="none"
+            stroke="#000000"
+            strokeOpacity="0.22"
+            strokeWidth="3"
+          />
+        </svg>
+
+        {/* Middle Section: Flexible Vertical Flag Shaft + Undistorted Tilted Watermelon Slice */}
+        <div className="relative flex-1 w-full flex items-center justify-center pb-4 -my-px">
+          <svg
+            viewBox="0 0 128 100"
+            preserveAspectRatio="none"
+            className="absolute inset-0 w-full h-full block"
+            aria-hidden="true"
+          >
+            <rect x="0" y="0" width="43" height="100" fill="#15803D" />
+            <rect x="43" y="0" width="42" height="100" fill="#F8FAFC" />
+            <rect x="85" y="0" width="43" height="100" fill="#18181B" />
+            <polygon points="0,30 128,0 128,100 0,100" fill="#000000" fillOpacity="0.08" />
+          </svg>
+          {/* Center Tilted Watermelon Slice */}
+          <svg
+            viewBox="0 0 128 110"
+            className="relative z-10 w-[92%] h-auto object-contain drop-shadow-[0_4px_5px_rgba(0,0,0,0.38)]"
+            aria-hidden="true"
+          >
+            <g transform="translate(66, 52) rotate(-28)">
+              <path
+                d="M -54 0 A 54 54 0 0 0 54 0 Z"
+                fill="#16A34A"
+                stroke="#14532D"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+              <path d="M -48 0 A 48 48 0 0 0 48 0 Z" fill="#ECFDF5" />
+              <path d="M -45 0 A 45 45 0 0 0 45 0 Z" fill="#DCFCE7" />
+              <path d="M -42 0 A 42 42 0 0 0 42 0 Z" fill="#EF4444" />
+              <line
+                x1="-42"
+                y1="0.8"
+                x2="42"
+                y2="0.8"
+                stroke="#FCA5A5"
+                strokeWidth="1.2"
+                strokeOpacity="0.5"
+              />
+              <ellipse cx="-19" cy="12" rx="2" ry="3.5" transform="rotate(28 -19 12)" fill="#18181B" />
+              <ellipse cx="-6.5" cy="16" rx="2" ry="3.5" transform="rotate(10 -6.5 16)" fill="#18181B" />
+              <ellipse cx="6.5" cy="16" rx="2" ry="3.5" transform="rotate(-10 6.5 16)" fill="#18181B" />
+              <ellipse cx="19" cy="12" rx="2" ry="3.5" transform="rotate(-28 19 12)" fill="#18181B" />
+              <ellipse cx="-28" cy="20" rx="2" ry="3.5" transform="rotate(40 -28 20)" fill="#18181B" />
+              <ellipse cx="-15" cy="27" rx="2" ry="3.5" transform="rotate(20 -15 27)" fill="#18181B" />
+              <ellipse cx="0" cy="30" rx="2" ry="3.5" fill="#18181B" />
+              <ellipse cx="15" cy="27" rx="2" ry="3.5" transform="rotate(-20 15 27)" fill="#18181B" />
+              <ellipse cx="28" cy="20" rx="2" ry="3.5" transform="rotate(-40 28 20)" fill="#18181B" />
+            </g>
+          </svg>
+        </div>
+
+        {/* Bottom Section: Pointed V-Tip + White Keffiyeh Fringes (aspect-ratio preserved) */}
+        <svg
+          viewBox="0 0 128 84"
+          className="w-full h-auto shrink-0 block"
+          aria-hidden="true"
+        >
+          <defs>
+            <clipPath id="footerPennantBottomClip">
+              <polygon points="0,0 128,0 128,10 64,56 0,10" />
+            </clipPath>
+          </defs>
+          <g stroke="#E2E8F0" strokeWidth="2.4" strokeLinecap="round">
+            <line x1="3" y1="12" x2="3" y2="36" />
+            <line x1="8" y1="16" x2="8" y2="40" />
+            <line x1="13" y1="19" x2="13" y2="43" />
+            <line x1="18" y1="23" x2="18" y2="47" />
+            <line x1="23" y1="26" x2="23" y2="50" />
+            <line x1="28" y1="30" x2="28" y2="54" />
+            <line x1="33" y1="34" x2="33" y2="58" />
+            <line x1="38" y1="37" x2="38" y2="61" />
+            <line x1="43" y1="41" x2="43" y2="65" />
+            <line x1="48" y1="44" x2="48" y2="68" />
+            <line x1="53" y1="48" x2="53" y2="72" />
+            <line x1="58" y1="52" x2="58" y2="76" />
+            <line x1="64" y1="55" x2="64" y2="80" />
+            <line x1="70" y1="52" x2="70" y2="76" />
+            <line x1="75" y1="48" x2="75" y2="72" />
+            <line x1="80" y1="44" x2="80" y2="68" />
+            <line x1="85" y1="41" x2="85" y2="65" />
+            <line x1="90" y1="37" x2="90" y2="61" />
+            <line x1="95" y1="34" x2="95" y2="58" />
+            <line x1="100" y1="30" x2="100" y2="54" />
+            <line x1="105" y1="26" x2="105" y2="50" />
+            <line x1="110" y1="23" x2="110" y2="47" />
+            <line x1="115" y1="19" x2="115" y2="43" />
+            <line x1="120" y1="16" x2="120" y2="40" />
+            <line x1="125" y1="12" x2="125" y2="36" />
+          </g>
+          <g stroke="#94A3B8" strokeWidth="1" strokeLinecap="round" opacity="0.65">
+            <line x1="5.5" y1="14" x2="5.5" y2="34" />
+            <line x1="15.5" y1="21" x2="15.5" y2="41" />
+            <line x1="25.5" y1="28" x2="25.5" y2="48" />
+            <line x1="35.5" y1="35" x2="35.5" y2="55" />
+            <line x1="45.5" y1="43" x2="45.5" y2="63" />
+            <line x1="55.5" y1="50" x2="55.5" y2="70" />
+            <line x1="72.5" y1="50" x2="72.5" y2="70" />
+            <line x1="82.5" y1="43" x2="82.5" y2="63" />
+            <line x1="92.5" y1="35" x2="92.5" y2="55" />
+            <line x1="102.5" y1="28" x2="102.5" y2="48" />
+            <line x1="112.5" y1="21" x2="112.5" y2="41" />
+            <line x1="122.5" y1="14" x2="122.5" y2="34" />
+          </g>
+          <g clipPath="url(#footerPennantBottomClip)">
+            <rect x="0" y="0" width="43" height="60" fill="#15803D" />
+            <rect x="43" y="0" width="42" height="60" fill="#F8FAFC" />
+            <rect x="85" y="0" width="43" height="60" fill="#18181B" />
+            <polygon points="0,0 128,0 128,60 0,60" fill="#000000" fillOpacity="0.1" />
+          </g>
+        </svg>
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-5xl pr-6 pl-16 sm:pl-24 md:pl-32 lg:pl-36 xl:pl-24">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-10">
           <div className="col-span-1 md:col-span-2 space-y-4">
             <h3 className="text-xl font-black dark:text-white light:text-gray-900 italic tracking-tighter uppercase">

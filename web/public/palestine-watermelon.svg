@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 360" width="128" height="360" fill="none">
+  <defs>
+    <linearGradient id="flagRed" x1="0" y1="0" x2="128" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C81E1E" />
+      <stop offset="100%" stop-color="#991B1B" />
+    </linearGradient>
+    <linearGradient id="melonFlesh" x1="-44" y1="0" x2="44" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DC2626" />
+      <stop offset="55%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#B91C1C" />
+    </linearGradient>
+    <linearGradient id="melonRind" x1="-56" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22C55E" />
+      <stop offset="50%" stop-color="#16A34A" />
+      <stop offset="100%" stop-color="#15803D" />
+    </linearGradient>
+    <filter id="sliceShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+    <clipPath id="bannerClip">
+      <polygon points="0,0 128,0 128,276 64,322 0,276" />
+    </clipPath>
+  </defs>
+
+  <!-- Bottom White Keffiyeh Fringes -->
+  <g stroke="#E2E8F0" stroke-width="2.4" stroke-linecap="round">
+    <line x1="3" y1="278" x2="3" y2="302" />
+    <line x1="8" y1="282" x2="8" y2="306" />
+    <line x1="13" y1="285" x2="13" y2="309" />
+    <line x1="18" y1="289" x2="18" y2="313" />
+    <line x1="23" y1="292" x2="23" y2="316" />
+    <line x1="28" y1="296" x2="28" y2="320" />
+    <line x1="33" y1="300" x2="33" y2="324" />
+    <line x1="38" y1="303" x2="38" y2="327" />
+    <line x1="43" y1="307" x2="43" y2="331" />
+    <line x1="48" y1="310" x2="48" y2="334" />
+    <line x1="53" y1="314" x2="53" y2="338" />
+    <line x1="58" y1="318" x2="58" y2="342" />
+    <line x1="64" y1="321" x2="64" y2="346" />
+    <line x1="70" y1="318" x2="70" y2="342" />
+    <line x1="75" y1="314" x2="75" y2="338" />
+    <line x1="80" y1="310" x2="80" y2="334" />
+    <line x1="85" y1="307" x2="85" y2="331" />
+    <line x1="90" y1="303" x2="90" y2="327" />
+    <line x1="95" y1="300" x2="95" y2="324" />
+    <line x1="100" y1="296" x2="100" y2="320" />
+    <line x1="105" y1="292" x2="105" y2="316" />
+    <line x1="110" y1="289" x2="110" y2="313" />
+    <line x1="115" y1="285" x2="115" y2="309" />
+    <line x1="120" y1="282" x2="120" y2="306" />
+    <line x1="125" y1="278" x2="125" y2="302" />
+  </g>
+  <g stroke="#94A3B8" stroke-width="1" stroke-linecap="round" opacity="0.65">
+    <line x1="5.5" y1="280" x2="5.5" y2="300" />
+    <line x1="15.5" y1="287" x2="15.5" y2="307" />
+    <line x1="25.5" y1="294" x2="25.5" y2="314" />
+    <line x1="35.5" y1="301" x2="35.5" y2="321" />
+    <line x1="45.5" y1="309" x2="45.5" y2="329" />
+    <line x1="55.5" y1="316" x2="55.5" y2="336" />
+    <line x1="72.5" y1="316" x2="72.5" y2="336" />
+    <line x1="82.5" y1="309" x2="82.5" y2="329" />
+    <line x1="92.5" y1="301" x2="92.5" y2="321" />
+    <line x1="102.5" y1="294" x2="102.5" y2="314" />
+    <line x1="112.5" y1="287" x2="112.5" y2="307" />
+    <line x1="122.5" y1="280" x2="122.5" y2="300" />
+  </g>
+
+  <!-- Vertical Pennant Body -->
+  <g clip-path="url(#bannerClip)">
+    <rect x="0" y="0" width="43" height="325" fill="#15803D" />
+    <rect x="43" y="0" width="42" height="325" fill="#F8FAFC" />
+    <rect x="85" y="0" width="43" height="325" fill="#18181B" />
+    <polygon points="0,110 128,40 128,325 0,325" fill="#000000" fill-opacity="0.08" />
+    <polygon points="0,0 128,0 64,78" fill="url(#flagRed)" />
+    <polyline points="0,0 64,78 128,0" fill="none" stroke="#000000" stroke-opacity="0.22" stroke-width="3" />
+  </g>
+
+  <!-- Tilted Crescent Watermelon Slice -->
+  <g filter="url(#sliceShadow)" transform="translate(66, 165) rotate(-28)">
+    <path d="M -54 0 A 54 54 0 0 0 54 0 Z" fill="url(#melonRind)" stroke="#14532D" stroke-width="1.8" stroke-linejoin="round" />
+    <path d="M -48 0 A 48 48 0 0 0 48 0 Z" fill="#ECFDF5" />
+    <path d="M -45 0 A 45 45 0 0 0 45 0 Z" fill="#DCFCE7" />
+    <path d="M -42 0 A 42 42 0 0 0 42 0 Z" fill="url(#melonFlesh)" />
+    <line x1="-42" y1="0.8" x2="42" y2="0.8" stroke="#FCA5A5" stroke-width="1.2" stroke-opacity="0.5" />
+    <ellipse cx="-19" cy="12" rx="2" ry="3.5" transform="rotate(28 -19 12)" fill="#18181B" />
+    <ellipse cx="-6.5" cy="16" rx="2" ry="3.5" transform="rotate(10 -6.5 16)" fill="#18181B" />
+    <ellipse cx="6.5" cy="16" rx="2" ry="3.5" transform="rotate(-10 6.5 16)" fill="#18181B" />
+    <ellipse cx="19" cy="12" rx="2" ry="3.5" transform="rotate(-28 19 12)" fill="#18181B" />
+    <ellipse cx="-28" cy="20" rx="2" ry="3.5" transform="rotate(40 -28 20)" fill="#18181B" />
+    <ellipse cx="-15" cy="27" rx="2" ry="3.5" transform="rotate(20 -15 27)" fill="#18181B" />
+    <ellipse cx="0" cy="30" rx="2" ry="3.5" fill="#18181B" />
+    <ellipse cx="15" cy="27" rx="2" ry="3.5" transform="rotate(-20 15 27)" fill="#18181B" />
+    <ellipse cx="28" cy="20" rx="2" ry="3.5" transform="rotate(-40 28 20)" fill="#18181B" />
+  </g>
+</svg>
