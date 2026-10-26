@@ -32,6 +32,9 @@ test('writer shares official-versus-platform report capabilities and dialect cor
     expect(AGENTIC_SYSTEM_PROMPT).toContain(ARTORO_PLATFORM_CONTEXT);
     expect(ARTORO_PLATFORM_CONTEXT).toContain('/reports');
     expect(ARTORO_PLATFORM_CONTEXT).toContain('لا نفي الموقع المذكور');
+    expect(ARTORO_PLATFORM_CONTEXT).toContain('3 استراتيجيات');
+    expect(ARTORO_PLATFORM_CONTEXT).toContain('Short Swings');
+    expect(ARTORO_PLATFORM_CONTEXT).toContain('15 دقيقة');
 });
 function db(rows:any[]=[]) {
     const ops:any[]=[];
