@@ -104,9 +104,34 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
 
     now = datetime.now(timezone.utc)
 
+    # Pre-fetch email map to eliminate hundreds of individual RPC network calls
+    email_map: Dict[str, str] = {}
+    try:
+        page = 1
+        while True:
+            resp = supabase.auth.admin.list_users(page=page, per_page=100)
+            users = resp.users if hasattr(resp, "users") else (resp if isinstance(resp, list) else [])
+            if not users:
+                break
+            for u in users:
+                uid = str(getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None))
+                em = str(getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else "") or "").strip().lower()
+                if em and "@" in em:
+                    email_map[uid] = em
+            if len(users) < 100:
+                break
+            page += 1
+    except Exception as e:
+        print(f"[CAMPAIGN-EMAIL] Warning: bulk email prefetch fallback: {e}")
+
     # 1. Active Pro subscriptions to exclude from Founders offer and identify renewals
     paid_subs = supabase.table("subscriptions").select("id, user_id, plan_id, status, current_period_end").eq("status", "active").execute().data or []
     paid_uids = {s["user_id"] for s in paid_subs}
+
+    # Pre-fetch recent marketing logs to avoid hundreds of individual RPC/table calls
+    cutoff_7d = (now - timedelta(days=7)).isoformat()
+    recent_logs = supabase.table("marketing_message_log").select("user_id").gte("sent_at", cutoff_7d).execute().data or []
+    recently_contacted_uids = {r["user_id"] for r in recent_logs}
 
     sent_this_run = 0
 
@@ -123,10 +148,10 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         days_left = (end_dt.date() - now.date()).days
         if days_left <= 7:
             uid = sub["user_id"]
-            email = get_user_email(uid)
+            email = email_map.get(uid) or get_user_email(uid)
             if not email or "@" not in email:
                 continue
-            if is_user_unsubscribed(uid, email) or has_recent_message(uid, "renewal_reminder", cooldown_days=3):
+            if is_user_unsubscribed(uid, email) or uid in recently_contacted_uids:
                 continue
             prof = supabase.table("profiles").select("display_name, username").eq("id", uid).maybe_single().execute().data or {}
             dname = prof.get("display_name") or prof.get("username") or "صديقنا العزيز"
@@ -148,7 +173,7 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         supabase.table("profiles")
         .select("id, username, display_name, updated_at")
         .order("updated_at", desc=True)
-        .limit(200)
+        .limit(500)
         .execute()
         .data or []
     )
@@ -157,14 +182,18 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         if sent_this_run >= limit_for_this_run:
             break
         uid = p["id"]
-        if uid in paid_uids:
+        if uid in paid_uids or uid in recently_contacted_uids:
             continue
 
-        email = get_user_email(uid)
+        email = email_map.get(uid) or get_user_email(uid)
         if not email or "@" not in email:
             continue
 
-        if is_user_unsubscribed(uid, email) or has_recent_message(uid, "founders_offer", cooldown_days=7):
+        # Filter out test domains and known bad addresses
+        if any(fake_domain in email for fake_domain in ["@example.", "@test.", "ghgfhgfh"]):
+            continue
+
+        if is_user_unsubscribed(uid, email):
             continue
 
         dname = p.get("display_name") or p.get("username") or "صديقنا العزيز"
