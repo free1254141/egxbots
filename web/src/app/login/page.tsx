@@ -5,17 +5,14 @@ import { isAllowedAdminEmail } from "@/lib/admin-auth-client";
 import { useMemo, useState, Suspense, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Eye, EyeOff } from "lucide-react";
 
 function LoginForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect") || searchParams.get("next");
-  const defaultTarget = "/profile";
-  const targetDestination = redirectUrl || defaultTarget;
+  const targetDestination = "/profile";
 
   const { signIn, signInWithGoogle, user, loading } = useAuth();
   const { t } = useLanguage();

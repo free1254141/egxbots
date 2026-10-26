@@ -32,7 +32,7 @@ export default function SignupPage() {
         setError(res.error);
         return;
       }
-      router.push("/login");
+      router.push(res.user ? "/profile" : "/login");
     } finally {
       setSubmitting(false);
     }
