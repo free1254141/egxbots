@@ -38,6 +38,7 @@ import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
+import RevenueDetailsModal from "./RevenueDetailsModal";
 import { withDailyActiveUsers } from "./user-chart-data";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
@@ -136,6 +137,7 @@ interface UserStats {
     rejectedOrders: number;
     avgOrderValue: number;
     recentOrders: { user_id: string; amount_egp: number; status: string; provider: string; payment_review_status: string | null; created_at: string }[];
+    approvedOrders?: any[];
     portfolioUsers: number;
     totalOpenPositions: number;
     topStocks: { symbol: string; count: number }[];
@@ -201,6 +203,7 @@ export default function UsersTab() {
     const [showActiveUsers, setShowActiveUsers] = useState(true);
     const [showPro, setShowPro] = useState(true);
     const [showEgx30, setShowEgx30] = useState(true);
+    const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showRecommendations, setShowRecommendations] = useState(true);
 
     // Modal States
@@ -410,16 +413,25 @@ export default function UsersTab() {
                 ) : <>
                 {/* KPI Cards — Revenue · Pro · MAU · Growth */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
-                    <div className="border-4 border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
+                    <div 
+                        onClick={() => setShowRevenueModal(true)}
+                        className="border-4 border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] cursor-pointer hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-1 active:translate-y-1 transition-all group"
+                        title={isAr ? "اضغط لعرض تفاصيل الطلبات المؤكدة" : "Click to view confirmed orders details"}
+                    >
                         <div className="flex items-center justify-between text-zinc-500 mb-1">
                             <span className="font-black text-[10px] uppercase tracking-wider">{isAr ? "صافي الإيرادات (بعد خصم 4%)" : "Net Revenue (-4% fee)"}</span>
-                            <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
                         </div>
                         <div className="text-3xl font-black text-black dark:text-white font-mono">
                             {statsLoading ? "..." : `${Number(stats?.totalRevenue || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </div>
-                        <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                            <ArrowUpRight className="w-3 h-3" /> {isAr ? `ج.م · ${stats?.totalPaidOrders || 0} طلب مؤكد (بدون الأدمن)` : `EGP · ${stats?.totalPaidOrders || 0} paid orders (excl. admin)`}
+                        <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                                <ArrowUpRight className="w-3 h-3" /> {isAr ? `ج.م · ${stats?.totalPaidOrders || 0} طلب مؤكد` : `EGP · ${stats?.totalPaidOrders || 0} paid orders`}
+                            </span>
+                            <span className="underline group-hover:text-black dark:group-hover:text-white font-black text-[9px] bg-emerald-200 dark:bg-emerald-900 px-1 py-0.5 border border-black dark:border-white">
+                                {isAr ? "عرض التفاصيل 🔍" : "View Details 🔍"}
+                            </span>
                         </div>
                     </div>
 
@@ -1372,6 +1384,16 @@ export default function UsersTab() {
                     </div>
                 </div>
             )}
+
+            {/* Revenue Details Modal */}
+            <RevenueDetailsModal
+                isOpen={showRevenueModal}
+                onClose={() => setShowRevenueModal(false)}
+                orders={stats?.approvedOrders || []}
+                totalRevenue={stats?.totalRevenue || 0}
+                totalPaidOrders={stats?.totalPaidOrders || 0}
+                isAr={isAr}
+            />
         </div>
     );
 }

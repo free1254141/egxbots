@@ -35,8 +35,8 @@ export async function GET(req: NextRequest) {
       supabase.from("user_activity_events").select("id,user_id,event_name,path,created_at", { count: "exact" }).gte("created_at", ninetyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
       supabase.from("ai_chat_messages").select("id,user_id,role,created_at", { count: "exact" }).gte("created_at", ninetyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
       supabase.from("ai_chat_sessions").select("id,user_id,created_at,updated_at").limit(100000),
-      supabase.from("local_payment_orders").select("user_id,amount_egp,status,provider,payment_review_status,created_at").order("created_at", { ascending: false }).limit(500),
-      supabase.from("kashier_payments").select("user_id,amount_paid,status,created_at").order("created_at", { ascending: false }).limit(500),
+      supabase.from("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,payment_review_status,customer_note,created_at").order("created_at", { ascending: false }).limit(500),
+      supabase.from("kashier_payments").select("order_id,user_id,amount_paid,status,created_at").order("created_at", { ascending: false }).limit(500),
       supabase.from("positions").select("user_id,symbol,status").eq("status", "open").limit(10000),
       supabase.from("stock_prices").select("date,close").eq("symbol", "EGX30").order("date", { ascending: true }).limit(1000),
       supabase.from("scan_results").select("id,created_at").limit(50000),
@@ -109,12 +109,19 @@ export async function GET(req: NextRequest) {
       "user@gmail.com",
     ]);
 
+    const userEmailMap = new Map<string, string>();
+    const userNameMap = new Map<string, string>();
     try {
       const authRes = await supabase.auth.admin.listUsers({ page: 1, perPage: 2000 });
       for (const user of authRes.data?.users || []) {
         const email = String(user.email || "").toLowerCase().trim();
+        const uid = String(user.id);
+        if (email) userEmailMap.set(uid, email);
+        const name = user.user_metadata?.full_name || user.user_metadata?.name || user.user_metadata?.display_name || "";
+        if (name) userNameMap.set(uid, String(name).trim());
+
         if (ADMIN_EMAILS.has(email) || user.app_metadata?.role === "admin") {
-          adminUserIds.add(String(user.id));
+          adminUserIds.add(uid);
           continue;
         }
         const atIdx = email.indexOf("@");
@@ -129,6 +136,12 @@ export async function GET(req: NextRequest) {
     adminUserIds.add("ba9c27e8-f62d-452f-8a29-dc77fd092207"); // weeessd57
     adminUserIds.add("f3592b1c-ebe1-4fed-ba36-b92a58568df8"); // weeeenew
     adminUserIds.add("77f317e8-1df4-4cca-933b-bf4d3662c047"); // user@gmail.com
+
+    allProfiles.forEach((p: any) => {
+      const uid = String(p.id);
+      if (p.display_name && !userNameMap.has(uid)) userNameMap.set(uid, String(p.display_name).trim());
+      if (p.username && !userNameMap.has(uid)) userNameMap.set(uid, String(p.username).trim());
+    });
 
     const analytics = buildUserAnalytics({
       profiles: allProfiles,
@@ -199,9 +212,14 @@ export async function GET(req: NextRequest) {
       if (date in signupsByDay) signupsByDay[date] += 1;
     });
 
-    // Track Pro subscription starts per day (excluding admin accounts)
+    // Track Pro subscription starts per day (excluding admin accounts and excluding trial/inactive subscriptions)
     subscriptions.forEach((sub: any) => {
       if (adminUserIds.has(String(sub.user_id))) return;
+      const status = String(sub.status || "").toLowerCase().trim();
+      // Exclude trial, canceled, or non-active subscriptions from the new Pro timeline
+      if (status === "trialing" || status === "canceled" || status === "cancelled") return;
+      if (status !== "active") return;
+
       const subDateStr = sub.current_period_start || sub.created_at;
       if (subDateStr) {
         const date = toCairoDate(subDateStr);
@@ -260,8 +278,49 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    const GATEWAY_FEE_RATE = 0.04;
+    const approvedOrders = [
+      ...(paymentOrders || [])
+        .filter((p: any) => String(p.status || "").toLowerCase() === "approved" && !adminUserIds.has(String(p.user_id || "")))
+        .map((p: any) => {
+          const gross = Number(p.amount_egp || 0);
+          const net = Math.round(gross * (1 - GATEWAY_FEE_RATE) * 100) / 100;
+          return {
+            id: String(p.id || ""),
+            user_id: String(p.user_id || ""),
+            plan_id: String(p.plan_id || "pro"),
+            amount_egp: gross,
+            net_egp: net,
+            provider: String(p.provider || "vodafone_cash"),
+            customer_note: p.customer_note || null,
+            created_at: p.created_at,
+            email: userEmailMap.get(String(p.user_id)) || null,
+            display_name: userNameMap.get(String(p.user_id)) || null,
+          };
+        }),
+      ...(kashierPayments || [])
+        .filter((p: any) => String(p.status || "").toLowerCase() === "success" && !adminUserIds.has(String(p.user_id || "")))
+        .map((p: any) => {
+          const gross = Number(p.amount_paid || 0);
+          const net = Math.round(gross * (1 - GATEWAY_FEE_RATE) * 100) / 100;
+          return {
+            id: String(p.order_id || p.id || ""),
+            user_id: String(p.user_id || ""),
+            plan_id: "pro",
+            amount_egp: gross,
+            net_egp: net,
+            provider: "kashier",
+            customer_note: null,
+            created_at: p.created_at,
+            email: userEmailMap.get(String(p.user_id)) || null,
+            display_name: userNameMap.get(String(p.user_id)) || null,
+          };
+        }),
+    ].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
     const planMap = analytics.plans;
     return NextResponse.json({
+      approvedOrders,
       totalUsers: Math.max(nonAdminProfiles.length, totalProfileCount - adminUserIds.size),
       totalRecommendations: scanResults.length,
       currentEgx30: lastKnownEgx30,
