@@ -131,7 +131,7 @@ export function ActiveAISignals({ signals, isAr }: { signals: AISignal[]; isAr: 
                                             {sig.top_reasons.slice(0, 2).map((reason, idx) => (
                                                 <div key={idx} className={`flex items-start gap-1.5 text-xs font-medium leading-relaxed text-zinc-600 dark:text-zinc-400 ${isAr ? "flex-row-reverse text-right" : ""}`}>
                                                     <Sparkles className="w-3 h-3 text-[#FFDC58] shrink-0 mt-0.5" />
-                                                    <span>{reason}</span>
+                                                    <span>{String(reason)}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -165,11 +165,21 @@ export function DailyAnalysisSummary({
     healthScore, 
     advancing, 
     declining, 
+    liquidity,
     isAr 
 }: { 
     healthScore: number; 
     advancing: number; 
     declining: number; 
+    liquidity?: {
+        total_turnover_billion_egp?: number;
+        total_turnover_million_egp?: number;
+        turnover_vs_20d_pct?: number;
+        flow_verdict_ar?: string;
+        flow_verdict_en?: string;
+        daily_summary_ar?: string;
+        daily_summary_en?: string;
+    } | null;
     isAr: boolean;
 }) {
     const verdict = healthScore >= 70 
@@ -186,7 +196,7 @@ export function DailyAnalysisSummary({
                 </div>
                 <div className="space-y-1.5 flex-1">
                     <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">
-                        {isAr ? "ملخص التحليل الفني والآلي اليومي" : "Daily Technical & AI Summary"}
+                        {isAr ? "ملخص التحليل الفني والسيولة اليومي" : "Daily Technical & Liquidity Summary"}
                     </h4>
                     <div className={`flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-zinc-500 dark:text-zinc-400 ${isAr ? "flex-row-reverse" : ""}`}>
                         <div>
@@ -201,11 +211,24 @@ export function DailyAnalysisSummary({
                             {isAr ? "الأسهم الهابطة:" : "Declining:"}{" "}
                             <span className="text-rose-600 dark:text-rose-400 font-bold">{declining}</span>
                         </div>
+                        {liquidity?.total_turnover_billion_egp != null && (
+                            <div>
+                                {isAr ? "سيولة الجلسة:" : "Session Turnover:"}{" "}
+                                <span className="text-indigo-600 dark:text-indigo-400 font-bold font-mono">
+                                    {liquidity.total_turnover_billion_egp.toFixed(2)} {isAr ? "مليار ج.م" : "B EGP"}
+                                </span>
+                                {liquidity.flow_verdict_ar && (
+                                    <span className="ms-1 text-zinc-700 dark:text-zinc-300 font-semibold">
+                                        ({isAr ? liquidity.flow_verdict_ar : liquidity.flow_verdict_en})
+                                    </span>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <p className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400 pt-1">
                         {isAr 
-                            ? `الذكاء الاصطناعي يظهر إشارة صحة سوق بـ ${healthScore} نقاط. مع تفوق الأسهم ${advancing > declining ? "الصاعدة" : "الهابطة"}، ننصح ${healthScore >= 70 ? "بالتركيز على فرص الشراء الفعالة وتفعيل الأهداف القريبة" : healthScore < 45 ? "بتجنب الدخول العشوائي والاحتفاظ بالسيولة لحين استقرار الاتجاه" : "بالانتقائية العالية في المضاربة مع تقليص أحجام الصفقات"}.`
-                            : `The AI is reporting a market health score of ${healthScore}/100. With ${advancing} advancing vs ${declining} declining stocks, the recommendation is to ${healthScore >= 70 ? "focus on high-confidence long setups" : healthScore < 45 ? "stay in cash and avoid risky entries" : "be selective and manage risk tightly"}.`
+                            ? `الذكاء الاصطناعي يظهر إشارة صحة سوق بـ ${healthScore} نقاط. مع تفوق الأسهم ${advancing > declining ? "الصاعدة" : "الهابطة"}، ننصح ${healthScore >= 70 ? "بالتركيز على فرص الشراء الفعالة وتفعيل الأهداف القريبة" : healthScore < 45 ? "بتجنب الدخول العشوائي والاحتفاظ بالسيولة لحين استقرار الاتجاه" : "بالانتقائية العالية في المضاربة مع تقليص أحجام الصفقات"}.${liquidity?.daily_summary_ar ? ` ${liquidity.daily_summary_ar}` : ""}`
+                            : `The AI is reporting a market health score of ${healthScore}/100. With ${advancing} advancing vs ${declining} declining stocks, the recommendation is to ${healthScore >= 70 ? "focus on high-confidence long setups" : healthScore < 45 ? "stay in cash and avoid risky entries" : "be selective and manage risk tightly"}.${liquidity?.daily_summary_en ? ` ${liquidity.daily_summary_en}` : ""}`
                         }
                     </p>
                 </div>

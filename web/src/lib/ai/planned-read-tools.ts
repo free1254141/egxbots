@@ -4,7 +4,7 @@ const symbolsParameter = {type:'array',items:{type:'string'},minItems:1,maxItems
 export const PLANNED_READ_TOOLS_SCHEMA = [
  {type:'function',function:{name:'get_fundamentals',description:'قراءة البيانات الأساسية المخزنة: مضاعف الربحية وربحية السهم والقيمة السوقية والتصنيف. وضح تاريخ تحديث اللقطة والحقول الناقصة؛ ليست قوائم مالية حديثة ولا تاريخ فترة مالية. لا تستنتج مضاعف الدفترية أو نمو الإيرادات عند غيابهما.',parameters:{type:'object',properties:{symbols:symbolsParameter},required:['symbols']}}},
  {type:'function',function:{name:'get_sector_peers',description:'نظراء السهم من تصنيف الصناعة المخزن (أو القطاع عند غياب الصناعة) مع البيانات الأساسية المتاحة وتاريخها. التصنيف العام Finance لا يعني البنوك. لا تقدم ترتيب شراء أو تقييماً للأرخص من بيانات قديمة أو ناقصة.',parameters:{type:'object',properties:{symbol:{type:'string'},max_results:{type:'integer',minimum:1,maximum:10,description:'عدد النظراء فقط، لا يشمل السهم الأصلي. لثلاثة نظراء استخدم 3؛ السهم الأصلي يضاف تلقائياً.'}},required:['symbol']}}},
- {type:'function',function:{name:'get_market_breadth',description:'اتساع أحدث جلسة يومية مخزنة للأسهم ذات تغير سعري صالح: صاعد/هابط/ثابت ونسبة الصاعدة ونسبة الصاعد إلى الهابط، مع تغطية العينة. ليس بيانات لحظية ولا عضوية مؤشر EGX30 ولا صافي شراء مؤسسي.',parameters:{type:'object',properties:{}}}},
+ {type:'function',function:{name:'get_market_breadth',description:'اتساع وسيولة أحدث جلسة يومية مخزنة للأسهم ذات تغير سعري صالح: صاعد/هابط/ثابت ونسبة الصاعدة ونسبة الصاعد إلى الهابط، مع إجمالي قيمة التداول بالجنيه وتوزيع السيولة بين الأسهم الصاعدة والهابطة ومقارنتها بمتوسط 20 جلسة وأعلى الأسهم سيولة. ليس بيانات لحظية ولا عضوية مؤشر EGX30 ولا صافي شراء مؤسسي.',parameters:{type:'object',properties:{}}}},
 ];
 const number = (v:unknown):number|null => typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null;
 const normalize = (v:unknown) => String(v).trim().toUpperCase().replace(/\.CA$/i,'');
@@ -45,16 +45,60 @@ export async function executePlannedReadTool(name:string,args:any,db:any,today:s
    limitations:['نظراء التصنيف المخزن وليسوا قائمة شراء أو ترتيب قيمة عادلة.','التغطية والتواريخ تخص المصدر المخزن؛ التصنيف القطاعي العام قد يجمع صناعات مختلفة.']};
  }
  if(name==='get_market_breadth') {
-  const {data,error}=await db.from('stock_technical_indicators').select('symbol,date,change_pct').eq('exchange','EGX').order('date',{ascending:false}).order('symbol',{ascending:true}).limit(1000);
+  const {data,error}=await db.from('stock_technical_indicators').select('symbol,date,change_pct,close,volume,vol_sma20,r_vol,cmf_20,rsi_14').eq('exchange','EGX').order('date',{ascending:false}).order('symbol',{ascending:true}).limit(1000);
   if(error)throw new Error('تعذر قراءة اتساع السوق');
   const rows=data||[],date=rows[0]?.date;
   if(!date)return {status:'success',availability:'missing',stocks:[],reason:'لا توجد جلسة مخزنة لحساب الاتساع.'};
   const latest=[...new Map(rows.filter((r:any)=>r.date===date).map((r:any)=>[r.symbol,r])).values()] as any[];
   const valid=latest.filter(r=>number(r.change_pct)!==null),advancing=valid.filter(r=>number(r.change_pct)!>0).length,declining=valid.filter(r=>number(r.change_pct)!<0).length;
   const complete=rows.length<1000||rows[rows.length-1].date!==date;
+  let totalTurnover=0,avg20dTurnover=0,advTurnover=0,decTurnover=0,unchTurnover=0,surgeCount=0,posCmfCount=0,negCmfCount=0;
+  const turnoverRows:any[]=[];
+  for(const r of valid){
+   const c=number(r.close),v=number(r.volume),v20=number(r.vol_sma20),chg=number(r.change_pct)!,rv=number(r.r_vol),cmf=number(r.cmf_20),rsi=number(r.rsi_14);
+   if(rv!==null&&rv>=2)surgeCount++;
+   if(cmf!==null&&cmf>0.05)posCmfCount++;
+   if(cmf!==null&&cmf<-0.05)negCmfCount++;
+   if(c!==null&&c>0&&v!==null&&v>0){
+    const tv=c*v;
+    totalTurnover+=tv;
+    if(v20!==null&&v20>0)avg20dTurnover+=c*v20;
+    if(chg>0)advTurnover+=tv;
+    else if(chg<0)decTurnover+=tv;
+    else unchTurnover+=tv;
+    turnoverRows.push({symbol:r.symbol,date,close:c,change_pct:chg,volume:Math.round(v),turnover_egp:Math.round(tv),turnover_million_egp:Number((tv/1e6).toFixed(2)),r_vol:rv,rsi_14:rsi,cmf_20:cmf});
+   }
+  }
+  turnoverRows.sort((a,b)=>b.turnover_egp-a.turnover_egp);
+  const topTurnover=totalTurnover>0?turnoverRows.slice(0,10).map(item=>({...item,market_share_pct:Number(((item.turnover_egp/totalTurnover)*100).toFixed(2))})):[];
+  const top5Share=totalTurnover>0?Number(((turnoverRows.slice(0,5).reduce((s,x)=>s+x.turnover_egp,0)/totalTurnover)*100).toFixed(2)):null;
+  const top10Share=totalTurnover>0?Number(((turnoverRows.slice(0,10).reduce((s,x)=>s+x.turnover_egp,0)/totalTurnover)*100).toFixed(2)):null;
+  const liquidityFields=totalTurnover>0?{
+   total_turnover_egp:Math.round(totalTurnover),
+   total_turnover_million_egp:Number((totalTurnover/1e6).toFixed(2)),
+   total_turnover_billion_egp:Number((totalTurnover/1e9).toFixed(3)),
+   avg_20d_turnover_egp:avg20dTurnover>0?Math.round(avg20dTurnover):null,
+   avg_20d_turnover_million_egp:avg20dTurnover>0?Number((avg20dTurnover/1e6).toFixed(2)):null,
+   turnover_vs_20d_ratio:avg20dTurnover>0?Number((totalTurnover/avg20dTurnover).toFixed(2)):null,
+   turnover_vs_20d_pct:avg20dTurnover>0?Number(((totalTurnover/avg20dTurnover)*100).toFixed(2)):null,
+   advancing_turnover_egp:Math.round(advTurnover),
+   advancing_turnover_million_egp:Number((advTurnover/1e6).toFixed(2)),
+   advancing_turnover_pct:Number(((advTurnover/totalTurnover)*100).toFixed(2)),
+   declining_turnover_egp:Math.round(decTurnover),
+   declining_turnover_million_egp:Number((decTurnover/1e6).toFixed(2)),
+   declining_turnover_pct:Number(((decTurnover/totalTurnover)*100).toFixed(2)),
+   unchanged_turnover_egp:Math.round(unchTurnover),
+   unchanged_turnover_million_egp:Number((unchTurnover/1e6).toFixed(2)),
+   unchanged_turnover_pct:Number(((unchTurnover/totalTurnover)*100).toFixed(2)),
+   top5_concentration_pct:top5Share,
+   top10_concentration_pct:top10Share,
+   unusual_volume_surge_count:surgeCount,
+   positive_cmf_count:posCmfCount,
+   negative_cmf_count:negCmfCount,
+  }:{};
   const stats={symbol:'EGX',date,breadth_total:valid.length,breadth_advancing:advancing,breadth_declining:declining,breadth_unchanged:valid.length-advancing-declining,
-    breadth_advancing_pct:valid.length?100*advancing/valid.length:null,breadth_ad_ratio:declining?advancing/declining:null};
-  return {status:'success',availability:!valid.length?'missing':!complete||valid.length!==latest.length?'partial':'available',date,stocks:[stats],
+    breadth_advancing_pct:valid.length?100*advancing/valid.length:null,breadth_ad_ratio:declining?advancing/declining:null,...liquidityFields};
+  return {status:'success',availability:!valid.length?'missing':!complete||valid.length!==latest.length?'partial':'available',date,stocks:[stats],...(totalTurnover>0?{liquidity_summary:liquidityFields,top_liquidity_stocks:topTurnover}:{}),
    scan_complete:complete,excluded_missing_change:latest.length-valid.length,coverage:'أسهم أحدث جلسة مخزنة ذات تغير سعري صالح؛ ليست جميع الأوراق أو عضوية مؤشر بعينه.',
    limitations:['نسبة الصاعدة = الصاعدة ÷ إجمالي الأسهم ذات تغير صالح ×100.','نسبة الصاعد إلى الهابط غير متاحة إذا كان عدد الهابطة صفراً.','ليس سعراً لحظياً أو صافي شراء مؤسسي.']};
  }

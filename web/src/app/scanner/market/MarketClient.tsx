@@ -14,7 +14,7 @@ import {
 import {
     ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Bar, ComposedChart
 } from "recharts";
-import { MarketHealthScore, MarketBreadthStrip, TopMovers } from "@/components/MarketBreadth";
+import { MarketHealthScore, MarketBreadthStrip, DailyLiquidityUpdateCard, TopMovers } from "@/components/MarketBreadth";
 import { ActiveAISignals, DailyAnalysisSummary } from "@/components/ActiveAISignals";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 
@@ -1662,7 +1662,10 @@ export default function MarketClient() {
                             {t("market.last_updated")} {new Date(data.updated_at).toLocaleTimeString(isAr ? "ar-EG" : "en-US")}
                         </span>
                         <button
-                            onClick={() => void fetchMarketStatus()}
+                            onClick={() => {
+                                void fetchMarketStatus();
+                                void fetchBreadthData();
+                            }}
                             className="inline-flex min-h-10 items-center justify-center gap-2 border-2 border-black bg-amber-300 px-3 text-xs font-black text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] disabled:opacity-50 dark:border-white"
                             title={isAr ? "تحديث" : "Refresh"}
                         >
@@ -1686,14 +1689,17 @@ export default function MarketClient() {
                 </div>
             )}
             {!breadthLoading && breadthData && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                    <div className="lg:col-span-1">
-                        <MarketHealthScore data={breadthData} isAr={isAr} />
+                <>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <div className="lg:col-span-1">
+                            <MarketHealthScore data={breadthData} isAr={isAr} />
+                        </div>
+                        <div className="lg:col-span-2">
+                            <MarketBreadthStrip data={breadthData} isAr={isAr} />
+                        </div>
                     </div>
-                    <div className="lg:col-span-2">
-                        <MarketBreadthStrip data={breadthData} isAr={isAr} />
-                    </div>
-                </div>
+                    <DailyLiquidityUpdateCard data={breadthData} isAr={isAr} />
+                </>
             )}
 
             {/* Metrics Cards Grid */}
@@ -2315,6 +2321,7 @@ export default function MarketClient() {
                         healthScore={breadthData.health_score}
                         advancing={breadthData.advancing}
                         declining={breadthData.declining}
+                        liquidity={breadthData.liquidity}
                         isAr={isAr}
                     />
                 </div>

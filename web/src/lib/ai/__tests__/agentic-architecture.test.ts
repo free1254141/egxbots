@@ -2148,6 +2148,144 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(planEmitted).toBeDefined();
     });
 
+    test("checkAgenticDraft grounds market-wide liquidity, sector liquidity flow, and top liquidity stocks from get_market", () => {
+        const marketEv = toAgenticEvidence("get_market", {}, {
+            status: "success",
+            session_date: "2026-10-22",
+            egx30: {
+                close: 41684.7,
+                change_pct: -2.01,
+                high: 42653.4,
+                low: 41634.3,
+                volume: 300168600,
+                market_regime: "اتجاه هابط"
+            },
+            market_liquidity: {
+                session_date: "2026-10-22",
+                total_stocks_sampled: 236,
+                advancing: 10,
+                declining: 215,
+                unchanged: 11,
+                advancing_pct: 4.2,
+                declining_pct: 91.1,
+                total_turnover_egp: 5420500000,
+                total_turnover_million_egp: 5420.5,
+                total_turnover_billion_egp: 5.42,
+                avg_20d_turnover_egp: 4517000000,
+                avg_20d_turnover_million_egp: 4517.0,
+                turnover_vs_20d_ratio: 1.2,
+                turnover_vs_20d_pct: 20.0,
+                advancing_turnover_million_egp: 410.2,
+                advancing_turnover_pct: 7.6,
+                declining_turnover_million_egp: 4890.3,
+                declining_turnover_pct: 90.2,
+                unchanged_turnover_million_egp: 120.0,
+                unchanged_turnover_pct: 2.2,
+                top5_concentration_pct: 38.5,
+                top10_concentration_pct: 54.2,
+                unusual_volume_surge_count: 14,
+                positive_cmf_count: 42,
+                negative_cmf_count: 180,
+                wyckoff_accumulation_count: 18,
+                wyckoff_distribution_count: 25
+            },
+            sector_liquidity: [
+                {
+                    sector_ar: "العقارات والإنشاءات",
+                    sector_en: "Real Estate",
+                    stock_count: 35,
+                    advancing: 2,
+                    declining: 31,
+                    turnover_egp: 1520400000,
+                    turnover_million_egp: 1520.4,
+                    market_share_pct: 28.1,
+                    weighted_change_pct: -2.45,
+                    weighted_cmf_20: 0.04,
+                    flow_direction: "ضغط بيعي / جني أرباح",
+                    top_stock_symbol: "TMGH",
+                    top_stock_turnover_million_egp: 620.5,
+                    top_stock_change_pct: -1.85
+                },
+                {
+                    sector_ar: "البنوك والخدمات المالية",
+                    sector_en: "Banks & Financial Services",
+                    stock_count: 28,
+                    advancing: 3,
+                    declining: 24,
+                    turnover_egp: 1380200000,
+                    turnover_million_egp: 1380.2,
+                    market_share_pct: 25.5,
+                    weighted_change_pct: -1.9,
+                    weighted_cmf_20: 0.08,
+                    flow_direction: "تجميع انتقائي رغم الهبوط",
+                    top_stock_symbol: "COMI",
+                    top_stock_turnover_million_egp: 810.3,
+                    top_stock_change_pct: -1.5
+                }
+            ],
+            top_liquidity_stocks: [
+                {
+                    symbol: "COMI",
+                    name_ar: "البنك التجاري الدولي",
+                    sector_ar: "البنوك والخدمات المالية",
+                    date: "2026-10-22",
+                    close: 84.5,
+                    change_pct: -1.5,
+                    volume: 9589349,
+                    turnover_egp: 810300000,
+                    turnover_million_egp: 810.3,
+                    market_share_pct: 14.9,
+                    r_vol: 1.45,
+                    cmf_20: 0.12,
+                    rsi_14: 46.2
+                },
+                {
+                    symbol: "TMGH",
+                    name_ar: "مجموعة طلعت مصطفى القابضة",
+                    sector_ar: "العقارات والإنشاءات",
+                    date: "2026-10-22",
+                    close: 61.2,
+                    change_pct: -1.85,
+                    volume: 10138888,
+                    turnover_egp: 620500000,
+                    turnover_million_egp: 620.5,
+                    market_share_pct: 11.4,
+                    r_vol: 1.32,
+                    cmf_20: 0.05,
+                    rsi_14: 43.8
+                }
+            ],
+            top_gainers: [{ symbol: "RKAZ", close: 2.34, change_pct: 4.93, r_vol: 0.48, date: "2026-10-22" }],
+            top_losers: [{ symbol: "TRTO", close: 3.10, change_pct: -8.28, r_vol: 1.15, date: "2026-10-22" }]
+        });
+
+        const draft = `### 💧 خريطة سيولة السوق الكلية (جلسة 2026-10-22)
+| المقياس | القيمة |
+|---|---|
+| إجمالي قيمة التداول الكلية | 5420.5 مليون ج.م (5.42 مليار ج.م) |
+| متوسط السيولة لـ 20 جلسة | 4517.0 مليون ج.م |
+| السيولة مقارنة بمتوسط 20 جلسة | 1.2x (+20.0%) |
+| سيولة الأسهم الصاعدة | 410.2 مليون ج.م (7.6%) |
+| سيولة الأسهم الهابطة | 4890.3 مليون ج.م (90.2%) |
+| تركز السيولة في أعلى 5 أسهم | 38.5% |
+| تركز السيولة في أعلى 10 أسهم | 54.2% |
+
+### 🏭 توزيع السيولة على القطاعات
+| القطاع | قيمة التداول (مليون ج.م) | حصة القطاع من السيولة | متوسط التغير المرجح | CMF-20 المرجح | السهم القائد |
+|---|---|---|---|---|---|
+| العقارات والإنشاءات | 1520.4 | 28.1% | -2.45% | 0.04 | TMGH |
+| البنوك والخدمات المالية | 1380.2 | 25.5% | -1.9% | 0.08 | COMI |
+
+### 🔥 أعلى الأسهم جذباً للسيولة
+| السهم | الإغلاق | التغير | قيمة التداول (مليون ج.م) | حصة السيولة | السيولة النسبية R.Vol | CMF-20 |
+|---|---|---|---|---|---|---|
+| COMI | 84.5 | -1.5% | 810.3 | 14.9% | 1.45x | 0.12 |
+| TMGH | 61.2 | -1.85% | 620.5 | 11.4% | 1.32x | 0.05 |`;
+
+        const reasons = checkAgenticDraft(draft, [marketEv]);
+        expect(reasons).toEqual([]);
+    });
+
     it("chart vision context overrides previous session symbols preventing drift to historical stocks", async () => {
         const mockVisionResult = {
             image_type: "chart" as const,
@@ -2242,5 +2380,143 @@ describe("Agentic tool correctness and failure boundaries", () => {
 
         // Must emit plan without crashing and handle vision properly
         expect(planEmitted).toBeDefined();
+    });
+
+    test("checkAgenticDraft grounds market-wide liquidity, sector liquidity flow, and top liquidity stocks from get_market", () => {
+        const marketEv = toAgenticEvidence("get_market", {}, {
+            status: "success",
+            session_date: "2026-10-22",
+            egx30: {
+                close: 41684.7,
+                change_pct: -2.01,
+                high: 42653.4,
+                low: 41634.3,
+                volume: 300168600,
+                market_regime: "اتجاه هابط"
+            },
+            market_liquidity: {
+                session_date: "2026-10-22",
+                total_stocks_sampled: 236,
+                advancing: 10,
+                declining: 215,
+                unchanged: 11,
+                advancing_pct: 4.2,
+                declining_pct: 91.1,
+                total_turnover_egp: 5420500000,
+                total_turnover_million_egp: 5420.5,
+                total_turnover_billion_egp: 5.42,
+                avg_20d_turnover_egp: 4517000000,
+                avg_20d_turnover_million_egp: 4517.0,
+                turnover_vs_20d_ratio: 1.2,
+                turnover_vs_20d_pct: 20.0,
+                advancing_turnover_million_egp: 410.2,
+                advancing_turnover_pct: 7.6,
+                declining_turnover_million_egp: 4890.3,
+                declining_turnover_pct: 90.2,
+                unchanged_turnover_million_egp: 120.0,
+                unchanged_turnover_pct: 2.2,
+                top5_concentration_pct: 38.5,
+                top10_concentration_pct: 54.2,
+                unusual_volume_surge_count: 14,
+                positive_cmf_count: 42,
+                negative_cmf_count: 180,
+                wyckoff_accumulation_count: 18,
+                wyckoff_distribution_count: 25
+            },
+            sector_liquidity: [
+                {
+                    sector_ar: "العقارات والإنشاءات",
+                    sector_en: "Real Estate",
+                    stock_count: 35,
+                    advancing: 2,
+                    declining: 31,
+                    turnover_egp: 1520400000,
+                    turnover_million_egp: 1520.4,
+                    market_share_pct: 28.1,
+                    weighted_change_pct: -2.45,
+                    weighted_cmf_20: 0.04,
+                    flow_direction: "ضغط بيعي / جني أرباح",
+                    top_stock_symbol: "TMGH",
+                    top_stock_turnover_million_egp: 620.5,
+                    top_stock_change_pct: -1.85
+                },
+                {
+                    sector_ar: "البنوك والخدمات المالية",
+                    sector_en: "Banks & Financial Services",
+                    stock_count: 28,
+                    advancing: 3,
+                    declining: 24,
+                    turnover_egp: 1380200000,
+                    turnover_million_egp: 1380.2,
+                    market_share_pct: 25.5,
+                    weighted_change_pct: -1.9,
+                    weighted_cmf_20: 0.08,
+                    flow_direction: "تجميع انتقائي رغم الهبوط",
+                    top_stock_symbol: "COMI",
+                    top_stock_turnover_million_egp: 810.3,
+                    top_stock_change_pct: -1.5
+                }
+            ],
+            top_liquidity_stocks: [
+                {
+                    symbol: "COMI",
+                    name_ar: "البنك التجاري الدولي",
+                    sector_ar: "البنوك والخدمات المالية",
+                    date: "2026-10-22",
+                    close: 84.5,
+                    change_pct: -1.5,
+                    volume: 9589349,
+                    turnover_egp: 810300000,
+                    turnover_million_egp: 810.3,
+                    market_share_pct: 14.9,
+                    r_vol: 1.45,
+                    cmf_20: 0.12,
+                    rsi_14: 46.2
+                },
+                {
+                    symbol: "TMGH",
+                    name_ar: "مجموعة طلعت مصطفى القابضة",
+                    sector_ar: "العقارات والإنشاءات",
+                    date: "2026-10-22",
+                    close: 61.2,
+                    change_pct: -1.85,
+                    volume: 10138888,
+                    turnover_egp: 620500000,
+                    turnover_million_egp: 620.5,
+                    market_share_pct: 11.4,
+                    r_vol: 1.32,
+                    cmf_20: 0.05,
+                    rsi_14: 43.8
+                }
+            ],
+            top_gainers: [{ symbol: "RKAZ", close: 2.34, change_pct: 4.93, r_vol: 0.48, date: "2026-10-22" }],
+            top_losers: [{ symbol: "TRTO", close: 3.10, change_pct: -8.28, r_vol: 1.15, date: "2026-10-22" }]
+        });
+
+        const draft = `### 💧 خريطة سيولة السوق الكلية (جلسة 2026-10-22)
+| المقياس | القيمة |
+|---|---|
+| إجمالي قيمة التداول الكلية | 5420.5 مليون ج.م (5.42 مليار ج.م) |
+| متوسط السيولة لـ 20 جلسة | 4517.0 مليون ج.م |
+| السيولة مقارنة بمتوسط 20 جلسة | 1.2x (+20.0%) |
+| سيولة الأسهم الصاعدة | 410.2 مليون ج.م (7.6%) |
+| سيولة الأسهم الهابطة | 4890.3 مليون ج.م (90.2%) |
+| تركز السيولة في أعلى 5 أسهم | 38.5% |
+| تركز السيولة في أعلى 10 أسهم | 54.2% |
+
+### 🏭 توزيع السيولة على القطاعات
+| القطاع | قيمة التداول (مليون ج.م) | حصة القطاع من السيولة | متوسط التغير المرجح | CMF-20 المرجح | السهم القائد |
+|---|---|---|---|---|---|
+| العقارات والإنشاءات | 1520.4 | 28.1% | -2.45% | 0.04 | TMGH |
+| البنوك والخدمات المالية | 1380.2 | 25.5% | -1.9% | 0.08 | COMI |
+
+### 🔥 أعلى الأسهم جذباً للسيولة
+| السهم | الإغلاق | التغير | قيمة التداول (مليون ج.م) | حصة السيولة | السيولة النسبية R.Vol | CMF-20 |
+|---|---|---|---|---|---|---|
+| COMI | 84.5 | -1.5% | 810.3 | 14.9% | 1.45x | 0.12 |
+| TMGH | 61.2 | -1.85% | 620.5 | 11.4% | 1.32x | 0.05 |`;
+
+        const reasons = checkAgenticDraft(draft, [marketEv]);
+        expect(reasons).toEqual([]);
     });
 });

@@ -628,21 +628,280 @@ async function executeRawTool(
 
             if (!latestDate) return { status: "success", availability: "missing", session_date: null, egx30: { close: null, change_pct: null, market_regime: null }, top_gainers: [], top_losers: [] };
 
-            const { data: gainers } = await supabase
+            const { data: sessionRows } = await supabase
                 .from("stock_technical_indicators")
-                .select("symbol, close, change_pct, r_vol, rsi_14")
+                .select("symbol, close, volume, vol_sma20, r_vol, change_pct, rsi_14, cmf_20")
                 .eq("exchange", "EGX")
                 .eq("date", latestDate)
                 .order("change_pct", { ascending: false })
-                .limit(5);
+                .limit(500);
 
-            const { data: losers } = await supabase
-                .from("stock_technical_indicators")
-                .select("symbol, close, change_pct, r_vol, rsi_14")
-                .eq("exchange", "EGX")
-                .eq("date", latestDate)
-                .order("change_pct", { ascending: true })
-                .limit(5);
+            const validChangeRows = (sessionRows || []).filter((r: any) => finite(r.change_pct) != null);
+            const gainers = [...validChangeRows]
+                .sort((a: any, b: any) => Number(b.change_pct) - Number(a.change_pct))
+                .slice(0, 5)
+                .map((r: any) => ({ symbol: r.symbol, close: r.close, change_pct: r.change_pct, r_vol: r.r_vol, rsi_14: r.rsi_14 }));
+            const losers = [...validChangeRows]
+                .sort((a: any, b: any) => Number(a.change_pct) - Number(b.change_pct))
+                .slice(0, 5)
+                .map((r: any) => ({ symbol: r.symbol, close: r.close, change_pct: r.change_pct, r_vol: r.r_vol, rsi_14: r.rsi_14 }));
+
+            let fundRows: any[] = [];
+            let scanRows: any[] = [];
+            let stockNameRows: any[] = [];
+            try {
+                const [{ data: fData }, { data: scData }, { data: stData }] = await Promise.all([
+                    supabase.from("stock_fundamentals").select("symbol, name, name_ar, data").eq("exchange", "EGX").order("symbol", { ascending: true }).limit(500),
+                    supabase.from("stock_scans_summary").select("symbol, scan_date, acc_score, dist_score, wyckoff_phase").eq("scan_date", latestDate).order("acc_score", { ascending: false }).limit(500),
+                    supabase.from("stocks").select("symbol, name, name_ar").eq("exchange", "EGX").order("symbol", { ascending: true }).limit(500),
+                ]);
+                fundRows = fData || [];
+                scanRows = scData || [];
+                stockNameRows = stData || [];
+            } catch {
+                // Optional enrichment tables in minimal mocks
+            }
+
+            const classifyEgxSector = (rawSector: string, rawIndustry: string): { sector: string; sector_ar: string } => {
+                const ind = String(rawIndustry || "").toLowerCase();
+                const sec = String(rawSector || "").toLowerCase();
+                const combined = `${ind} ${sec}`;
+                if (ind.includes("real estate") || ind.includes("homebuilding") || combined.includes("عقار")) return { sector: "Real Estate", sector_ar: "العقارات والتطوير العقاري" };
+                if ((ind.includes("bank") && !ind.includes("investment") && !ind.includes("broker")) || combined.includes("بنوك")) return { sector: "Banks", sector_ar: "البنوك" };
+                if (sec.includes("finance") || ind.includes("financial") || ind.includes("investment") || ind.includes("insurance")) return { sector: "Financial Services", sector_ar: "الخدمات المالية غير المصرفية" };
+                if (combined.includes("chemical") || combined.includes("fertilizer") || combined.includes("petrochemical") || combined.includes("كيماويات") || combined.includes("أسمدة")) return { sector: "Chemicals & Fertilizers", sector_ar: "الكيماويات والأسمدة والبتروكيماويات" };
+                if (combined.includes("construction") || combined.includes("engineering") || combined.includes("contracting") || combined.includes("cement") || combined.includes("building") || combined.includes("مقاولات")) return { sector: "Construction & Building Materials", sector_ar: "التشييد ومواد البناء" };
+                if (combined.includes("steel") || combined.includes("mining") || combined.includes("metal") || combined.includes("non-energy minerals") || combined.includes("حديد") || combined.includes("تعدين")) return { sector: "Basic Resources & Metals", sector_ar: "الموارد الأساسية والمعادن" };
+                if (combined.includes("food") || combined.includes("beverage") || combined.includes("milling") || combined.includes("poultry") || combined.includes("agricultural") || combined.includes("consumer non-durables") || combined.includes("أغذية")) return { sector: "Food & Beverages", sector_ar: "الأغذية والمشروبات والزراعة" };
+                if (combined.includes("pharma") || combined.includes("health") || combined.includes("medical") || combined.includes("hospital") || combined.includes("أدوية")) return { sector: "Healthcare & Pharmaceuticals", sector_ar: "الرعاية الصحية والأدوية" };
+                if (combined.includes("telecom") || combined.includes("technology") || combined.includes("communications") || combined.includes("software") || combined.includes("electronic")) return { sector: "Telecom & Technology", sector_ar: "الاتصالات وتكنولوجيا المعلومات" };
+                if (combined.includes("energy") || combined.includes("oil") || combined.includes("gas") || combined.includes("utilities") || combined.includes("طاقة")) return { sector: "Energy & Utilities", sector_ar: "الطاقة والمرافق" };
+                if (combined.includes("transport") || combined.includes("shipping") || combined.includes("logistics") || combined.includes("container")) return { sector: "Transportation & Shipping", sector_ar: "النقل والشحن والخدمات اللوجستية" };
+                if (combined.includes("tourism") || combined.includes("hotel") || combined.includes("resort") || combined.includes("consumer services")) return { sector: "Tourism & Leisure", sector_ar: "السياحة والترفيه" };
+                if (combined.includes("industrial") || combined.includes("manufacturing") || combined.includes("textile") || combined.includes("cables") || combined.includes("consumer durables")) return { sector: "Industrial Goods & Services", sector_ar: "السلع والخدمات الصناعية" };
+                return { sector: "Other", sector_ar: "قطاعات أخرى" };
+            };
+
+            const sectorBySymbol = new Map<string, { sector: string; sector_ar: string }>();
+            const arNameBySymbol = new Map<string, string>();
+            for (const st of stockNameRows) {
+                const sym = String(st.symbol || "").toUpperCase();
+                if (sym && (st.name_ar || st.name)) arNameBySymbol.set(sym, String(st.name_ar || st.name));
+            }
+            for (const f of fundRows) {
+                const sym = String(f.symbol || "").toUpperCase();
+                const d = f.data && typeof f.data === "object" ? f.data : {};
+                if (sym) {
+                    sectorBySymbol.set(sym, classifyEgxSector(d.sector || "", d.industry || ""));
+                    if (!arNameBySymbol.has(sym) && (f.name_ar || f.name || d.name)) {
+                        arNameBySymbol.set(sym, String(f.name_ar || f.name || d.name));
+                    }
+                }
+            }
+
+            let totalTurnover = 0;
+            let avg20dTurnover = 0;
+            let advTurnover = 0;
+            let decTurnover = 0;
+            let unchTurnover = 0;
+            let advCount = 0;
+            let decCount = 0;
+            let unchCount = 0;
+            let surgeCount = 0;
+            let posCmfCount = 0;
+            let negCmfCount = 0;
+
+            const stockTurnovers: any[] = [];
+            const sectorAgg = new Map<string, {
+                sector: string;
+                sector_ar: string;
+                turnover_egp: number;
+                weighted_change_sum: number;
+                weighted_cmf_sum: number;
+                stocks_count: number;
+                advancing_count: number;
+                declining_count: number;
+                stocks: any[];
+            }>();
+
+            for (const r of validChangeRows) {
+                const sym = String(r.symbol || "").toUpperCase();
+                const chg = Number(r.change_pct);
+                const c = finite(r.close);
+                const v = finite(r.volume);
+                const v20 = finite(r.vol_sma20);
+                const rv = finite(r.r_vol);
+                const cmf = finite(r.cmf_20);
+                const rsi = finite(r.rsi_14);
+
+                if (chg > 0) advCount++;
+                else if (chg < 0) decCount++;
+                else unchCount++;
+                if (rv != null && rv >= 2) surgeCount++;
+                if (cmf != null && cmf > 0.05) posCmfCount++;
+                if (cmf != null && cmf < -0.05) negCmfCount++;
+
+                if (c != null && c > 0 && v != null && v > 0) {
+                    const tv = c * v;
+                    totalTurnover += tv;
+                    if (v20 != null && v20 > 0) avg20dTurnover += c * v20;
+                    if (chg > 0) advTurnover += tv;
+                    else if (chg < 0) decTurnover += tv;
+                    else unchTurnover += tv;
+
+                    const secInfo = sectorBySymbol.get(sym) || { sector: "Other", sector_ar: "قطاعات أخرى" };
+                    const item = {
+                        symbol: sym,
+                        name_ar: arNameBySymbol.get(sym) || sym,
+                        sector: secInfo.sector,
+                        sector_ar: secInfo.sector_ar,
+                        date: latestDate,
+                        close: c,
+                        change_pct: Number(chg.toFixed(2)),
+                        volume: Math.round(v),
+                        turnover_egp: Math.round(tv),
+                        turnover_million_egp: Number((tv / 1e6).toFixed(2)),
+                        r_vol: rv != null ? Number(rv.toFixed(2)) : null,
+                        rsi_14: rsi != null ? Number(rsi.toFixed(2)) : null,
+                        cmf_20: cmf != null ? Number(cmf.toFixed(3)) : null,
+                    };
+                    stockTurnovers.push(item);
+
+                    if (!sectorAgg.has(secInfo.sector)) {
+                        sectorAgg.set(secInfo.sector, {
+                            sector: secInfo.sector,
+                            sector_ar: secInfo.sector_ar,
+                            turnover_egp: 0,
+                            weighted_change_sum: 0,
+                            weighted_cmf_sum: 0,
+                            stocks_count: 0,
+                            advancing_count: 0,
+                            declining_count: 0,
+                            stocks: [],
+                        });
+                    }
+                    const grp = sectorAgg.get(secInfo.sector)!;
+                    grp.turnover_egp += tv;
+                    grp.weighted_change_sum += chg * tv;
+                    grp.weighted_cmf_sum += (cmf ?? 0) * tv;
+                    grp.stocks_count += 1;
+                    if (chg > 0) grp.advancing_count += 1;
+                    else if (chg < 0) grp.declining_count += 1;
+                    grp.stocks.push(item);
+                }
+            }
+
+            stockTurnovers.sort((a, b) => b.turnover_egp - a.turnover_egp);
+            const topLiquidityStocks = totalTurnover > 0
+                ? stockTurnovers.slice(0, 10).map((s) => ({
+                    ...s,
+                    market_share_pct: Number(((s.turnover_egp / totalTurnover) * 100).toFixed(2)),
+                }))
+                : [];
+
+            const sectorLiquidity = totalTurnover > 0
+                ? Array.from(sectorAgg.values())
+                    .map((g) => {
+                        g.stocks.sort((a, b) => b.turnover_egp - a.turnover_egp);
+                        const topStock = g.stocks[0] || null;
+                        const wChg = g.turnover_egp > 0 ? Number((g.weighted_change_sum / g.turnover_egp).toFixed(2)) : 0;
+                        const wCmf = g.turnover_egp > 0 ? Number((g.weighted_cmf_sum / g.turnover_egp).toFixed(3)) : 0;
+                        const sentiment = wChg >= 1.0 && wCmf > 0.05
+                            ? "strong_accumulation"
+                            : wChg > 0
+                            ? "accumulation"
+                            : wChg <= -1.0 && wCmf < -0.05
+                            ? "strong_distribution"
+                            : wChg < 0
+                            ? "distribution"
+                            : "neutral";
+                        const sentimentAr = sentiment === "strong_accumulation"
+                            ? "تجميع قوي (دخول سيولة)"
+                            : sentiment === "accumulation"
+                            ? "تجميع (تدفق إيجابي)"
+                            : sentiment === "strong_distribution"
+                            ? "تصريف قوي (خروج سيولة)"
+                            : sentiment === "distribution"
+                            ? "تصريف (ضغط بيعي)"
+                            : "محايد";
+                        return {
+                            sector: g.sector,
+                            sector_ar: g.sector_ar,
+                            date: latestDate,
+                            turnover_egp: Math.round(g.turnover_egp),
+                            turnover_million_egp: Number((g.turnover_egp / 1e6).toFixed(2)),
+                            market_share_pct: Number(((g.turnover_egp / totalTurnover) * 100).toFixed(2)),
+                            weighted_change_pct: wChg,
+                            weighted_cmf_20: wCmf,
+                            stocks_count: g.stocks_count,
+                            advancing_count: g.advancing_count,
+                            declining_count: g.declining_count,
+                            sentiment,
+                            sentiment_ar: sentimentAr,
+                            top_stock_symbol: topStock?.symbol || null,
+                            top_stock_name_ar: topStock?.name_ar || null,
+                            top_stock_turnover_million_egp: topStock?.turnover_million_egp ?? null,
+                            top_stock_change_pct: topStock?.change_pct ?? null,
+                            top_stock_share_in_sector_pct: topStock && g.turnover_egp > 0
+                                ? Number(((topStock.turnover_egp / g.turnover_egp) * 100).toFixed(2))
+                                : null,
+                        };
+                    })
+                    .sort((a, b) => b.turnover_egp - a.turnover_egp)
+                : [];
+
+            const accCount = scanRows.filter((s: any) => (finite(s.acc_score) ?? 0) >= 50).length;
+            const strongAccCount = scanRows.filter((s: any) => (finite(s.acc_score) ?? 0) >= 70).length;
+            const distCount = scanRows.filter((s: any) => (finite(s.dist_score) ?? 0) >= 50).length;
+            const strongDistCount = scanRows.filter((s: any) => (finite(s.dist_score) ?? 0) >= 70).length;
+
+            const top5Share = totalTurnover > 0
+                ? Number(((stockTurnovers.slice(0, 5).reduce((sum, s) => sum + s.turnover_egp, 0) / totalTurnover) * 100).toFixed(2))
+                : null;
+            const top10Share = totalTurnover > 0
+                ? Number(((stockTurnovers.slice(0, 10).reduce((sum, s) => sum + s.turnover_egp, 0) / totalTurnover) * 100).toFixed(2))
+                : null;
+
+            const marketLiquidity = totalTurnover > 0
+                ? {
+                    session_date: latestDate,
+                    total_turnover_egp: Math.round(totalTurnover),
+                    total_turnover_million_egp: Number((totalTurnover / 1e6).toFixed(2)),
+                    total_turnover_billion_egp: Number((totalTurnover / 1e9).toFixed(3)),
+                    avg_20d_turnover_egp: avg20dTurnover > 0 ? Math.round(avg20dTurnover) : null,
+                    avg_20d_turnover_million_egp: avg20dTurnover > 0 ? Number((avg20dTurnover / 1e6).toFixed(2)) : null,
+                    avg_20d_turnover_billion_egp: avg20dTurnover > 0 ? Number((avg20dTurnover / 1e9).toFixed(3)) : null,
+                    turnover_vs_20d_ratio: avg20dTurnover > 0 ? Number((totalTurnover / avg20dTurnover).toFixed(2)) : null,
+                    turnover_vs_20d_pct: avg20dTurnover > 0 ? Number(((totalTurnover / avg20dTurnover) * 100).toFixed(2)) : null,
+                    advancing_turnover_egp: Math.round(advTurnover),
+                    advancing_turnover_million_egp: Number((advTurnover / 1e6).toFixed(2)),
+                    advancing_turnover_pct: Number(((advTurnover / totalTurnover) * 100).toFixed(2)),
+                    declining_turnover_egp: Math.round(decTurnover),
+                    declining_turnover_million_egp: Number((decTurnover / 1e6).toFixed(2)),
+                    declining_turnover_pct: Number(((decTurnover / totalTurnover) * 100).toFixed(2)),
+                    unchanged_turnover_egp: Math.round(unchTurnover),
+                    unchanged_turnover_million_egp: Number((unchTurnover / 1e6).toFixed(2)),
+                    unchanged_turnover_pct: Number(((unchTurnover / totalTurnover) * 100).toFixed(2)),
+                    top5_concentration_pct: top5Share,
+                    top10_concentration_pct: top10Share,
+                    stocks_traded_count: validChangeRows.length,
+                    advancing_count: advCount,
+                    declining_count: decCount,
+                    unchanged_count: unchCount,
+                    advancing_stocks_pct: validChangeRows.length > 0 ? Number(((advCount / validChangeRows.length) * 100).toFixed(2)) : null,
+                    unusual_volume_surge_count: surgeCount,
+                    positive_cmf_count: posCmfCount,
+                    negative_cmf_count: negCmfCount,
+                    ...(scanRows.length > 0
+                        ? {
+                            accumulation_count: accCount,
+                            strong_accumulation_count: strongAccCount,
+                            distribution_count: distCount,
+                            strong_distribution_count: strongDistCount,
+                        }
+                        : {}),
+                }
+                : undefined;
 
             return {
                 status: "success",
@@ -664,6 +923,7 @@ async function executeRawTool(
                     tracked_symbols_sample: Array.from(SHARIA_COMPLIANT_EGX_SYMBOLS).slice(0, 15),
                     description: "المؤشر الشرعي الرسمي المعتمد من الهيئة العامة للرقابة المالية ويضم 33 شركة متوافقة مع معايير وضوابط الشريعة الإسلامية"
                 },
+                ...(marketLiquidity ? { market_liquidity: marketLiquidity, sector_liquidity: sectorLiquidity, top_liquidity_stocks: topLiquidityStocks } : {}),
                 top_gainers: gainers || [],
                 top_losers: losers || []
             };
@@ -1262,20 +1522,112 @@ async function executeRawTool(
             const since = new Date(`${today}T00:00:00Z`);
             since.setUTCDate(since.getUTCDate() - 7);
             const sinceDate = since.toISOString().slice(0, 10);
+            const fetchLimit = symbols.length ? 15 : 100;
             let query = supabase.from("stock_news_sentiment")
                 .select("symbol,date,sentiment_score,news_count,headlines")
                 .eq("exchange", "EGX").gte("date", sinceDate).gt("news_count", 0)
-                .order("date", { ascending: false }).limit(15);
+                .order("date", { ascending: false }).limit(fetchLimit);
             if (symbols.length) query = query.in("symbol", symbols);
             const { data: rows } = await query;
             const rowSymbols = [...new Set((rows || []).map((r:any)=>String(r.symbol || "").toUpperCase()).filter(Boolean))];
             const { data: names } = rowSymbols.length
-                ? await supabase.from("stocks").select("symbol,name").in("symbol", rowSymbols).limit(rowSymbols.length)
+                ? await supabase.from("stocks").select("symbol,name,name_ar").in("symbol", rowSymbols).limit(rowSymbols.length)
                 : { data: [] };
-            const nameMap = new Map<string,string>((names || []).map((r:any)=>[String(r.symbol).toUpperCase(),String(r.name || "")]));
-            const news = sanitizeNewsRows(rows || [], nameMap);
-            return { status:"success", availability:news.length ? "available" : "missing", news, symbols,
-                date_range:{ from:sinceDate, through:today }, note:news.length ? undefined : "لا توجد عناوين موثقة مطابقة في مصدر الأخبار خلال آخر 7 أيام" };
+            const nameMap = new Map<string,string>((names || []).map((r:any)=>[
+                String(r.symbol).toUpperCase(),
+                [r.name, r.name_ar].filter(Boolean).join(" ")
+            ]));
+            const arNameMap = new Map<string,string>((names || []).map((r:any)=>[
+                String(r.symbol).toUpperCase(),
+                String(r.name_ar || r.name || "")
+            ]));
+            const sanitized = sanitizeNewsRows(rows || [], nameMap).map((row: any) => ({
+                ...row,
+                ...(arNameMap.get(row.symbol) ? { name_ar: arNameMap.get(row.symbol) } : {}),
+            }));
+
+            const isBoilerplateHeadline = (h: string): boolean =>
+                /\bEstimates\s*[–—-]\s*EGX:[A-Z0-9]+\s*[–—-]\s*TradingView/i.test(h)
+                || /^أخبار سهم .*معلومات مباشر/.test(h)
+                || /Stock Price\s*(?:&|and)\s*News.*Google Finance/i.test(h);
+
+            let news = sanitized;
+            let marketNewsSummary: any = undefined;
+            if (!symbols.length && sanitized.length > 0) {
+                const substantiveRows: any[] = [];
+                const boilerplateRows: any[] = [];
+                let posCount = 0;
+                let negCount = 0;
+                let neutralCount = 0;
+                for (const row of sanitized) {
+                    const score = typeof row.sentiment_score === "number" ? row.sentiment_score : 0;
+                    if (score > 0.1) posCount++;
+                    else if (score < -0.1) negCount++;
+                    else neutralCount++;
+
+                    const realHeadlines = (row.headlines || []).filter((h: string) => !isBoilerplateHeadline(h));
+                    if (realHeadlines.length > 0) {
+                        substantiveRows.push({
+                            ...row,
+                            headlines: realHeadlines,
+                            news_count: realHeadlines.length,
+                        });
+                    } else {
+                        boilerplateRows.push(row);
+                    }
+                }
+                substantiveRows.sort((a, b) => {
+                    const dCmp = String(b.date || "").localeCompare(String(a.date || ""));
+                    if (dCmp !== 0) return dCmp;
+                    const sDiff = Math.abs(Number(b.sentiment_score || 0)) - Math.abs(Number(a.sentiment_score || 0));
+                    if (Math.abs(sDiff) > 0.05) return sDiff;
+                    return Number(b.news_count || 0) - Number(a.news_count || 0);
+                });
+                news = (substantiveRows.length > 0 ? [...substantiveRows, ...boilerplateRows] : sanitized).slice(0, 15);
+                marketNewsSummary = {
+                    total_stocks_with_records: sanitized.length,
+                    substantive_news_stocks_count: substantiveRows.length,
+                    positive_sentiment_stocks_count: posCount,
+                    negative_sentiment_stocks_count: negCount,
+                    neutral_sentiment_stocks_count: neutralCount,
+                };
+            }
+
+            let recentCorporateActions: any[] | undefined = undefined;
+            if (!symbols.length) {
+                try {
+                    const { data: caRows } = await supabase
+                        .from("corporate_actions")
+                        .select("symbol,action_type,title,action_date,published_at,source,url")
+                        .eq("exchange", "EGX")
+                        .gte("published_at", `${sinceDate}T00:00:00Z`)
+                        .order("published_at", { ascending: false })
+                        .limit(10);
+                    if (Array.isArray(caRows) && caRows.length > 0) {
+                        recentCorporateActions = caRows.map((c: any) => ({
+                            symbol: c.symbol,
+                            action_type: c.action_type,
+                            title: String(c.title || "").slice(0, 300),
+                            action_date: c.action_date || null,
+                            published_date: c.published_at ? String(c.published_at).slice(0, 10) : null,
+                            source: c.source || null,
+                        }));
+                    }
+                } catch {
+                    // Optional corporate_actions enrichment
+                }
+            }
+
+            return {
+                status: "success",
+                availability: news.length || recentCorporateActions?.length ? "available" : "missing",
+                news,
+                ...(marketNewsSummary ? { market_news_summary: marketNewsSummary } : {}),
+                ...(recentCorporateActions?.length ? { recent_corporate_actions: recentCorporateActions } : {}),
+                symbols,
+                date_range: { from: sinceDate, through: today },
+                note: news.length || recentCorporateActions?.length ? undefined : "لا توجد عناوين موثقة مطابقة في مصدر الأخبار خلال آخر 7 أيام"
+            };
         }
 
         if (toolName === "get_comparison") {

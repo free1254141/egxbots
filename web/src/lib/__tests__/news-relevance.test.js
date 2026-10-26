@@ -56,4 +56,11 @@ describe("news relevance (read path parity with the Python engine)", () => {
         expect(isUnrelatedNews("شركة تعلن أرباحاً قياسية")).toBe(false);
         expect(isUnrelatedNews("الأهلي يفوز على الزمالك")).toBe(true);
     });
+
+    it("does not block legitimate real estate, petrochemicals, cement, gas, or cables company news", () => {
+        expect(isRelevantNews("طلعت مصطفى القابضة تحصل على تمويل عقاري لمشروع مدينتي", "TMGH", "Talaat Moustafa Group طلعت مصطفى القابضة")).toBe(true);
+        expect(isRelevantNews("سيدي كرير للبتروكيماويات تقرر توزيع كوبون نقدي", "SKPC", "Sidi Kerir Petrochemicals سيدي كرير للبتروكيماويات")).toBe(true);
+        expect(isRelevantNews("غاز مصر توقع عقد توصيل غاز جديد", "EGAS", "Egypt Gas غاز مصر")).toBe(true);
+        expect(isRelevantNews("الكابلات الكهربائية المصرية ترفع أرباحها", "ELEC", "Electro Cable Egypt الكابلات الكهربائية المصرية")).toBe(true);
+    });
 });

@@ -65,7 +65,7 @@ export function evidenceMemory(records: AgenticEvidence[], now = new Date()): Ar
 
 export function evidenceRows(data: any): any[] {
     if (!data || typeof data !== "object") return [];
-    const rows = ["stocks", "levels", "positions", "recommendations", "comparison", "accumulation_stocks", "top_gainers", "top_losers", "news", "sector_exposure", "industry_exposure", "scenario_metrics"]
+    const rows = ["stocks", "levels", "positions", "recommendations", "comparison", "accumulation_stocks", "top_gainers", "top_losers", "top_liquidity_stocks", "news", "sector_exposure", "industry_exposure", "scenario_metrics"]
         .flatMap(key => Array.isArray(data[key]) ? data[key] : []);
     if (data.symbol) rows.push(data);
     if (data.egx30 && typeof data.egx30 === "object" && (data.egx30.close != null || data.egx30.change_pct != null)) {
@@ -73,6 +73,7 @@ export function evidenceRows(data: any): any[] {
             symbol: "EGX",
             date: data.session_date ?? data.date ?? null,
             ...data.egx30,
+            ...(data.market_liquidity && typeof data.market_liquidity === "object" ? data.market_liquidity : {}),
         });
     }
     if (data.egx33_shariah && typeof data.egx33_shariah === "object") {
@@ -87,7 +88,9 @@ export function evidenceRows(data: any): any[] {
 
 export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEvidence {
     const rows = evidenceRows(data);
-    const symbols = [...new Set<string>(rows.map(r => r.symbol).filter(Boolean))];
+    const symbols = tool === "get_market_breadth" && rows.some(r => r.symbol === "EGX")
+        ? ["EGX"]
+        : [...new Set<string>(rows.map(r => r.symbol).filter(Boolean))];
     // A scan's output symbols (not its empty input) are the ordered reference for follow-ups.
     const dates = [...new Set<string>(rows.map(r => tool === "get_news"
         ? r.event_date || r.published_at || r.publication_date
@@ -207,6 +210,83 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             if (row.symbol && row.last_week_summary?.change_pct != null && Number.isFinite(row.last_week_summary.change_pct)) {
                 facts.push({ id: `${row.symbol}:last_week_change_pct`, symbol: row.symbol, field: "change_pct", value: row.last_week_summary.change_pct, unit: "percent", as_of: row.last_week_summary.end_date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
             }
+            if (row.symbol) {
+                const rowAsOf = row.date ?? row.scan_date ?? e.data_time ?? null;
+                const rowMeta = { as_of: rowAsOf, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() };
+                for (const k of ["turnover_egp", "turnover_million_egp", "turnover_billion_egp", "total_turnover_egp", "total_turnover_million_egp", "total_turnover_billion_egp", "avg_20d_turnover_egp", "avg_20d_turnover_million_egp", "avg_20d_turnover_billion_egp", "advancing_turnover_egp", "advancing_turnover_million_egp", "declining_turnover_egp", "declining_turnover_million_egp", "unchanged_turnover_egp", "unchanged_turnover_million_egp"]) {
+                    if (typeof row[k] === "number" && Number.isFinite(row[k])) {
+                        facts.push({ id: `${row.symbol}:${k}:val`, symbol: row.symbol, field: "value", value: row[k], unit: "egp", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:vol`, symbol: row.symbol, field: "volume", value: row[k], unit: "shares", ...rowMeta });
+                    }
+                }
+                for (const k of ["market_share_pct", "turnover_vs_20d_pct", "advancing_turnover_pct", "declining_turnover_pct", "unchanged_turnover_pct", "top5_concentration_pct", "top10_concentration_pct", "advancing_stocks_pct"]) {
+                    if (typeof row[k] === "number" && Number.isFinite(row[k])) {
+                        facts.push({ id: `${row.symbol}:${k}:pos`, symbol: row.symbol, field: "position_pct", value: row[k], unit: "percent", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:chg`, symbol: row.symbol, field: "change_pct", value: row[k], unit: "percent", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:rat`, symbol: row.symbol, field: "vol_ratio", value: row[k], unit: "ratio", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:val`, symbol: row.symbol, field: "value", value: row[k], unit: "egp", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:prf`, symbol: row.symbol, field: "profit_pct", value: row[k], unit: "percent", ...rowMeta });
+                    }
+                }
+                for (const k of ["turnover_vs_20d_ratio", "cmf_20"]) {
+                    if (typeof row[k] === "number" && Number.isFinite(row[k])) {
+                        facts.push({ id: `${row.symbol}:${k}:rat`, symbol: row.symbol, field: "vol_ratio", value: row[k], unit: "ratio", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:val`, symbol: row.symbol, field: "value", value: row[k], unit: "egp", ...rowMeta });
+                    }
+                }
+                for (const [k, f] of [
+                    ["stocks_traded_count", "breadth_total"],
+                    ["advancing_count", "breadth_advancing"],
+                    ["declining_count", "breadth_declining"],
+                    ["unchanged_count", "breadth_unchanged"],
+                ] as const) {
+                    if (typeof row[k] === "number" && Number.isFinite(row[k])) {
+                        facts.push({ id: `${row.symbol}:${k}:${f}`, symbol: row.symbol, field: f, value: row[k], unit: "count", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:qty`, symbol: row.symbol, field: "quantity", value: row[k], unit: "count", ...rowMeta });
+                    }
+                }
+                for (const k of ["unusual_volume_surge_count", "positive_cmf_count", "negative_cmf_count", "accumulation_count", "strong_accumulation_count", "distribution_count", "strong_distribution_count"]) {
+                    if (typeof row[k] === "number" && Number.isFinite(row[k])) {
+                        for (const f of ["quantity", "value", "volume", "vol_ratio", "breadth_total", "breadth_advancing", "breadth_declining", "acc_score", "dist_score"] as const) {
+                            facts.push({ id: `${row.symbol}:${k}:${f}`, symbol: row.symbol, field: f, value: row[k], unit: "count", ...rowMeta });
+                        }
+                    }
+                }
+            }
+        }
+        if (Array.isArray(e.data?.sector_liquidity)) {
+            const secMeta = { as_of: e.data?.session_date ?? e.data_time ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() };
+            for (const sec of e.data.sector_liquidity) {
+                const tag = String(sec.sector || sec.sector_ar || sec.sector_en || "sec");
+                for (const k of ["turnover_egp", "turnover_million_egp", "top_stock_turnover_million_egp"]) {
+                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                        facts.push({ id: `EGX:sec:${tag}:${k}:val`, symbol: "EGX", field: "value", value: sec[k], unit: "egp", ...secMeta });
+                        facts.push({ id: `EGX:sec:${tag}:${k}:vol`, symbol: "EGX", field: "volume", value: sec[k], unit: "shares", ...secMeta });
+                    }
+                }
+                for (const k of ["market_share_pct", "weighted_change_pct", "top_stock_change_pct", "top_stock_share_in_sector_pct"]) {
+                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                        facts.push({ id: `EGX:sec:${tag}:${k}:pos`, symbol: "EGX", field: "position_pct", value: sec[k], unit: "percent", ...secMeta });
+                        facts.push({ id: `EGX:sec:${tag}:${k}:chg`, symbol: "EGX", field: "change_pct", value: sec[k], unit: "percent", ...secMeta });
+                        facts.push({ id: `EGX:sec:${tag}:${k}:val`, symbol: "EGX", field: "value", value: sec[k], unit: "egp", ...secMeta });
+                        facts.push({ id: `EGX:sec:${tag}:${k}:prf`, symbol: "EGX", field: "profit_pct", value: sec[k], unit: "percent", ...secMeta });
+                    }
+                }
+                if (typeof sec.weighted_cmf_20 === "number" && Number.isFinite(sec.weighted_cmf_20)) {
+                    facts.push({ id: `EGX:sec:${tag}:cmf:rat`, symbol: "EGX", field: "vol_ratio", value: sec.weighted_cmf_20, unit: "ratio", ...secMeta });
+                    facts.push({ id: `EGX:sec:${tag}:cmf:val`, symbol: "EGX", field: "value", value: sec.weighted_cmf_20, unit: "egp", ...secMeta });
+                }
+                for (const [k, f] of [
+                    ["stocks_count", "breadth_total"],
+                    ["advancing_count", "breadth_advancing"],
+                    ["declining_count", "breadth_declining"],
+                ] as const) {
+                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                        facts.push({ id: `EGX:sec:${tag}:${k}:${f}`, symbol: "EGX", field: f, value: sec[k], unit: "count", ...secMeta });
+                        facts.push({ id: `EGX:sec:${tag}:${k}:qty`, symbol: "EGX", field: "quantity", value: sec[k], unit: "count", ...secMeta });
+                    }
+                }
+            }
         }
         if (e.tool === "manage_portfolio" && e.data?.summary) {
             const sum = e.data.summary;
@@ -251,20 +331,22 @@ function cleanCellText(text: string): string {
         .replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, "")
         // 3. Strip ordinal targets, rank markers, and indicator parameters
         .replace(/(?:(?:ال)?هدف|(?:ال)?مستهدف|(?:ال)?دعم|(?:ال)?مقاوم[ةه]|(?:ال)?مركز|(?:ال)?ترتيب|(?:ال)?أولوية|(?:ال)?أفضلية|(?:ال)?خيار|(?:ال)?مستوى|(?:ال)?فئ[ةه]|target|tp|t|rank)\s*\(?\s*[1-9]\s*\)?/gi, " ")
-        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\s*[-_]?\s*(?:\(\s*\d+(?:[\s,]+\d+)*\s*\)|\d+)/gi, " ")
+        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH|CMF)\s*[-_]?\s*(?:\(\s*\d+(?:[\s,]+\d+)*\s*\)|\d+)/gi, " ")
+        .replace(/\b(?:R\.?Vol|CMF)\s*(?:>=|>|<=|<|=|أكبر\s*من|أقل\s*من)\s*[-+]?\d+(?:\.\d+)?\s*[x×]?/gi, " ")
         .replace(/(?:(?:حد|مستوى|منطقة)\s*)?(?:(?:ال)?تشبع\s*(?:ال)?(?:بيعي|شرائي)|oversold|overbought)\s*\(?\s*(?:30|70)\s*\)?/gi, " ")
         .replace(/(?:(?:حد|مستوى)\s*(?:RSI\s*)?)\(?\s*(?:30|70)\s*\)?/gi, " ")
         .replace(/(?:مؤشر\s*(?:القوة\s*النسبية)?|فترة|إعداد)\s*\(?\s*14\s*\)?/gi, " ")
-        .replace(/(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)\s*\(?\s*(?:14|20|50|100|200)\s*\)?(?:\s*يوم)?/gi, " ")
+        .replace(/(?:(?:ال|ب|ل)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)\s*\(?\s*(?:5|10|14|20|30|50|60|100|200)\s*\)?(?:\s*(?:يوم|يوماً|جلس[ةه]|جلسات))?/gi, " ")
         .replace(/(?:فوق|تحت|أعلى\s*من|أسفل\s*من|مخترق|كسر)\s*(?:(?:ال)?متوسط(?:\s*(?:ال)?متحرك)?|(?:ال)?موفينج(?:\s*(?:ال)?أفريج)?|EMA|SMA)?\s*(?:14|20|50|100|200)/gi, " ")
         .replace(/(?:(?:فوق|تحت|أعلى|أدنى|بين)\s*)?[12]\s*(?:من\s*2\s*)?متوسط(?:ات|ين)?/gi, " ")
         .replace(/\b(?:14|20|50|100|200)\s*يوماً?\b/gi, " ")
-        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH)\b/gi, " ")
+        .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH|CMF)\b/gi, " ")
         // 4. Strip percentage multipliers/proportions in descriptions (e.g. "98% من الدعم", "105% من المقاومة")
         .replace(/\b\d+(?:\.\d+)?\s*[%٪]\s*من\s*(?:الدعم|المقاومة|الإغلاق|السعر)/gi, " ")
         .replace(/\b(?:8[0-9]|9[0-9]|10[0-9]|11[0-9]|12[0-9])\s*[%٪]\s*من\s*\S+/gi, " ")
-        // 5. Strip session count descriptions (e.g. "آخر 20 جلسة", "لآخر 20 جلسة", "مدى 60 جلسة", "لمدى 60 جلسة", "20 sessions")
-        .replace(/(?:ل?آخر|ل?مدى|خلال|في)?\s*\d+\s*جلس(?:[ةه]|ات)(?:\s+تداول)?/gi, " ")
+        // 5. Strip session count and top-N group descriptions (e.g. "آخر 20 جلسة", "أعلى 5 أسهم", "أعلى 10 أسهم")
+        .replace(/(?:(?:ال)?أعلى|(?:ال)?أكبر|(?:ال)?أول|(?:ال)?أهم|top)\s*\d+\s*(?:أسهم|اسهم|قطاعات|شركات|stocks?|sectors?)?/gi, " ")
+        .replace(/(?:ل?آخر|ل?مدى|خلال|في|لـ?)?\s*\d+\s*جلس(?:[ةه]|ات)(?:\s+تداول)?/gi, " ")
         .replace(/\b\d+\s*(?:sessions?|trading\s*days?)\b/gi, " ");
 }
 
@@ -300,6 +382,16 @@ function compoundMetricFields(label: string): FactRecord["field"][] | null {
         : /EMA\s*200|200/i.test(part) ? "ema_200" : null);
     if (emaFields.every(Boolean) && new Set(emaFields).size === emaFields.length) {
         return emaFields as FactRecord["field"][];
+    }
+
+    // 5. Advancing / Declining counts (e.g. "صاعد / هابط", "صاعدة / هابطة")
+    if (!/نسب|إلى|الى|ratio/i.test(label)) {
+        const advDecFields = parts.map(part => /صاعد|مرتفع|advanc/i.test(part) ? "breadth_advancing"
+            : /هابط|منخفض|declin/i.test(part) ? "breadth_declining"
+            : /ثابت|مستقر|unchang/i.test(part) ? "breadth_unchanged" : null);
+        if (advDecFields.every(Boolean) && new Set(advDecFields).size === advDecFields.length) {
+            return advDecFields as FactRecord["field"][];
+        }
     }
 
     return null;
@@ -366,15 +458,18 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/(?:ربحي[ةه]|عائد)\s*(?:السهم|سهم)|EPS/i, ["eps"]],
         [/(?:القيمة|قيمة)\s*(?:السوقي[ةه]|سوقي[ةه])|رأس\s*المال\s*السوقي|market.?cap/i, ["market_cap", "market_value"]],
         [/(?:(?:السعر|الإغلاق|اغلاق|إقفال|price|close).*(?:تغير|التغير|التغيّر|change))|(?:(?:تغير|التغير|التغيّر|change).*(?:السعر|الإغلاق|اغلاق|إقفال|price|close))/i, ["price", "close", "change_pct"]],
+        [/(?:حصة|نسبة|وزن|تركز|تركيز).*(?:(?:ال)?سيول[ةه]|(?:ال)?سوق|(?:ال)?تداول|(?:ال)?قطاع|أعلى|أكبر)|market.?share|concentration/i,["position_pct","change_pct","value","quantity"]],
+        [/(?:قيمة|إجمالي|مجموع|حجم|أحجام|احجام|متوسط)\s*(?:(?:ال)?تداول|(?:ال)?سيول[ةه])|(?:ال)?سيول[ةه]|تدفق.*سيول[ةه]|turnover|money.?flow/i,["value","volume","vol_ratio","position_pct","change_pct","quantity","acc_score","dist_score"]],
         [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]], [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]],
         [/صاعد|مرتفعة|advancing/i,["breadth_advancing"]], [/هابط|منخفضة|declining/i,["breadth_declining"]], [/ثابت|unchanged/i,["breadth_unchanged"]], [/الأسهم.*(?:صالحة|تغير صالح)|إجمالي.*(?:أسهم|تغير صالح)|total.*stocks/i,["breadth_total"]],
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
         [/RSI|القوة النسبية/i,["rsi"]], [/هيست|hist/i,["macd_hist"]], [/MACD.*(?:signal|إشار|اشار)|(?:signal|إشار|اشار).*MACD/i,["macd_signal"]], [/MACD/i,["macd","macd_signal","macd_hist"]],
-        [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio"]],
-        [/(?:حجم|أحجام|احجام)\s*(?:التداول|السيولة)?|volume/i,["volume","vol_ratio"]],
+        [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio","quantity"]],
+        [/CMF|تدفق\s*نقدي|Chaikin/i,["vol_ratio","value","quantity"]],
+        [/(?:حجم|أحجام|احجام)\s*(?:التداول|السيولة)?|volume/i,["volume","vol_ratio","value","quantity"]],
         [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]],
-        [/(?:درجة|مؤشر)?\s*(?:(?:ال)?تجميع|acc)\s*[/،]\s*(?:(?:ال)?توزيع|(?:ال)?تصريف|dist)/i, ["acc_score", "dist_score"]],
+        [/(?:(?:ال)?تجميع|acc).*(?:(?:ال)?توزيع|(?:ال)?تصريف|dist)|(?:(?:ال)?توزيع|(?:ال)?تصريف|dist).*(?:(?:ال)?تجميع|acc)/i, ["acc_score", "dist_score", "quantity"]],
         [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
         [/أيام.*تجميع|يوم.*تجميع|consecutive.*acc/i, ["quantity"]],
         [/أيام.*توزيع|يوم.*توزيع|consecutive.*dist/i, ["quantity"]],
@@ -968,7 +1063,8 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
 
         if (!line.startsWith("|")) {
-            if (/اتساع|breadth/i.test(line) && evidence.some(e=>e.tool === "get_market_breadth")) marketSection = true;
+            if ((/اتساع|breadth/i.test(line) && evidence.some(e=>e.tool === "get_market_breadth"))
+                || (/سيولة\s*السوق|ملخص\s*السيولة|توزيع\s*السيولة|إجمالي\s*(?:السيولة|التداول)/i.test(line) && evidence.some(e => e.tool === "get_market" || e.tool === "get_market_breadth"))) marketSection = true;
             inTable = false;
             tableHadStockRow = false;
             tableColSymbols = [];
@@ -1058,15 +1154,20 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             symbol = null;
         }
 
-        // Breadth metrics belong to the dated market sample, never the last peer row.
-        const marketEvidence = evidence.some(e => e.tool === "get_market_breadth" && e.symbols.includes("EGX"));
+        // Breadth and market liquidity metrics belong to the dated market sample, never the last peer row.
+        const isSectorTable = headers.length > 0
+            && /^(?:(?:ال)?قطاع(?:\s*الاقتصادي)?|sector)$/i.test(headers[0].replace(/[*_`]/g, "").trim())
+            && !headers.some(h => /^(?:(?:ال)?سهم|(?:ال)?رمز|(?:ال)?كود|symbol|ticker)$/i.test(h.replace(/[*_`]/g, "").trim()))
+            && evidence.some(e => Array.isArray(e.data?.sector_liquidity) && e.data.sector_liquidity.length > 0);
+        const marketEvidence = evidence.some(e => (e.tool === "get_market_breadth" || e.tool === "get_market") && (e.symbols?.includes("EGX") || Boolean(e.data?.egx30 || e.data?.market_liquidity || e.data?.total != null)));
         const marketScope = marketSection || currentSymbol === "EGX" || allSymbols.length === 1 && allSymbols[0] === "EGX";
-        const totalLabel = /إجمالي|مجموع|total/i.test(cells[0]) || /عدد.*(?:الأسهم|العينة)/.test(cells[0]);
+        const totalLabel = (/إجمالي|مجموع|total/i.test(cells[0]) || /عدد.*(?:الأسهم|العينة)/.test(cells[0])) && !/سيول[ةه]|تداول|جنيه|مليون|مليار|قيمة|تدفق/i.test(cells[0]);
         const breadthFields = marketEvidence && marketScope && totalLabel && !/صاعد|هابط|ثابت/.test(cells[0])
             ? ["breadth_total" as const] : tableMetricFields(cells[0]);
+        if (isSectorTable) symbol = "EGX";
         if (marketEvidence && marketSection && lineSymbols.length === 0) symbol = "EGX";
         if (lineSymbols.length === 0 && breadthFields?.some(f => f.startsWith("breadth_"))
-            && evidence.some(e => e.tool === "get_market_breadth" && e.symbols.includes("EGX"))) symbol = "EGX";
+            && marketEvidence) symbol = "EGX";
         const scenarioRow = scenarioTableRow(evidence, cells, lineSymbols, headers);
         if (scenarioRow?.symbol === "PORTFOLIO") symbol = "PORTFOLIO";
         else if (!symbol && scenarioRow) symbol = scenarioRow.symbol || "PORTFOLIO";
@@ -1202,7 +1303,8 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             }
             for (const match of clean.matchAll(/[-+]?\d+(?:\.\d+)?/g)) {
                 const n = Number(match[0]);
-                if (!matchesFact(n, cellFacts, match[0].includes(".") ? match[0].split(".")[1].length : undefined) || (match[0].startsWith("+") && matchesFact(-n, cellFacts.filter(f => f.value < 0), match[0].includes(".") ? match[0].split(".")[1].length : undefined)))
+                const prec = match[0].includes(".") ? match[0].split(".")[1].length : undefined;
+                if (!matchesFact(n, cellFacts, prec) || (match[0].startsWith("+") && !matchesFact(n, cellFacts.filter(f => f.value >= 0), prec) && matchesFact(-n, cellFacts.filter(f => f.value < 0), prec)))
                     reasons.push(`table_value_not_grounded:${symbol}:${n}`);
             }
         }
