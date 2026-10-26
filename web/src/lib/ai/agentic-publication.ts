@@ -223,6 +223,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
                     if (typeof row[k] === "number" && Number.isFinite(row[k])) {
                         facts.push({ id: `${row.symbol}:${k}:pos`, symbol: row.symbol, field: "position_pct", value: row[k], unit: "percent", ...rowMeta });
                         facts.push({ id: `${row.symbol}:${k}:chg`, symbol: row.symbol, field: "change_pct", value: row[k], unit: "percent", ...rowMeta });
+                        facts.push({ id: `${row.symbol}:${k}:brp`, symbol: row.symbol, field: "breadth_advancing_pct", value: row[k], unit: "percent", ...rowMeta });
                         facts.push({ id: `${row.symbol}:${k}:rat`, symbol: row.symbol, field: "vol_ratio", value: row[k], unit: "ratio", ...rowMeta });
                         facts.push({ id: `${row.symbol}:${k}:val`, symbol: row.symbol, field: "value", value: row[k], unit: "egp", ...rowMeta });
                         facts.push({ id: `${row.symbol}:${k}:prf`, symbol: row.symbol, field: "profit_pct", value: row[k], unit: "percent", ...rowMeta });
@@ -258,32 +259,36 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
             const secMeta = { as_of: e.data?.session_date ?? e.data_time ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() };
             for (const sec of e.data.sector_liquidity) {
                 const tag = String(sec.sector || sec.sector_ar || sec.sector_en || "sec");
-                for (const k of ["turnover_egp", "turnover_million_egp", "top_stock_turnover_million_egp"]) {
-                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
-                        facts.push({ id: `EGX:sec:${tag}:${k}:val`, symbol: "EGX", field: "value", value: sec[k], unit: "egp", ...secMeta });
-                        facts.push({ id: `EGX:sec:${tag}:${k}:vol`, symbol: "EGX", field: "volume", value: sec[k], unit: "shares", ...secMeta });
+                const targetSymbols = ["EGX", ...(sec.top_stock_symbol ? [String(sec.top_stock_symbol).toUpperCase()] : [])];
+                for (const targetSym of targetSymbols) {
+                    for (const k of ["turnover_egp", "turnover_million_egp", "top_stock_turnover_million_egp"]) {
+                        if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:val`, symbol: targetSym, field: "value", value: sec[k], unit: "egp", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:vol`, symbol: targetSym, field: "volume", value: sec[k], unit: "shares", ...secMeta });
+                        }
                     }
-                }
-                for (const k of ["market_share_pct", "weighted_change_pct", "top_stock_change_pct", "top_stock_share_in_sector_pct"]) {
-                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
-                        facts.push({ id: `EGX:sec:${tag}:${k}:pos`, symbol: "EGX", field: "position_pct", value: sec[k], unit: "percent", ...secMeta });
-                        facts.push({ id: `EGX:sec:${tag}:${k}:chg`, symbol: "EGX", field: "change_pct", value: sec[k], unit: "percent", ...secMeta });
-                        facts.push({ id: `EGX:sec:${tag}:${k}:val`, symbol: "EGX", field: "value", value: sec[k], unit: "egp", ...secMeta });
-                        facts.push({ id: `EGX:sec:${tag}:${k}:prf`, symbol: "EGX", field: "profit_pct", value: sec[k], unit: "percent", ...secMeta });
+                    for (const k of ["market_share_pct", "weighted_change_pct", "top_stock_change_pct", "top_stock_share_in_sector_pct"]) {
+                        if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:pos`, symbol: targetSym, field: "position_pct", value: sec[k], unit: "percent", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:chg`, symbol: targetSym, field: "change_pct", value: sec[k], unit: "percent", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:brp`, symbol: targetSym, field: "breadth_advancing_pct", value: sec[k], unit: "percent", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:val`, symbol: targetSym, field: "value", value: sec[k], unit: "egp", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:prf`, symbol: targetSym, field: "profit_pct", value: sec[k], unit: "percent", ...secMeta });
+                        }
                     }
-                }
-                if (typeof sec.weighted_cmf_20 === "number" && Number.isFinite(sec.weighted_cmf_20)) {
-                    facts.push({ id: `EGX:sec:${tag}:cmf:rat`, symbol: "EGX", field: "vol_ratio", value: sec.weighted_cmf_20, unit: "ratio", ...secMeta });
-                    facts.push({ id: `EGX:sec:${tag}:cmf:val`, symbol: "EGX", field: "value", value: sec.weighted_cmf_20, unit: "egp", ...secMeta });
-                }
-                for (const [k, f] of [
-                    ["stocks_count", "breadth_total"],
-                    ["advancing_count", "breadth_advancing"],
-                    ["declining_count", "breadth_declining"],
-                ] as const) {
-                    if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
-                        facts.push({ id: `EGX:sec:${tag}:${k}:${f}`, symbol: "EGX", field: f, value: sec[k], unit: "count", ...secMeta });
-                        facts.push({ id: `EGX:sec:${tag}:${k}:qty`, symbol: "EGX", field: "quantity", value: sec[k], unit: "count", ...secMeta });
+                    if (typeof sec.weighted_cmf_20 === "number" && Number.isFinite(sec.weighted_cmf_20)) {
+                        facts.push({ id: `${targetSym}:sec:${tag}:cmf:rat`, symbol: targetSym, field: "vol_ratio", value: sec.weighted_cmf_20, unit: "ratio", ...secMeta });
+                        facts.push({ id: `${targetSym}:sec:${tag}:cmf:val`, symbol: targetSym, field: "value", value: sec.weighted_cmf_20, unit: "egp", ...secMeta });
+                    }
+                    for (const [k, f] of [
+                        ["stocks_count", "breadth_total"],
+                        ["advancing_count", "breadth_advancing"],
+                        ["declining_count", "breadth_declining"],
+                    ] as const) {
+                        if (typeof sec[k] === "number" && Number.isFinite(sec[k])) {
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:${f}`, symbol: targetSym, field: f, value: sec[k], unit: "count", ...secMeta });
+                            facts.push({ id: `${targetSym}:sec:${tag}:${k}:qty`, symbol: targetSym, field: "quantity", value: sec[k], unit: "count", ...secMeta });
+                        }
                     }
                 }
             }
@@ -1156,8 +1161,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
 
         // Breadth and market liquidity metrics belong to the dated market sample, never the last peer row.
         const isSectorTable = headers.length > 0
-            && /^(?:(?:ال)?قطاع(?:\s*الاقتصادي)?|sector)$/i.test(headers[0].replace(/[*_`]/g, "").trim())
-            && !headers.some(h => /^(?:(?:ال)?سهم|(?:ال)?رمز|(?:ال)?كود|symbol|ticker)$/i.test(h.replace(/[*_`]/g, "").trim()))
+            && /(?:قطاع|sector)/i.test(headers[0].replace(/[*_`]/g, "").trim())
             && evidence.some(e => Array.isArray(e.data?.sector_liquidity) && e.data.sector_liquidity.length > 0);
         const marketEvidence = evidence.some(e => (e.tool === "get_market_breadth" || e.tool === "get_market") && (e.symbols?.includes("EGX") || Boolean(e.data?.egx30 || e.data?.market_liquidity || e.data?.total != null)));
         const marketScope = marketSection || currentSymbol === "EGX" || allSymbols.length === 1 && allSymbols[0] === "EGX";
@@ -1378,6 +1382,32 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
     for (const e of evidence.filter(e => e.availability !== "error")) {
         const planned = renderPlannedReadEvidence(e.tool, e.data);
         if (planned) lines.push(planned);
+        if (e.tool === "get_market" && e.data?.status === "success" && e.data?.market_liquidity) {
+            const ml = e.data.market_liquidity;
+            const secs = Array.isArray(e.data.sector_liquidity) ? e.data.sector_liquidity.slice(0, 6) : [];
+            const topStocks = Array.isArray(e.data.top_liquidity_stocks) ? e.data.top_liquidity_stocks.slice(0, 6) : [];
+            lines.push(`\nملخص سيولة السوق الكلية بتاريخ ${ml.session_date || e.data.session_date || "أحدث جلسة"}:`);
+            lines.push("| المقياس | القيمة |", "|---|---|");
+            if (ml.total_turnover_million_egp != null) lines.push(`| إجمالي السيولة المتداولة (مليون ج.م) | ${ml.total_turnover_million_egp} |`);
+            if (ml.avg_20d_turnover_million_egp != null) lines.push(`| متوسط السيولة لـ 20 جلسة (مليون ج.م) | ${ml.avg_20d_turnover_million_egp} |`);
+            if (ml.turnover_vs_20d_pct != null) lines.push(`| نسبة السيولة من متوسط 20 جلسة % | ${ml.turnover_vs_20d_pct}% |`);
+            if (ml.advancing_turnover_million_egp != null) lines.push(`| سيولة الأسهم الصاعدة (مليون ج.م) | ${ml.advancing_turnover_million_egp} (${ml.advancing_turnover_pct}%) |`);
+            if (ml.declining_turnover_million_egp != null) lines.push(`| سيولة الأسهم الهابطة (مليون ج.م) | ${ml.declining_turnover_million_egp} (${ml.declining_turnover_pct}%) |`);
+            if (ml.top5_concentration_pct != null) lines.push(`| تركز السيولة في أعلى 5 أسهم % | ${ml.top5_concentration_pct}% |`);
+            if (ml.top10_concentration_pct != null) lines.push(`| تركز السيولة في أعلى 10 أسهم % | ${ml.top10_concentration_pct}% |`);
+            if (secs.length > 0) {
+                lines.push("\nتوزيع السيولة على القطاعات:", "| القطاع | السيولة (مليون ج.م) | حصة السوق % | التغير المرجح % | القائد |", "|---|---:|---:|---:|---|");
+                for (const s of secs) {
+                    lines.push(`| ${s.sector_ar || s.sector} | ${s.turnover_million_egp} | ${s.market_share_pct}% | ${s.weighted_change_pct}% | ${s.top_stock_symbol || "—"} |`);
+                }
+            }
+            if (topStocks.length > 0) {
+                lines.push("\nأعلى الأسهم استحواذاً على السيولة:", "| السهم | الإغلاق | التغير % | السيولة (مليون ج.م) | حصة السوق % | الحجم النسبي |", "|---|---:|---:|---:|---:|---:|");
+                for (const st of topStocks) {
+                    lines.push(`| ${st.symbol} | ${st.close} | ${st.change_pct}% | ${st.turnover_million_egp} | ${st.market_share_pct}% | ${st.r_vol ?? "—"} |`);
+                }
+            }
+        }
         if (e.tool === "compare_strategies_history") {
             const result = renderBacktestEvidence(e.data);
             if (result) lines.push(result);

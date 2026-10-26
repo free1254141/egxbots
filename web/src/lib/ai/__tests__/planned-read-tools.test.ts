@@ -117,3 +117,57 @@ test('breadth table cannot inherit the last peer symbol',async()=>{
  expect(checkAgenticDraft(draft.replace('| البند | القيمة |','| البند | العدد |').replace('إجمالي الأسهم ذات تغير صالح','الإجمالي ذو تغير صالح'),e)).toEqual([]);
  expect(checkAgenticDraft(draft.replace('50%','7.02%'),e)).toContain('table_value_not_grounded:EGX:7.02');
 });
+
+test('sector liquidity share and leader stock in prose and sector tables do not trigger false attribution rejections',()=>{
+ const marketData={
+  status:'success',
+  session_date:'2026-10-25',
+  egx30:{close:30500,change_pct:-1.2},
+  market_liquidity:{
+   session_date:'2026-10-25',
+   total_turnover_egp:3651800000,
+   total_turnover_million_egp:3651.8,
+   total_turnover_billion_egp:3.652,
+   avg_20d_turnover_million_egp:3687.48,
+   turnover_vs_20d_pct:99.03,
+   advancing_turnover_million_egp:916.24,
+   advancing_turnover_pct:25.09,
+   declining_turnover_million_egp:2705.25,
+   declining_turnover_pct:74.08,
+   top5_concentration_pct:29.59,
+   top10_concentration_pct:44.44,
+  },
+  sector_liquidity:[
+   {
+    sector:'Chemicals & Fertilizers',
+    sector_ar:'الكيماويات والأسمدة والبتروكيماويات',
+    turnover_egp:132850000,
+    turnover_million_egp:132.85,
+    market_share_pct:3.64,
+    weighted_change_pct:-2.01,
+    weighted_cmf_20:-0.066,
+    stocks_count:11,
+    advancing_count:1,
+    declining_count:10,
+    top_stock_symbol:'ABUK',
+    top_stock_turnover_million_egp:86.26,
+    top_stock_change_pct:-2.01,
+    top_stock_share_in_sector_pct:64.93,
+   },
+  ],
+  top_losers:[{symbol:'ABUK',close:51.2,change_pct:-2.01,r_vol:1.1,rsi_14:42}],
+  top_liquidity_stocks:[{symbol:'ABUK',close:51.2,change_pct:-2.01,turnover_million_egp:86.26,market_share_pct:2.36,r_vol:1.1,rsi_14:42,cmf_20:-0.08}],
+ };
+ const ev=[toAgenticEvidence('get_market',{},marketData)];
+ const draft=[
+  'قطاع الكيماويات والأسمدة والبتروكيماويات استحوذ على نسبة 3.64% من السيولة وانخفض بنسبة -2.01% بقيادة سهم ABUK.',
+  '| اسم القطاع | السيولة (مليون ج.م) | حصة السوق % | التغير المرجح % | التدفق النقدي CMF | السهم القائد |',
+  '|---|---:|---:|---:|---:|---|',
+  '| الكيماويات والأسمدة والبتروكيماويات | 132.85 | 3.64% | -2.01% | -0.066 | ABUK (-2.01%) |',
+ ].join('\n');
+ expect(checkAgenticDraft(draft,ev)).toEqual([]);
+ const fb=safeAgenticFallback(ev,'ignored');
+ expect(fb).toContain('3651.8');
+ expect(fb).toContain('الكيماويات والأسمدة والبتروكيماويات');
+ expect(fb).toContain('ABUK');
+});

@@ -135,7 +135,9 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
             if (symbolsInSentence.length > 1) continue;
             const symbol = proseOwner(sentence, [...bySymbol.keys()], section);
             if (!symbol) continue;
-            const symbolFacts = bySymbol.get(symbol) || [];
+            const symbolFacts = bySymbol.has("EGX") && symbol !== "EGX"
+                ? [...(bySymbol.get(symbol) || []), ...(bySymbol.get("EGX") || [])]
+                : (bySymbol.get(symbol) || []);
             const scenarioAllocation = symbolFacts.some(record => record.tool === "analyze_portfolio_risk" && record.field === "value");
 
             const percentClaims = Array.from(sentence.matchAll(/(?:[-+]?\d+(?:[.,]\d+)?)\s*(?:%|٪)/g))
