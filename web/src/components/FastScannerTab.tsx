@@ -553,6 +553,9 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
         <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 border-2 border-black bg-cyan-400 text-black text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000]">
+                <span>BETA</span>
+              </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 border-2 border-black bg-black text-[#FFE600] text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000]">
                 <Target className="w-4 h-4 text-[#FFE600]" />
                 <span>{isAr ? "إشارات الرصد اللحظي 🎯 PRO" : "Intraday Fast Signals 🎯 PRO"}</span>
@@ -567,10 +570,15 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
               </span>
             </div>
 
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-black tracking-tight leading-tight">
-              {isAr
-                ? "نظام إشارات الرصد اللحظي ورادار السيولة السريع (فريم 15 دقيقة)"
-                : "Intraday Fast Signals & 15-Minute Liquidity Radar"}
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-black tracking-tight leading-tight flex items-center flex-wrap gap-2">
+              <span>
+                {isAr
+                  ? "نظام إشارات الرصد اللحظي ورادار السيولة السريع (فريم 15 دقيقة)"
+                  : "Intraday Fast Signals & 15-Minute Liquidity Radar"}
+              </span>
+              <span className="px-2 py-0.5 bg-black text-cyan-300 border-2 border-black text-xs sm:text-sm font-black uppercase tracking-wider shadow-[2px_2px_0px_#000] shrink-0">
+                BETA
+              </span>
             </h1>
 
             {!isGuideOpen && (

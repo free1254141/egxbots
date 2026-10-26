@@ -2181,12 +2181,13 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                             },
                             {
                                 id: "fast_scanner",
-                                shortLabel: isAr ? "إشارات الرصد اللحظي 🎯" : "Intraday Signals 🎯",
-                                label: isAr ? "إشارات الرصد اللحظي 🎯" : "Intraday Fast Signals 🎯",
+                                shortLabel: isAr ? "إشارات الرصد اللحظي 🎯 (BETA)" : "Intraday Signals 🎯 (BETA)",
+                                label: isAr ? "إشارات الرصد اللحظي 🎯 (BETA)" : "Intraday Fast Signals 🎯 (BETA)",
                                 subtitle: isAr ? "رادار السيولة السريع (1 إلى 4 جلسات)" : "15m Liquidity Radar (1–4 Sessions)",
                                 icon: Target,
                                 isSpecial: true,
                                 isFastScanner: true,
+                                badge: "BETA",
                             },
                             {
                                 id: "comparison",
@@ -2245,12 +2246,16 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         </div>
                                     </div>
                                     {(tab as any).isSpecial && (
-                                        <span className={`px-1 py-0.2 sm:px-1.5 sm:py-0.5 text-[8px] sm:text-[10px] font-black uppercase tracking-wider shrink-0 ${
-                                            isSelected
-                                                ? "bg-black text-[#FFE600] border border-black"
-                                                : "bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border border-black font-black"
+                                        <span className={`px-1 py-0.2 sm:px-1.5 sm:py-0.5 text-[8px] sm:text-[10px] font-black uppercase tracking-wider shrink-0 border border-black ${
+                                            (tab as any).badge === "BETA"
+                                                ? isSelected
+                                                    ? "bg-black text-cyan-300"
+                                                    : "bg-cyan-400 text-black"
+                                                : isSelected
+                                                ? "bg-black text-[#FFE600]"
+                                                : "bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950"
                                         }`}>
-                                            PRO
+                                            {(tab as any).badge || "PRO"}
                                         </span>
                                     )}
                                 </button>
