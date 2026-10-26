@@ -750,6 +750,7 @@ export default function AIChatbotTab() {
                                                                                 showSuggestedButtons={false}
                                                                                 latencyMs={log.latency_ms}
                                                                                 tables={Array.isArray(log.tables) ? log.tables : []}
+                                                                                userQuery={log.message}
                                                                             />
                                                                         ) : (
                                                                             <div className="text-zinc-400 dark:text-zinc-500 italic text-[11px] py-1 flex items-center gap-1.5">

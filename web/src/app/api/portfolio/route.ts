@@ -62,11 +62,14 @@ export async function POST(req: NextRequest) {
             case "extract_and_save":
             case "ai_extract_and_save": {
                 const text = String(body.text || "").trim();
-                if (!text) {
+                const userQuery = body.userQuery ? String(body.userQuery).trim() : "";
+                const suggestedButtons = Array.isArray(body.suggestedButtons) ? body.suggestedButtons.map(String) : [];
+
+                if (!text && !userQuery) {
                     return NextResponse.json({ ok: false, message: "محتوى الرسالة فارغ، لا يمكن استخراج الأسهم." }, { status: 400 });
                 }
                 const { callExtractionLLM } = await import("@/lib/ai/portfolio-extract");
-                const extracted = await callExtractionLLM(text);
+                const extracted = await callExtractionLLM({ text, userQuery, suggestedButtons });
 
                 if (!Array.isArray(extracted) || extracted.length === 0) {
                     return NextResponse.json({

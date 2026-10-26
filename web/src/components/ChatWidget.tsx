@@ -724,6 +724,7 @@ export default function ChatWidget() {
                                              onShare={() => shareAnswer(idx)}
                                              sharing={sharingMessageId === (msg.id || String(idx))}
                                              latencyMs={msg.latencyMs}
+                                             userQuery={messages.slice(0, idx).reverse().find(m => m.role === "user")?.content}
                                          />
 
                                     </div>

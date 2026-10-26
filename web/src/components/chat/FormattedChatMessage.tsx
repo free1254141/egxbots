@@ -19,6 +19,7 @@ interface FormattedChatMessageProps {
     onShare?: () => void;
     sharing?: boolean;
     latencyMs?: number;
+    userQuery?: string;
 }
 
 interface RawPipeStock {
@@ -533,7 +534,8 @@ export function FormattedChatMessage({
     showShareButton = false,
     onShare,
     sharing = false,
-    latencyMs
+    latencyMs,
+    userQuery
 }: FormattedChatMessageProps) {
     content = stripEnvironmentLeak(sanitizeUiLabel(content));
     suggestedButtons = suggestedButtons?.map(button => stripEnvironmentLeak(sanitizeUiLabel(button))).filter(Boolean);
@@ -556,7 +558,7 @@ export function FormattedChatMessage({
             const res = await fetch("/api/portfolio", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "extract_and_save", text: content }),
+                body: JSON.stringify({ action: "extract_and_save", text: content, userQuery: userQuery || undefined, suggestedButtons: suggestedButtons || undefined }),
             });
             const data = await res.json();
             if (res.status === 401 || data.requiresAuth) {
