@@ -16,12 +16,12 @@ export default function Footer() {
 
   return (
     <footer className="app-footer-surface relative overflow-hidden w-full py-12 mt-20">
-      {/* Left-side Hanging Palestine Watermelon Pennant (0% -> 75% of footer height, positioned next to logo on large screens) */}
+      {/* Left-side Hanging Palestine Watermelon Pennant (0% -> 75% of footer height, aligned with Header left side) */}
       <div
         dir="ltr"
         aria-label={isAr ? "تضامناً مع إخوتنا في فلسطين" : "Standing in solidarity with Palestine"}
         title={isAr ? "في القلب يا فلسطين" : "Standing with Palestine"}
-        className="pointer-events-none select-none absolute left-2 sm:left-4 md:left-6 lg:left-[max(1.5rem,calc(50%-33rem))] xl:left-[max(2rem,calc(50%-34.5rem))] top-0 h-[75%] w-11 sm:w-16 md:w-20 lg:w-24 z-10 flex flex-col items-stretch drop-shadow-[0_6px_12px_rgba(0,0,0,0.32)]"
+        className="pointer-events-none select-none absolute left-2 sm:left-4 md:left-8 top-0 h-[75%] w-11 sm:w-16 md:w-20 lg:w-24 z-10 flex flex-col items-stretch drop-shadow-[0_6px_12px_rgba(0,0,0,0.32)]"
       >
         {/* Top Section: Stripes + Red Downward Triangle (aspect-ratio preserved) */}
         <svg
@@ -155,7 +155,7 @@ export default function Footer() {
         </svg>
       </div>
 
-      <div className="relative z-10 mx-auto max-w-5xl pr-6 pl-16 sm:pl-24 md:pl-32 lg:pl-36 xl:pl-24">
+      <div className="relative z-10 mx-auto max-w-5xl pr-6 pl-16 sm:pl-24 md:pl-32 lg:pl-36 xl:px-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-10">
           <div className="col-span-1 md:col-span-2 space-y-4">
             <h3 className="text-xl font-black dark:text-white light:text-gray-900 italic tracking-tighter uppercase">

@@ -263,7 +263,21 @@ export default function Header() {
         <header ref={headerRef} className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
             <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-4 md:px-8 py-3 flex items-center justify-between gap-4">
                 {/* Brand */}
-                <div className="flex items-center min-w-0">
+                <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                    {/* Hanging Palestine Watermelon Pennant next to site logo */}
+                    <div
+                        title={language === "ar" ? "في القلب يا فلسطين" : "Standing with Palestine"}
+                        aria-label={language === "ar" ? "تضامناً مع إخوتنا في فلسطين" : "Standing in solidarity with Palestine"}
+                        className="pointer-events-none select-none -mt-3 -mb-1 h-[54px] sm:h-[60px] w-6 sm:w-7 shrink-0 flex items-start drop-shadow-[0_3px_6px_rgba(0,0,0,0.28)]"
+                    >
+                        <img
+                            src="/palestine-watermelon.svg?v=3"
+                            alt={language === "ar" ? "فلسطين" : "Palestine"}
+                            width={28}
+                            height={60}
+                            className="w-full h-full object-contain object-top block"
+                        />
+                    </div>
                     <Link href="/" className="group flex items-center gap-2 sm:gap-2.5 min-w-0">
                         <div className="relative bg-white p-1 rounded-none border-4 border-black dark:border-white transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 flex-shrink-0 flex items-center justify-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.5)]">
                                 <Image
