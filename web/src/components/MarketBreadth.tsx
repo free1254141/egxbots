@@ -11,6 +11,7 @@ import {
     Layers,
     Flame,
     ShieldCheck,
+    Sparkles,
 } from "lucide-react";
 
 export interface LiquiditySectorItem {
@@ -267,9 +268,25 @@ export function DailyLiquidityUpdateCard({ data, isAr }: { data: BreadthData | n
                     </div>
                 </div>
 
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 border-2 font-black text-xs uppercase self-start md:self-auto ${vStyle.badgeCls} ${isAr ? "flex-row-reverse" : "flex-row"}`}>
-                    <span className={`w-2 h-2 rounded-full ${vStyle.dotCls}`} />
-                    <span>{isAr ? liq.flow_verdict_ar : liq.flow_verdict_en}</span>
+                <div className={`flex flex-wrap items-center gap-2 self-start md:self-auto ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 border-2 font-black text-xs uppercase ${vStyle.badgeCls} ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                        <span className={`w-2 h-2 rounded-full ${vStyle.dotCls}`} />
+                        <span>{isAr ? liq.flow_verdict_ar : liq.flow_verdict_en}</span>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const prompt = isAr
+                                ? "اشرح لي بالتفصيل وبأسلوب مبسط معنى أرقام سيولة السوق اليوم (إجمالي السيولة، ميزان السيولة بين الصاعد والهابط، تركز السيولة في الأسهم القيادية، والانفجار الحجمي وتدفق السيولة الذكية)، وإيه وضع السوق والقطاعات حالياً للمستثمر؟"
+                                : "Explain in detail and simple terms the meaning of today's market liquidity numbers (total turnover, advancing vs declining split, top stocks concentration, volume surges, and smart money flow) and what the current market and sector situation means for investors.";
+                            window.dispatchEvent(new CustomEvent("open-chat-with-message", { detail: prompt }));
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-black dark:border-white bg-[#FFDC58] hover:bg-amber-300 text-black font-black text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,0.2)] transition hover:-translate-y-0.5 active:translate-y-0 ${isAr ? "flex-row-reverse" : "flex-row"}`}
+                    >
+                        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isAr ? "اشرح معنى الأرقام ووضع السوق" : "Explain Numbers & Market Status"}</span>
+                    </button>
                 </div>
             </div>
 

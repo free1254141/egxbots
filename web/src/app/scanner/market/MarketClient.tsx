@@ -9,7 +9,7 @@ import {
     Loader2, RefreshCw, Landmark,
     ArrowUpRight, ArrowDownRight, AlertTriangle, AlertCircle,
     DollarSign, Activity, Layers, Search, ChevronDown, Check, X,
-    Cpu
+    Cpu, Sparkles
 } from "lucide-react";
 import {
     ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Bar, ComposedChart
@@ -1662,15 +1662,18 @@ export default function MarketClient() {
                             {t("market.last_updated")} {new Date(data.updated_at).toLocaleTimeString(isAr ? "ar-EG" : "en-US")}
                         </span>
                         <button
+                            type="button"
                             onClick={() => {
-                                void fetchMarketStatus();
-                                void fetchBreadthData();
+                                const prompt = isAr
+                                    ? "اشرح لي وضع السوق المصري ككل اليوم بالتفصيل: حالة المؤشر العام EGX30 واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
+                                    : "Explain the overall Egyptian market status today in detail: EGX30 trend and regime, market breadth and health, total liquidity and top sectors, and what the key takeaway is for investors right now.";
+                                window.dispatchEvent(new CustomEvent("open-chat-with-message", { detail: prompt }));
                             }}
-                            className="inline-flex min-h-10 items-center justify-center gap-2 border-2 border-black bg-amber-300 px-3 text-xs font-black text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] disabled:opacity-50 dark:border-white"
-                            title={isAr ? "تحديث" : "Refresh"}
+                            className="inline-flex min-h-10 items-center justify-center gap-2 border-2 border-black bg-amber-300 hover:bg-amber-400 px-3.5 text-xs font-black text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:border-white"
+                            title={isAr ? "افهم وضع السوق ككل مع أرتورو" : "Understand Overall Market Status with AI"}
                         >
-                            <RefreshCw className="h-4 w-4" />
-                            <span>{isAr ? "تحديث البيانات" : "Refresh data"}</span>
+                            <Sparkles className="h-4 w-4 shrink-0" />
+                            <span>{isAr ? "افهم وضع السوق ككل" : "Explain Overall Market Status"}</span>
                         </button>
                     </div>
                 }
