@@ -745,7 +745,8 @@ export async function POST(req: NextRequest) {
                                 isPro: !billingOn || userIsPro,
                                 chartContext,
                                 diagnosticCapture: diagnostics.capture,
-                                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true)
+                                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
+                                gateMode: "audit_only"
                             }
                         );
 
@@ -1006,7 +1007,8 @@ export async function POST(req: NextRequest) {
                 isPro: !billingOn || userIsPro,
                 chartContext,
                 diagnosticCapture: diagnostics.capture,
-                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true)
+                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
+                gateMode: "audit_only"
             }
         );
 

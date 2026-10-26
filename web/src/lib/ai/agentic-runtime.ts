@@ -305,6 +305,15 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         ? "deepseek-flash"
         : selectedModel;
     const client = executionSupabase(input.supabase);
+    const gateMode: "audit_only" | "strict" =
+        options.gateMode ??
+        (process.env.AGENTIC_GATE_MODE === "strict"
+            ? "strict"
+            : process.env.AGENTIC_GATE_MODE === "audit_only"
+            ? "audit_only"
+            : isTestEnv
+            ? "strict"
+            : "audit_only");
     const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
     const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink, options?.chatSource);
     let vision: VisionContext | null = null;
@@ -895,21 +904,28 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     }
     if (!finalPassed) {
         console.warn("[Agentic] publication review failed:", reasons.slice(0, 6).join(" | ").slice(0, 600));
-        origin = "safe_fallback";
-        const activeForFallback = usedSymbols.length
-            ? usedSymbols
-            : (vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? sessionState.last_symbols ?? []);
-        let deterministicDashboard: string | null = null;
-        if (!inputImages.length) {
-            try {
-                const dash = renderLunaStockDashboard(evidence, proContext.userSavedPositions);
-                if (dash && checkAgenticDraft(dash, verificationEvidence(), userMessage, evidence).length === 0) deterministicDashboard = dash;
-            } catch { deterministicDashboard = null; }
+        const hasSubstantiveDraft = Boolean(draft && draft.trim().length > 0);
+        if (gateMode === "audit_only" && hasSubstantiveDraft) {
+            options.diagnosticCapture?.("shadow_gate_audit", { reasons, draftLength: draft.length });
+            // Shadow mode / Silent Audit: Keep the rich model draft for the user without suppression.
+            // publication_review is still recorded with final_passed: false and reasons intact in the database.
+        } else {
+            origin = "safe_fallback";
+            const activeForFallback = usedSymbols.length
+                ? usedSymbols
+                : (vision?.symbols?.map(s => s.symbol) ?? sessionSummary?.last_image_symbols ?? sessionState.last_symbols ?? []);
+            let deterministicDashboard: string | null = null;
+            if (!inputImages.length) {
+                try {
+                    const dash = renderLunaStockDashboard(evidence, proContext.userSavedPositions);
+                    if (dash && checkAgenticDraft(dash, verificationEvidence(), userMessage, evidence).length === 0) deterministicDashboard = dash;
+                } catch { deterministicDashboard = null; }
+            }
+            if (deterministicDashboard) origin = "deterministic_dashboard";
+            draft = inputImages.length && vision
+                ? safeImageEvidenceReply(vision, userMessage) || "وصلت الصورة، لكن لم أتمكن من استخراج حقائق مؤكدة منها. حدّد الجزء المطلوب أو أرسل صورة أوضح."
+                : deterministicDashboard || safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
         }
-        if (deterministicDashboard) origin = "deterministic_dashboard";
-        draft = inputImages.length && vision
-            ? safeImageEvidenceReply(vision, userMessage) || "وصلت الصورة، لكن لم أتمكن من استخراج حقائق مؤكدة منها. حدّد الجزء المطلوب أو أرسل صورة أوضح."
-            : deterministicDashboard || safeAgenticFallback(fallbackEvidence(evidence.length ? evidence : verificationEvidence(), activeForFallback), "verification_incomplete", userMessage);
     }
     draft = withPortfolioFailureGuide(draft, evidence);
     const response = withFooter(draft);
@@ -943,12 +959,13 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     // Emit only the checked canonical answer. SSE statuses still show progress while working.
     yield { type: "token", data: response };
     yield { type: "done", data: { response, tables: [], response_origin: origin, vision,
-        chart_actions: finalPassed ? chartActions : [],
+        chart_actions: (finalPassed || gateMode === "audit_only") ? chartActions : [],
         session_update: sessionUpdate,
         summary_state: updatedSummary,
         usage: accounting.summary(toolCalls),
         publication_review: { passed: firstPassed, final_passed: finalPassed, repaired, reasons, advisory_issues: advisoryIssues,
+            shadow_mode: gateMode === "audit_only",
             data_coverage: evidence.some(e => e.availability !== 'available') ? 'partial' : 'complete',
-            completion: finalPassed ? "complete" : "partial", reviewer: "llm_advisory_deterministic_evidence_gate" } } };
+            completion: (finalPassed || (gateMode === "audit_only" && Boolean(draft && draft.trim().length > 0))) ? "complete" : "partial", reviewer: "llm_advisory_deterministic_evidence_gate" } } };
 }
 

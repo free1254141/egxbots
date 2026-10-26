@@ -16,6 +16,7 @@ export interface PipelineOptions {
     isPro?: boolean;
     chatSource?: string;
     skipReview?: boolean;
+    gateMode?: "audit_only" | "strict";
 }
 
 export interface AgenticToolCall {

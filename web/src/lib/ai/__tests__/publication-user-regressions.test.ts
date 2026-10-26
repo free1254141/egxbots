@@ -2,7 +2,7 @@ import {executeAgenticTool} from '../agentic-tools';
 import {checkAgenticDraft,checkUserPositionInputs,toAgenticEvidence,compactEvidence,advisoryImageConsistency,advisoryTableRowCountConsistency} from '../agentic-publication';
 import {groundedReviewerIssues} from '../agentic-runtime';
 import {ARTORO_PLATFORM_CONTEXT} from '../platform-context';
-import {AGENTIC_SYSTEM_PROMPT} from '../agentic-pipeline';
+import {AGENTIC_SYSTEM_PROMPT, runAgenticPipelineStream} from '../agentic-pipeline';
 import {safeAgenticFallback} from '../agentic-publication';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -398,3 +398,52 @@ test('memoo1286 production regression: market breadth coexistence with accumulat
     ].join('\n');
     expect(checkAgenticDraft(draft, e)).toEqual([]);
 });
+
+test('silent audit mode (gateMode: audit_only) delivers rich draft to user without suppression while recording failure reasons in metadata', async () => {
+    const fetchMock = jest.fn();
+    const leakedDraft = 'تحليل سهم COMI: تاريخ السجل ليس نشر الخبر (date_kind = aggregation).';
+    fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: leakedDraft }, finish_reason: "stop" }], usage: { total_tokens: 20 } })
+    });
+    global.fetch = fetchMock as any;
+
+    const client: any = { from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ select: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }), limit: () => Promise.resolve({ data: [], error: null }) }) }) }) };
+
+    const events: any[] = [];
+    for await (const e of runAgenticPipelineStream("ما موقف COMI؟", [], { current_symbol: null, last_symbols: [], summary: null }, null, [], client, [], "u1", "s1", "m1", undefined, { timeoutMs: 10000, skipReview: true, gateMode: "audit_only" })) {
+        events.push(e);
+    }
+    const done = events.find(e => e.type === "done")?.data;
+    expect(done).toBeDefined();
+    // User sees the rich draft without suppression
+    expect(done.response).toContain("date_kind = aggregation");
+    expect(done.response_origin).toBe("llm");
+    // Gate logged the failure in metadata without blocking
+    expect(done.publication_review.final_passed).toBe(false);
+    expect(done.publication_review.shadow_mode).toBe(true);
+    expect(done.publication_review.reasons).toContain("internal_implementation_names_in_response");
+});
+
+test('strict mode (gateMode: strict) suppresses ungrounded draft and drops into safe_fallback', async () => {
+    const fetchMock = jest.fn();
+    const leakedDraft = 'تحليل سهم COMI: تاريخ السجل ليس نشر الخبر (date_kind = aggregation).';
+    fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: leakedDraft }, finish_reason: "stop" }], usage: { total_tokens: 20 } })
+    });
+    global.fetch = fetchMock as any;
+
+    const client: any = { from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ select: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }), limit: () => Promise.resolve({ data: [], error: null }) }) }) }) };
+
+    const events: any[] = [];
+    for await (const e of runAgenticPipelineStream("ما موقف COMI؟", [], { current_symbol: null, last_symbols: [], summary: null }, null, [], client, [], "u1", "s1", "m1", undefined, { timeoutMs: 10000, skipReview: true, gateMode: "strict" })) {
+        events.push(e);
+    }
+    const done = events.find(e => e.type === "done")?.data;
+    expect(done).toBeDefined();
+    expect(done.response_origin).toBe("safe_fallback");
+    expect(done.publication_review.final_passed).toBe(false);
+    expect(done.publication_review.reasons).toContain("internal_implementation_names_in_response");
+});
+

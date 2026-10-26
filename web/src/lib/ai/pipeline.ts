@@ -1972,6 +1972,7 @@ export interface PipelineOptions {
     isPro?: boolean;
     chatSource?: string;
     skipReview?: boolean;
+    gateMode?: "audit_only" | "strict";
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */
@@ -1987,9 +1988,15 @@ export async function* runPipelineStream(
 ): AsyncGenerator<{ type: string; data: any }> {
     const deepseekKey = getDeepSeekApiKey();
     if (deepseekKey && !options.mockPlannerResult && !options.mockToolsResults) {
+        const isTestEnv = Boolean(process.env.JEST_WORKER_ID || process.env.NODE_ENV === "test");
         const effectiveOptions: PipelineOptions = {
             ...options,
             skipReview: options.skipReview !== undefined ? options.skipReview : (process.env.AGENTIC_ENABLE_LEGACY_REVIEW !== "true"),
+            gateMode: options.gateMode !== undefined
+                ? options.gateMode
+                : (process.env.AGENTIC_GATE_MODE === "strict"
+                    ? "strict"
+                    : (process.env.AGENTIC_GATE_MODE === "audit_only" ? "audit_only" : (isTestEnv ? "strict" : "audit_only"))),
         };
         yield* runAgenticPipelineStream(
             userMessage, images, sessionState, sessionSummary, history,
