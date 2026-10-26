@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { parseMarkdownTable, exportTableToExcel } from "@/lib/excelExport";
-import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap } from "lucide-react";
+import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle } from "lucide-react";
 import StockCard, { StockData } from "./StockCard";
 import type { ChatTable } from "@/contexts/ChatContext";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
@@ -539,6 +539,44 @@ export function FormattedChatMessage({
     suggestedButtons = suggestedButtons?.map(button => stripEnvironmentLeak(sanitizeUiLabel(button))).filter(Boolean);
     if (/environment_details|Current time:|Working directory:|Workspace root folder:/i.test(content)) content = "";
     const [copiedText, setCopiedText] = useState(false);
+    const [savingToPortfolio, setSavingToPortfolio] = useState(false);
+    const [portfolioFeedback, setPortfolioFeedback] = useState<{
+        ok: boolean;
+        message: string;
+        isQuotaReached?: boolean;
+        requiresAuth?: boolean;
+        stocks?: Array<{ symbol: string; quantity: number; price: number | null }>;
+    } | null>(null);
+
+    const handleSaveToPortfolio = async () => {
+        if (savingToPortfolio || !content) return;
+        setSavingToPortfolio(true);
+        setPortfolioFeedback(null);
+        try {
+            const res = await fetch("/api/portfolio", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "extract_and_save", text: content }),
+            });
+            const data = await res.json();
+            if (res.status === 401 || data.requiresAuth) {
+                setPortfolioFeedback({
+                    ok: false,
+                    requiresAuth: true,
+                    message: data.message || "يجب تسجيل الدخول أولاً لإضافة الأسهم إلى محفظتك الشخصية.",
+                });
+            } else {
+                setPortfolioFeedback(data);
+            }
+        } catch {
+            setPortfolioFeedback({
+                ok: false,
+                message: "تعذر الاتصال بالسيرفر لحفظ الأسهم. يرجى المحاولة مرة أخرى.",
+            });
+        } finally {
+            setSavingToPortfolio(false);
+        }
+    };
     const mermaidContainerRef = useRef<HTMLDivElement>(null);
 
     const mermaidMatch = !isStreaming ? content.match(/```mermaid\s+([\s\S]*?)```/g) : null;
@@ -882,6 +920,27 @@ export function FormattedChatMessage({
                         <span className="font-sans">{copiedText ? "Copied!" : "Copy"}</span>
                     </button>
 
+                    {/* 💼 1-Click Save to Portfolio powered by LLM */}
+                    <button
+                        type="button"
+                        onClick={handleSaveToPortfolio}
+                        disabled={savingToPortfolio}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-300 border border-amber-500/40 font-bold text-xs transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-60"
+                        title="استخراج الأسهم المذكورة وإضافتها لمحفظتك الاستثمارية فوراً بالذكاء الاصطناعي"
+                    >
+                        {savingToPortfolio ? (
+                            <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 dark:text-amber-400" />
+                                <span>جاري الحفظ بالذكاء الاصطناعي...</span>
+                            </>
+                        ) : (
+                            <>
+                                <Briefcase className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                <span>حفظ في محفظتي</span>
+                            </>
+                        )}
+                    </button>
+
                     {typeof latencyMs === "number" && latencyMs > 0 && (
                         <span
                             className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs"
@@ -916,7 +975,61 @@ export function FormattedChatMessage({
                             <span>{btnText}</span>
                         </button>
                     ))}
-                </div>
+                {portfolioFeedback && (
+                        <div className="w-full mt-2">
+                            {portfolioFeedback.ok ? (
+                                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/40 text-emerald-900 dark:text-emerald-200 text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs animate-in fade-in duration-200">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                        <span>{portfolioFeedback.message}</span>
+                                        {portfolioFeedback.stocks && portfolioFeedback.stocks.length > 0 && (
+                                            <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                                                ({portfolioFeedback.stocks.map((s: any) => `${s.symbol} ${s.quantity ? `[${s.quantity}]` : ''}`).join(", ")})
+                                            </span>
+                                        )}
+                                    </div>
+                                    <a
+                                        href="/profile#portfolio"
+                                        className="shrink-0 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-all text-[11px] shadow-xs"
+                                    >
+                                        عرض محفظتي ↗
+                                    </a>
+                                </div>
+                            ) : portfolioFeedback.requiresAuth ? (
+                                <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-500/40 text-blue-900 dark:text-blue-200 text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs animate-in fade-in duration-200">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <Lock className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                                        <span>{portfolioFeedback.message}</span>
+                                    </div>
+                                    <a
+                                        href="/auth/login?returnUrl=/profile"
+                                        className="shrink-0 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all text-[11px] shadow-xs"
+                                    >
+                                        تسجيل الدخول
+                                    </a>
+                                </div>
+                            ) : portfolioFeedback.isQuotaReached ? (
+                                <div className="p-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-amber-500/10 border-2 border-amber-400 text-amber-950 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs animate-in fade-in duration-200">
+                                    <div className="flex items-center gap-2">
+                                        <Crown className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                                        <span>{portfolioFeedback.message}</span>
+                                    </div>
+                                    <a
+                                        href="/pricing"
+                                        className="shrink-0 px-3 py-1 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-black font-black rounded-lg transition-all text-xs border border-black shadow-[2px_2px_0_0_#000]"
+                                    >
+                                        ترقية إلى Pro (عرض المؤسسين 50 ج.م) 👑
+                                    </a>
+                                </div>
+                            ) : (
+                                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-1.5 animate-in fade-in duration-200">
+                                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                                    <span>{portfolioFeedback.message}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    </div>
             )}
         </div>
     );

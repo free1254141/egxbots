@@ -424,18 +424,23 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
   const sentKeysSet = new Set(sentToday.sent_keys);
 
-  // Filter out stocks already sent today (unless forced)
+  const isSymbolSentToday = (sym: string) =>
+    sentKeysSet.has(`${sym}:volume_surge`) ||
+    sentKeysSet.has(`${sym}:breakout`) ||
+    sentKeysSet.has(`${sym}:rsi_oversold`);
+
+  // Filter out stocks already sent today across ANY scanner type (unless forced)
   const rawFreshVolume = options.forceDispatch
     ? topVolume
-    : topVolume.filter((s) => !sentKeysSet.has(`${s.symbol}:volume_surge`));
+    : topVolume.filter((s) => !isSymbolSentToday(s.symbol));
 
   const rawFreshBreakout = options.forceDispatch
     ? topBreakout
-    : topBreakout.filter((s) => !sentKeysSet.has(`${s.symbol}:breakout`));
+    : topBreakout.filter((s) => !isSymbolSentToday(s.symbol));
 
   const rawFreshOversold = options.forceDispatch
     ? topOversold
-    : topOversold.filter((s) => !sentKeysSet.has(`${s.symbol}:rsi_oversold`));
+    : topOversold.filter((s) => !isSymbolSentToday(s.symbol));
 
   const freshDisclosures = options.forceDispatch
     ? disclosuresMatches
@@ -586,10 +591,22 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       if (sent) alertsDispatchedCount++;
     }
 
-    // Register newly sent keys into sentToday
-    for (const v of freshVolume) sentKeysSet.add(`${v.symbol}:volume_surge`);
-    for (const b of freshBreakout) sentKeysSet.add(`${b.symbol}:breakout`);
-    for (const o of freshOversold) sentKeysSet.add(`${o.symbol}:rsi_oversold`);
+    // Register newly sent keys into sentToday (tag all categories for alerted symbols to avoid repeat cross-scanner alerts today)
+    for (const v of freshVolume) {
+      sentKeysSet.add(`${v.symbol}:volume_surge`);
+      sentKeysSet.add(`${v.symbol}:breakout`);
+      sentKeysSet.add(`${v.symbol}:rsi_oversold`);
+    }
+    for (const b of freshBreakout) {
+      sentKeysSet.add(`${b.symbol}:volume_surge`);
+      sentKeysSet.add(`${b.symbol}:breakout`);
+      sentKeysSet.add(`${b.symbol}:rsi_oversold`);
+    }
+    for (const o of freshOversold) {
+      sentKeysSet.add(`${o.symbol}:volume_surge`);
+      sentKeysSet.add(`${o.symbol}:breakout`);
+      sentKeysSet.add(`${o.symbol}:rsi_oversold`);
+    }
     for (const d of freshDisclosures) sentKeysSet.add(`disclosure:${d.id}`);
   }
 
@@ -721,21 +738,18 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   // Portfolio Cap: Maximum 8 simultaneously active swing trades to prevent portfolio overwhelm
   const MAX_PORTFOLIO_ACTIVE = 8;
 
-  // Deduplication guard: No stock can be alerted or added more than ONCE per day across any scanner type
-  const isSymbolAlreadyLoggedToday = (sym: string) => {
+  // Deduplication guard: No stock can be added more than ONCE per day across any scanner type
+  const isSymbolAlreadyActiveOrClosedToday = (sym: string) => {
     return (
       stillActiveSignals.some((s) => s.symbol === sym) ||
-      currentClosed.some((s) => s.symbol === sym && s.entry_date === cairoTime.dateStr) ||
-      sentKeysSet.has(`${sym}:volume_surge`) ||
-      sentKeysSet.has(`${sym}:breakout`) ||
-      sentKeysSet.has(`${sym}:rsi_oversold`)
+      currentClosed.some((s) => s.symbol === sym && s.entry_date === cairoTime.dateStr)
     );
   };
 
   // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active and portfolio has room)
   for (const v of freshVolume) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyLoggedToday(v.symbol)) continue;
+    if (isSymbolAlreadyActiveOrClosedToday(v.symbol)) continue;
     const plan = calculateScannerTradePlan(v.close, "volume_surge");
     stillActiveSignals.push({
       id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
@@ -763,7 +777,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   }
   for (const b of freshBreakout) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyLoggedToday(b.symbol)) continue;
+    if (isSymbolAlreadyActiveOrClosedToday(b.symbol)) continue;
     const plan = calculateScannerTradePlan(b.close, "breakout");
     stillActiveSignals.push({
       id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
@@ -791,7 +805,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   }
   for (const o of freshOversold) {
     if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyLoggedToday(o.symbol)) continue;
+    if (isSymbolAlreadyActiveOrClosedToday(o.symbol)) continue;
     const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
     stillActiveSignals.push({
       id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,

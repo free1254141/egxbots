@@ -7,7 +7,7 @@ export async function GET() {
         const supabase = await createSupabaseServerClient();
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         if (authError || !user) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ ok: false, requiresAuth: true, message: "يجب تسجيل الدخول أولاً لإضافة الأسهم إلى محفظتك الشخصية." }, { status: 401 });
         }
 
         const { getPortfolioSnapshot } = await import("@/lib/ai/portfolio-tools");
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
         const supabase = await createSupabaseServerClient();
         const { data: { user }, error: authError } = await supabase.auth.getUser();
         if (authError || !user) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ ok: false, requiresAuth: true, error: "Unauthorized", message: "يجب تسجيل الدخول أولاً لإضافة الأسهم إلى محفظتك الشخصية." }, { status: 401 });
         }
 
         const body = await req.json().catch(() => ({}));
@@ -59,6 +59,98 @@ export async function POST(req: NextRequest) {
         const tools = await import("@/lib/ai/portfolio-tools");
         let result: { ok: boolean; message: string };
         switch (action) {
+            case "extract_and_save":
+            case "ai_extract_and_save": {
+                const text = String(body.text || "").trim();
+                if (!text) {
+                    return NextResponse.json({ ok: false, message: "محتوى الرسالة فارغ، لا يمكن استخراج الأسهم." }, { status: 400 });
+                }
+                const { callExtractionLLM } = await import("@/lib/ai/portfolio-extract");
+                const extracted = await callExtractionLLM(text);
+
+                if (!Array.isArray(extracted) || extracted.length === 0) {
+                    return NextResponse.json({
+                        ok: false,
+                        message: "لم يكتشف الذكاء الاصطناعي أي أسهم صريحة للبورصة المصرية في هذا الرد لحفظها.",
+                    });
+                }
+
+                const preparedItems: Array<{ symbol: string; quantity: number; price: number | null }> = [];
+                for (const item of extracted) {
+                    const sym = String(item.symbol || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+                    if (!sym || sym.length < 2 || sym.length > 8) continue;
+
+                    const qty = item.quantity && Number(item.quantity) > 0 ? Number(item.quantity) : 100;
+                    let p = item.price && Number(item.price) > 0 ? Number(item.price) : null;
+
+                    if (p === null) {
+                        try {
+                            const { data: priceRow } = await supabase
+                                .from("stock_prices")
+                                .select("close")
+                                .eq("symbol", sym)
+                                .order("date", { ascending: false })
+                                .limit(1)
+                                .maybeSingle();
+
+                            if (priceRow?.close && Number(priceRow.close) > 0) {
+                                p = Number(priceRow.close);
+                            }
+                        } catch {}
+                    }
+
+                    preparedItems.push({
+                        symbol: sym,
+                        quantity: qty,
+                        price: p || 10.0,
+                    });
+                }
+
+                if (preparedItems.length === 0) {
+                    return NextResponse.json({
+                        ok: false,
+                        message: "لم يتم التعرف على رموز صالحة لأسهم البورصة المصرية.",
+                    });
+                }
+
+                const { data: planRows } = await supabase
+                    .from("subscriptions")
+                    .select("plan_id,status,current_period_end")
+                    .eq("user_id", user.id)
+                    .limit(10);
+                const { isPro, planLimits } = await import("@/lib/ai/plan-gate");
+                const pro = isPro(planRows || []);
+                const limit = planLimits(pro ? "pro" : "free").portfolio_stocks;
+
+                const { data: existingRows } = await supabase
+                    .from("positions")
+                    .select("symbol")
+                    .eq("user_id", user.id)
+                    .eq("status", "open");
+                const currentSymbols = new Set((existingRows || []).map((r: any) => String(r.symbol || "").toUpperCase()));
+                const newDistinctSymbols = new Set(preparedItems.map(p => p.symbol).filter(s => !currentSymbols.has(s)));
+
+                if (!pro && (currentSymbols.size + newDistinctSymbols.size) > limit) {
+                    return NextResponse.json({
+                        ok: false,
+                        isQuotaReached: true,
+                        limit,
+                        currentCount: currentSymbols.size,
+                        attemptedCount: newDistinctSymbols.size,
+                        stocks: preparedItems,
+                        message: `الخطة المجانية تتيح حتى ${limit} أسهم في المحفظة (محفظتك الحالية بها ${currentSymbols.size} أسهم). قم بالترقية لباقة Pro لإدارة حتى 10 أسهم وتفعيل تنبيهات السوينج الحية!`,
+                    });
+                }
+
+                const saveResult = await tools.bulkAddPortfolioPositions(supabase, user.id, preparedItems);
+                return NextResponse.json({
+                    ...saveResult,
+                    isQuotaReached: !saveResult.ok && (saveResult.message.includes("الخطة المجانية") || saveResult.message.includes("الحد الأقصى")),
+                    stocks: preparedItems,
+                    addedCount: saveResult.addedCount || preparedItems.length,
+                    message: saveResult.ok ? `تم بنجاح حفظ ${saveResult.addedCount || preparedItems.length} أسهم في محفظتك الشخصية!` : saveResult.message,
+                });
+            }
             case "bulk_add":
                 if (!Array.isArray(body.items) || body.items.length === 0) {
                     return NextResponse.json({ ok: false, message: "قائمة الأسهم مطلوبة" }, { status: 400 });
