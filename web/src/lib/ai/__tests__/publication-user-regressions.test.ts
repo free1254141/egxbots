@@ -450,3 +450,47 @@ test('strict mode (gateMode: strict) suppresses ungrounded draft and drops into 
     expect(done.publication_review.reasons).toContain("internal_implementation_names_in_response");
 });
 
+test('portfolio loss recovery protocol is present in system prompt and enforces triage, 3-tier plans, and cash parking', () => {
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("Portfolio Loss Recovery, Capital Allocation & Averaging Down Protocol");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("خطة تنفيذية ثلاثية الأبعاد لكل مركز خاسر (3-Tier Position Action Plan)");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("البقاء والاحتفاظ المشروط (Hold)");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("التخفيف وجني السيولة (Trim)");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("الخروج الصارم / وقف الخسارة (Stop Loss)");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("صناديق اليوم بيوم");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("Crash Guard");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("EGX30 Context");
+});
+
+test('checkAgenticDraft validates 3-tier portfolio recovery advice and cash parking without false violations', () => {
+    const eLevels = toAgenticEvidence('get_stock_levels', { symbols: ['ETEL', 'GSSC'] }, {
+        levels: [
+            { symbol: 'ETEL', date: '2026-10-26', close: 120.80, support: 120.02, resistance: 156.00 },
+            { symbol: 'GSSC', date: '2026-10-26', close: 236.00, support: 211.52, resistance: 290.00 }
+        ]
+    });
+    const eRecs = toAgenticEvidence('get_recommendations', { status: 'open' }, { total: 0, recommendations: [] });
+
+    const draft = `### خطة إدارة المراكز والسيولة
+قبل أي قرار بضخ سيولة، نحتاج لتوضيح:
+1. متوسط الشراء ووزن كل مركز في المحفظة.
+2. حجم رأس المال الجديد المتاح والمدى الزمني للاستثمار.
+3. هل هذه السيولة مخصصة لالتزامات قريبة؟
+
+خطة التحرك لكل مركز:
+- **ETEL (السعر: 120.80 ج.م)**:
+  - الاحتفاظ المشروط: فوق الدعم 120.02 ج.م مع مراقبة ارتداد مؤكد.
+  - التخفيف: عند ملامسة المقاومة 156.00 ج.م.
+  - وقف الخسارة الصارم: كسر 120.02 ج.م بإغلاق مؤكد.
+
+- **GSSC (السعر: 236.00 ج.م)**:
+  - الاحتفاظ المشروط: أعلى الدعم 211.52 ج.م.
+  - التخفيف: قرب المقاومة 290.00 ج.م.
+  - وقف الخسارة: كسر 211.52 ج.م.
+
+تجميد إشارات الشراء المفتوحة (العدد صفر) يمثل تفعيل نظام Crash Guard لحماية السيولة. يُنصح بحفظ الكاش مؤقتاً في أوعية نقدية منخفضة المخاطر مثل صناديق اليوم بيوم النقدية حتى تظهر إشارة شراء معتمدة.`;
+
+    const issues = checkAgenticDraft(draft, [eLevels, eRecs]);
+    expect(issues).toEqual([]);
+});
+
+

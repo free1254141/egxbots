@@ -36,7 +36,7 @@ describe("portfolio-extract", () => {
         it("ignores system words and acronyms like RSI, MACD, EMA, EGX", () => {
             const text = "مؤشر RSI عند 45 ومؤشر MACD سالب";
             const userQuery = "ما رأيك في المؤشرات؟";
-            const buttons = [];
+            const buttons: any[] = [];
 
             const result = extractFallbackStocks(text, userQuery, buttons);
             expect(result.length).toBe(0);
