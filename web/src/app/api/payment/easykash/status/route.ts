@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const service = getSupabaseServiceClient();
     const { data: order, error } = await service
       .from("local_payment_orders")
-      .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at")
+      .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note")
       .eq("id", orderId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -64,6 +64,65 @@ export async function GET(req: NextRequest) {
           .eq("user_id", user.id)
           .maybeSingle();
         inviteLink = invite?.invite_link || "";
+      }
+
+      const customerNote = String(order.customer_note || "");
+      if (!customerNote.includes("tg_welcomed")) {
+        const { data: profile } = await service
+          .from("profiles")
+          .select("telegram_chat_id, display_name, username")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const tgChatId = profile?.telegram_chat_id ? String(profile.telegram_chat_id).trim() : null;
+        if (tgChatId) {
+          const botToken = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
+          const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+          if (botToken) {
+            const displayName = profile?.display_name || profile?.username || "المستثمر";
+            const buttons: { text: string; url: string }[][] = [];
+            if (inviteLink) {
+              buttons.push([{ text: "💎 الانضمام لقناة VIP", url: inviteLink }]);
+            }
+            buttons.push([{ text: "🌐 فتح حسابك والتقارير", url: "https://egxbots.com/reports" }]);
+
+            const welcomeMsg = `🎉 <b>أهلاً وسهلاً بك يا ${displayName}!</b>\n\n` +
+              `✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة Pro بنجاح!</b> 🚀\n\n` +
+              `━━━━━━━━━━━━━━━━━━━━\n` +
+              (inviteLink ? `💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n${inviteLink}\n<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n` : "") +
+              `📊 <b>مزايا باقتك المفعّلة الآن:</b>\n` +
+              `• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n` +
+              `• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n` +
+              `• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n` +
+              `━━━━━━━━━━━━━━━━━━━━\n` +
+              `💡 <b>كيف تبدأ؟</b>\n` +
+              `1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n` +
+              `2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n` +
+              `نتمنى لك تداولات موفقة ومربحة دائماً! 📈`;
+
+            try {
+              const tgResp = await fetch(`${relayUrl}/bot${botToken}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: tgChatId,
+                  text: welcomeMsg,
+                  parse_mode: "HTML",
+                  reply_markup: { inline_keyboard: buttons },
+                }),
+                signal: AbortSignal.timeout(5000),
+              });
+              if (tgResp.ok) {
+                await service
+                  .from("local_payment_orders")
+                  .update({ customer_note: `${customerNote} | tg_welcomed`.trim() })
+                  .eq("id", orderId);
+              }
+            } catch (err) {
+              console.warn("[easykash/status] Telegram welcome dispatch error:", err);
+            }
+          }
+        }
       }
     }
 

@@ -478,3 +478,98 @@ def handle_chat_member_update(payload: Dict[str, Any]) -> None:
         invite_link = invite_payload.get("invite_link") if isinstance(invite_payload, dict) else None
         record_vip_channel_join(int(tg_user_id), invite_link)
         return
+
+
+import os
+from datetime import datetime, timezone
+import requests
+
+def send_pro_welcome_to_user_telegram(
+    user_id: str,
+    invite_link: str = "",
+    plan_name: str = "Pro",
+    subscription_end: str = ""
+) -> bool:
+    """Send the rich VIP Pro welcome message directly to the user's Telegram if they have linked their account."""
+    from api.stock_ai import _init_supabase, supabase
+    _init_supabase()
+    if not supabase:
+        return False
+    try:
+        profile = (
+            supabase.table("profiles")
+            .select("telegram_chat_id, display_name, username")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not profile or not profile.data:
+            return False
+        tg_id_raw = profile.data.get("telegram_chat_id")
+        if not tg_id_raw:
+            return False
+        try:
+            tg_id = int(str(tg_id_raw).strip())
+        except (ValueError, TypeError):
+            return False
+
+        display_name = profile.data.get("display_name") or profile.data.get("username") or "المستثمر"
+
+        if not invite_link:
+            from api.telegram_pro_invites import ensure_pro_invite
+            invite = ensure_pro_invite(user_id, subscription_end or datetime.now(timezone.utc).isoformat())
+            invite_link = str((invite or {}).get("invite_link") or "").strip()
+
+        buttons = []
+        if invite_link:
+            buttons.append([{"text": "💎 الانضمام لقناة VIP", "url": invite_link}])
+        buttons.append([{"text": "🌐 فتح حسابك والتقارير", "url": "https://egxbots.com/reports"}])
+
+        msg = (
+            f"🎉 <b>أهلاً وسهلاً بك يا {display_name}!</b>\n\n"
+            f"✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة {plan_name} بنجاح!</b> 🚀\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+        )
+        if invite_link:
+            msg += (
+                "💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n"
+                f"{invite_link}\n"
+                "<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n"
+            )
+        msg += (
+            "📊 <b>مزايا باقتك المفعّلة الآن:</b>\n"
+            "• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n"
+            "• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n"
+            "• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 <b>كيف تبدأ؟</b>\n"
+            "1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n"
+            "2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n"
+            "نتمنى لك تداولات موفقة ومربحة دائماً! 📈"
+        )
+
+        token = os.getenv("ARTORO_AI_BOT") or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN")
+        if not token:
+            return False
+
+        from api.telegram_pro_invites import _telegram_bases
+        for base in _telegram_bases():
+            try:
+                resp = requests.post(
+                    f"{base}/bot{token}/sendMessage",
+                    json={
+                        "chat_id": tg_id,
+                        "text": msg,
+                        "parse_mode": "HTML",
+                        "reply_markup": {"inline_keyboard": buttons}
+                    },
+                    timeout=10
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    return True
+            except Exception:
+                continue
+        return False
+    except Exception as e:
+        print(f"[TELEGRAM_PRO] Error sending pro welcome: {e}")
+        return False

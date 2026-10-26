@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
 import FoundingMemberBanner from "./components/FoundingMemberBanner";
+import PaymentWelcomeModal from "./components/PaymentWelcomeModal";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -31,6 +32,31 @@ export default function ProfilePage() {
   const [phoneDraft, setPhoneDraft] = useState("");
   const [savingPhone, setSavingPhone] = useState(false);
   const [quotaData, setQuotaData] = useState<any>(null);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [welcomeOrderId, setWelcomeOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    const customerReference = params.get("customerReference") || params.get("order_id");
+
+    if (payment === "easykash" || payment === "success" || customerReference) {
+      setWelcomeOrderId(customerReference || null);
+      setShowWelcomeModal(true);
+    }
+  }, []);
+
+  const handleCloseWelcomeModal = () => {
+    setShowWelcomeModal(false);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("payment");
+      url.searchParams.delete("customerReference");
+      url.searchParams.delete("order_id");
+      window.history.replaceState({}, "", url.pathname + (url.search ? url.search : ""));
+    }
+  };
   const proInviteUrl = proInvite.is_pro && proInvite.invite_link ? proInvite.invite_link : "";
   const freeTelegramUrl = "https://t.me/egxbots/153";
   const freeTelegramWebUrl = "https://web.telegram.org/a/#@egxbots";
@@ -779,6 +805,18 @@ export default function ProfilePage() {
           </div>
         )}
       </section>
+
+      <PaymentWelcomeModal
+        isOpen={showWelcomeModal}
+        onClose={handleCloseWelcomeModal}
+        orderId={welcomeOrderId}
+        userId={userId}
+        isAr={isAr}
+        proInvite={proInvite}
+        telegramLinked={telegramLinked}
+        onRefreshInvite={refreshProInvite}
+        onRefreshProfile={reloadProfile}
+      />
     </div>
   );
 }

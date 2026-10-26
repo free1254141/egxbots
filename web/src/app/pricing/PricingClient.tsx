@@ -382,10 +382,8 @@ export default function PricingClient() {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("customerReference");
     if (params.get("payment") === "easykash" && ref) {
-      setLocalOrder(ref);
-      setOrderStatus("pending");
-      setStep("submitted");
-      window.history.replaceState({}, "", "/pricing");
+      window.location.replace(`/profile?payment=easykash&customerReference=${encodeURIComponent(ref)}`);
+      return;
     }
   }, []);
 

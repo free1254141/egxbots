@@ -714,24 +714,66 @@ class TelegramBot:
                     except Exception as e:
                         self._log(f"Could not sync subscription telegram_chat_id: {e}")
 
-                    self._reply(
-                        chat_id,
-                        f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
-                        "✅ *تم ربط حساب تليجرام بنجاح\\!*\n\n"
-                        "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي على المنصة\\!\n\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        "🤖 *EGX Bots* جاهز لإرسال إشارات التداول إليك فور حدوثها\\!\n\n"
-                        "📊 *ستتلقى تنبيهات عن:*\n"
-                        "• 🟢 إشارات الشراء الجديدة\n"
-                        "• 🎯 الوصول للأهداف السعرية\n"
-                        "• 🛡️ تفعيل وقف الخسارة\n\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n\n"
-                        f"🎉 *Welcome, {display_name}\\!*\n\n"
-                        "✅ *Telegram successfully linked\\!*\n\n"
-                        "Your account is now connected to *EGX Bots*\\. "
-                        "You'll receive real\\-time buy signals and risk alerts directly here\\.\n\n"
-                        "📌 Use /help to see available commands\\.",
-                    )
+                    # Check if user has active Pro subscription
+                    is_pro = False
+                    sub_end = None
+                    try:
+                        sub_res = (
+                            supabase.table("subscriptions")
+                            .select("plan_id, status, current_period_end")
+                            .eq("user_id", uid)
+                            .in_("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
+                            .in_("status", ["active", "trialing"])
+                            .order("current_period_end", desc=True)
+                            .limit(1)
+                            .maybe_single()
+                            .execute()
+                        )
+                        if sub_res and sub_res.data:
+                            sub_end = sub_res.data.get("current_period_end")
+                            is_pro = True
+                    except Exception as e:
+                        self._log(f"Error checking user subscription: {e}")
+
+                    if is_pro:
+                        try:
+                            from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
+                            sent = send_pro_welcome_to_user_telegram(
+                                user_id=uid,
+                                subscription_end=str(sub_end) if sub_end else "",
+                            )
+                            if not sent:
+                                self._reply(
+                                    chat_id,
+                                    f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
+                                    "✅ *تم ربط حسابك في تليجرام بنجاح\\!*\n"
+                                    "⭐ *اشتراكك في باقة Pro مفعّل ونشط الآن* 🚀\n\n"
+                                    "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي\\!\n\n"
+                                    "تابع قناة VIP لمشاهدة إشارات التداول وتصفح الموقع من هنا:\n"
+                                    "https://egxbots\\.com/profile",
+                                )
+                        except Exception as e:
+                            self._log(f"Error in pro welcome dispatch: {e}")
+                            self._reply(chat_id, f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n✅ *تم ربط حساب تليجرام بنجاح\\!*")
+                    else:
+                        self._reply(
+                            chat_id,
+                            f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
+                            "✅ *تم ربط حساب تليجرام بنجاح\\!*\n\n"
+                            "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي على المنصة\\!\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n"
+                            "🤖 *EGX Bots* جاهز لإرسال إشارات التداول إليك فور حدوثها\\!\n\n"
+                            "📊 *ستتلقى تنبيهات عن:*\n"
+                            "• 🟢 إشارات الشراء الجديدة\n"
+                            "• 🎯 الوصول للأهداف السعرية\n"
+                            "• 🛡️ تفعيل وقف الخسارة\n\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n\n"
+                            f"🎉 *Welcome, {display_name}\\!*\n\n"
+                            "✅ *Telegram successfully linked\\!*\n\n"
+                            "Your account is now connected to *EGX Bots*\\. "
+                            "You'll receive real\\-time buy signals and risk alerts directly here\\.\n\n"
+                            "📌 Use /help to see available commands\\.",
+                        )
                 else:
                     self._reply(
                         chat_id,

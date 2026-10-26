@@ -243,7 +243,7 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
         print(f"[EASYKASH] Warning: could not update profile whatsapp_number: {exc}")
 
     origin = os.getenv("WEB_ORIGIN", "https://egxbots.com").strip().rstrip("/")
-    return_url = f"{origin}/pricing?payment=easykash&customerReference={order_id}"
+    return_url = f"{origin}/profile?payment=easykash&customerReference={order_id}"
     try:
         payload = _direct_pay_payload(amount, name, email, mobile, return_url, order_id)
         response = requests.post(
@@ -382,7 +382,18 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
         sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", order["user_id"]).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
         subscription_end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
         if subscription_end:
-            ensure_pro_invite(order["user_id"], str(subscription_end))
+            invite = ensure_pro_invite(order["user_id"], str(subscription_end))
+            invite_link = str((invite or {}).get("invite_link") or "").strip()
+            try:
+                from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
+                send_pro_welcome_to_user_telegram(
+                    order["user_id"],
+                    invite_link=invite_link,
+                    plan_name="Pro",
+                    subscription_end=str(subscription_end),
+                )
+            except Exception as tg_err:
+                print(f"[EASYKASH] Welcome telegram dispatch warning: {tg_err}")
     except Exception as exc:
         print(f"[EASYKASH] VIP invite deferred for order {order_id}: {type(exc).__name__}")
 
@@ -415,7 +426,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
     order_id = _customer_reference(order_id)
     _init_supabase()
-    result = supabase.table("local_payment_orders").select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
     order = result.data if result else None
     if not order:
         raise ValueError("Payment order not found")
@@ -427,4 +438,15 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
         if end:
             invite = ensure_pro_invite(user_id, str(end))
             invite_link = str(invite.get("invite_link") or "")
+            note = str(order.get("customer_note") or "")
+            if "tg_welcomed" not in note:
+                try:
+                    from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
+                    sent = send_pro_welcome_to_user_telegram(user_id, invite_link=invite_link, subscription_end=str(end))
+                    if sent:
+                        supabase.table("local_payment_orders").update({
+                            "customer_note": f"{note} | tg_welcomed".strip(" |")
+                        }).eq("id", order_id).execute()
+                except Exception as tg_status_err:
+                    print(f"[EASYKASH] Status welcome telegram dispatch warning: {tg_status_err}")
     return {**order, "subscription": {"current_period_end": end} if end else None, "telegram_pro_url": invite_link}
