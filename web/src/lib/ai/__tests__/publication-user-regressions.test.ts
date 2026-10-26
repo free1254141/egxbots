@@ -493,4 +493,25 @@ test('checkAgenticDraft validates 3-tier portfolio recovery advice and cash park
     expect(issues).toEqual([]);
 });
 
+test('elliott wave and chart strategies protocol eliminates workspace friction and enforces definitive wave rules', () => {
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("Chart Strategies & Elliott Wave Analysis");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("نقطة إبطال العد");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("لا يوجد حالياً عدّ موجي خماسي مكتمل أو صالح للسهم في الفترة المفحوصة");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("Data Quality, Sharp Drops & Capital Actions Precedence");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("⚠️ تنبيه جوهري حول حركة السعر / الإجراءات الرأسمالية:");
+    expect(AGENTIC_SYSTEM_PROMPT).toContain("ملخص تنفيذي مكثف في الصدارة (Executive Summary)");
+});
+
+test('chat footer uses professional Arabic and eliminates hype contradictory wording for Pro users', () => {
+    const { AI_CONFIG } = require('../config');
+    const { buildChatFooter } = require('../agentic-runtime');
+    expect(AI_CONFIG.disclaimer).toContain("ليس نصيحة استثمارية، والقرار الاستثماري مسؤوليتك الكاملة");
+    expect(AI_CONFIG.disclaimer).not.toContain("مش نصيحة استثمار");
+
+    const proFooter = buildChatFooter(true, null, "web");
+    expect(proFooter).not.toContain("للصفقات الفورية اللحظية");
+    expect(proFooter).toContain("egxbots.com");
+});
+
+
 
