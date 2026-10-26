@@ -84,7 +84,10 @@ export async function GET(request: NextRequest) {
       target_price: row.target_price,
       stop_loss: row.stop_loss,
     }));
-    return NextResponse.json({ markers, recommendations }, { headers: { "Cache-Control": "private, no-store" } });
+    const cacheHeader = unrestricted
+      ? "private, max-age=60, stale-while-revalidate=120"
+      : "public, max-age=120, s-maxage=300, stale-while-revalidate=600";
+    return NextResponse.json({ markers, recommendations }, { headers: { "Cache-Control": cacheHeader } });
   } catch (error) {
     console.error("[CHART_MARKERS]", error);
     return NextResponse.json({ markers: [] }, { status: 503 });
