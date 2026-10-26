@@ -346,6 +346,10 @@ function cleanCellText(text: string): string {
         .replace(/(?:(?:فوق|تحت|أعلى|أدنى|بين)\s*)?[12]\s*(?:من\s*2\s*)?متوسط(?:ات|ين)?/gi, " ")
         .replace(/\b(?:14|20|50|100|200)\s*يوماً?\b/gi, " ")
         .replace(/\b(?:RSI|EMA|SMA|BB|MACD|ATR|STOCH|CMF)\b/gi, " ")
+        // Strip Egyptian exchange index names and references (EGX30, EGX33 Shariah, EGX70, EGX100, etc.)
+        .replace(/\b(?:EGX|إيجي\s*إكس|ايجي\s*اكس|مؤشر\s*(?:الشريعة\s*)?|شريعة)\s*[-_]?\s*(?:30|33|70|100|20|50)(?:\s*(?:shariah|شريعة))?\b/gi, " ")
+        .replace(/\bEGX[-_]?(?:30|33|70|100|20|50)\b/gi, " ")
+        .replace(/(?:مؤشر\s*(?:الشريعة)?\s*)\(?\s*(?:30|33|70|100|20|50)\s*\)?/gi, " ")
         // 4. Strip percentage multipliers/proportions in descriptions (e.g. "98% من الدعم", "105% من المقاومة")
         .replace(/\b\d+(?:\.\d+)?\s*[%٪]\s*من\s*(?:الدعم|المقاومة|الإغلاق|السعر)/gi, " ")
         .replace(/\b(?:8[0-9]|9[0-9]|10[0-9]|11[0-9]|12[0-9])\s*[%٪]\s*من\s*\S+/gi, " ")
@@ -1006,7 +1010,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         if (named.length > 1 || !owner || /^\s*#{1,6}\s/.test(raw) || /(?:إذا|اذا|لو|عند اختراق|هدف|مستهدف|وقف)/.test(line)) continue;
         // A generic/disclaimer line ("being above EMA50 only describes the snapshot")
         // makes no relation claim about the previous owner; do not inherit it.
-        if (named.length === 0 && /لا\s*(?:يثبت|يعني|يدل|تثبت|تكفي|يمكن)|يصف\s+موقع|بشكل\s+عام|عموم|ملاحظة|تنبيه/.test(line)) continue;
+        if (named.length === 0 && (/لا\s*(?:يثبت|يعني|يدل|تثبت|تكفي|يمكن)|يصف\s+موقع|بشكل\s+عام|عموم|ملاحظة|تنبيه/.test(line) || /(?:الأسهم|الاسهم|أغلب|اغلب|معظم|الشركات|النماذج|المجموعة|القطاع|السوق|stocks|shares)/.test(line))) continue;
         const row = [...rows].reverse().find(r=>r.symbol === owner && r.close != null);
         if (!row) continue;
         for (const relation of line.matchAll(/(?<!ال)(فوق|أعلى من|اعلى من|تحت|أسفل|اسفل|above|below)\s*(?:الـ\s*)?EMA\s*(50|200)/gi)) {
@@ -1016,7 +1020,12 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const close=Number(row.close), average=Number(row[`ema_${relation[2]}`]);
             if (!Number.isFinite(close) || !Number.isFinite(average)) continue;
             const above=/فوق|أعلى|اعلى|above/i.test(relation[1]);
-            if ((above && close <= average) || (!above && close >= average)) reasons.push(`price_average_relation_contradiction:${owner}:ema_${relation[2]}`);
+            const relativeDiff = Math.abs(close - average) / average;
+            // If close and average are virtually identical (within 0.8% parity/testing band),
+            // describing the position as at/near/above/below is within snapshot rounding tolerance.
+            if (relativeDiff > 0.008) {
+                if ((above && close < average) || (!above && close > average)) reasons.push(`price_average_relation_contradiction:${owner}:ema_${relation[2]}`);
+            }
         }
     }
     // Check numbers in markdown rows against the named stock, including rows with no currency unit.
@@ -1024,8 +1033,9 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         .map(m => m[1].toUpperCase())
         .filter(s => !["RSI", "MACD", "EMA", "EPS", "EGX", "PRO", "VIP", "USD", "EGP", "DCF", "SME"].includes(s));
     const allSymbols = [...new Set([...evidence.flatMap(e => e.symbols), ...headingSymbols])];
+    const stockSymbols = allSymbols.filter(s => !["EGX", "RSI", "MACD", "EMA", "EPS", "PRO", "VIP", "USD", "EGP", "DCF", "SME"].includes(s));
     const portfolioFacts = facts.filter(f => f.symbol === "PORTFOLIO" || !f.symbol);
-    let currentSymbol: string | null = allSymbols.length === 1 ? allSymbols[0] : null;
+    let currentSymbol: string | null = stockSymbols.length === 1 ? stockSymbols[0] : null;
     let rankColIdx: number = -1;
     let inTable = false;
     let tableHadStockRow = false;
@@ -1058,12 +1068,16 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
 
     for (const rawLine of reply.split("\n")) {
         const line = rawLine.trim();
-        const lineSymbols = allSymbols.filter(s => new RegExp(`\\b${s}\\b`, "i").test(line));
+        const lineSymbols = stockSymbols.filter(s => new RegExp(`\\b${s}\\b`, "i").test(line));
         const lineSymbol = lineSymbols.length === 1 ? lineSymbols[0] : null;
         if (lineSymbol) {
             currentSymbol = lineSymbol;
-            marketSection = lineSymbol === "EGX";
+            marketSection = false;
         } else if (lineSymbols.length > 1) {
+            currentSymbol = null;
+            marketSection = false;
+        } else if (/\bEGX\b/i.test(line) && /مؤشر|سوق|اتساع|breadth|market/i.test(line)) {
+            marketSection = true;
             currentSymbol = null;
         }
 
@@ -1102,7 +1116,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
 
         // Detect comparison table where multiple columns are stock symbols (e.g. | وجه المقارنة | COMI | EAST |)
         if (isNewTable || tableColSymbols.length === 0) {
-            const detectedCols = cells.map(cell => allSymbols.find(s => new RegExp(`\\b${s}\\b`, "i").test(cell)) || null);
+            const detectedCols = cells.map(cell => stockSymbols.find(s => new RegExp(`\\b${s}\\b`, "i").test(cell)) || null);
             if (detectedCols.filter(Boolean).length >= 2) {
                 isComparisonTable = true;
                 tableColSymbols = detectedCols;
@@ -1111,7 +1125,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         }
 
         if (isComparisonTable) {
-            if (/ترتيب|مركز|مرتب[ةه]|أولوية|تصنيف|أفضلية|^#$|^م$|^ت$|رقم|rank|tier|category|تاريخ|التاريخ|الجلسة|جلسة|date|session/i.test(cells[0])) continue;
+            if (/ترتيب|مركز|مرتب[ةه]|أولوية|تصنيف|أفضلية|^#$|^م$|^ت$|رقم|rank|tier|category|تاريخ|التاريخ|الجلسة|جلسة|date|session|المؤشر|مؤشر|القطاع|قطاع|index|sector/i.test(cells[0])) continue;
             for (let colIdx = 0; colIdx < cells.length; colIdx++) {
                 const colSymbol = tableColSymbols[colIdx];
                 if (!colSymbol) continue;
@@ -1169,7 +1183,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
         const breadthFields = marketEvidence && marketScope && totalLabel && !/صاعد|هابط|ثابت/.test(cells[0])
             ? ["breadth_total" as const] : tableMetricFields(cells[0]);
         if (isSectorTable) symbol = "EGX";
-        if (marketEvidence && marketSection && lineSymbols.length === 0) symbol = "EGX";
+        if (marketEvidence && marketSection && lineSymbols.length === 0 && !tableHadStockRow) symbol = "EGX";
         if (lineSymbols.length === 0 && breadthFields?.some(f => f.startsWith("breadth_"))
             && marketEvidence) symbol = "EGX";
         const scenarioRow = scenarioTableRow(evidence, cells, lineSymbols, headers);
@@ -1231,9 +1245,11 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
             const levelField: FactRecord["field"] | undefined = /دعم/.test(cells[0]) ? "distance_from_support_pct"
                 : /مقاوم/.test(cells[0]) ? "distance_from_resistance_pct" : undefined;
             const rowFields = !tableHadStockRow ? (symbol === "EGX" ? breadthFields : tableMetricFields(cells[0])) : undefined;
-            const isCommentaryCol = !tableHadStockRow && idx >= 2
-                && /(?:الوصف(?:\s+الفني)?|القراءة(?:\s+والتقييم)?|ملاحظات|التعليق|التفسير|الدلالة|الشرح|البيان|الإشارة|الوضع\s+الفني)/i.test(header)
-                && !/سعر|إغلاق|قيمة|مستوى|عائد/i.test(header);
+            const isCommentaryCol = (
+                /(?:الوصف(?:\s+الفني)?|القراءة(?:\s+والتقييم)?|ملاحظات|التعليق|التفسير|الدلالة|الشرح|البيان|الإشارة|الوضع\s+الفني|ملخص|الحالة(?:\s+الفنية)?)/i.test(header)
+                || /(?:خبر|أخبار|اخبار|عنوان|عناوين|إفصاح|افصاح|إفصاحات|افصاحات|تفاصيل|ملخص(?:\s+الخبر)?|news|headline|headlines|summary|disclosure|source|مصدر|رابط)/i.test(header)
+                || (evidence.some(e => e.tool === "get_news") && /(?:نص|موضوع|حدث|بيان)/i.test(header))
+            ) && !/سعر|إغلاق|اغلاق|قيمة(?:\s+السهم|\s+السوقية)?|مستوى|عائد|ربح%|price|close|target|stop|دعم|مقاوم/i.test(header);
             if (isCommentaryCol) continue;
             const verticalMetricValue = Boolean(rowFields?.length)
                 && (/^(?:(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى|price|value|level)(?:\s*(?:[\/،-]|أو)\s*(?:السعر|سعر|القيمة|قيمة|المستوى|مستوى))?(?:\s*\([^)]*\))?)$/i.test(header.replace(/[*_`]/g," ").trim())

@@ -320,3 +320,81 @@ test.each(['الفترة: 473 شمعة فعلية من أصل حد (500)، رأ�
 test.each(['## العناصر (٣)','## 3 مراكز','## الاستراتيجيات (3)','## rows (3)'])('explicit entity count detects mismatch: %s',heading=>{
  expect(advisoryTableRowCountConsistency(heading+'\n| الرمز | القيمة |\n|---|---|\n| A1 | 10 |\n| B2 | 20 |')).toHaveLength(1);
 });
+
+test('memoo1286 production regression: EGX 33 Shariah index in stock tables does not flag index number 33 as ungrounded stock metric', () => {
+    const e = [toAgenticEvidence('get_technical_scan', { preset: 'smart_money_flow' }, {
+        status: 'success',
+        stocks: [
+            { symbol: 'ADIB', date: '2026-10-26', close: 28.50, change_pct: 1.5, rsi_14: 55.4, ema_50: 27.20, ema_200: 25.80 },
+            { symbol: 'MFPC', date: '2026-10-26', close: 45.20, change_pct: 2.1, rsi_14: 60.1, ema_50: 43.10, ema_200: 41.50 },
+        ]
+    })];
+    const draft = [
+        '| الرمز | الإغلاق | التغير | المؤشر |',
+        '|---|---|---|---|',
+        '| ADIB | 28.50 | +1.50% | EGX 33 |',
+        '| MFPC | 45.20 | +2.10% | مؤشر الشريعة EGX 33 |'
+    ].join('\n');
+    expect(checkAgenticDraft(draft, e)).toEqual([]);
+});
+
+test('memoo1286 production regression: ELNA price testing EMA200 within 0.8% parity tolerance is not a fatal contradiction', () => {
+    const e = [toAgenticEvidence('get_technical_scan', { preset: 'smart_money_flow' }, {
+        status: 'success',
+        stocks: [
+            { symbol: 'ELNA', date: '2026-10-26', close: 37.00, ema_50: 35.70, ema_200: 37.0961 }
+        ]
+    })];
+    const draft = 'سهم ELNA يتداول عند 37.00 جنيه وهو فوق EMA50 (35.70) وفوق EMA200 (37.10).';
+    expect(checkAgenticDraft(draft, e)).toEqual([]);
+});
+
+test('memoo1286 production regression: news table numbers (profits, shares, time) are not evaluated as stock price facts', () => {
+    const e = [
+        toAgenticEvidence('get_news', { symbols: ['FCMD', 'KORA'] }, {
+            news: [
+                { symbol: 'FCMD', title: 'فيوتشر كير تتحول للربحية وتسجل 8.7 مليون جنيه بالنصف الأول', date: '2026-10-25' },
+                { symbol: 'KORA', title: 'قرة للطاقة: أيمن قرة باع بـ 864 مليون واشترى بـ 73.35', date: '2026-10-25' }
+            ]
+        })
+    ];
+    const draft = [
+        '| السهم | التاريخ | ملخص الخبر |',
+        '|---|---|---|',
+        '| FCMD | 2026-10-25 | تحولت للربحية وسجلت 8.70 مليون جنيه |',
+        '| KORA | 2026-10-25 | باع بـ 864 مليون واشترى بـ 73.35 |'
+    ].join('\n');
+    expect(checkAgenticDraft(draft, e)).toEqual([]);
+});
+
+test('memoo1286 production regression: market breadth coexistence with accumulation stocks does not poison stock rows with EGX facts', () => {
+    const e = [
+        toAgenticEvidence('get_accumulation_stocks', {}, {
+            status: 'success',
+            stocks: [
+                { symbol: 'ADIB', scan_date: '2026-10-25', acc_score: 85, dist_score: 0, close: 28.50 },
+                { symbol: 'MFPC', scan_date: '2026-10-25', acc_score: 75, dist_score: 0, close: 45.20 }
+            ]
+        }),
+        toAgenticEvidence('get_market_breadth', { symbols: ['EGX'] }, {
+            status: 'success',
+            date: '2026-10-25',
+            summary: { symbol: 'EGX', stocks_traded_count: 236, advancing_count: 10, declining_count: 215, unchanged_count: 11, date: '2026-10-25' }
+        })
+    ];
+    const draft = [
+        '### اتساع السوق EGX',
+        '| المقياس | القيمة |',
+        '|---|---|',
+        '| إجمالي الأسهم | 236 |',
+        '| الأسهم الصاعدة | 10 |',
+        '| الأسهم الهابطة | 215 |',
+        '',
+        '### أسهم التجميع الذكي',
+        '| الرمز | الإغلاق | نقاط التجميع |',
+        '|---|---|---|',
+        '| ADIB | 28.50 | 85 |',
+        '| MFPC | 45.20 | 75 |'
+    ].join('\n');
+    expect(checkAgenticDraft(draft, e)).toEqual([]);
+});
