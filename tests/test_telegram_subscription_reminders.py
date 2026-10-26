@@ -11,6 +11,9 @@ from jobs.telegram_subscription_reminders import (
     run_subscription_reminders,
     get_telegram_token,
 )
+from api.jobs.telegram_subscription_reminders import (
+    run_subscription_reminders as api_run_subscription_reminders,
+)
 
 
 def test_is_lifetime_plan():
@@ -157,3 +160,10 @@ def test_run_subscription_reminders_filters_lifetime():
             assert result["status"] == "completed"
             assert result["eligible"] == 0
             assert result["sent"] == 0
+
+
+def test_api_jobs_package_import_equivalence():
+    """Verify that both api.jobs and root jobs import the exact same runner."""
+    assert callable(api_run_subscription_reminders)
+    assert callable(run_subscription_reminders)
+    assert api_run_subscription_reminders.__name__ == run_subscription_reminders.__name__

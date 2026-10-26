@@ -533,7 +533,10 @@ async def trigger_daily_bot(request: Request, background_tasks: BackgroundTasks)
 @app.post("/api/admin/run-subscription-reminders")
 async def trigger_subscription_reminders(request: Request):
     require_internal_admin(request)
-    from jobs.telegram_subscription_reminders import run_subscription_reminders
+    try:
+        from api.jobs.telegram_subscription_reminders import run_subscription_reminders
+    except ImportError:
+        from jobs.telegram_subscription_reminders import run_subscription_reminders
     import asyncio
     res = await asyncio.to_thread(run_subscription_reminders)
     return {"status": "success", "result": res}

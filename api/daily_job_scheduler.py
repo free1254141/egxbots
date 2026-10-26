@@ -460,7 +460,10 @@ def _scheduler_worker():
 
             if now_monotonic - _last_subscription_reminders_at >= subscription_reminders_interval:
                 try:
-                    from jobs.telegram_subscription_reminders import run_subscription_reminders
+                    try:
+                        from api.jobs.telegram_subscription_reminders import run_subscription_reminders
+                    except ImportError:
+                        from jobs.telegram_subscription_reminders import run_subscription_reminders
                     run_subscription_reminders()
                 except Exception as reminder_err:
                     print(f"[DAILY-JOB-SCHEDULER] Subscription reminders check failed: {reminder_err}")

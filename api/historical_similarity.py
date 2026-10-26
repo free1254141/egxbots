@@ -75,16 +75,25 @@ def load_symbol_prices_direct(symbol: str, limit: int = 1500) -> pd.DataFrame:
         cached.index.name = "date"
         return cached.ffill().bfill()
         
-    res = (
-        client.table("stock_prices")
-        .select("date,open,high,low,close,volume")
-        .eq("symbol", s)
-        .eq("exchange", e)
-        .order("date", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    all_data = res.data or []
+    all_data = []
+    for attempt in range(2):
+        try:
+            res = (
+                client.table("stock_prices")
+                .select("date,open,high,low,close,volume")
+                .eq("symbol", s)
+                .eq("exchange", e)
+                .order("date", desc=True)
+                .limit(limit if attempt == 0 else min(limit, 500))
+                .execute()
+            )
+            all_data = res.data or []
+            break
+        except Exception as query_err:
+            if "57014" in str(query_err) or "timeout" in str(query_err).lower():
+                time.sleep(1.0)
+                continue
+            raise
         
     if not all_data:
         return pd.DataFrame()
@@ -725,12 +734,30 @@ def _get_recent_active_symbol_bases(max_stale_days: int = 30) -> Set[str]:
         return set()
 
     cutoff_date = (datetime.utcnow() - timedelta(days=max_stale_days)).date().isoformat()
+    # 1. Prefer stock_scans_summary which has only ~280 active symbols per day and avoids full scan
+    try:
+        scan_res = (
+            supabase.table("stock_scans_summary")
+            .select("symbol")
+            .gte("scan_date", cutoff_date)
+            .limit(3000)
+            .execute()
+        )
+        if scan_res.data:
+            symbols = {r["symbol"].split(".")[0].upper() for r in scan_res.data if r.get("symbol")}
+            if symbols:
+                return symbols
+    except Exception:
+        pass
+
+    # 2. Fallback to stock_prices scoped by exchange to utilize the composite index
     response = (
         supabase.table("stock_prices")
         .select("symbol,date")
+        .eq("exchange", "EGX")
         .gte("date", cutoff_date)
         .order("date", desc=True)
-        .limit(50000)
+        .limit(5000)
         .execute()
     )
 
@@ -795,7 +822,7 @@ def run_market_wide_similarity_scan(
     stop_loss: float = -0.03,
     features_to_use: Optional[List[str]] = None,
     min_win_rate: float = 0.0,  # Changed: include all results, no filtering
-    max_workers: int = 35,
+    max_workers: int = 10,
     search_scope: str = "same_symbol",
     progress_callback=None
 ) -> List[Dict[str, Any]]:
@@ -814,6 +841,7 @@ def run_market_wide_similarity_scan(
         search_scope: 'same_symbol' or 'all_symbols' (cross-symbol similarity)
         progress_callback: Callback function for progress updates
     """
+    max_workers = int(os.getenv("SIMILARITY_MAX_WORKERS", str(max_workers)))
     from api.stock_ai import get_supabase_symbols
     
     print(f"🔄 Starting market-wide similarity scan...")

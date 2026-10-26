@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api ./api
 COPY symbols_data ./symbols_data
 COPY scripts ./scripts
+COPY jobs ./jobs
 
 # Hugging Face Spaces expects the app to listen on port 7860 by default.
 ENV PORT=7860

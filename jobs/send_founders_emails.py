@@ -47,8 +47,15 @@ def send_renewal_reminder_email(user_id: str, email: str, display_name: str, day
     cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
-    if send_resend_email(email, subject, html):
-        record_marketing_message(user_id, email, "renewal_reminder", {"days_left": days_left, "end_date": end_date})
+    send_meta: Dict[str, Any] = {}
+    if send_resend_email(email, subject, html, out=send_meta):
+        record_marketing_message(
+            user_id,
+            email,
+            "renewal_reminder",
+            {"days_left": days_left, "end_date": end_date},
+            provider_message_id=send_meta.get("provider_message_id")
+        )
         return True
     return False
 
@@ -75,8 +82,15 @@ def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bo
     cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
-    if send_resend_email(email, subject, html):
-        record_marketing_message(user_id, email, "founders_offer", {"channel": "email"})
+    send_meta: Dict[str, Any] = {}
+    if send_resend_email(email, subject, html, out=send_meta):
+        record_marketing_message(
+            user_id,
+            email,
+            "founders_offer",
+            {"channel": "email"},
+            provider_message_id=send_meta.get("provider_message_id")
+        )
         return True
     return False
 

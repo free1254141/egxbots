@@ -93,6 +93,7 @@ def get_git_changes():
                 (clean_path.startswith("api/") and not clean_path.startswith("api/symbols_data/")) or 
                 (clean_path.endswith(".py") and not clean_path.startswith("web/")) or
                 clean_path.startswith("scripts/") or
+                clean_path.startswith("jobs/") or
                 clean_path in ["requirements.txt", "Dockerfile", "README.md"]
             )
             if not is_backend:

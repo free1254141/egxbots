@@ -29,6 +29,19 @@ function verifySvix(body: string, id: string, timestamp: string, signatureHeader
   });
 }
 
+export async function GET() {
+  const configured = Boolean(process.env.RESEND_WEBHOOK_SECRET?.trim());
+  return NextResponse.json({
+    ok: true,
+    service: "resend-webhook",
+    configured,
+    events_tracked: Object.values(EVENT_MAP),
+    instructions: configured
+      ? "Webhook secret configured. Register https://egxbots.com/api/marketing/resend-webhook in Resend Dashboard -> Webhooks."
+      : "RESEND_WEBHOOK_SECRET is missing. Copy the signing secret (whsec_...) from Resend Dashboard -> Webhooks.",
+  });
+}
+
 export async function POST(req: NextRequest) {
   const secret = process.env.RESEND_WEBHOOK_SECRET?.trim();
   if (!secret) return NextResponse.json({ error: "webhook_not_configured" }, { status: 503 });
@@ -41,7 +54,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
   }
 
-  let payload: { type?: string; data?: { email_id?: string } };
+  let payload: { type?: string; data?: { email_id?: string; id?: string; to?: string[] } };
   try {
     payload = JSON.parse(body);
   } catch {
@@ -49,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 
   const eventType = EVENT_MAP[payload.type || ""];
-  const providerId = payload.data?.email_id;
+  const providerId = payload.data?.email_id || payload.data?.id || svixId;
   if (!eventType || !providerId) return NextResponse.json({ ok: true, ignored: true });
 
   try {
@@ -60,16 +73,36 @@ export async function POST(req: NextRequest) {
       .eq("provider_message_id", providerId)
       .limit(1)
       .maybeSingle();
-    // Not a marketing email (e.g. transactional): nothing to attribute.
-    if (!msg) return NextResponse.json({ ok: true, ignored: true });
+
+    let matchedUserId = msg?.user_id || null;
+    let campaign = msg?.message_type || "email_campaign";
+    let messageId = msg?.id || null;
+
+    // Fallback attribution by recipient email if provider_message_id was not yet indexed
+    if (!msg && Array.isArray(payload.data?.to) && payload.data.to.length > 0) {
+      const recipient = payload.data.to[0].trim().toLowerCase();
+      const { data: recentMsg } = await service
+        .from("marketing_message_log")
+        .select("id,user_id,message_type")
+        .eq("email", recipient)
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recentMsg) {
+        matchedUserId = recentMsg.user_id;
+        campaign = recentMsg.message_type;
+        messageId = recentMsg.id;
+      }
+    }
 
     const { error } = await service.from("marketing_events").insert({
       event_type: eventType,
       channel: "email",
-      campaign: msg.message_type,
-      message_id: msg.id,
+      campaign,
+      message_id: messageId,
       provider_message_id: providerId,
-      user_id: msg.user_id,
+      user_id: matchedUserId,
+      target: Array.isArray(payload.data?.to) ? payload.data.to.join(", ") : null,
       svix_id: svixId,
     });
     // Duplicate svix-id (retry) violates the unique index: treat as success.
@@ -81,5 +114,5 @@ export async function POST(req: NextRequest) {
     console.warn("[marketing/resend-webhook] error:", err instanceof Error ? err.message : "error");
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, tracked: eventType });
 }

@@ -3758,7 +3758,10 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         if trigger == "scheduled" and phase == "close" and not dry_run and _stage_needed('telegram_subscription_reminders'):
             _start_step('telegram_subscription_reminders', 'Send private Telegram renewal reminders due today')
             try:
-                from jobs.telegram_subscription_reminders import run_subscription_reminders
+                try:
+                    from api.jobs.telegram_subscription_reminders import run_subscription_reminders
+                except ImportError:
+                    from jobs.telegram_subscription_reminders import run_subscription_reminders
                 reminder_res = await asyncio.to_thread(run_subscription_reminders)
                 status_ok = reminder_res.get("status") in ("completed", "partial_success")
                 summary_msg = f"Sent: {reminder_res.get('sent', 0)}, Failed: {reminder_res.get('failed', 0)}, Skipped: {reminder_res.get('skipped', 0)}"
