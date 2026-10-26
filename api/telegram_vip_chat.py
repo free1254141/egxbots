@@ -657,10 +657,14 @@ def _format_markdown_table_smart(buf: List[str]) -> List[str]:
         any(k in headers[0] for k in ["المستوى", "المؤشر", "المقياس", "البيان", "العنصر", "المتوسط", "Metric", "Level"])
     )
 
-    # 2. Multi-Stock Recommendations / Scanner Alert Table
+    # 2. Multi-Stock Recommendations / Scanner Alert Table (must have entry/stop/target and not be a technical indicators table)
+    headers_joined_lower = " ".join(headers).lower()
+    has_target_or_stop = any(k in headers_joined_lower for k in ["دخول", "وقف", "هدف", "مستهدف", "target", "stop", "entry"])
+    is_technical_indicator_table = any(k in headers_joined_lower for k in ["macd", "rsi", "هيستوجرام", "ema", "sma", "stoch"])
     is_stock_cards_table = (
         any(k in headers[0] for k in ["السهم", "الرمز", "Ticker", "Symbol"]) and
-        any(k in " ".join(headers) for k in ["دخول", "وقف", "هدف", "إشارة", "عائد", "Target", "Stop", "Entry"])
+        has_target_or_stop and
+        not is_technical_indicator_table
     )
 
     if is_vertical_levels_or_metrics:
@@ -727,7 +731,7 @@ def _format_markdown_table_smart(buf: List[str]) -> List[str]:
 
             # Card Header
             header_parts = [f"🔹 <b>{sym}</b>"]
-            if signal:
+            if signal and not re.match(r"^[−\-\+]?\d+(?:\.\d+)?%?$", signal.strip()):
                 header_parts.append(f"<i>{signal}</i>")
             if time_val and time_val != "—":
                 header_parts.append(f"⏱️ <code>{time_val}</code>")
