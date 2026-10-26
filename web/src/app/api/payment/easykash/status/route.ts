@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
         .from("subscriptions")
         .select("current_period_end")
         .eq("user_id", user.id)
-        .in("plan_id", ["pro", "lifetime", "pro_lifetime"])
+        .in("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
         .eq("status", "active")
         .order("current_period_end", { ascending: false })
         .limit(1)
@@ -79,7 +79,8 @@ export async function GET(req: NextRequest) {
           const botToken = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
           const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
           if (botToken) {
-            const displayName = profile?.display_name || profile?.username || "المستثمر";
+            const rawDisplayName = profile?.display_name || profile?.username || "المستثمر";
+            const displayName = rawDisplayName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             const buttons: { text: string; url: string }[][] = [];
             if (inviteLink) {
               buttons.push([{ text: "💎 الانضمام لقناة VIP", url: inviteLink }]);

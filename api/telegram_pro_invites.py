@@ -513,10 +513,11 @@ def send_pro_welcome_to_user_telegram(
         except (ValueError, TypeError):
             return False
 
-        display_name = profile.data.get("display_name") or profile.data.get("username") or "المستثمر"
+        import html
+        raw_name = profile.data.get("display_name") or profile.data.get("username") or "المستثمر"
+        display_name = html.escape(str(raw_name))
 
         if not invite_link:
-            from api.telegram_pro_invites import ensure_pro_invite
             invite = ensure_pro_invite(user_id, subscription_end or datetime.now(timezone.utc).isoformat())
             invite_link = str((invite or {}).get("invite_link") or "").strip()
 

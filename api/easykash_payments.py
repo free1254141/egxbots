@@ -386,12 +386,17 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
             invite_link = str((invite or {}).get("invite_link") or "").strip()
             try:
                 from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
-                send_pro_welcome_to_user_telegram(
+                sent = send_pro_welcome_to_user_telegram(
                     order["user_id"],
                     invite_link=invite_link,
                     plan_name="Pro",
                     subscription_end=str(subscription_end),
                 )
+                if sent:
+                    note = str(order.get("customer_note") or "")
+                    supabase.table("local_payment_orders").update({
+                        "customer_note": f"{note} | tg_welcomed".strip(" |")
+                    }).eq("id", order_id).execute()
             except Exception as tg_err:
                 print(f"[EASYKASH] Welcome telegram dispatch warning: {tg_err}")
     except Exception as exc:

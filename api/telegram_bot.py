@@ -742,6 +742,16 @@ class TelegramBot:
                                 user_id=uid,
                                 subscription_end=str(sub_end) if sub_end else "",
                             )
+                            if sent:
+                                try:
+                                    recent_order = supabase.table("local_payment_orders").select("id, customer_note").eq("user_id", uid).eq("status", "approved").order("created_at", desc=True).limit(1).maybe_single().execute()
+                                    if recent_order and recent_order.data:
+                                        ord_id = recent_order.data.get("id")
+                                        ord_note = str(recent_order.data.get("customer_note") or "")
+                                        if "tg_welcomed" not in ord_note:
+                                            supabase.table("local_payment_orders").update({"customer_note": f"{ord_note} | tg_welcomed".strip(" |")}).eq("id", ord_id).execute()
+                                except Exception as mark_err:
+                                    self._log(f"Could not record tg_welcomed on order: {mark_err}")
                             if not sent:
                                 self._reply(
                                     chat_id,
