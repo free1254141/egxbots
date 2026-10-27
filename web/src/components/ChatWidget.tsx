@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -86,6 +86,30 @@ export default function ChatWidget() {
     const [wallpaperId, setWallpaperId] = useState<string>(DEFAULT_WALLPAPER_ID);
     const [wallpaperOpacity, setWallpaperOpacity] = useState<number>(DEFAULT_WALLPAPER_OPACITY);
     const [customWallpaperImage, setCustomWallpaperImage] = useState<string | undefined>(undefined);
+
+    // Chat Settings dropdown
+    const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+    const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!isSettingsOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) {
+                setIsSettingsOpen(false);
+            }
+        };
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                setIsSettingsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("keydown", handleKeyDown);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [isSettingsOpen]);
 
     useEffect(() => {
         const cfg = getSavedWallpaperConfig();
@@ -482,7 +506,7 @@ export default function ChatWidget() {
             {/* Main Chat Container */}
             <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${isChatRoute ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0">
+                <div className="relative z-30 flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0">
                     <div className="flex items-center gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight">
                         {user && !isInitializing && !accessError && !isSidebarOpen && (
                             <button
@@ -504,38 +528,121 @@ export default function ChatWidget() {
                                 {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/5 Left`}
                             </div>
                         )}
-                        {/* Autonomous Recs Mode Toggle Button */}
-                        <button
-                            type="button"
-                            onClick={handleToggleAutonomousRecs}
-                            className={`flex items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer ${
-                                autonomousRecommendations
-                                    ? "border-emerald-500/80 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)]"
-                                    : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-100 dark:border-white/20 dark:bg-black dark:text-zinc-300 dark:hover:bg-zinc-900"
-                            }`}
-                            title={autonomousRecommendations ? "وضع التوصيات الحرة: مفعّل (اضغط للإيقاف)" : "تفعيل وضع التوصيات الحرة للذكاء الاصطناعي (إخلاء مسؤولية)"}
-                            aria-label={autonomousRecommendations ? "إيقاف وضع التوصيات الحرة" : "تفعيل وضع التوصيات الحرة"}
-                        >
-                            <span className="relative flex h-2 w-2">
+                        {/* Settings Dropdown Button & Popover */}
+                        <div className="relative" ref={settingsMenuRef}>
+                            <button
+                                type="button"
+                                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                                className={`relative grid h-9 w-9 place-items-center rounded-xl border text-zinc-800 shadow-xs transition active:scale-95 cursor-pointer dark:text-white ${
+                                    isSettingsOpen
+                                        ? "border-amber-400 bg-amber-500/10 text-amber-600 dark:border-amber-400 dark:text-amber-300"
+                                        : autonomousRecommendations
+                                            ? "border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:border-emerald-500/60 dark:text-emerald-400"
+                                            : "border-zinc-300 bg-white hover:border-zinc-400 hover:bg-zinc-100 dark:border-white/20 dark:bg-black dark:hover:bg-zinc-900"
+                                }`}
+                                title="إعدادات الشات"
+                                aria-label="إعدادات الشات"
+                                aria-expanded={isSettingsOpen}
+                            >
+                                <Settings className={`h-[18px] w-[18px] transition-transform duration-200 ${isSettingsOpen ? "rotate-45 text-amber-500" : ""}`} />
                                 {autonomousRecommendations && (
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-white dark:border-black"></span>
+                                    </span>
                                 )}
-                                <span className={`relative inline-flex rounded-full h-2 w-2 ${autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-400 dark:bg-zinc-600"}`}></span>
-                            </span>
-                            <Sparkles className={`h-3.5 w-3.5 ${autonomousRecommendations ? "text-emerald-500 animate-pulse" : "text-zinc-500"}`} />
-                            <span className="hidden sm:inline text-[11px] font-bold">
-                                {autonomousRecommendations ? "توصيات حرة ⚡" : "توصيات حرة"}
-                            </span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setShowWallpaperModal(true)}
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
-                            title="تغيير خلفية الشات (ورق حائط)"
-                            aria-label="تغيير خلفية الشات"
-                        >
-                            <Palette className="h-[18px] w-[18px]" />
-                        </button>
+                            </button>
+
+                            {/* Dropdown Menu Popover */}
+                            {isSettingsOpen && (
+                                <div className="absolute ltr:right-0 rtl:left-0 top-full mt-2 w-72 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in zoom-in-95 duration-150 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
+                                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-100 dark:border-zinc-800/80">
+                                        <div className="flex items-center gap-1.5 text-xs font-black text-zinc-900 dark:text-white">
+                                            <Settings className="h-3.5 w-3.5 text-amber-500" />
+                                            <span>إعدادات الشات</span>
+                                        </div>
+                                        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">ARTORO</span>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        {/* 1. Autonomous Recommendations Mode */}
+                                        <div className={`rounded-xl border p-2.5 transition ${
+                                            autonomousRecommendations
+                                                ? "border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/30 dark:bg-emerald-950/20"
+                                                : "border-zinc-200/80 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/60"
+                                        }`}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                                                        autonomousRecommendations
+                                                            ? "bg-emerald-500/15 text-emerald-500"
+                                                            : "bg-zinc-200/60 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                                                    }`}>
+                                                        <Sparkles className="h-4 w-4" />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="text-xs font-bold text-zinc-900 dark:text-white">توصيات حرة</span>
+                                                            {autonomousRecommendations && (
+                                                                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                                                                    نشط ⚡
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                                            {autonomousRecommendations ? "توليد فرص برؤية مستقلة" : "مقترحات ذكاء اصطناعي حرة"}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Switch Toggle */}
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    dir="ltr"
+                                                    aria-checked={autonomousRecommendations}
+                                                    onClick={() => {
+                                                        handleToggleAutonomousRecs();
+                                                        setIsSettingsOpen(false);
+                                                    }}
+                                                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                        autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700"
+                                                    }`}
+                                                    title={autonomousRecommendations ? "إيقاف وضع التوصيات الحرة" : "تفعيل وضع التوصيات الحرة"}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                                                            autonomousRecommendations ? "translate-x-5" : "translate-x-0"
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* 2. Chat Wallpaper Setting */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowWallpaperModal(true);
+                                                setIsSettingsOpen(false);
+                                            }}
+                                            className="w-full flex items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-2.5 text-right transition hover:border-amber-400 hover:bg-amber-50/50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-amber-500/40 dark:hover:bg-zinc-900 cursor-pointer"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                                                    <Palette className="h-4 w-4" />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">ورق حائط وخلفية الشات</span>
+                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">زخارف التداول، ألوان، أو صورة</span>
+                                                </div>
+                                            </div>
+                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">تغيير</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                         {!isChatRoute && (
                             <button
                                 onClick={() => setIsExpanded(!isExpanded)}
