@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
+import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
 import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
 import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
@@ -52,7 +53,9 @@ export default function ChatWidget() {
         deleteSession,
         renameSession,
         isSidebarOpen,
-        setIsSidebarOpen
+        setIsSidebarOpen,
+        autonomousRecommendations,
+        setAutonomousRecommendations
     } = useChat();
 
     const { language } = useLanguage();
@@ -60,6 +63,23 @@ export default function ChatWidget() {
     const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
     const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
     const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
+
+    // Autonomous Recommendations preferences
+    const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
+
+    const handleToggleAutonomousRecs = () => {
+        if (autonomousRecommendations) {
+            setAutonomousRecommendations(false);
+            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
+        } else {
+            setShowAutonomousModal(true);
+        }
+    };
+
+    const handleConfirmAutonomousRecs = () => {
+        setAutonomousRecommendations(true);
+        toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
+    };
 
     // Chat Wallpaper preferences
     const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);
@@ -484,6 +504,29 @@ export default function ChatWidget() {
                                 {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/5 Left`}
                             </div>
                         )}
+                        {/* Autonomous Recs Mode Toggle Button */}
+                        <button
+                            type="button"
+                            onClick={handleToggleAutonomousRecs}
+                            className={`flex items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer ${
+                                autonomousRecommendations
+                                    ? "border-emerald-500/80 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.35)]"
+                                    : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-100 dark:border-white/20 dark:bg-black dark:text-zinc-300 dark:hover:bg-zinc-900"
+                            }`}
+                            title={autonomousRecommendations ? "وضع التوصيات الحرة: مفعّل (اضغط للإيقاف)" : "تفعيل وضع التوصيات الحرة للذكاء الاصطناعي (إخلاء مسؤولية)"}
+                            aria-label={autonomousRecommendations ? "إيقاف وضع التوصيات الحرة" : "تفعيل وضع التوصيات الحرة"}
+                        >
+                            <span className="relative flex h-2 w-2">
+                                {autonomousRecommendations && (
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                )}
+                                <span className={`relative inline-flex rounded-full h-2 w-2 ${autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-400 dark:bg-zinc-600"}`}></span>
+                            </span>
+                            <Sparkles className={`h-3.5 w-3.5 ${autonomousRecommendations ? "text-emerald-500 animate-pulse" : "text-zinc-500"}`} />
+                            <span className="hidden sm:inline text-[11px] font-bold">
+                                {autonomousRecommendations ? "توصيات حرة ⚡" : "توصيات حرة"}
+                            </span>
+                        </button>
                         <button
                             type="button"
                             onClick={() => setShowWallpaperModal(true)}
@@ -575,6 +618,28 @@ export default function ChatWidget() {
                         </div>
                     ) : (
                         <>
+                            {autonomousRecommendations && (
+                                <div className="flex items-center justify-between p-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/15 to-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-900 dark:text-emerald-200 mb-3 font-semibold shadow-xs animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="relative flex h-2 w-2 shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </span>
+                                        <span>⚡ <strong>وضع التوصيات الحرة المستقلة مفعّل:</strong> تحليلات الذكاء الاصطناعي استرشادية، وقرارك بمسؤوليتك بالكامل.</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAutonomousRecommendations(false);
+                                            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
+                                        }}
+                                        className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold transition shrink-0 cursor-pointer"
+                                    >
+                                        إيقاف
+                                    </button>
+                                </div>
+                            )}
+
                             {!isPro && remainingQuota === 1 && (
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
@@ -1219,6 +1284,14 @@ export default function ChatWidget() {
                     setWallpaperOpacity(opacity);
                     setCustomWallpaperImage(customImg);
                 }}
+                isAr={language === "ar"}
+            />
+
+            {/* Autonomous Recommendations Disclaimer Modal */}
+            <AutonomousRecsModal
+                isOpen={showAutonomousModal}
+                onClose={() => setShowAutonomousModal(false)}
+                onConfirm={handleConfirmAutonomousRecs}
                 isAr={language === "ar"}
             />
         </div>

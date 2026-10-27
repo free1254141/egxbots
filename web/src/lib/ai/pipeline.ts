@@ -1973,6 +1973,7 @@ export interface PipelineOptions {
     chatSource?: string;
     skipReview?: boolean;
     gateMode?: "audit_only" | "strict";
+    autonomousRecommendations?: boolean;
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */
@@ -4163,6 +4164,7 @@ export async function runPipeline(
             (result as any).summary_state = event.data.summary_state ?? (result as any).summary_state;
             result.tables = event.data.tables ?? [];
             result.chart_actions = event.data.chart_actions ?? [];
+            (result as any).enable_autonomous_recs = event.data.enable_autonomous_recs ?? undefined;
         }
     }
     return result;

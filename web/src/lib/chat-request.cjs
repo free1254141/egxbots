@@ -14,6 +14,7 @@ function createChatRequest(input) {
             client_message_id: input.clientMessageId,
             stream: true,
             chart_context: input.chartContext,
+            ...(input.autonomousRecommendations ? { autonomous_recommendations: true } : {}),
         }),
     };
 }

@@ -315,6 +315,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             ? "strict"
             : "audit_only");
     const proContext = await resolveUserProContext(input.supabase, input.userId, options?.isPro);
+    let autonomousRecommendationsActive = Boolean(options.autonomousRecommendations);
     const withFooter = (reply: string) => withChatFooter(reply, proContext.isPro, proContext.vipInviteLink, options?.chatSource);
     let vision: VisionContext | null = null;
     let visionError: string | null = null;
@@ -390,6 +391,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         } : null,
         portfolio_add_awaiting:sessionSummary.portfolio_add_awaiting, pending_portfolio_import:sessionSummary.pending_portfolio_import,
     } : null, vision:compactVision, previous_evidence:previousEvidence,
+        autonomous_recommendations: autonomousRecommendationsActive,
         chart_context: sanitizeChartContext(options.chartContext),
         image_read_failed: inputImages.length > 0 && !vision,
         current_time_cairo: new Date().toLocaleString("en-GB", { timeZone: "Africa/Cairo" }) };
@@ -604,6 +606,10 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         } else completed.push(...await Promise.all(calls.map(execute)));
         for (const { record, message } of completed) {
             evidence.push(record); messages.push({ ...message, content: JSON.stringify(compactEvidence(record)) });
+            if (record.tool === "enable_autonomous_recommendations" && record.availability !== "error") {
+                autonomousRecommendationsActive = true;
+                context.autonomous_recommendations = true;
+            }
             if (record.availability !== "error") for (const symbol of record.symbols) if (!usedSymbols.includes(symbol)) usedSymbols.push(symbol);
         }
         context.previous_evidence = unsupersededEvidence(previousEvidence, evidence);
@@ -641,6 +647,9 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 messages.push(assistant);
                 yield { type: "status", data: { status: "tools", message: "جلب الأدلة اللازمة للطلب..." } };
                 await executeCalls(calls);
+                if (calls.some(c => c.function.name === "enable_autonomous_recommendations")) {
+                    yield { type: "enable_autonomous_recs", data: { enabled: true } };
+                }
                 yield emitData();
             }
         } catch (err: any) {
@@ -963,6 +972,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         session_update: sessionUpdate,
         summary_state: updatedSummary,
         usage: accounting.summary(toolCalls),
+        enable_autonomous_recs: autonomousRecommendationsActive ? true : undefined,
         publication_review: { passed: firstPassed, final_passed: finalPassed, repaired, reasons, advisory_issues: advisoryIssues,
             shadow_mode: gateMode === "audit_only",
             data_coverage: evidence.some(e => e.availability !== 'available') ? 'partial' : 'complete',

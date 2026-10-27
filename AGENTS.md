@@ -30,6 +30,15 @@ These instructions apply to the entire repository, including AI assistants, revi
 - Coordinate delegated work so agents do not independently repeat the same remote query, live test or generation. Share compact findings rather than large logs.
 - Before an external call, determine the question it answers, the smallest scope and whether an existing result already answers it. Report measured savings separately from estimates; never promise a percentage without measurements.
 
+## Email Campaign Reporting Rule
+
+- Whenever an email batch or campaign is dispatched, ALWAYS automatically report the complete live analytics breakdown immediately after dispatch without waiting for the user to request it:
+  1. Total cumulative emails sent across all campaigns and database records.
+  2. Total opened emails and open rate percentage (`open_rate = opened / total * 100`).
+  3. Total clicks and conversions (`click_rate`).
+  4. Bounced/failed count.
+  5. Detailed list of users who opened and clicked (with timestamps).
+
 ## AI Chat Architecture (Agentic Function Calling)
 
 - All user chat queries are routed through the pure LLM-driven Agentic architecture in `web/src/lib/ai/agentic-pipeline.ts` (delegated from `web/src/lib/ai/pipeline.ts`).

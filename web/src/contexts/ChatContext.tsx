@@ -74,6 +74,8 @@ interface ChatContextType {
     renameSession: (sessionId: string, newTitle: string) => Promise<void>;
     isSidebarOpen: boolean;
     setIsSidebarOpen: (v: boolean) => void;
+    autonomousRecommendations: boolean;
+    setAutonomousRecommendations: (enabled: boolean) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -180,6 +182,35 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
     const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+    const [autonomousRecommendations, setAutonomousRecommendationsState] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const saved = localStorage.getItem("artoro_autonomous_recs_enabled");
+            if (saved === "true") {
+                setAutonomousRecommendationsState(true);
+            }
+        }
+    }, []);
+
+    const setAutonomousRecommendations = useCallback((enabled: boolean) => {
+        setAutonomousRecommendationsState(enabled);
+        if (typeof window !== "undefined") {
+            localStorage.setItem("artoro_autonomous_recs_enabled", String(enabled));
+            window.dispatchEvent(new CustomEvent("artoro-autonomous-recs-changed", { detail: { enabled } }));
+        }
+    }, []);
+
+    useEffect(() => {
+        const handleRecsChange = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (detail && typeof detail.enabled === "boolean") {
+                setAutonomousRecommendationsState(detail.enabled);
+            }
+        };
+        window.addEventListener("artoro-autonomous-recs-changed", handleRecsChange);
+        return () => window.removeEventListener("artoro-autonomous-recs-changed", handleRecsChange);
+    }, []);
 
 
     useEffect(() => {
@@ -666,6 +697,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                     sessionId: currentSessionId,
                     clientMessageId: `${currentSessionId}:${newUserMsg.timestamp}`,
                     chartContext: requestChartContext,
+                    autonomousRecommendations,
                 }),
                 signal: abortControllerRef.current.signal,
             });
@@ -726,6 +758,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (contentType.includes("application/json") || !response.body) {
                 const data = await response.json();
                 publishChartActions(data.chart_actions, requestChartContext, requestChartOwner, requestChartGeneration);
+                if (data.enable_autonomous_recs === true) {
+                    setAutonomousRecommendations(true);
+                }
                 if (data.remaining_quota !== undefined) {
                     setRemainingQuota(data.remaining_quota);
                 }
@@ -792,6 +827,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 assistantMsg.isStreaming = false;
                                 assistantMsg.statusText = undefined;
                                 updateAssistantMsgInState(assistantMsg);
+                            } else if (currentEventName === "enable_autonomous_recs" || parsed.type === "enable_autonomous_recs" || parsed.enable_autonomous_recs === true) {
+                                setAutonomousRecommendations(true);
                             } else if (parsed.type === "image_urls" && Array.isArray(parsed.image_urls) && parsed.image_urls.length > 0) {
                                 setSessionMessages(currentSessionId, prevMsgs => 
                                     prevMsgs.map(m => (m.timestamp === newUserMsg.timestamp ? { ...m, imageUrl: parsed.image_urls[0], images: parsed.image_urls } : m))
@@ -820,6 +857,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                             } else if (currentEventName === "done" || parsed.type === "done" || parsed.event === "done") {
                                 receivedDone = true;
                                 publishChartActions(parsed.chart_actions, requestChartContext, requestChartOwner, requestChartGeneration);
+                                if (parsed.enable_autonomous_recs === true) {
+                                    setAutonomousRecommendations(true);
+                                }
                                 if (parsed.reply) {
                                     assistantMsg.content = stripMarkdownTables(sanitizeReply(parsed.reply));
                                 } else if (assistantMsg.content) {
@@ -915,7 +955,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 setIsLoading(false);
             }
         }
-    }, [remainingQuota, selectedModel, setActiveSessionId, setSessions, setSessionMessages, flushStoredMessages]);
+    }, [remainingQuota, selectedModel, setActiveSessionId, setSessions, setSessionMessages, flushStoredMessages, autonomousRecommendations]);
 
     return (
         <ChatContext.Provider value={{
@@ -942,7 +982,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             deleteSession,
             renameSession,
             isSidebarOpen,
-            setIsSidebarOpen
+            setIsSidebarOpen,
+            autonomousRecommendations,
+            setAutonomousRecommendations
         }}>
             {children}
         </ChatContext.Provider>

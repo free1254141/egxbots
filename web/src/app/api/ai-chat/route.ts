@@ -505,11 +505,13 @@ export async function POST(req: NextRequest) {
         const normalizedForGate = normalizeArabicIntent(message);
         const asksProRecs = /(?:توصيات|توصيه|اشارات|اشاره|ترشيحات|recommendations?|signals?)/i.test(normalizedForGate)
             && !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedForGate);
-        if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && asksProRecs) {
+        const autonomousRecommendations = Boolean(body.autonomous_recommendations);
+        const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعله|شغله|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
+        if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && asksProRecs && !autonomousRecommendations && !mentionsAutonomousMode) {
             try {
                 const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
                 if (!gateIsPro(planRows || [])) {
-                    return NextResponse.json({ reply: "التوصيات وإشارات المنصة متاحة ضمن خطة Pro فقط. فعّل Pro لعرض التوصيات الفورية والبيانات الكاملة." });
+                    return NextResponse.json({ reply: "التوصيات وإشارات المنصة الرسمية متاحة ضمن خطة Pro فقط. يمكنك بدلاً من ذلك تفعيل «وضع التوصيات الحرة المستقلة للذكاء الاصطناعي» من الزر أعلى الشات للحصول على مقترحات فنية استرشادية، أو الترقية لـ Pro لعرض الإشارات الرسمية." });
                 }
             } catch {
                 return NextResponse.json({ reply: "التوصيات وإشارات المنصة متاحة ضمن خطة Pro فقط. فعّل Pro لعرض التوصيات الفورية والبيانات الكاملة." });
@@ -746,7 +748,8 @@ export async function POST(req: NextRequest) {
                                 chartContext,
                                 diagnosticCapture: diagnostics.capture,
                                 skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
-                                gateMode: "audit_only"
+                                gateMode: "audit_only",
+                                autonomousRecommendations,
                             }
                         );
 
@@ -771,6 +774,9 @@ export async function POST(req: NextRequest) {
                             switch (event.type) {
                                 case "status":
                                     sendEvent({ type: "status", status: event.data.status, message: event.data.message });
+                                    break;
+                                case "enable_autonomous_recs":
+                                    sendEvent({ type: "enable_autonomous_recs", enabled: true });
                                     break;
                                 case "vision_result":
                                     sendEvent({ type: "vision", data: event.data });
@@ -921,7 +927,8 @@ export async function POST(req: NextRequest) {
                                         session_state: sessionUpdate,
                                         tables: event.data.tables || [],
                                         chart_actions: event.data.chart_actions || [],
-                                        latency_ms: streamingTotalLatencyMs
+                                        latency_ms: streamingTotalLatencyMs,
+                                        enable_autonomous_recs: event.data.enable_autonomous_recs || undefined
                                     });
 
                                     controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -1008,7 +1015,8 @@ export async function POST(req: NextRequest) {
                 chartContext,
                 diagnosticCapture: diagnostics.capture,
                 skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
-                gateMode: "audit_only"
+                gateMode: "audit_only",
+                autonomousRecommendations,
             }
         );
 
@@ -1096,7 +1104,8 @@ export async function POST(req: NextRequest) {
             is_pro: isUnlimited || userIsPro,
             suggested_buttons: suggestedButtons,
             session_state: pipelineResult.session_update,
-            latency_ms: totalLatencyMs
+            latency_ms: totalLatencyMs,
+            enable_autonomous_recs: (pipelineResult as any).enable_autonomous_recs || undefined
         });
 
     } catch (error: any) {

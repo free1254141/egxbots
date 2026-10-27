@@ -60,6 +60,35 @@ def send_renewal_reminder_email(user_id: str, email: str, display_name: str, day
     return False
 
 
+def send_expired_reactivation_email(user_id: str, email: str, display_name: str, end_date: str) -> bool:
+    """Sends an urgent expired reactivation email to users whose subscription recently ended."""
+    if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "expired_reactivation", cooldown_days=3):
+        return False
+
+    subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - يمكنك إعادة التفعيل وتثبيت السعر (50 ج.م)"
+    greeting = f"أهلاً {display_name} 👋"
+    paragraphs = [
+        f"نحيطك علماً بأن اشتراكك في <strong>باقة EGX BOTS PRO</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
+        "لقد توقفت صلاحيات الوصول إلى <strong>مساعد الشات بوت الذكي (AI Chatbot)، إشارات ونماذج السوينج الفنية اللحظية، مستويات المراقبة، وقناة التنبيهات الفنية VIP على تليجرام</strong>.",
+        "💡 <strong>فرصة لتثبيت السعر:</strong> يمكنك إعادة تفعيل اشتراكك الآن والاحتفاظ بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل اكتمال مقاعد الـ 100 مؤسس.",
+    ]
+    cta_text = "إعادة تفعيل الاشتراك وتثبيت السعر (50 ج.م)"
+    cta_url = f"{APP_URL}/pricing?plan=pro"
+
+    html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
+    send_meta: Dict[str, Any] = {}
+    if send_resend_email(email, subject, html, out=send_meta):
+        record_marketing_message(
+            user_id,
+            email,
+            "expired_reactivation",
+            {"end_date": end_date},
+            provider_message_id=send_meta.get("provider_message_id")
+        )
+        return True
+    return False
+
+
 def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bool:
     """Sends the 100 Founders scarcity email to active free users."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "founders_offer", cooldown_days=7):
@@ -107,6 +136,7 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
     results = {
         "dry_run": dry_run,
         "renewals_sent": 0,
+        "expired_sent": 0,
         "founders_sent": 0,
         "skipped": 0,
         "remaining_daily_cap": remaining_quota,
@@ -182,7 +212,52 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
                     print(f"[SENT] Renewal email sent to: {email} ({dname})", flush=True)
                 time.sleep(0.5)
 
-    # 3. Priority B: Active Non-Pro Users (Targeted for Founders Offer)
+    # 3. Priority B: Recently Expired Subscriptions (ended in last 4 days, not renewed)
+    expired_subs = (
+        supabase.table("subscriptions")
+        .select("id, user_id, plan_id, status, current_period_end")
+        .in_("status", ["canceled", "expired"])
+        .order("current_period_end", desc=True)
+        .limit(20)
+        .execute()
+        .data or []
+    )
+    for sub in expired_subs:
+        if sent_this_run >= limit_for_this_run:
+            break
+        uid = sub["user_id"]
+        if uid in paid_uids:
+            continue
+        end_str = sub.get("current_period_end")
+        if not end_str:
+            continue
+        try:
+            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        days_ago = (now.date() - end_dt.date()).days
+        if 0 <= days_ago <= 4:
+            email = email_map.get(uid) or get_user_email(uid)
+            if not email or "@" not in email:
+                continue
+            if is_user_unsubscribed(uid, email) or has_recent_message(uid, "expired_reactivation", cooldown_days=3):
+                continue
+            prof = supabase.table("profiles").select("display_name, username").eq("id", uid).maybe_single().execute().data or {}
+            dname = prof.get("display_name") or prof.get("username") or "صديقنا العزيز"
+
+            if dry_run:
+                print(f"[DRY-RUN] Would send Expired Reactivation email to: {email} ({dname}) - Expired {days_ago} days ago", flush=True)
+                results["expired_sent"] += 1
+                sent_this_run += 1
+            else:
+                ok = send_expired_reactivation_email(uid, email, dname, end_str)
+                if ok:
+                    results["expired_sent"] += 1
+                    sent_this_run += 1
+                    print(f"[SENT] Expired Reactivation email sent to: {email} ({dname})", flush=True)
+                time.sleep(0.5)
+
+    # 4. Priority C: Active Non-Pro Users (Targeted for Founders Offer)
     recent_profiles = (
         supabase.table("profiles")
         .select("id, username, display_name, updated_at")

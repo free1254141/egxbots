@@ -32,6 +32,7 @@ test('recommendation freshness includes returned quote dates and scopes each sou
         {data:[{symbol:'EPPK',entry_price:9.78,status:'open',created_at:'2026-09-17'}]},
         {count:1},
         {data:[{created_at:'2026-09-21'}]},
+        {data:[]},
         {data:[{close:9.78,date:'2026-10-13'}]},
     ];
     const chain:any = new Proxy({}, {get:(_,key)=>key==='then'
@@ -43,6 +44,6 @@ test('recommendation freshness includes returned quote dates and scopes each sou
         latest_recommendation_date:'2026-09-21',
         latest_returned_quote_date:'2026-10-13',
     });
-    expect(result.date_scope).toContain('المصادر المعروضة');
+    expect(result.date_scope).toContain('تاريخ التوصيات يشمل');
     expect(result.recommendations[0]).toMatchObject({signal_date:'2026-09-17',current_date:'2026-10-13'});
 });
