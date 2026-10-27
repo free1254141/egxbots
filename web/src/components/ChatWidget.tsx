@@ -5,11 +5,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink } from "lucide-react";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
+import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
+import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
 import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
@@ -58,6 +60,44 @@ export default function ChatWidget() {
     const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
     const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
     const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
+
+    // Chat Wallpaper preferences
+    const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);
+    const [wallpaperId, setWallpaperId] = useState<string>(DEFAULT_WALLPAPER_ID);
+    const [wallpaperOpacity, setWallpaperOpacity] = useState<number>(DEFAULT_WALLPAPER_OPACITY);
+    const [customWallpaperImage, setCustomWallpaperImage] = useState<string | undefined>(undefined);
+
+    useEffect(() => {
+        const cfg = getSavedWallpaperConfig();
+        setWallpaperId(cfg.id);
+        setWallpaperOpacity(cfg.opacity);
+        setCustomWallpaperImage(cfg.customImage);
+
+        const handleWallpaperChange = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (detail) {
+                setWallpaperId(detail.id);
+                setWallpaperOpacity(detail.opacity);
+                setCustomWallpaperImage(detail.customImage);
+            }
+        };
+        window.addEventListener("artoro-wallpaper-changed", handleWallpaperChange);
+        return () => window.removeEventListener("artoro-wallpaper-changed", handleWallpaperChange);
+    }, []);
+
+    const activeWallpaper = useMemo(() => {
+        if (wallpaperId === "custom" && customWallpaperImage) {
+            return {
+                backgroundColor: "#000000",
+                backgroundImage: `url(${customWallpaperImage})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center" as const,
+                backgroundRepeat: "no-repeat" as const,
+            };
+        }
+        const found = CHAT_WALLPAPERS.find(w => w.id === wallpaperId);
+        return found ? found.style : CHAT_WALLPAPERS[0].style;
+    }, [wallpaperId, customWallpaperImage]);
 
     useEffect(() => {
         if (!showUpgradeModal) return;
@@ -444,6 +484,15 @@ export default function ChatWidget() {
                                 {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/5 Left`}
                             </div>
                         )}
+                        <button
+                            type="button"
+                            onClick={() => setShowWallpaperModal(true)}
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900"
+                            title="تغيير خلفية الشات (ورق حائط)"
+                            aria-label="تغيير خلفية الشات"
+                        >
+                            <Palette className="h-[18px] w-[18px]" />
+                        </button>
                         {!isChatRoute && (
                             <button
                                 onClick={() => setIsExpanded(!isExpanded)}
@@ -466,8 +515,20 @@ export default function ChatWidget() {
                 </div>
 
                 {/* Messages Body */}
-                <div className="relative flex-1 min-h-0 flex flex-col">
-                <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg dark:bg-black" onScroll={handleScroll}>
+                <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-black">
+                    {/* WhatsApp Style Wallpaper Layer */}
+                    <div 
+                        className="pointer-events-none absolute inset-0 z-0 transition-all duration-300"
+                        style={{
+                            ...activeWallpaper,
+                            opacity: (wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY) / 100,
+                        }}
+                    />
+                    <div 
+                        ref={scrollContainerRef} 
+                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none" 
+                        onScroll={handleScroll}
+                    >
                     {isInitializing ? (
                         <div role="status" aria-live="polite" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
                             <Loader2 aria-hidden="true" className="h-6 w-6 motion-safe:animate-spin text-amber-500" />
@@ -1145,6 +1206,21 @@ export default function ChatWidget() {
                     </div>
                 </div>
             )}
+
+            {/* WhatsApp Style Chat Wallpaper Modal */}
+            <ChatWallpaperModal
+                isOpen={showWallpaperModal}
+                onClose={() => setShowWallpaperModal(false)}
+                currentId={wallpaperId}
+                currentOpacity={wallpaperOpacity}
+                currentCustomImage={customWallpaperImage}
+                onApply={(id, opacity, customImg) => {
+                    setWallpaperId(id);
+                    setWallpaperOpacity(opacity);
+                    setCustomWallpaperImage(customImg);
+                }}
+                isAr={language === "ar"}
+            />
         </div>
     );
 }
