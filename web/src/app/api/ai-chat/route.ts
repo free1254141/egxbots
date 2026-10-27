@@ -778,6 +778,9 @@ export async function POST(req: NextRequest) {
                                 case "enable_autonomous_recs":
                                     sendEvent({ type: "enable_autonomous_recs", enabled: true });
                                     break;
+                                case "disable_autonomous_recs":
+                                    sendEvent({ type: "disable_autonomous_recs", enabled: false });
+                                    break;
                                 case "vision_result":
                                     sendEvent({ type: "vision", data: event.data });
                                     break;
@@ -928,7 +931,8 @@ export async function POST(req: NextRequest) {
                                         tables: event.data.tables || [],
                                         chart_actions: event.data.chart_actions || [],
                                         latency_ms: streamingTotalLatencyMs,
-                                        enable_autonomous_recs: event.data.enable_autonomous_recs || undefined
+                                        enable_autonomous_recs: event.data.enable_autonomous_recs || undefined,
+                                        disable_autonomous_recs: event.data.disable_autonomous_recs || undefined
                                     });
 
                                     controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -1105,7 +1109,8 @@ export async function POST(req: NextRequest) {
             suggested_buttons: suggestedButtons,
             session_state: pipelineResult.session_update,
             latency_ms: totalLatencyMs,
-            enable_autonomous_recs: (pipelineResult as any).enable_autonomous_recs || undefined
+            enable_autonomous_recs: (pipelineResult as any).enable_autonomous_recs || undefined,
+            disable_autonomous_recs: (pipelineResult as any).disable_autonomous_recs || undefined
         });
 
     } catch (error: any) {

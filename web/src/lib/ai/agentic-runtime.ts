@@ -610,6 +610,10 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 autonomousRecommendationsActive = true;
                 context.autonomous_recommendations = true;
             }
+            if (record.tool === "disable_autonomous_recommendations" && record.availability !== "error") {
+                autonomousRecommendationsActive = false;
+                context.autonomous_recommendations = false;
+            }
             if (record.availability !== "error") for (const symbol of record.symbols) if (!usedSymbols.includes(symbol)) usedSymbols.push(symbol);
         }
         context.previous_evidence = unsupersededEvidence(previousEvidence, evidence);
@@ -649,6 +653,9 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 await executeCalls(calls);
                 if (calls.some(c => c.function.name === "enable_autonomous_recommendations")) {
                     yield { type: "enable_autonomous_recs", data: { enabled: true } };
+                }
+                if (calls.some(c => c.function.name === "disable_autonomous_recommendations")) {
+                    yield { type: "disable_autonomous_recs", data: { enabled: false } };
                 }
                 yield emitData();
             }
@@ -973,6 +980,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         summary_state: updatedSummary,
         usage: accounting.summary(toolCalls),
         enable_autonomous_recs: autonomousRecommendationsActive ? true : undefined,
+        disable_autonomous_recs: !autonomousRecommendationsActive && evidence.some(e => e.tool === "disable_autonomous_recommendations") ? true : undefined,
         publication_review: { passed: firstPassed, final_passed: finalPassed, repaired, reasons, advisory_issues: advisoryIssues,
             shadow_mode: gateMode === "audit_only",
             data_coverage: evidence.some(e => e.availability !== 'available') ? 'partial' : 'complete',

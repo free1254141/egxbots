@@ -61,6 +61,14 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             message: 'تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي بنجاح في الواجهة. يمكنك الآن فحص بيانات ومؤشرات السوق واقتراح الفرص المناسبة برؤيتك المستقلة، مع الالتزام التام بإبراز إخلاء المسؤولية.'
         };
     }
+    if (name === 'disable_autonomous_recommendations') {
+        return {
+            status: 'success',
+            availability: 'available',
+            autonomous_recommendations_enabled: false,
+            message: 'تم إيقاف وضع التوصيات الحرة المستقلة للذكاء الاصطناعي بنجاح في الواجهة والعودة للوضع القياسي.'
+        };
+    }
     if (name === 'get_recommendations') {
         // The access decision is supplied by the authenticated route, never tool arguments.
         const legacy = await executeAgenticTool(name, { ...args, status: args.status || 'open', limit: 200 }, db, userId, cache);
