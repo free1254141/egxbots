@@ -827,7 +827,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 assistantMsg.isStreaming = false;
                                 assistantMsg.statusText = undefined;
                                 updateAssistantMsgInState(assistantMsg);
-                            } else if (currentEventName === "enable_autonomous_recs" || parsed.type === "enable_autonomous_recs" || parsed.enable_autonomous_recs === true) {
+                            } else if (currentEventName === "enable_autonomous_recs" || parsed.type === "enable_autonomous_recs") {
                                 setAutonomousRecommendations(true);
                             } else if (parsed.type === "image_urls" && Array.isArray(parsed.image_urls) && parsed.image_urls.length > 0) {
                                 setSessionMessages(currentSessionId, prevMsgs => 

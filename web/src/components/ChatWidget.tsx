@@ -553,13 +553,22 @@ export default function ChatWidget() {
                                 )}
                             </button>
 
+                            {/* Mobile Backdrop Overlay */}
+                            {isSettingsOpen && (
+                                <div
+                                    className="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 sm:hidden animate-in fade-in duration-150"
+                                    onClick={() => setIsSettingsOpen(false)}
+                                    aria-hidden="true"
+                                />
+                            )}
+
                             {/* Dropdown Menu Popover */}
                             {isSettingsOpen && (
-                                <div className="absolute ltr:right-0 rtl:left-0 top-full mt-2 w-72 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in zoom-in-95 duration-150 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
+                                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full ltr:sm:right-0 rtl:sm:left-0 sm:mt-2 w-auto sm:w-72 max-h-[85vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-white/95 p-3.5 sm:p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in zoom-in-95 duration-150 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
                                     <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-100 dark:border-zinc-800/80">
                                         <div className="flex items-center gap-1.5 text-xs font-black text-zinc-900 dark:text-white">
                                             <Settings className="h-3.5 w-3.5 text-amber-500" />
-                                            <span>إعدادات الشات</span>
+                                            <span>{language === "ar" ? "إعدادات الشات" : "Chat Settings"}</span>
                                         </div>
                                         <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">ARTORO</span>
                                     </div>
@@ -582,15 +591,19 @@ export default function ChatWidget() {
                                                     </div>
                                                     <div className="flex flex-col">
                                                         <div className="flex items-center gap-1.5">
-                                                            <span className="text-xs font-bold text-zinc-900 dark:text-white">توصيات حرة</span>
+                                                            <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                                                {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
+                                                            </span>
                                                             {autonomousRecommendations && (
                                                                 <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400">
-                                                                    نشط ⚡
+                                                                    {language === "ar" ? "نشط ⚡" : "Active ⚡"}
                                                                 </span>
                                                             )}
                                                         </div>
                                                         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                            {autonomousRecommendations ? "توليد فرص برؤية مستقلة" : "مقترحات ذكاء اصطناعي حرة"}
+                                                            {autonomousRecommendations
+                                                                ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
+                                                                : (language === "ar" ? "مقترحات ذكاء اصطناعي حرة" : "Free AI-generated trade ideas")}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -608,7 +621,9 @@ export default function ChatWidget() {
                                                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                                                         autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700"
                                                     }`}
-                                                    title={autonomousRecommendations ? "إيقاف وضع التوصيات الحرة" : "تفعيل وضع التوصيات الحرة"}
+                                                    title={autonomousRecommendations
+                                                        ? (language === "ar" ? "إيقاف وضع التوصيات الحرة" : "Disable Autonomous Recs")
+                                                        : (language === "ar" ? "تفعيل وضع التوصيات الحرة" : "Enable Autonomous Recs")}
                                                 >
                                                     <span
                                                         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
@@ -633,11 +648,17 @@ export default function ChatWidget() {
                                                     <Palette className="h-4 w-4" />
                                                 </div>
                                                 <div className="flex flex-col">
-                                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">ورق حائط وخلفية الشات</span>
-                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">زخارف التداول، ألوان، أو صورة</span>
+                                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                                        {language === "ar" ? "ورق حائط وخلفية الشات" : "Chat Wallpaper"}
+                                                    </span>
+                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                                        {language === "ar" ? "زخارف التداول، ألوان، أو صورة" : "Doodles, colors or custom image"}
+                                                    </span>
                                                 </div>
                                             </div>
-                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">تغيير</span>
+                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                                                {language === "ar" ? "تغيير" : "Change"}
+                                            </span>
                                         </button>
                                     </div>
                                 </div>
