@@ -1161,59 +1161,41 @@ export async function GET(req: NextRequest) {
                 .or("is_deleted_by_user.is.null,is_deleted_by_user.eq.false")
                 .order("updated_at", { ascending: false });
 
-            const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
+            const { planLimits, hasActiveProSubscription, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
             const today = getCairoDateString();
-            const billingOn = paymentsEnabled();
-            let isUnlimited = !billingOn && isUnlimitedChatUser(user);
-            let quotaLimit = AI_CONFIG.limits.dailyMessages;
+            const isUnlimited = !paymentsEnabled() && isUnlimitedChatUser(user);
+            let quotaLimit = isUnlimited ? 999 : 0;
             let usedCount = 0;
             let userIsPro = false;
 
-            if (billingOn) {
-                const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_start,current_period_end").eq("user_id", userId).order("current_period_end", { ascending: false });
-                userIsPro = gateIsPro(planRows || []);
-                isUnlimited = false;
+            const { data: planRows, error: planError } = await authClient
+                .from("subscriptions")
+                .select("plan_id,status,current_period_start,current_period_end")
+                .eq("user_id", userId)
+                .order("current_period_end", { ascending: false });
+            if (planError) console.error("[ai-chat] Failed to load subscription for sessions access:", planError);
+            userIsPro = hasActiveProSubscription(planRows || []);
 
-                if (userIsPro) {
-                    quotaLimit = planLimits("pro").chat_messages_per_month;
-                    const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
-                    const monthStartStr = quotaWin.effectiveMonthStartStr;
-                    const effectiveStart = quotaWin.effectiveStartDate;
+            if (userIsPro) {
+                quotaLimit = planLimits("pro").chat_messages_per_month;
+                const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
+                const monthStartStr = quotaWin.effectiveMonthStartStr;
+                const effectiveStart = quotaWin.effectiveStartDate;
 
-                    const [limitRowsRes, msgRowsRes] = await Promise.all([
-                        supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
-                        supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
-                    ]);
+                const [limitRowsRes, msgRowsRes] = await Promise.all([
+                    supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
+                    supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
+                ]);
 
-                    const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
-                    const msgCount = new Set((msgRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
-                    usedCount = Math.max(limitsCount, msgCount);
-                } else {
-                    // Free user: strictly 5 messages daily
-                    quotaLimit = 5;
-                    const { data: limitData } = await supabase
-                        .from("ai_chatbot_limits")
-                        .select("chat_count")
-                        .eq("user_id", userId)
-                        .eq("date", today)
-                        .maybeSingle();
-                    usedCount = limitData?.chat_count || 0;
-                }
-            } else {
-                const { data: limitData } = await supabase
-                    .from("ai_chatbot_limits")
-                    .select("chat_count")
-                    .eq("user_id", userId)
-                    .eq("date", today)
-                    .maybeSingle();
-                quotaLimit = 5;
-                usedCount = limitData?.chat_count || 0;
+                const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
+                const msgCount = new Set((msgRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
+                usedCount = Math.max(limitsCount, msgCount);
             }
 
             return NextResponse.json({
                 sessions: sessions || [],
                 remaining_quota: isUnlimited ? 999 : Math.max(0, quotaLimit - usedCount),
-                quota_limit: isUnlimited ? 999 : quotaLimit,
+                quota_limit: quotaLimit,
                 is_pro: isUnlimited || userIsPro
             });
         }
