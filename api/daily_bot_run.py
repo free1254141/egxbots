@@ -3761,7 +3761,12 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 try:
                     from api.jobs.telegram_subscription_reminders import run_subscription_reminders
                 except ImportError:
-                    from jobs.telegram_subscription_reminders import run_subscription_reminders
+                    try:
+                        from jobs.telegram_subscription_reminders import run_subscription_reminders
+                    except ImportError:
+                        import sys, os
+                        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                        from jobs.telegram_subscription_reminders import run_subscription_reminders
                 reminder_res = await asyncio.to_thread(run_subscription_reminders)
                 status_ok = reminder_res.get("status") in ("completed", "partial_success")
                 summary_msg = f"Sent: {reminder_res.get('sent', 0)}, Failed: {reminder_res.get('failed', 0)}, Skipped: {reminder_res.get('skipped', 0)}"

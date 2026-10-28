@@ -90,25 +90,22 @@ def send_expired_reactivation_email(user_id: str, email: str, display_name: str,
 
 
 def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bool:
-    """Sends the 100 Founders scarcity email to active free users."""
+    """Sends the high-converting 3-Day Pro Trial & Founders scarcity email to active free users."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "founders_offer", cooldown_days=7):
         return False
 
-    subject = "⚡ عرض الـ 100 مؤسس الأوائل: باقة Pro بـ 50 ج.م شهرياً مدى الحياة | EGX BOTS"
-    greeting = f"أهلاً {display_name} ⚡"
+    subject = "🎁 هديتك من EGX BOTS: تفعيل باقة Pro مجاناً لمدة 3 أيام (بدون دفع وبدون بطاقة)"
+    greeting = f"أهلاً {display_name} 👋"
     paragraphs = [
-        "يسعدنا تواجدك وتفاعلك معنا في منصة <strong>EGX BOTS</strong>.",
-        "نود إعلامك أننا أطلقنا رسمياً <strong>عرض الـ 100 مؤسس الأوائل</strong>، والذي يمنحك اشتراك كامل في باقة Pro بسعر <strong>50 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م).",
-        "🎯 <strong>أدوات ومزايا باقة Pro الرقمية:</strong><br/>"
-        "• <strong>مساعد الشات بوت الذكي (AI Chatbot):</strong> شات بوت متطور لتحليل أي سهم، فحص مستويات الدعم والمقاومة، ومقارنة الشركات لحظياً عبر الموقع وتليجرام (350 استفساراً شهرياً).<br/>"
-        "• <strong>إشارات ونماذج السوينج الفنية:</strong> رصد رقمي ومؤتمت لمستويات المراقبة الفنية والأهداف السعرية الاسترشادية وإدارة المخاطر.<br/>"
-        "• <strong>ماسح التجميع والسيولة الذكية:</strong> فحص كمي وإحصائي لحظي لحركة التداول بالبورصة المصرية.<br/>"
-        "• <strong>قناة التنبيهات الفنية VIP:</strong> إشعارات رقمية مباشرة لاكتمال النماذج الفنية على تليجرام.<br/>"
-        "• <strong>تثبيت السعر:</strong> مهما ارتفع سعر الاشتراك مستقبلاً، اشتراكك البرمجي ثابت بـ 50 ج.م شهرياً للأبد.",
-        "🎁 <strong>تريد التجربة أولاً؟</strong> يمكنك تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> بضغطة زر واحدة من صفحة الأسعار ودون أي التزام!",
+        "يسعدنا تواجدك معنا في منصة <strong>EGX BOTS</strong>. ولأننا نؤمن أن التجربة العملية هي أفضل برهان للمتداول، يسعدنا أن نهديك <strong>تفعيل باقة Pro مجاناً بالكامل لمدة 3 أيام</strong> بضغطة زر واحدة — بدون أي دفع مسبق وبدون طلب بطاقة بنكية.",
+        "🚀 <strong>ما الذي يمكنك تجربته واستكشافه فوراً خلال الـ 3 أيام؟</strong><br/>"
+        "• <strong>فحص أي سهم مصري عبر الشات بوت الذكي:</strong> اسأل الشات بوت عن أي سهم بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.<br/>"
+        "• <strong>ماسح السيولة الذكية والنماذج الفنية:</strong> رصد رقمي ومؤتمت لمستويات المراقبة الفنية والأهداف السعرية الاسترشادية وحركة التجميع بالبورصة المصرية.<br/>"
+        "• <strong>قناة التنبيهات الفنية VIP على تليجرام:</strong> إشعارات رقمية مباشرة لاكتمال النماذج الفنية لحظياً عبر تليجرام.",
+        "💡 <strong>عرض تثبيت السعر (50 ج.م):</strong> إذا نالت أدوات ومزايا Pro إعجابك خلال فترة التجربة، يمكنك تثبيت اشتراكك بسعر باقة المؤسسين المخفض <strong>(50 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل اكتمال مقاعد الـ 100 مؤسس الأولى.",
     ]
-    cta_text = "حجز مقعد المؤسسين بـ 50 ج.م شهرياً"
-    cta_url = f"{APP_URL}/pricing?plan=pro"
+    cta_text = "⚡ تفعيل باقة Pro المجانية الآن (0 ج.م)"
+    cta_url = f"{APP_URL}/pricing?plan=pro&trial=true"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
     send_meta: Dict[str, Any] = {}
@@ -117,7 +114,7 @@ def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bo
             user_id,
             email,
             "founders_offer",
-            {"channel": "email"},
+            {"channel": "email", "version": "free_trial_v2"},
             provider_message_id=send_meta.get("provider_message_id")
         )
         return True
@@ -194,6 +191,8 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
             uid = sub["user_id"]
             email = email_map.get(uid) or get_user_email(uid)
             if not email or "@" not in email:
+                continue
+            if email.lower() in ["user@gmail.com", "weeessd57@gmail.com"]:
                 continue
             if is_user_unsubscribed(uid, email) or uid in recently_contacted_uids:
                 continue
@@ -278,8 +277,11 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         if not email or "@" not in email:
             continue
 
-        # Filter out test domains and known bad addresses
-        if any(fake_domain in email for fake_domain in ["@example.", "@test.", "ghgfhgfh"]):
+        # Filter out test domains, known bad addresses, and admin accounts
+        fake_patterns = ["@example.", "@test.", "test1@", "test2@", "weeeenew", "fakeuse", "ghgfhgfh", "123456", "asdfgh"]
+        if any(pat in email.lower() for pat in fake_patterns):
+            continue
+        if email.lower() in ["user@gmail.com", "weeessd57@gmail.com"]:
             continue
 
         if is_user_unsubscribed(uid, email):

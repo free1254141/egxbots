@@ -463,7 +463,12 @@ def _scheduler_worker():
                     try:
                         from api.jobs.telegram_subscription_reminders import run_subscription_reminders
                     except ImportError:
-                        from jobs.telegram_subscription_reminders import run_subscription_reminders
+                        try:
+                            from jobs.telegram_subscription_reminders import run_subscription_reminders
+                        except ImportError:
+                            import sys, os
+                            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                            from jobs.telegram_subscription_reminders import run_subscription_reminders
                     run_subscription_reminders()
                 except Exception as reminder_err:
                     print(f"[DAILY-JOB-SCHEDULER] Subscription reminders check failed: {reminder_err}")

@@ -2519,4 +2519,10 @@ describe("Agentic tool correctness and failure boundaries", () => {
         const reasons = checkAgenticDraft(draft, [marketEv]);
         expect(reasons).toEqual([]);
     });
+
+    test("system prompt enforces Numbered Options & Menu Selection Protocol for numbered single-digit inputs", () => {
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("قاعدة فهم الاختيارات المرقمة والردود المقتضبة (Numbered Options & Menu Selection Protocol)");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("يُمنع منعاً باتاً السؤال أو طلب التوضيح أو التردد والارتباك");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("get_recommendations(status=\"open\")");
+    });
 });
