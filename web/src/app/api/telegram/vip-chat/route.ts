@@ -104,7 +104,7 @@ async function resolveTelegramUser(
 
     let isPro = false;
     let used = 0;
-    let limit = Number(process.env.FREE_CHAT_MESSAGES || "10");
+    let limit = 10;
     let period: "daily" | "monthly" = "monthly";
 
     if (linkedUserId) {
@@ -146,7 +146,7 @@ async function resolveTelegramUser(
         const todayCount = rowDate === todayCairo ? Number(stateRow?.daily_count || 0) : 0;
         isPro = false;
         period = "monthly";
-        limit = Number(process.env.FREE_CHAT_MESSAGES || "10");
+        limit = 10;
         used = todayCount;
     }
 

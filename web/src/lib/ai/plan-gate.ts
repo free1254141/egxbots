@@ -27,8 +27,8 @@ export function paymentsEnabled(): boolean {
 const FREE: PlanLimits = {
   name: "free",
   signal_delay_days: Number(process.env.FREE_SIGNAL_DELAY_DAYS || "15"),
-  chat_messages_daily: Number(process.env.FREE_CHAT_DAILY_MESSAGES || "10"),
-  chat_messages_per_month: Number(process.env.FREE_CHAT_MESSAGES || "10"),
+  chat_messages_daily: 10,
+  chat_messages_per_month: 10,
   portfolio_stocks: Number(process.env.FREE_PORTFOLIO_STOCKS || "5"),
   price_egp: 0,
   billing: "enabled",

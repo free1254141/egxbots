@@ -23,8 +23,8 @@ def free_limits() -> Dict[str, Any]:
     return {
         "name": "free",
         "signal_delay_days": int(os.getenv("FREE_SIGNAL_DELAY_DAYS", "15")),
-        "chat_messages_daily": int(os.getenv("FREE_CHAT_DAILY_MESSAGES", "10")),
-        "chat_messages_per_month": int(os.getenv("FREE_CHAT_MESSAGES", "10")),
+        "chat_messages_daily": 10,
+        "chat_messages_per_month": 10,
         "portfolio_stocks": int(os.getenv("FREE_PORTFOLIO_STOCKS", "5")),
         "price_egp": 0,
     }
