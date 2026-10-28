@@ -738,6 +738,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
+            if (response.status === 403) {
+                setShowUpgradeModal(true);
+                let detail = "المساعد الذكي متاح لمشتركي Pro فقط. اشترك في Pro لفتح الشات وجميع أدوات التحليل الذكي.";
+                try {
+                    const data = await response.json();
+                    if (typeof data.detail === "string") detail = data.detail;
+                } catch {}
+                assistantMsg.content = detail;
+                assistantMsg.isStreaming = false;
+                assistantMsg.statusText = undefined;
+                updateAssistantMsgInState(assistantMsg);
+                flushStoredMessages(currentSessionId);
+                return;
+            }
+
             if (!response.ok) {
                 let errorMsg = "حدث خطأ في السيرفر أثناء معالجة الطلب. يرجى المحاولة مرة أخرى لاحقاً.";
                 try {
