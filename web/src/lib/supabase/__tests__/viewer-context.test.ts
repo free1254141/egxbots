@@ -8,6 +8,7 @@ let mockSubscriptionLookups = 0;
 let mockIdentityLookups = 0;
 let mockIdentityError: unknown = null;
 const mockPlanEq = jest.fn();
+const mockPlanIn = jest.fn();
 const mockPlanOrder = jest.fn();
 const mockPlanLimit = jest.fn();
 
@@ -45,10 +46,12 @@ jest.mock("@supabase/supabase-js", () => ({
         select: () => {
           const chain: any = {
             eq: mockPlanEq,
+            in: mockPlanIn,
             order: mockPlanOrder,
             limit: mockPlanLimit,
           };
           mockPlanEq.mockReturnValue(chain);
+          mockPlanIn.mockReturnValue(chain);
           mockPlanOrder.mockReturnValue(chain);
           mockPlanLimit.mockImplementation(async () => {
             mockSubscriptionLookups += 1;
@@ -114,7 +117,7 @@ describe("viewer plan freshness", () => {
     expect((await getViewerContext(request)).pro).toBe(true);
     expect(mockSubscriptionLookups).toBe(2);
     expect(mockPlanEq).toHaveBeenCalledWith("user_id", "test-user");
-    expect(mockPlanEq).toHaveBeenCalledWith("status", "active");
+    expect(mockPlanIn).toHaveBeenCalledWith("status", ["active", "trialing"]);
     expect(mockPlanOrder).toHaveBeenCalledWith("current_period_end", {
       ascending: false,
       nullsFirst: true,

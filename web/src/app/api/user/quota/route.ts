@@ -115,9 +115,9 @@ export async function GET() {
       (acc: number, row: any) => acc + (Number(row.chat_count) || 0),
       0
     );
-    const chatUsed = pro ? monthlyLimitsCount : todayChatCount;
-    const chatLimit = pro ? limits.chat_messages_per_month : 5;
-    const quotaPeriod = pro ? "monthly" : "daily";
+    const chatUsed = monthlyLimitsCount;
+    const chatLimit = limits.chat_messages_per_month;
+    const quotaPeriod = "monthly";
 
     // Derive portfolio count
     const positionRows = posResult.data;
