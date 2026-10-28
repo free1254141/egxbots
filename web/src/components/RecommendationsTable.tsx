@@ -287,53 +287,63 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             setHasProAccess(false);
             return () => { active = false; };
         }
-        setHasProAccess(false);
-        let lastCheckAt = 0;
+        const cacheKey = `egxbots_support_pro_v1:${user.id}`;
         let checking = false;
-        const checkPlan = async () => {
+        const checkPlan = async (forceRefresh = false) => {
+            if (!forceRefresh) {
+                try {
+                    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+                    if (cached && typeof cached.pro === "boolean" && Date.now() - cached.at < 5 * 60 * 1000) {
+                        if (active) setHasProAccess(cached.pro);
+                        return;
+                    }
+                } catch {
+                    // ignore storage errors
+                }
+            }
             if (checking) return;
             checking = true;
-            lastCheckAt = Date.now();
             try {
                 const response = await fetch("/api/user/quota", { cache: "no-store" });
                 const payload = response.ok ? await response.json() : null;
-                if (active) setHasProAccess(payload?.plan?.is_pro === true);
+                const pro = payload?.plan?.is_pro === true;
+                if (active) setHasProAccess(pro);
+                if (payload?.ok) {
+                    try {
+                        sessionStorage.setItem(cacheKey, JSON.stringify({ pro, at: Date.now() }));
+                    } catch {
+                        // storage unavailable
+                    }
+                }
             } catch {
                 if (active) setHasProAccess(false);
             } finally {
                 checking = false;
             }
         };
-        const checkOnReturn = () => {
-            if (!document.hidden && Date.now() - lastCheckAt >= 30_000) void checkPlan();
-        };
         const handleEntitlementsUpdated = (event?: Event) => {
             const custom = event as CustomEvent<{ is_pro?: boolean }> | undefined;
             if (custom?.detail?.is_pro === true && active) {
                 setHasProAccess(true);
             }
-            void checkPlan();
+            void checkPlan(true);
         };
         const handleStorageEvent = (e: StorageEvent) => {
             if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
                 if (e.key === "egx_pro_active" && e.newValue === "true" && active) {
                     setHasProAccess(true);
                 }
-                void checkPlan();
+                void checkPlan(true);
             }
         };
 
-        void checkPlan();
+        void checkPlan(false);
 
-        // Refresh on user return or explicit upgrade event instead of background polling.
-        window.addEventListener("focus", checkOnReturn);
-        document.addEventListener("visibilitychange", checkOnReturn);
+        // Refresh only on explicit upgrade/entitlement events instead of tab-focus polling.
         window.addEventListener("egx:entitlements-updated", handleEntitlementsUpdated);
         window.addEventListener("storage", handleStorageEvent);
         return () => {
             active = false;
-            window.removeEventListener("focus", checkOnReturn);
-            document.removeEventListener("visibilitychange", checkOnReturn);
             window.removeEventListener("egx:entitlements-updated", handleEntitlementsUpdated);
             window.removeEventListener("storage", handleStorageEvent);
         };

@@ -54,6 +54,14 @@ export const REQUEST_DATA_TOOLS_SCHEMA = [{ type: 'function', function: {
 export async function executeRequestTool(name: string, args: any, db: any, userId: string, cache: ChartHistoryCache,
     access: { isPro: boolean }): Promise<any> {
     if (name === 'enable_autonomous_recommendations') {
+        if (!access.isPro) {
+            return {
+                status: 'error',
+                availability: 'error',
+                autonomous_recommendations_enabled: false,
+                message: 'وضع التوصيات الحرة والتوصيات المفتوحة متاح حصرياً لمشتركي باقة Pro. وجّه المستخدم للاشتراك في باقة Pro (50 ج.م شهرياً ضمن عرض المؤسسين) لتفعيل وضع التوصيات الحرة وعرض التوصيات المفتوحة.'
+            };
+        }
         return {
             status: 'success',
             availability: 'available',
@@ -158,8 +166,8 @@ export function recommendationVisibility(row: any, isPro: boolean, now = new Dat
     const recent = !Number.isFinite(date) || date > cutoff.getTime()
         || closed && row.source_kind === 'model_signals' && (!Number.isFinite(exitDate) || exitDate > cutoff.getTime());
     const highReturn = row.source_kind === 'model_signals' && !closed && Number(row.unrealized_return_pct) > 50;
-    const locked = row.source_kind === 'short_swings' ? !closed && (recent || row.is_pending_entry) : recent || highReturn;
+    const locked = !closed || (row.source_kind === 'short_swings' ? recent || row.is_pending_entry : recent || highReturn);
     if (!locked) return { ...row, is_locked: false };
     return { source_kind: row.source_kind, recommendation_type: row.recommendation_type, symbol: null,
-        status: row.status, signal_date: row.signal_date, is_locked: true, note: 'تفاصيل التوصية متاحة للبرو؛ لا تستنتج الرمز أو المستويات.' };
+        status: row.status, signal_date: row.signal_date, is_locked: true, note: 'التوصيات المفتوحة وتفاصيل الإشارات الحديثة متاحة للبرو حصرياً؛ لا تستنتج الرمز أو المستويات.' };
 }

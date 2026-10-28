@@ -61,9 +61,10 @@ interface QuotaData {
 
 interface Props {
   refreshTrigger?: number;
+  onQuotaLoaded?: (data: QuotaData) => void;
 }
 
-export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
+export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Props) {
   const { language } = useLanguage();
   const isAr = language === "ar";
 
@@ -100,6 +101,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
         const json = await res.json();
         if (json.ok) {
           setData(json);
+          onQuotaLoaded?.(json);
         }
       }
     } catch (e) {
@@ -108,7 +110,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [onQuotaLoaded]);
 
   useEffect(() => {
     fetchQuota();
@@ -230,7 +232,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
               <div className="flex flex-wrap items-center gap-2 text-xs font-bold mt-1 text-zinc-600 dark:text-zinc-400">
                 <span>
                   {isAr ? "الكوتا المستهلكة:" : "Quota Used:"}{" "}
-                  <b className="font-mono text-black dark:text-white font-black">{chat?.used ?? 0} / {chat?.limit ?? 50}</b> ({chat?.percent ?? 0}%)
+                  <b className="font-mono text-black dark:text-white font-black">{chat?.used ?? 0} / {chat?.limit ?? 10}</b> ({chat?.percent ?? 0}%)
                 </span>
                 <span>•</span>
                 <span>
@@ -342,7 +344,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0 }: Props) {
               <span className="text-2xl font-black text-black dark:text-white">
                 {chat?.used ?? 0}
                 <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
-                  {" "}/ {chat?.limit ?? 50}
+                  {" "}/ {chat?.limit ?? 10}
                 </span>
               </span>
               <span className="text-xs font-black text-zinc-600 dark:text-zinc-300">

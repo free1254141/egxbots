@@ -68,6 +68,11 @@ export default function ChatWidget() {
     const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
 
     const handleToggleAutonomousRecs = () => {
+        if (!isPro && !autonomousRecommendations) {
+            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
+            setShowUpgradeModal(true);
+            return;
+        }
         if (autonomousRecommendations) {
             setAutonomousRecommendations(false);
             toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
@@ -77,9 +82,21 @@ export default function ChatWidget() {
     };
 
     const handleConfirmAutonomousRecs = () => {
+        if (!isPro) {
+            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
+            setShowUpgradeModal(true);
+            return;
+        }
         setAutonomousRecommendations(true);
         toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
     };
+
+    // Auto-disable autonomous recs if user is not Pro
+    useEffect(() => {
+        if (!isPro && autonomousRecommendations) {
+            setAutonomousRecommendations(false);
+        }
+    }, [isPro, autonomousRecommendations, setAutonomousRecommendations]);
 
     // Chat Wallpaper preferences
     const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);
@@ -159,7 +176,7 @@ export default function ChatWidget() {
             })
             .catch(() => {});
 
-        fetch("/api/payment/easykash/config", { cache: "no-store" })
+        fetch("/api/payment/easykash/config")
             .then(r => r.ok ? r.json() : null)
             .then(cfg => {
                 if (active && cfg?.founders?.remaining !== undefined) {
@@ -411,6 +428,12 @@ export default function ChatWidget() {
     }
 
     const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!isPro) {
+            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+            setShowUpgradeModal(true);
+            e.target.value = "";
+            return;
+        }
         const files = Array.from(e.target.files || []);
         if (files.length === 0) return;
 
@@ -525,7 +548,7 @@ export default function ChatWidget() {
                     <div className="flex items-center gap-2">
                         {user && !isInitializing && !accessError && (
                             <div className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs">
-                                {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/5 Left`}
+                                {quotaLimit >= 999 ? "Unlimited ♾️" : isPro ? `${remainingQuota}/${quotaLimit || 350} Left` : `${remainingQuota}/${quotaLimit || 10} Left`}
                             </div>
                         )}
                         {/* Settings Dropdown Button & Popover */}
@@ -594,6 +617,11 @@ export default function ChatWidget() {
                                                             <span className="text-xs font-bold text-zinc-900 dark:text-white">
                                                                 {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
                                                             </span>
+                                                            {!isPro && (
+                                                                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-black text-amber-600 dark:text-amber-400 border border-amber-500/40">
+                                                                    PRO 👑
+                                                                </span>
+                                                            )}
                                                             {autonomousRecommendations && (
                                                                 <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400">
                                                                     {language === "ar" ? "نشط ⚡" : "Active ⚡"}
@@ -601,9 +629,11 @@ export default function ChatWidget() {
                                                             )}
                                                         </div>
                                                         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                            {autonomousRecommendations
-                                                                ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
-                                                                : (language === "ar" ? "مقترحات ذكاء اصطناعي حرة" : "Free AI-generated trade ideas")}
+                                                            {!isPro
+                                                                ? (language === "ar" ? "ميزة حصرية لمشتركي Pro" : "Exclusive to Pro members")
+                                                                : autonomousRecommendations
+                                                                    ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
+                                                                    : (language === "ar" ? "مقترحات ذكاء اصطناعي حرة" : "Free AI-generated trade ideas")}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -772,7 +802,7 @@ export default function ChatWidget() {
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
                                         <span className="text-base">⚠️</span>
-                                        <span>متبقي لك رسالة واحدة اليوم مجاناً</span>
+                                        <span>متبقي لك رسالة واحدة في باقتك المجانية</span>
                                     </div>
                                     <button
                                         type="button"
@@ -788,7 +818,7 @@ export default function ChatWidget() {
                                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
                                     <div className="flex items-center gap-2">
                                         <span className="text-base">🛑</span>
-                                        <span>استهلكت رصيدك اليومي المجاني (5/5)</span>
+                                        <span>استهلكت باقتك المجانية ({quotaLimit || 10}/{quotaLimit || 10})</span>
                                     </div>
                                     <button
                                         type="button"
@@ -830,14 +860,21 @@ export default function ChatWidget() {
 
                                     {/* Portfolio Image Upload Hero Card */}
                                     <div 
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={() => {
+                                            if (!isPro) {
+                                                toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+                                                setShowUpgradeModal(true);
+                                                return;
+                                            }
+                                            fileInputRef.current?.click();
+                                        }}
                                         className="group relative cursor-pointer rounded-2xl border border-dashed border-amber-500/40 dark:border-white/20 bg-amber-500/5 hover:bg-amber-500/10 dark:bg-black dark:hover:bg-zinc-950 p-4 sm:p-5 transition-all shadow-xs text-right"
                                     >
                                         <div className="flex items-start sm:items-center justify-between gap-3">
                                             <div className="space-y-1 flex-1">
                                                 <div className="flex items-center gap-2">
                                                     <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
-                                                        جديد وحصري 📸
+                                                        {isPro ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
                                                     </span>
                                                     <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
                                                         حلل محفظتك الاستثمارية من صورة
@@ -1082,7 +1119,14 @@ export default function ChatWidget() {
 
                                 <button
                                     type="button"
-                                    onClick={() => fileInputRef.current?.click()}
+                                    onClick={() => {
+                                        if (!isPro) {
+                                            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+                                            setShowUpgradeModal(true);
+                                            return;
+                                        }
+                                        fileInputRef.current?.click();
+                                    }}
                                     disabled={isLoading}
                                     className="h-9 w-9 shrink-0 rounded-xl bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 text-slate-600 dark:text-white flex items-center justify-center transition-all disabled:opacity-50 relative mb-0.5"
                                     title={language === "ar" ? "إرفاق صور للتحليل" : "Attach images for analysis"}
@@ -1263,7 +1307,9 @@ export default function ChatWidget() {
                         {/* Title & Description */}
                         <div className="space-y-2">
                             <h3 className="text-xl sm:text-2xl font-black text-black dark:text-white leading-tight">
-                                لقد استهلكت رصيدك اليومي المجاني (5/5)
+                                {remainingQuota <= 0
+                                    ? `لقد استهلكت باقتك المجانية (${quotaLimit || 10}/${quotaLimit || 10})`
+                                    : "ميزة حصرية لمشتركي باقة Pro 👑"}
                             </h3>
                             <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
                                 🔥 <strong>عرض المؤسسين:</strong> احجز مقعدك الآن بـ <strong>50 ج.م فقط شهرياً</strong> مدى الحياة (بدلاً من 200 ج.م) — باقي {foundersSeatsRemaining} مقعداً فقط!
@@ -1277,19 +1323,19 @@ export default function ChatWidget() {
                         <div className="space-y-2.5 py-2">
                             <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
                                 <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>شات ذكي مفتوح لتحليل الأسهم والمحافظ بالصور</span>
+                                <span>350 رسالة شات بوت ذكي شهرياً</span>
                             </div>
                             <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
                                 <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>إشارات وتوصيات يومية فورية (صفر تأخير)</span>
+                                <span>رفع وتحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI)</span>
                             </div>
                             <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
                                 <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام</span>
+                                <span>فتح التوصيات المفتوحة وإشارات الدخول اللحظية وتفعيل وضع التوصيات الحرة</span>
                             </div>
                             <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
                                 <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>حتى 10 أسهم نشطة في المحفظة</span>
+                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام + حتى 10 أسهم في المحفظة</span>
                             </div>
                         </div>
 
@@ -1340,7 +1386,7 @@ export default function ChatWidget() {
                                 onClick={() => setShowUpgradeModal(false)}
                                 className="w-full py-1.5 px-4 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
                             >
-                                المتابعة غداً مع تجدد الرصيد المجاني
+                                إغلاق النافذة
                             </button>
                         </div>
                     </div>

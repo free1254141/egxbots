@@ -386,22 +386,35 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
       if (filter.divergence_type) activeFilters.push("divergence");
       if (filter.use_ai_filter) activeFilters.push("ai_filter");
       if (current.shariaOnly) activeFilters.push("sharia");
-      void fetch("/api/analytics/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event_name: "feature_use",
-          path: "/scanner/technical",
-          metadata: {
-            feature: "tech_scan",
-            country: filter.country || "Egypt",
-            results_count: next.length,
-            scanned_count: res.scanned_count,
-            filters: activeFilters.join(",") || "default",
-            filter_count: activeFilters.length,
-          },
-        }),
-      }).catch(() => { /* non-critical */ });
+      // Throttle technical scan telemetry to at most once per 5 minutes
+      let shouldSendScanEvent = true;
+      try {
+        const lastScanEvent = Number(sessionStorage.getItem("egx_last_tech_scan_telemetry") || 0);
+        if (Date.now() - lastScanEvent < 5 * 60 * 1000) {
+          shouldSendScanEvent = false;
+        } else {
+          sessionStorage.setItem("egx_last_tech_scan_telemetry", String(Date.now()));
+        }
+      } catch {}
+
+      if (shouldSendScanEvent) {
+        void fetch("/api/analytics/events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_name: "feature_use",
+            path: "/scanner/technical",
+            metadata: {
+              feature: "tech_scan",
+              country: filter.country || "Egypt",
+              results_count: next.length,
+              scanned_count: res.scanned_count,
+              filters: activeFilters.join(",") || "default",
+              filter_count: activeFilters.length,
+            },
+          }),
+        }).catch(() => { /* non-critical */ });
+      }
 
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {

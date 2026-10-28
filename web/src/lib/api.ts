@@ -20,7 +20,13 @@ export async function fetchHistoricalSimilarity(symbol?: string, sameContext = f
 
 export function recordFeatureUse(feature: string, metadata: Record<string, string | number | boolean> = {}): void {
   let session_id: string | null = null;
-  try { session_id = sessionStorage.getItem("egxbots_activity_session_v1"); } catch { /* optional telemetry */ }
+  try {
+    const throttleKey = `egx_feature_telemetry_${feature}`;
+    const lastSent = Number(sessionStorage.getItem(throttleKey) || 0);
+    if (Date.now() - lastSent < 5 * 60 * 1000) return;
+    sessionStorage.setItem(throttleKey, String(Date.now()));
+    session_id = sessionStorage.getItem("egxbots_activity_session_v1");
+  } catch { /* optional telemetry */ }
   void fetch("/api/analytics/events", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ event_name: "feature_use", path: "/scanner/backtests?tab=similarity", session_id, metadata: { feature, ...metadata } }),
     keepalive: true, cache: "no-store",

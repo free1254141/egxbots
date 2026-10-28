@@ -53,6 +53,20 @@ function Tracker() {
     const key = `${user.id}:${cleanPath}`;
     if (lastTracked.current === key) return;
     if (trackingBlocked()) return;
+
+    // Deduplicate repeated navigation to the same page within 15 minutes
+    try {
+      const raw = sessionStorage.getItem("egxbots_tracked_paths_v1");
+      const map = raw ? JSON.parse(raw) : {};
+      const now = Date.now();
+      if (map[key] && now - map[key] < 15 * 60 * 1000) {
+        lastTracked.current = key;
+        return;
+      }
+      map[key] = now;
+      sessionStorage.setItem("egxbots_tracked_paths_v1", JSON.stringify(map));
+    } catch {}
+
     lastTracked.current = key;
     void fetch("/api/analytics/events", {
       method: "POST",

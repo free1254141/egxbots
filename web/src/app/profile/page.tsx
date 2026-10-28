@@ -145,14 +145,6 @@ export default function ProfilePage() {
       setTelegramLinked(Boolean((profileRow as any).telegram_chat_id));
       setWhatsappNumber((profileRow as any).whatsapp_number || null);
     }
-
-    try {
-      const qRes = await fetch("/api/user/quota", { cache: "no-store" });
-      if (qRes.ok) {
-        const qJson = await qRes.json();
-        if (qJson.ok) setQuotaData(qJson);
-      }
-    } catch {}
   }, [supabase, userId]);
 
   const handleSavePhone = async () => {
@@ -188,7 +180,7 @@ export default function ProfilePage() {
     if (!userId) return;
     const refreshWhenVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastProfileRefreshAtRef.current < 60_000) return;
+      if (Date.now() - lastProfileRefreshAtRef.current < 10 * 60_000) return;
       void reloadProfile();
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -401,7 +393,7 @@ export default function ProfilePage() {
       )}
 
       {/* ── Plan & Quota (الخطة والكوتا) ── */}
-      <PlanQuotaCard key={`quota-${portfolioVersion}`} refreshTrigger={portfolioVersion} />
+      <PlanQuotaCard key={`quota-${portfolioVersion}`} refreshTrigger={portfolioVersion} onQuotaLoaded={setQuotaData} />
 
       {/* ── My Portfolio (محفظتى) ── */}
       <div id="portfolio" className="scroll-mt-8">

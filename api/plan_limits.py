@@ -2,7 +2,7 @@
 Centralized plan / feature limits for EGX Bots.
 
 Single source of truth for the two tiers:
-  FREE  - (when PAYMENTS_ENABLED=true) signals delayed 15 days, 50 chat msgs/month, 5 portfolio stocks.
+  FREE  - (when PAYMENTS_ENABLED=true) signals delayed 15 days, 10 chat msgs/month, 5 portfolio stocks.
   PRO   - 200 EGP: daily signals, 350 chat msgs/month, 10 portfolio stocks.
 
 When PAYMENTS_ENABLED is false (default) the platform is FREE-UNLIMITED:
@@ -23,8 +23,8 @@ def free_limits() -> Dict[str, Any]:
     return {
         "name": "free",
         "signal_delay_days": int(os.getenv("FREE_SIGNAL_DELAY_DAYS", "15")),
-        "chat_messages_daily": int(os.getenv("FREE_CHAT_DAILY_MESSAGES", "5")),
-        "chat_messages_per_month": int(os.getenv("FREE_CHAT_MESSAGES", "150")),
+        "chat_messages_daily": int(os.getenv("FREE_CHAT_DAILY_MESSAGES", "10")),
+        "chat_messages_per_month": int(os.getenv("FREE_CHAT_MESSAGES", "10")),
         "portfolio_stocks": int(os.getenv("FREE_PORTFOLIO_STOCKS", "5")),
         "price_egp": 0,
     }

@@ -18,7 +18,7 @@ export const AI_CONFIG = {
     },
   },
   limits: {
-    dailyMessages: 5,
+    dailyMessages: 10,
     sessionHistoryCap: 15,
     plannerTimeoutMs: 6_000,
     plannerMaxTokens: 320,

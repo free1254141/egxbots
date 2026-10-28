@@ -41,7 +41,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
 
     // Check if user is a PRO subscriber
     useEffect(() => {
-        if (!user) {
+        if (!user?.id) {
             setIsPro(false);
             return;
         }
@@ -71,7 +71,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
                 }
             })
             .catch(() => setIsPro(false));
-    }, [user]);
+    }, [user?.id]);
 
     // Load or generate session ID
     useEffect(() => {

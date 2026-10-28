@@ -174,8 +174,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [remainingQuota, setRemainingQuota] = useState<number>(5);
-    const [quotaLimit, setQuotaLimit] = useState<number>(5);
+    const [remainingQuota, setRemainingQuota] = useState<number>(10);
+    const [quotaLimit, setQuotaLimit] = useState<number>(10);
     const [isPro, setIsPro] = useState<boolean>(false);
     const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
     const [selectedModel, setSelectedModelState] = useState<string>("deepseek-chat");
@@ -585,7 +585,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (authLoading) return;
         if (!userId) {
             setAccessState({ status: "loading" });
-            setRemainingQuota(5);
+            setRemainingQuota(10);
             return;
         }
         void fetchSessions(userId);
@@ -598,6 +598,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : (imageInput ? [imageInput] : []);
 
         if (!text.trim() && imagesList.length === 0) return;
+
+        if (!isPro && imagesList.length > 0) {
+            setShowUpgradeModal(true);
+            return;
+        }
 
         let currentSessionId = activeSessionIdRef.current;
         if (!currentSessionId) {
@@ -672,7 +677,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         try {
             if (remainingQuota <= 0) {
                 setShowUpgradeModal(true);
-                assistantMsg.content = "لقد استهلكت رصيدك اليومي المجاني (5/5). تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ اشترك الآن في Pro بـ 200 ج.م فقط شهرياً واشترك في قناة الـ VIP.";
+                assistantMsg.content = "لقد استهلكت باقتك المجانية (10/10 رسائل). تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ اشترك الآن في Pro بـ 50 ج.م فقط شهرياً (عرض المؤسسين) واشترك في قناة الـ VIP.";
                 assistantMsg.isStreaming = false;
                 assistantMsg.statusText = undefined;
                 updateAssistantMsgInState(assistantMsg);
@@ -705,7 +710,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (response.status === 429) {
                 setRemainingQuota(0);
                 setShowUpgradeModal(true);
-                let detail = "لقد استهلكت رصيدك اليومي المجاني (5/5). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على تحليل غير محدود لمحفظتك وقناة توصيات VIP!";
+                let detail = "لقد استهلكت باقتك المجانية (10/10 رسائل). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!";
                 try {
                     const data = await response.json();
                     if (data.detail && typeof data.detail === "string") {

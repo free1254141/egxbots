@@ -251,9 +251,7 @@ export default function PricingClient() {
     let cancelled = false;
     const loadConfig = async () => {
       try {
-        const response = await fetch("/api/payment/easykash/config", {
-          cache: "no-store",
-        });
+        const response = await fetch("/api/payment/easykash/config");
         if (!response.ok) throw new Error("Payment configuration unavailable");
         const local = await response.json();
         if (!cancelled) setLocalConfig(local);
@@ -264,13 +262,8 @@ export default function PricingClient() {
       }
     };
     void loadConfig();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void loadConfig();
-    };
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -463,7 +456,7 @@ export default function PricingClient() {
   const selectedPlanDetails = paidPlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[1];
   const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[1];
   const proPrice = selectedPlanDetails?.amount_egp ?? 1000;
-  const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 50, portfolio_stocks: 5 };
+  const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 10 };
   const chartFeatures = [
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? "معمل الشارت: حتى 8 نوافذ، مؤشرات واستراتيجيات ومقارنة تاريخية" : "Chart workspace: up to 8 panels, indicators, strategies and historical comparison", included: true },
@@ -472,7 +465,9 @@ export default function PricingClient() {
   const freeFeatures = [
     { icon: <Zap className="w-4 h-4" />, text: isAr ? `تأخير الإشارات المتوسطة ${freeLimits.signal_delay_days} يوماً` : `Medium swings delayed ${freeLimits.signal_delay_days} days`, included: true },
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "الصفقات القصيرة ⚡ PRO (متاحة بأرشيف متأخر 15 يوماً فقط)" : "Short Swings ⚡ PRO (15-day delayed archive only)", included: false },
-    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "5 رسائل شات بوت يومياً" : "5 chatbot messages / day", included: true },
+    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 رسائل شات بوت شهرياً (لتجربة تحليل الأسهم)" : "10 chatbot messages / month (stock analysis trial)", included: true },
+    { icon: <Sparkles className="w-4 h-4" />, text: isAr ? "التوصيات المفتوحة وإشارات الدخول الحية في الشات 🔒 PRO" : "Open Recommendations & Live Entry Signals in Chat 🔒 PRO", included: false },
+    { icon: <Sparkles className="w-4 h-4" />, text: isAr ? "رفع وتحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI) 📸 PRO" : "Portfolio & Chart Image Analysis (Vision AI) 📸 PRO", included: false },
     ...chartFeatures,
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حتى ${freeLimits.portfolio_stocks} أسهم في المحفظة` : `Up to ${freeLimits.portfolio_stocks} portfolio stocks`, included: true },
     { icon: <Activity className="w-4 h-4" />, text: isAr ? "النشاط غير الطبيعي (أسهم ارتفع حجمها بشكل غير طبيعي)" : "Unusual Activity (volume spike detection)", included: false },
@@ -485,6 +480,8 @@ export default function PricingClient() {
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "الصفقات القصيرة ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح EMA10 بدون تشفير" : "Short Swings ⚡ PRO — momentum trades, tight 4% stop, and EMA10 runners unmasked", included: true },
     { icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام — سيولة ذكية، اختراقات، تشبع بيعي، وإفصاحات" : "Live Telegram Scanner Alerts — smart volume, breakouts, oversold bounce & disclosures", included: true },
     { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? `${proLimits.chat_messages_per_month} رسالة شات بوت ذكي شهرياً` : `${proLimits.chat_messages_per_month} smart chatbot messages / month`, included: true },
+    { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "فتح كافة التوصيات المفتوحة وإشارات الدخول اللحظية وتفعيل وضع التوصيات الحرة في الشات" : "Full access to open recommendations, live entry signals & autonomous recs mode in chat", included: true },
+    { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "رفع وتحليل لقطات شاشة المحفظة والشارت بالذكاء الاصطناعي (Vision AI) 📸" : "Upload & analyze portfolio and chart screenshots with Vision AI 📸", included: true },
     ...chartFeatures,
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حتى ${proLimits.portfolio_stocks} أسهم نشطة في المحفظة` : `Up to ${proLimits.portfolio_stocks} active portfolio stocks`, included: true },
     { icon: <Activity className="w-4 h-4" />, text: isAr ? "النشاط غير الطبيعي — أسهم بحجم تداول غير طبيعي + تقييم AI" : "Unusual Activity — volume spikes + AI scoring", included: true },
@@ -496,6 +493,7 @@ export default function PricingClient() {
     { icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام بكافة مراحله للأبد" : "Live Telegram Scanner Alerts forever across all stages", included: true },
     { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "الصفقات القصيرة ⚡ PRO ومتابعة الأرباح كاملة بدون تشفير" : "Short Swings ⚡ PRO momentum trades unmasked", included: true },
     { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? `${proLimits.chat_messages_per_month} استشارة شات بوت شهرياً تتجدد تلقائياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages refreshed monthly for life`, included: true },
+    { icon: <Sparkles className="w-4 h-4 text-emerald-500" />, text: isAr ? "فتح كافة التوصيات المفتوحة وإشارات الدخول + تحليل صور المحفظة والشارت (Vision AI) 📸" : "Unrestricted open recommendations + Vision AI portfolio & chart analysis 📸", included: true },
     ...chartFeatures,
     { icon: <Activity className="w-4 h-4 text-emerald-500" />, text: isAr ? "النشاط غير الطبيعي للأسهم + المحفظة الموسعة (10 أسهم)" : "Unusual Activity + 10 portfolio stock slots", included: true },
     { icon: <Sparkles className="w-4 h-4 text-yellow-500" />, text: isAr ? "أولوية قصوى لكافة التحديثات والميزات المستقبلية" : "VIP priority for all future updates", included: true },

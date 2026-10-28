@@ -104,8 +104,8 @@ async function resolveTelegramUser(
 
     let isPro = false;
     let used = 0;
-    let limit = Number(process.env.FREE_CHAT_DAILY_MESSAGES || "5");
-    let period: "daily" | "monthly" = "daily";
+    let limit = Number(process.env.FREE_CHAT_MESSAGES || "10");
+    let period: "daily" | "monthly" = "monthly";
 
     if (linkedUserId) {
         const subRes = await supabase
@@ -126,8 +126,6 @@ async function resolveTelegramUser(
             .gte("date", quotaWin.effectiveMonthStartStr);
 
         const limitRows = limitsRes?.data || [];
-        const todayRow = limitRows.find((r: any) => String(r.date) === todayCairo);
-        const todayCount = Number(todayRow?.chat_count || 0);
         const monthlyCount = limitRows.reduce(
             (acc: number, r: any) => acc + (Number(r.chat_count) || 0),
             0
@@ -138,31 +136,31 @@ async function resolveTelegramUser(
             limit = planLimits("pro").chat_messages_per_month || 350;
             used = monthlyCount;
         } else {
-            period = "daily";
-            limit = Number(process.env.FREE_CHAT_DAILY_MESSAGES || "5");
-            used = todayCount;
+            period = "monthly";
+            limit = planLimits("free").chat_messages_per_month || 10;
+            used = monthlyCount;
         }
     } else {
-        // Unlinked Telegram group user -> Free plan (5 messages/day)
+        // Unlinked Telegram group user -> Free plan (10 messages allowance)
         const rowDate = stateRow?.quota_date ? String(stateRow.quota_date) : "";
         const todayCount = rowDate === todayCairo ? Number(stateRow?.daily_count || 0) : 0;
         isPro = false;
-        period = "daily";
-        limit = Number(process.env.FREE_CHAT_DAILY_MESSAGES || "5");
+        period = "monthly";
+        limit = Number(process.env.FREE_CHAT_MESSAGES || "10");
         used = todayCount;
     }
 
     // Apply optional simulation test_mode (for testing quota exhaustion or free tier)
     if (testMode === "limit_reached") {
         isPro = false;
-        period = "daily";
-        limit = 5;
-        used = 5;
+        period = "monthly";
+        limit = 10;
+        used = 10;
     } else if (testMode === "free_plan") {
         isPro = false;
-        period = "daily";
-        limit = 5;
-        used = Math.min(4, used);
+        period = "monthly";
+        limit = 10;
+        used = Math.min(9, used);
     }
 
     const remaining = Math.max(0, limit - used);
@@ -349,7 +347,7 @@ export async function POST(req: NextRequest) {
                     period: userInfo.period,
                     detail: userInfo.isPro
                         ? `لقد استهلكت باقة رسائلك الشهرية (${userInfo.limit}/${userInfo.limit}).`
-                        : `لقد استهلكت رصيدك اليومي المجاني (${userInfo.limit}/${userInfo.limit} أسئلة اليوم). اشترك في باقة PRO للحصول على 350 سؤال شهرياً وتوصيات لحظية!`,
+                        : `لقد استهلكت باقتك المجانية (${userInfo.limit}/${userInfo.limit} أسئلة). اشترك في باقة PRO للحصول على 350 سؤال شهرياً وتوصيات لحظية!`,
                 },
                 { status: 429 }
             );

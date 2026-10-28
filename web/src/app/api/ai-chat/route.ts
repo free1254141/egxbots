@@ -499,22 +499,53 @@ export async function POST(req: NextRequest) {
         if (message.length > 4000) return NextResponse.json({ detail: "Message is too long" }, { status: 413 });
         const hasImages = imageList.length > 0;
 
-        // Recommendation lists are a Pro feature. Free users can still use
-        // ordinary stock questions, but must upgrade before requesting the
-        // platform's actionable recommendation feed.
+        // Vision / Portfolio Image Upload is a Pro-exclusive feature.
+        if (billingOn && !isUnlimited && !userIsPro && hasImages) {
+            return NextResponse.json({
+                reply:
+                    "📸 **ميزة تحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI) متاحة حصرياً لمشتركي باقة Pro.**\n\n" +
+                    "اشترك الآن في باقة Pro (**50 ج.م فقط شهرياً** ضمن عرض المؤسسين بدلاً من 200 ج.م) للاستفادة من:\n" +
+                    "- 📸 رفع وتحليل لقطات شاشة محفظتك من ثندر أو أي تطبيق تداول والشارت الفني فوراً\n" +
+                    "- 🎯 فتح جميع التوصيات المفتوحة ووضع التوصيات الحرة في الشات\n" +
+                    "- 🚀 350 رسالة شات بوت ذكي شهرياً + قناة التليجرام VIP\n\n" +
+                    "👉 [الترقية إلى Pro الآن من صفحة التسعير](/pricing)",
+                is_pro: false,
+                quota_limit: userMonthlyCap,
+            });
+        }
+
+        // Open recommendations and Autonomous recommendations are Pro-exclusive features.
         const normalizedForGate = normalizeArabicIntent(message);
+        const asksClosedRecsOnly = /(?:مغلقه|مقفوله|ارشيف|سابقه|تاريخيه|closed)/i.test(normalizedForGate)
+            && !/(?:مفتوحه|حالي|الان|دلوقتي|اليوم|النهارده|نشطه|open)/i.test(normalizedForGate);
         const asksProRecs = /(?:توصيات|توصيه|اشارات|اشاره|ترشيحات|recommendations?|signals?)/i.test(normalizedForGate)
-            && !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedForGate);
-        const autonomousRecommendations = Boolean(body.autonomous_recommendations);
-        const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعله|شغله|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
-        if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && asksProRecs && !autonomousRecommendations && !mentionsAutonomousMode) {
+            && !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedForGate)
+            && !asksClosedRecsOnly;
+        const autonomousRecommendations = (!billingOn || isUnlimited || userIsPro) ? Boolean(body.autonomous_recommendations) : false;
+        const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
+        if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && (asksProRecs || mentionsAutonomousMode)) {
             try {
                 const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
                 if (!gateIsPro(planRows || [])) {
-                    return NextResponse.json({ reply: "التوصيات وإشارات المنصة الرسمية متاحة ضمن خطة Pro فقط. يمكنك بدلاً من ذلك تفعيل «وضع التوصيات الحرة المستقلة للذكاء الاصطناعي» من الزر أعلى الشات للحصول على مقترحات فنية استرشادية، أو الترقية لـ Pro لعرض الإشارات الرسمية." });
+                    return NextResponse.json({
+                        reply:
+                            "🔒 **التوصيات المفتوحة ووضع التوصيات الحرة في الشات متاحان حصرياً لمشتركي باقة Pro.**\n\n" +
+                            "اشترك الآن في باقة Pro (**50 ج.م فقط شهرياً** ضمن عرض المؤسسين بدلاً من 200 ج.م) للحصول على:\n" +
+                            "- 🎯 جميع التوصيات المفتوحة وإشارات الدخول والأهداف ووقف الخسارة لحظياً\n" +
+                            "- 🤖 تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي في الشات\n" +
+                            "- 📸 تحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI)\n" +
+                            "- 🚀 350 رسالة شات بوت شهرياً + قناة التليجرام VIP\n\n" +
+                            "👉 [الترقية إلى Pro الآن من صفحة التسعير](/pricing)",
+                        is_pro: false,
+                        quota_limit: userMonthlyCap,
+                    });
                 }
             } catch {
-                return NextResponse.json({ reply: "التوصيات وإشارات المنصة متاحة ضمن خطة Pro فقط. فعّل Pro لعرض التوصيات الفورية والبيانات الكاملة." });
+                return NextResponse.json({
+                    reply: "التوصيات المفتوحة ووضع التوصيات الحرة متاحان ضمن خطة Pro فقط. فعّل Pro لعرض التوصيات الفورية والبيانات الكاملة.",
+                    is_pro: false,
+                    quota_limit: userMonthlyCap,
+                });
             }
         }
 
@@ -600,6 +631,7 @@ export async function POST(req: NextRequest) {
 
         // 1. Monthly budget gate (permanent ledger via ai_chatbot_limits and ai_chat_messages).
         // Deleting old chats must NEVER reduce or refund consumed quota.
+        let usedBonusCredit = false;
         if (billingOn && !isUnlimited) {
             const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
             const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
@@ -623,19 +655,31 @@ export async function POST(req: NextRequest) {
             monthlyUsed = Math.max(limitsSum, msgsCount);
 
             if (monthlyUsed >= userMonthlyCap) {
-                return NextResponse.json({
-                    detail: `Monthly message limit reached (${userMonthlyCap}). Upgrade to Pro for ${planLimits("pro").chat_messages_per_month} messages/month.`
-                }, { status: 429 });
+                if (!userIsPro) {
+                    const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
+                    if (bonusRes && bonusRes.allowed === true) {
+                        usedBonusCredit = true;
+                    } else {
+                        return NextResponse.json({
+                            error: "LIMIT_REACHED",
+                            limit_type: "monthly",
+                            daily_limit: userMonthlyCap,
+                            detail: `لقد استهلكت باقتك المجانية (${userMonthlyCap}/${userMonthlyCap} رسائل). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!`
+                        }, { status: 429 });
+                    }
+                } else {
+                    return NextResponse.json({
+                        detail: `Monthly message limit reached (${userMonthlyCap}). Upgrade to Pro for ${planLimits("pro").chat_messages_per_month} messages/month.`
+                    }, { status: 429 });
+                }
             }
         }
 
         // 2. Consume / record chat quota in ai_chatbot_limits
         if (!isUnlimited) {
-            // Free users get strictly 5 messages per day.
-            // Pro users get up to their monthly cap / daily usage.
             const effectiveDailyLimit = userIsPro
                 ? Math.max(AI_CONFIG.limits.dailyMessages, userMonthlyCap)
-                : 5;
+                : Math.max(10, userMonthlyCap);
             const { data: quotaRows, error: quotaError } = await supabase.rpc("consume_ai_chat_quota", {
                 p_user_id: userId,
                 p_date: today,
@@ -644,17 +688,21 @@ export async function POST(req: NextRequest) {
             if (quotaError) return NextResponse.json({ detail: "Unable to reserve chat quota" }, { status: 503 });
             const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
             if (!quota?.allowed) {
-                // If daily limit reached, check if the user has bonus credits (e.g. from linking Telegram)
-                const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
-                if (bonusRes && bonusRes.allowed === true) {
-                    limitData = { chat_count: Number(quota.chat_count || effectiveDailyLimit) };
+                if (usedBonusCredit) {
+                    limitData = { chat_count: Number(quota?.chat_count || effectiveDailyLimit) };
                 } else {
-                    return NextResponse.json({
-                        error: "LIMIT_REACHED",
-                        limit_type: "daily",
-                        daily_limit: effectiveDailyLimit,
-                        detail: "لقد استهلكت رصيدك اليومي المجاني (5/5). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على تحليل غير محدود لمحفظتك وقناة توصيات VIP!"
-                    }, { status: 429 });
+                    // Check if the user has bonus credits (e.g. from linking Telegram)
+                    const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
+                    if (bonusRes && bonusRes.allowed === true) {
+                        limitData = { chat_count: Number(quota?.chat_count || effectiveDailyLimit) };
+                    } else {
+                        return NextResponse.json({
+                            error: "LIMIT_REACHED",
+                            limit_type: "monthly",
+                            daily_limit: userMonthlyCap,
+                            detail: `لقد استهلكت باقتك المجانية (${userMonthlyCap}/${userMonthlyCap} رسائل). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!`
+                        }, { status: 429 });
+                    }
                 }
             } else {
                 limitData = { chat_count: Number(quota.chat_count || 0) };
@@ -664,11 +712,7 @@ export async function POST(req: NextRequest) {
 
         const calcRemainingQuota = () => {
             if (isUnlimited) return 999;
-            if (userIsPro) {
-                return Math.max(0, userMonthlyCap - monthlyUsed);
-            }
-            const todayCount = limitData?.chat_count || 0;
-            return Math.max(0, 5 - todayCount);
+            return Math.max(0, userMonthlyCap - monthlyUsed);
         };
 
         diagnostics.capture("runtime_configuration", {config: AI_CONFIG, user_is_pro: userIsPro, unlimited: isUnlimited, billing_enabled: billingOn, history_source: "server_session_messages_preferred", endpoint: "/api/ai-chat", transport: stream === true || stream === "true" || (req.headers.get("accept") || "").includes("text/event-stream") ? "sse" : "json"});
@@ -924,7 +968,7 @@ export async function POST(req: NextRequest) {
                                         reply: replyText,
                                         session_id: activeSessionId,
                                         remaining_quota: calcRemainingQuota(),
-                                        quota_limit: isUnlimited ? 999 : (userIsPro ? userMonthlyCap : 5),
+                                        quota_limit: isUnlimited ? 999 : userMonthlyCap,
                                         is_pro: isUnlimited || userIsPro,
                                         suggested_buttons: suggestedButtons,
                                         session_state: sessionUpdate,
@@ -1104,7 +1148,7 @@ export async function POST(req: NextRequest) {
             chart_actions: pipelineResult.chart_actions || [],
             session_id: activeSessionId,
             remaining_quota: calcRemainingQuota(),
-            quota_limit: isUnlimited ? 999 : (userIsPro ? userMonthlyCap : 5),
+            quota_limit: isUnlimited ? 999 : userMonthlyCap,
             is_pro: isUnlimited || userIsPro,
             suggested_buttons: suggestedButtons,
             session_state: pipelineResult.session_update,
@@ -1165,32 +1209,19 @@ export async function GET(req: NextRequest) {
                 const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_start,current_period_end").eq("user_id", userId).order("current_period_end", { ascending: false });
                 userIsPro = gateIsPro(planRows || []);
                 isUnlimited = false;
+                const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
+                quotaLimit = userIsPro ? planLimits("pro").chat_messages_per_month : planLimits("free").chat_messages_per_month;
+                const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
+                const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
 
-                if (userIsPro) {
-                    quotaLimit = planLimits("pro").chat_messages_per_month;
-                    const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
-                    const monthStartStr = quotaWin.effectiveMonthStartStr;
-                    const effectiveStart = quotaWin.effectiveStartDate;
+                const [limitRowsRes, msgRowsRes] = await Promise.all([
+                    supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
+                    supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
+                ]);
 
-                    const [limitRowsRes, msgRowsRes] = await Promise.all([
-                        supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
-                        supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
-                    ]);
-
-                    const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
-                    const msgCount = new Set((msgRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
-                    usedCount = Math.max(limitsCount, msgCount);
-                } else {
-                    // Free user: strictly 5 messages daily
-                    quotaLimit = 5;
-                    const { data: limitData } = await supabase
-                        .from("ai_chatbot_limits")
-                        .select("chat_count")
-                        .eq("user_id", userId)
-                        .eq("date", today)
-                        .maybeSingle();
-                    usedCount = limitData?.chat_count || 0;
-                }
+                const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
+                const msgCount = new Set((msgRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
+                usedCount = Math.max(limitsCount, msgCount);
             } else {
                 const { data: limitData } = await supabase
                     .from("ai_chatbot_limits")
@@ -1198,7 +1229,7 @@ export async function GET(req: NextRequest) {
                     .eq("user_id", userId)
                     .eq("date", today)
                     .maybeSingle();
-                quotaLimit = 5;
+                quotaLimit = 10;
                 usedCount = limitData?.chat_count || 0;
             }
 

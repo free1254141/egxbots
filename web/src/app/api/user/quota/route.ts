@@ -1,11 +1,39 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
-import { planLimits, resolveSubscriptionQuotaWindow } from "@/lib/ai/plan-gate";
+import { getCairoDateString, planLimits, resolveSubscriptionQuotaWindow } from "@/lib/ai/plan-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
+
+// Cache top-100 founding member IDs in module memory for 10 minutes to avoid
+// scanning 200 subscription rows on every Pro quota check.
+let cachedFounderUids: string[] | null = null;
+let cachedFounderUidsExpiresAt = 0;
+const FOUNDER_CACHE_TTL_MS = 10 * 60 * 1000;
+
+async function getFounderUids(serviceClient: any): Promise<string[]> {
+  const now = Date.now();
+  if (cachedFounderUids && now < cachedFounderUidsExpiresAt) {
+    return cachedFounderUids;
+  }
+  const { data: allActiveSubs } = await serviceClient
+    .from("subscriptions")
+    .select("user_id, created_at")
+    .eq("status", "active")
+    .in("plan_id", ["pro", "lifetime", "pro_lifetime"])
+    .order("created_at", { ascending: true })
+    .limit(200);
+
+  const uniqueFounderUids = Array.from(
+    new Set<string>((allActiveSubs || []).map((s: any) => String(s.user_id || "")).filter(Boolean))
+  ).slice(0, 100);
+
+  cachedFounderUids = uniqueFounderUids;
+  cachedFounderUidsExpiresAt = now + FOUNDER_CACHE_TTL_MS;
+  return uniqueFounderUids;
+}
 
 export async function GET() {
   try {
@@ -27,53 +55,63 @@ export async function GET() {
     }
 
     const clientForData = serviceClient || supabase;
+    const now = new Date();
+    const calMonthStartStr = `${getCairoDateString(now).slice(0, 7)}-01`;
 
-    // Fetch subscription first — we need current_period_start to determine the
-    // correct quota window for PRO users who upgraded mid-month.
-    const subResult = await clientForData
-      .from("subscriptions")
-      .select("id, plan_id, status, current_period_start, current_period_end, created_at")
-      .eq("user_id", user.id)
-      .in("status", ["active", "trialing"])
-      .order("current_period_end", { ascending: false })
-      .limit(5);
-
-    const subRows = subResult.data;
-    const subErr = subResult.error;
-    if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
-
-    // Derive plan status & effective monthly window via the shared single-source helper.
-    const quotaWin = resolveSubscriptionQuotaWindow(subRows || []);
-    const pro = quotaWin.isPro;
-    const activeSub = quotaWin.activeSub;
-    const monthStartStr = quotaWin.effectiveMonthStartStr;
-
-    const [limitRowsRes, posResult] = await Promise.all([
-      // Chat quota ledger: only from effective subscription start (not calendar month start)
+    // Execute all user-scoped queries in a single parallel round-trip
+    // to minimize serverless wall-clock & active CPU time.
+    const [subResult, limitRowsRes, posResult, trialRes, bonusRes, profileRes] = await Promise.all([
+      clientForData
+        .from("subscriptions")
+        .select("id, plan_id, status, current_period_start, current_period_end, created_at")
+        .eq("user_id", user.id)
+        .in("status", ["active", "trialing"])
+        .order("current_period_end", { ascending: false })
+        .limit(5),
       serviceClient
         .from("ai_chatbot_limits")
         .select("date, chat_count")
         .eq("user_id", user.id)
-        .gte("date", monthStartStr),
-
-      // Open portfolio positions
+        .gte("date", calMonthStartStr),
       supabase
         .from("positions")
         .select("symbol")
         .eq("user_id", user.id)
         .eq("status", "open"),
+      clientForData
+        .from("subscription_trials")
+        .select("started_at, expires_at")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      clientForData.rpc("get_chat_bonus_balance", { p_user_id: user.id }),
+      clientForData
+        .from("profiles")
+        .select("telegram_chat_id")
+        .eq("id", user.id)
+        .maybeSingle(),
     ]);
 
+    const subRows = subResult.data;
+    const subErr = subResult.error;
+    if (subErr) console.warn("[api/user/quota] subscriptions query error:", subErr);
     if (limitRowsRes.error) console.warn("[api/user/quota] limits count error:", limitRowsRes.error);
     if (posResult.error) console.warn("[api/user/quota] positions query error:", posResult.error);
+
+    // Derive plan status & effective monthly window via the shared single-source helper.
+    const quotaWin = resolveSubscriptionQuotaWindow(subRows || [], now);
+    const pro = quotaWin.isPro;
+    const activeSub = quotaWin.activeSub;
+    const monthStartStr = quotaWin.effectiveMonthStartStr;
+
     const planName = pro ? (activeSub?.plan_id === "lifetime" ? "lifetime" : "pro") : "free";
     const limits = planLimits(planName);
 
-    // Derive chat quota
+    // Derive chat quota (filtered to effective subscription window start)
     const today = quotaWin.todayStr;
-    const todayLimitRow = (limitRowsRes.data || []).find((r: any) => r.date === today);
+    const effectiveLimitRows = (limitRowsRes.data || []).filter((r: any) => String(r.date || "") >= monthStartStr);
+    const todayLimitRow = effectiveLimitRows.find((r: any) => r.date === today);
     const todayChatCount = Number(todayLimitRow?.chat_count || 0);
-    const monthlyLimitsCount = (limitRowsRes.data || []).reduce(
+    const monthlyLimitsCount = effectiveLimitRows.reduce(
       (acc: number, row: any) => acc + (Number(row.chat_count) || 0),
       0
     );
@@ -90,22 +128,11 @@ export async function GET() {
 
     const portfolioLimit = limits.portfolio_stocks;
 
-    // 4. Founding member detection (first 100 distinct Pro / Lifetime members)
+    // 4. Founding member detection (first 100 distinct Pro / Lifetime members, cached for 10m)
     let isFoundingMember = false;
     let foundingMemberNumber: number | null = null;
     if (pro) {
-      const { data: allActiveSubs } = await serviceClient
-        .from("subscriptions")
-        .select("user_id, created_at")
-        .eq("status", "active")
-        .in("plan_id", ["pro", "lifetime", "pro_lifetime"])
-        .order("created_at", { ascending: true })
-        .limit(200);
-      
-      const uniqueFounderUids = Array.from(
-        new Set((allActiveSubs || []).map((s: any) => s.user_id))
-      ).slice(0, 100);
-
+      const uniqueFounderUids = await getFounderUids(serviceClient);
       const subIdx = uniqueFounderUids.indexOf(user.id);
       if (subIdx !== -1) {
         isFoundingMember = true;
@@ -114,21 +141,6 @@ export async function GET() {
     }
 
     const isLifetime = activeSub?.plan_id === "lifetime" || activeSub?.plan_id === "pro_lifetime";
-
-    // Query trial status and bonus balance
-    const [trialRes, bonusRes, profileRes] = await Promise.all([
-      clientForData
-        .from("subscription_trials")
-        .select("started_at, expires_at")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-      clientForData.rpc("get_chat_bonus_balance", { p_user_id: user.id }),
-      clientForData
-        .from("profiles")
-        .select("telegram_chat_id")
-        .eq("id", user.id)
-        .maybeSingle(),
-    ]);
 
     const hasUsedTrial = Boolean(trialRes.data);
     const isTrialActive = trialRes.data?.expires_at
