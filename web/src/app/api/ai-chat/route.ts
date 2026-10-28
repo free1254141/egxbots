@@ -446,30 +446,38 @@ export async function POST(req: NextRequest) {
         }
         
         userId = user.id;
-        const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
+        const { paymentsEnabled, planLimits, isPro: gateIsPro, hasActiveProSubscription, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
         const billingOn = paymentsEnabled();
-        // Legacy unlimited allow-list is only valid while billing is disabled.
-        // Once plans are active, every account must have an active Pro
-        // subscription to bypass the Free quota.
+        // Keep the legacy operator allow-list only for local/admin access while
+        // billing is disabled. The customer-facing AI chat itself is Pro-only.
         const isUnlimited = !billingOn && isUnlimitedChatUser(user);
         let userIsPro = false;
         let userMonthlyCap = Number.MAX_SAFE_INTEGER;
         let quotaWin = resolveSubscriptionQuotaWindow([]);
-        if (billingOn) {
-            try {
-                const { data: planRows } = await authClient
-                    .from("subscriptions")
-                    .select("plan_id,status,current_period_start,current_period_end")
-                    .eq("user_id", userId)
-                    .order("current_period_end", { ascending: false })
-                    .limit(10);
-                userIsPro = gateIsPro(planRows || []);
-                userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
-                quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
-            } catch {
-                userIsPro = false;
-                userMonthlyCap = planLimits("free").chat_messages_per_month;
-            }
+        let planRows: any[] = [];
+        try {
+            const { data, error } = await authClient
+                .from("subscriptions")
+                .select("plan_id,status,current_period_start,current_period_end")
+                .eq("user_id", userId)
+                .order("current_period_end", { ascending: false })
+                .limit(10);
+            if (error) throw error;
+            planRows = data || [];
+            userIsPro = hasActiveProSubscription(planRows);
+            userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
+            quotaWin = resolveSubscriptionQuotaWindow(planRows);
+        } catch (subscriptionError) {
+            console.error("[ai-chat] Failed to verify Pro subscription:", subscriptionError);
+            userIsPro = false;
+            userMonthlyCap = planLimits("free").chat_messages_per_month;
+        }
+
+        if (!userIsPro && !isUnlimited) {
+            return NextResponse.json({
+                code: "PRO_REQUIRED",
+                detail: "المساعد الذكي متاح لمشتركي Pro فقط. اشترك في Pro لفتح الشات وجميع أدوات التحليل الذكي."
+            }, { status: 403 });
         }
         const body = await req.json();
         const diagnostics = createDiagnosticTrace(canTraceChat(user));
