@@ -37,7 +37,7 @@ export default function ChatWidget() {
         stopResponding,
         isLoading, 
         remainingQuota,
-        quotaLimit = 5,
+        quotaLimit = 10,
         isPro = false,
         isInitializing,
         accessError,
