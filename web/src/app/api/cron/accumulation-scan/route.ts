@@ -9,6 +9,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Vercel Hobby plan limit (max 60s)
 
 export async function GET(req: NextRequest) {
+    // Accumulation scan runs natively on Python Hugging Face backend in daily_bot_run.
+    // Exit immediately to prevent holding Vercel Serverless Lambdas open for 55 seconds.
+    const force = req.nextUrl.searchParams.get("force") === "true";
+    if (!force) {
+        return NextResponse.json({
+            ok: true,
+            skipped: true,
+            reason: "Accumulation scan is executed natively on Python Hugging Face backend in daily_bot_run.",
+            runner: "python-huggingface",
+        });
+    }
+
     // حماية: فقط Vercel Cron أو طلبات مصرح بها
     const authHeader = req.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;

@@ -84,12 +84,12 @@ export default function PaymentWelcomeModal({
 
       const interval = setInterval(() => {
         pollCountRef.current += 1;
-        if (pollCountRef.current > 12) {
+        if (pollCountRef.current > 3) {
           clearInterval(interval);
           return;
         }
         void checkStatus();
-      }, 4000);
+      }, 6000);
 
       return () => clearInterval(interval);
     }
@@ -218,10 +218,17 @@ export default function PaymentWelcomeModal({
                 </div>
               </div>
               <div className="text-left rtl:text-right">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500 text-black text-xs font-black border border-black shadow-[1px_1px_0px_#000]">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  {isAr ? "مفعّل ونشط" : "Active"}
-                </span>
+                {(orderData?.status === "approved" || Boolean(proInvite.current_period_end) || isBotActive) ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500 text-black text-xs font-black border border-black shadow-[1px_1px_0px_#000]">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    {isAr ? "مفعّل ونشط" : "Active"}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-400 text-black text-xs font-black border border-black shadow-[1px_1px_0px_#000]">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {isAr ? "جاري التأكيد" : "Verifying"}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -282,9 +289,23 @@ export default function PaymentWelcomeModal({
                 </a>
               </div>
             ) : (
-              <div className="mt-2 p-2.5 bg-white dark:bg-zinc-900 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-emerald-600" />
-                <span>{isAr ? "جاري تجهيز رابط الـ VIP الخاص بك..." : "Generating your VIP link..."}</span>
+              <div className="mt-2 p-2.5 bg-white dark:bg-zinc-900 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0 text-emerald-600" />
+                  <span>{isAr ? "جاري تجهيز وتأكيد الرابط..." : "Preparing your VIP link..."}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pollCountRef.current = 0;
+                    setVerifying(true);
+                    void checkStatus().finally(() => setVerifying(false));
+                  }}
+                  disabled={verifying}
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs border border-black cursor-pointer shadow-[1px_1px_0px_#000] active:translate-x-0.5 active:translate-y-0.5"
+                >
+                  {verifying ? (isAr ? "جاري الفحص..." : "Checking...") : (isAr ? "تحقق الآن" : "Check now")}
+                </button>
               </div>
             )}
           </div>

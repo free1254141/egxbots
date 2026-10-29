@@ -173,11 +173,13 @@ export default function PricingClient() {
     setPollingExhausted(false);
     const schedule = () => {
       if (stopped) return;
-      if (Date.now() - startedAt >= 15 * 60_000) {
+      // Stop automatic polling after 4 attempts (~60 seconds) or if user navigates away.
+      // The user can still click 'Check payment status again' manually.
+      if (attempts >= 4 || Date.now() - startedAt >= 60_000 || document.visibilityState === "hidden") {
         setPollingExhausted(true);
         return;
       }
-      const delay = Math.min(30_000, 5_000 * Math.pow(1.5, attempts));
+      const delay = Math.min(25_000, 6_000 * Math.pow(1.5, attempts));
       attempts += 1;
       timer = setTimeout(check, delay);
     };

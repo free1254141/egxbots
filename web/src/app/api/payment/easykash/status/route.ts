@@ -6,6 +6,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
+// Short 8-second in-memory cache to debounce rapid consecutive status requests for the same order
+const orderStatusCache = new Map<string, { payload: any; expiresAt: number }>();
+
 export async function GET(req: NextRequest) {
   const auth = await createSupabaseServerClient(req);
   const { data: { user } } = await auth.auth.getUser();
@@ -13,6 +16,20 @@ export async function GET(req: NextRequest) {
 
   const orderId = req.nextUrl.searchParams.get("order_id") || "";
   if (!orderId) return NextResponse.json({ detail: "Missing order_id" }, { status: 400 });
+
+  const now = Date.now();
+  const cacheKey = `${user.id}:${orderId}`;
+  const cached = orderStatusCache.get(cacheKey);
+  if (orderStatusCache.size > 500) {
+    orderStatusCache.clear();
+  } else if (orderStatusCache.size > 200) {
+    for (const [k, v] of orderStatusCache.entries()) {
+      if (v.expiresAt <= now) orderStatusCache.delete(k);
+    }
+  }
+  if (cached && now < cached.expiresAt) {
+    return NextResponse.json(cached.payload);
+  }
 
   try {
     const service = getSupabaseServiceClient();
@@ -36,7 +53,11 @@ export async function GET(req: NextRequest) {
             signal: AbortSignal.timeout(6000),
           }
         );
-        if (response.ok) return NextResponse.json(await response.json());
+        if (response.ok) {
+        const data = await response.json();
+        orderStatusCache.set(cacheKey, { payload: data, expiresAt: now + 8000 });
+        return NextResponse.json(data);
+      }
       }
       return NextResponse.json({ detail: "Payment order not found" }, { status: 404 });
     }
@@ -127,11 +148,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const result = {
       ...order,
       subscription: end ? { current_period_end: end } : null,
       telegram_pro_url: inviteLink,
-    });
+    };
+    orderStatusCache.set(cacheKey, { payload: result, expiresAt: now + 8000 });
+    return NextResponse.json(result);
   } catch (err: any) {
     console.error("[api/payment/easykash/status] error:", err);
     return NextResponse.json({ detail: "Payment status is unavailable" }, { status: 503 });

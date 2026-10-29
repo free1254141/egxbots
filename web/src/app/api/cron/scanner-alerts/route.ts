@@ -42,6 +42,18 @@ async function handleCron(req: NextRequest) {
   const chatId = url.searchParams.get("chat_id") || bodyJson.chat_id || undefined;
   const trigger = bodyJson.trigger || (chatId ? `Test Run for Chat ${chatId}` : "Cron Scheduler");
 
+  // Routine 15-minute background scans are now handled natively inside Python
+  // on Hugging Face Spaces. Vercel serverless function only executes if explicitly
+  // forced by admin or when testing a specific Telegram chat recipient.
+  if (!force && !chatId) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      runner: "python-huggingface",
+      message: "Routine scanner alerts run natively on Python backend (Hugging Face Spaces) to preserve Vercel compute quotas.",
+    });
+  }
+
   try {
     const result = await executeScannerEngine({
       trigger,

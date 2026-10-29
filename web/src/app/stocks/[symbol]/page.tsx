@@ -16,18 +16,38 @@ export const preferredRegion = "fra1";
 // drastically cuts the number of re-renders Vercel has to run per symbol.
 export const revalidate = 86400;
 
-// Pre-render the top Egyptian stocks at build time for instant 0ms responses to
-// search engine crawlers and users. The remaining symbols are statically cached
-// on first hit via ISR.
-const TOP_EGX_SYMBOLS = [
-  "comi", "fwry", "hrho", "east", "tmgh", "swdy", "ekho", "abuk",
-  "amoc", "mfpc", "etel", "cich", "heli", "btfh", "alfa",
-  "acro", "adib", "cieb", "efid", "efih", "egal", "egas", "oras",
-  "talm", "esrs", "clho", "orwe", "phdc", "spmd", "alcn"
+// Complete Egyptian stock exchange symbol directory for 100% pre-rendering at build time.
+// Pre-rendering both lowercase and uppercase eliminates dynamic Lambda executions when crawlers request either format.
+const ALL_FALLBACK_EGX_SYMBOLS = [
+  "aalr","abuk","acamd","acap","acgc","acro","actf","adci","adib","adpc","adri","afdi","afmc","agig","aidc","aih","aind","aivcb","ajwa","alcn","alex","alra","alum","amer","ames","amia","amii","amoc","ampi","anfi","appc","apsw","arab","arcc","areh","areha","arva","ascm","aspi","atlc","atqa","auto","axph","bcap","bidi","bigp","binv","bioc","bony","btfh","caed","cana","ccap","ccrs","cefm","cera","cfgh","cich","cieb","cilb","cira","cirf","clho","cnfn","comi","copr","cosg","cpci","cpme","crst","csag","daph","dcrc","dein","dgtz","domt","dscw","dtpp","ealr","easb","east","ebsc","ecap","edbm","edfm","eeii","efic","efid","efih","egal","egas","egbe","egch","egref","egsa","egts","ehdr","eitp","ekhoa","elec","elka","elna","elsh","elwa","emfd","engc","eosb","epco","eppk","esrs","etel","etrs","expa","fait","faita","fcmd","ferc","fire","fnar","ftns","fwry","gbco","gdwa","ggcc","ggrn","gihd","gmci","gour","gpim","gppl","grca","gssc","gtex","gthe","gtwl","hbco","hdbk","heli","hrho","ibct","icfc","icid","icle","idre","ieec","ifap","ineg","infi","irax","iron","isma","ismq","isph","jufo","kabo","kasabf","kora","krdi","kwin","kzpc","lcsw","luts","maal","masr","matd","mbeg","mbsc","mcqe","mcro","medp","megm","mena","mepa","mfpc","mfsc","mhot","mich","mils","miph","mkit","moed","moil","moin","mosc","mpci","mpco","mprc","mtie","naho","napr","nare","nbke","nccw","ncgc","ndrl","neda","nhps","ninh","niph","obri","ocdi","ocph","odin","ofh","oih","olfi","oras","orhd","ormt","orwe","pach","phar","phdc","phgc","phtv","pioh","poul","prcl","prdc","prmh","qnba","qnbe","racc","rakt","raya","rkaz","rmda","roto","rrei","rtvc","rubx","saib","saud","scem","scfm","scts","sdti","seig","seiga","simo","sipc","skpc","smfr","smpp","snfc","spht","spin","spmd","srwa","sugr","svce","swdy","talm","tanm","taqa","tmgh","tora","trto","twsa","tycn","uasg","ubee","uefm","uegc","unip","unit","upms","utop","valu","vert","vlmr","vlmra","wcdf","wkol","zeot","zmid"
 ];
 
 export async function generateStaticParams() {
-  return TOP_EGX_SYMBOLS.map((symbol) => ({ symbol }));
+  const symbolSet = new Set<string>();
+  try {
+    const directory = await getPublicStockDirectory();
+    if (Array.isArray(directory) && directory.length > 0) {
+      for (const stock of directory) {
+        if (stock.symbol) {
+          symbolSet.add(stock.symbol.toLowerCase());
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[stocks] Failed to load full directory for static params, falling back to all catalog symbols:", err);
+  }
+
+  // Ensure 100% catalog coverage even if live directory query failed or was incomplete
+  for (const s of ALL_FALLBACK_EGX_SYMBOLS) {
+    symbolSet.add(s.toLowerCase());
+  }
+
+  const params: Array<{ symbol: string }> = [];
+  for (const sym of symbolSet) {
+    params.push({ symbol: sym.toLowerCase() });
+    params.push({ symbol: sym.toUpperCase() });
+  }
+  return params;
 }
 
 interface PageProps {

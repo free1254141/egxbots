@@ -35,17 +35,26 @@ def _is_market_session(cairo_dt: dt.datetime) -> bool:
 
 def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     global _last_run_timestamp
-    admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
-    web_origin = os.getenv("WEB_ORIGIN", "https://egxbots.com").rstrip("/")
-    target_urls = [
-        f"{web_origin}/api/cron/scanner-alerts",
-        "http://localhost:3000/api/cron/scanner-alerts",
-        "http://127.0.0.1:3000/api/cron/scanner-alerts"
-    ]
+    # Update timestamp immediately to prevent 30s tight-looping if skipped or on transient error
+    _last_run_timestamp = time.time()
+    # Execute scanner natively inside Python on Hugging Face Spaces to avoid
+    # waking Vercel Serverless Functions or consuming Vercel CPU quotas.
+    try:
+        from api.scanner_alerts_engine import execute_scanner_alerts_native
+        res = execute_scanner_alerts_native(force=force, force_dispatch=force_dispatch)
+        if res.get("ok"):
+            dispatched = res.get("alerts_dispatched", 0)
+            matches = res.get("matches", {})
+            print(f"[SCANNER_SCHEDULER] Native Python scan executed! Dispatched: {dispatched} alerts to Telegram. Matches: {matches}")
+            return {"ok": True, "data": res}
+        elif res.get("skipped"):
+            return res
+    except Exception as e:
+        print(f"[SCANNER_SCHEDULER] Native Python scanner error: {e}")
 
-    last_error = None
-    result_data = None
-    for url in target_urls:
+    # Fallback to local dev endpoint only if running in local development
+    admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
+    for url in ["http://localhost:3000/api/cron/scanner-alerts", "http://127.0.0.1:3000/api/cron/scanner-alerts"]:
         try:
             req = urllib.request.Request(
                 url,
@@ -60,21 +69,15 @@ def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> D
                     "force_dispatch": force_dispatch,
                 }).encode("utf-8")
             )
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if resp.status == 200:
-                    dispatched = data.get("alerts_dispatched", 0)
-                    matches = data.get("matches", {})
-                    fresh = data.get("fresh_matches", {})
-                    print(f"[SCANNER_SCHEDULER] Scan executed! Dispatched: {dispatched} alerts to Telegram. Matches: {matches}, Fresh: {fresh}")
                     _last_run_timestamp = time.time()
                     return {"ok": True, "data": data}
-        except Exception as e:
-            last_error = str(e)
+        except Exception:
             continue
 
-    print(f"[SCANNER_SCHEDULER] Scanner trigger skipped or failed to reach frontend cron endpoint. Error: {last_error}")
-    return {"ok": False, "error": last_error}
+    return {"ok": False, "error": "Native scan skipped or inactive"}
 
 def trigger_scanner_job_now(force: bool = True, force_dispatch: bool = True) -> Dict[str, Any]:
     return _trigger_scanner_job(force=force, force_dispatch=force_dispatch)
