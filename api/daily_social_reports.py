@@ -38,28 +38,12 @@ def generate_daily_social_reports(job_run_id, steps, trigger='scheduled', dry_ru
         if kind == 'market' and latest.get('refresh_market_status') != 'success':
             results[kind] = {'status': 'skipped', 'reason': 'Market refresh failed'}
             continue
-        request = urllib.request.Request(endpoint, method='POST',
-            data=json.dumps({'date': date.date().isoformat(), 'kind': kind, 'job_run_id': job_run_id}).encode(),
-            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + secret})
+        # Execute natively inside Python on Hugging Face Spaces to eliminate 4x120s Vercel Lambdas
         try:
-            with (opener or urllib.request.urlopen)(request, timeout=130) as response:
-                results[kind] = json.loads(response.read().decode())
-        except urllib.error.HTTPError as error:
-            # Keep status and a known rejection reason; never log provider text,
-            # response HTML, credentials or request URLs.
-            reason = ''
-            try:
-                message = json.loads(error.read(2048).decode()).get('error')
-                if message in {'Unauthorized', 'Invalid report request', 'Daily data job is not ready',
-                               'Report already claimed or storage unavailable'}:
-                    reason = ': ' + message
-            except Exception:
-                pass
-            results[kind] = {'status': 'failed', 'http_status': error.code,
-                             'error': f'HTTP {error.code}{reason}'}
+            from api.native_social_reports import generate_native_social_report
+            results[kind] = generate_native_social_report(kind, date.date().isoformat(), job_run_id)
         except Exception as error:
-            # Never retry an ambiguous timeout: the server may still be generating.
-            results[kind] = {'status': 'failed', 'error': type(error).__name__}
+            results[kind] = {'status': 'failed', 'error': str(error)}
     images = {}
     fb_publication = None
     if client is not None:

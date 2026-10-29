@@ -1376,11 +1376,22 @@ def _send_market_buy_hold(gate: Dict[str, Any], market_date: str) -> bool:
 
 
 def _generate_daily_market_outlook(market_date: str, gate: Dict[str, Any], recommendations_created: int) -> Optional[str]:
+    # Execute natively in Python to prevent waking Vercel Serverless Functions
+    try:
+        from api.daily_market_outlook import compose_daily_market_outlook_native
+        msg = compose_daily_market_outlook_native(market_date, gate, recommendations_created)
+        if msg:
+            print(f"[DAILY_OUTLOOK] Draft composed natively in Python for {market_date}.")
+            return msg
+    except Exception as e:
+        print(f"[DAILY_OUTLOOK] Native composer failed, checking local fallback: {e}")
+
     admin_key = (os.getenv("ADMIN_SECRET_KEY") or "").strip()
-    if not admin_key:
-        print("[DAILY_OUTLOOK] ADMIN_SECRET_KEY unavailable; cannot call the Vercel composer.")
+    origin = get_web_origin() or ""
+    # Only allow fallback to local development port 3000, never remote Vercel in production
+    if not admin_key or ("localhost" not in origin and "127.0.0.1" not in origin):
         return None
-    endpoint = f"{get_web_origin().rstrip('/')}/api/internal/daily-market-outlook"
+    endpoint = f"{origin.rstrip('/')}/api/internal/daily-market-outlook"
     gate_context = {
         "blocked": bool(gate.get("blocked")), "reason": gate.get("reason"),
         "regime": gate.get("regime"), "latestClose": gate.get("latest_close"),

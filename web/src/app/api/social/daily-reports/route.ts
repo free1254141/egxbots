@@ -22,6 +22,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // Social reports run natively on Python Hugging Face backend.
+  // Exit immediately to prevent spinning up 4x 120-second Serverless Lambdas.
+  const force = req.nextUrl.searchParams.get("force") === "true";
+  if (!force) {
+    return NextResponse.json({
+      status: "skipped",
+      reason: "Daily social reports are generated natively on Python Hugging Face backend in daily_social_reports.",
+      runner: "python-huggingface",
+    });
+  }
   if (!authorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const { date, kind, job_run_id: jobId } = body;

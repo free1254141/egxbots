@@ -558,7 +558,15 @@ def _web_vip_chat_endpoints() -> List[str]:
 
 
 def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
-    """Call Next.js /api/telegram/vip-chat endpoint with automatic local->production fallback."""
+    """Execute VIP chat action natively inside Python to eliminate Vercel serverless executions."""
+    try:
+        from api.native_telegram_vip_chat import handle_native_vip_chat
+        res = handle_native_vip_chat(payload)
+        if res and (res.get("ok") or res.get("error_code")):
+            return res
+    except Exception as exc:
+        print(f"[TELEGRAM_VIP_CHAT] Native chat handler error: {exc}")
+
     admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
     headers = {
         "Content-Type": "application/json",
