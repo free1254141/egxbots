@@ -89,6 +89,39 @@ def send_expired_reactivation_email(user_id: str, email: str, display_name: str,
     return False
 
 
+def send_trial_onboarding_email(user_id: str, email: str, display_name: str, invite_link: str, end_date: str) -> bool:
+    """Sends a targeted onboarding and activation email to a trialing user."""
+    if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "trial_onboarding", cooldown_days=2):
+        return False
+
+    subject = "🚀 تفعيل باقتك: رابط قناة VIP الخاصة بك وجرب الشات بوت الذكي الآن | EGX BOTS"
+    greeting = f"أهلاً {display_name} 👋"
+    paragraphs = [
+        f"لاحظنا أنك قمت بتفعيل <strong>تجربة باقة Pro المجانية</strong> لمدة 3 أيام، ونود التأكد من حصولك على أقصى استفادة قبل انتهاء فترة التجربة <strong>(بتاريخ {end_date[:10]})</strong>.",
+        f"1️⃣ <strong>رابط قناة التنبيهات الفنية VIP على تليجرام:</strong><br/>"
+        f"انضم الآن لقناة التنبيهات اللحظية عبر الرابط المخصص لحسابك:<br/>"
+        f"<a href='{invite_link}' style='color:#10b981;font-weight:bold;'>{invite_link}</a>",
+        "2️⃣ <strong>جرب الشات بوت الذكي الآن:</strong><br/>"
+        "اسأل الشات بوت عن أي سهم في محفظتك بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.",
+        "💡 <strong>تثبيت السعر:</strong> يمكنك الاستمرار بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل انتهاء الفترة التجريبية.",
+    ]
+    cta_text = "بدء استخدام الشات بوت وفحص الأسهم"
+    cta_url = f"{APP_URL}/ai-chat"
+
+    html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
+    send_meta: Dict[str, Any] = {}
+    if send_resend_email(email, subject, html, out=send_meta):
+        record_marketing_message(
+            user_id,
+            email,
+            "trial_onboarding",
+            {"invite_link": invite_link, "end_date": end_date},
+            provider_message_id=send_meta.get("provider_message_id")
+        )
+        return True
+    return False
+
+
 def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bool:
     """Sends the high-converting 3-Day Pro Trial & Founders scarcity email to active free users."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "founders_offer", cooldown_days=7):
@@ -134,6 +167,7 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
         "dry_run": dry_run,
         "renewals_sent": 0,
         "expired_sent": 0,
+        "onboarding_sent": 0,
         "founders_sent": 0,
         "skipped": 0,
         "remaining_daily_cap": remaining_quota,
@@ -211,7 +245,51 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
                     print(f"[SENT] Renewal email sent to: {email} ({dname})", flush=True)
                 time.sleep(0.5)
 
-    # 3. Priority B: Recently Expired Subscriptions (ended in last 4 days, not renewed)
+    # 3. Priority A2: Active Trialing Users needing onboarding & VIP invite
+    trialing_subs = (
+        supabase.table("subscriptions")
+        .select("id, user_id, plan_id, status, current_period_end")
+        .eq("status", "trialing")
+        .execute()
+        .data or []
+    )
+    for tsub in trialing_subs:
+        if sent_this_run >= limit_for_this_run:
+            break
+        t_uid = tsub["user_id"]
+        t_end = tsub.get("current_period_end") or ""
+        if not t_end:
+            continue
+        try:
+            t_end_dt = datetime.fromisoformat(t_end.replace("Z", "+00:00"))
+            if t_end_dt < now:
+                continue
+        except Exception:
+            continue
+        t_email = email_map.get(t_uid) or get_user_email(t_uid)
+        if not t_email or "@" not in t_email or is_user_unsubscribed(t_uid, t_email):
+            continue
+        if has_recent_message(t_uid, "trial_onboarding", cooldown_days=2):
+            continue
+        # get VIP invite link
+        inv_row = supabase.table("pro_telegram_invites").select("invite_link").eq("user_id", t_uid).maybe_single().execute().data or {}
+        inv_link = inv_row.get("invite_link") or "https://t.me/egxbots"
+        t_prof = supabase.table("profiles").select("display_name, username").eq("id", t_uid).maybe_single().execute().data or {}
+        t_name = t_prof.get("display_name") or t_prof.get("username") or "صديقنا العزيز"
+
+        if dry_run:
+            print(f"[DRY-RUN] Would send Trial Onboarding email to: {t_email} ({t_name})", flush=True)
+            results["onboarding_sent"] += 1
+            sent_this_run += 1
+        else:
+            ok = send_trial_onboarding_email(t_uid, t_email, t_name, inv_link, t_end)
+            if ok:
+                results["onboarding_sent"] += 1
+                sent_this_run += 1
+                print(f"[SENT] Trial Onboarding email sent to: {t_email} ({t_name})", flush=True)
+            time.sleep(0.5)
+
+    # 4. Priority B: Recently Expired Subscriptions (ended in last 4 days, not renewed)
     expired_subs = (
         supabase.table("subscriptions")
         .select("id, user_id, plan_id, status, current_period_end")
@@ -278,7 +356,7 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
             continue
 
         # Filter out test domains, known bad addresses, and admin accounts
-        fake_patterns = ["@example.", "@test.", "test1@", "test2@", "weeeenew", "fakeuse", "ghgfhgfh", "123456", "asdfgh"]
+        fake_patterns = ["@example.", "@test.", "test@", "test1@", "test2@", "weeeenew", "fakeuse", "fakebot", "ghgfhgfh", "123456", "asdfgh", ".cim"]
         if any(pat in email.lower() for pat in fake_patterns):
             continue
         if email.lower() in ["user@gmail.com", "weeessd57@gmail.com"]:

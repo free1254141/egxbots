@@ -2554,7 +2554,7 @@ describe("Agentic tool correctness and failure boundaries", () => {
         };
 
         // When a user asks "حلل دى" with a chart of EGX30 after previous conversation was about ABUK
-        const stream = runAgenticPipelineStream({
+        const stream = (runAgenticPipelineStream as any)({
             userMessage: "حلل دى",
             images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             sessionState: {
@@ -2620,5 +2620,12 @@ describe("Agentic tool correctness and failure boundaries", () => {
 
         // Must emit plan without crashing and handle vision properly
         expect(planEmitted).toBeDefined();
+    });
+
+    test("response max tokens is at least 4000 and prompt enforces conciseness to prevent double generation", () => {
+        const { AI_CONFIG } = require("../config");
+        expect(AI_CONFIG.limits.responseMaxTokens).toBeGreaterThanOrEqual(4000);
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("كن مكثفاً وموجزاً ومباشراً");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("يمنع منعاً باتاً كتابة فقرات أو أقسام مستقلة لسرد ما لم تُرجعه الأدوات");
     });
 });
