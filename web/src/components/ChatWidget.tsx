@@ -55,7 +55,8 @@ export default function ChatWidget() {
         isSidebarOpen,
         setIsSidebarOpen,
         autonomousRecommendations,
-        setAutonomousRecommendations
+        setAutonomousRecommendations,
+        isAccessReady
     } = useChat();
 
     const { language } = useLanguage();
@@ -91,12 +92,12 @@ export default function ChatWidget() {
         toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
     };
 
-    // Auto-disable autonomous recs if user is not Pro
+    // Auto-disable autonomous recs ONLY after server access check is ready and confirms user is not Pro
     useEffect(() => {
-        if (!isPro && autonomousRecommendations) {
+        if (isAccessReady && !isPro && autonomousRecommendations) {
             setAutonomousRecommendations(false);
         }
-    }, [isPro, autonomousRecommendations, setAutonomousRecommendations]);
+    }, [isAccessReady, isPro, autonomousRecommendations, setAutonomousRecommendations]);
 
     // Chat Wallpaper preferences
     const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);

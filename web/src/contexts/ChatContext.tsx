@@ -76,6 +76,7 @@ interface ChatContextType {
     setIsSidebarOpen: (v: boolean) => void;
     autonomousRecommendations: boolean;
     setAutonomousRecommendations: (enabled: boolean) => void;
+    isAccessReady: boolean;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -199,6 +200,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             localStorage.setItem("artoro_autonomous_recs_enabled", String(enabled));
             window.dispatchEvent(new CustomEvent("artoro-autonomous-recs-changed", { detail: { enabled } }));
         }
+        void fetch("/api/ai-chat?action=settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update_settings", autonomous_recommendations: enabled }),
+        }).catch((err) => {
+            console.warn("Failed to persist autonomous recommendations to Supabase:", err);
+        });
     }, []);
 
     useEffect(() => {
@@ -459,6 +467,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 setRemainingQuota(data.remaining_quota);
                 if (typeof data.quota_limit === "number") setQuotaLimit(data.quota_limit);
                 if (typeof data.is_pro === "boolean") setIsPro(data.is_pro);
+                if (typeof data.autonomous_recommendations === "boolean") {
+                    const isAutonomous = Boolean(data.is_pro && data.autonomous_recommendations);
+                    setAutonomousRecommendationsState(isAutonomous);
+                    if (typeof window !== "undefined") {
+                        localStorage.setItem("artoro_autonomous_recs_enabled", String(isAutonomous));
+                    }
+                }
                 setAccessState({ owner, status: "ready" });
             } catch (e) {
                 if (accessOwnerRef.current === owner) setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "error" });
@@ -993,7 +1008,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             isSidebarOpen,
             setIsSidebarOpen,
             autonomousRecommendations,
-            setAutonomousRecommendations
+            setAutonomousRecommendations,
+            isAccessReady: accessState.status === "ready"
         }}>
             {children}
         </ChatContext.Provider>

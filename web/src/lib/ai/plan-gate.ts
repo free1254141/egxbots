@@ -85,15 +85,18 @@ export function isPro(rows: Array<{ plan_id?: unknown; status?: unknown; current
 }
 
 /** Strict entitlement check for paid-only features, regardless of billing mode. */
-export function hasActiveProSubscription(rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>): boolean {
-  const now = Date.now();
+export function hasActiveProSubscription(
+  rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>,
+  now: Date | number = Date.now()
+): boolean {
+  const nowMs = typeof now === "number" ? now : now.getTime();
   return (rows || []).some((row) => {
     const plan = String(row.plan_id || "").toLowerCase();
     if (!(PRO_PLAN_IDS as readonly string[]).includes(plan)) return false;
     if (!["active", "trialing"].includes(String(row.status || "").toLowerCase())) return false;
     if (!row.current_period_end) return true;
     const end = new Date(String(row.current_period_end)).getTime();
-    return Number.isFinite(end) && end > now;
+    return Number.isFinite(end) && end > nowMs;
   });
 }
 
@@ -134,7 +137,7 @@ export function resolveSubscriptionQuotaWindow(
   now: Date = new Date()
 ): SubscriptionQuotaWindow {
   const list = Array.isArray(rows) ? rows : [];
-  const pro = hasActiveProSubscription(list);
+  const pro = hasActiveProSubscription(list, now);
   const nowMs = now.getTime();
   const activeSub =
     list.find((row) => {

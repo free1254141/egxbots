@@ -424,6 +424,46 @@ async function handleSessionResolution(
     return res.activeSessionId;
 }
 
+async function persistAutonomousSetting(supabaseClient: any, userId: string, enabled: boolean) {
+    if (!supabaseClient || !userId) return;
+    try {
+        const { data: settingsRow } = await supabaseClient
+            .from("user_settings")
+            .select("app_state")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+        const currentAppState = (settingsRow?.app_state && typeof settingsRow.app_state === "object") ? settingsRow.app_state : {};
+        const newAppState = {
+            ...currentAppState,
+            chat: {
+                ...(currentAppState.chat || {}),
+                autonomous_recommendations: enabled,
+            },
+            autonomous_recommendations: enabled,
+        };
+
+        if (settingsRow) {
+            await supabaseClient
+                .from("user_settings")
+                .update({
+                    app_state: newAppState,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", userId);
+        } else {
+            await supabaseClient.from("user_settings").insert({
+                user_id: userId,
+                app_state: newAppState,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            });
+        }
+    } catch (err) {
+        console.warn("[persistAutonomousSetting] Failed to persist autonomous recommendations:", err);
+    }
+}
+
 export async function POST(req: NextRequest) {
     const requestReceivedAt = Date.now();
     const totalRequestStartTime = Date.now();
@@ -437,6 +477,9 @@ export async function POST(req: NextRequest) {
         try {
             supabase = getSupabaseServiceClient();
         } catch {
+            supabase = getSupabaseClient();
+        }
+        if (!supabase) {
             supabase = getSupabaseClient();
         }
 
@@ -472,6 +515,21 @@ export async function POST(req: NextRequest) {
             }
         }
         const body = await req.json();
+
+        const { searchParams } = new URL(req.url);
+        const action = searchParams.get("action");
+        if (action === "settings" || body.action === "update_settings") {
+            if (billingOn && !isUnlimited && !userIsPro) {
+                return NextResponse.json({
+                    error: "ميزة وضع التوصيات الحرة حصرية لمشتركي باقة Pro.",
+                    is_pro: false,
+                }, { status: 403 });
+            }
+            const enabled = Boolean(body.autonomous_recommendations);
+            await persistAutonomousSetting(supabase, userId, enabled);
+            return NextResponse.json({ ok: true, autonomous_recommendations: enabled });
+        }
+
         const diagnostics = createDiagnosticTrace(canTraceChat(user));
         diagnostics.capture("http_request", { message: body.message, history: body.history, model: body.model,
             session_id: body.session_id, client_message_id: body.client_message_id, stream: body.stream,
@@ -521,7 +579,22 @@ export async function POST(req: NextRequest) {
         const asksProRecs = /(?:توصيات|توصيه|اشارات|اشاره|ترشيحات|recommendations?|signals?)/i.test(normalizedForGate)
             && !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedForGate)
             && !asksClosedRecsOnly;
-        const autonomousRecommendations = (!billingOn || isUnlimited || userIsPro) ? Boolean(body.autonomous_recommendations) : false;
+        let autonomousRecommendations = (!billingOn || isUnlimited || userIsPro) ? Boolean(body.autonomous_recommendations) : false;
+        if (!autonomousRecommendations && (!billingOn || isUnlimited || userIsPro)) {
+            try {
+                const { data: settingsRow } = await supabase
+                    .from("user_settings")
+                    .select("app_state")
+                    .eq("user_id", userId)
+                    .maybeSingle();
+                const appState = settingsRow?.app_state || {};
+                if (Boolean(appState.chat?.autonomous_recommendations ?? appState.autonomous_recommendations)) {
+                    autonomousRecommendations = true;
+                }
+            } catch (err) {
+                console.warn("[autonomousRecommendations] Failed to read fallback setting:", err);
+            }
+        }
         const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
         if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && (asksProRecs || mentionsAutonomousMode)) {
             try {
@@ -821,9 +894,13 @@ export async function POST(req: NextRequest) {
                                     break;
                                 case "enable_autonomous_recs":
                                     sendEvent({ type: "enable_autonomous_recs", enabled: true });
+                                    if (!billingOn || isUnlimited || userIsPro) {
+                                        void persistAutonomousSetting(supabase, userId, true);
+                                    }
                                     break;
                                 case "disable_autonomous_recs":
                                     sendEvent({ type: "disable_autonomous_recs", enabled: false });
+                                    void persistAutonomousSetting(supabase, userId, false);
                                     break;
                                 case "vision_result":
                                     sendEvent({ type: "vision", data: event.data });
@@ -1157,6 +1234,14 @@ export async function POST(req: NextRequest) {
             disable_autonomous_recs: (pipelineResult as any).disable_autonomous_recs || undefined
         });
 
+        if ((pipelineResult as any).enable_autonomous_recs) {
+            if (!billingOn || isUnlimited || userIsPro) {
+                await persistAutonomousSetting(supabase, userId, true);
+            }
+        } else if ((pipelineResult as any).disable_autonomous_recs) {
+            await persistAutonomousSetting(supabase, userId, false);
+        }
+
     } catch (error: any) {
         console.error("Critical Chat API Error:", error);
         if (supabase && userId) {
@@ -1177,7 +1262,15 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
     try {
         const authClient = await createSupabaseServerClient(req);
-        const supabase = getSupabaseClient();
+        let supabase: any = null;
+        try {
+            supabase = getSupabaseServiceClient();
+        } catch {
+            supabase = getSupabaseClient();
+        }
+        if (!supabase) {
+            supabase = getSupabaseClient();
+        }
 
         const { data: { user }, error: authError } = await authClient.auth.getUser();
         if (authError || !user) {
@@ -1233,11 +1326,28 @@ export async function GET(req: NextRequest) {
                 usedCount = limitData?.chat_count || 0;
             }
 
+            let savedAutonomousRecs = false;
+            try {
+                const { data: settingsRow } = await supabase
+                    .from("user_settings")
+                    .select("app_state")
+                    .eq("user_id", userId)
+                    .maybeSingle();
+                const appState = settingsRow?.app_state || {};
+                savedAutonomousRecs = Boolean(
+                    appState.chat?.autonomous_recommendations ??
+                    appState.autonomous_recommendations
+                );
+            } catch (err) {
+                console.warn("[sessions GET] Failed to fetch user_settings:", err);
+            }
+
             return NextResponse.json({
                 sessions: sessions || [],
                 remaining_quota: isUnlimited ? 999 : Math.max(0, quotaLimit - usedCount),
                 quota_limit: isUnlimited ? 999 : quotaLimit,
-                is_pro: isUnlimited || userIsPro
+                is_pro: isUnlimited || userIsPro,
+                autonomous_recommendations: (isUnlimited || userIsPro) ? savedAutonomousRecs : false,
             });
         }
 

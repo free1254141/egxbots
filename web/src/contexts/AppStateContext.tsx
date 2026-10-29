@@ -564,6 +564,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const lastSettingsFetchedAtRef = useRef<number>(0);
   const lastSettingsUserIdRef = useRef<string | null>(null);
   const lastPersistedSettingsRef = useRef<string | null>(null);
+  const remoteExtraAppStateRef = useRef<Record<string, any>>({});
   const SETTINGS_STALE_TIME_MS = 60 * 1000; // 1 minute
 
   useEffect(() => {
@@ -600,6 +601,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       const remote = row?.app_state as PersistedAppState | undefined;
+      if (row?.app_state && typeof row.app_state === "object") {
+        remoteExtraAppStateRef.current = { ...row.app_state };
+      }
 
 
       const hasRemote = remote && typeof remote === "object" && Object.keys(remote as any).length > 0;
@@ -665,10 +669,29 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       const serialized = JSON.stringify(fullPersisted);
       if (lastPersistedSettingsRef.current === serialized) return;
       lastPersistedSettingsRef.current = serialized;
-      const timeoutId = window.setTimeout(() => {
+      const timeoutId = window.setTimeout(async () => {
+        let baseAppState = remoteExtraAppStateRef.current || {};
+        try {
+          const { data: freshRow } = await supabase
+            .from("user_settings")
+            .select("app_state")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (freshRow?.app_state && typeof freshRow.app_state === "object") {
+            baseAppState = { ...baseAppState, ...freshRow.app_state };
+            remoteExtraAppStateRef.current = baseAppState;
+          }
+        } catch {}
+
+        const mergedAppState = {
+          ...baseAppState,
+          ...fullPersisted,
+        };
+
         void supabase.from("user_settings").upsert({
           user_id: user.id,
-          app_state: fullPersisted // Save everything to cloud
+          app_state: mergedAppState,
+          updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
       }, 1500); // Slightly longer debounce for full sync
 
