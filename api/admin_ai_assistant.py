@@ -144,22 +144,21 @@ def tool_get_market_overview() -> Dict[str, Any]:
 
 
 def tool_query_market_engine(query: str) -> Dict[str, Any]:
-    """Queries Next.js chat engine route to get official platform analysis."""
-    app_url = os.getenv("NEXT_PUBLIC_APP_URL") or "http://localhost:3000"
-    url = f"{app_url}/api/admin/chat-engine"
-    admin_key = (os.getenv("ADMIN_SECRET_KEY") or "").strip()
-    payload = json.dumps({"message": query}).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json", "x-admin-key": admin_key},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return {"pipeline_response": data.get("response", "")}
-    except Exception as exc:
-        return {"note": "Market engine direct route unavailable, using direct DB data", "error": str(exc)}
+    """Provides market/platform analysis natively in Python without calling Vercel Serverless."""
+    _init_supabase()
+    if not supabase:
+        return {"note": "Market database directly queried", "summary": "Database unavailable"}
+    
+    # Extract symbol if user asked about a specific stock
+    words = [w.strip(".,;:!?()[]/\\").upper() for w in (query or "").split()]
+    for word in words:
+        if 2 <= len(word) <= 6 and word.isalpha():
+            quote = tool_get_stock_quote(word)
+            if quote.get("found"):
+                return {"stock_data": quote, "note": f"بيانات مباشرة من البورصة المصرية لرمز {word}"}
+                
+    # Default to market overview
+    return tool_get_market_overview()
 
 
 # -------------------------------------------------------------------------

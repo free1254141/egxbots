@@ -13,7 +13,7 @@ export async function fetchHistoricalSimilarity(symbol?: string, sameContext = f
   if (symbol) params.set("symbol", symbol);
   else params.set("view", "summary");
   if (sameContext) params.set("context", "matched");
-  const response = await fetch(`/api/scan/similarity/published?${params}`, { cache: "no-store", signal });
+  const response = await fetch(`/api/scan/similarity/published?${params}`, { signal });
   if (!response.ok) throw new Error(`Similarity report unavailable (${response.status})`);
   return response.json();
 }
@@ -2114,7 +2114,7 @@ export async function getStockFundamentals(ticker: string): Promise<any> {
 
   try {
 
-    const res = await fetch(`/api/market/fundamentals?ticker=${encodeURIComponent(ticker)}`, { cache: "no-store" });
+    const res = await fetch(`/api/market/fundamentals?ticker=${encodeURIComponent(ticker)}`);
 
     if (!res.ok) return null;
 
@@ -2202,7 +2202,7 @@ export async function getAdaptiveRecommendation(params: {
 
   const fetchUrl = `${baseUrl ? `${baseUrl}/adaptive/recommendation` : "/api/adaptive/recommendation"}?${query.toString()}`;
 
-  const res = await fetch(fetchUrl, { cache: "no-store" });
+  const res = await fetch(fetchUrl);
 
   if (!res.ok) {
 
@@ -2244,8 +2244,8 @@ export interface PublicMarketOverview {
 
 export async function getPublicMarketOverview(signal?: AbortSignal): Promise<PublicMarketOverview> {
   const [statusResponse, breadthResponse] = await Promise.all([
-    fetch("/api/market/status", { cache: "no-store", signal }),
-    fetch("/api/market/breadth", { cache: "no-store", signal }),
+    fetch("/api/market/status", { signal }),
+    fetch("/api/market/breadth", { signal }),
   ]);
   const [status, breadth] = await Promise.all([
     statusResponse.ok ? statusResponse.json() : null,
@@ -2256,7 +2256,7 @@ export async function getPublicMarketOverview(signal?: AbortSignal): Promise<Pub
 
 export async function getRecommendationChartHistory(symbol: string, exchange: string, signal?: AbortSignal): Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }> {
   const params = new URLSearchParams({ symbol, exchange });
-  const response = await fetch(`/api/recommendations/chart-markers?${params}`, { cache: "no-store", signal });
+  const response = await fetch(`/api/recommendations/chart-markers?${params}`, { signal });
   if (!response.ok) throw new Error(`Failed to load recommendation history (${response.status})`);
   const data = await response.json();
   return {

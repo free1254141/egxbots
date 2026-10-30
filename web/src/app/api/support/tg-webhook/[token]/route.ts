@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const preferredRegion = "fra1"; // Prevent multi-region cold starts
+export const runtime = "edge";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const token = process.env.SUPPORT_BOT_TOKEN?.trim();
@@ -17,12 +15,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       return NextResponse.json({ error: "Backend URL is not secure" }, { status: 503 });
     }
     const target = new URL(`/support-tg-webhook/${encodeURIComponent(token)}`, backendUrl);
+    const bodyText = await req.text();
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: await req.text(),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
+      body: bodyText,
+      signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) return NextResponse.json({ error: "Backend rejected update" }, { status: 502 });
     return NextResponse.json({ ok: true });

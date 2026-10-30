@@ -852,7 +852,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             } else {
                 // Use the session-aware API for the public scanner as well. A
                 // browser Supabase query bypasses the server-side delay gate.
-                const response = await fetch("/api/ai_bot/recommendations?limit=200", { cache: "no-store" });
+                const response = await fetch("/api/ai_bot/recommendations?limit=200");
                 if (!response.ok) throw new Error("Failed to load recommendations");
                 scanData = await response.json();
             }

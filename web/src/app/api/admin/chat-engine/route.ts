@@ -14,7 +14,14 @@ export async function POST(req: NextRequest) {
     const host = req.headers.get("host") || "";
     const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
 
-    if (!isLocal && (!expectedKey || adminKey !== expectedKey)) {
+    if (!isLocal) {
+        return NextResponse.json({
+            ok: false,
+            error: "Remote execution disabled on Vercel to prevent Serverless CPU exhaustion. Market queries must run natively in Python on Hugging Face Spaces.",
+        }, { status: 403 });
+    }
+
+    if (!expectedKey || adminKey !== expectedKey) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 

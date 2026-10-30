@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getPublicMarketClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 // The chart needs public market data, never the privileged admin proxy.
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query.maybeSingle();
     if (error) return NextResponse.json({ error: "Fundamentals unavailable" }, { status: 503 });
     return NextResponse.json({ data: data?.data || null }, {
-      headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" },
+      headers: { "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400" },
     });
   } catch {
     return NextResponse.json({ error: "Fundamentals unavailable" }, { status: 503 });

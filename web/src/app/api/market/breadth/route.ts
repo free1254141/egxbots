@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getSupabaseClient } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const PUBLIC_CACHE_HEADERS = dailyCacheHeaders(DAILY_CACHE_TAGS.market);
@@ -54,8 +55,8 @@ function classifyEgxSector(rawSector: string, rawIndustry: string): { sector: st
   return { sector: "Other Sectors", sector_ar: "قطاعات متنوعة أخرى" };
 }
 
-export async function GET(req: Request) {
-  try {
+const computeMarketBreadth = unstable_cache(
+  async () => {
     const supabase = getSupabaseClient();
 
     // 1. Get the latest available date for EGX
@@ -68,7 +69,7 @@ export async function GET(req: Request) {
 
     if (dateError || !dateRows || dateRows.length === 0) {
       console.error("Failed to fetch latest technical indicator date:", dateError);
-      return NextResponse.json({ error: "No technical indicator data available" }, { status: 404 });
+      return null;
     }
 
     const latestDate = dateRows[0].date;
@@ -100,7 +101,7 @@ export async function GET(req: Request) {
 
     if (indError || !indicators || indicators.length === 0) {
       console.error("Failed to fetch indicators for date:", latestDate, indError);
-      return NextResponse.json({ error: "Failed to fetch indicators" }, { status: 500 });
+      return null;
     }
 
     const nameMap = new Map<string, string>();
@@ -386,7 +387,7 @@ export async function GET(req: Request) {
     const dailySummaryAr = `بلغ إجمالي السيولة المتداولة في السوق ${totalTurnoverBillion.toFixed(2)} مليار ج.م (${totalTurnoverMillion.toLocaleString("en-US")} مليون ج.م) بنسبة ${turnoverVs20dPct.toFixed(1)}% من متوسط 20 جلسة (${avg20dTurnoverMillion.toLocaleString("en-US")} مليون ج.م). استحوذت الأسهم الصاعدة على ${advancingTurnoverPct.toFixed(1)}% من السيولة مقابل ${decliningTurnoverPct.toFixed(1)}% للأسهم الهابطة${leadSector ? `، وتصدر قطاع «${leadSector.sector_ar}» التداولات بحصة ${leadSector.market_share_pct.toFixed(1)}%` : ""}${leadStock ? ` بقيادة سهم ${leadStock.symbol} (${leadStock.turnover_million_egp.toFixed(1)} مليون ج.م)` : ""}.`;
     const dailySummaryEn = `Total market turnover reached ${totalTurnoverBillion.toFixed(2)}B EGP (${totalTurnoverMillion.toLocaleString("en-US")}M EGP), at ${turnoverVs20dPct.toFixed(1)}% of the 20-day average (${avg20dTurnoverMillion.toLocaleString("en-US")}M EGP). Advancing stocks captured ${advancingTurnoverPct.toFixed(1)}% of liquidity vs ${decliningTurnoverPct.toFixed(1)}% in declining stocks${leadSector ? `, led by ${leadSector.sector} (${leadSector.market_share_pct.toFixed(1)}% share)` : ""}${leadStock ? ` and top stock ${leadStock.symbol} (${leadStock.turnover_million_egp.toFixed(1)}M EGP)` : ""}.`;
 
-    return NextResponse.json({
+    return {
       health_score: healthScore,
       health_label: healthLabel,
       advancing,
@@ -431,7 +432,19 @@ export async function GET(req: Request) {
         top_sectors: topSectors,
         top_liquidity_stocks: topLiquidityStocks,
       },
-    }, { headers: PUBLIC_CACHE_HEADERS });
+    };
+  },
+  ["market-breadth-egx-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] }
+);
+
+export async function GET() {
+  try {
+    const payload = await computeMarketBreadth();
+    if (!payload) {
+      return NextResponse.json({ error: "Failed to fetch indicators" }, { status: 500 });
+    }
+    return NextResponse.json(payload, { headers: PUBLIC_CACHE_HEADERS });
   } catch (error) {
     console.error("Breadth API error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

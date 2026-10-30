@@ -19,7 +19,7 @@ export function requestShortSwings(viewerKey: string, refresh = false): Promise<
     if (!entry.pending && (key !== viewerKey || entry.expires <= Date.now())) requests.delete(key);
   }
   const entry: RequestEntry = { promise: null as unknown as Promise<ShortSwingsData>, pending: true, expires: 0 };
-  entry.promise = fetch("/api/short-swings", { cache: "no-store" }).then(async response => {
+  entry.promise = fetch("/api/short-swings").then(async response => {
     if (!response.ok) throw new Error(`Short swings HTTP ${response.status}`);
     return response.json() as Promise<ShortSwingsData>;
   }).then(data => {

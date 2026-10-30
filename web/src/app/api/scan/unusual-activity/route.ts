@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { priorTwentySessionHigh } from "@/lib/unusualActivity";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const MIN_RELATIVE_VOLUME = 2;
@@ -16,8 +17,8 @@ function finite(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export async function GET() {
-  try {
+const getCachedUnusualActivity = unstable_cache(
+  async () => {
     const supabase = getSupabaseServiceClient({ cacheMarketData: true });
     const { data: latestRows, error: latestError } = await supabase
       .from("stock_technical_indicators")
@@ -27,7 +28,7 @@ export async function GET() {
       .limit(1);
     if (latestError) throw latestError;
     const asOf = latestRows?.[0]?.date ? String(latestRows[0].date).slice(0, 10) : null;
-    if (!asOf) return NextResponse.json({ asOf: null, coverage: 0, totalMatches: 0, rows: [] }, { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.market) });
+    if (!asOf) return { asOf: null, coverage: 0, totalMatches: 0, threshold: MIN_RELATIVE_VOLUME, rows: [] };
 
     const { data: indicators, error: indicatorsError } = await supabase
       .from("stock_technical_indicators")
@@ -82,10 +83,16 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json(
-      { asOf, coverage: bySymbol.size, totalMatches: unusual.length, threshold: MIN_RELATIVE_VOLUME, rows },
-      { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.market) },
-    );
+    return { asOf, coverage: bySymbol.size, totalMatches: unusual.length, threshold: MIN_RELATIVE_VOLUME, rows };
+  },
+  ["unusual-activity-egx-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] }
+);
+
+export async function GET() {
+  try {
+    const payload = await getCachedUnusualActivity();
+    return NextResponse.json(payload, { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.market) });
   } catch (error) {
     console.error("[UNUSUAL_ACTIVITY] Failed to load latest technical snapshot", error);
     return NextResponse.json({ error: "Unusual activity is temporarily unavailable." }, { status: 503 });
