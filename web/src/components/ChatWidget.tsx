@@ -509,13 +509,14 @@ export default function ChatWidget() {
     return (
         <div 
             className={isChatRoute ? "fixed inset-0 z-[9999] flex h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0" : `
-                fixed z-[9999] flex gap-1 bg-transparent
-                animate-in fade-in slide-in-from-bottom-5 duration-200 transition-all
-                max-md:inset-0 max-md:w-full max-md:h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
+                fixed bottom-0 right-0 md:bottom-6 md:right-6 z-[9999] flex gap-1 bg-transparent origin-bottom-right
+                animate-in fade-in slide-in-from-bottom-5 duration-200
+                max-md:w-full max-md:h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
                 md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
+                transition-[width,height] duration-200
                 ${isExpanded 
-                    ? "md:top-4 md:bottom-4 md:left-4 md:right-4 md:w-[calc(100vw-2rem)] md:h-[calc(100vh-2rem)]"
-                    : "md:bottom-6 md:right-6 md:top-auto md:left-auto md:w-[740px] md:h-[680px]"
+                    ? "w-full h-[100dvh] md:w-[calc(100vw-3rem)] md:h-[calc(100vh-3rem)]"
+                    : "w-full h-[100dvh] md:w-[740px] md:h-[680px]"
                 }
             `}
         >
