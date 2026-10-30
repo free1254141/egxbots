@@ -152,8 +152,32 @@ export default function PricingClient() {
   const [pollingExhausted, setPollingExhausted] = useState(false);
 
   // Live founders counter from backend — refreshed every time localConfig is fetched
+  const isGrandfathered = Boolean(
+    localConfig?.founders?.is_grandfathered ||
+    localConfig?.plans?.find((p: any) => p.id === "pro")?.is_grandfathered_renewal
+  );
   const foundersRemaining: number = localConfig?.founders?.remaining ?? null;
   const foundersIsOpen: boolean = localConfig?.founders?.is_open ?? true;
+  const foundersEndsAt: string | null = localConfig?.founders?.ends_at ?? null;
+
+  // Countdown timer for the time-limited founders offer
+  const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
+  useEffect(() => {
+    if (!foundersEndsAt) { setFoundersCountdown(null); return; }
+    const update = () => {
+      const diffMs = new Date(foundersEndsAt).getTime() - Date.now();
+      if (diffMs <= 0) { setFoundersCountdown("00:00:00"); return; }
+      const d = Math.floor(diffMs / 86400000);
+      const h = Math.floor((diffMs % 86400000) / 3600000);
+      const m = Math.floor((diffMs % 3600000) / 60000);
+      const s = Math.floor((diffMs % 60000) / 1000);
+      if (d > 0) setFoundersCountdown(`${d}ي ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+      else setFoundersCountdown(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+    };
+    update();
+    const iv = setInterval(update, 1000);
+    return () => clearInterval(iv);
+  }, [foundersEndsAt]);
 
   // Live lifetime spots counter from backend — strictly limited to 20 users
   const lifetimeLimit: number = localConfig?.lifetime?.limit ?? 20;
@@ -1099,8 +1123,10 @@ export default function PricingClient() {
                   id: "pro" as const,
                   name_ar: "شهر واحد",
                   name_en: "1 Month",
-                  badge_ar: foundersRemaining !== null ? `50 ج.م (${foundersRemaining} مقعد) 🔥` : "50 ج.م 🔥",
-                  badge_en: "50 EGP 🔥",
+                  badge_ar: isGrandfathered
+                    ? "50 ج.م (تجديد حصري مدى الحياة) ⚡"
+                    : (foundersCountdown ? `100 ج.م ⏰ ${foundersCountdown} (تثبيت مدى الحياة)` : "100 ج.م مدى الحياة 🔥"),
+                  badge_en: isGrandfathered ? "50 EGP (Renewal for life) ⚡" : "100 EGP (Locked for life) 🔥",
                   badgeBg: "bg-amber-300 text-black",
                 },
                 {
@@ -1253,9 +1279,9 @@ export default function PricingClient() {
                     }`}
                   >
                     {isMonthly && planDiscount ? (
-                      foundersRemaining !== null
-                        ? `عرض المؤسسين (باقي ${foundersRemaining} مقعد)`
-                        : planDiscount.label_ar || "عرض محدود"
+                      foundersCountdown
+                        ? `عرض المؤسسين 100 ج.م مدى الحياة (ينتهي خلال ⏰ ${foundersCountdown})`
+                        : (planDiscount.label_ar || "عرض المؤسسين (100 ج.م شهرياً مدى الحياة) 🔥")
                     ) : isFeatured ? (
                       isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular"
                     ) : (
@@ -1339,9 +1365,13 @@ export default function PricingClient() {
                         <span>{isAr ? "عرض المؤسسين الأوائل:" : "Founding Member Perk:"}</span>
                       </div>
                       <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-200">
-                        {isAr
-                          ? "50 ج.م شهرياً للأول 100 مشترك مع مهلة سماح 72 ساعة للتجديد بهذا السعر."
-                          : "50 EGP/mo for first 100 members with 72h renewal grace period."}
+                        {isGrandfathered
+                          ? (isAr
+                            ? "50 ج.م شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة)."
+                            : "50 EGP/mo grandfathered founders rate active for your account as long as renewed.")
+                          : (isAr
+                            ? "100 ج.م شهرياً عرض باقة المؤسسين (بدلاً من 200 ج.م) متاح لمدة 15 يوماً فقط — يثبت سعرك بـ 100 ج.م مدى الحياة طول ما بتجدد، مع مهلة سماح 72 ساعة (3 أيام) لتثبيت السعر عند كل تجديد."
+                            : "100 EGP/mo limited 15-day founders offer (instead of 200 EGP) — locks your 100 EGP/mo rate for life as long as renewed, with 72h renewal grace period.")}
                       </p>
                     </div>
                   )}
@@ -1588,7 +1618,7 @@ export default function PricingClient() {
                           </span>
                         ) : plan.id === "pro" ? (
                           <span className="text-amber-600 dark:text-amber-400 font-bold">
-                            {foundersRemaining !== null ? (isAr ? `باقي ${foundersRemaining} مؤسس` : `${foundersRemaining} spots`) : "متاح"}
+                            {foundersCountdown ? (isAr ? `ينتهي خلال ⏰ ${foundersCountdown}` : `Ends in ⏰ ${foundersCountdown}`) : (isAr ? "عرض 15 يوم فقط 🔥" : "15-day offer 🔥")}
                           </span>
                         ) : (
                           <span className="text-emerald-600 font-bold">{isAr ? "متاح فوري" : "Available"}</span>

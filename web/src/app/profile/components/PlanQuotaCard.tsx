@@ -523,8 +523,8 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>
                   {isAr 
-                    ? "مهلة تجديد المؤسسين: تمنح 72 ساعة سماح بعد تاريخ الانتهاء لتجديد اشتراكك بـ 50 ج.م فقط قبل تحويل الحساب للسعر الرسمي (200 ج.م)."
-                    : "Founding member grace period: 72 hours window after expiry to renew at 50 EGP before standard 200 EGP pricing applies."}
+                    ? "مهلة تجديد المؤسسين: تمنح 72 ساعة سماح (3 أيام) بعد تاريخ الانتهاء لتجديد اشتراكك بسعر المؤسسين المخفض مدى الحياة قبل تحويل الحساب للسعر الرسمي (200 ج.م)."
+                    : "Founding member grace period: 72 hours window after expiry to renew at your locked founders rate for life before regular 200 EGP pricing applies."}
                 </span>
               </span>
               <Link 

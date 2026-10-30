@@ -565,7 +565,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
                 )
             free_lines.append("━━━━━━━━━━━━━━━━━━━━")
             free_lines.append("⚡ <i>تم رصد هذه الإشارة الفنية الخوارزمية لحظياً لمشتركي VIP وقت انطلاق السهم بمستويات الرصد والوقف المحسوبة آلياً.</i>\n")
-            free_lines.append("🔥 لا تفوّت إشارات الجلسة القادمة — احجز مقعدك الآن في <b>باقة المؤسسين بـ 50 ج.م فقط شهرياً</b> بدلاً من 200 ج.م!")
+            free_lines.append("🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ 100 ج.م فقط شهرياً</b> بدلاً من 200 ج.م (لفترة محدودة 15 يوماً فقط)!")
             free_lines.append("👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing")
             send_telegram_alert(free_channel, "\n".join(free_lines))
 

@@ -164,7 +164,7 @@ export default function BillingTab() {
                         {/* Plan prices */}
                         <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 space-y-4 shadow-[6px_6px_0px_rgba(0,0,0,1)]">
                             <h3 className="text-sm font-black uppercase tracking-widest text-emerald-600">أسعار الباقات (ج.م)</h3>
-                            {foundersOffer && <p className="text-sm font-bold">عرض الشهر بـ50 ج.م مستمر حتى اكتمال أول 100 مشترك، بدون تاريخ انتهاء. بعدها يصبح سعر الشهر 200 ج.م.</p>}
+                            {foundersOffer && <p className="text-sm font-bold">عرض الشهر بـ 100 ج.م مستمر لفترة محدودة (15 يوماً فقط). للمشتركين القدامى بـ 50 ج.م يستمر سعرهم عند التجديد أو خلال مهلة سماح 3 أيام. السعر الأساسي 200 ج.م.</p>}
                             <div className="grid sm:grid-cols-3 gap-4">
                                 <label>
                                     <span className={labelClass}>شهر واحد</span>

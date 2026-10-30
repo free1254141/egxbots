@@ -17,6 +17,7 @@ if ROOT_DIR not in sys.path:
 sys.stdout.reconfigure(encoding='utf-8')
 
 from api.stock_ai import supabase
+from api.payment_common import is_user_eligible_for_50_egp_renewal
 from api.marketing_lifecycle import (
     send_resend_email,
     record_marketing_message,
@@ -35,15 +36,21 @@ def send_renewal_reminder_email(user_id: str, email: str, display_name: str, day
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "renewal_reminder", cooldown_days=3):
         return False
 
+    is_eligible = is_user_eligible_for_50_egp_renewal(user_id)
     time_str = "غداً" if days_left <= 1 else f"خلال {days_left} أيام"
     subject = f"⏳ تذكير: ينتهي اشتراكك في EGX BOTS Pro {time_str} ({end_date[:10]})"
     greeting = f"أهلاً {display_name} 👋"
+    if is_eligible:
+        perk = "💡 <strong>عرض خاص للمجددين:</strong> يمكنك الاستمرار بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة)</strong> بتجديد اشتراكك قبل انتهاء الفترة أو خلال مهلة السماح (72 ساعة)."
+        cta_text = "تجديد الاشتراك وتثبيت السعر (50 ج.م)"
+    else:
+        perk = "💡 <strong>عرض المؤسسين لفترة محدودة:</strong> يمكنك تجديد اشتراكك الآن بسعر عرض المؤسسين المخفض <strong>(100 ج.م شهرياً بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط مع مهلة 72 ساعة لتثبيت السعر."
+        cta_text = "تجديد الاشتراك بسعر العرض (100 ج.م)"
     paragraphs = [
         f"نود تذكيرك بأن اشتراكك الحالي في <strong>باقة EGX BOTS PRO</strong> سينتهي <strong>{time_str} (بتاريخ {end_date[:10]})</strong>.",
         "لضمان استمرار وصولك دون انقطاع إلى <strong>مساعد الشات بوت الذكي (AI Chatbot)، إشارات ونماذج السوينج الفنية اللحظية، مستويات المراقبة والأهداف السعرية الاسترشادية، وقناة التنبيهات الفنية على تليجرام</strong>، يمكنك تجديد اشتراكك الآن.",
-        "💡 <strong>عرض خاص للمجددين:</strong> يمكنك الاستمرار بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة)</strong> بتجديد اشتراكك قبل انتهاء الفترة.",
+        perk,
     ]
-    cta_text = "تجديد الاشتراك وتثبيت السعر (50 ج.م)"
     cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
@@ -65,14 +72,22 @@ def send_expired_reactivation_email(user_id: str, email: str, display_name: str,
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "expired_reactivation", cooldown_days=3):
         return False
 
-    subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - يمكنك إعادة التفعيل وتثبيت السعر (50 ج.م)"
+    is_eligible = is_user_eligible_for_50_egp_renewal(user_id)
     greeting = f"أهلاً {display_name} 👋"
+    if is_eligible:
+        subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - مهلة 72 ساعة لتثبيت السعر بـ 50 ج.م"
+        perk = "💡 <strong>مهلة سماح 72 ساعة (3 أيام):</strong> لأنك من المشتركين المؤهلين لسعر المؤسسين، أمامك مهلة 72 ساعة فقط لإعادة تفعيل اشتراكك والاحتفاظ بسعر <strong>50 ج.م شهرياً مدى الحياة</strong> قبل أن يرتفع السعر إلى 100 ج.م."
+        cta_text = "إعادة التفعيل خلال مهلة السماح (50 ج.م)"
+    else:
+        subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - يمكنك إعادة التفعيل بسعر العرض (100 ج.م)"
+        perk = "💡 <strong>عرض المؤسسين لفترة محدودة:</strong> يمكنك إعادة تفعيل اشتراكك الآن بسعر عرض المؤسسين المخفض <strong>(100 ج.م شهرياً بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط مع مهلة 72 ساعة لتثبيت السعر عند كل تجديد."
+        cta_text = "إعادة تفعيل الاشتراك بسعر العرض (100 ج.م)"
+
     paragraphs = [
         f"نحيطك علماً بأن اشتراكك في <strong>باقة EGX BOTS PRO</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
         "لقد توقفت صلاحيات الوصول إلى <strong>مساعد الشات بوت الذكي (AI Chatbot)، إشارات ونماذج السوينج الفنية اللحظية، مستويات المراقبة، وقناة التنبيهات الفنية VIP على تليجرام</strong>.",
-        "💡 <strong>فرصة لتثبيت السعر:</strong> يمكنك إعادة تفعيل اشتراكك الآن والاحتفاظ بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل اكتمال مقاعد الـ 100 مؤسس.",
+        perk,
     ]
-    cta_text = "إعادة تفعيل الاشتراك وتثبيت السعر (50 ج.م)"
     cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
@@ -103,7 +118,7 @@ def send_trial_onboarding_email(user_id: str, email: str, display_name: str, inv
         f"<a href='{invite_link}' style='color:#10b981;font-weight:bold;'>{invite_link}</a>",
         "2️⃣ <strong>جرب الشات بوت الذكي الآن:</strong><br/>"
         "اسأل الشات بوت عن أي سهم في محفظتك بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.",
-        "💡 <strong>تثبيت السعر:</strong> يمكنك الاستمرار بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل انتهاء الفترة التجريبية.",
+        "💡 <strong>عرض المؤسسين (100 ج.م شهرياً مدى الحياة):</strong> يمكنك تثبيت اشتراكك بسعر عرض المؤسسين <strong>(100 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط! يثبت هذا السعر لحسابك دائماً طول ما بتجدد.",
     ]
     cta_text = "بدء استخدام الشات بوت وفحص الأسهم"
     cta_url = f"{APP_URL}/ai-chat"
@@ -135,7 +150,7 @@ def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bo
         "• <strong>فحص أي سهم مصري عبر الشات بوت الذكي:</strong> اسأل الشات بوت عن أي سهم بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.<br/>"
         "• <strong>ماسح السيولة الذكية والنماذج الفنية:</strong> رصد رقمي ومؤتمت لمستويات المراقبة الفنية والأهداف السعرية الاسترشادية وحركة التجميع بالبورصة المصرية.<br/>"
         "• <strong>قناة التنبيهات الفنية VIP على تليجرام:</strong> إشعارات رقمية مباشرة لاكتمال النماذج الفنية لحظياً عبر تليجرام.",
-        "💡 <strong>عرض تثبيت السعر (50 ج.م):</strong> إذا نالت أدوات ومزايا Pro إعجابك خلال فترة التجربة، يمكنك تثبيت اشتراكك بسعر باقة المؤسسين المخفض <strong>(50 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> قبل اكتمال مقاعد الـ 100 مؤسس الأولى.",
+        "💡 <strong>عرض المؤسسين (100 ج.م شهرياً مدى الحياة):</strong> إذا نالت أدوات ومزايا Pro إعجابك خلال فترة التجربة، يمكنك الاشتراك بسعر باقة المؤسسين <strong>(100 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط! يثبت هذا السعر لحسابك دائماً طول ما بتجدد مع مهلة سماح 72 ساعة لتثبيت السعر عند كل تجديد.",
     ]
     cta_text = "⚡ تفعيل باقة Pro المجانية الآن (0 ج.م)"
     cta_url = f"{APP_URL}/pricing?plan=pro&trial=true"

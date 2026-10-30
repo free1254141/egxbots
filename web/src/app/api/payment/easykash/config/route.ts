@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { withFoundersOffer } from "@/lib/founders-offer";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 // Payment config includes Founders Offer pricing from Supabase RPC — changes
@@ -9,19 +10,44 @@ export const runtime = "nodejs";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
-// Cache-Control: 5-min Edge CDN cache, 1-hour stale-while-revalidate
+// Cache-Control: 5-min Edge CDN cache, 1-hour stale-while-revalidate for public
 const PAYMENT_CONFIG_HEADERS = {
   "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400",
 };
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const response = await fetch(`${BACKEND_URL}/payment/easykash/config`, { cache: "no-store" });
+    let authHeader = req.headers.get("Authorization") || "";
+    let userId: string | null = null;
+
+    if (!authHeader) {
+      try {
+        const auth = await createSupabaseServerClient(req);
+        const { data: { session } } = await auth.auth.getSession();
+        if (session?.access_token) {
+          authHeader = `Bearer ${session.access_token}`;
+          userId = session.user.id;
+        }
+      } catch {}
+    }
+
+    const backendUrl = userId
+      ? `${BACKEND_URL}/payment/easykash/config?user_id=${encodeURIComponent(userId)}`
+      : `${BACKEND_URL}/payment/easykash/config`;
+
+    const headers: Record<string, string> = {};
+    if (authHeader) headers["Authorization"] = authHeader;
+
+    const response = await fetch(backendUrl, {
+      headers,
+      cache: "no-store",
+    });
     const config = await response.json().catch(() => ({ enabled: false }));
     const finalConfig = response.ok ? await withFoundersOffer(config) : config;
+
     return NextResponse.json(finalConfig, {
       status: response.status,
-      headers: PAYMENT_CONFIG_HEADERS,
+      headers: userId ? { "Cache-Control": "private, no-cache" } : PAYMENT_CONFIG_HEADERS,
     });
   } catch {
     return NextResponse.json({ enabled: false, mode: "disabled", provider: "easykash" }, { status: 503 });

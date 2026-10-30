@@ -716,7 +716,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         try {
             if (remainingQuota <= 0) {
                 setShowUpgradeModal(true);
-                assistantMsg.content = "لقد استهلكت باقتك المجانية (10/10 رسائل). تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ اشترك الآن في Pro بـ 50 ج.م فقط شهرياً (عرض المؤسسين) واشترك في قناة الـ VIP.";
+                assistantMsg.content = "لقد استهلكت باقتك المجانية (10/10 رسائل). تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ اشترك الآن في Pro بـ 100 ج.م فقط شهرياً (عرض المؤسسين - لفترة محدودة 15 يوماً بدلاً من 200 ج.م) واشترك في قناة الـ VIP.";
                 assistantMsg.isStreaming = false;
                 assistantMsg.statusText = undefined;
                 updateAssistantMsgInState(assistantMsg);
@@ -749,7 +749,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (response.status === 429) {
                 setRemainingQuota(0);
                 setShowUpgradeModal(true);
-                let detail = "لقد استهلكت باقتك المجانية (10/10 رسائل). 🔥 حصرياً: احجز مقعدك الآن ضمن أول 100 مؤسس بـ 50 ج.م فقط شهرياً (بدلاً من 200 ج.م) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!";
+                let detail = "لقد استهلكت باقتك المجانية (10/10 رسائل). 🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة (15 يوماً فقط) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!";
                 try {
                     const data = await response.json();
                     if (data.detail && typeof data.detail === "string") {

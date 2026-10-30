@@ -60,7 +60,25 @@ export default function ChatWidget() {
     } = useChat();
 
     const { language } = useLanguage();
-    const [foundersSeatsRemaining, setFoundersSeatsRemaining] = useState<number>(84);
+    const [foundersEndsAt, setFoundersEndsAt] = useState<string | null>(null);
+    const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!foundersEndsAt) { setFoundersCountdown(null); return; }
+        const update = () => {
+            const diffMs = new Date(foundersEndsAt).getTime() - Date.now();
+            if (diffMs <= 0) { setFoundersCountdown("00:00:00"); return; }
+            const d = Math.floor(diffMs / 86400000);
+            const h = Math.floor((diffMs % 86400000) / 3600000);
+            const m = Math.floor((diffMs % 3600000) / 60000);
+            const s = Math.floor((diffMs % 60000) / 1000);
+            if (d > 0) setFoundersCountdown(`${d}ي ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+            else setFoundersCountdown(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+        };
+        update();
+        const iv = setInterval(update, 1000);
+        return () => clearInterval(iv);
+    }, [foundersEndsAt]);
     const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
     const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
     const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
@@ -184,8 +202,8 @@ export default function ChatWidget() {
         fetch("/api/payment/easykash/config")
             .then(r => r.ok ? r.json() : null)
             .then(cfg => {
-                if (active && cfg?.founders?.remaining !== undefined) {
-                    setFoundersSeatsRemaining(Number(cfg.founders.remaining));
+                if (active && cfg?.founders?.ends_at) {
+                    setFoundersEndsAt(cfg.founders.ends_at);
                 }
             })
             .catch(() => {});
@@ -1322,7 +1340,7 @@ export default function ChatWidget() {
                                     : "ميزة حصرية لمشتركي باقة Pro 👑"}
                             </h3>
                             <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
-                                🔥 <strong>عرض المؤسسين:</strong> احجز مقعدك الآن بـ <strong>50 ج.م فقط شهرياً</strong> مدى الحياة (بدلاً من 200 ج.م) — باقي {foundersSeatsRemaining} مقعداً فقط!
+                                🔥 <strong>عرض المؤسسين:</strong> اشترك الآن بـ <strong>100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — {foundersCountdown ? `متبقي ⏰ ${foundersCountdown}` : "متاح لمدة 15 يوماً فقط!"} وثبّت سعرك طول ما بتجدد!
                             </div>
                             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
                                 تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ انضم الآن لقناة الـ VIP واحصل على جميع مميزات Pro بدون قيود.
@@ -1388,7 +1406,7 @@ export default function ChatWidget() {
                                 }}
                                 className="w-full py-3 px-4 bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
                             >
-                                <span>احجز مقعد المؤسسين بـ 50 ج.م فقط شهرياً ⚡</span>
+                                <span>اشترك في عرض المؤسسين بـ 100 ج.م شهرياً (تثبيت مدى الحياة) ⚡</span>
                                 <span>←</span>
                             </button>
 

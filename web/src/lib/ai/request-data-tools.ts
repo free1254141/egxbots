@@ -59,7 +59,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
                 status: 'error',
                 availability: 'error',
                 autonomous_recommendations_enabled: false,
-                message: 'وضع التوصيات الحرة والتوصيات المفتوحة متاح حصرياً لمشتركي باقة Pro. وجّه المستخدم للاشتراك في باقة Pro (50 ج.م شهرياً ضمن عرض المؤسسين) لتفعيل وضع التوصيات الحرة وعرض التوصيات المفتوحة.'
+                message: 'وضع التوصيات الحرة والتوصيات المفتوحة متاح حصرياً لمشتركي باقة Pro. وجّه المستخدم للاشتراك في باقة Pro (100 ج.م شهرياً ضمن عرض المؤسسين لفترة محدودة 15 يوماً فقط) لتفعيل وضع التوصيات الحرة وعرض التوصيات المفتوحة.'
             };
         }
         return {

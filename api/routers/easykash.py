@@ -36,8 +36,14 @@ def _authenticated_user_id(authorization: str | None) -> str:
 
 
 @router.get("/config")
-def config():
-    return payment_config()
+def config(user_id: str | None = None, authorization: str | None = Header(default=None)):
+    uid = user_id
+    if not uid and authorization and authorization.startswith("Bearer "):
+        try:
+            uid = _authenticated_user_id(authorization)
+        except Exception:
+            uid = None
+    return payment_config(user_id=uid)
 
 
 @router.post("/create")

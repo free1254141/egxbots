@@ -1020,7 +1020,7 @@ export function FormattedChatMessage({
                                         href="/pricing"
                                         className="shrink-0 px-3 py-1 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-black font-black rounded-lg transition-all text-xs border border-black shadow-[2px_2px_0_0_#000]"
                                     >
-                                        ترقية إلى Pro (عرض المؤسسين 50 ج.م) 👑
+                                        ترقية إلى Pro (عرض المؤسسين 100 ج.م) 👑
                                     </a>
                                 </div>
                             ) : (

@@ -20,6 +20,7 @@ from api.payment_common import (
     plan_amount_egp,
     pro_discount,
     pro_regular_amount_egp,
+    is_user_eligible_for_50_egp_renewal,
 )
 from api.telegram_pro_invites import ensure_pro_invite
 
@@ -43,7 +44,7 @@ _EASYKASH_INSTALLMENT_OPTIONS = [
     33,  # Klivvr (shown under EasyKash Installments)
     34,  # Forsa
 ]
-_PLANS = {"pro": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500}
+_PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500}
 _ACTIVE_PRO_PLAN_IDS = list(_PLANS)
 
 
@@ -80,18 +81,27 @@ def is_easykash_ready() -> bool:
     return bool(os.getenv("EASYKASH_API_KEY", "").strip() and os.getenv("EASYKASH_CALLBACK_SECRET", "").strip())
 
 
-def payment_config() -> Dict[str, Any]:
+def payment_config(user_id: str | None = None) -> Dict[str, Any]:
     from api.plan_limits import free_limits, pro_limits
 
     enabled = is_payments_enabled() and is_easykash_ready()
     discount = pro_discount()
     settings = billing_settings()
+
+    from api.payment_common import is_user_eligible_for_50_egp_renewal, is_user_eligible_for_100_egp_renewal, founders_offer_is_open
+    is_eligible_50 = is_user_eligible_for_50_egp_renewal(user_id) if user_id else False
+    is_eligible_100 = is_user_eligible_for_100_egp_renewal(user_id) if user_id else False
+    monthly_amount = float(plan_amount_egp("pro", user_id=user_id))
+    
     monthly = {
         "id": "pro",
         "name_ar": "شهري",
         "name_en": "Monthly",
-        "amount_egp": int(plan_amount_egp("pro")),
+        "amount_egp": int(monthly_amount),
         "days": 30,
+        "is_grandfathered_renewal": is_eligible_50,
+        "is_grandfathered_100": is_eligible_100,
+        "founders_lock_rate": 50 if is_eligible_50 else (100 if (is_eligible_100 or founders_offer_is_open()) else None),
     }
     if discount["active"]:
         monthly["discount"] = {
@@ -114,7 +124,8 @@ def payment_config() -> Dict[str, Any]:
             "badge": "حصري لـ 20 مقعداً 🔥",
         },
     ]
-    # Founders counter: count active Pro subscribers to show remaining spots live
+    # Founders offer - time-limited (15 days): use ends_at from env, not seat count
+    from api.payment_common import founders_offer_ends_at, founders_offer_is_open
     founders_limit = int(settings.get("founders_limit") or os.getenv("FOUNDERS_LIMIT", "100"))
     founders_count = 0
     try:
@@ -129,6 +140,9 @@ def payment_config() -> Dict[str, Any]:
     except Exception:
         founders_count = 0
     founders_remaining = max(0, founders_limit - founders_count)
+    _founders_ends_at = founders_offer_ends_at()
+    _founders_is_open = founders_offer_is_open()
+    _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else None
 
     # Lifetime spots counter: strictly limited to 20 users only
     lifetime_limit = int(settings.get("lifetime_limit") or os.getenv("LIFETIME_LIMIT", "20"))
@@ -155,7 +169,8 @@ def payment_config() -> Dict[str, Any]:
             "limit": founders_limit,
             "count": founders_count,
             "remaining": founders_remaining,
-            "is_open": founders_remaining > 0,
+            "is_open": _founders_is_open,
+            "ends_at": _founders_ends_at_str,
         },
         "lifetime": {
             "limit": lifetime_limit,
@@ -224,11 +239,21 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
             pass
 
     order_id = str(uuid4())
-    amount = Decimal(str(plan_amount_egp(plan_id))).quantize(Decimal("0.01"))
+    actual_plan_id = plan_id
+    if plan_id in ("pro", "pro_renewal"):
+        if is_user_eligible_for_50_egp_renewal(user_id):
+            actual_plan_id = "pro_renewal"
+            amount = Decimal("50.00")
+        else:
+            actual_plan_id = "pro"
+            amount = Decimal("100.00")
+    else:
+        amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id))).quantize(Decimal("0.01"))
+
     row = {
         "id": order_id,
         "user_id": user_id,
-        "plan_id": plan_id,
+        "plan_id": actual_plan_id,
         "amount_egp": float(amount),
         "provider": "easykash",
         "status": "pending",

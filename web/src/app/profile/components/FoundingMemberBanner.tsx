@@ -48,19 +48,19 @@ export default function FoundingMemberBanner({ memberNumber, language = "ar" }: 
           <span className="text-zinc-950">
             {isAr ? (
               <>
-                تهانينا! أنت ضمن <strong>أول 100 مؤسس لـ EGX Bots</strong> {memberNumber != null ? `(#${memberNumber})` : ""} — اشتراكك مثبت بـ <strong>50 ج.م فقط مدى الحياة</strong>.
+                تهانينا! أنت عضو في <strong>باقة المؤسسين لـ EGX Bots</strong> {memberNumber != null ? `(#${memberNumber})` : ""} — اشتراكك مثبت <strong>مدى الحياة طول ما بتجدد</strong>.
               </>
             ) : (
               <>
-                Congratulations! You are a <strong>Founding Member</strong> {memberNumber != null ? `(#${memberNumber})` : ""} — locked at <strong>50 EGP/mo for life</strong>.
+                Congratulations! You are a <strong>Founding Member</strong> {memberNumber != null ? `(#${memberNumber})` : ""} — your rate is <strong>locked for life as long as renewed</strong>.
               </>
             )}
           </span>
           <span className="inline-flex items-center gap-1 bg-black/10 border border-black/30 px-2 py-0.5 text-[10px] font-bold text-black rounded-xs">
             <AlertCircle className="w-3 h-3 text-amber-800" />
             {isAr 
-              ? "مهلة التجديد: لديك 72 ساعة سماح بعد انتهاء كل شهر للحفاظ على سعر المؤسسين (50 ج.م) قبل عودته لسعر 200 ج.م."
-              : "Grace period: 72 hours renewal window upon expiry to retain the 50 EGP founder rate before reverting to 200 EGP."}
+              ? "مهلة التجديد: لديك 72 ساعة سماح بعد انتهاء كل شهر للحفاظ على سعر المؤسسين المخفض مدى الحياة قبل عودته للسعر الرسمي (200 ج.م)."
+              : "Grace period: 72 hours renewal window upon expiry to retain your locked founder rate for life before reverting to 200 EGP."}
           </span>
         </div>
       </div>

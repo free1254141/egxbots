@@ -892,7 +892,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
           }
           freeLines.push(`━━━━━━━━━━━━━━━━━━━━`);
           freeLines.push(`⚡ <i>تم رصد هذه الإشارة الفنية الخوارزمية لحظياً لمشتركي VIP وقت انطلاق السهم بمستويات الرصد والوقف المحسوبة آلياً.</i>\n`);
-          freeLines.push(`🔥 لا تفوّت إشارات الجلسة القادمة — احجز مقعدك الآن في <b>باقة المؤسسين بـ 50 ج.م فقط شهرياً</b> بدلاً من 200 ج.م!`);
+          freeLines.push(`🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ 100 ج.م فقط شهرياً</b> بدلاً من 200 ج.م (لفترة محدودة 15 يوماً فقط)!`);
           freeLines.push(`👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing`);
           await sendTelegramAlert(FREE_CHANNEL_CHAT_ID, freeLines.join("\n"));
         }
