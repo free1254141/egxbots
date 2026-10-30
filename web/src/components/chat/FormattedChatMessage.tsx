@@ -38,6 +38,7 @@ type ContentBlock =
     | { type: "text"; content: string }
     | { type: "table"; headers: string[]; rows: string[][] }
     | { type: "stock_card"; stock: StockData; rawJson: string }
+    | { type: "stock_cards"; stocks: StockData[] }
     | { type: "raw_pipe_table"; items: RawPipeStock[] };
 
 const KNOWN_STOCK_SYMBOLS = new Set([
@@ -67,7 +68,7 @@ function parseStockJson(text: string): StockData[] | null {
             const symbol = obj.symbol || obj.ticker;
             if (!symbol || typeof symbol !== "string") return false;
             
-            if (obj.type && ["stock", "stock_card", "stock_data", "stock_payload"].includes(obj.type)) {
+            if (obj.type && ["stock", "stock_card", "stock_data", "stock_payload", "recommendation", "signal", "opportunity", "stock_cards"].includes(obj.type)) {
                 return true;
             }
             
@@ -76,7 +77,9 @@ function parseStockJson(text: string): StockData[] | null {
             const hasMacd = obj.macdSignal !== undefined || obj.macd_signal !== undefined || obj.macd !== undefined;
             const hasChange = obj.changePercent !== undefined || obj.change_percent !== undefined || obj.change !== undefined;
             
-            return hasPrice || hasRsi || hasMacd || hasChange;
+            const hasEntry = obj.entryRange !== undefined || obj.entry_range !== undefined || obj.entryPrice !== undefined || obj.entry_price !== undefined;
+            const hasTarget = obj.target1 !== undefined || obj.target_1 !== undefined || obj.target !== undefined;
+            return hasPrice || hasRsi || hasMacd || hasChange || hasEntry || hasTarget;
         };
 
         if (Array.isArray(parsed)) {
@@ -84,9 +87,12 @@ function parseStockJson(text: string): StockData[] | null {
             return validStocks.length > 0 ? validStocks : null;
         } else if (isStockObj(parsed)) {
             return [parsed];
-        } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.stocks)) {
-            const validStocks = parsed.stocks.filter(isStockObj);
-            return validStocks.length > 0 ? validStocks : null;
+        } else if (parsed && typeof parsed === "object") {
+            const list = parsed.stocks || parsed.recommendations || parsed.signals || parsed.opportunities || parsed.items;
+            if (Array.isArray(list)) {
+                const validStocks = list.filter(isStockObj);
+                return validStocks.length > 0 ? validStocks : null;
+            }
         }
 
         return null;
@@ -396,7 +402,22 @@ function parseContentBlocks(content: string): ContentBlock[] {
         }
     }
 
-    return finalBlocks;
+    // Consolidate consecutive stock_card blocks into stock_cards grid/carousel
+    const consolidatedBlocks: ContentBlock[] = [];
+    for (const b of finalBlocks) {
+        if (b.type === "stock_card") {
+            const last = consolidatedBlocks[consolidatedBlocks.length - 1];
+            if (last && last.type === "stock_cards") {
+                last.stocks.push(b.stock);
+            } else {
+                consolidatedBlocks.push({ type: "stock_cards", stocks: [b.stock] });
+            }
+        } else {
+            consolidatedBlocks.push(b);
+        }
+    }
+
+    return consolidatedBlocks;
 }
 
 function renderTableCell(cellText: string) {
@@ -876,17 +897,61 @@ export function FormattedChatMessage({
                             )}
                         </div>
                     );
+                } else if (block.type === "stock_cards") {
+                    return (
+                        <div 
+                            key={bIdx} 
+                            className={`my-4 ${
+                                block.stocks.length === 1 
+                                    ? "w-full max-w-xl mx-auto" 
+                                    : "grid grid-cols-1 md:grid-cols-2 gap-4"
+                            }`}
+                        >
+                            {block.stocks.map((stock, sIdx) => (
+                                <StockCard 
+                                    key={sIdx} 
+                                    stock={stock} 
+                                    onSymbolClick={(symbol) => {
+                                        if (onButtonClick) {
+                                            onButtonClick(`تحليل سهم ${symbol}`);
+                                        }
+                                    }}
+                                    onNewsClick={(symbol) => {
+                                        if (onButtonClick) {
+                                            onButtonClick(`أخبار سهم ${symbol}`);
+                                        }
+                                    }}
+                                    onAddToPortfolio={(symbol) => {
+                                        if (onButtonClick) {
+                                            onButtonClick(`أضف سهم ${symbol} لمحفظتي`);
+                                        }
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    );
                 } else if (block.type === "stock_card") {
                     return (
-                        <StockCard 
-                            key={bIdx} 
-                            stock={block.stock} 
-                            onSymbolClick={(symbol) => {
-                                if (onButtonClick) {
-                                    onButtonClick(`تحليل ${symbol}`);
-                                }
-                            }}
-                        />
+                        <div key={bIdx} className="my-4 w-full max-w-xl mx-auto">
+                            <StockCard 
+                                stock={block.stock} 
+                                onSymbolClick={(symbol) => {
+                                    if (onButtonClick) {
+                                        onButtonClick(`تحليل سهم ${symbol}`);
+                                    }
+                                }}
+                                onNewsClick={(symbol) => {
+                                    if (onButtonClick) {
+                                        onButtonClick(`أخبار سهم ${symbol}`);
+                                    }
+                                }}
+                                onAddToPortfolio={(symbol) => {
+                                    if (onButtonClick) {
+                                        onButtonClick(`أضف سهم ${symbol} لمحفظتي`);
+                                    }
+                                }}
+                            />
+                        </div>
                     );
                 }
                 return null;
