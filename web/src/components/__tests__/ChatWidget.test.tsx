@@ -125,3 +125,35 @@ test("floating launcher button is not rendered on /chart when closed so it does 
 
     chat.isOpen = true;
 });
+
+test("active chat chunks large message lists (20 messages) and loads older batches on demand", () => {
+    const testMessages = Array.from({ length: 35 }, (_, i) => ({
+        id: `msg-${i + 1}`,
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `Message ${i + 1}`,
+    }));
+    (chat as any).messages = testMessages;
+
+    render(<ChatWidget />);
+
+    const loadOlderBtn = screen.getByRole("button", { name: "تحميل الرسائل السابقة" });
+    expect(loadOlderBtn).toBeTruthy();
+    expect(loadOlderBtn.textContent).toContain("15 متبقية");
+
+    fireEvent.click(loadOlderBtn);
+
+    expect(screen.queryByRole("button", { name: "تحميل الرسائل السابقة" })).toBeNull();
+    (chat as any).messages = [];
+});
+
+test("mobile layout container uses fixed inset-0 and touch-action pan-y on scroll container", () => {
+    const { container } = render(<ChatWidget />);
+    const outerContainer = container.firstChild as HTMLElement;
+    expect(outerContainer.className).toContain("max-md:fixed");
+    expect(outerContainer.className).toContain("max-md:inset-0");
+    expect(outerContainer.className).toContain("pt-[env(safe-area-inset-top,0px)]");
+
+    const scrollContainer = container.querySelector(".neobrutal-grid-bg") as HTMLElement;
+    expect(scrollContainer.style.touchAction).toBe("pan-y");
+    expect(scrollContainer.className).toContain("overscroll-y-contain");
+});

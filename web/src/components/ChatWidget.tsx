@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -248,6 +248,10 @@ export default function ChatWidget() {
     const [loadingStep, setLoadingStep] = useState<1 | 2 | 3>(1);
     const [sharingMessageId, setSharingMessageId] = useState<string | null>(null);
     const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+    const INITIAL_VISIBLE_COUNT = 20;
+    const LOAD_MORE_STEP = 20;
+    const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
+    const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
 
     const handleDownloadImage = async (url: string) => {
@@ -390,10 +394,41 @@ export default function ChatWidget() {
         };
     }, [modelMenuOpen]);
 
+    const hasMoreOlder = messages.length > visibleCount;
+    const visibleMessages = useMemo(() => {
+        if (messages.length <= visibleCount) return messages;
+        return messages.slice(messages.length - visibleCount);
+    }, [messages, visibleCount]);
+
+    const handleLoadMoreOlder = useCallback(() => {
+        if (visibleCount >= messages.length || isLoadingOlder) return;
+        setIsLoadingOlder(true);
+        const container = scrollContainerRef.current;
+        const prevScrollHeight = container ? container.scrollHeight : 0;
+        const prevScrollTop = container ? container.scrollTop : 0;
+
+        setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
+
+        requestAnimationFrame(() => {
+            if (container) {
+                const newScrollHeight = container.scrollHeight;
+                const heightDiff = newScrollHeight - prevScrollHeight;
+                if (heightDiff > 0) {
+                    container.scrollTop = prevScrollTop + heightDiff;
+                }
+            }
+            setIsLoadingOlder(false);
+        });
+    }, [visibleCount, messages.length, isLoadingOlder]);
+
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
         setIsUserScrolledUp(!isAtBottom);
+
+        if (scrollTop < 80 && hasMoreOlder && !isLoadingOlder) {
+            handleLoadMoreOlder();
+        }
     };
 
     const scrollToBottom = useCallback(() => {
@@ -409,6 +444,7 @@ export default function ChatWidget() {
 
     useEffect(() => {
         setIsUserScrolledUp(false);
+        setVisibleCount(INITIAL_VISIBLE_COUNT);
     }, [activeSessionId]);
 
     useEffect(() => {
@@ -526,11 +562,11 @@ export default function ChatWidget() {
 
     return (
         <div 
-            className={isChatRoute ? "fixed inset-0 z-[9999] flex h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0" : `
-                fixed bottom-0 right-0 md:bottom-6 md:right-6 z-[9999] flex gap-1 bg-transparent origin-bottom-right
+            className={isChatRoute ? "fixed inset-0 z-[9999] flex flex-col h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
+                fixed z-[9999] flex gap-1 bg-transparent origin-bottom-right
                 animate-in fade-in slide-in-from-bottom-5 duration-200
-                max-md:w-full max-md:h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
-                md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
+                max-md:fixed max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:w-full max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
+                md:bottom-6 md:right-6 md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
                 transition-[width,height] duration-200
                 ${isExpanded 
                     ? "w-full h-[100dvh] md:w-[calc(100vw-3rem)] md:h-[calc(100vh-3rem)]"
@@ -753,7 +789,12 @@ export default function ChatWidget() {
                     />
                     <div 
                         ref={scrollContainerRef} 
-                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none" 
+                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none overscroll-y-contain" 
+                        style={{
+                            WebkitOverflowScrolling: "touch",
+                            touchAction: "pan-y",
+                            overscrollBehaviorY: "contain"
+                        }}
                         onScroll={handleScroll}
                     >
                     {isInitializing ? (
@@ -989,10 +1030,38 @@ export default function ChatWidget() {
                                 </div>
                             )}
 
-                            {messages.map((msg, idx) => (
+                            {/* Load older messages button when history is chunked */}
+                            {hasMoreOlder && (
+                                <div className="flex justify-center py-2 shrink-0">
+                                    <button
+                                        type="button"
+                                        onClick={handleLoadMoreOlder}
+                                        disabled={isLoadingOlder}
+                                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black border border-zinc-300 dark:border-white/20 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                                        title="تحميل الرسائل السابقة"
+                                        aria-label="تحميل الرسائل السابقة"
+                                    >
+                                        {isLoadingOlder ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                        ) : (
+                                            <ArrowUp className="h-3.5 w-3.5 text-amber-500" />
+                                        )}
+                                        <span>
+                                            {language === "ar"
+                                                ? `تحميل رسائل سابقة (${messages.length - visibleCount} متبقية)`
+                                                : `Load older messages (${messages.length - visibleCount} remaining)`
+                                            }
+                                        </span>
+                                    </button>
+                                </div>
+                            )}
 
+                            {visibleMessages.map((msg, vIdx) => {
+                                const originalIdx = messages.length <= visibleCount ? vIdx : (messages.length - visibleCount + vIdx);
+                                const isLastMessage = originalIdx === messages.length - 1;
+                                return (
                                 <div
-                                    key={idx}
+                                    key={msg.id || `msg-${originalIdx}`}
                                     className="flex gap-2 sm:gap-4 w-full max-w-3xl mx-auto min-w-0"
                                 >
                                     <div className={`
@@ -1034,20 +1103,21 @@ export default function ChatWidget() {
                                             content={msg.content || msg.statusText || ""} 
                                             role={msg.role} 
                                             suggestedButtons={msg.suggestedButtons}
-                                            showSuggestedButtons={idx === messages.length - 1}
+                                            showSuggestedButtons={isLastMessage}
                                             onButtonClick={(btnText) => sendMessage(btnText)}
                                              isStreaming={msg.isStreaming}
                                              tables={msg.tables}
-                                             showShareButton={isChatAdmin && msg.role === "assistant" && idx === messages.length - 1}
-                                             onShare={() => shareAnswer(idx)}
-                                             sharing={sharingMessageId === (msg.id || String(idx))}
+                                             showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
+                                             onShare={() => shareAnswer(originalIdx)}
+                                             sharing={sharingMessageId === (msg.id || String(originalIdx))}
                                              latencyMs={msg.latencyMs}
-                                             userQuery={messages.slice(0, idx).reverse().find(m => m.role === "user")?.content}
+                                             userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
                                          />
 
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
 
                             {isLoading && !messages[messages.length - 1]?.content && (
                                 <div className="flex gap-3 w-full max-w-3xl mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300">

@@ -181,18 +181,6 @@ async function resolveTelegramUser(
 }
 
 export async function POST(req: NextRequest) {
-    const force = req.nextUrl.searchParams.get("force") === "true";
-    const host = req.headers.get("host") || "";
-    const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
-    if (!isLocal && !force) {
-        return NextResponse.json({
-            ok: true,
-            skipped: true,
-            reason: "Telegram VIP chat runs natively on Python backend on Hugging Face Spaces.",
-            runner: "python-huggingface",
-        });
-    }
-
     if (!isAuthorizedRequest(req)) {
         return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }

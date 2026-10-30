@@ -274,18 +274,18 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         if symbol and evidence_data:
             latest = evidence_data[0]
             reply_text = (
-                f"📊 <b>التحليل الفني السريع لسهم #{symbol}:</b>\n\n"
-                f"• <b>آخر سعر إغلاق:</b> <code>{latest.get('close')} ج.م</code> ({float(latest.get('change_pct') or 0):+.2f}%)\n"
-                f"• <b>النشاط والسيولة:</b> حجم التداول <code>{int(latest.get('volume') or 0):,}</code> سهم بنشاط نسبي <code>{float(latest.get('r_vol') or 1.0):.2f}x</code>\n"
-                f"• <b>مؤشر القوة النسبية RSI:</b> <code>{float(latest.get('rsi_14') or 50):.1f}</code>\n"
-                f"• <b>الدعم والمقاومة:</b> الدعم الفني عند متوسط 20 يوم <code>{latest.get('ema_20')} ج.م</code> والمقاومة عند <code>{latest.get('bb_upper')} ج.م</code>.\n\n"
-                f"💡 <i>نصيحة إدارة المخاطر: ينصح دائماً بوضع وقف خسارة أسفل مستوى الدعم بنسبة 2.5% إلى 3.0% لحماية المحفظة.</i>"
+                f"📊 **التحليل الفني السريع لسهم #{symbol}:**\n\n"
+                f"• **آخر سعر إغلاق:** `{latest.get('close')} ج.م` ({float(latest.get('change_pct') or 0):+.2f}%)\n"
+                f"• **النشاط والسيولة:** حجم التداول `{int(latest.get('volume') or 0):,}` سهم بنشاط نسبي `{float(latest.get('r_vol') or 1.0):.2f}x`\n"
+                f"• **مؤشر القوة النسبية RSI:** `{float(latest.get('rsi_14') or 50):.1f}`\n"
+                f"• **الدعم والمقاومة:** الدعم الفني عند متوسط 20 يوم `{latest.get('ema_20')} ج.م` والمقاومة عند `{latest.get('bb_upper')} ج.م`.\n\n"
+                f"💡 _نصيحة إدارة المخاطر: ينصح دائماً بوضع وقف خسارة أسفل مستوى الدعم بنسبة 2.5% إلى 3.0% لحماية المحفظة._"
             )
         else:
             reply_text = (
                 f"مرحباً بك يا {user_info['display_name']}! 👋\n\n"
-                f"أنا <b>أرتورو (ARTORO AI)</b>، المساعد الذكي لتحليل الأسهم المصرية.\n"
-                f"يمكنك سؤالي عن أي سهم بكتابة رمزه (مثال: <code>COMI</code> أو <code>فوري</code> أو <code>سهم طلعت مصطفى</code>)، "
+                f"أنا **أرتورو (ARTORO AI)**، المساعد الذكي لتحليل الأسهم المصرية.\n"
+                f"يمكنك سؤالي عن أي سهم بكتابة رمزه (مثال: `COMI` أو `فوري` أو `سهم طلعت مصطفى`)، "
                 f"أو الاستفسار عن وضع المؤشرات العامة والسيولة وسأجيبك بأدق القراءات الفنية اللحظية."
             )
 

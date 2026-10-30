@@ -558,15 +558,9 @@ def _web_vip_chat_endpoints() -> List[str]:
 
 
 def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
-    """Execute VIP chat action natively inside Python to eliminate Vercel serverless executions."""
-    try:
-        from api.native_telegram_vip_chat import handle_native_vip_chat
-        res = handle_native_vip_chat(payload)
-        if res and (res.get("ok") or res.get("error_code")):
-            return res
-    except Exception as exc:
-        print(f"[TELEGRAM_VIP_CHAT] Native chat handler error: {exc}")
-
+    """Execute VIP chat action via web API (Agentic Pipeline with 9 tools).
+    Falls back to native Python handler only if the web endpoint is unreachable or fails.
+    """
     admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
     headers = {
         "Content-Type": "application/json",
@@ -578,11 +572,23 @@ def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[st
             connect_timeout = 2.0 if "127.0.0.1" in url else 8.0
             resp = requests.post(url, json=payload, headers=headers, timeout=(connect_timeout, timeout))
             if resp.status_code in (200, 400, 403, 429):
-                return resp.json()
+                data = resp.json()
+                if not data.get("skipped"):
+                    return data
             last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
         except Exception as exc:
             last_error = str(exc)
             continue
+
+    # Fallback to native Python chat handler if web endpoint is unreachable
+    try:
+        from api.native_telegram_vip_chat import handle_native_vip_chat
+        res = handle_native_vip_chat(payload)
+        if res and (res.get("ok") or res.get("error_code")):
+            return res
+    except Exception as exc:
+        print(f"[TELEGRAM_VIP_CHAT] Native chat handler error: {exc}")
+
     return {"ok": False, "error": last_error}
 
 
