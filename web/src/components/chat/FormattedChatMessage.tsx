@@ -104,12 +104,29 @@ function parseNum(val: string | undefined): number | undefined {
 export function tryParseRecommendationsTable(headers: string[], rows: string[][]): StockData[] | null {
     if (!headers || headers.length < 3 || !rows || rows.length === 0) return null;
 
-    const symbolIdx = headers.findIndex(h => /السهم|الرمز|الكود/i.test(h));
-    const entryIdx = headers.findIndex(h => /الدخول|سعر الدخول|منطقة الدخول/i.test(h));
-    const target1Idx = headers.findIndex(h => /المستهدف\s*1?|الهدف\s*1?|تارجت\s*1?/i.test(h));
-    const target2Idx = headers.findIndex(h => /المستهدف\s*2|الهدف\s*2|تارجت\s*2/i.test(h));
-    const stopLossIdx = headers.findIndex(h => /وقف الخسارة|الوقف|Stop\s*Loss/i.test(h));
-    const returnIdx = headers.findIndex(h => /العائد|التغير|الربح/i.test(h));
+    const findIdx = (pattern: RegExp, exclude?: RegExp) => {
+        for (let i = 0; i < headers.length; i++) {
+            if (pattern.test(headers[i])) {
+                if (exclude && exclude.test(headers[i])) continue;
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    const symbolIdx = findIdx(/السهم|الرمز|الكود/i);
+    // CRITICAL: entryIdx must NOT match "تاريخ الدخول"
+    let entryIdx = findIdx(/سعر الدخول|منطقة الدخول/i);
+    if (entryIdx === -1) {
+        entryIdx = findIdx(/الدخول/i, /تاريخ/i);
+    }
+    const currentPriceIdx = findIdx(/السعر الحالي|سعر الإغلاق|الإغلاق/i);
+    const target1Idx = findIdx(/المستهدف\s*1?|الهدف\s*1?|تارجت\s*1?/i);
+    const target2Idx = findIdx(/المستهدف\s*2|الهدف\s*2|تارجت\s*2/i);
+    const stopLossIdx = findIdx(/وقف الخسارة|الوقف|Stop\s*Loss/i);
+    const returnIdx = findIdx(/العائد|التغير|الربح/i);
+    const signalTypeIdx = findIdx(/نوع الإشارة|الإشارة|النوع/i);
+    const timeframeIdx = findIdx(/الأفق|المدى|الفريم/i);
 
     if (symbolIdx === -1 || entryIdx === -1 || (target1Idx === -1 && stopLossIdx === -1)) {
         return null;
@@ -122,9 +139,17 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
         if (!rawSymbol || rawSymbol === "-" || rawSymbol.startsWith("---") || /المؤشر|المستوى/i.test(rawSymbol)) continue;
 
         const isExplicitShariah = rawSymbol.includes("شرعي") || rawSymbol.includes("EGX33") || rawSymbol.includes("شريعة");
-        const cleanSymbol = rawSymbol.replace(/\(شرعي\)|\(شريعة\)|\(.*\)/g, "").trim().toUpperCase();
+        
+        // Clean symbol: strip bold asterisks **CRST** -> CRST, badges, etc.
+        const cleanSymbol = rawSymbol
+            .replace(/\*/g, "")
+            .replace(/[✅🚀⚡🧲]/g, "")
+            .replace(/\(شرعي\)|\(شريعة\)|\(.*?\)|شرعي/g, "")
+            .trim()
+            .toUpperCase();
 
         const entry = parseNum(row[entryIdx]);
+        const currentPrice = currentPriceIdx !== -1 ? parseNum(row[currentPriceIdx]) : undefined;
         const target1 = target1Idx !== -1 ? parseNum(row[target1Idx]) : undefined;
         const target2 = target2Idx !== -1 ? parseNum(row[target2Idx]) : undefined;
         const stopLoss = stopLossIdx !== -1 ? parseNum(row[stopLossIdx]) : undefined;
@@ -134,23 +159,28 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
             changePct = parseNum(row[returnIdx]);
         }
 
+        const signalType = signalTypeIdx !== -1 && row[signalTypeIdx] ? row[signalTypeIdx].replace(/\*/g, "").trim() : "فرصة مضاربة";
+        const timeframe = timeframeIdx !== -1 && row[timeframeIdx] ? row[timeframeIdx].replace(/\*/g, "").trim() : "1-3 جلسات";
+
         const meta = EGX_STOCKS_METADATA[cleanSymbol];
 
-        if (cleanSymbol && (entry !== undefined || target1 !== undefined || stopLoss !== undefined)) {
+        if (cleanSymbol && (entry !== undefined || target1 !== undefined || stopLoss !== undefined || currentPrice !== undefined)) {
+            const finalPrice = currentPrice !== undefined && currentPrice > 0 ? currentPrice : (entry || 0);
             stocks.push({
                 symbol: cleanSymbol,
                 name: meta?.name || cleanSymbol,
                 sector: meta?.sector,
-                price: entry || 0,
+                price: finalPrice,
                 changePercent: changePct !== undefined ? changePct : 0,
                 entryRange: entry ? `${entry.toFixed(2)} ج.م` : undefined,
                 target1,
                 target2,
                 stopLoss,
-                recommendation: "فرصة مضاربة",
-                signal: "دخول مؤكد",
+                recommendation: signalType || "فرصة مضاربة",
+                signal: signalType || "دخول مؤكد",
+                signalType,
                 isShariah: isExplicitShariah || meta?.isShariah,
-                timeframe: "1-3 جلسات"
+                timeframe
             });
         }
     }
@@ -176,14 +206,18 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let macdVal: string | undefined;
     let volRatio: number | undefined;
     let pe: number | undefined;
+    let eps: number | undefined;
+    let marketCap: string | undefined;
     let wyckoffPhase: string | undefined;
+    let ema50: number | undefined;
+    let ema200: number | undefined;
 
     for (const row of rows) {
         if (!row || row.length < 2) continue;
         const key = row[0]?.trim() || "";
         const val = row[1]?.trim() || "";
 
-        if (/الإغلاق الحالي|آخر سعر|سعر الإغلاق/i.test(key)) {
+        if (/الإغلاق الحالي|آخر سعر|سعر الإغلاق|إغلاق/i.test(key)) {
             hasClose = true;
             price = parseNum(val);
         } else if (/الدعم الأول|دعم أول|الدعم 1/i.test(key)) {
@@ -205,15 +239,25 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
             volRatio = parseNum(val);
         } else if (/مضاعف الربحية|P\/E/i.test(key)) {
             pe = parseNum(val);
+        } else if (/ربحية السهم|EPS/i.test(key)) {
+            eps = parseNum(val);
+        } else if (/القيمة السوقية/i.test(key)) {
+            marketCap = val;
         } else if (/مرحلة وايكوف/i.test(key)) {
             wyckoffPhase = val;
+        } else if (/EMA\s*50/i.test(key)) {
+            hasEma = true;
+            ema50 = parseNum(val);
+        } else if (/EMA\s*200/i.test(key)) {
+            hasEma = true;
+            ema200 = parseNum(val);
         } else if (/EMA/i.test(key)) {
             hasEma = true;
         }
     }
 
     const matchCount = (hasClose ? 1 : 0) + (hasSupport ? 1 : 0) + (hasResistance ? 1 : 0) + (hasRsi ? 1 : 0) + (hasEma ? 1 : 0);
-    if (matchCount < 2) {
+    if (matchCount < 1 && !rsi) {
         return null;
     }
 
@@ -223,10 +267,14 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let recommendation = "";
     let isShariah = false;
 
+    // Clean asterisks from text for reliable regex matching
+    const cleanRecent = recentText.replace(/\*/g, "");
+
     // Extract symbol and name from recent preceding text
-    const symbolMatch = recentText.match(/(?:تحليل سهم|سهم)\s+([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
-                     || recentText.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
-                     || recentText.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i);
+    const symbolMatch = cleanRecent.match(/(?:تحليل سهم|سهم|عتاقة|فوري)\s+([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
+                     || cleanRecent.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
+                     || cleanRecent.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i)
+                     || cleanRecent.match(/\(([A-Za-z0-9_]{2,8})\)/);
 
     if (symbolMatch) {
         if (symbolMatch[2]) {
@@ -242,7 +290,7 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     if (!symbol) {
         for (const s of KNOWN_STOCK_SYMBOLS) {
             const regex = new RegExp(`\\b${s}\\b`, "i");
-            if (regex.test(recentText)) {
+            if (regex.test(cleanRecent)) {
                 symbol = s;
                 break;
             }
@@ -251,22 +299,33 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
 
     if (!symbol) return null;
 
-    // Price change percentage
-    const changeMatch = recentText.match(/تغير الجلسة:\s*([+-]?[\d\.]+)%/i)
-                     || recentText.match(/([+-]?[\d\.]+)%\s*بتاريخ/i);
+    // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY)
+    if (!price || price === 0) {
+        const textPriceMatch = cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+-]?[\d\.]+)/i)
+                            || cleanRecent.match(/([+-]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i);
+        if (textPriceMatch) {
+            price = parseNum(textPriceMatch[1]);
+        }
+    }
+
+    // Price change percentage from text
+    const changeMatch = cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)%/i)
+                     || cleanRecent.match(/([+-]?[\d\.]+)%\s*بتاريخ/i)
+                     || cleanRecent.match(/،\s*([+-]?[\d\.]+)%\s*\)/i)
+                     || cleanRecent.match(/\(([+-]?[\d\.]+)%\)/i);
     if (changeMatch) {
         changePct = parseFloat(changeMatch[1]);
     }
 
     // Evaluation / Recommendation
-    const evalMatch = recentText.match(/التقييم الفني العام:\s*([^\n\r\|]+)/i);
+    const evalMatch = cleanRecent.match(/التقييم الفني العام:\s*([^\n\r\|]+)/i);
     if (evalMatch) {
         recommendation = evalMatch[1].trim();
     }
 
     // Shariah check
-    if (/متوافق مع الشريعة|EGX\s*33|شريعة/i.test(recentText)) {
-        if (!/غير متوافق|خارج EGX\s*33/i.test(recentText)) {
+    if (/متوافق مع الشريعة|EGX\s*33|شريعة/i.test(cleanRecent)) {
+        if (!/غير متوافق|خارج EGX\s*33/i.test(cleanRecent)) {
             isShariah = true;
         }
     }
@@ -280,6 +339,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         price: price || 0,
         changePercent: changePct !== undefined ? changePct : 0,
         entryRange: support1 ? `${support1.toFixed(2)} ج.م` : undefined,
+        support1,
+        support2,
+        resistance1,
+        resistance2,
         target1: resistance1,
         target2: resistance2,
         stopLoss: support2 || (support1 ? Number((support1 * 0.98).toFixed(2)) : undefined),
@@ -288,7 +351,13 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         rsi,
         macdSignal: macdVal,
         volumeRatio: volRatio,
+        rVol: volRatio,
         peRatio: pe,
+        eps,
+        marketCap,
+        wyckoffPhase,
+        ema50,
+        ema200,
         isShariah: isShariah || meta?.isShariah
     };
 }

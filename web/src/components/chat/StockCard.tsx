@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { 
     TrendingUp, 
     TrendingDown, 
@@ -60,6 +61,16 @@ export interface StockData {
     r_vol?: number | string;
     high?: number | string;
     low?: number | string;
+    support1?: string | number;
+    support2?: string | number;
+    resistance1?: string | number;
+    resistance2?: string | number;
+    ema50?: string | number;
+    ema200?: string | number;
+    wyckoffPhase?: string;
+    peRatio?: string | number;
+    eps?: string | number;
+    marketCap?: string | number;
 
     // Classification & Badges
     sector?: string;
@@ -160,8 +171,18 @@ export function StockCard({
     const target2 = stockData.target2 || stockData.target_2;
     const stopLoss = stockData.stopLoss || stockData.stop_loss;
     const riskReward = stockData.riskReward || stockData.risk_reward;
-    const relativeVol = stockData.rVol || stockData.r_vol;
+    const relativeVol = stockData.rVol || stockData.r_vol || stockData.volumeRatio;
     const sector = stockData.sector;
+    const support1 = stockData.support1;
+    const support2 = stockData.support2;
+    const resistance1 = stockData.resistance1;
+    const resistance2 = stockData.resistance2;
+    const ema50 = stockData.ema50;
+    const ema200 = stockData.ema200;
+    const wyckoffPhase = stockData.wyckoffPhase;
+    const macdDesc = typeof stockData.macdSignal === "string" ? stockData.macdSignal : undefined;
+    const peRatio = stockData.peRatio;
+    const eps = stockData.eps;
     const isShariah = Boolean(
         stockData.isShariah ?? stockData.is_sharia_compliant ?? (stockData.sharia_index === "EGX33")
     );
@@ -197,15 +218,55 @@ export function StockCard({
         }
     };
 
-    const handleAddToPortfolio = (e: React.MouseEvent) => {
+    const [isSavingToPortfolio, setIsSavingToPortfolio] = useState(false);
+
+    const handleAddToPortfolio = async (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (onAddToPortfolio) {
-            onAddToPortfolio(symbol);
-        } else if (onSymbolClick) {
-            onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
-        }
+        if (isSavingToPortfolio) return;
+        setIsSavingToPortfolio(true);
+
+        // Optimistic UI update
         setAddedToPortfolio(true);
-        setTimeout(() => setAddedToPortfolio(false), 3000);
+        setTimeout(() => setAddedToPortfolio(false), 4000);
+
+        try {
+            const numPrice = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : null;
+            const res = await fetch("/api/portfolio", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "add",
+                    symbol: symbol.toUpperCase(),
+                    quantity: 100,
+                    price: numPrice
+                })
+            });
+
+            const resData = await res.json().catch(() => ({}));
+
+            if (res.ok && resData.ok) {
+                toast.success(`تمت إضافة سهم #${symbol} إلى محفظتك بنجاح ✅`);
+                // Dispatch portfolio-updated event so PortfolioContext, header chip, and profile update LIVE!
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new Event("portfolio-updated"));
+                }
+            } else if (res.status === 401 || resData.requiresAuth) {
+                toast.error("يرجى تسجيل الدخول أولاً لإضافة السهم لمحفظتك");
+            } else if (resData.message?.includes("الخطة المجانية") || resData.message?.includes("الحد الأقصى")) {
+                toast.error(resData.message);
+            } else if (resData.message) {
+                toast.error(resData.message);
+            }
+        } catch (err: any) {
+            // Background fail is silent or toast
+        } finally {
+            setIsSavingToPortfolio(false);
+            if (onAddToPortfolio) {
+                onAddToPortfolio(symbol);
+            } else if (onSymbolClick) {
+                onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
+            }
+        }
     };
 
     return (
@@ -311,86 +372,126 @@ export function StockCard({
                 </div>
             </div>
 
-            {/* Quantitative Trading Plan (2x2 Grid) — Domain Specific Specialty */}
-            {(entryRange || target1 || stopLoss || riskReward) && (
+            {/* Quantitative Trading Plan / Technical Levels (2x2 Grid) */}
+            {(entryRange || target1 || stopLoss || support1 || resistance1) && (
                 <div className="mt-3.5 grid grid-cols-2 gap-2 sm:gap-2.5 relative z-10">
-                    {/* 1. Entry Range */}
+                    {/* Cell 1: Entry / Support 1 */}
                     <div className="p-2.5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
                         <div className="flex items-center gap-1 text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
                             <Zap className="w-3.5 h-3.5 text-amber-500" />
-                            <span>نطاق الدخول</span>
+                            <span>{target1 ? "نطاق الدخول" : "الدعم الأول"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-1">
-                            {entryRange || `${formattedPrice} ج.م`}
+                            {entryRange || (support1 ? `${Number(support1).toFixed(2)} ج.م` : `${formattedPrice} ج.م`)}
                         </div>
                     </div>
 
-                    {/* 2. Target 1 */}
+                    {/* Cell 2: Target 1 / Resistance 1 */}
                     <div className="p-2.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/20 border border-emerald-500/20 flex flex-col justify-between">
                         <div className="flex items-center gap-1 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
                             <Target className="w-3.5 h-3.5" />
-                            <span>المستهدف</span>
+                            <span>{target1 ? "المستهدف 1" : "المقاومة الأولى"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-                            {target1 ? String(target1) : "مستهدف مفتوح"}
+                            {target1 ? (typeof target1 === "number" ? `${target1.toFixed(2)} ج.م` : String(target1)) : (resistance1 ? `${Number(resistance1).toFixed(2)} ج.م` : "عائق صعود")}
                         </div>
                     </div>
 
-                    {/* 3. Stop Loss */}
+                    {/* Cell 3: Stop Loss / Support 2 */}
                     <div className="p-2.5 rounded-2xl bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/20 flex flex-col justify-between">
                         <div className="flex items-center gap-1 text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
                             <ShieldAlert className="w-3.5 h-3.5" />
-                            <span>وقف الخسارة</span>
+                            <span>{target1 ? "وقف الخسارة" : "الدعم الحاسم (2)"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-rose-600 dark:text-rose-400 mt-1">
-                            {stopLoss ? String(stopLoss) : "أسفل الدعم 3%"}
+                            {stopLoss ? (typeof stopLoss === "number" ? `${stopLoss.toFixed(2)} ج.م` : String(stopLoss)) : (support2 ? `${Number(support2).toFixed(2)} ج.م` : "كسر الدعم")}
                         </div>
                     </div>
 
-                    {/* 4. Risk / Reward */}
+                    {/* Cell 4: Target 2 / Resistance 2 / Risk:Reward */}
                     <div className="p-2.5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
                         <div className="flex items-center gap-1 text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
                             <Scale className="w-3.5 h-3.5 text-cyan-500" />
-                            <span>العائد للمخاطرة</span>
+                            <span>{target2 ? "المستهدف 2" : (resistance2 ? "المقاومة 2" : "العائد للمخاطرة")}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-1">
-                            {riskReward ? String(riskReward) : "1 : 2.0 🎯"}
+                            {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ج.م` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ج.م` : (riskReward ? String(riskReward) : "1 : 2.0 🎯"))}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Momentum & Liquidity Gauge (RSI + Relative Vol) */}
-            <div className="mt-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/10 flex flex-wrap items-center justify-between gap-2 relative z-10">
-                {/* RSI Meter */}
-                <div className="flex items-center gap-2 flex-1 min-w-[140px]">
-                    <div className="flex items-center gap-1 text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                        <Activity className="w-3.5 h-3.5 text-amber-500" />
-                        <span>RSI:</span>
-                        <span className="font-mono font-black text-zinc-900 dark:text-white">
-                            {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "52.0"}
+            {/* Comprehensive Technical Indicators & Liquidity Panel */}
+            <div className="mt-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/10 space-y-2.5 relative z-10">
+                {/* Primary Row: RSI & Relative Volume */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    {/* RSI Meter */}
+                    <div className="flex items-center gap-2 flex-1 min-w-[140px]">
+                        <div className="flex items-center gap-1 text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                            <Activity className="w-3.5 h-3.5 text-amber-500" />
+                            <span>RSI:</span>
+                            <span className="font-mono font-black text-zinc-900 dark:text-white">
+                                {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "52.0"}
+                            </span>
+                        </div>
+
+                        {rsiVal !== undefined && !isNaN(rsiVal) && (
+                            <div className="w-16 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                                <div 
+                                    className={`h-full rounded-full ${rsiProgressColor}`}
+                                    style={{ width: `${Math.min(Math.max(rsiVal, 0), 100)}%` }}
+                                />
+                            </div>
+                        )}
+
+                        <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border ${rsiColor}`}>
+                            {rsiLabel}
                         </span>
                     </div>
 
-                    {rsiVal !== undefined && !isNaN(rsiVal) && (
-                        <div className="w-16 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                            <div 
-                                className={`h-full rounded-full ${rsiProgressColor}`}
-                                style={{ width: `${Math.min(Math.max(rsiVal, 0), 100)}%` }}
-                            />
+                    {/* Relative Volume Badge */}
+                    {relativeVol && (
+                        <div className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <BarChart2 className="w-3 h-3 text-amber-500" />
+                            <span>السيولة: <strong>{String(relativeVol)}x</strong></span>
                         </div>
                     )}
-
-                    <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border ${rsiColor}`}>
-                        {rsiLabel}
-                    </span>
                 </div>
 
-                {/* Relative Volume Badge */}
-                {relativeVol && (
-                    <div className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                        <BarChart2 className="w-3 h-3 text-amber-500" />
-                        <span>السيولة: <strong>{String(relativeVol)}x</strong></span>
+                {/* Secondary Indicators Row: MACD, EMAs, Wyckoff, PE */}
+                {(macdDesc || ema50 || ema200 || wyckoffPhase || peRatio) && (
+                    <div className="pt-2 border-t border-zinc-200/60 dark:border-white/5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                        {wyckoffPhase && (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                <span>وايكوف:</span>
+                                <strong>{wyckoffPhase}</strong>
+                            </span>
+                        )}
+
+                        {macdDesc && (
+                            <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                                <span>MACD:</span>
+                                <strong>{macdDesc}</strong>
+                            </span>
+                        )}
+
+                        {ema50 && (
+                            <span className="px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
+                                EMA 50: {typeof ema50 === "number" ? ema50.toFixed(2) : ema50}
+                            </span>
+                        )}
+
+                        {ema200 && (
+                            <span className="px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
+                                EMA 200: {typeof ema200 === "number" ? ema200.toFixed(2) : ema200}
+                            </span>
+                        )}
+
+                        {peRatio && (
+                            <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-mono">
+                                P/E: {typeof peRatio === "number" ? peRatio.toFixed(1) : peRatio}x
+                            </span>
+                        )}
                     </div>
                 )}
             </div>

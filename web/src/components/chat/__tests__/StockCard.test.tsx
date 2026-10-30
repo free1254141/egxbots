@@ -196,4 +196,51 @@ describe("StockCard Component", () => {
         expect(screen.getByText("#LCSW")).toBeTruthy();
         expect(screen.getAllByText("35.73").length).toBeGreaterThan(0);
     });
+
+    test("FormattedChatMessage accurately extracts price and change when price is in preceding text like ATQA", () => {
+        const atqaMarkdown = `
+عتاقة — مصر الوطنية للصلب (ATQA) ✅ متوافق مع الشريعة ومدرج ضمن مؤشر EGX 33
+آخر إغلاق متاح: 9.05 ج.م (جلسة 29-10-2026، +0.56%)
+
+| المؤشر / المقياس | القيمة | القراءة |
+|---|---|---|
+| RSI (14) | 26.77 | تشبع بيعي |
+| MACD | -0.150 | سالب |
+| EMA 50 | 9.80 | السعر أدناه |
+| EMA 200 | 8.90 | السعر أعلاه |
+| الحجم النسبي | 1.45 | نشاط مرتفع |
+| مرحلة وايكوف | تجميع قوي | تجميع مؤسسي |
+
+رأي التحليل الفني للمراقبة.
+        `;
+
+        render(<FormattedChatMessage role="assistant" content={atqaMarkdown} />);
+
+        expect(screen.getByText("#ATQA")).toBeTruthy();
+        expect(screen.getAllByText("9.05").length).toBeGreaterThan(0);
+        expect(screen.getByText("+0.56%")).toBeTruthy();
+        expect(screen.getAllByText(/تجميع قوي/).length).toBeGreaterThan(0);
+        expect(screen.getByText(/EMA 50:/)).toBeTruthy();
+    });
+
+    test("FormattedChatMessage distinguishes تاريخ الدخول from سعر الدخول correctly", () => {
+        const fullTableMarkdown = `
+| السهم | نوع الإشارة | تاريخ الدخول | سعر الدخول | السعر الحالي | العائد الحالي | المستهدف 1 | المستهدف 2 | وقف الخسارة | الأفق |
+|---|---|---|---|---|---|---|---|---|---|
+| **CRST** | اختراق 🚀 | 30-10-2026 | 2.49 | 2.49 | 0.00% | 2.64 | 2.73 | 2.40 | 1–3 جلسات |
+| **EDFM** | انفجار حجم ⚡ | 30-10-2026 | 376.05 | 376.05 | 0.00% | 392.97 | 404.25 | 364.77 | 1–3 جلسات |
+        `;
+
+        render(<FormattedChatMessage role="assistant" content={fullTableMarkdown} />);
+
+        // CRST must be 2.49, NOT 30.00
+        expect(screen.getByText("#CRST")).toBeTruthy();
+        expect(screen.getAllByText("2.49").length).toBeGreaterThan(0);
+        expect(screen.queryByText("30.00")).toBeNull();
+
+        // EDFM must be 376.05, NOT 30.00
+        expect(screen.getByText("#EDFM")).toBeTruthy();
+        expect(screen.getAllByText("376.05").length).toBeGreaterThan(0);
+        expect(screen.getByText("392.97 ج.م")).toBeTruthy();
+    });
 });
