@@ -60,7 +60,7 @@ if thread_id:
 inline_keyboard = {
     "inline_keyboard": [
         [
-            {"text": "👑 اشترك بـ 50 ج.م (عرض المؤسسين)", "url": "https://egxbots.com/pricing?plan=pro"},
+            {"text": "👑 اشترك بـ 100 ج.م (تثبيت مدى الحياة)", "url": "https://egxbots.com/pricing?plan=pro"},
         ],
         [
             {"text": "💬 جرب الشات الذكي", "url": "https://egxbots.com/chat"},

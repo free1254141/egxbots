@@ -21,6 +21,8 @@ from api.payment_common import (
     pro_discount,
     pro_regular_amount_egp,
     is_user_eligible_for_50_egp_renewal,
+    is_user_eligible_for_100_egp_renewal,
+    founders_offer_is_open,
 )
 from api.telegram_pro_invites import ensure_pro_invite
 
@@ -124,25 +126,11 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
             "badge": "حصري لـ 20 مقعداً 🔥",
         },
     ]
-    # Founders offer - time-limited (15 days): use ends_at from env, not seat count
+    # Founders offer - time-limited (15 days): strictly time-limited
     from api.payment_common import founders_offer_ends_at, founders_offer_is_open
-    founders_limit = int(settings.get("founders_limit") or os.getenv("FOUNDERS_LIMIT", "100"))
-    founders_count = 0
-    try:
-        _init_supabase()
-        if supabase:
-            result = supabase.table("subscriptions").select("user_id", count="exact").eq("status", "active").execute()
-            if result and result.data:
-                # Count distinct user IDs
-                founders_count = len(set(r.get("user_id") for r in result.data if r.get("user_id")))
-            else:
-                founders_count = result.count or 0
-    except Exception:
-        founders_count = 0
-    founders_remaining = max(0, founders_limit - founders_count)
     _founders_ends_at = founders_offer_ends_at()
     _founders_is_open = founders_offer_is_open()
-    _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else None
+    _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else "2026-11-14T01:00:00Z"
 
     # Lifetime spots counter: strictly limited to 20 users only
     lifetime_limit = int(settings.get("lifetime_limit") or os.getenv("LIFETIME_LIMIT", "20"))
@@ -166,11 +154,14 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
         "plans": plans,
         "limits": {"free": free_limits(), "pro": pro_limits()},
         "founders": {
-            "limit": founders_limit,
-            "count": founders_count,
-            "remaining": founders_remaining,
+            "limit": None,
+            "count": None,
+            "remaining": None,
             "is_open": _founders_is_open,
+            "price_egp": 50 if is_eligible_50 else 100,
+            "regular_price_egp": int(pro_regular_amount_egp()),
             "ends_at": _founders_ends_at_str,
+            "is_grandfathered": is_eligible_50,
         },
         "lifetime": {
             "limit": lifetime_limit,
@@ -244,9 +235,12 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
         if is_user_eligible_for_50_egp_renewal(user_id):
             actual_plan_id = "pro_renewal"
             amount = Decimal("50.00")
-        else:
+        elif is_user_eligible_for_100_egp_renewal(user_id) or founders_offer_is_open():
             actual_plan_id = "pro"
             amount = Decimal("100.00")
+        else:
+            actual_plan_id = "pro"
+            amount = Decimal(str(plan_amount_egp("pro", user_id=user_id))).quantize(Decimal("0.01"))
     else:
         amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id))).quantize(Decimal("0.01"))
 

@@ -12,7 +12,8 @@ const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNA
 
 // Cache-Control: 5-min Edge CDN cache, 1-hour stale-while-revalidate for public
 const PAYMENT_CONFIG_HEADERS = {
-  "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400",
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+  "Vary": "Cookie, Authorization",
 };
 
 export async function GET(req: NextRequest) {
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(finalConfig, {
       status: response.status,
-      headers: userId ? { "Cache-Control": "private, no-cache" } : PAYMENT_CONFIG_HEADERS,
+      headers: PAYMENT_CONFIG_HEADERS,
     });
   } catch {
     return NextResponse.json({ enabled: false, mode: "disabled", provider: "easykash" }, { status: 503 });

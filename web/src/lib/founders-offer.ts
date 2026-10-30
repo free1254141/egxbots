@@ -24,17 +24,15 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
   const effectivePrice = isGrandfathered ? 50 : Number(offer.price_egp);
 
   // Compute offer ends_at from backend (passed via payment_config -> founders.ends_at) or env fallback
-  const configEndsAt =
-    config.founders?.ends_at ??
-    offer.ends_at ??
-    process.env.FOUNDERS_OFFER_ENDS_AT ??
-    process.env.NEXT_PUBLIC_FOUNDERS_OFFER_ENDS_AT ??
-    null;
+  const configEndsAt = config.founders?.ends_at || offer.ends_at || process.env.FOUNDERS_OFFER_ENDS_AT || process.env.NEXT_PUBLIC_FOUNDERS_OFFER_ENDS_AT || "2026-11-14T01:00:00Z";
 
   return {
     ...config,
     founders: {
       ...offer,
+      limit: null,
+      count: null,
+      remaining: null,
       ends_at: configEndsAt,
       price_egp: effectivePrice,
       is_grandfathered: isGrandfathered,

@@ -156,9 +156,9 @@ export default function PricingClient() {
     localConfig?.founders?.is_grandfathered ||
     localConfig?.plans?.find((p: any) => p.id === "pro")?.is_grandfathered_renewal
   );
-  const foundersRemaining: number = localConfig?.founders?.remaining ?? null;
+  const foundersRemaining: number | null = null;
   const foundersIsOpen: boolean = localConfig?.founders?.is_open ?? true;
-  const foundersEndsAt: string | null = localConfig?.founders?.ends_at ?? null;
+  const foundersEndsAt: string = localConfig?.founders?.ends_at || "2026-11-14T01:00:00Z";
 
   // Countdown timer for the time-limited founders offer
   const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
@@ -277,7 +277,17 @@ export default function PricingClient() {
     let cancelled = false;
     const loadConfig = async () => {
       try {
-        const response = await fetch("/api/payment/easykash/config");
+        const headers: Record<string, string> = {};
+        if (user) {
+          try {
+            const sb = createSupabaseBrowserClient();
+            const { data } = await sb.auth.getSession();
+            if (data?.session?.access_token) {
+              headers["Authorization"] = `Bearer ${data.session.access_token}`;
+            }
+          } catch {}
+        }
+        const response = await fetch("/api/payment/easykash/config", { headers, cache: "no-store" });
         if (!response.ok) throw new Error("Payment configuration unavailable");
         const local = await response.json();
         if (!cancelled) setLocalConfig(local);
@@ -291,7 +301,7 @@ export default function PricingClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -463,7 +473,10 @@ export default function PricingClient() {
     },
   ].map((plan) => {
     const configured = localConfig?.plans?.find((item: any) => item.id === plan.id);
-    const amount = Number(configured?.amount_egp ?? plan.amount_egp);
+    let amount = Number(configured?.amount_egp ?? plan.amount_egp);
+    if (plan.id === "pro" && isGrandfathered) {
+      amount = 50;
+    }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
     return {
@@ -1618,7 +1631,11 @@ export default function PricingClient() {
                           </span>
                         ) : plan.id === "pro" ? (
                           <span className="text-amber-600 dark:text-amber-400 font-bold">
-                            {foundersCountdown ? (isAr ? `ينتهي خلال ⏰ ${foundersCountdown}` : `Ends in ⏰ ${foundersCountdown}`) : (isAr ? "عرض 15 يوم فقط 🔥" : "15-day offer 🔥")}
+                            {isGrandfathered
+                              ? (isAr ? "تجديد حصري مثبت مدى الحياة ⚡" : "Locked renewal rate for life ⚡")
+                              : foundersCountdown
+                              ? (isAr ? `ينتهي خلال ⏰ ${foundersCountdown}` : `Ends in ⏰ ${foundersCountdown}`)
+                              : (isAr ? "عرض 15 يوماً فقط 🔥" : "15-day offer 🔥")}
                           </span>
                         ) : (
                           <span className="text-emerald-600 font-bold">{isAr ? "متاح فوري" : "Available"}</span>
