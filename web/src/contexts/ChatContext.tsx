@@ -177,7 +177,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(false);
     const [remainingQuota, setRemainingQuota] = useState<number>(10);
     const [quotaLimit, setQuotaLimit] = useState<number>(10);
-    const [isPro, setIsPro] = useState<boolean>(false);
+    const [isPro, setIsPro] = useState<boolean>(() => {
+        if (typeof window !== "undefined") {
+            return localStorage.getItem("egx_pro_active") === "true";
+        }
+        return false;
+    });
     const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
     const [selectedModel, setSelectedModelState] = useState<string>("deepseek-chat");
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
@@ -466,7 +471,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 }
                 setRemainingQuota(data.remaining_quota);
                 if (typeof data.quota_limit === "number") setQuotaLimit(data.quota_limit);
-                if (typeof data.is_pro === "boolean") setIsPro(data.is_pro);
+                if (typeof data.is_pro === "boolean") {
+                    setIsPro(data.is_pro);
+                    if (typeof window !== "undefined") {
+                        localStorage.setItem("egx_pro_active", data.is_pro ? "true" : "false");
+                    }
+                }
                 if (typeof data.autonomous_recommendations === "boolean") {
                     const isAutonomous = Boolean(data.is_pro && data.autonomous_recommendations);
                     setAutonomousRecommendationsState(isAutonomous);
@@ -491,13 +501,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     // Payment completion is an explicit refresh; ordinary token rotation is not.
     useEffect(() => {
-        const onStorage = (event: StorageEvent) => {
-            if (event.key === "egx_entitlements_timestamp") retryAccess();
+        const onEntitlements = (event: Event) => {
+            const detail = (event as CustomEvent)?.detail;
+            if (detail && typeof detail.is_pro === "boolean") {
+                setIsPro(detail.is_pro);
+            }
+            retryAccess();
         };
-        window.addEventListener("egx:entitlements-updated", retryAccess);
+        const onStorage = (event: StorageEvent) => {
+            if (event.key === "egx_entitlements_timestamp" || event.key === "egx_pro_active") {
+                if (typeof window !== "undefined") {
+                    const stored = localStorage.getItem("egx_pro_active") === "true";
+                    setIsPro(stored);
+                }
+                retryAccess();
+            }
+        };
+        window.addEventListener("egx:entitlements-updated", onEntitlements);
         window.addEventListener("storage", onStorage);
         return () => {
-            window.removeEventListener("egx:entitlements-updated", retryAccess);
+            window.removeEventListener("egx:entitlements-updated", onEntitlements);
             window.removeEventListener("storage", onStorage);
         };
     }, [retryAccess]);
@@ -614,7 +637,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         if (!text.trim() && imagesList.length === 0) return;
 
-        if (!isPro && imagesList.length > 0) {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro && imagesList.length > 0) {
             setShowUpgradeModal(true);
             return;
         }

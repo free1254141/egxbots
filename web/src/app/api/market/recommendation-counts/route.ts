@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const runtime = "nodejs";
-// Removed force-dynamic: dailyCacheHeaders already sets
-// Vercel-CDN-Cache-Control: s-maxage=86400, so the Edge CDN will cache this
-// for the entire day and serve repeat requests at zero serverless CPU cost.
+export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
-export async function GET(request: NextRequest) {
-  const requestedFrom = request.nextUrl.searchParams.get("from");
-  const from = requestedFrom && /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom)
-    ? requestedFrom
-    : new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-
-  try {
+const getCachedDailyCounts = unstable_cache(
+  async (from: string): Promise<Record<string, number>> => {
     const db = getSupabaseServiceClient({ cacheMarketData: true });
     const dailyCounts: Record<string, number> = {};
     const pageSize = 1000;
@@ -34,6 +28,20 @@ export async function GET(request: NextRequest) {
       }
       if (rows.length < pageSize) break;
     }
+    return dailyCounts;
+  },
+  ["market-recommendation-counts"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.recommendations] }
+);
+
+export async function GET(request: NextRequest) {
+  const requestedFrom = request.nextUrl.searchParams.get("from");
+  const from = requestedFrom && /^\d{4}-\d{2}-\d{2}$/.test(requestedFrom)
+    ? requestedFrom
+    : new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+
+  try {
+    const dailyCounts = await getCachedDailyCounts(from);
     return NextResponse.json({ from, daily_counts: dailyCounts }, { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.recommendations) });
   } catch (error) {
     console.error("[MARKET_RECOMMENDATION_COUNTS]", error);

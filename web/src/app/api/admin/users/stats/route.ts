@@ -101,6 +101,7 @@ export async function GET(req: NextRequest) {
     let emailDomains: Record<string, number> = {};
     const adminUserIds = new Set<string>();
     const ADMIN_EMAILS = new Set([
+      "acursour@gmail.com",
       "weeessd57@gmail.com",
       "weeeessd57@gmail.com",
       "weeasd57@gmail.com",
@@ -368,6 +369,8 @@ export async function GET(req: NextRequest) {
       newUsers14Days: analytics.newUsers14Days,
       retentionRate: analytics.retentionRate,
       emailDomains: analytics.emailDomains,
+    }, {
+      headers: { 'Cache-Control': 'private, max-age=180, stale-while-revalidate=300' },
     });
   } catch (error) {
     console.error("[admin/users/stats] failed:", error);

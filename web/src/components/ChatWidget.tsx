@@ -69,7 +69,8 @@ export default function ChatWidget() {
     const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
 
     const handleToggleAutonomousRecs = () => {
-        if (!isPro && !autonomousRecommendations) {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro && !autonomousRecommendations) {
             toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
             setShowUpgradeModal(true);
             return;
@@ -83,18 +84,21 @@ export default function ChatWidget() {
     };
 
     const handleConfirmAutonomousRecs = () => {
-        if (!isPro) {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro) {
             toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
             setShowUpgradeModal(true);
             return;
         }
+        setShowAutonomousModal(false);
         setAutonomousRecommendations(true);
         toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
     };
 
     // Auto-disable autonomous recs ONLY after server access check is ready and confirms user is not Pro
     useEffect(() => {
-        if (isAccessReady && !isPro && autonomousRecommendations) {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (isAccessReady && !activePro && autonomousRecommendations) {
             setAutonomousRecommendations(false);
         }
     }, [isAccessReady, isPro, autonomousRecommendations, setAutonomousRecommendations]);
@@ -429,7 +433,8 @@ export default function ChatWidget() {
     }
 
     const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!isPro) {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro) {
             toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
             setShowUpgradeModal(true);
             e.target.value = "";
@@ -504,7 +509,8 @@ export default function ChatWidget() {
     return (
         <div 
             className={isChatRoute ? "fixed inset-0 z-[9999] flex h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0" : `
-                fixed z-[9999] flex gap-1 bg-transparent transition-all duration-300
+                fixed z-[9999] flex gap-1 bg-transparent
+                animate-in fade-in slide-in-from-bottom-5 duration-200 transition-all
                 max-md:inset-0 max-md:w-full max-md:h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
                 md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
                 ${isExpanded 
@@ -618,7 +624,7 @@ export default function ChatWidget() {
                                                             <span className="text-xs font-bold text-zinc-900 dark:text-white">
                                                                 {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
                                                             </span>
-                                                            {!isPro && (
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) && (
                                                                 <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-black text-amber-600 dark:text-amber-400 border border-amber-500/40">
                                                                     PRO 👑
                                                                 </span>
@@ -630,7 +636,7 @@ export default function ChatWidget() {
                                                             )}
                                                         </div>
                                                         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                            {!isPro
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true"))
                                                                 ? (language === "ar" ? "ميزة حصرية لمشتركي Pro" : "Exclusive to Pro members")
                                                                 : autonomousRecommendations
                                                                     ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
@@ -862,7 +868,8 @@ export default function ChatWidget() {
                                     {/* Portfolio Image Upload Hero Card */}
                                     <div 
                                         onClick={() => {
-                                            if (!isPro) {
+                                            const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                            if (!activePro) {
                                                 toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
                                                 setShowUpgradeModal(true);
                                                 return;
@@ -875,7 +882,7 @@ export default function ChatWidget() {
                                             <div className="space-y-1 flex-1">
                                                 <div className="flex items-center gap-2">
                                                     <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
-                                                        {isPro ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
+                                                        {(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
                                                     </span>
                                                     <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
                                                         حلل محفظتك الاستثمارية من صورة
@@ -1121,7 +1128,8 @@ export default function ChatWidget() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (!isPro) {
+                                        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                        if (!activePro) {
                                             toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
                                             setShowUpgradeModal(true);
                                             return;

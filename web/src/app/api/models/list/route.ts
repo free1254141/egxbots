@@ -3,6 +3,10 @@ import { getSupabaseClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 export const revalidate = 3600;
+const headers = {
+  "Cache-Control": "public, max-age=300",
+  "Vercel-CDN-Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+};
 
 export async function GET() {
   try {
@@ -34,7 +38,7 @@ export async function GET() {
       metadata: model.metadata || {}
     })) || [];
 
-    return NextResponse.json({ models: modelList });
+    return NextResponse.json({ models: modelList }, { headers });
 
   } catch (error) {
     console.error('Models API error:', error);

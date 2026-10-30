@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 3600; // 1 hour (daily data)
+
+export const revalidate = 86400; // 24 hours (daily data)
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(req: Request) {

@@ -5,6 +5,7 @@ export function isChatAdminEmail(email: string | null | undefined): boolean {
     const configured = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || process.env.ADMIN_EMAILS || "")
         .split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
     const adminEmails = new Set([
+        "acursour@gmail.com",
         "weeeessd57@gmail.com",
         ...configured,
     ]);

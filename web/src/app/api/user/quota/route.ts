@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { getCairoDateString, planLimits, resolveSubscriptionQuotaWindow } from "@/lib/ai/plan-gate";
+import { isUnlimitedChatUser } from "@/lib/ai/server-secrets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,9 +37,9 @@ async function getFounderUids(serviceClient: any): Promise<string[]> {
   return uniqueFounderUids;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const supabase = await createSupabaseServerClient();
+    const supabase = await createSupabaseServerClient(req);
     const {
       data: { user },
       error: authError,
@@ -98,12 +100,13 @@ export async function GET() {
     if (posResult.error) console.warn("[api/user/quota] positions query error:", posResult.error);
 
     // Derive plan status & effective monthly window via the shared single-source helper.
+    const isUnlimited = isUnlimitedChatUser(user);
     const quotaWin = resolveSubscriptionQuotaWindow(subRows || [], now);
-    const pro = quotaWin.isPro;
+    const pro = quotaWin.isPro || isUnlimited;
     const activeSub = quotaWin.activeSub;
     const monthStartStr = quotaWin.effectiveMonthStartStr;
 
-    const planName = pro ? (activeSub?.plan_id === "lifetime" ? "lifetime" : "pro") : "free";
+    const planName = pro ? (activeSub?.plan_id === "lifetime" || isUnlimited ? "lifetime" : "pro") : "free";
     const limits = planLimits(planName);
 
     // Derive chat quota (filtered to effective subscription window start)

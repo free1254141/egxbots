@@ -16,6 +16,7 @@ export function isAllowedAdminEmail(email?: string | null): boolean {
 
     // Check specific known emails
     const explicitAdmins = [
+        "acursour@gmail.com",
         "weeeessd57@gmail.com",
         "weeessd57@gmail.com",
         "weeasd57@gmail.com",

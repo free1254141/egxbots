@@ -491,27 +491,29 @@ export async function POST(req: NextRequest) {
         userId = user.id;
         const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
         const billingOn = paymentsEnabled();
-        // Legacy unlimited allow-list is only valid while billing is disabled.
-        // Once plans are active, every account must have an active Pro
-        // subscription to bypass the Free quota.
-        const isUnlimited = !billingOn && isUnlimitedChatUser(user);
-        let userIsPro = false;
-        let userMonthlyCap = Number.MAX_SAFE_INTEGER;
+        const isUnlimited = isUnlimitedChatUser(user);
+        let userIsPro = isUnlimited;
+        let userMonthlyCap = isUnlimited ? Number.MAX_SAFE_INTEGER : planLimits("free").chat_messages_per_month;
         let quotaWin = resolveSubscriptionQuotaWindow([]);
         if (billingOn) {
             try {
-                const { data: planRows } = await authClient
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient
                     .from("subscriptions")
                     .select("plan_id,status,current_period_start,current_period_end")
                     .eq("user_id", userId)
                     .order("current_period_end", { ascending: false })
                     .limit(10);
-                userIsPro = gateIsPro(planRows || []);
+                if (gateIsPro(planRows || [])) {
+                    userIsPro = true;
+                }
                 userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
                 quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
             } catch {
-                userIsPro = false;
-                userMonthlyCap = planLimits("free").chat_messages_per_month;
+                if (!isUnlimited) {
+                    userIsPro = false;
+                    userMonthlyCap = planLimits("free").chat_messages_per_month;
+                }
             }
         }
         const body = await req.json();
@@ -596,10 +598,11 @@ export async function POST(req: NextRequest) {
             }
         }
         const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
-        if (billingOn && !isUnlimited && message && !detectPortfolioIntent(message) && (asksProRecs || mentionsAutonomousMode)) {
+        if (billingOn && !isUnlimited && !userIsPro && message && !detectPortfolioIntent(message) && (asksProRecs || mentionsAutonomousMode)) {
             try {
-                const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
-                if (!gateIsPro(planRows || [])) {
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
+                if (!isUnlimited && !gateIsPro(planRows || [])) {
                     return NextResponse.json({
                         reply:
                             "🔒 **التوصيات المفتوحة ووضع التوصيات الحرة في الشات متاحان حصرياً لمشتركي باقة Pro.**\n\n" +
@@ -1293,17 +1296,23 @@ export async function GET(req: NextRequest) {
             const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
             const today = getCairoDateString();
             const billingOn = paymentsEnabled();
-            let isUnlimited = !billingOn && isUnlimitedChatUser(user);
+            const isUnlimited = isUnlimitedChatUser(user);
             let quotaLimit = AI_CONFIG.limits.dailyMessages;
             let usedCount = 0;
-            let userIsPro = false;
+            let userIsPro = isUnlimited;
 
             if (billingOn) {
-                const { data: planRows } = await authClient.from("subscriptions").select("plan_id,status,current_period_start,current_period_end").eq("user_id", userId).order("current_period_end", { ascending: false });
-                userIsPro = gateIsPro(planRows || []);
-                isUnlimited = false;
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient
+                    .from("subscriptions")
+                    .select("plan_id,status,current_period_start,current_period_end")
+                    .eq("user_id", userId)
+                    .order("current_period_end", { ascending: false });
+                if (gateIsPro(planRows || [])) {
+                    userIsPro = true;
+                }
                 const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
-                quotaLimit = userIsPro ? planLimits("pro").chat_messages_per_month : planLimits("free").chat_messages_per_month;
+                quotaLimit = (isUnlimited || userIsPro) ? planLimits("pro").chat_messages_per_month : planLimits("free").chat_messages_per_month;
                 const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
                 const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
 

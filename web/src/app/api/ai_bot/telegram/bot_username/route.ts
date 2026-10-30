@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 // Bot username is a static string that never changes at runtime.
 // Cache aggressively at the Edge CDN — no serverless function needed after first hit.
 export const revalidate = 86400;
