@@ -47,18 +47,53 @@ def test_is_vip_chat_update_topic_isolation():
     }
     assert is_vip_chat_update(update_in_recs_topic) is False
 
-    # 3. Message in general topic (thread_id=None) -> False
+    # 3. Message in general topic (thread_id=None or thread_id=1) -> False even if pending prompt exists!
+    set_local_pending_prompt(-1002083067817, 998877, "stock")
     update_in_general = {
         "message": {
             "message_id": 103,
             "chat": {"id": -1002083067817, "type": "supergroup"},
             "from": {"id": 998877, "first_name": "Ahmed"},
-            "text": "صباح الخير",
+            "text": "مش عارف استخدم البوت",
         }
     }
     assert is_vip_chat_update(update_in_general) is False
 
-    # 4. Callback query with vip_ prefix -> True
+    update_in_general_thread_1 = {
+        "message": {
+            "message_id": 104,
+            "chat": {"id": -1002083067817, "type": "supergroup"},
+            "message_thread_id": 1,
+            "from": {"id": 998877, "first_name": "Ahmed"},
+            "text": "مش عارف استخدم البوت",
+        }
+    }
+    assert is_vip_chat_update(update_in_general_thread_1) is False
+    set_local_pending_prompt(-1002083067817, 998877, None)
+
+    # 4. Message in private chat with @egxbots_bot -> True
+    update_in_private = {
+        "message": {
+            "message_id": 105,
+            "chat": {"id": 998877, "type": "private"},
+            "from": {"id": 998877, "first_name": "Ahmed"},
+            "text": "حلل سهم فوري",
+        }
+    }
+    assert is_vip_chat_update(update_in_private) is True
+
+    # 5. Account linking via /start <uuid> in private chat -> False (delegated to telegram_bot)
+    update_start_uuid = {
+        "message": {
+            "message_id": 106,
+            "chat": {"id": 998877, "type": "private"},
+            "from": {"id": 998877, "first_name": "Ahmed"},
+            "text": "/start ba9c27e8-f62d-452f-8a29-dc77fd092207",
+        }
+    }
+    assert is_vip_chat_update(update_start_uuid) is False
+
+    # 6. Callback query with vip_ prefix -> True
     cb_update = {
         "callback_query": {
             "id": "cb_1",

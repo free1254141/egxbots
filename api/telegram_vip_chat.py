@@ -989,7 +989,7 @@ def format_pipeline_reply_for_telegram(
 
 
 def is_vip_chat_update(data: Dict[str, Any]) -> bool:
-    """Return True if this Telegram update belongs to the VIP Chat room / topic or uses vip_ callbacks."""
+    """Return True if this Telegram update belongs to the VIP Chat room / topic or @egxbots_bot private chat."""
     if data.get("callback_query"):
         cb_data = str(data["callback_query"].get("data") or "")
         if cb_data.startswith("vip_"):
@@ -1005,25 +1005,24 @@ def is_vip_chat_update(data: Dict[str, Any]) -> bool:
     target_group = get_vip_group_id()
     target_topic = get_vip_topic_id()
 
-    # Check if inside the configured group + topic (e.g., -1002083067817 thread 1680)
+    # 1. Inside the configured official supergroup (e.g., -1002083067817):
+    # STRICT TOPIC ISOLATION: The bot operates EXCLUSIVELY inside topic 1680 (ARTORO topic).
+    # It must NEVER reply to messages in Topic 1 ("الدردشة العامة"), Topic 153 ("التوصيات"), or any other topic.
     if chat_id_str == target_group:
-        if thread_id == 153:
+        if target_topic is not None and thread_id != target_topic:
             return False
-        if target_topic is not None and thread_id == target_topic:
-            return True
-        from_id = int((msg.get("from") or {}).get("id") or 0)
-        if from_id and get_local_pending_prompt(chat_id_str, from_id):
-            return True
-        reply_to = msg.get("reply_to_message") or {}
-        reply_text = str(reply_to.get("text") or "")
-        if "تحليل سهم فوري —" in reply_text or "مقارنة الأسهم —" in reply_text or "اسأل أرتورو —" in reply_text:
-            return True
-        # Also allow commands to open panel or test quota in general topic
-        if text.lower().startswith(("/vippanel", "/artoro_panel", "/panel", "/artoro", "/menu", "/test_")):
-            return True
-        return False
+        return True
 
-    # Also support standalone VIP Chat groups if chat_type is group/supergroup and explicitly addressed
+    # 2. Inside Private 1-on-1 Chat with @egxbots_bot:
+    if chat_type == "private" or (chat_id_str and chat_id_str == str((msg.get("from") or {}).get("id"))):
+        # Let telegram_bot handle deep link account connection (/start <uuid>)
+        if text.startswith("/start") and len(text.split()) > 1:
+            arg = text.split()[1].strip().lower()
+            if arg not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot"):
+                return False
+        return True
+
+    # 3. For any other standalone supergroup (if explicitly addressed):
     if chat_type in ("group", "supergroup"):
         if text.lower().startswith(("/vippanel", "/artoro_panel", "/ask")):
             return True
