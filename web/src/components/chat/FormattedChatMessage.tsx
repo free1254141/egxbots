@@ -37,9 +37,261 @@ interface RawPipeStock {
 type ContentBlock = 
     | { type: "text"; content: string }
     | { type: "table"; headers: string[]; rows: string[][] }
-    | { type: "stock_card"; stock: StockData; rawJson: string }
-    | { type: "stock_cards"; stocks: StockData[] }
+    | { type: "stock_card"; stock: StockData; rawJson: string; tableData?: { headers: string[]; rows: string[][] } }
+    | { type: "stock_cards"; stocks: StockData[]; tableData?: { headers: string[]; rows: string[][] } }
     | { type: "raw_pipe_table"; items: RawPipeStock[] };
+
+export const EGX_STOCKS_METADATA: Record<string, { name: string; sector: string; isShariah?: boolean }> = {
+    COMI: { name: "البنك التجاري الدولي", sector: "بنوك", isShariah: false },
+    TMGH: { name: "مجموعة طلعت مصطفى", sector: "عقارات", isShariah: true },
+    EAST: { name: "الشرقية - إيسترن كومباني", sector: "أغذية ومشروبات وتبغ", isShariah: false },
+    SEIG: { name: "الشرقية - إيسترن كومباني", sector: "أغذية ومشروبات وتبغ", isShariah: false },
+    HRHO: { name: "إي إف جي القابضة", sector: "خدمات مالية غير مصرفية", isShariah: false },
+    SWDY: { name: "السويدي إليكتريك", sector: "صناعي وهندسي", isShariah: true },
+    FWRY: { name: "فوري لتكنولوجيا البنوك", sector: "تكنولوجيا مالية", isShariah: true },
+    AMOC: { name: "الإسكندرية للزيوت المعدنية", sector: "طاقة وبترول", isShariah: true },
+    EKHO: { name: "القابضة المصرية الكويتية", sector: "استثمار وخدمات مالية", isShariah: true },
+    ABUK: { name: "أبو قير للأسمدة", sector: "كيماويات وأسمدة", isShariah: true },
+    MFPC: { name: "مصر لإنتاج الأسمدة - موبكو", sector: "كيماويات وأسمدة", isShariah: true },
+    ETEL: { name: "المصرية للاتصالات", sector: "اتصالات", isShariah: true },
+    JUFO: { name: "جهينة للصناعات الغذائية", sector: "أغذية ومشروبات", isShariah: true },
+    DOMT: { name: "دومتي للصناعات الغذائية", sector: "أغذية ومشروبات", isShariah: true },
+    SKPC: { name: "سيدي كرير للبتروكيماويات", sector: "كيماويات وبتروكيماويات", isShariah: true },
+    ISPH: { name: "ابن سينا فارما", sector: "رعاية صحية وأدوية", isShariah: true },
+    GBCO: { name: "جي بي كوربوريشن", sector: "سيارات وتجارة", isShariah: true },
+    GBAUTO: { name: "جي بي كوربوريشن", sector: "سيارات وتجارة", isShariah: true },
+    HELI: { name: "مصر الجديدة للإسكان", sector: "عقارات", isShariah: true },
+    PHDC: { name: "بالم هيلز للتعمير", sector: "عقارات", isShariah: true },
+    ACGC: { name: "العربية لحليج الأقطان", sector: "غزل ونسيج", isShariah: true },
+    EFID: { name: "إيديتا للصناعات الغذائية", sector: "أغذية ومشروبات", isShariah: true },
+    EFIH: { name: "إي فاينانس", sector: "تكنولوجيا مالية", isShariah: true },
+    CRST: { name: "كريست مارك", sector: "خدمات واستثمار", isShariah: true },
+    EDFM: { name: "مطاحن ومخابز شمال القاهرة", sector: "أغذية ومطاحن", isShariah: true },
+    MBEG: { name: "إم بي للهندسة", sector: "صناعي وهندسي", isShariah: true },
+    WCDF: { name: "مطاحن ومخابز وسط وغرب الدلتا", sector: "أغذية ومطاحن", isShariah: true },
+    LCSW: { name: "ليسيكو مصر", sector: "مواد بناء وسيراميك", isShariah: true },
+    ETRS: { name: "المصرية لخدمات النقل - إيجيترانس", sector: "نقل ولوجستيات", isShariah: true },
+    BTFH: { name: "بلتون المالية القابضة", sector: "خدمات مالية غير مصرفية", isShariah: false },
+    AFMC: { name: "مطاحن الإسكندرية", sector: "أغذية ومطاحن", isShariah: true },
+    CIEB: { name: "بنك كريدي أجريكول مصر", sector: "بنوك", isShariah: false },
+    ADIB: { name: "مصرف أبوظبي الإسلامي", sector: "بنوك إسلامية", isShariah: true },
+    CCAP: { name: "القلعة للاستشارات المالية", sector: "استثمار وخدمات مالية", isShariah: false },
+    KORA: { name: "قرة للطاقة", sector: "طاقة وخدمات هندسية", isShariah: true },
+    ORAS: { name: "أوراسكوم كونستراكشون", sector: "مقاولات وتشييد", isShariah: true },
+    ORHD: { name: "أوراسكوم للتنمية مصر", sector: "عقارات وسياحة", isShariah: true },
+    CICH: { name: "سي آي كابيتال القابضة", sector: "خدمات مالية غير مصرفية", isShariah: false },
+    VALU: { name: "فاليو", sector: "تكنولوجيا مالية واستهلاكية", isShariah: false },
+    POUL: { name: "القاهرة للدواجن", sector: "أغذية ودواجن", isShariah: true },
+    ISMA: { name: "الإسماعيلية مصر للدواجن", sector: "أغذية ودواجن", isShariah: true },
+    IRON: { name: "الحديد والصلب المصرية", sector: "تعدين وحديد", isShariah: true },
+    MBSC: { name: "مصر بني سويف للأسمنت", sector: "مواد بناء وأسمنت", isShariah: true },
+    MPCI: { name: "مصر للأسمنت - قنا", sector: "مواد بناء وأسمنت", isShariah: true },
+    DEIN: { name: "دايس للملابس الجاهزة", sector: "ملابس ومنسوجات", isShariah: true },
+    CEFM: { name: "مطاحن ومخابز الإسكندرية", sector: "أغذية ومطاحن", isShariah: true },
+    SCFM: { name: "مطاحن جنوب القاهرة والجيزة", sector: "أغذية ومطاحن", isShariah: true },
+    PHAR: { name: "المصرية الدولية للأدوية - إيبيكو", sector: "رعاية صحية وأدوية", isShariah: true },
+    ODIN: { name: "أودن للاستثمارات المالية", sector: "استثمار وخدمات مالية", isShariah: false },
+};
+
+function parseNum(val: string | undefined): number | undefined {
+    if (!val) return undefined;
+    const cleaned = val.replace(/[^\d.-]/g, "");
+    if (!cleaned) return undefined;
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? undefined : n;
+}
+
+export function tryParseRecommendationsTable(headers: string[], rows: string[][]): StockData[] | null {
+    if (!headers || headers.length < 3 || !rows || rows.length === 0) return null;
+
+    const symbolIdx = headers.findIndex(h => /السهم|الرمز|الكود/i.test(h));
+    const entryIdx = headers.findIndex(h => /الدخول|سعر الدخول|منطقة الدخول/i.test(h));
+    const target1Idx = headers.findIndex(h => /المستهدف\s*1?|الهدف\s*1?|تارجت\s*1?/i.test(h));
+    const target2Idx = headers.findIndex(h => /المستهدف\s*2|الهدف\s*2|تارجت\s*2/i.test(h));
+    const stopLossIdx = headers.findIndex(h => /وقف الخسارة|الوقف|Stop\s*Loss/i.test(h));
+    const returnIdx = headers.findIndex(h => /العائد|التغير|الربح/i.test(h));
+
+    if (symbolIdx === -1 || entryIdx === -1 || (target1Idx === -1 && stopLossIdx === -1)) {
+        return null;
+    }
+
+    const stocks: StockData[] = [];
+    for (const row of rows) {
+        if (!row || row.length <= symbolIdx) continue;
+        const rawSymbol = row[symbolIdx]?.trim() || "";
+        if (!rawSymbol || rawSymbol === "-" || rawSymbol.startsWith("---") || /المؤشر|المستوى/i.test(rawSymbol)) continue;
+
+        const isExplicitShariah = rawSymbol.includes("شرعي") || rawSymbol.includes("EGX33") || rawSymbol.includes("شريعة");
+        const cleanSymbol = rawSymbol.replace(/\(شرعي\)|\(شريعة\)|\(.*\)/g, "").trim().toUpperCase();
+
+        const entry = parseNum(row[entryIdx]);
+        const target1 = target1Idx !== -1 ? parseNum(row[target1Idx]) : undefined;
+        const target2 = target2Idx !== -1 ? parseNum(row[target2Idx]) : undefined;
+        const stopLoss = stopLossIdx !== -1 ? parseNum(row[stopLossIdx]) : undefined;
+        
+        let changePct: number | undefined;
+        if (returnIdx !== -1 && row[returnIdx]) {
+            changePct = parseNum(row[returnIdx]);
+        }
+
+        const meta = EGX_STOCKS_METADATA[cleanSymbol];
+
+        if (cleanSymbol && (entry !== undefined || target1 !== undefined || stopLoss !== undefined)) {
+            stocks.push({
+                symbol: cleanSymbol,
+                name: meta?.name || cleanSymbol,
+                sector: meta?.sector,
+                price: entry || 0,
+                changePercent: changePct !== undefined ? changePct : 0,
+                entryRange: entry ? `${entry.toFixed(2)} ج.م` : undefined,
+                target1,
+                target2,
+                stopLoss,
+                recommendation: "فرصة مضاربة",
+                signal: "دخول مؤكد",
+                isShariah: isExplicitShariah || meta?.isShariah,
+                timeframe: "1-3 جلسات"
+            });
+        }
+    }
+
+    return stocks.length > 0 ? stocks : null;
+}
+
+export function tryParseAnalysisTable(headers: string[], rows: string[][], recentText: string): StockData | null {
+    if (!rows || rows.length < 2) return null;
+
+    let hasClose = false;
+    let hasSupport = false;
+    let hasResistance = false;
+    let hasRsi = false;
+    let hasEma = false;
+
+    let price: number | undefined;
+    let support1: number | undefined;
+    let support2: number | undefined;
+    let resistance1: number | undefined;
+    let resistance2: number | undefined;
+    let rsi: number | undefined;
+    let macdVal: string | undefined;
+    let volRatio: number | undefined;
+    let pe: number | undefined;
+    let wyckoffPhase: string | undefined;
+
+    for (const row of rows) {
+        if (!row || row.length < 2) continue;
+        const key = row[0]?.trim() || "";
+        const val = row[1]?.trim() || "";
+
+        if (/الإغلاق الحالي|آخر سعر|سعر الإغلاق/i.test(key)) {
+            hasClose = true;
+            price = parseNum(val);
+        } else if (/الدعم الأول|دعم أول|الدعم 1/i.test(key)) {
+            hasSupport = true;
+            support1 = parseNum(val);
+        } else if (/الدعم الثاني|دعم ثان|الدعم 2/i.test(key)) {
+            support2 = parseNum(val);
+        } else if (/المقاومة الأولى|مقاومة أولى|المقاومة 1/i.test(key)) {
+            hasResistance = true;
+            resistance1 = parseNum(val);
+        } else if (/المقاومة الثانية|مقاومة ثانية|المقاومة 2/i.test(key)) {
+            resistance2 = parseNum(val);
+        } else if (/RSI/i.test(key)) {
+            hasRsi = true;
+            rsi = parseNum(val);
+        } else if (/MACD/i.test(key)) {
+            macdVal = val;
+        } else if (/الحجم النسبي/i.test(key)) {
+            volRatio = parseNum(val);
+        } else if (/مضاعف الربحية|P\/E/i.test(key)) {
+            pe = parseNum(val);
+        } else if (/مرحلة وايكوف/i.test(key)) {
+            wyckoffPhase = val;
+        } else if (/EMA/i.test(key)) {
+            hasEma = true;
+        }
+    }
+
+    const matchCount = (hasClose ? 1 : 0) + (hasSupport ? 1 : 0) + (hasResistance ? 1 : 0) + (hasRsi ? 1 : 0) + (hasEma ? 1 : 0);
+    if (matchCount < 2) {
+        return null;
+    }
+
+    let symbol = "";
+    let name = "";
+    let changePct: number | undefined;
+    let recommendation = "";
+    let isShariah = false;
+
+    // Extract symbol and name from recent preceding text
+    const symbolMatch = recentText.match(/(?:تحليل سهم|سهم)\s+([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
+                     || recentText.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
+                     || recentText.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i);
+
+    if (symbolMatch) {
+        if (symbolMatch[2]) {
+            name = symbolMatch[1].replace(/###|📊/g, "").trim();
+            symbol = symbolMatch[2].trim().toUpperCase();
+        } else {
+            symbol = symbolMatch[1].trim().toUpperCase();
+            name = symbol;
+        }
+    }
+
+    // Fallback: check if any KNOWN_STOCK_SYMBOLS appears in recent text
+    if (!symbol) {
+        for (const s of KNOWN_STOCK_SYMBOLS) {
+            const regex = new RegExp(`\\b${s}\\b`, "i");
+            if (regex.test(recentText)) {
+                symbol = s;
+                break;
+            }
+        }
+    }
+
+    if (!symbol) return null;
+
+    // Price change percentage
+    const changeMatch = recentText.match(/تغير الجلسة:\s*([+-]?[\d\.]+)%/i)
+                     || recentText.match(/([+-]?[\d\.]+)%\s*بتاريخ/i);
+    if (changeMatch) {
+        changePct = parseFloat(changeMatch[1]);
+    }
+
+    // Evaluation / Recommendation
+    const evalMatch = recentText.match(/التقييم الفني العام:\s*([^\n\r\|]+)/i);
+    if (evalMatch) {
+        recommendation = evalMatch[1].trim();
+    }
+
+    // Shariah check
+    if (/متوافق مع الشريعة|EGX\s*33|شريعة/i.test(recentText)) {
+        if (!/غير متوافق|خارج EGX\s*33/i.test(recentText)) {
+            isShariah = true;
+        }
+    }
+
+    const meta = EGX_STOCKS_METADATA[symbol];
+
+    return {
+        symbol,
+        name: name || meta?.name || symbol,
+        sector: meta?.sector,
+        price: price || 0,
+        changePercent: changePct !== undefined ? changePct : 0,
+        entryRange: support1 ? `${support1.toFixed(2)} ج.م` : undefined,
+        target1: resistance1,
+        target2: resistance2,
+        stopLoss: support2 || (support1 ? Number((support1 * 0.98).toFixed(2)) : undefined),
+        recommendation: recommendation || wyckoffPhase || "حيادي للمراقبة",
+        signal: recommendation || "مراقبة فنية",
+        rsi,
+        macdSignal: macdVal,
+        volumeRatio: volRatio,
+        peRatio: pe,
+        isShariah: isShariah || meta?.isShariah
+    };
+}
 
 const KNOWN_STOCK_SYMBOLS = new Set([
     "COMI", "EAST", "HRHO", "SWDY", "FWRY", "TMGH", "AMOC", "EKHO", "ABUK", "MFPC",
@@ -252,6 +504,34 @@ function parseContentBlocks(content: string): ContentBlock[] {
                     return cells;
                 });
                 if (headers.length > 0 && rows.length > 0) {
+                    // 1. Try recommendations / opportunities table first
+                    const recStocks = tryParseRecommendationsTable(headers, rows);
+                    if (recStocks && recStocks.length > 0) {
+                        flushText();
+                        blocks.push({ 
+                            type: "stock_cards", 
+                            stocks: recStocks,
+                            tableData: { headers, rows }
+                        });
+                        currentTableLines = [];
+                        return;
+                    }
+
+                    // 2. Try single/comparative stock analysis table
+                    const recentText = currentTextLines.join("\n") + "\n" + (blocks.length > 0 && blocks[blocks.length - 1].type === "text" ? (blocks[blocks.length - 1] as any).content : "");
+                    const analyzedStock = tryParseAnalysisTable(headers, rows, recentText);
+                    if (analyzedStock) {
+                        flushText();
+                        blocks.push({ 
+                            type: "stock_card", 
+                            stock: analyzedStock, 
+                            rawJson: "",
+                            tableData: { headers, rows }
+                        });
+                        currentTableLines = [];
+                        return;
+                    }
+
                     blocks.push({ type: "table", headers, rows });
                 } else {
                     currentTextLines.push(...currentTableLines);
@@ -410,7 +690,7 @@ function parseContentBlocks(content: string): ContentBlock[] {
             if (last && last.type === "stock_cards") {
                 last.stocks.push(b.stock);
             } else {
-                consolidatedBlocks.push({ type: "stock_cards", stocks: [b.stock] });
+                consolidatedBlocks.push({ type: "stock_cards", stocks: [b.stock], tableData: b.tableData });
             }
         } else {
             consolidatedBlocks.push(b);
@@ -899,40 +1179,51 @@ export function FormattedChatMessage({
                     );
                 } else if (block.type === "stock_cards") {
                     return (
-                        <div 
-                            key={bIdx} 
-                            className={`my-4 ${
-                                block.stocks.length === 1 
-                                    ? "w-full max-w-xl mx-auto" 
-                                    : "grid grid-cols-1 md:grid-cols-2 gap-4"
-                            }`}
-                        >
-                            {block.stocks.map((stock, sIdx) => (
-                                <StockCard 
-                                    key={sIdx} 
-                                    stock={stock} 
-                                    onSymbolClick={(symbol) => {
-                                        if (onButtonClick) {
-                                            onButtonClick(`تحليل سهم ${symbol}`);
-                                        }
-                                    }}
-                                    onNewsClick={(symbol) => {
-                                        if (onButtonClick) {
-                                            onButtonClick(`أخبار سهم ${symbol}`);
-                                        }
-                                    }}
-                                    onAddToPortfolio={(symbol) => {
-                                        if (onButtonClick) {
-                                            onButtonClick(`أضف سهم ${symbol} لمحفظتي`);
-                                        }
-                                    }}
-                                />
-                            ))}
+                        <div key={bIdx} className="my-4 space-y-3">
+                            <div 
+                                className={`${
+                                    block.stocks.length === 1 
+                                        ? "w-full max-w-xl mx-auto" 
+                                        : "grid grid-cols-1 md:grid-cols-2 gap-4"
+                                }`}
+                            >
+                                {block.stocks.map((stock, sIdx) => (
+                                    <StockCard 
+                                        key={sIdx} 
+                                        stock={stock} 
+                                        onSymbolClick={(symbol) => {
+                                            if (onButtonClick) {
+                                                onButtonClick(`تحليل سهم ${symbol}`);
+                                            }
+                                        }}
+                                        onNewsClick={(symbol) => {
+                                            if (onButtonClick) {
+                                                onButtonClick(`أخبار سهم ${symbol}`);
+                                            }
+                                        }}
+                                        onAddToPortfolio={(symbol) => {
+                                            if (onButtonClick) {
+                                                onButtonClick(`أضف سهم ${symbol} لمحفظتي`);
+                                            }
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            {block.tableData && (
+                                <details className="mt-2 text-xs text-zinc-500 group">
+                                    <summary className="cursor-pointer font-bold hover:text-amber-500 dark:hover:text-amber-400 transition-colors inline-flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-white/10 select-none">
+                                        <span>📊 عرض جدول البيانات والأرقام الكاملة ({block.tableData.rows.length} صف / تصدير إكسيل)</span>
+                                    </summary>
+                                    <div className="mt-2">
+                                        <ExportableTable headers={block.tableData.headers} rows={block.tableData.rows} />
+                                    </div>
+                                </details>
+                            )}
                         </div>
                     );
                 } else if (block.type === "stock_card") {
                     return (
-                        <div key={bIdx} className="my-4 w-full max-w-xl mx-auto">
+                        <div key={bIdx} className="my-4 w-full max-w-xl mx-auto space-y-2">
                             <StockCard 
                                 stock={block.stock} 
                                 onSymbolClick={(symbol) => {
@@ -951,6 +1242,16 @@ export function FormattedChatMessage({
                                     }
                                 }}
                             />
+                            {block.tableData && (
+                                <details className="mt-2 text-xs text-zinc-500 group">
+                                    <summary className="cursor-pointer font-bold hover:text-amber-500 dark:hover:text-amber-400 transition-colors inline-flex items-center gap-1.5 py-1 px-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-white/10 select-none">
+                                        <span>📊 عرض جدول البيانات الكامل ({block.tableData.rows.length} صف / تصدير إكسيل)</span>
+                                    </summary>
+                                    <div className="mt-2">
+                                        <ExportableTable headers={block.tableData.headers} rows={block.tableData.rows} />
+                                    </div>
+                                </details>
+                            )}
                         </div>
                     );
                 }

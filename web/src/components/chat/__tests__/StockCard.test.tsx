@@ -148,4 +148,52 @@ describe("StockCard Component", () => {
         expect(screen.getByText("#COMI")).toBeTruthy();
         expect(screen.getByText("التجاري الدولي")).toBeTruthy();
     });
+
+    test("FormattedChatMessage automatically converts standard stock analysis table to interactive StockCard", () => {
+        const markdownAnalysis = `
+### 📊 تحليل سهم طلعت مصطفى (TMGH)
+السعر الأخير: 80.40 ج.م (تغير الجلسة: +0.31% بتاريخ 29-10-2026) | التقييم الفني العام: 🟡 حيادي للمراقبة
+
+| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |
+|---|---|---|
+| الإغلاق الحالي | 80.40 | آخر إغلاق متاح |
+| الدعم الأول | 79.40 | منطقة اختبار حرجة |
+| الدعم الثاني | 76.22 | الدعم التالي عند كسر الأول |
+| المقاومة الأولى | 93.00 | عقبة رئيسية |
+| المقاومة الثانية | 100.90 | مقاومة بعيدة |
+| RSI (14) | 39.08 | ضعف نسبي |
+
+الرأي التوليفي: السهم متوافق مع الشريعة (EGX33).
+        `;
+
+        render(<FormattedChatMessage role="assistant" content={markdownAnalysis} />);
+
+        // Stock Card should be rendered
+        expect(screen.getByText("#TMGH")).toBeTruthy();
+        expect(screen.getAllByText("80.40").length).toBeGreaterThan(0);
+        expect(screen.getByText("EGX33 شرعي")).toBeTruthy();
+        expect(screen.getByText(/فتح الشارت/)).toBeTruthy();
+        expect(screen.getByText("أضف للمحفظة")).toBeTruthy();
+    });
+
+    test("FormattedChatMessage automatically converts recommendations table to interactive StockCard grid", () => {
+        const recTableMarkdown = `
+إليك قائمة التوصيات المفتوحة الحالية:
+
+| السهم | الدخول | المستهدف 1 | المستهدف 2 | وقف الخسارة | العائد الحالي |
+|---|---|---|---|---|---|
+| CRST | 2.49 | 2.64 | 2.73 | 2.40 | 0.00% |
+| LCSW (شرعي) | 35.73 | 37.34 | 38.41 | 35.73 | +2.07% |
+
+بالتوفيق في تداولاتك!
+        `;
+
+        render(<FormattedChatMessage role="assistant" content={recTableMarkdown} />);
+
+        // Both stock cards should be rendered
+        expect(screen.getByText("#CRST")).toBeTruthy();
+        expect(screen.getByText("2.49")).toBeTruthy();
+        expect(screen.getByText("#LCSW")).toBeTruthy();
+        expect(screen.getAllByText("35.73").length).toBeGreaterThan(0);
+    });
 });
