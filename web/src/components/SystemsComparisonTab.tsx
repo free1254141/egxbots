@@ -160,8 +160,8 @@ export default function SystemsComparisonTab({
 
         <p className="mt-3 text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed border-t-2 border-black/20 pt-3">
           {isAr
-            ? "يوفر StokScan AI ثلاثة أنظمة رصد خوارزمية متكاملة في البورصة المصرية تتفق في أدوات التحليل وتتكامل في الأفق الزمني: إشارات المدى المتوسط (2–6 أسابيع)، وإشارات المدى القصير (3–10 جلسات)، وإشارات الرصد اللحظي السريع على فريم 15 دقيقة (1–4 جلسات)."
-            : "StokScan AI provides three complementary algorithmic technical scanning systems across different time horizons: Medium-Term (2–6 weeks), Short-Term (3–10 sessions), and Intraday Fast Radar on 15m candles (1–4 sessions)."}
+            ? "يوفر EGX BOTS ثلاثة أنظمة رصد خوارزمية متكاملة في البورصة المصرية تتفق في أدوات التحليل وتتكامل في الأفق الزمني: إشارات المدى المتوسط (2–6 أسابيع)، وإشارات المدى القصير (3–10 جلسات)، وإشارات الرصد اللحظي السريع على فريم 15 دقيقة (1–4 جلسات)."
+            : "EGX BOTS provides three complementary algorithmic technical scanning systems across different time horizons: Medium-Term (2–6 weeks), Short-Term (3–10 sessions), and Intraday Fast Radar on 15m candles (1–4 sessions)."}
         </p>
       </div>
 

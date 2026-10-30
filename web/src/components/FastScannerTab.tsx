@@ -531,7 +531,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
     const ret = getSignalReturn(sig);
     const retStr = ret >= 0 ? `+${ret.toFixed(2)}%` : `${ret.toFixed(2)}%`;
     const text = [
-      `🎯 إشارة رصد فني لحظي — StokScan AI`,
+      `🎯 إشارة رصد فني لحظي — EGX BOTS AI`,
       `💎 السهم: #${sig.symbol} (${badge.label})`,
       `📅 تاريخ الرصد: ${sig.entry_date} (${sig.entry_time})`,
       `📍 مستوى الرصد: ${sig.entry_price?.toFixed(2)} ج.م`,
@@ -1930,7 +1930,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
             <div className="flex items-center justify-between border-b-2 border-black dark:border-zinc-700 pb-3">
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 bg-[#FFE600] text-black border-2 border-black font-black text-xs">
-                  StokScan AI 🎯
+                  EGX BOTS AI 🎯
                 </span>
                 <h3 className="font-black text-base text-black dark:text-white">
                   {isAr ? `بطاقة إشارة فنية — #${shareSignal.symbol}` : `Signal Card — #${shareSignal.symbol}`}

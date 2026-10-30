@@ -128,8 +128,8 @@ export function AutonomousRecsModal({
               </strong>
               <p className="text-zinc-500 dark:text-zinc-400 text-[11px] mt-0.5">
                 {isAr
-                  ? "منصة StokScan وإدارتها ومطوروها يخلون مسؤوليتهم القانونية والمالية تماماً عن أي قرارات أو صفقات أو خسائر ناتجة عن استخدام هذه التوصيات، وقرارك الاستثماري يقع على مسؤوليتك الشخصية بالكامل."
-                  : "StokScan, its management, and developers are completely disclaimed of any financial or legal liability for any decisions, trades, or losses resulting from these recommendations. Your investment decisions remain entirely your personal responsibility."}
+                  ? "منصة EGX BOTS وإدارتها ومطوروها يخلون مسؤوليتهم القانونية والمالية تماماً عن أي قرارات أو صفقات أو خسائر ناتجة عن استخدام هذه التوصيات، وقرارك الاستثماري يقع على مسؤوليتك الشخصية بالكامل."
+                  : "EGX BOTS, its management, and developers are completely disclaimed of any financial or legal liability for any decisions, trades, or losses resulting from these recommendations. Your investment decisions remain entirely your personal responsibility."}
               </p>
             </div>
           </div>
