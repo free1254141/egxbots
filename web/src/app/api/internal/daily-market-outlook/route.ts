@@ -23,6 +23,16 @@ type DailyContext = {
 };
 
 export async function POST(request: NextRequest) {
+  const host = request.headers.get("host") || "";
+  const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+  const force = request.nextUrl.searchParams.get("force") === "true";
+  if (!isLocal && !force) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "Daily market outlook runs natively in Python backend on Hugging Face Spaces.",
+      runner: "python-huggingface",
+    });
+  }
   const expectedKey = process.env.ADMIN_SECRET_KEY?.trim();
   const providedKey = request.headers.get("x-admin-key")?.trim();
   if (!expectedKey || !providedKey || providedKey !== expectedKey) {
