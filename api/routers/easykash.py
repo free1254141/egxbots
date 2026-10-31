@@ -3,7 +3,14 @@ from typing import Any, Dict
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from api.easykash_payments import create_checkout, is_payments_enabled, order_status, payment_config, process_callback
+from api.easykash_payments import (
+    create_checkout,
+    is_payments_enabled,
+    order_status,
+    payment_config,
+    process_callback,
+    validate_affiliate_code,
+)
 from api import stock_ai
 from api.stock_ai import _init_supabase
 
@@ -16,6 +23,7 @@ class CheckoutRequest(BaseModel):
     email: str = ""
     name: str = ""
     mobile: str
+    promo_code: str = ""
 
 
 def _authenticated_user_id(authorization: str | None) -> str:
@@ -46,6 +54,11 @@ def config(user_id: str | None = None, authorization: str | None = Header(defaul
     return payment_config(user_id=uid)
 
 
+@router.get("/validate-promo")
+def validate_promo(code: str = "", track_click: bool = False):
+    return validate_affiliate_code(code, track_click=track_click)
+
+
 @router.post("/create")
 def create(req: CheckoutRequest, authorization: str | None = Header(default=None)):
     if not is_payments_enabled():
@@ -56,7 +69,7 @@ def create(req: CheckoutRequest, authorization: str | None = Header(default=None
     if not req.user_id:
         raise HTTPException(status_code=400, detail="Missing user_id")
     try:
-        return create_checkout(req.user_id, req.plan_id, req.email, req.name, req.mobile)
+        return create_checkout(req.user_id, req.plan_id, req.email, req.name, req.mobile, promo_code=req.promo_code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

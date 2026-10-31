@@ -60,6 +60,9 @@ export default function PricingClient() {
   const [selectedPlan, setSelectedPlan] = useState("pro");
   const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro");
   const proCardRef = useRef<HTMLDivElement>(null);
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; name: string; discount_percent: number } | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
 
   const [trialEligible, setTrialEligible] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
@@ -393,6 +396,55 @@ export default function PricingClient() {
     setStep("payment");
   };
 
+  const applyPromoCode = async (rawCode: string, trackClick = false, silent = false) => {
+    const clean = (rawCode || "").trim().toUpperCase();
+    if (!clean) return;
+    setPromoChecking(true);
+    try {
+      const res = await fetch(
+        `/api/payment/easykash/validate-promo?code=${encodeURIComponent(clean)}${trackClick ? "&track=1" : ""}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.valid) {
+        setAppliedPromo({
+          code: data.code,
+          name: data.name,
+          discount_percent: Number(data.discount_percent || 0),
+        });
+        setPromoInput(data.code);
+        try {
+          localStorage.setItem("egx_affiliate_ref", data.code);
+        } catch {}
+        if (!silent) {
+          toast.success(
+            isAr
+              ? `🎉 تم تفعيل كود (${data.code}) بنجاح — خصم ${data.discount_percent}%!`
+              : `🎉 Promo code (${data.code}) applied — ${data.discount_percent}% OFF!`
+          );
+        }
+      } else {
+        if (!silent) {
+          toast.error(data?.error || (isAr ? "كود الخصم غير صحيح أو منتهي الصلاحية" : "Invalid or expired promo code"));
+        }
+      }
+    } catch {
+      if (!silent) {
+        toast.error(isAr ? "تعذر التحقق من الكود حالياً" : "Could not verify promo code");
+      }
+    } finally {
+      setPromoChecking(false);
+    }
+  };
+
+  const removePromoCode = () => {
+    setAppliedPromo(null);
+    setPromoInput("");
+    try {
+      localStorage.removeItem("egx_affiliate_ref");
+    } catch {}
+  };
+
   const startEasyKashPayment = async (planId = selectedPlan) => {
     if (!user) {
       router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
@@ -407,7 +459,11 @@ export default function PricingClient() {
       const res = await fetch("/api/payment/easykash/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id: planId, mobile: normalizedMobile }),
+        body: JSON.stringify({
+          plan_id: planId,
+          mobile: normalizedMobile,
+          promo_code: appliedPromo?.code || "",
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || (isAr ? "تعذر إنشاء طلب الدفع" : "Could not start checkout"));
@@ -438,6 +494,17 @@ export default function PricingClient() {
     if (params.get("payment") === "easykash" && ref) {
       window.location.replace(`/profile?payment=easykash&customerReference=${encodeURIComponent(ref)}`);
       return;
+    }
+    const urlPromo = (params.get("ref") || params.get("promo") || params.get("code") || "").trim().toUpperCase();
+    if (urlPromo) {
+      applyPromoCode(urlPromo, true, false);
+    } else {
+      try {
+        const savedPromo = (localStorage.getItem("egx_affiliate_ref") || "").trim().toUpperCase();
+        if (savedPromo) {
+          applyPromoCode(savedPromo, false, true);
+        }
+      } catch {}
     }
   }, []);
 
@@ -519,7 +586,12 @@ export default function PricingClient() {
 
   const selectedPlanDetails = paidPlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
   const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
-  const proPrice = selectedPlanDetails?.amount_egp ?? 1000;
+  const baseProPrice = selectedPlanDetails?.amount_egp ?? 1000;
+  const promoDiscountAmount =
+    appliedPromo && appliedPromo.discount_percent > 0
+      ? Math.min(Math.max(0, baseProPrice - 20), Math.round((baseProPrice * appliedPromo.discount_percent) / 100))
+      : 0;
+  const proPrice = Math.max(20, baseProPrice - promoDiscountAmount);
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 10 };
   const chartFeatures = [
@@ -853,6 +925,52 @@ export default function PricingClient() {
                     </span>
                   </div>
                 </div>
+
+                {/* Promo / Referral Code Input */}
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
+                  <label htmlFor="promo-input" className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
+                    {isAr ? "هل لديك كود خصم أو إحالة؟ (اختياري)" : "Have a Promo / Referral Code? (Optional)"}
+                  </label>
+                  {appliedPromo ? (
+                    <div className="flex items-center justify-between gap-2 border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 px-3.5 py-2.5 text-xs font-black">
+                      <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>
+                          {isAr
+                            ? `كود (${appliedPromo.code}) مفعّل — ${appliedPromo.name} (خصم ${appliedPromo.discount_percent}%)`
+                            : `Code (${appliedPromo.code}) active — ${appliedPromo.discount_percent}% OFF`}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removePromoCode}
+                        className="text-[11px] font-black text-red-600 hover:underline shrink-0 cursor-pointer"
+                      >
+                        {isAr ? "إزالة" : "Remove"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        id="promo-input"
+                        type="text"
+                        value={promoInput}
+                        onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                        placeholder={isAr ? "أدخل الكود مثل: AMR15" : "Enter code e.g. AMR15"}
+                        className="flex-1 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3.5 py-2.5 font-mono text-sm font-black uppercase outline-none focus:ring-2 focus:ring-emerald-500 text-zinc-950 dark:text-white"
+                        dir="ltr"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => applyPromoCode(promoInput, false, false)}
+                        disabled={promoChecking || !promoInput.trim()}
+                        className="border-2 border-black dark:border-white bg-zinc-900 text-white dark:bg-white dark:text-black px-5 py-2.5 text-xs font-black uppercase tracking-wider hover:bg-emerald-500 hover:text-black transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        {promoChecking ? (isAr ? "جاري التحقق..." : "Checking...") : (isAr ? "تطبيق الكود" : "Apply")}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Submit Button */}
@@ -940,11 +1058,25 @@ export default function PricingClient() {
               </div>
 
               {/* Total */}
-              <div className="flex items-baseline justify-between border-b border-zinc-800 pb-5">
-                <span className="text-sm font-black">{isAr ? "المبلغ الإجمالي:" : "Total Amount:"}</span>
-                <div className="text-end">
-                  <span className="text-3xl font-black text-emerald-400">{proPrice.toLocaleString()}</span>
-                  <span className="text-xs font-bold text-zinc-400 ms-1">ج.م</span>
+              <div className="space-y-2 border-b border-zinc-800 pb-5">
+                {promoDiscountAmount > 0 && appliedPromo && (
+                  <div className="space-y-1 text-xs font-bold">
+                    <div className="flex justify-between text-zinc-400">
+                      <span>{isAr ? "السعر قبل كود الخصم:" : "Subtotal:"}</span>
+                      <span className="line-through">{baseProPrice.toLocaleString()} ج.م</span>
+                    </div>
+                    <div className="flex justify-between text-amber-400 font-black">
+                      <span>{isAr ? `خصم كود (${appliedPromo.code} - ${appliedPromo.discount_percent}%):` : `Promo (${appliedPromo.code}):`}</span>
+                      <span>-{promoDiscountAmount.toLocaleString()} ج.م</span>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-black">{isAr ? "المبلغ الإجمالي:" : "Total Amount:"}</span>
+                  <div className="text-end">
+                    <span className="text-3xl font-black text-emerald-400">{proPrice.toLocaleString()}</span>
+                    <span className="text-xs font-bold text-zinc-400 ms-1">ج.م</span>
+                  </div>
                 </div>
               </div>
 
@@ -1145,6 +1277,31 @@ export default function PricingClient() {
             </div>
           </div>
         </div>
+
+        {/* ── ACTIVE AFFILIATE / PROMO BANNER ── */}
+        {appliedPromo && (
+          <div className="border-4 border-black dark:border-white bg-emerald-500 text-black p-4 shadow-[6px_6px_0px_rgba(0,0,0,1)] flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-black">
+              <Sparkles className="w-5 h-5 shrink-0 fill-black" />
+              <span>
+                {isAr
+                  ? `🎁 تم تفعيل كود الإحالة الخاص بـ (${appliedPromo.name}) — كود: ${appliedPromo.code}${
+                      appliedPromo.discount_percent > 0 ? ` بخصم إضافي ${appliedPromo.discount_percent}% عند الدفع!` : ""
+                    }`
+                  : `🎁 Referral code (${appliedPromo.code}) by ${appliedPromo.name} is active${
+                      appliedPromo.discount_percent > 0 ? ` — ${appliedPromo.discount_percent}% extra discount at checkout!` : ""
+                    }`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={removePromoCode}
+              className="text-[11px] font-black px-3 py-1 border-2 border-black bg-white hover:bg-zinc-100 text-black shrink-0 cursor-pointer"
+            >
+              {isAr ? "إلغاء الكود" : "Remove"}
+            </button>
+          </div>
+        )}
 
         {/* ── PRO DURATION SWITCHER (سويتشر مدة باقة Pro فقط: شهر، 6 شهور، سنة) ── */}
         <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-2.5 sm:py-3 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/60 dark:border-zinc-800/60">

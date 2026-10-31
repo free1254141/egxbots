@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   if (!/^01[0125]\d{8}$/.test(mobile)) {
     return NextResponse.json({ detail: "أدخل رقم موبايل مصري صحيح من أي شبكة" }, { status: 400 });
   }
+  const promoCode = typeof body?.promo_code === "string" ? body.promo_code.trim().toUpperCase().slice(0, 32) : "";
 
   // Save/update phone number in profiles so the user never has to enter it again
   try {
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
         email: user.email || "",
         name: String(user.user_metadata?.full_name || user.user_metadata?.name || "EGX Bots user").slice(0, 100),
         mobile,
+        promo_code: promoCode,
       }),
       cache: "no-store",
     });

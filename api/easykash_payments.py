@@ -202,7 +202,47 @@ def _direct_pay_payload(
     }
 
 
-def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str) -> Dict[str, Any]:
+def validate_affiliate_code(code: str, track_click: bool = False) -> Dict[str, Any]:
+    clean_code = (code or "").strip().upper()
+    if not clean_code or len(clean_code) > 32:
+        return {"valid": False, "error": "كود الخصم غير صالح"}
+    _init_supabase()
+    if not supabase:
+        return {"valid": False, "error": "تعذر التحقق من الكود حالياً"}
+    try:
+        res = (
+            supabase.table("affiliates")
+            .select("id,user_id,code,name,discount_percent,commission_percent,is_active,clicks_count")
+            .eq("code", clean_code)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        aff = (res.data or [None])[0]
+        if not aff:
+            return {"valid": False, "error": "كود الخصم غير صحيح أو منتهي الصلاحية"}
+        if track_click:
+            try:
+                supabase.table("affiliates").update({
+                    "clicks_count": int(aff.get("clicks_count") or 0) + 1,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", aff["id"]).execute()
+            except Exception:
+                pass
+        return {
+            "valid": True,
+            "id": aff["id"],
+            "user_id": aff.get("user_id"),
+            "code": aff["code"],
+            "name": aff["name"],
+            "discount_percent": float(aff.get("discount_percent") or 0),
+            "commission_percent": float(aff.get("commission_percent") or 25),
+        }
+    except Exception:
+        return {"valid": False, "error": "تعذر التحقق من الكود حالياً"}
+
+
+def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "") -> Dict[str, Any]:
     if not is_payments_enabled():
         raise RuntimeError("Payments are currently disabled")
     if not is_easykash_ready():
@@ -244,6 +284,23 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
     else:
         amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id))).quantize(Decimal("0.01"))
 
+    clean_promo = (promo_code or "").strip().upper()
+    affiliate_info = None
+    discount_amount = Decimal("0.00")
+    commission_amount = Decimal("0.00")
+    if clean_promo:
+        aff_check = validate_affiliate_code(clean_promo, track_click=False)
+        if aff_check.get("valid") and str(aff_check.get("user_id") or "") != str(user_id):
+            affiliate_info = aff_check
+            disc_pct = Decimal(str(aff_check.get("discount_percent") or 0))
+            comm_pct = Decimal(str(aff_check.get("commission_percent") or 25))
+            if disc_pct > 0:
+                discount_amount = (amount * disc_pct / Decimal("100")).quantize(Decimal("1"))
+                if amount - discount_amount < Decimal("20.00"):
+                    discount_amount = max(Decimal("0.00"), amount - Decimal("20.00"))
+                amount = (amount - discount_amount).quantize(Decimal("0.01"))
+            commission_amount = (amount * comm_pct / Decimal("100")).quantize(Decimal("0.01"))
+
     row = {
         "id": order_id,
         "user_id": user_id,
@@ -253,6 +310,12 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
         "status": "pending",
         "payment_review_status": "pending_review",
     }
+    if affiliate_info:
+        row["affiliate_id"] = affiliate_info["id"]
+        row["affiliate_code"] = affiliate_info["code"]
+        row["discount_amount_egp"] = float(discount_amount)
+        row["commission_amount_egp"] = float(commission_amount)
+        row["commission_status"] = "pending" 
     inserted = supabase.table("local_payment_orders").insert(row).execute()
     if not inserted.data:
         raise RuntimeError("Could not create payment order")
@@ -328,7 +391,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
     _init_supabase()
     if not supabase:
         return {"ok": False, "status_code": 503, "code": "database_unavailable"}
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,updated_at").eq("id", order_id).maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,discount_amount_egp").eq("id", order_id).maybe_single().execute()
     order = result.data if result else None
     if not order or order.get("provider") != "easykash":
         return {"ok": False, "status_code": 404, "code": "order_not_found"}
@@ -384,13 +447,30 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "status_code": 503, "code": "callback_processing"}
     try:
         activate_subscription(order["user_id"], order.get("plan_id") or "pro", provider="easykash", payment_order_id=order_id)
-        supabase.table("local_payment_orders").update({
+        update_payload = {
             "status": "approved",
             "payment_review_status": "reviewed",
             "payment_reviewed_at": now,
             "customer_note": f"EasyKash reference: {str(payload.get('easykashRef') or '')[:100]}",
             "updated_at": now,
-        }).eq("id", order_id).eq("status", "submitted").execute()
+        }
+        if order.get("affiliate_id"):
+            update_payload["commission_status"] = "earned"
+        supabase.table("local_payment_orders").update(update_payload).eq("id", order_id).eq("status", "submitted").execute()
+        if order.get("affiliate_id"):
+            try:
+                aff_id = order["affiliate_id"]
+                aff_res = supabase.table("affiliates").select("total_sales_count,total_revenue_egp,total_commission_egp").eq("id", aff_id).maybe_single().execute()
+                aff_row = (aff_res.data if aff_res else None) or {}
+                comm_val = float(order.get("commission_amount_egp") or 0)
+                supabase.table("affiliates").update({
+                    "total_sales_count": int(aff_row.get("total_sales_count") or 0) + 1,
+                    "total_revenue_egp": float(aff_row.get("total_revenue_egp") or 0) + float(expected_amount),
+                    "total_commission_egp": float(aff_row.get("total_commission_egp") or 0) + comm_val,
+                    "updated_at": now,
+                }).eq("id", aff_id).execute()
+            except Exception as aff_err:
+                print(f"[EASYKASH] Affiliate commission update warning: {aff_err}")
     except Exception as exc:
         supabase.table("local_payment_orders").update({"status": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", order_id).eq("status", "submitted").execute()
         print(f"[EASYKASH] callback processing failed for order {order_id}: {type(exc).__name__}")

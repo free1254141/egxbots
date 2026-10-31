@@ -297,6 +297,14 @@ export default function Footer() {
               </li>
               <li>
                 <Link
+                  href="/affiliate"
+                  className="inline-flex items-center gap-1.5 text-sm font-black text-emerald-500 hover:text-emerald-400 transition-colors"
+                >
+                  <span>💰 {isAr ? "التسويق بالعمولة (اربح 25% كاش)" : "Affiliate Program (Earn 25% Cash)"}</span>
+                </Link>
+              </li>
+              <li>
+                <Link
                   href="/refund"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
                 >

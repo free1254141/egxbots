@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -253,7 +254,13 @@ export default function ProfilePage() {
         </div>
 
         {/* Global Collapse / Expand All controls */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Link
+            href="/affiliate"
+            className="h-10 px-3.5 flex items-center gap-2 border-4 border-black dark:border-white bg-emerald-500 text-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] hover:bg-emerald-400 transition-all cursor-pointer"
+          >
+            <span>💰 {isAr ? "رابط الإحالة والأرباح (25%)" : "Referral Link (25%)"}</span>
+          </Link>
           <button
             type="button"
             onClick={() => handleToggleAllSections(true)}

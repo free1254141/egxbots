@@ -28,6 +28,24 @@ interface PlanLimits {
     pro?: { chat_messages_per_month: number; portfolio_stocks: number };
 }
 
+interface AffiliateRow {
+    id: string;
+    code: string;
+    name: string;
+    phone: string;
+    payment_method: string;
+    discount_percent: number;
+    commission_percent: number;
+    is_active: boolean;
+    clicks_count: number;
+    total_sales_count: number;
+    total_revenue_egp: number;
+    total_commission_egp: number;
+    paid_commission_egp: number;
+    notes: string;
+    created_at: string;
+}
+
 function toLocalInput(iso: string | null): string {
     if (!iso) return "";
     const date = new Date(iso);
@@ -54,6 +72,28 @@ export default function BillingTab() {
     const [labelEn, setLabelEn] = useState("Limited offer");
     const [error, setError] = useState<string | null>(null);
 
+    // Affiliates state
+    const [affiliates, setAffiliates] = useState<AffiliateRow[]>([]);
+    const [affCode, setAffCode] = useState("");
+    const [affName, setAffName] = useState("");
+    const [affPhone, setAffPhone] = useState("");
+    const [affMethod, setAffMethod] = useState("vodafone_cash");
+    const [affDiscount, setAffDiscount] = useState("15");
+    const [affCommission, setAffCommission] = useState("25");
+    const [affSaving, setAffSaving] = useState(false);
+
+    const loadAffiliates = useCallback(async () => {
+        try {
+            const res = await fetch("/api/admin/affiliates", { cache: "no-store" });
+            if (res.ok) {
+                const data = await res.json();
+                setAffiliates(Array.isArray(data?.affiliates) ? data.affiliates : []);
+            }
+        } catch {
+            // non-blocking
+        }
+    }, []);
+
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -78,12 +118,13 @@ export default function BillingTab() {
                 setLivePlans(Array.isArray(config?.plans) ? config.plans : []);
                 setPlanLimits(config?.limits || {});
             }
+            await loadAffiliates();
         } catch (err: any) {
             setError(err.message || "خطأ غير معروف");
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [loadAffiliates]);
 
     useEffect(() => {
         load();
@@ -141,11 +182,83 @@ export default function BillingTab() {
         }
     };
 
+    const handleCreateAffiliate = async () => {
+        if (!affCode.trim() || !affName.trim()) {
+            toast.error("أدخل كود الخصم واسم المؤثر");
+            return;
+        }
+        setAffSaving(true);
+        try {
+            const res = await fetch("/api/admin/affiliates", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "create",
+                    code: affCode.trim().toUpperCase(),
+                    name: affName.trim(),
+                    phone: affPhone.trim(),
+                    payment_method: affMethod,
+                    discount_percent: Number(affDiscount || 10),
+                    commission_percent: Number(affCommission || 25),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "فشل حفظ كود المؤثر");
+            toast.success(`تم حفظ كود ${data.affiliate?.code || affCode.toUpperCase()} بنجاح`);
+            setAffCode("");
+            setAffName("");
+            setAffPhone("");
+            await loadAffiliates();
+        } catch (err: any) {
+            toast.error(err.message || "فشل الحفظ");
+        } finally {
+            setAffSaving(false);
+        }
+    };
+
+    const handleAffiliateAction = async (action: "mark_paid" | "toggle_active" | "delete", aff: AffiliateRow) => {
+        try {
+            const res = await fetch("/api/admin/affiliates", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action,
+                    id: aff.id,
+                    is_active: !aff.is_active,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "فشلت العملية");
+            toast.success(
+                action === "mark_paid"
+                    ? `تم تسجيل تحويل العمولة لـ ${aff.name}`
+                    : action === "toggle_active"
+                    ? `تم تحديث حالة الكود ${aff.code}`
+                    : `تم حذف الكود ${aff.code}`
+            );
+            await loadAffiliates();
+        } catch (err: any) {
+            toast.error(err.message || "حدث خطأ");
+        }
+    };
+
+    const copyAffiliateLink = (code: string) => {
+        const url = `https://egxbots.com/pricing?ref=${encodeURIComponent(code)}`;
+        navigator.clipboard.writeText(url);
+        toast.success(`تم نسخ رابط الإحالة: ${url}`);
+    };
+
     const inputClass = "w-full border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3 py-2.5 text-sm font-black text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500";
     const labelClass = "block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1";
 
     const discountInvalid = discountEnabled && (!discountPrice || Number(discountPrice) <= 0 || !discountEndsAt);
     const liveMonthly = livePlans.find((plan) => plan.id === "pro");
+
+    const totalUnpaidCommissions = affiliates.reduce(
+        (sum, a) => sum + Math.max(0, Number(a.total_commission_egp || 0) - Number(a.paid_commission_egp || 0)),
+        0
+    );
+    const totalAffiliateSales = affiliates.reduce((sum, a) => sum + Number(a.total_sales_count || 0), 0);
 
     return (
         <div className="min-h-[70vh] py-10 px-4" dir="rtl">
@@ -261,6 +374,204 @@ export default function BillingTab() {
                         <p className="text-xs font-bold text-zinc-600 dark:text-zinc-300">
                             حدود المزايا المعروضة من إعدادات الخدمة: مجاني {planLimits.free?.signal_delay_days ?? 15} يوم تأخير، {planLimits.free?.chat_messages_per_month ?? 10} رسائل شهرياً و{planLimits.free?.portfolio_stocks ?? 5} أسهم؛ Pro {planLimits.pro?.chat_messages_per_month ?? 350} رسالة و{planLimits.pro?.portfolio_stocks ?? 10} أسهم.
                         </p>
+
+                        {/* ── AFFILIATE & PROMO CODE SYSTEM ── */}
+                        <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 space-y-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-zinc-200 dark:border-zinc-800 pb-4">
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 block">AFFILIATE & REFERRAL SYSTEM</span>
+                                    <h3 className="text-xl font-black text-zinc-950 dark:text-white">نظام التسويق بالعمولة وأكواد المؤثرين</h3>
+                                    <p className="text-xs font-bold text-zinc-500 mt-0.5">
+                                        أنشئ كود خصم ورابط إحالة لأي مؤثر أو مستخدم، وتابع مبيعاته وحوّل عمولته على رقم محفظته الإلكترونية.
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs font-black">
+                                    <div className="border-2 border-black dark:border-white px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900">
+                                        المبيعات: <span className="text-emerald-600">{totalAffiliateSales}</span>
+                                    </div>
+                                    <div className="border-2 border-black dark:border-white px-3 py-1.5 bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">
+                                        مستحق للتحويل: <span>{totalUnpaidCommissions.toLocaleString()} ج.م</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Create Affiliate Form */}
+                            <div className="grid sm:grid-cols-3 gap-4 bg-zinc-50 dark:bg-zinc-900/50 p-4 border-2 border-zinc-200 dark:border-zinc-800">
+                                <label>
+                                    <span className={labelClass}>كود الخصم (مثال: AMR15)</span>
+                                    <input
+                                        type="text"
+                                        value={affCode}
+                                        onChange={(e) => setAffCode(e.target.value.toUpperCase())}
+                                        placeholder="AMR15"
+                                        className={inputClass}
+                                        dir="ltr"
+                                    />
+                                </label>
+                                <label>
+                                    <span className={labelClass}>اسم المؤثر / القناة</span>
+                                    <input
+                                        type="text"
+                                        value={affName}
+                                        onChange={(e) => setAffName(e.target.value)}
+                                        placeholder="أ/ عمرو - تيليجرام"
+                                        className={inputClass}
+                                    />
+                                </label>
+                                <label>
+                                    <span className={labelClass}>رقم الموبايل (محفظة إلكترونية)</span>
+                                    <input
+                                        type="text"
+                                        value={affPhone}
+                                        onChange={(e) => setAffPhone(e.target.value)}
+                                        placeholder="01012345678"
+                                        className={inputClass}
+                                        dir="ltr"
+                                    />
+                                </label>
+                                <label>
+                                    <span className={labelClass}>وسيلة استلام العمولة</span>
+                                    <select
+                                        value={affMethod}
+                                        onChange={(e) => setAffMethod(e.target.value)}
+                                        className={inputClass}
+                                    >
+                                        <option value="vodafone_cash">محفظة إلكترونية (فودافون / اتصالات / أورنج / وي)</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span className={labelClass}>خصم المشترك (%)</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="50"
+                                        value={affDiscount}
+                                        onChange={(e) => setAffDiscount(e.target.value)}
+                                        placeholder="15"
+                                        className={inputClass}
+                                        dir="ltr"
+                                    />
+                                </label>
+                                <label>
+                                    <span className={labelClass}>عمولة المسوق (%)</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="80"
+                                        value={affCommission}
+                                        onChange={(e) => setAffCommission(e.target.value)}
+                                        placeholder="25"
+                                        className={inputClass}
+                                        dir="ltr"
+                                    />
+                                </label>
+                                <div className="sm:col-span-3 flex justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateAffiliate}
+                                        disabled={affSaving}
+                                        className="border-3 border-black dark:border-white bg-black text-white dark:bg-emerald-500 dark:text-black font-black px-6 py-2.5 text-xs uppercase tracking-wider shadow-[3px_3px_0px_#10b981] hover:-translate-y-0.5 transition-all cursor-pointer disabled:opacity-50"
+                                    >
+                                        {affSaving ? "جارٍ الإضافة..." : "+ إضافة / تحديث كود مسوق"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Affiliates List */}
+                            {affiliates.length === 0 ? (
+                                <div className="text-center py-6 text-xs font-bold text-zinc-400">
+                                    لا يوجد مسوقون مضافون حالياً. أضف أول كود خصم من النموذج أعلاه.
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-start text-xs font-bold border-collapse">
+                                        <thead>
+                                            <tr className="border-b-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white text-[11px]">
+                                                <th className="p-2.5 text-start">الكود والرابط</th>
+                                                <th className="p-2.5 text-start">المؤثر / رقم التحويل</th>
+                                                <th className="p-2.5 text-start">النسب</th>
+                                                <th className="p-2.5 text-start">الزيارات / المبيعات</th>
+                                                <th className="p-2.5 text-start">الرصيد المستحق</th>
+                                                <th className="p-2.5 text-end">إجراءات</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                                            {affiliates.map((aff) => {
+                                                const unpaid = Math.max(
+                                                    0,
+                                                    Number(aff.total_commission_egp || 0) - Number(aff.paid_commission_egp || 0)
+                                                );
+                                                return (
+                                                    <tr key={aff.id} className={!aff.is_active ? "opacity-50" : ""}>
+                                                        <td className="p-2.5">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono font-black text-sm px-2 py-0.5 bg-amber-300 text-black border border-black">
+                                                                    {aff.code}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => copyAffiliateLink(aff.code)}
+                                                                    className="text-[10px] font-black px-2 py-1 border border-black dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-500 hover:text-white transition-colors cursor-pointer"
+                                                                >
+                                                                    نسخ الرابط 🔗
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                            <div className="font-black text-zinc-950 dark:text-white">{aff.name}</div>
+                                                            <div className="text-[10px] text-zinc-500 font-mono">
+                                                                {aff.phone || "بدون رقم"} (محفظة إلكترونية)
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                            <div className="text-emerald-600 dark:text-emerald-400">خصم: {aff.discount_percent}%</div>
+                                                            <div className="text-amber-600 dark:text-amber-400">عمولة: {aff.commission_percent}%</div>
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                            <div>{aff.clicks_count || 0} نقرة</div>
+                                                            <div className="text-emerald-600 font-black">{aff.total_sales_count || 0} اشتراك مدفوع</div>
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                            <div className="text-sm font-black text-zinc-950 dark:text-white">
+                                                                {unpaid.toLocaleString()} ج.م
+                                                            </div>
+                                                            <div className="text-[10px] text-zinc-400">
+                                                                إجمالي: {Number(aff.total_commission_egp || 0).toLocaleString()} ج.م | محوّل: {Number(aff.paid_commission_egp || 0).toLocaleString()} ج.م
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-2.5 text-end space-x-1 space-x-reverse">
+                                                            {unpaid > 0 && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleAffiliateAction("mark_paid", aff)}
+                                                                    className="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-black border border-black cursor-pointer hover:bg-emerald-600"
+                                                                >
+                                                                    ✓ تم التحويل
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleAffiliateAction("toggle_active", aff)}
+                                                                className="px-2 py-1 bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-[10px] font-black border border-black dark:border-zinc-700 cursor-pointer"
+                                                            >
+                                                                {aff.is_active ? "إيقاف" : "تفعيل"}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleAffiliateAction("delete", aff)}
+                                                                className="px-2 py-1 bg-red-100 text-red-700 text-[10px] font-black border border-red-300 cursor-pointer hover:bg-red-600 hover:text-white"
+                                                            >
+                                                                حذف
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
