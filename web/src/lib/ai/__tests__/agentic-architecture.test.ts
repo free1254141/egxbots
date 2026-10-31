@@ -121,7 +121,7 @@ describe("Agentic architecture integration: current production path", () => {
             {content:"get_comparison"},verdict(),{content:"get_comparison"},verdict()], {
             userMessage:"قارن COMI وSWDY",db:d,summary:{last_tool_evidence:[{...previous,captured_at:new Date().toISOString()}]}});
         expect(r.done.response_origin).toBe("safe_fallback");
-        expect(r.done.response).toContain("**COMI**");expect(r.done.response).toContain("**SWDY**");expect(r.done.response).not.toContain("| البند |");
+        expect(r.done.response).toContain("COMI");expect(r.done.response).toContain("SWDY");expect(r.done.response).not.toContain("| البند |");
         expect(r.done.response.match(/القوة النسبية 45/g)).toHaveLength(2);
         expect(r.done.response).not.toContain("TMGH");
         const repair = JSON.parse(r.fetchMock.mock.calls[3][1].body);

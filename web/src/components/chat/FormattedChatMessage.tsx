@@ -6,6 +6,8 @@ import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, B
 import StockCard, { StockData } from "./StockCard";
 import type { ChatTable } from "@/contexts/ChatContext";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
+import { getCanonicalStockName } from "@/lib/ai/stock-names";
+import { isShariaCompliant } from "@/lib/shariaStocks";
 
 interface FormattedChatMessageProps {
     content: string;
@@ -45,7 +47,7 @@ export const EGX_STOCKS_METADATA: Record<string, { name: string; sector: string;
     COMI: { name: "البنك التجاري الدولي", sector: "بنوك", isShariah: false },
     TMGH: { name: "مجموعة طلعت مصطفى", sector: "عقارات", isShariah: true },
     EAST: { name: "الشرقية - إيسترن كومباني", sector: "أغذية ومشروبات وتبغ", isShariah: false },
-    SEIG: { name: "الشرقية - إيسترن كومباني", sector: "أغذية ومشروبات وتبغ", isShariah: false },
+    SEIG: { name: "السعودية المصرية للاستثمار والتمويل", sector: "استثمار وخدمات مالية", isShariah: false },
     HRHO: { name: "إي إف جي القابضة", sector: "خدمات مالية غير مصرفية", isShariah: false },
     SWDY: { name: "السويدي إليكتريك", sector: "صناعي وهندسي", isShariah: true },
     FWRY: { name: "فوري لتكنولوجيا البنوك", sector: "تكنولوجيا مالية", isShariah: true },
@@ -66,7 +68,8 @@ export const EGX_STOCKS_METADATA: Record<string, { name: string; sector: string;
     EFID: { name: "إيديتا للصناعات الغذائية", sector: "أغذية ومشروبات", isShariah: true },
     EFIH: { name: "إي فاينانس", sector: "تكنولوجيا مالية", isShariah: true },
     CRST: { name: "كريست مارك", sector: "خدمات واستثمار", isShariah: true },
-    EDFM: { name: "مطاحن ومخابز شمال القاهرة", sector: "أغذية ومطاحن", isShariah: true },
+    EDFM: { name: "مطاحن شرق الدلتا", sector: "أغذية ومطاحن", isShariah: true },
+    MILS: { name: "مطاحن ومخابز شمال القاهرة", sector: "أغذية ومطاحن", isShariah: true },
     MBEG: { name: "إم بي للهندسة", sector: "صناعي وهندسي", isShariah: true },
     WCDF: { name: "مطاحن ومخابز وسط وغرب الدلتا", sector: "أغذية ومطاحن", isShariah: true },
     LCSW: { name: "ليسيكو مصر", sector: "مواد بناء وسيراميك", isShariah: true },
@@ -85,17 +88,31 @@ export const EGX_STOCKS_METADATA: Record<string, { name: string; sector: string;
     ISMA: { name: "الإسماعيلية مصر للدواجن", sector: "أغذية ودواجن", isShariah: true },
     IRON: { name: "الحديد والصلب المصرية", sector: "تعدين وحديد", isShariah: true },
     MBSC: { name: "مصر بني سويف للأسمنت", sector: "مواد بناء وأسمنت", isShariah: true },
-    MPCI: { name: "مصر للأسمنت - قنا", sector: "مواد بناء وأسمنت", isShariah: true },
+    MPCI: { name: "ممفيس للأدوية والصناعات الكيماوية", sector: "رعاية صحية وأدوية", isShariah: true },
+    MCQE: { name: "مصر للأسمنت - قنا", sector: "مواد بناء وأسمنت", isShariah: true },
     DEIN: { name: "دايس للملابس الجاهزة", sector: "ملابس ومنسوجات", isShariah: true },
-    CEFM: { name: "مطاحن ومخابز الإسكندرية", sector: "أغذية ومطاحن", isShariah: true },
-    SCFM: { name: "مطاحن جنوب القاهرة والجيزة", sector: "أغذية ومطاحن", isShariah: true },
+    CEFM: { name: "مطاحن مصر الوسطى", sector: "أغذية ومطاحن", isShariah: true },
+    SCFM: { name: "مطاحن ومخابز جنوب القاهرة والجيزة", sector: "أغذية ومطاحن", isShariah: true },
     PHAR: { name: "المصرية الدولية للأدوية - إيبيكو", sector: "رعاية صحية وأدوية", isShariah: true },
     ODIN: { name: "أودن للاستثمارات المالية", sector: "استثمار وخدمات مالية", isShariah: false },
+    TALM: { name: "تعليم لخدمات الإدارة", sector: "خدمات تعليمية", isShariah: true },
+    GTWL: { name: "جولدن تكس للأصواف", sector: "غزل ونسيج", isShariah: true },
+    MASR: { name: "مدينة مصر للإسكان والتعمير", sector: "عقارات", isShariah: true },
+    RREI: { name: "العربية للاستثمار العقاري", sector: "عقارات", isShariah: true },
+    MAAL: { name: "مرسيليا المصرية الخليجية للاستثمار", sector: "عقارات وسياحة", isShariah: true },
+    EGBE: { name: "البنك المصري الخليجي", sector: "بنوك", isShariah: false },
 };
 
 function parseNum(val: string | undefined): number | undefined {
     if (!val) return undefined;
-    const cleaned = val.replace(/[^\d.-]/g, "");
+    const str = String(val).trim();
+    if (!str || str === "-" || str === "—" || str === "N/A" || str === "null") return undefined;
+    // CRITICAL: Guard against dates (e.g. 30-10-2026 or 2026-10-30 or 30/10/2026)
+    // parseFloat("30-10-2026") evaluates to 30, which falsely becomes 30.00 EGP price!
+    if (/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(str)) {
+        return undefined;
+    }
+    const cleaned = str.replace(/[^\d.-]/g, "");
     if (!cleaned) return undefined;
     const n = parseFloat(cleaned);
     return isNaN(n) ? undefined : n;
@@ -121,12 +138,15 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
         entryIdx = findIdx(/الدخول/i, /تاريخ/i);
     }
     const currentPriceIdx = findIdx(/السعر الحالي|سعر الإغلاق|الإغلاق/i);
-    const target1Idx = findIdx(/المستهدف\s*1?|الهدف\s*1?|تارجت\s*1?/i);
-    const target2Idx = findIdx(/المستهدف\s*2|الهدف\s*2|تارجت\s*2/i);
+    const target1Idx = findIdx(/المستهدف\s*1?|الهدف\s*1?|تارجت\s*1?|المستهدف الأول/i);
+    const target2Idx = findIdx(/المستهدف\s*2|الهدف\s*2|تارجت\s*2|المستهدف الثاني/i);
     const stopLossIdx = findIdx(/وقف الخسارة|الوقف|Stop\s*Loss/i);
     const returnIdx = findIdx(/العائد|التغير|الربح/i);
     const signalTypeIdx = findIdx(/نوع الإشارة|الإشارة|النوع/i);
     const timeframeIdx = findIdx(/الأفق|المدى|الفريم/i);
+    const rsiIdx = findIdx(/RSI/i);
+    const rvolIdx = findIdx(/الحجم النسبي|السيولة/i);
+    const wyckoffIdx = findIdx(/وايكوف|التجميع|مرحلة/i);
 
     if (symbolIdx === -1 || entryIdx === -1 || (target1Idx === -1 && stopLossIdx === -1)) {
         return null;
@@ -159,10 +179,19 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
             changePct = parseNum(row[returnIdx]);
         }
 
+        const rsiVal = rsiIdx !== -1 ? parseNum(row[rsiIdx]) : undefined;
+        const rvolVal = rvolIdx !== -1 ? parseNum(row[rvolIdx]) : undefined;
+        const wyckoffVal = wyckoffIdx !== -1 && row[wyckoffIdx] ? row[wyckoffIdx].replace(/\*/g, "").trim() : undefined;
+
         const signalType = signalTypeIdx !== -1 && row[signalTypeIdx] ? row[signalTypeIdx].replace(/\*/g, "").trim() : "فرصة مضاربة";
         const timeframe = timeframeIdx !== -1 && row[timeframeIdx] ? row[timeframeIdx].replace(/\*/g, "").trim() : "1-3 جلسات";
 
-        const meta = EGX_STOCKS_METADATA[cleanSymbol];
+        const canonical = getCanonicalStockName(cleanSymbol);
+        const meta = EGX_STOCKS_METADATA[cleanSymbol] || {
+            name: canonical.name_ar,
+            sector: canonical.sector || "سوق الأسهم المصرية",
+            isShariah: isShariaCompliant(cleanSymbol)
+        };
 
         if (cleanSymbol && (entry !== undefined || target1 !== undefined || stopLoss !== undefined || currentPrice !== undefined)) {
             const finalPrice = currentPrice !== undefined && currentPrice > 0 ? currentPrice : (entry || 0);
@@ -179,6 +208,9 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
                 recommendation: signalType || "فرصة مضاربة",
                 signal: signalType || "دخول مؤكد",
                 signalType,
+                rsi: rsiVal,
+                rVol: rvolVal,
+                wyckoffPhase: wyckoffVal,
                 isShariah: isExplicitShariah || meta?.isShariah,
                 timeframe
             });
@@ -211,15 +243,23 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let wyckoffPhase: string | undefined;
     let ema50: number | undefined;
     let ema200: number | undefined;
+    let changePct: number | undefined;
 
     for (const row of rows) {
         if (!row || row.length < 2) continue;
         const key = row[0]?.trim() || "";
         const val = row[1]?.trim() || "";
+        const extraVal = row[2]?.trim() || "";
 
         if (/الإغلاق الحالي|آخر سعر|سعر الإغلاق|إغلاق/i.test(key)) {
             hasClose = true;
             price = parseNum(val);
+            if (changePct === undefined && extraVal) {
+                const rowChange = parseNum(extraVal);
+                if (rowChange !== undefined && /%/.test(extraVal)) {
+                    changePct = rowChange;
+                }
+            }
         } else if (/الدعم الأول|دعم أول|الدعم 1/i.test(key)) {
             hasSupport = true;
             support1 = parseNum(val);
@@ -263,7 +303,6 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
 
     let symbol = "";
     let name = "";
-    let changePct: number | undefined;
     let recommendation = "";
     let isShariah = false;
 
@@ -271,10 +310,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     const cleanRecent = recentText.replace(/\*/g, "");
 
     // Extract symbol and name from recent preceding text
-    const symbolMatch = cleanRecent.match(/(?:تحليل سهم|سهم|عتاقة|فوري)\s+([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
-                     || cleanRecent.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r]+?)\s*\(([A-Za-z0-9_]{2,8})\)/i)
+    const symbolMatch = cleanRecent.match(/(?:تحليل سهم|سهم|شركة)?\s*([^\(\n\r#\|]{2,40}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
+                     || cleanRecent.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r#\|]+?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
                      || cleanRecent.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i)
-                     || cleanRecent.match(/\(([A-Za-z0-9_]{2,8})\)/);
+                     || cleanRecent.match(/[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/);
 
     if (symbolMatch) {
         if (symbolMatch[2]) {
@@ -302,19 +341,22 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY)
     if (!price || price === 0) {
         const textPriceMatch = cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+-]?[\d\.]+)/i)
-                            || cleanRecent.match(/([+-]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i);
+                            || cleanRecent.match(/([+-]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
+                            || cleanRecent.match(/(?:سعر السهم|سعر|الإغلاق)\s*[:=]?\s*([+-]?[\d\.]+)\s*ج\.م/i);
         if (textPriceMatch) {
             price = parseNum(textPriceMatch[1]);
         }
     }
 
     // Price change percentage from text
-    const changeMatch = cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)%/i)
-                     || cleanRecent.match(/([+-]?[\d\.]+)%\s*بتاريخ/i)
-                     || cleanRecent.match(/،\s*([+-]?[\d\.]+)%\s*\)/i)
-                     || cleanRecent.match(/\(([+-]?[\d\.]+)%\)/i);
-    if (changeMatch) {
-        changePct = parseFloat(changeMatch[1]);
+    if (changePct === undefined) {
+        const changeMatch = cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)\s*%/i)
+                         || cleanRecent.match(/([+-]?[\d\.]+)\s*%\s*بتاريخ/i)
+                         || cleanRecent.match(/،\s*([+-]?[\d\.]+)\s*%\s*\)/i)
+                         || cleanRecent.match(/\(\s*([+-]?[\d\.]+)\s*%\s*\)/i);
+        if (changeMatch) {
+            changePct = parseFloat(changeMatch[1]);
+        }
     }
 
     // Evaluation / Recommendation
@@ -330,7 +372,12 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         }
     }
 
-    const meta = EGX_STOCKS_METADATA[symbol];
+    const canonical = getCanonicalStockName(symbol);
+    const meta = EGX_STOCKS_METADATA[symbol] || {
+        name: canonical.name_ar,
+        sector: canonical.sector || "سوق الأسهم المصرية",
+        isShariah: isShariaCompliant(symbol)
+    };
 
     return {
         symbol,

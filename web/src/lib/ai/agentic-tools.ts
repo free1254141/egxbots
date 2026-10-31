@@ -8,6 +8,7 @@ import { sanitizeNewsRows } from "./news-evidence";
 import { todayInCairo } from "./cairo-date";
 import { hasActiveProSubscription, paymentsEnabled, planLimits } from "./plan-gate";
 import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
+import { getCanonicalStockName } from "./stock-names";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -205,7 +206,13 @@ async function executeRawTool(
                     .select("symbol, name, name_ar")
                     .eq("symbol", sym)
                     .limit(1);
-                const stockData = stockRows?.[0] || { symbol: sym, name: sym, name_ar: sym };
+                const canonical = getCanonicalStockName(sym);
+                const stockData = {
+                    symbol: sym,
+                    name: canonical.name_en || stockRows?.[0]?.name || sym,
+                    name_ar: stockRows?.[0]?.name_ar || canonical.name_ar || sym,
+                    sector: canonical.sector || null,
+                };
 
                 const { data: indRows } = await supabase
                     .from("stock_technical_indicators")
@@ -436,8 +443,12 @@ async function executeRawTool(
 
                     const history = summarizeStockHistory(pRows);
 
+                    const canonical = getCanonicalStockName(sym);
                     levels.push({
                         symbol: sym,
+                        name_ar: canonical.name_ar,
+                        name: canonical.name_en,
+                        sector: canonical.sector || null,
                         is_sharia_compliant: isShariaCompliant(sym),
                         sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         close,
@@ -1080,9 +1091,13 @@ async function executeRawTool(
                         : s.scanner_type === "rsi_oversold"
                         ? "🧲 مضاربة لحظية (تشبع بيعي)"
                         : "⚡ مضاربة لحظية (إسكان 15 دقيقة)";
+                    const canonical = getCanonicalStockName(s.symbol);
                     return {
                         id: s.id || `scanner_${s.symbol}_${s.entry_date}`,
                         symbol: s.symbol,
+                        name_ar: canonical.name_ar,
+                        name: canonical.name_en,
+                        sector: canonical.sector || null,
                         is_sharia_compliant: isShariaCompliant(s.symbol),
                         sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
                         signal: "BUY",
@@ -1111,9 +1126,13 @@ async function executeRawTool(
             const closedScannerRecs = (statusFilter === "closed" || statusFilter === "all")
                 ? filteredClosedScannerSignals.map((c: any) => {
                     const isWin = c.status === "target_hit" || (c.return_pct != null && c.return_pct > 0);
+                    const canonical = getCanonicalStockName(c.symbol);
                     return {
                         id: c.id || `closed_scanner_${c.symbol}_${c.exit_date}`,
                         symbol: c.symbol,
+                        name_ar: canonical.name_ar,
+                        name: canonical.name_en,
+                        sector: canonical.sector || null,
                         is_sharia_compliant: isShariaCompliant(c.symbol),
                         sharia_index: isShariaCompliant(c.symbol) ? "EGX33" : null,
                         signal: "BUY",
@@ -1289,9 +1308,13 @@ async function executeRawTool(
                     }
                 }
 
+                const canonical = getCanonicalStockName(sym);
                 enrichedRecs.push({
                     id: r.id,
                     symbol: sym,
+                    name_ar: canonical.name_ar,
+                    name: canonical.name_en,
+                    sector: canonical.sector || null,
                     is_sharia_compliant: isShariaCompliant(sym),
                     sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                     signal: r.signal || "BUY",
@@ -1394,11 +1417,45 @@ async function executeRawTool(
             if (shariaScanOnly) {
                 stocks = stocks.filter((s: any) => isShariaCompliant(s.symbol));
             }
-            stocks = stocks.slice(0, 10).map((s: any) => ({
-                ...s,
-                is_sharia_compliant: isShariaCompliant(s.symbol),
-                sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
-            }));
+            if (table === "stock_scans_summary" && stocks.length > 0) {
+                const symbols = stocks.map((s: any) => s.symbol);
+                const { data: indicators } = await supabase
+                    .from("stock_technical_indicators")
+                    .select("symbol,close,change_pct,r_vol,rsi_14,macd,macd_signal,macd_histogram,ema_50,ema_200,king_ai_score,egx_ai_score")
+                    .eq("exchange", "EGX")
+                    .eq("date", date)
+                    .in("symbol", symbols)
+                    .limit(symbols.length || 60);
+                const indMap = new Map((indicators || []).map((ind: any) => [ind.symbol, ind]));
+                stocks = stocks.map((s: any) => {
+                    const ind: any = indMap.get(s.symbol) || {};
+                    return {
+                        ...s,
+                        close: ind.close ?? null,
+                        change_pct: ind.change_pct ?? null,
+                        r_vol: ind.r_vol ?? s.vol_ratio ?? null,
+                        rsi_14: ind.rsi_14 ?? null,
+                        macd: ind.macd ?? null,
+                        macd_signal: ind.macd_signal ?? null,
+                        macd_histogram: ind.macd_histogram ?? null,
+                        ema_50: ind.ema_50 ?? null,
+                        ema_200: ind.ema_200 ?? null,
+                        king_ai_score: ind.king_ai_score ?? null,
+                        egx_ai_score: ind.egx_ai_score ?? null,
+                    };
+                });
+            }
+            stocks = stocks.slice(0, 10).map((s: any) => {
+                const canonical = getCanonicalStockName(s.symbol);
+                return {
+                    ...s,
+                    name_ar: canonical.name_ar,
+                    name: canonical.name_en,
+                    sector: canonical.sector || s.sector || null,
+                    is_sharia_compliant: isShariaCompliant(s.symbol),
+                    sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
+                };
+            });
             return { status:"success", preset, date, sharia_only: shariaScanOnly, stocks, accumulation_stocks: toolName === "get_accumulation_stocks" ? stocks : undefined,
                 bounded_candidates: preset === "macd_cross" || shariaScanOnly ? 60 : 10, methodology: preset === "macd_cross" ? "Histogram crossed from <=0 previous session to >0 latest session" : preset };
         }
@@ -1461,11 +1518,17 @@ async function executeRawTool(
             if (shariaScreenOnly) {
                 stocks = stocks.filter((s: any) => isShariaCompliant(s.symbol));
             }
-            stocks = stocks.sort((a:any,b:any)=>(a.distance_from_resistance_pct-b.distance_from_resistance_pct)||(b.r_vol-a.r_vol)).slice(0,maxResults).map((s: any) => ({
-                ...s,
-                is_sharia_compliant: isShariaCompliant(s.symbol),
-                sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
-            }));
+            stocks = stocks.sort((a:any,b:any)=>(a.distance_from_resistance_pct-b.distance_from_resistance_pct)||(b.r_vol-a.r_vol)).slice(0,maxResults).map((s: any) => {
+                const canonical = getCanonicalStockName(s.symbol);
+                return {
+                    ...s,
+                    name_ar: canonical.name_ar,
+                    name: canonical.name_en,
+                    sector: canonical.sector || s.sector || null,
+                    is_sharia_compliant: isShariaCompliant(s.symbol),
+                    sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
+                };
+            });
             return { status:"success", date, sharia_only: shariaScreenOnly, filters:{rsi_min:rsiMin,rsi_max:rsiMax,relative_volume_min:volumeMin,
                 relative_volume_inclusive:volumeInclusive,max_resistance_distance_pct:distanceMax,resistance_distance_inclusive:distanceInclusive}, stocks, scan_complete:!truncated && insufficientHistory.length===0,
                 candidate_limit:250, candidates_checked:rows.length, truncated, insufficient_history_symbols:insufficientHistory,
@@ -1665,9 +1728,13 @@ async function executeRawTool(
                     .limit(1);
                 const quote = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 const wyckoff = wyckoffRows?.[0] || {};
+                const canonical = getCanonicalStockName(sym);
                 if (quote) {
                     return {
                         symbol: sym,
+                        name_ar: canonical.name_ar,
+                        name: canonical.name_en,
+                        sector: canonical.sector || null,
                         is_sharia_compliant: isShariaCompliant(sym),
                         sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         ...quote,
@@ -1681,7 +1748,15 @@ async function executeRawTool(
                         consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
                     };
                 } else {
-                    return { symbol: sym, is_sharia_compliant: isShariaCompliant(sym), sharia_index: isShariaCompliant(sym) ? "EGX33" : null, error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب" };
+                    return {
+                        symbol: sym,
+                        name_ar: canonical.name_ar,
+                        name: canonical.name_en,
+                        sector: canonical.sector || null,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                        sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
+                        error: "لا تتوفر بيانات لهذا الرمز في المصدر المطلوب"
+                    };
                 }
             });
             return { status: "success", comparison: data, comparisons: data };

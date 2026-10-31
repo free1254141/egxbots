@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { getCanonicalStockName } from "@/lib/ai/stock-names";
 import { 
     TrendingUp, 
     TrendingDown, 
@@ -113,9 +114,14 @@ export function StockCard({
         return null;
     }
 
-    const symbol = String(stockData.symbol).toUpperCase().replace(".CA", "");
-    const nameAr = stockData.nameAr || stockData.companyName || stockData.name || symbol;
-    const nameEn = stockData.nameEn || (stockData.nameAr ? symbol : undefined);
+    const rawSymbol = String(stockData.symbol || "").trim();
+    const symbol = rawSymbol.replace(/[\*\#\`]/g, "").trim().toUpperCase().replace(".CA", "");
+    const canonical = getCanonicalStockName(symbol);
+    const cleanRawName = String(stockData.nameAr || stockData.companyName || stockData.name || "").replace(/[\*\#\`]/g, "").trim();
+    const nameAr = (cleanRawName && cleanRawName !== symbol && cleanRawName.length > 2)
+        ? cleanRawName
+        : (canonical.name_ar || symbol);
+    const nameEn = stockData.nameEn || canonical.name_en || (nameAr !== symbol ? symbol : undefined);
     
     // Parse price
     const rawPrice = typeof stockData.price === "number" ? stockData.price : parseFloat(String(stockData.price || "0"));
@@ -171,6 +177,18 @@ export function StockCard({
     const target2 = stockData.target2 || stockData.target_2;
     const stopLoss = stockData.stopLoss || stockData.stop_loss;
     const riskReward = stockData.riskReward || stockData.risk_reward;
+
+    // Mathematically calculated Risk/Reward ratio if not directly provided
+    const rawTarget1Num = typeof target1 === "number" ? target1 : parseFloat(String(target1 || "").replace(/[^\d.-]/g, ""));
+    const rawStopLossNum = typeof stopLoss === "number" ? stopLoss : parseFloat(String(stopLoss || "").replace(/[^\d.-]/g, ""));
+    let calculatedRR: string | undefined = riskReward ? String(riskReward) : undefined;
+    if (!calculatedRR && !isNaN(rawTarget1Num) && !isNaN(rawStopLossNum) && !isNaN(rawPrice) && rawPrice > 0) {
+        const reward = Math.abs(rawTarget1Num - rawPrice);
+        const risk = Math.abs(rawPrice - rawStopLossNum);
+        if (risk > 0) {
+            calculatedRR = `${(reward / risk).toFixed(1)} : 1`;
+        }
+    }
     const relativeVol = stockData.rVol || stockData.r_vol || stockData.volumeRatio;
     const sector = stockData.sector;
     const support1 = stockData.support1;
@@ -415,7 +433,7 @@ export function StockCard({
                             <span>{target2 ? "المستهدف 2" : (resistance2 ? "المقاومة 2" : "العائد للمخاطرة")}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-1">
-                            {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ج.م` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ج.م` : (riskReward ? String(riskReward) : "1 : 2.0 🎯"))}
+                            {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ج.م` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ج.م` : (calculatedRR || "—"))}
                         </div>
                     </div>
                 </div>
@@ -431,7 +449,7 @@ export function StockCard({
                             <Activity className="w-3.5 h-3.5 text-amber-500" />
                             <span>RSI:</span>
                             <span className="font-mono font-black text-zinc-900 dark:text-white">
-                                {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "52.0"}
+                                {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "—"}
                             </span>
                         </div>
 
