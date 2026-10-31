@@ -25,6 +25,13 @@ def __getattr__(name: str):
 CHAT_ID_FILE = os.path.join(os.path.dirname(__file__), "support_admin_chat_id.txt")
 TELEGRAM_RELAY_URL = os.getenv("TELEGRAM_RELAY_URL", "https://api.telegram.org").rstrip("/")
 
+_ADMIN_ACTIVE_SESSIONS: Dict[int, Dict[str, Any]] = {}
+SESSION_REGEX = re.compile(
+    r'(?:Session|جلسة|session_id)(?:</?[a-zA-Z0-9]+>|[\s:=-])*([a-zA-Z0-9\-_]{6,})',
+    re.IGNORECASE
+)
+ACTIVE_SESSION_TTL_SECONDS = 20 * 60  # 20 minutes of inactivity
+
 ADMIN_REPLY_KEYBOARD = {
     "keyboard": [
         [{"text": "👥 المسجلين (اليوم وأمس)"}, {"text": "💬 مستخدمين الشات"}],
@@ -151,12 +158,19 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
     # Forward to admin on Telegram
     admin_chat_id = load_admin_chat_id()
     if admin_chat_id:
+        _ADMIN_ACTIVE_SESSIONS[admin_chat_id] = {
+            "session_id": session_id,
+            "user_name": user_name or "Guest",
+            "time": time.time(),
+        }
         tg_text = (
-            f"💬 <b>[Support Chat Request]</b>\n"
+            f"💬 <b>[طلب دعم فني جديد]</b>\n"
             f"<b>Session:</b> <code>{session_id}</code>\n"
-            f"<b>User Name:</b> {user_name or 'Guest'}\n"
+            f"<b>العميل:</b> {user_name or 'زائر'}\n"
             f"---------------------------------\n"
-            f"{content}"
+            f"{content}\n"
+            f"---------------------------------\n"
+            f"💡 <i>اضغط Reply (رد) على الرسالة لإرسال ردك مباشرة للعميل.</i>"
         )
         send_telegram_message(admin_chat_id, tg_text)
         
@@ -227,29 +241,73 @@ def handle_telegram_update(data: dict):
     # Always register / update admin chat ID
     save_admin_chat_id(chat_id)
 
-    # Check if this is a reply to a forwarded customer support message ticket
+    clean_cmd = text.lower()
+
+    # Manual command to end/close active support session so admin can chat with AI freely
+    if clean_cmd in ("/end", "/done", "/close", "انهاء", "إنهاء", "خلاص", "تم الانتهاء"):
+        if chat_id in _ADMIN_ACTIVE_SESSIONS:
+            sess = _ADMIN_ACTIVE_SESSIONS.pop(chat_id, None)
+            sess_id = sess.get("session_id") if sess else ""
+            send_telegram_message(chat_id, f"🔒 تم إغلاق جلسة الدعم الفني (<code>{sess_id}</code>). رسائلك التالية لن تُرسل للعميل ويمكنك استخدام المساعد الذكي بحرية.")
+        else:
+            send_telegram_message(chat_id, "ℹ️ لا توجد جلسة دعم فني نشطة حالياً.")
+        return
+
+    is_admin_command = (
+        clean_cmd.startswith("/")
+        or clean_cmd in (
+            "المسجلين", "المستخدمين", "مسجلين", "👥 المسجلين (اليوم وأمس)", "المسجلين اليوم",
+            "النشاط", "نشاط", "تفاعل", "التفاعل", "⚡ نشاط المستخدمين",
+            "الشات", "شات", "محادثات", "المحادثات", "💬 مستخدمين الشات",
+            "تقرير", "إحصائيات", "احصائيات", "التقرير", "الإحصائيات", "📊 تقرير شامل",
+            "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر"
+        )
+    )
+
+    # 1. Resolve session_id from explicit reply
+    session_id = None
     reply_to = message.get("reply_to_message", {})
     if reply_to and text:
         reply_text = reply_to.get("text", "") or reply_to.get("caption", "")
-        match = re.search(r'Session:\s*([a-zA-Z0-9\-]+)', reply_text)
+        match = SESSION_REGEX.search(reply_text)
         if match:
             session_id = match.group(1)
-            
-            _init_supabase()
-            if _supabase:
-                reply_data = {
+        elif chat_id in _ADMIN_ACTIVE_SESSIONS:
+            active_info = _ADMIN_ACTIVE_SESSIONS[chat_id]
+            if time.time() - active_info.get("time", 0) < ACTIVE_SESSION_TTL_SECONDS:
+                session_id = active_info.get("session_id")
+
+    # 2. Or resolve from active session if admin typed directly without reply (and not a command)
+    if not session_id and not is_admin_command and chat_id in _ADMIN_ACTIVE_SESSIONS:
+        active_info = _ADMIN_ACTIVE_SESSIONS[chat_id]
+        if time.time() - active_info.get("time", 0) < ACTIVE_SESSION_TTL_SECONDS:
+            session_id = active_info.get("session_id")
+
+    # 3. If routed to customer support session
+    if session_id and not is_admin_command:
+        _init_supabase()
+        if _supabase:
+            reply_data = {
+                "session_id": session_id,
+                "sender": "admin",
+                "content": text,
+                "user_name": "Admin"
+            }
+            try:
+                _supabase.table("support_messages").insert(reply_data).execute()
+                _ADMIN_ACTIVE_SESSIONS[chat_id] = {
                     "session_id": session_id,
-                    "sender": "admin",
-                    "content": text,
-                    "user_name": "Admin"
+                    "time": time.time(),
                 }
-                try:
-                    _supabase.table("support_messages").insert(reply_data).execute()
-                    send_telegram_message(chat_id, f"✅ تم إرسال ردك للعميل بنجاح في جلسة <code>{session_id}</code>")
-                    print(f"[SUPPORT_CHAT] Saved admin reply for session {session_id}")
-                except Exception as e:
-                    print(f"[SUPPORT_CHAT] Error saving admin reply: {e}")
-            return
+                send_telegram_message(
+                    chat_id,
+                    f"✅ تم إرسال ردك للعميل بنجاح\n<b>Session:</b> <code>{session_id}</code>\n💡 <i>لإنهاء الجلسة والحديث مع الذكاء الاصطناعي اكتب /end</i>"
+                )
+                print(f"[SUPPORT_CHAT] Saved admin reply for session {session_id}")
+            except Exception as e:
+                print(f"[SUPPORT_CHAT] Error saving admin reply: {e}")
+                send_telegram_message(chat_id, f"⚠️ خطأ أثناء حفظ الرد: {e}")
+        return
 
     clean_cmd = text.lower()
 
