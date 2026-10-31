@@ -176,6 +176,15 @@ describe("StockCard Component", () => {
         expect(screen.getByText("EGX33 شرعي")).toBeTruthy();
         expect(screen.getByText(/فتح الشارت/)).toBeTruthy();
         expect(screen.getByText("أضف للمحفظة")).toBeTruthy();
+
+        // Technical levels must be displayed instead of recommendation trading plan labels
+        expect(screen.getAllByText("الدعم الأول").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("المقاومة الأولى").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("الدعم الحاسم (2)").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("المقاومة 2").length).toBeGreaterThan(0);
+        expect(screen.queryByText("نطاق الدخول")).toBeNull();
+        expect(screen.queryByText("المستهدف 1")).toBeNull();
+        expect(screen.queryByText("وقف الخسارة")).toBeNull();
     });
 
     test("FormattedChatMessage automatically converts recommendations table to interactive StockCard grid", () => {
