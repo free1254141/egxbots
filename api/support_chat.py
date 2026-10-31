@@ -108,6 +108,21 @@ def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] 
             success = False
     return success
 
+def set_telegram_reaction(chat_id: int, message_id: Optional[int], emoji: str = "👍") -> bool:
+    if not message_id:
+        return False
+    url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/setMessageReaction"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "reaction": [{"type": "emoji", "emoji": emoji}]
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=5)
+        return resp.json().get("ok", False)
+    except Exception:
+        return False
+
 def answer_callback_query(callback_query_id: str, text: Optional[str] = None):
     url = f"{TELEGRAM_RELAY_URL}/bot{get_token()}/answerCallbackQuery"
     payload = {"callback_query_id": callback_query_id}
@@ -299,10 +314,12 @@ def handle_telegram_update(data: dict):
                     "session_id": session_id,
                     "time": time.time(),
                 }
-                send_telegram_message(
-                    chat_id,
-                    f"✅ تم إرسال ردك للعميل بنجاح\n<b>Session:</b> <code>{session_id}</code>\n💡 <i>لإنهاء الجلسة والحديث مع الذكاء الاصطناعي اكتب /end</i>"
-                )
+                reacted = set_telegram_reaction(chat_id, message.get("message_id"), "👍")
+                if not reacted:
+                    send_telegram_message(
+                        chat_id,
+                        f"✅ تم إرسال ردك للعميل (Session: <code>{session_id}</code>)"
+                    )
                 print(f"[SUPPORT_CHAT] Saved admin reply for session {session_id}")
             except Exception as e:
                 print(f"[SUPPORT_CHAT] Error saving admin reply: {e}")
