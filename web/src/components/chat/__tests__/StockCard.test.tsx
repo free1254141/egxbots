@@ -34,6 +34,7 @@ describe("StockCard Component", () => {
             riskReward: "1 : 2.2 🎯",
             rsi: 58.2,
             rVol: 2.4,
+            king_ai_score: 0.685,
             sector: "التطوير العقاري",
             isShariah: true,
             signalType: "فرصة مضاربة",
@@ -50,6 +51,7 @@ describe("StockCard Component", () => {
         // Badges
         expect(screen.getByText(/EGX33 شرعي/)).toBeTruthy();
         expect(screen.getByText("فرصة مضاربة")).toBeTruthy();
+        expect(screen.getByText(/68.5%/)).toBeTruthy();
 
         // Quantitative Trading Plan Metrics
         expect(screen.getByText("57.50 - 58.50 ج.م")).toBeTruthy();
@@ -195,6 +197,25 @@ describe("StockCard Component", () => {
         expect(screen.getByText("2.49")).toBeTruthy();
         expect(screen.getByText("#LCSW")).toBeTruthy();
         expect(screen.getAllByText("35.73").length).toBeGreaterThan(0);
+    });
+
+    test("FormattedChatMessage parses KING AI and EGX AI scores from analysis table", () => {
+        const kingTableMarkdown = `
+### 📊 تحليل سهم طلعت مصطفى (TMGH)
+السعر الأخير: 80.40 ج.م
+
+| المؤشر / المقياس | القيمة | القراءة والتقييم |
+|---|---|---|
+| RSI (14) | 55.40 | منطقة حيادية |
+| تقييم نموذج KING AI | 74.2% | ثقة صعود جيدة |
+| تقييم نموذج EGX AI | 68.0% | إيجابي |
+        `;
+
+        render(<FormattedChatMessage role="assistant" content={kingTableMarkdown} />);
+
+        expect(screen.getByText("#TMGH")).toBeTruthy();
+        expect(screen.getByText(/تقييم KING AI:/)).toBeTruthy();
+        expect(screen.getAllByText("74.2%").length).toBeGreaterThan(0);
     });
 
     test("FormattedChatMessage accurately extracts price and change when price is in preceding text like ATQA", () => {

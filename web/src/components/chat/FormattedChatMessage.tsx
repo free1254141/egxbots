@@ -244,6 +244,8 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let ema50: number | undefined;
     let ema200: number | undefined;
     let changePct: number | undefined;
+    let kingAiScore: number | undefined;
+    let egxAiScore: number | undefined;
 
     for (const row of rows) {
         if (!row || row.length < 2) continue;
@@ -293,6 +295,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
             ema200 = parseNum(val);
         } else if (/EMA/i.test(key)) {
             hasEma = true;
+        } else if (/KING|نموذج KING|King\s*AI/i.test(key)) {
+            kingAiScore = parseNum(val);
+        } else if (/EGX\s*AI|نموذج EGX/i.test(key)) {
+            egxAiScore = parseNum(val);
         }
     }
 
@@ -405,6 +411,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         wyckoffPhase,
         ema50,
         ema200,
+        king_ai_score: kingAiScore,
+        kingScore: kingAiScore,
+        egx_ai_score: egxAiScore,
+        egxScore: egxAiScore,
         isShariah: isShariah || meta?.isShariah
     };
 }

@@ -72,6 +72,10 @@ export interface StockData {
     peRatio?: string | number;
     eps?: string | number;
     marketCap?: string | number;
+    king_ai_score?: string | number;
+    kingScore?: string | number;
+    egx_ai_score?: string | number;
+    egxScore?: string | number;
 
     // Classification & Badges
     sector?: string;
@@ -201,6 +205,10 @@ export function StockCard({
     const macdDesc = typeof stockData.macdSignal === "string" ? stockData.macdSignal : undefined;
     const peRatio = stockData.peRatio;
     const eps = stockData.eps;
+    const rawKing = stockData.king_ai_score ?? stockData.kingScore;
+    const kingScoreVal = typeof rawKing === "number" ? rawKing : rawKing ? parseFloat(String(rawKing).replace(/[^\d.-]/g, "")) : undefined;
+    const rawEgx = stockData.egx_ai_score ?? stockData.egxScore;
+    const egxScoreVal = typeof rawEgx === "number" ? rawEgx : rawEgx ? parseFloat(String(rawEgx).replace(/[^\d.-]/g, "")) : undefined;
     const isShariah = Boolean(
         stockData.isShariah ?? stockData.is_sharia_compliant ?? (stockData.sharia_index === "EGX33")
     );
@@ -476,9 +484,21 @@ export function StockCard({
                     )}
                 </div>
 
-                {/* Secondary Indicators Row: MACD, EMAs, Wyckoff, PE */}
-                {(macdDesc || ema50 || ema200 || wyckoffPhase || peRatio) && (
+                {/* Secondary Indicators Row: MACD, EMAs, Wyckoff, PE, King AI */}
+                {(macdDesc || ema50 || ema200 || wyckoffPhase || peRatio || kingScoreVal !== undefined) && (
                     <div className="pt-2 border-t border-zinc-200/60 dark:border-white/5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                        {kingScoreVal !== undefined && !isNaN(kingScoreVal) && (
+                            <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 font-mono font-bold ${
+                                (kingScoreVal > 1 ? kingScoreVal / 100 : kingScoreVal) >= 0.60 
+                                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30" 
+                                    : (kingScoreVal > 1 ? kingScoreVal / 100 : kingScoreVal) >= 0.50
+                                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                        : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                            }`}>
+                                <Sparkles className="w-3 h-3 text-purple-500" />
+                                <span>تقييم KING AI: <strong>{(kingScoreVal <= 1 ? kingScoreVal * 100 : kingScoreVal).toFixed(1)}%</strong></span>
+                            </span>
+                        )}
                         {wyckoffPhase && (
                             <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                                 <span>وايكوف:</span>
