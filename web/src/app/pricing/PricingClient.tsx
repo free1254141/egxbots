@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -57,8 +57,9 @@ export default function PricingClient() {
   const [subscriptionEnd, setSubscriptionEnd] = useState<string | null>(null);
   const [telegramProUrl, setTelegramProUrl] = useState("");
   const [isPro, setIsPro] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState("pro_6m");
-  const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro_6m");
+  const [selectedPlan, setSelectedPlan] = useState("pro");
+  const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro");
+  const proCardRef = useRef<HTMLDivElement>(null);
 
   const [trialEligible, setTrialEligible] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
@@ -354,9 +355,33 @@ export default function PricingClient() {
     setTimeout(() => setCopiedOrder(false), 2000);
   };
 
-  const handleDurationSelect = (id: "pro" | "pro_6m" | "pro_1y") => {
+  const scrollToProCard = () => {
+    if (typeof window === "undefined") return;
+    const card = proCardRef.current || document.getElementById("pro-plan-card");
+    if (!card) return;
+
+    const headerH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-h")) || 72;
+    const stickyBar = document.getElementById("pricing-duration-navbar");
+    const stickyH = stickyBar ? stickyBar.offsetHeight : 80;
+    const totalStickyOffset = headerH + stickyH + 16;
+
+    const cardRect = card.getBoundingClientRect();
+    const targetScrollY = window.scrollY + cardRect.top - totalStickyOffset;
+
+    window.scrollTo({
+      top: Math.max(0, targetScrollY),
+      behavior: "smooth",
+    });
+  };
+
+  const handleDurationSelect = (id: "pro" | "pro_6m" | "pro_1y", shouldScroll = false) => {
     setActiveProDuration(id);
     setSelectedPlan(id);
+    if (shouldScroll) {
+      setTimeout(() => {
+        scrollToProCard();
+      }, 50);
+    }
   };
 
   // The plans view is much taller than the payment view. Reset scroll before
@@ -492,8 +517,8 @@ export default function PricingClient() {
     };
   });
 
-  const selectedPlanDetails = paidPlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[1];
-  const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[1];
+  const selectedPlanDetails = paidPlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
+  const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
   const proPrice = selectedPlanDetails?.amount_egp ?? 1000;
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 10 };
@@ -998,7 +1023,7 @@ export default function PricingClient() {
 
   // ── STEP 1: PLANS COMPARISON GRID (DEFAULT) ────────────────────────────────
   return (
-    <div className="min-h-[75vh] py-10 sm:py-14 px-4 relative overflow-hidden" dir={isAr ? "rtl" : "ltr"}>
+    <div className="min-h-[75vh] py-10 sm:py-14 px-4 relative overflow-x-clip" dir={isAr ? "rtl" : "ltr"}>
       <div className="max-w-6xl mx-auto space-y-10 relative">
         {/* Main Header */}
         <div className="text-center space-y-3">
@@ -1122,7 +1147,7 @@ export default function PricingClient() {
         </div>
 
         {/* ── PRO DURATION SWITCHER (سويتشر مدة باقة Pro فقط: شهر، 6 شهور، سنة) ── */}
-        <div className="space-y-3">
+        <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-2.5 sm:py-3 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/60 dark:border-zinc-800/60">
           <div className="text-center">
             <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
               {isAr ? "اختر مدة اشتراك باقة EGX BOTS PRO:" : "SELECT PRO BILLING CYCLE:"}
@@ -1164,7 +1189,7 @@ export default function PricingClient() {
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => handleDurationSelect(tab.id)}
+                    onClick={() => handleDurationSelect(tab.id, true)}
                     className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 border-2 transition-all text-xs sm:text-sm font-black active:translate-y-0.5 cursor-pointer ${
                       isSelected
                         ? "border-black dark:border-white bg-black text-white dark:bg-white dark:text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_#10b981]"
@@ -1274,7 +1299,9 @@ export default function PricingClient() {
 
             return (
               <div
-                className={`border-4 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative transition-all duration-300 ${
+                id="pro-plan-card"
+                ref={proCardRef}
+                className={`scroll-mt-48 border-4 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative transition-all duration-300 ${
                   isFeatured
                     ? "border-black dark:border-white bg-emerald-50/70 dark:bg-emerald-950/30 ring-4 ring-emerald-500 shadow-[8px_8px_0px_#10b981]"
                     : "border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_#10b981]"
@@ -1540,125 +1567,6 @@ export default function PricingClient() {
                 <span>{isAr ? "صلاحية 36,500 يوم · بدون أي تجديد" : "36,500 days · Zero renewals"}</span>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* ── QUICK COMPARISON TABLE (مقارنة سريعة لجميع المدد والأسعار) ── */}
-        <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 sm:p-8 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981] space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-zinc-200 dark:border-zinc-800 pb-4">
-            <div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 block mb-0.5">
-                {isAr ? "جدول المقارنة السريعة" : "QUICK COMPARISON"}
-              </span>
-              <h3 className="text-xl font-black text-zinc-950 dark:text-white">
-                {isAr ? "مقارنة جميع مدد الاشتراك والأسعار" : "Compare All Durations & Pricing"}
-              </h3>
-            </div>
-            <p className="text-xs font-bold text-zinc-500">
-              {isAr ? "اضغط على أي خطة لاختيارها والانتقال للدفع فوراً" : "Click any plan to select and checkout"}
-            </p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-start text-xs font-bold">
-              <thead>
-                <tr className="border-b-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-white uppercase text-[11px]">
-                  <th className="p-3 text-start">{isAr ? "الخطة / المدة" : "Plan"}</th>
-                  <th className="p-3 text-start">{isAr ? "السعر الإجمالي" : "Total Price"}</th>
-                  <th className="p-3 text-start">{isAr ? "المعادل الشهري" : "Monthly Rate"}</th>
-                  <th className="p-3 text-start">{isAr ? "نسبة التوفير" : "Savings"}</th>
-                  <th className="p-3 text-start">{isAr ? "المقاعد والحالة" : "Availability"}</th>
-                  <th className="p-3 text-end">{isAr ? "الإجراء" : "Action"}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                {/* Free */}
-                <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
-                  <td className="p-3 font-black text-zinc-950 dark:text-white flex items-center gap-1.5">
-                    <span>{isAr ? "مجاني" : "Free"}</span>
-                  </td>
-                  <td className="p-3">0 ج.م</td>
-                  <td className="p-3 text-zinc-500">0 ج.م</td>
-                  <td className="p-3 text-zinc-500">—</td>
-                  <td className="p-3"><span className="text-emerald-600">{isAr ? "متاح دائماً" : "Always Free"}</span></td>
-                  <td className="p-3 text-end">
-                    <span className="text-[10px] text-zinc-400 font-bold uppercase">{isAr ? "الأساسي" : "Basic"}</span>
-                  </td>
-                </tr>
-
-                {/* Paid Plans */}
-                {paidPlans.map((plan) => {
-                  const isCur = selectedPlan === plan.id;
-                  return (
-                    <tr
-                      key={plan.id}
-                      className={`transition-colors ${
-                        isCur
-                          ? "bg-emerald-50/60 dark:bg-emerald-950/20 font-black"
-                          : "hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-                      }`}
-                    >
-                      <td className="p-3 font-black text-zinc-950 dark:text-white">
-                        <div className="flex items-center gap-1.5">
-                          {plan.isLifetime && <Crown className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 shrink-0" />}
-                          <span>{isAr ? plan.name_ar : plan.name_en}</span>
-                          {plan.badge && (
-                            <span className="text-[9px] font-black px-1.5 py-0.2 border border-black bg-amber-300 text-black">
-                              {plan.badge}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3 font-black text-zinc-950 dark:text-white">
-                        {plan.amount_egp.toLocaleString()} ج.م
-                      </td>
-                      <td className="p-3 text-zinc-600 dark:text-zinc-400">
-                        {plan.isLifetime ? (isAr ? "دفعة واحدة للأبد" : "One-time") : `${plan.monthlyEquivalent} ج.م / شهر`}
-                      </td>
-                      <td className="p-3">
-                        {plan.savingsPct > 0 ? (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-black">
-                            {plan.isLifetime ? (isAr ? "وفر للأبد 👑" : "Save 95%+") : `وفر ${plan.savingsPct}%`}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400">—</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {plan.id === "lifetime" ? (
-                          <span className={lifetimeIsOpen ? "text-purple-600 dark:text-yellow-400 font-black" : "text-red-500"}>
-                            {lifetimeIsOpen ? (isAr ? `متبقي ${lifetimeRemaining} مقعداً` : `${lifetimeRemaining} left`) : (isAr ? "اكتملت المقاعد" : "Sold out")}
-                          </span>
-                        ) : plan.id === "pro" ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-bold">
-                            {isGrandfathered
-                              ? (isAr ? "تجديد حصري مثبت مدى الحياة ⚡" : "Locked renewal rate for life ⚡")
-                              : foundersCountdown
-                              ? (isAr ? `ينتهي خلال ⏰ ${foundersCountdown}` : `Ends in ⏰ ${foundersCountdown}`)
-                              : (isAr ? "عرض 15 يوماً فقط 🔥" : "15-day offer 🔥")}
-                          </span>
-                        ) : (
-                          <span className="text-emerald-600 font-bold">{isAr ? "متاح فوري" : "Available"}</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-end">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPlan(plan.id)}
-                          className={`px-3 py-1.5 border-2 border-black dark:border-white text-[11px] font-black transition-all ${
-                            isCur
-                              ? "bg-[#FFE600] text-black shadow-[2px_2px_0px_#000]"
-                              : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
-                          }`}
-                        >
-                          {isCur ? (isAr ? "✓ محددة الآن" : "✓ Selected") : (isAr ? "اختيار هذه الخطة" : "Select Plan")}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         </div>
 
