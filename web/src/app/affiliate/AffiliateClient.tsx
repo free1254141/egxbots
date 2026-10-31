@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAffiliate } from "@/contexts/AffiliateContext";
 import {
   Copy,
   Check,
@@ -20,80 +21,38 @@ import {
   Gift,
   Smartphone,
   Lock,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-
-interface AffiliateData {
-  id: string;
-  user_id: string;
-  code: string;
-  name: string;
-  phone: string;
-  payment_method: string;
-  discount_percent: number;
-  commission_percent: number;
-  is_active: boolean;
-  clicks_count: number;
-  total_sales_count: number;
-  total_revenue_egp: number;
-  total_commission_egp: number;
-  paid_commission_egp: number;
-}
-
-interface ReferralOrder {
-  id: string;
-  plan_id: string;
-  amount_egp: number;
-  status: string;
-  commission_amount_egp: number;
-  commission_status: string;
-  created_at: string;
-}
 
 export default function AffiliateClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
   const { user, loading: authLoading } = useAuth();
+  const {
+    affiliate,
+    referrals,
+    loading: affiliateLoading,
+    isRefreshing,
+    refreshAffiliate,
+    saveAffiliateSettings,
+  } = useAffiliate();
 
-  const [affiliate, setAffiliate] = useState<AffiliateData | null>(null);
-  const [referrals, setReferrals] = useState<ReferralOrder[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
   const [codeInput, setCodeInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
-  const loadAffiliateProfile = useCallback(async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await fetch("/api/affiliate/me", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.affiliate) {
-          setAffiliate(data.affiliate);
-          setCodeInput(data.affiliate.code || "");
-          setPhoneInput(data.affiliate.phone || "");
-        }
-        setReferrals(Array.isArray(data?.referrals) ? data.referrals : []);
-      }
-    } catch {
-      // non-blocking
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
+  // Sync inputs from context when affiliate data is available
   useEffect(() => {
-    if (!authLoading) {
-      loadAffiliateProfile();
+    if (affiliate) {
+      setCodeInput((prev) => (prev ? prev : affiliate.code || ""));
+      setPhoneInput((prev) => (prev ? prev : affiliate.phone || ""));
     }
-  }, [authLoading, loadAffiliateProfile]);
+  }, [affiliate]);
+
+  const loading = authLoading || (affiliateLoading && !affiliate);
 
   const normalizedPhoneInput = phoneInput.replace(/[\s-]/g, "");
   const isPhoneInputValid = /^01[0125]\d{8}$/.test(normalizedPhoneInput);
@@ -149,23 +108,17 @@ export default function AffiliateClient() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/affiliate/me", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: codeInput.trim().toUpperCase(),
-          phone: normalizedPhoneInput,
-          payment_method: "vodafone_cash",
-        }),
+      const res = await saveAffiliateSettings({
+        code: codeInput.trim().toUpperCase(),
+        phone: normalizedPhoneInput,
+        payment_method: "vodafone_cash",
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || (isAr ? "تعذر حفظ البيانات" : "Could not save settings"));
+      if (!res.success) {
+        throw new Error(res.error || (isAr ? "تعذر حفظ البيانات" : "Could not save settings"));
       }
-      if (data?.affiliate) {
-        setAffiliate(data.affiliate);
-        setCodeInput(data.affiliate.code);
-        setPhoneInput(data.affiliate.phone);
+      if (res.affiliate) {
+        setCodeInput(res.affiliate.code);
+        setPhoneInput(res.affiliate.phone);
       }
       toast.success(
         isAr
@@ -337,6 +290,15 @@ export default function AffiliateClient() {
                   <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-black font-mono">
                     📱 {affiliate.phone}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => refreshAffiliate(true)}
+                    disabled={isRefreshing}
+                    title={isAr ? "تحديث البيانات" : "Refresh Data"}
+                    className="p-1.5 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 cursor-pointer disabled:opacity-50 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-500" : ""}`} />
+                  </button>
                 </div>
               </div>
 

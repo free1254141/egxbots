@@ -12,6 +12,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { TelegramProProvider } from "@/contexts/TelegramProContext";
+import { AffiliateProvider } from "@/contexts/AffiliateContext";
 import { SupportChatProvider } from "@/contexts/SupportChatContext";
 import UserActivityTracker from "@/components/UserActivityTracker";
 
@@ -58,7 +59,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       <AuthProvider>
         <UserActivityTracker />
         <TelegramProProvider>
-          <LanguageProvider>
+          <AffiliateProvider>
+            <LanguageProvider>
             <NotificationProvider>
               <PortfolioProvider>
                <WatchlistProvider>
@@ -77,6 +79,7 @@ export default function Providers({ children }: { children: ReactNode }) {
               </PortfolioProvider>
             </NotificationProvider>
           </LanguageProvider>
+          </AffiliateProvider>
         </TelegramProProvider>
       </AuthProvider>
     </ThemeProvider>
