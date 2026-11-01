@@ -510,7 +510,10 @@ export default function PricingClient() {
 
   if (loading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="min-h-[60vh] flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
+        <h1 className="text-2xl sm:text-4xl font-black text-zinc-950 dark:text-white tracking-tight">
+          {isAr ? "خطط وأسعار باقات EGX BOTS" : "EGX BOTS Subscription Plans & Pricing"}
+        </h1>
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
       </div>
     );
@@ -518,8 +521,11 @@ export default function PricingClient() {
 
   if (!localConfig) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center p-6 text-center font-bold text-zinc-900 dark:text-white">
-        {isAr ? "تعذر تحميل الخطط الآن. أعد تحميل الصفحة للمحاولة مجددًا." : "Plans are temporarily unavailable. Please reload and try again."}
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4 font-bold text-zinc-900 dark:text-white">
+        <h1 className="text-xl sm:text-2xl font-black">
+          {isAr ? "خطط وأسعار باقات EGX BOTS" : "EGX BOTS Subscription Plans & Pricing"}
+        </h1>
+        <p>{isAr ? "تعذر تحميل الخطط الآن. أعد تحميل الصفحة للمحاولة مجددًا." : "Plans are temporarily unavailable. Please reload and try again."}</p>
       </div>
     );
   }
@@ -682,7 +688,7 @@ export default function PricingClient() {
                   : isAr ? "تم التفعيل بنجاح" : "Pro Activated"
                 : isAr ? "جاري التحقق من الدفع" : "Verifying Payment"}
             </span>
-            <h2 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white">
               {orderStatus === "failed"
                 ? isAr ? "لم تكتمل عملية الدفع" : "Payment was not completed"
                 : orderStatus === "approved"
@@ -690,7 +696,7 @@ export default function PricingClient() {
                   ? isAr ? "أهلاً بك في نخبة EGX BOTS مدى الحياة! 👑🎉" : "Welcome to EGX BOTS Lifetime VIP! 👑🎉"
                   : isAr ? "أهلاً بك في EGX BOTS Pro! 🎉" : "Welcome to EGX BOTS Pro! 🎉"
                 : isAr ? "في انتظار إشعار تأكيد الدفع ⏳" : "Awaiting payment confirmation ⏳"}
-            </h2>
+            </h1>
             <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300 leading-relaxed max-w-md mx-auto">
               {orderStatus === "failed"
                 ? isAr

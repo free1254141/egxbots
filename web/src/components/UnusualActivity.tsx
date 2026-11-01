@@ -117,7 +117,7 @@ export default function UnusualActivity() {
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 border border-black bg-white p-1 dark:border-white">
-            <Image src="/favicon_io/apple-touch-icon.png" alt="" width={20} height={20} className="h-5 w-5 object-contain" />
+            <Image src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={20} height={20} className="h-5 w-5 object-contain" />
           </span>
           <Activity className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
           <h2 className="text-sm font-black text-zinc-950 dark:text-white">{ar ? "نشاط غير طبيعي" : "Unusual Activity"}</h2>

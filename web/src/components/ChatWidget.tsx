@@ -21,7 +21,7 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
     return (
         <span className={`artoro-brand-mark artoro-brand-mark--${size}`} role="img" aria-label="ARTORO V3">
             <span className="artoro-brand-mark__core">
-                <NextImage src="/favicon_io/apple-touch-icon.png" alt="" width={48} height={48} className="h-full w-full object-contain" priority />
+                <NextImage src="/favicon_io/apple-touch-icon.png" alt="ARTORO AI" width={48} height={48} className="h-full w-full object-contain" priority />
             </span>
             {size !== "header" && <span className="artoro-brand-mark__version" aria-hidden="true">V3</span>}
         </span>

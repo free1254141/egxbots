@@ -39,11 +39,10 @@ export default function BrandedPageHeader({
       <div className="pointer-events-none absolute -right-5 top-1/2 -z-10 hidden -translate-y-1/2 opacity-[0.12] sm:block md:right-7">
         <Image
           src="/favicon_io/apple-touch-icon.png"
-          alt=""
+          alt="EGX Bots Logo"
           width={176}
           height={176}
           className="h-28 w-28 object-contain md:h-40 md:w-40"
-          aria-hidden="true"
         />
       </div>
       <div className="relative flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">

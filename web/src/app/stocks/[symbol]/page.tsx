@@ -67,7 +67,17 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const companyName = fund.name || fund.Name || symbol;
   const sector = fund.sector || fund.Sector || "";
 
-  const title = `تحليل وسعر سهم ${companyName} (${symbol}) بالذكاء الاصطناعي`;
+  // Generate short, high-relevance title so final title + " | EGX BOTS" is strictly < 60 chars (well under Bing's 70-char limit)
+  const cleanName = String(companyName || "")
+    .split(/[-—–(]/)[0]
+    .replace(/(?:شركة|ش\.م\.م|القابضة|للاستثمار)\b/g, "")
+    .trim();
+  const displayName = cleanName && cleanName.toLowerCase() !== symbol.toLowerCase() && cleanName.length <= 22
+    ? cleanName
+    : symbol;
+  const title = displayName !== symbol
+    ? `سهم ${displayName} (${symbol}) | تحليل وسعر`
+    : `سهم ${symbol} | تحليل وسعر`;
   const description = `تحليل سهم ${companyName} (${symbol}) بالإغلاقات اليومية المسجلة، تقييم AI Score، ومؤشرات التحليل الفني في البورصة المصرية. راجع تاريخ البيانات الظاهر بالصفحة.`;
 
   return {

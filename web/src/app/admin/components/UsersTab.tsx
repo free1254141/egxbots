@@ -955,7 +955,7 @@ export default function UsersTab() {
                                             <td data-label={isAr ? "المستخدم" : "User"} className="px-4 py-3">
                                                 <div className="flex items-center gap-3">
                                                     {u.avatar_url ? (
-                                                        <img src={u.avatar_url} alt="" className="w-8 h-8 rounded-full border-2 border-black dark:border-white object-cover shrink-0" />
+                                                        <img src={u.avatar_url} alt={u.display_name || u.username || "User avatar"} className="w-8 h-8 rounded-full border-2 border-black dark:border-white object-cover shrink-0" />
                                                     ) : (
                                                         <div className="w-8 h-8 rounded-full border-2 border-black dark:border-white bg-blue-100 dark:bg-blue-900 flex items-center justify-center font-black text-xs text-blue-700 dark:text-blue-300 shrink-0">
                                                             {(u.display_name || u.username || u.email || "?")[0].toUpperCase()}
