@@ -55,12 +55,14 @@ import subprocess
 def get_git_changes():
     files = set()
     try:
-        # Files changed since the Hugging Face Space baseline deployment 23 days ago
-        res = subprocess.run(["git", "diff", "--name-only", "78cc5e6", "HEAD"], capture_output=True, text=True)
-        if res.returncode == 0:
-            for line in res.stdout.splitlines():
-                if line.strip():
-                    files.add(line.strip())
+        # Files changed in recent commits (up to last 20 commits)
+        for base_ref in ["HEAD~20", "HEAD~10", "HEAD~5", "HEAD~1"]:
+            res = subprocess.run(["git", "diff", "--name-only", base_ref, "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if line.strip():
+                        files.add(line.strip())
+                break
         
         # Files modified but not committed yet
         res = subprocess.run(["git", "diff", "--name-only"], capture_output=True, text=True)
