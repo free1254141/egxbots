@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { parseMarkdownTable, exportTableToExcel } from "@/lib/excelExport";
 import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle } from "lucide-react";
 import StockCard, { StockData } from "./StockCard";
+import ScheduleAutomationModal from "./ScheduleAutomationModal";
 import type { ChatTable } from "@/contexts/ChatContext";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
@@ -969,6 +970,7 @@ export function FormattedChatMessage({
     if (/environment_details|Current time:|Working directory:|Workspace root folder:/i.test(content)) content = "";
     const [copiedText, setCopiedText] = useState(false);
     const [savingToPortfolio, setSavingToPortfolio] = useState(false);
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [portfolioFeedback, setPortfolioFeedback] = useState<{
         ok: boolean;
         message: string;
@@ -1435,6 +1437,17 @@ export function FormattedChatMessage({
                         )}
                     </button>
 
+                    {/* ⏰ 1-Click Automate Daily */}
+                    <button
+                        type="button"
+                        onClick={() => setShowScheduleModal(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-900 dark:text-purple-300 border border-purple-500/40 font-bold text-xs transition-all shadow-xs active:scale-95 cursor-pointer"
+                        title="أتمتة هذا السؤال كاستشارة يومية تصلك على تليجرام في موعد تحدده"
+                    >
+                        <Clock className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                        <span>أتمتة السؤال يومياً</span>
+                    </button>
+
                     {typeof latencyMs === "number" && latencyMs > 0 && (
                         <span
                             className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs"
@@ -1524,6 +1537,15 @@ export function FormattedChatMessage({
                         </div>
                     )}
                     </div>
+            )}
+
+            {showScheduleModal && (
+                <ScheduleAutomationModal
+                    isOpen={showScheduleModal}
+                    onClose={() => setShowScheduleModal(false)}
+                    initialPrompt={userQuery || (content.length > 200 ? content.slice(0, 200) : content)}
+                    initialTitle={userQuery ? `متابعة: ${userQuery.slice(0, 30)}` : undefined}
+                />
             )}
         </div>
     );

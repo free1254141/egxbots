@@ -615,6 +615,7 @@ export default function PricingClient() {
     { icon: <Activity className="w-4 h-4" />, text: isAr ? "النشاط غير الطبيعي (أسهم ارتفع حجمها بشكل غير طبيعي)" : "Unusual Activity (volume spike detection)", included: false },
     { icon: <ShieldCheck className="w-4 h-4" />, text: isAr ? "قناة تليجرام الفورية (تنبيهات فنية ومؤشرات الخوارزميات)" : "Instant Telegram Channel (daily technical signals)", included: false },
     { icon: <BellRing className="w-4 h-4" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات)" : "Live Telegram Scanner Alerts (Volume & Breakouts)", included: false },
+    { icon: <Clock className="w-4 h-4" />, text: isAr ? "أتمتة استشارات الذكاء الاصطناعي اليومية المجدولة عبر تليجرام" : "Daily Scheduled Telegram AI Chat Automations", included: false },
   ];
 
   const proFeatures = [
@@ -622,6 +623,7 @@ export default function PricingClient() {
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "الصفقات القصيرة ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح EMA10 بدون تشفير" : "Short Swings ⚡ PRO — momentum trades, tight 4% stop, and EMA10 runners unmasked", included: true },
     { icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام — سيولة ذكية، اختراقات، تشبع بيعي، وإفصاحات" : "Live Telegram Scanner Alerts — smart volume, breakouts, oversold bounce & disclosures", included: true },
     { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? `${proLimits.chat_messages_per_month} رسالة شات بوت ذكي شهرياً` : `${proLimits.chat_messages_per_month} smart chatbot messages / month`, included: true },
+    { icon: <Clock className="w-4 h-4 text-sky-500" />, text: isAr ? "أتمتة استشارات الذكاء الاصطناعي اليومية (حتى 5 استشارات مجدولة يومياً تُرسل لتليجرام في المواعيد التي تختارها)" : "Daily Scheduled AI Chat Automations (up to 5 scheduled consults/day sent to your Telegram at your preferred times)", included: true },
     { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "فتح كافة التوصيات المفتوحة وإشارات الدخول اللحظية وتفعيل وضع التوصيات الحرة في الشات" : "Full access to open recommendations, live entry signals & autonomous recs mode in chat", included: true },
     { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "رفع وتحليل لقطات شاشة المحفظة والشارت بالذكاء الاصطناعي (Vision AI) 📸" : "Upload & analyze portfolio and chart screenshots with Vision AI 📸", included: true },
     ...chartFeatures,
@@ -635,6 +637,7 @@ export default function PricingClient() {
     { icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />, text: isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام بكافة مراحله للأبد" : "Live Telegram Scanner Alerts forever across all stages", included: true },
     { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "الصفقات القصيرة ⚡ PRO ومتابعة الأرباح كاملة بدون تشفير" : "Short Swings ⚡ PRO momentum trades unmasked", included: true },
     { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? `${proLimits.chat_messages_per_month} استشارة شات بوت شهرياً تتجدد تلقائياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages refreshed monthly for life`, included: true },
+    { icon: <Clock className="w-4 h-4 text-emerald-500" />, text: isAr ? "أتمتة استشارات الذكاء الاصطناعي اليومية (حتى 5 استشارات مجدولة يومياً للأبد)" : "Daily Scheduled AI Chat Automations (up to 5 scheduled consults/day forever)", included: true },
     { icon: <Sparkles className="w-4 h-4 text-emerald-500" />, text: isAr ? "فتح كافة التوصيات المفتوحة وإشارات الدخول + تحليل صور المحفظة والشارت (Vision AI) 📸" : "Unrestricted open recommendations + Vision AI portfolio & chart analysis 📸", included: true },
     ...chartFeatures,
     { icon: <Activity className="w-4 h-4 text-emerald-500" />, text: isAr ? "النشاط غير الطبيعي للأسهم + المحفظة الموسعة (10 أسهم)" : "Unusual Activity + 10 portfolio stock slots", included: true },

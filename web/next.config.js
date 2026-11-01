@@ -55,6 +55,10 @@ const nextConfig = {
         destination: '/api/portfolio/:path*',
       },
       {
+        source: '/api/automations/:path*',
+        destination: '/api/automations/:path*',
+      },
+      {
         source: '/api/:path*',
         destination: `${BACKEND_URL}/:path*`,
       },

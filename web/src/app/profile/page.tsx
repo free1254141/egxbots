@@ -12,6 +12,7 @@ import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User
 import { toast } from "sonner";
 import MyPortfolioSection from "./components/MyPortfolioSection";
 import PlanQuotaCard from "./components/PlanQuotaCard";
+import ScheduledAutomationsCard from "./components/ScheduledAutomationsCard";
 import FoundingMemberBanner from "./components/FoundingMemberBanner";
 import PaymentWelcomeModal from "./components/PaymentWelcomeModal";
 
@@ -401,6 +402,14 @@ export default function ProfilePage() {
 
       {/* ── Plan & Quota (الخطة والكوتا) ── */}
       <PlanQuotaCard key={`quota-${portfolioVersion}`} refreshTrigger={portfolioVersion} onQuotaLoaded={setQuotaData} />
+
+      {/* ── Scheduled Daily AI Automations (أتمتة الاستشارات اليومية) ── */}
+      <ScheduledAutomationsCard
+        isPro={Boolean(proInvite.is_pro || quotaData?.plan?.is_pro || quotaData?.plan?.tier === 'pro')}
+        language={language}
+        telegramLinked={telegramLinked}
+        onQuotaConsumed={() => setPortfolioVersion((v) => v + 1)}
+      />
 
       {/* ── My Portfolio (محفظتى) ── */}
       <div id="portfolio" className="scroll-mt-8">

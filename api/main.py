@@ -373,6 +373,14 @@ async def startup_event():
     except Exception as e:
         print(f"DEBUG ERROR: Failed to start Facebook Social Scheduler: {e}")
 
+    # Scheduled AI Automations Worker (user daily scheduled chats via Telegram)
+    try:
+        from api.scheduled_automations_worker import start_scheduled_automations_worker
+        start_scheduled_automations_worker()
+        print("DEBUG: Scheduled Automations Worker started successfully.")
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to start Scheduled Automations Worker: {e}")
+
 
 
 
@@ -403,6 +411,12 @@ async def shutdown_event():
     try:
         from api.social_scheduler import stop_social_scheduler
         stop_social_scheduler()
+    except Exception:
+        pass
+
+    try:
+        from api.scheduled_automations_worker import stop_scheduled_automations_worker
+        stop_scheduled_automations_worker()
     except Exception:
         pass
 
@@ -490,7 +504,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 
-from api.routers import admin, bot, easykash, scan_ai, scan_ai_fast, scan_tech, similarity_admin, support, chatbot, short_swings
+from api.routers import admin, bot, easykash, scan_ai, scan_ai_fast, scan_tech, similarity_admin, support, chatbot, short_swings, automations
 
 
 
@@ -513,6 +527,7 @@ app.include_router(similarity_admin.router)
 app.include_router(support.router)
 app.include_router(chatbot.router)  # New Anti-Hallucination Chatbot
 app.include_router(short_swings.router)
+app.include_router(automations.router)
 app.include_router(health_router)
 
 
