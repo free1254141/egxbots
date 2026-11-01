@@ -44,12 +44,34 @@ export function knownSymbolHints(message: string): Array<{ name: string; symbols
         }).slice(0, 30).map(([name, value]) => ({ name, symbols: Array.isArray(value) ? value : [value] }));
 }
 
-export const REQUEST_DATA_TOOLS_SCHEMA = [{ type: 'function', function: {
-    name: 'get_corporate_actions',
-    description: 'اقرأ سجل الإجراءات الرأسمالية والتوزيعات والأخبار المؤرخة للسهم المطلوب: اكتتاب، زيادة رأس مال، كوبون، تجزئة. ميّز المصدر الرسمي عن الخبر، وغياب السجل لا ينفي وجود الحدث أو يثبت أن الاكتتاب مفتوح اليوم.',
-    parameters: { type: 'object', properties: { symbols: { type: 'array', items: { type: 'string' }, maxItems: 10 },
-        action_type: { type: 'string', enum: ['rights_issue', 'capital_increase', 'capital_reduction', 'dividend', 'stock_split', 'bonus_shares', 'all'] } }, required: ['symbols'] }
-} }];
+export const REQUEST_DATA_TOOLS_SCHEMA = [
+    {
+        type: 'function',
+        function: {
+            name: 'get_corporate_actions',
+            description: 'اقرأ سجل الإجراءات الرأسمالية والتوزيعات والأخبار المؤرخة للسهم المطلوب: اكتتاب، زيادة رأس مال، كوبون، تجزئة. ميّز المصدر الرسمي عن الخبر، وغياب السجل لا ينفي وجود الحدث أو يثبت أن الاكتتاب مفتوح اليوم.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    symbols: { type: 'array', items: { type: 'string' }, maxItems: 10 },
+                    action_type: { type: 'string', enum: ['rights_issue', 'capital_increase', 'capital_reduction', 'dividend', 'stock_split', 'bonus_shares', 'all'] }
+                },
+                required: ['symbols']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_scheduled_automations',
+            description: 'استعلام عن قائمة الأسئلة والاستشارات المجدولة والمؤتمتة الخاصة بالمستخدم ومواعيد تشغيلها بتوقيت القاهرة وحالتها (نشط / متوقف). استدعِ هذه الأداة عندما يسأل المستخدم عن الأوتوميشن الخاص به، أو الأسئلة المتأتمتة، أو مواعيد إرسال الاستشارات اليومية (مثل: «عندي اتوميشن؟»، «عندي أسئلة متأتمتة؟»، «إيه الاستشارات المجدولة عندي؟»).',
+            parameters: {
+                type: 'object',
+                properties: {}
+            }
+        }
+    }
+];
 
 export async function executeRequestTool(name: string, args: any, db: any, userId: string, cache: ChartHistoryCache,
     access: { isPro: boolean }): Promise<any> {
@@ -75,6 +97,46 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             availability: 'available',
             autonomous_recommendations_enabled: false,
             message: 'تم إيقاف وضع التوصيات الحرة المستقلة للذكاء الاصطناعي بنجاح في الواجهة والعودة للوضع القياسي.'
+        };
+    }
+    if (name === 'get_scheduled_automations') {
+        if (!userId) {
+            return {
+                status: 'unauthenticated',
+                count: 0,
+                automations: [],
+                message: 'يجب تسجيل الدخول لعرض استشاراتك المجدولة.'
+            };
+        }
+        const { data: rows, error } = await db
+            .from('scheduled_chat_automations')
+            .select('id,name,prompt,scheduled_time,days_of_week,is_active,last_run_at,last_status')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return {
+                status: 'error',
+                message: 'تعذر جلب الاستشارات المجدولة من قاعدة البيانات.'
+            };
+        }
+
+        return {
+            status: 'success',
+            count: (rows || []).length,
+            max_allowed: 5,
+            automations: (rows || []).map((r: any) => ({
+                id: r.id,
+                name: r.name,
+                prompt: r.prompt,
+                scheduled_time: r.scheduled_time,
+                days_of_week: r.days_of_week === 'all_days' ? 'يومياً (طوال الأسبوع)' : 'أيام تداول البورصة فقط (الأحد - الخميس)',
+                is_active: r.is_active,
+                last_run_at: r.last_run_at,
+                last_status: r.last_status,
+            })),
+            is_pro: access.isPro,
+            management_url: '/profile',
         };
     }
     if (name === 'get_recommendations') {
