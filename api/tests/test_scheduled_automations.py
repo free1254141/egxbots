@@ -25,14 +25,16 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
             self.assertEqual(len(worker._cached_automations), 2)
 
     def test_is_user_pro(self):
-        # 1. Admin email / profile
-        with patch.object(worker, "_supabase_request", return_value=[{"role": "admin"}]):
-            self.assertTrue(worker._is_user_pro("admin-uuid"))
+        # 1. Admin user id / telegram
+        self.assertTrue(worker._is_user_pro("ba9c27e8-f62d-452f-8a29-dc77fd092207"))
+
+        with patch.object(worker, "_supabase_request", return_value=[{"telegram_chat_id": "5149631436"}]):
+            self.assertTrue(worker._is_user_pro("any-user-with-admin-tg"))
 
         # 2. Expired subscription
         past_date = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
         with patch.object(worker, "_supabase_request", side_effect=[
-            [], # profile role: not admin
+            [{"telegram_chat_id": "11111"}],
             [{"plan_id": "pro", "current_period_end": past_date}]
         ]):
             self.assertFalse(worker._is_user_pro("expired-user"))
@@ -40,7 +42,7 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
         # 3. Active subscription
         future_date = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=10)).isoformat()
         with patch.object(worker, "_supabase_request", side_effect=[
-            [],
+            [{"telegram_chat_id": "22222"}],
             [{"plan_id": "pro", "current_period_end": future_date}]
         ]):
             self.assertTrue(worker._is_user_pro("active-pro-user"))

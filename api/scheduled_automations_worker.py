@@ -27,6 +27,14 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+try:
+    from dotenv import load_dotenv
+    _base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(os.path.join(_base_dir, ".env"))
+    load_dotenv(os.path.join(_base_dir, "web", ".env.local"), override=True)
+except Exception:
+    pass
+
 logger = logging.getLogger("scheduled_automations_worker")
 logger.setLevel(logging.INFO)
 
@@ -130,15 +138,22 @@ def send_telegram_direct(chat_id: str | int, text: str) -> bool:
         return False
 
 
+ADMIN_USER_IDS = {"ba9c27e8-f62d-452f-8a29-dc77fd092207", "c4b3a6d0-61c5-4f75-97bc-24f486666da0"}
+ADMIN_TG_IDS = {"5149631436"}
+
+
 def _is_user_pro(user_id: str) -> bool:
     """Verifies that the user currently holds an active Pro or Lifetime subscription or is admin."""
-    # Check admin
-    admin_emails = {"acursour@gmail.com", "weeessd57@gmail.com", "weeeessd57@gmail.com"}
-    prof = _supabase_request(f"profiles?id=eq.{user_id}&select=role,telegram_chat_id&limit=1") or []
-    if prof and prof[0].get("role") in ("admin", "pro"):
+    # 1. Check known admin user IDs
+    if user_id in ADMIN_USER_IDS:
         return True
 
-    # Check subscriptions
+    # 2. Check admin Telegram chat IDs
+    prof = _supabase_request(f"profiles?id=eq.{user_id}&select=telegram_chat_id&limit=1") or []
+    if prof and str(prof[0].get("telegram_chat_id") or "") in ADMIN_TG_IDS:
+        return True
+
+    # 3. Check subscriptions
     subs = _supabase_request(
         f"subscriptions?user_id=eq.{user_id}&status=in.(active,trialing)&select=plan_id,current_period_end&order=current_period_end.desc&limit=1"
     ) or []
@@ -367,10 +382,12 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
     )
 
     # Also log to ai_chat_messages so user sees it in their chat history
+    session_id = f"automation-{auto_id}"
     _supabase_request(
         "ai_chat_messages",
         method="POST",
         payload={
+            "session_id": session_id,
             "user_id": user_id,
             "role": "user",
             "content": f"[استشارة مجدولة: {name}] {prompt}",
@@ -381,6 +398,7 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
         "ai_chat_messages",
         method="POST",
         payload={
+            "session_id": session_id,
             "user_id": user_id,
             "role": "assistant",
             "content": reply_text,

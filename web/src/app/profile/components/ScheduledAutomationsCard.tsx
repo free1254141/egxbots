@@ -240,7 +240,15 @@ export default function ScheduledAutomationsCard({
         if (onQuotaConsumed) onQuotaConsumed();
         loadAutomations();
       } else {
-        setErrorMsg(data.error || data.reason || "تعذر إرسال التجربة، تأكد من ربط حساب التليجرام وتوفر الرصيد");
+        const reasonText =
+          data.error === "pro_required" || data.reason === "pro_required"
+            ? "هذه الميزة تتطلب اشتراك Pro نشط أو باقة Lifetime."
+            : data.error === "no_telegram_linked" || data.reason === "no_telegram_linked"
+            ? "لم يتم العثور على حساب أو قناة تليجرام مربوطة لاستلام الاستشارة."
+            : data.error === "quota_exceeded" || data.reason === "quota_exceeded"
+            ? "تم استهلاك كوتتك الشهرية من رسائل الذكاء الاصطناعي."
+            : data.error || data.reason || "تعذر إرسال التجربة، تأكد من ربط حساب التليجرام وتوفر الرصيد";
+        setErrorMsg(reasonText);
       }
     } catch {
       setErrorMsg("فشل الاتصال بالخادم لتنفيذ التجربة");
