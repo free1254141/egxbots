@@ -297,6 +297,7 @@ class TelegramBot:
         wait_for_delivery: bool = False,
         retry_failed: bool = True,
         mirror_to_vip: bool = False,
+        parse_mode: Optional[str] = None,
     ) -> bool:
         """Send immediately when requested, otherwise enqueue for background delivery.
 
@@ -341,10 +342,16 @@ class TelegramBot:
             is_mirror = bool(vip_mirror and target == vip_mirror)
             payload = self._build_send_payload(message, target, message_thread_id)
             if payload:
-                # Render the Markdown formatting (*bold*, `code`) instead of showing
-                # literal asterisks/backticks. The sender loop already falls back to
-                # plain text if Telegram rejects the parse.
-                payload["parse_mode"] = "Markdown"
+                # Automatically choose HTML when message contains HTML tags (e.g. <b>, <i>, <a>),
+                # otherwise default to Markdown.
+                if parse_mode:
+                    target_mode = parse_mode
+                elif any(tag in message for tag in ("<b>", "</b>", "<i>", "</i>", "<a ", "<code>", "</code>", "<u>", "</u>", "<s>", "</s>", "<pre>", "</pre>")):
+                    target_mode = "HTML"
+                else:
+                    target_mode = "Markdown"
+
+                payload["parse_mode"] = target_mode
                 chunks = self._split_message(message)
                 for chunk_index, chunk in enumerate(chunks):
                     chunk_payload = dict(payload)
@@ -355,15 +362,20 @@ class TelegramBot:
                             desc = str(result.get("description", "")).lower()
                             if ("can't parse" in desc or "parse_mode" in desc or "entities" in desc) and chunk_payload.get("parse_mode"):
                                 plain_payload = dict(chunk_payload)
+                                is_html = (chunk_payload.get("parse_mode") == "HTML")
                                 plain_payload.pop("parse_mode", None)
-                                plain_payload["text"] = (
-                                    str(plain_payload.get("text", ""))
-                                    .replace("*", "")
-                                    .replace("`", "")
-                                    .replace("_", "")
-                                    .replace("[", "")
-                                    .replace("]", "")
-                                )
+                                if is_html:
+                                    import re as _re
+                                    plain_payload["text"] = _re.sub(r"<[^>]+>", "", str(plain_payload.get("text", "")))
+                                else:
+                                    plain_payload["text"] = (
+                                        str(plain_payload.get("text", ""))
+                                        .replace("*", "")
+                                        .replace("`", "")
+                                        .replace("_", "")
+                                        .replace("[", "")
+                                        .replace("]", "")
+                                    )
                                 result = self._call_api("sendMessage", plain_payload)
                         if not result.get("ok"):
                             self._delivery_context.last_error = dict(result) if isinstance(result, dict) else {"description": str(result)}
@@ -488,9 +500,14 @@ class TelegramBot:
                 if ("can't parse" in desc or "parse_mode" in desc or "entities" in desc) and payload.get("parse_mode"):
                     self._log("Retrying message as plain text fallback...")
                     payload_plain = payload.copy()
+                    is_html = (payload_plain.get("parse_mode") == "HTML")
                     payload_plain.pop("parse_mode", None)
                     if "text" in payload_plain:
-                        payload_plain["text"] = payload_plain["text"].replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+                        if is_html:
+                            import re as _re
+                            payload_plain["text"] = _re.sub(r"<[^>]+>", "", str(payload_plain.get("text", "")))
+                        else:
+                            payload_plain["text"] = payload_plain["text"].replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
                     result_plain = self._call_api("sendMessage", {key: value for key, value in payload_plain.items() if not key.startswith("_")})
                     if result_plain.get("ok"):
                         active_queue.popleft()
