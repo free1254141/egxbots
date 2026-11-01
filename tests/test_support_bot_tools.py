@@ -144,18 +144,15 @@ def test_admin_ai_tool_dispatch():
     assert "has_open_recommendations" in parsed3
 
 
-@patch("api.admin_ai_assistant.ask_admin_ai")
 @patch("api.support_chat.send_telegram_message")
-def test_admin_ai_natural_language_routing(mock_send, mock_ask):
-    mock_ask.return_value = "<b>تحليل ديب سيك:</b> تم تسجيل مستخدمين جدد اليوم."
+def test_support_bot_no_ai_fallback_guidance(mock_send):
     mock_send.return_value = True
 
-    # When admin sends arbitrary question, routes to ask_admin_ai
+    # When admin sends arbitrary message without active session, returns guidance without calling AI
     handle_telegram_update({"message": {"chat": {"id": 99999}, "text": "مين اللي سجل النهاردة وفتح صفحة الأسعار؟"}})
-    assert mock_ask.call_count == 1
     assert mock_send.call_count == 1
     args, kwargs = mock_send.call_args
-    assert "تحليل ديب سيك" in args[1]
+    assert "لم يتم إرسال الرسالة لعدم وجود جلسة دعم فني نشطة حالياً" in args[1]
 
 
 @patch("requests.post")

@@ -3,7 +3,7 @@ import re
 import requests
 import threading
 import time
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from api.stock_ai import _init_supabase, supabase as _supabase
 from api.support_analytics import (
     get_registrations_summary,
@@ -27,7 +27,7 @@ TELEGRAM_RELAY_URL = os.getenv("TELEGRAM_RELAY_URL", "https://api.telegram.org")
 
 _ADMIN_ACTIVE_SESSIONS: Dict[int, Dict[str, Any]] = {}
 SESSION_REGEX = re.compile(
-    r'(?:Session|جلسة|session_id)(?:</?[a-zA-Z0-9]+>|[\s:=-])*([a-zA-Z0-9\-_]{6,})',
+    r'(?:Session|جلسة|session_id)(?:</?[a-zA-Z0-9]+>|[\s:=-])*([a-zA-Z0-9\-_\.]{6,})',
     re.IGNORECASE
 )
 ACTIVE_SESSION_TTL_SECONDS = 20 * 60  # 20 minutes of inactivity
@@ -192,12 +192,6 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
     return saved_msg
 
 def handle_telegram_update(data: dict):
-    # 0. Route VIP Chat Room / Topic updates (https://t.me/egxbots/1680)
-    from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
-    if is_vip_chat_update(data):
-        handle_vip_chat_update(data, get_token())
-        return
-
     # 1. Handle Callback Query (from Admin Inline Keyboard)
     if data.get("callback_query"):
         cb = data["callback_query"]
@@ -258,12 +252,12 @@ def handle_telegram_update(data: dict):
 
     clean_cmd = text.lower()
 
-    # Manual command to end/close active support session so admin can chat with AI freely
+    # Manual command to end/close active support session
     if clean_cmd in ("/end", "/done", "/close", "انهاء", "إنهاء", "خلاص", "تم الانتهاء"):
         if chat_id in _ADMIN_ACTIVE_SESSIONS:
             sess = _ADMIN_ACTIVE_SESSIONS.pop(chat_id, None)
             sess_id = sess.get("session_id") if sess else ""
-            send_telegram_message(chat_id, f"🔒 تم إغلاق جلسة الدعم الفني (<code>{sess_id}</code>). رسائلك التالية لن تُرسل للعميل ويمكنك استخدام المساعد الذكي بحرية.")
+            send_telegram_message(chat_id, f"🔒 تم إغلاق جلسة الدعم الفني (<code>{sess_id}</code>). رسائلك التالية لن تُرسل للعميل.")
         else:
             send_telegram_message(chat_id, "ℹ️ لا توجد جلسة دعم فني نشطة حالياً.")
         return
@@ -332,11 +326,10 @@ def handle_telegram_update(data: dict):
     if clean_cmd.startswith("/start") or clean_cmd in ("/menu", "/help", "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر"):
         welcome_text = (
             "👑 <b>أهلاً بك في بوت إدارة ودعم منصة EGX Bots!</b>\n\n"
-            "هذا البوت مخصص للمؤسس والإدارة للتحكم الكامل والدعم الذكي:\n"
+            "هذا البوت مخصص للمؤسس والإدارة للمتابعة والدعم الفني المباشر:\n"
             "١. 💬 <b>دعم العملاء المباشر:</b> اضغط Reply (رد) على أي تذكرة عميل لإرسال ردك فورياً لشاشته بالموقع.\n"
-            "٢. 🤖 <b>المساعد الذكي (DeepSeek):</b> اكتب أي سؤال أو اطلب تحليلاً للمسجلين، النشاط، استخدام الصفحات، استفسارات الشات، أو تحليل الأسهم وتوصيات السوق.\n"
-            "٣. 📊 <b>تقارير لحظية سريعة:</b> استخدم الأزرار الثابتة بالأسفل لعرض إحصائيات اليوم وأمس بضغطة واحدة.\n\n"
-            "👇 <b>اختر من الأزرار أو اكتب استفسارك مباشرة لديب سيك:</b>"
+            "٢. 📊 <b>تقارير لحظية سريعة:</b> استخدم الأزرار الثابتة بالأسفل لعرض إحصائيات اليوم وأمس بضغطة واحدة.\n\n"
+            "👇 <b>اختر من الأزرار أدناه أو انتظر إشعارات رسائل العملاء:</b>"
         )
         send_telegram_message(chat_id, welcome_text, reply_markup=ADMIN_REPLY_KEYBOARD)
         send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
@@ -362,16 +355,11 @@ def handle_telegram_update(data: dict):
         send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
         return
 
-    # Natural language query -> Route to DeepSeek Admin AI Assistant
-    try:
-        from api.admin_ai_assistant import ask_admin_ai
-        ai_reply = ask_admin_ai(text, chat_id=chat_id)
-        send_telegram_message(chat_id, ai_reply, reply_markup=ADMIN_REPLY_KEYBOARD)
-    except Exception as ai_err:
-        print(f"[SUPPORT_CHAT] Admin AI Assistant error: {ai_err}")
-        err_msg = (
-            "⚠️ <b>تعذر معالجة الاستفسار بواسطة مساعد الذكاء الاصطناعي:</b>\n"
-            f"<code>{ai_err}</code>\n\n"
-            "يمكنك استخدام الأزرار أدناه لعرض التقارير اللحظية مباشرة."
-        )
-        send_telegram_message(chat_id, err_msg, reply_markup=ADMIN_REPLY_KEYBOARD)
+    # Fallback for arbitrary messages when no active customer session exists (NO AI / NO LLM)
+    guide_text = (
+        "ℹ️ <b>لم يتم إرسال الرسالة لعدم وجود جلسة دعم فني نشطة حالياً.</b>\n\n"
+        "للرد على عميل:\n"
+        "• اضغط <b>Reply (رد)</b> على رسالة طلب الدعم الخاصة بالعميل.\n\n"
+        "📊 أو استخدم الأزرار أدناه لعرض التقارير والإحصائيات اللحظية."
+    )
+    send_telegram_message(chat_id, guide_text, reply_markup=ADMIN_REPLY_KEYBOARD)
