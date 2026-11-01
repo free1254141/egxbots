@@ -277,7 +277,7 @@ describe("Agentic architecture integration: current production path", () => {
     });
     test("specialized screens and scenarios remain LLM selected", () => {
         const names=new Set(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name));
-        expect(names.size).toBe(22); expect(names.has("get_corporate_actions")).toBe(true); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true); expect(names.has("enable_autonomous_recommendations")).toBe(true); expect(names.has("disable_autonomous_recommendations")).toBe(true);
+        expect(names.size).toBe(23); expect(names.has("get_corporate_actions")).toBe(true); expect(names.has("calculate_position")).toBe(true); expect(names.has("screen_stocks")).toBe(true); expect(names.has("analyze_portfolio_risk")).toBe(true); expect(names.has("enable_autonomous_recommendations")).toBe(true); expect(names.has("disable_autonomous_recommendations")).toBe(true);
     });
     test("reviewer prompt distinguishes requested scenario holdings from saved positions",async()=>{
         const r=await run([{content:"تم تحليل السيناريو"},verdict()],{userMessage:"معايا 100 ألف ومحفظتي فيها COMI وSWDY"});
@@ -526,6 +526,25 @@ describe("Agentic architecture integration: current production path", () => {
         const history=[{role:"user",content:"هل اخترق؟"},{role:"assistant",content:text+"\n\n✅ تحليل EGX Bots مبني على أحدث البيانات المتاحة ومؤرّخ بمصدره — مش نصيحة استثمار، القرار ليك.\n\n📢 [قناة EGX Bots المجانية على تليجرام للتنبيهات والفرص](https://t.me/egxbots)"}];
         expect(compactHistory(history)).toEqual([{role:"user",content:"هل اخترق؟"},{role:"assistant",content:text}]);
     });
+    test("compactHistory replaces large markdown tables in assistant history with a concise placeholder", () => {
+        const table = [
+            "| المستوى / النقطة | القيمة (ج.م) | الوصف الفني |",
+            "|---|---|---|",
+            "| الإغلاق الحالي | 124.50 | إغلاق جلسة 29-10-2026 |",
+            "| الدعم الأول | 94.60 | قاع 20 جلسة |",
+            "| المقاومة الأولى | 179.99 | قمة 20 جلسة |"
+        ].join("\n");
+        const assistantMsg = `📊 تحليل سهم AFMC\n\n${table}\n\nالرأي التوليفي: السهم في مسار ارتداد.`;
+        const history = [
+            { role: "user", content: "حلل AFMC" },
+            { role: "assistant", content: assistantMsg }
+        ];
+        const result = compactHistory(history);
+        expect(result[1].content).toContain("[جدول البيانات والمؤشرات الفنية محفوظ في سجل الأدلة]");
+        expect(result[1].content).not.toContain("| الإغلاق الحالي |");
+        expect(result[1].content).toContain("📊 تحليل سهم AFMC");
+        expect(result[1].content).toContain("الرأي التوليفي: السهم في مسار ارتداد.");
+    });
     test("refresh removes duplicate evidence but retains a different scan and failed refresh",()=>{
         const old=toAgenticEvidence("screen_stocks",{rsi_min:40,rsi_max:60},{status:"success",date:"2026-10-07",stocks:[{symbol:"COMI",close:100}]});
         const refreshed=toAgenticEvidence("screen_stocks",{rsi_max:60,rsi_min:40},{status:"success",date:"2026-10-08",stocks:[{symbol:"COMI",close:101}]});
@@ -559,7 +578,7 @@ describe("Agentic architecture integration: current production path", () => {
 });
 
 describe("Agentic tool correctness and failure boundaries", () => {
-    test.each(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name).filter(name => !["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history", "screen_stocks", "analyze_portfolio_risk", "calculate_position", "get_fundamentals", "get_sector_peers", "get_market_breadth", "enable_autonomous_recommendations", "disable_autonomous_recommendations"].includes(name)))("existing data tools: %s reads healthy bounded fixtures",async tool=>{
+    test.each(AGENTIC_TOOLS_SCHEMA.map(t=>t.function.name).filter(name => !["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history", "screen_stocks", "analyze_portfolio_risk", "calculate_position", "get_fundamentals", "get_sector_peers", "get_market_breadth", "enable_autonomous_recommendations", "disable_autonomous_recommendations", "get_scheduled_automations"].includes(name)))("existing data tools: %s reads healthy bounded fixtures",async tool=>{
         const d=db(q=>({data:q.table === "stocks" ? [{id:1,symbol:"COMI",name:"Commercial Bank"}] : q.table === "stock_prices" ? [price]
             : q.table === "market_cache" ? {payload:{egx30:[{close:100,date:"2026-10-07"},{close:101,date:price.date}],regime:"sideways"}}
             : q.table === "stock_technical_indicators" ? [{symbol:"COMI",...price,change_pct:1,r_vol:2,rsi_14:55,macd:1,macd_signal:.5,macd_histogram:.5}]

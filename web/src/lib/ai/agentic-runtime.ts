@@ -228,11 +228,20 @@ export function groundedReviewerIssues(verdict: any, draft: string): string[] {
 }
 
 
+export function condenseAssistantTables(text: string): string {
+    return text
+        .replace(/(?:^|\n)\|[^\n]+\|\r?\n\|[-:\s|]+\|(?:\r?\n\|[^\n]+\|)+/g, "\n[جدول البيانات والمؤشرات الفنية محفوظ في سجل الأدلة]\n")
+        .replace(/(?:\[جدول البيانات والمؤشرات الفنية محفوظ في سجل الأدلة\]\s*){2,}/g, "[جدول البيانات والمؤشرات الفنية محفوظ في سجل الأدلة]\n");
+}
+
 export function compactHistory(history: Array<{ role: string; content: string }>) {
     let remaining = 5000;
     const result = [];
     for (const item of history.filter(h => ["user", "assistant"].includes(h.role)).slice(-8).reverse()) {
-        const text = item.role === "assistant" ? stripChatFooters(String(item.content)) : String(item.content);
+        let text = item.role === "assistant" ? stripChatFooters(String(item.content)) : String(item.content);
+        if (item.role === "assistant") {
+            text = condenseAssistantTables(text);
+        }
         const cap = Math.min(item.role === "user" ? 1000 : 1600, remaining);
         if (cap <= 0) break;
         const content = text.length <= cap ? text : text.slice(0, Math.max(0,cap-350)) + "\n[مختصر؛ الحقائق في سجل الأدلة]\n" + text.slice(-250);

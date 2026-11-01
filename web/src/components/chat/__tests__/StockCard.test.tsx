@@ -22,6 +22,23 @@ describe("StockCard Component", () => {
         });
     });
 
+    test("renders composite score badge when composite_score is present", () => {
+        const sampleStock = {
+            symbol: "AFMC",
+            nameAr: "مطاحن الإسكندرية",
+            price: 124.50,
+            changePercent: 13.09,
+            composite_score: 84,
+            composite_grade: "A+",
+            composite_verdict: "فرصة استثمارية ممتازة",
+            rsi: 62.0,
+        };
+
+        render(<StockCard stock={sampleStock} />);
+        expect(screen.getByText(/سكور: 84\/100/)).toBeTruthy();
+        expect(screen.getByText(/\(A\+\)/)).toBeTruthy();
+    });
+
     test("renders stock opportunity card with quantitative metrics and domain badges", () => {
         const sampleStock = {
             symbol: "TMGH",

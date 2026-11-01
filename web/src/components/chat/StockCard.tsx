@@ -76,6 +76,12 @@ export interface StockData {
     kingScore?: string | number;
     egx_ai_score?: string | number;
     egxScore?: string | number;
+    compositeScore?: number | string;
+    composite_score?: number | string;
+    compositeGrade?: string;
+    composite_grade?: string;
+    compositeVerdict?: string;
+    composite_verdict?: string;
 
     // Classification & Badges
     sector?: string;
@@ -212,6 +218,10 @@ export function StockCard({
     const isShariah = Boolean(
         stockData.isShariah ?? stockData.is_sharia_compliant ?? (stockData.sharia_index === "EGX33")
     );
+    const rawScore = stockData.composite_score ?? stockData.compositeScore;
+    const compositeScoreVal = typeof rawScore === "number" ? rawScore : rawScore ? parseFloat(String(rawScore).replace(/[^\d.-]/g, "")) : undefined;
+    const compositeGrade = stockData.composite_grade ?? stockData.compositeGrade;
+    const compositeVerdict = stockData.composite_verdict ?? stockData.compositeVerdict;
 
     const signalType = stockData.signalType || stockData.signal_type || stockData.recommendation || "فرصة رصد فني";
 
@@ -254,6 +264,11 @@ export function StockCard({
         // Optimistic UI update
         setAddedToPortfolio(true);
         setTimeout(() => setAddedToPortfolio(false), 4000);
+        if (onAddToPortfolio) {
+            onAddToPortfolio(symbol);
+        } else if (onSymbolClick) {
+            onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
+        }
 
         try {
             const numPrice = typeof rawPrice === "number" && rawPrice > 0 ? rawPrice : null;
@@ -287,11 +302,6 @@ export function StockCard({
             // Background fail is silent or toast
         } finally {
             setIsSavingToPortfolio(false);
-            if (onAddToPortfolio) {
-                onAddToPortfolio(symbol);
-            } else if (onSymbolClick) {
-                onSymbolClick(`أضف سهم ${symbol} لمحفظتي`);
-            }
         }
     };
 
@@ -338,6 +348,21 @@ export function StockCard({
 
                 {/* Badges on the Left */}
                 <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {compositeScoreVal !== undefined && !isNaN(compositeScoreVal) && (
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-mono font-black shadow-sm ${
+                            compositeScoreVal >= 80
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
+                                : compositeScoreVal >= 65
+                                    ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/40"
+                                    : compositeScoreVal >= 50
+                                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"
+                                        : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40"
+                        }`} title={compositeVerdict || `السكور الإجمالي: ${compositeScoreVal}/100`}>
+                            <Sparkles className="w-3 h-3 text-amber-500" />
+                            <span>سكور: {compositeScoreVal}/100</span>
+                            {compositeGrade && <span className="opacity-80">({compositeGrade})</span>}
+                        </span>
+                    )}
                     {isShariah && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-black">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>

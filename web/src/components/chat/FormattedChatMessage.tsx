@@ -9,6 +9,7 @@ import type { ChatTable } from "@/contexts/ChatContext";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
 import { isShariaCompliant } from "@/lib/shariaStocks";
+import { calculateStockCompositeScore } from "@/lib/ai/stock-scoring";
 
 interface FormattedChatMessageProps {
     content: string;
@@ -247,6 +248,9 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let changePct: number | undefined;
     let kingAiScore: number | undefined;
     let egxAiScore: number | undefined;
+    let compositeScore: number | undefined;
+    let compositeGrade: string | undefined;
+    let compositeVerdict: string | undefined;
 
     for (const row of rows) {
         if (!row || row.length < 2) continue;
@@ -300,6 +304,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
             kingAiScore = parseNum(val);
         } else if (/EGX\s*AI|نموذج EGX/i.test(key)) {
             egxAiScore = parseNum(val);
+        } else if (/سكور|Composite|EGX\s*Score/i.test(key)) {
+            compositeScore = parseNum(val);
+            const gradeMatch = (val + " " + extraVal).match(/\b(A\+|A|B|C|D)\b/i);
+            if (gradeMatch) compositeGrade = gradeMatch[1].toUpperCase();
         }
     }
 
@@ -379,6 +387,26 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         }
     }
 
+    if (compositeScore === undefined && (price || rsi || macdVal || ema50)) {
+        const calculated = calculateStockCompositeScore({
+            close: price,
+            rsi_14: rsi,
+            macd: typeof macdVal === "number" ? macdVal : parseNum(macdVal),
+            ema_50: ema50,
+            ema_200: ema200,
+            r_vol: volRatio,
+            king_ai_score: kingAiScore,
+            egx_ai_score: egxAiScore,
+            wyckoff_phase: wyckoffPhase,
+            is_sharia_compliant: isShariah,
+            pe_ratio: pe,
+            eps: eps
+        });
+        compositeScore = calculated.totalScore;
+        compositeGrade = calculated.grade;
+        compositeVerdict = calculated.verdictLabel;
+    }
+
     const canonical = getCanonicalStockName(symbol);
     const meta = EGX_STOCKS_METADATA[symbol] || {
         name: canonical.name_ar,
@@ -416,7 +444,13 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         kingScore: kingAiScore,
         egx_ai_score: egxAiScore,
         egxScore: egxAiScore,
-        isShariah: isShariah || meta?.isShariah
+        isShariah: isShariah || meta?.isShariah,
+        compositeScore,
+        composite_score: compositeScore,
+        compositeGrade,
+        composite_grade: compositeGrade,
+        compositeVerdict,
+        composite_verdict: compositeVerdict
     };
 }
 

@@ -9,6 +9,7 @@ import { todayInCairo } from "./cairo-date";
 import { hasActiveProSubscription, paymentsEnabled, planLimits } from "./plan-gate";
 import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
 import { getCanonicalStockName } from "./stock-names";
+import { calculateStockCompositeScore } from "./stock-scoring";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -289,6 +290,22 @@ async function executeRawTool(
                     };
                 } else {
                     const wyckoff = wyckoffRows?.[0] || {};
+                    const composite = calculateStockCompositeScore({
+                        close: ind.close,
+                        rsi_14: ind.rsi_14,
+                        macd: ind.macd,
+                        macd_signal: ind.macd_signal,
+                        macd_histogram: ind.macd_histogram,
+                        ema_50: ind.ema_50,
+                        ema_200: ind.ema_200,
+                        r_vol: ind.r_vol,
+                        king_ai_score: ind.king_ai_score,
+                        egx_ai_score: ind.egx_ai_score,
+                        acc_score: wyckoff.acc_score,
+                        dist_score: wyckoff.dist_score,
+                        wyckoff_phase: wyckoff.wyckoff_phase,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                    });
                     return {
                         symbol: sym,
                         name: stockData.name_ar || stockData.name || sym,
@@ -320,6 +337,10 @@ async function executeRawTool(
                         distribution_score: wyckoff.dist_score,
                         consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
                         consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
+                        composite_score: composite.totalScore,
+                        composite_grade: composite.grade,
+                        composite_verdict: composite.verdictLabel,
+                        composite_breakdown: composite.breakdownSummary,
                         ...history
                     };
                 }
@@ -1730,6 +1751,22 @@ async function executeRawTool(
                 const wyckoff = wyckoffRows?.[0] || {};
                 const canonical = getCanonicalStockName(sym);
                 if (quote) {
+                    const composite = calculateStockCompositeScore({
+                        close: quote.close,
+                        rsi_14: quote.rsi_14,
+                        macd: quote.macd,
+                        macd_signal: quote.macd_signal,
+                        macd_histogram: quote.macd_histogram,
+                        ema_50: quote.ema_50,
+                        ema_200: quote.ema_200,
+                        r_vol: quote.r_vol,
+                        king_ai_score: quote.king_ai_score,
+                        egx_ai_score: quote.egx_ai_score,
+                        acc_score: wyckoff.acc_score,
+                        dist_score: wyckoff.dist_score,
+                        wyckoff_phase: wyckoff.wyckoff_phase,
+                        is_sharia_compliant: isShariaCompliant(sym),
+                    });
                     return {
                         symbol: sym,
                         name_ar: canonical.name_ar,
@@ -1746,6 +1783,9 @@ async function executeRawTool(
                         dist_score: wyckoff.dist_score ?? null,
                         consecutive_acc_days: typeof wyckoff.consecutive_acc_days === "number" ? wyckoff.consecutive_acc_days : null,
                         consecutive_dist_days: typeof wyckoff.consecutive_dist_days === "number" ? wyckoff.consecutive_dist_days : null,
+                        composite_score: composite.totalScore,
+                        composite_grade: composite.grade,
+                        composite_verdict: composite.verdictLabel,
                     };
                 } else {
                     return {
