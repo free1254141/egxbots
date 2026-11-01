@@ -3775,7 +3775,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     try:
                         from jobs.telegram_subscription_reminders import run_subscription_reminders
                     except ImportError:
-                        import sys, os
+                        import sys
                         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                         from jobs.telegram_subscription_reminders import run_subscription_reminders
                 reminder_res = await asyncio.to_thread(run_subscription_reminders)

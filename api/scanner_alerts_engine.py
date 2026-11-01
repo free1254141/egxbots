@@ -116,30 +116,78 @@ def supabase_upsert(table: str, payload: Dict[str, Any], on_conflict: str = "bot
         logger.warning(f"[SCANNER_PY] UPSERT {table} failed: {e}")
         return False
 
-def send_telegram_alert(chat_id: str, text: str, timeout: int = 10) -> bool:
-    token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
-    if not token or not chat_id:
-        logger.info(f"[SCANNER_PY] Skipped Telegram dispatch (no token or chat_id={chat_id})")
+def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
+    if not chat_id:
         return False
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"}
-    )
+
+    # 1. First attempt: use established TelegramBot singleton bridge with reliable Supabase Relay
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status == 200
+        from api.telegram_bot import get_telegram_bot
+        bot = get_telegram_bot()
+        if bot and bot.token:
+            target_chat_id = str(chat_id).strip()
+            thread_id = None
+            if "_" in target_chat_id and not target_chat_id.startswith("@"):
+                parts = target_chat_id.split("_", 1)
+                target_chat_id = parts[0]
+                try:
+                    thread_id = int(parts[1])
+                except ValueError:
+                    pass
+            sent = bot.send_notification(
+                text,
+                chat_id=target_chat_id,
+                message_thread_id=thread_id,
+                wait_for_delivery=True,
+            )
+            if sent:
+                return True
     except Exception as e:
-        logger.warning(f"[SCANNER_PY] Telegram send failed to {chat_id}: {e}")
+        logger.warning(f"[SCANNER_PY] get_telegram_bot delivery failed: {e}")
+
+    # 2. Direct HTTP fallback (using ARTORO_AI_BOT with relay fallback)
+    token = os.getenv("ARTORO_AI_BOT") or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        logger.warning(f"[SCANNER_PY] Skipped Telegram dispatch (no token found in env: ARTORO_AI_BOT/TELEGRAM_BOT_TOKEN)")
         return False
+
+    target_chat_id = str(chat_id).strip()
+    thread_id = None
+    if "_" in target_chat_id and not target_chat_id.startswith("@"):
+        parts = target_chat_id.split("_", 1)
+        target_chat_id = parts[0]
+        try:
+            thread_id = int(parts[1])
+        except ValueError:
+            pass
+
+    relay_url = (os.getenv("TELEGRAM_RELAY_URL") or "https://api.telegram.org").rstrip("/")
+    for base in [relay_url, "https://api.telegram.org"]:
+        try:
+            url = f"{base}/bot{token}/sendMessage"
+            payload: Dict[str, Any] = {
+                "chat_id": int(target_chat_id) if target_chat_id.lstrip("-").isdigit() else target_chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            if thread_id is not None:
+                payload["message_thread_id"] = thread_id
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception as e:
+            logger.warning(f"[SCANNER_PY] Telegram send failed from {base}: {e}")
+            if base == relay_url:
+                continue
+
+    return False
 
 def calculate_trade_plan(close: float, scanner_type: str) -> Dict[str, Any]:
     prof = SCANNER_PROFILES.get(scanner_type, SCANNER_PROFILES["volume_surge"])
