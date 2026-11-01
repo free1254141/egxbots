@@ -827,14 +827,21 @@ export default function RecommendationCalendar({
                 {viewMode === "calendar" ? (
                     <>
                         {/* ── 4. Day Names Header ── */}
-                        <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center font-black text-xs text-zinc-600 dark:text-zinc-400">
-                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأحد</div>
-                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الإثنين</div>
-                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الثلاثاء</div>
-                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الأربعاء</div>
-                            <div className="p-1.5 bg-zinc-200 dark:bg-zinc-800 border-2 border-black dark:border-white">الخميس</div>
-                            <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">الجمعة (عطلة)</div>
-                            <div className="p-1.5 bg-zinc-100 dark:bg-zinc-900 border-2 border-zinc-400 dark:border-zinc-700 text-zinc-400">السبت (عطلة)</div>
+                        <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center font-black text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400">
+                            {["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"].map((dName, i) => {
+                                const shortNames = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
+                                return (
+                                    <div
+                                        key={dName}
+                                        className={`py-1 sm:py-1.5 border-2 border-black dark:border-white ${
+                                            i >= 5 ? "bg-zinc-100 dark:bg-zinc-900 border-zinc-400 dark:border-zinc-700 text-zinc-400" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                                        }`}
+                                    >
+                                        <span className="hidden sm:inline">{dName}{i >= 5 ? " (عطلة)" : ""}</span>
+                                        <span className="sm:hidden">{shortNames[i]}</span>
+                                    </div>
+                                );
+                            })}
                         </div>
 
                         {/* ── 5. Grid of Calendar Days ── */}
@@ -863,7 +870,7 @@ export default function RecommendationCalendar({
                                         onClick={() => {
                                             setSelectedDayDateStr(cell.dateStr);
                                         }}
-                                        className={`min-h-[75px] sm:min-h-[100px] p-2 border-2 flex flex-col justify-between transition-all select-none relative cursor-pointer ${
+                                        className={`min-h-[52px] sm:min-h-[100px] p-1 sm:p-2 border-2 flex flex-col justify-between transition-all select-none relative cursor-pointer ${
                                             isToday
                                                 ? "ring-4 ring-amber-400 dark:ring-amber-300 shadow-md shadow-amber-400/20 z-10"
                                                 : ""
@@ -885,97 +892,138 @@ export default function RecommendationCalendar({
                                                 : "border-zinc-200 dark:border-zinc-800 bg-white/40 dark:bg-zinc-950/40 text-zinc-400"
                                         }`}
                                     >
-                                        {/* Top: Day Number & Trades Badge */}
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-1">
-                                                <span
-                                                    className={`text-xs font-black font-mono px-1 py-0.5 ${
-                                                        isToday
-                                                            ? "bg-amber-400 text-black border border-black shadow-[1px_1px_0px_#000]"
-                                                            : cell.isCurrentMonth
-                                                            ? (hasClosed || hasCreated)
-                                                                ? "text-black dark:text-white"
-                                                                : "text-zinc-500"
-                                                            : "text-zinc-400"
-                                                    }`}
-                                                >
-                                                    {cell.dayNum}
-                                                </span>
-                                                {isToday && (
-                                                    <span className="px-1.5 py-0.5 border border-black bg-[#FFE600] text-black text-[9px] font-black uppercase shadow-[1px_1px_0px_#000]">
-                                                        {isAr ? "اليوم" : "TODAY"}
+                                        {/* Desktop Rich View */}
+                                        <div className="hidden sm:flex flex-col justify-between h-full">
+                                            {/* Top: Day Number & Trades Badge */}
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-1">
+                                                    <span
+                                                        className={`text-xs font-black font-mono px-1 py-0.5 ${
+                                                            isToday
+                                                                ? "bg-amber-400 text-black border border-black shadow-[1px_1px_0px_#000]"
+                                                                : cell.isCurrentMonth
+                                                                ? (hasClosed || hasCreated)
+                                                                    ? "text-black dark:text-white"
+                                                                    : "text-zinc-500"
+                                                                : "text-zinc-400"
+                                                        }`}
+                                                    >
+                                                        {cell.dayNum}
                                                     </span>
-                                                )}
+                                                    {isToday && (
+                                                        <span className="px-1.5 py-0.5 border border-black bg-[#FFE600] text-black text-[9px] font-black uppercase shadow-[1px_1px_0px_#000]">
+                                                            {isAr ? "اليوم" : "TODAY"}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex items-center gap-1">
+                                                    {isDelayed && (hasClosed || hasCreated) && (
+                                                        <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                                    )}
+                                                    {hasClosed && (
+                                                        <span className="px-1.5 py-0.2 border border-black bg-black text-[#FFE600] text-[9px] font-black">
+                                                            {dayInfo!.closed.length} صفقات
+                                                        </span>
+                                                    )}
+                                                    {hasCreated && !hasClosed && (
+                                                        <span className="px-1.5 py-0.2 border border-black bg-amber-400 text-black text-[9px] font-black">
+                                                            +{dayInfo!.created.length} توصية
+                                                        </span>
+                                                    )}
+                                                    {hasAdjusted && !hasClosed && !hasCreated && (
+                                                        <span className="px-1.5 py-0.2 border border-black bg-sky-400 text-black text-[9px] font-black">
+                                                            {dayInfo!.adjusted.length}🔧
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
 
-                                            <div className="flex items-center gap-1">
-                                                {isDelayed && (hasClosed || hasCreated) && (
-                                                    <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                                )}
-                                                {hasClosed && (
-                                                    <span className="px-1.5 py-0.2 border border-black bg-black text-[#FFE600] text-[9px] font-black">
-                                                        {dayInfo!.closed.length} صفقات
-                                                    </span>
-                                                )}
-                                                {hasCreated && !hasClosed && (
-                                                    <span className="px-1.5 py-0.2 border border-black bg-amber-400 text-black text-[9px] font-black">
-                                                        +{dayInfo!.created.length} توصية
-                                                    </span>
-                                                )}
-                                                {hasAdjusted && !hasClosed && !hasCreated && (
-                                                    <span className="px-1.5 py-0.2 border border-black bg-sky-400 text-black text-[9px] font-black">
-                                                        {dayInfo!.adjusted.length}🔧
-                                                    </span>
-                                                )}
-                                            </div>
+                                            {/* Middle: Win/Loss & Return */}
+                                            {hasClosed ? (
+                                                <div className="space-y-1 my-1">
+                                                    <div className="flex items-center justify-between text-[10px] font-black">
+                                                        <span className="text-emerald-600 dark:text-emerald-400">{wins} رابحة</span>
+                                                        {losses > 0 && <span className="text-rose-500">{losses} خاسرة</span>}
+                                                    </div>
+
+                                                    <div
+                                                        dir="ltr"
+                                                        className={`text-xs font-black font-mono text-center px-1 py-0.5 border border-black ${
+                                                            netPl >= 0
+                                                                ? "bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100"
+                                                                : "bg-rose-200 dark:bg-rose-900 text-rose-900 dark:text-rose-100"
+                                                        }`}
+                                                    >
+                                                        {netPl >= 0 ? "+" : ""}{netPl.toFixed(1)}%
+                                                    </div>
+                                                </div>
+                                            ) : hasCreated ? (
+                                                <div className="space-y-1 my-1">
+                                                    <div className="text-[10px] font-black text-amber-700 dark:text-amber-300 text-center">
+                                                        {isAr ? `إصدار ${dayInfo!.created.length} توصيات` : `${dayInfo!.created.length} signals`}
+                                                    </div>
+                                                    <div
+                                                        dir="ltr"
+                                                        className="text-[10px] font-black font-mono text-center px-1 py-0.5 border border-black bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-100 truncate"
+                                                    >
+                                                        {dayInfo!.created.slice(0, 3).map((t) => t.symbol).join(", ")}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="text-[10px] text-zinc-400 dark:text-zinc-600 font-bold text-center">
+                                                    {!cell.isCurrentMonth ? "" : cell.isWeekend ? "عطلة" : "لا إغلاقات"}
+                                                </div>
+                                            )}
+
+                                            {/* Bottom: Big Runner highlight */}
+                                            {isBigRunnerDay && (
+                                                <div
+                                                    dir="ltr"
+                                                    className="text-[9px] font-black bg-amber-400 text-black px-1 py-0.5 border border-black text-center truncate"
+                                                >
+                                                    🔥 {maxGainTrade.symbol} +{Number(maxGainTrade.profit_loss_pct).toFixed(0)}%
+                                                </div>
+                                            )}
                                         </div>
 
-                                        {/* Middle: Win/Loss & Return */}
-                                        {hasClosed ? (
-                                            <div className="space-y-1 my-1">
-                                                <div className="flex items-center justify-between text-[10px] font-black">
-                                                    <span className="text-emerald-600 dark:text-emerald-400">{wins} رابحة</span>
-                                                    {losses > 0 && <span className="text-rose-500">{losses} خاسرة</span>}
-                                                </div>
+                                        {/* Mobile Compact View */}
+                                        <div className="sm:hidden flex flex-col justify-between h-full space-y-0.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className={`text-[11px] font-black font-mono ${isToday ? "bg-amber-400 text-black px-0.5" : ""}`}>
+                                                    {cell.dayNum}
+                                                </span>
+                                                {hasClosed ? (
+                                                    <span className="px-0.5 bg-black text-[#FFE600] text-[8px] font-black">
+                                                        {dayInfo!.closed.length}
+                                                    </span>
+                                                ) : hasCreated ? (
+                                                    <span className="text-[8px] text-amber-600 font-bold">⚡</span>
+                                                ) : null}
+                                            </div>
 
-                                                <div
-                                                    dir="ltr"
-                                                    className={`text-xs font-black font-mono text-center px-1 py-0.5 border border-black ${
-                                                        netPl >= 0
-                                                            ? "bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100"
-                                                            : "bg-rose-200 dark:bg-rose-900 text-rose-900 dark:text-rose-100"
-                                                    }`}
-                                                >
-                                                    {netPl >= 0 ? "+" : ""}{netPl.toFixed(1)}%
+                                            {hasClosed ? (
+                                                <div className="text-center font-mono">
+                                                    <span
+                                                        className={`text-[8px] font-black px-0.5 py-0.2 border border-black inline-block leading-tight ${
+                                                            netPl >= 0
+                                                                ? "bg-emerald-200 text-emerald-950 dark:bg-emerald-900 dark:text-emerald-100"
+                                                                : "bg-rose-200 text-rose-950 dark:bg-rose-900 dark:text-rose-100"
+                                                        }`}
+                                                    >
+                                                        {netPl >= 0 ? "+" : ""}{netPl.toFixed(0)}%
+                                                    </span>
                                                 </div>
-                                            </div>
-                                        ) : hasCreated ? (
-                                            <div className="space-y-1 my-1">
-                                                <div className="text-[10px] font-black text-amber-700 dark:text-amber-300 text-center">
-                                                    {isAr ? `إصدار ${dayInfo!.created.length} توصيات` : `${dayInfo!.created.length} signals`}
+                                            ) : hasCreated ? (
+                                                <div className="text-[8px] font-black text-amber-600 dark:text-amber-400 text-center truncate">
+                                                    {dayInfo!.created.length}⚡
                                                 </div>
-                                                <div
-                                                    dir="ltr"
-                                                    className="text-[10px] font-black font-mono text-center px-1 py-0.5 border border-black bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-100 truncate"
-                                                >
-                                                    {dayInfo!.created.slice(0, 3).map((t) => t.symbol).join(", ")}
+                                            ) : (
+                                                <div className="text-[8px] text-zinc-400 text-center">
+                                                    {cell.isWeekend ? "عطلة" : "—"}
                                                 </div>
-                                            </div>
-                                        ) : (
-                                            <div className="text-[10px] text-zinc-400 dark:text-zinc-600 font-bold text-center">
-                                                {!cell.isCurrentMonth ? "" : cell.isWeekend ? "عطلة" : "لا إغلاقات"}
-                                            </div>
-                                        )}
-
-                                        {/* Bottom: Big Runner highlight */}
-                                        {isBigRunnerDay && (
-                                            <div
-                                                dir="ltr"
-                                                className="text-[9px] font-black bg-amber-400 text-black px-1 py-0.5 border border-black text-center truncate"
-                                            >
-                                                🔥 {maxGainTrade.symbol} +{Number(maxGainTrade.profit_loss_pct).toFixed(0)}%
-                                            </div>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
                                 );
                             })}

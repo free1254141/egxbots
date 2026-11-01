@@ -299,8 +299,8 @@ async function executeRawTool(
                         ema_50: ind.ema_50,
                         ema_200: ind.ema_200,
                         r_vol: ind.r_vol,
-                        king_ai_score: ind.king_ai_score,
-                        egx_ai_score: ind.egx_ai_score,
+                        king_ai_score: ind.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null,
+                        egx_ai_score: ind.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null,
                         acc_score: wyckoff.acc_score,
                         dist_score: wyckoff.dist_score,
                         wyckoff_phase: wyckoff.wyckoff_phase,
@@ -330,8 +330,8 @@ async function executeRawTool(
                         ema_200: ind.ema_200,
                         bollinger_upper: ind.bb_upper,
                         bollinger_lower: ind.bb_lower,
-                        king_ai_score: ind.king_ai_score,
-                        egx_ai_score: ind.egx_ai_score,
+                        king_ai_score: ind.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null,
+                        egx_ai_score: ind.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null,
                         wyckoff_phase: wyckoff.wyckoff_phase,
                         accumulation_score: wyckoff.acc_score,
                         distribution_score: wyckoff.dist_score,
@@ -552,7 +552,7 @@ async function executeRawTool(
                         availability: latest == null ? "missing" : "available", cost: round(cost), market_value: round(value),
                         profit_loss_val: cost != null && value != null ? round(value - cost) : null,
                         profit_loss_pct: entry != null && entry > 0 && latest != null ? round((latest-entry)/entry*100) : null,
-                        rsi: quote?.rsi_14 ?? null, king_ai: quote?.king_ai_score ?? null, egx_ai: quote?.egx_ai_score ?? null });
+                        rsi: quote?.rsi_14 ?? null, king_ai: quote?.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null, egx_ai: quote?.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null });
                 }
                 const complete = positions.length <= 100 && enriched.every(p => p.cost != null && p.market_value != null);
                 const invested = enriched.every(p => p.cost != null) ? enriched.reduce((n,p) => n + p.cost!, 0) : null;
@@ -1760,8 +1760,8 @@ async function executeRawTool(
                         ema_50: quote.ema_50,
                         ema_200: quote.ema_200,
                         r_vol: quote.r_vol,
-                        king_ai_score: quote.king_ai_score,
-                        egx_ai_score: quote.egx_ai_score,
+                        king_ai_score: quote.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null,
+                        egx_ai_score: quote.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null,
                         acc_score: wyckoff.acc_score,
                         dist_score: wyckoff.dist_score,
                         wyckoff_phase: wyckoff.wyckoff_phase,
@@ -1775,6 +1775,8 @@ async function executeRawTool(
                         is_sharia_compliant: isShariaCompliant(sym),
                         sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         ...quote,
+                        king_ai_score: quote.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null,
+                        egx_ai_score: quote.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null,
                         wyckoff_date: wyckoff.scan_date ?? null,
                         wyckoff_phase: wyckoff.wyckoff_phase ?? null,
                         accumulation_score: wyckoff.acc_score ?? null,

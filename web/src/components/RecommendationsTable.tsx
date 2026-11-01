@@ -2853,6 +2853,37 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 )}
                                             </div>
                                         </div>
+
+                                        {/* Financial Metric Grid on Mobile */}
+                                        {!locked && (
+                                            <div className="grid grid-cols-2 gap-2 p-2.5 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/60 text-xs font-bold">
+                                                <div>
+                                                    <span className="text-[10px] text-zinc-500 block">{isAr ? "سعر الدخول:" : "Entry Price:"}</span>
+                                                    <span className="font-mono font-black text-black dark:text-white">
+                                                        {row.entry_price != null ? `${Number(row.entry_price).toFixed(2)} ج.م` : (row.last_close != null ? `${Number(row.last_close).toFixed(2)} ج.م` : "—")}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] text-zinc-500 block">{isAr ? "السعر الحالي:" : "Current Price:"}</span>
+                                                    <span className="font-mono font-black text-black dark:text-white">
+                                                        {row.current_price != null ? `${Number(row.current_price).toFixed(2)} ج.م` : (row.last_close != null ? `${Number(row.last_close).toFixed(2)} ج.م` : "—")}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">{isAr ? "المستهدف الفني:" : "Target 1:"}</span>
+                                                    <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                                                        {row.target_price != null ? `${Number(row.target_price).toFixed(2)} ج.م` : "—"}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] text-rose-500 block">{isAr ? "وقف الخسارة:" : "Stop Loss:"}</span>
+                                                    <span className="font-mono font-black text-rose-500">
+                                                        {row.stop_loss != null ? `${Number(row.stop_loss).toFixed(2)} ج.م` : "—"}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {(user || locked) && (
                                             <div className="flex items-center justify-between pt-3 border-t border-zinc-200 dark:border-zinc-800">
                                                 {row.technical_score > 0 ? renderCircularScore(row.technical_score, "Tech") : <span className="text-xs text-zinc-500">—</span>}

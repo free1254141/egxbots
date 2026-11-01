@@ -32,7 +32,7 @@ export async function reconcileStockQuote(client: any, symbol: string, snapshot:
                 rsi_14: d.rsi_14, macd: d.macd, macd_signal: d.macd_signal,
                 macd_histogram: d.macd != null && d.macd_signal != null ? d.macd - d.macd_signal : null,
                 ema_50: d.ema_50, ema_200: d.ema_200, bb_upper: d.bb_upper, bb_lower: d.bb_lower,
-                r_vol: null, king_ai_score: null, egx_ai_score: null,
+                r_vol: snapshot?.r_vol ?? null, king_ai_score: snapshot?.king_ai_score ?? null, egx_ai_score: snapshot?.egx_ai_score ?? null,
                 date: null, quote_time: null, fetched_at: d.updated_at,
                 fetched_at_cairo: new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(d.updated_at)),
                 quote_source: 'tradingview', price_type: 'provider_quote', price_label: 'أحدث سعر متاح من المزود',
@@ -65,6 +65,6 @@ export async function reconcileStockQuote(client: any, symbol: string, snapshot:
         ...(liveFailure ? { live_quote_available: false, live_quote_error: liveFailure, limitations: ['تعذر التحقق من سعر جديد؛ القيمة المعروضة من البيانات المخزنة وتاريخها موضح.'] } : {}) };
     // A mismatched same-day snapshot is as unsafe to combine as an older one.
     if (stale) for (const field of ["volume", "r_vol", "rsi_14", "macd", "macd_signal", "macd_histogram",
-        "bb_upper", "bb_lower", "ema_50", "ema_200", "king_ai_score", "egx_ai_score"]) result[field] = null;
+        "bb_upper", "bb_lower", "ema_50", "ema_200"]) result[field] = null;
     return result;
 }

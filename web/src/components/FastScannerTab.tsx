@@ -927,8 +927,156 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
 
             return (
               <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff] overflow-hidden">
+                {/* Mobile Cards View */}
+                <div className="md:hidden divide-y-2 divide-black dark:divide-white">
+                  {currentList.map((sig: any, idx) => {
+                    const isRowActive = Boolean(sig._isActive || sig.status === "active");
+                    const isLocked = isRowActive && Boolean(sig.is_locked || !userHasPro);
+                    const badge = getScannerBadge(sig.scanner_type);
+                    const ret = getSignalReturn(sig);
+                    const isWin = ret > 0 || sig.status === "target_hit";
+                    const isBreakeven = ret === 0;
+
+                    const openChart = () => {
+                      if (isLocked) {
+                        setShowProModal(true);
+                        return;
+                      }
+                      setChartModalStock({
+                        symbol: sig.symbol,
+                        date: sig.entry_date,
+                        toDate: sig.exit_date || new Date().toISOString().split("T")[0],
+                        signalTime: sig.entry_time,
+                        signalPrice: sig.entry_price,
+                        exitTime: sig.exit_time,
+                        exitPrice: sig.exit_price,
+                        status: sig.status,
+                        scannerType: sig.scanner_type,
+                      });
+                    };
+
+                    return (
+                      <div
+                        key={`mob-${sig.symbol}-${sig.entry_date}-${idx}`}
+                        onClick={openChart}
+                        className="p-3.5 space-y-3 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer transition-colors"
+                      >
+                        {/* Header: Logo, Symbol, Badges & Return */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            {isLocked ? (
+                              <div className="w-10 h-10 border-2 border-black bg-amber-400 flex items-center justify-center shrink-0 shadow-[2px_2px_0px_#000]">
+                                <Lock className="w-4 h-4 text-black" />
+                              </div>
+                            ) : (
+                              <StockLogo symbol={sig.symbol} size="md" />
+                            )}
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono font-black text-sm text-indigo-600 dark:text-indigo-400">
+                                  {isLocked ? "••••••" : sig.symbol}
+                                </span>
+                                {isRowActive && (
+                                  <span className="px-1.5 py-0.5 border border-black bg-[#FFE600] text-black text-[9px] font-black animate-pulse">
+                                    ⚡ رصد حي
+                                  </span>
+                                )}
+                                {!isLocked && isShariaCompliant(sig.symbol) && (
+                                  <span className="px-1.5 py-0.2 border border-black bg-emerald-400 text-black text-[8px] font-black uppercase">
+                                    حلال
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-zinc-600 dark:text-zinc-400 font-bold block truncate max-w-[170px]">
+                                {isLocked ? "إشارة مشفرة لـ PRO" : (sig.name_ar || sig.symbol)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Live Return Pill */}
+                          <div className="text-left font-mono shrink-0">
+                            {isLocked ? (
+                              <span className="px-2 py-0.5 border border-black bg-zinc-200 dark:bg-zinc-800 text-zinc-500 text-xs font-black">
+                                PRO
+                              </span>
+                            ) : (
+                              <span
+                                dir="ltr"
+                                className={`text-sm font-black px-2 py-0.5 border border-black inline-block shadow-[1px_1px_0px_#000] ${
+                                  isWin
+                                    ? "bg-emerald-300 text-emerald-950 dark:bg-emerald-500 dark:text-black"
+                                    : isBreakeven
+                                    ? "bg-zinc-200 text-zinc-900"
+                                    : "bg-rose-300 text-rose-950 dark:bg-rose-500 dark:text-black"
+                                }`}
+                              >
+                                {ret >= 0 ? "+" : ""}{ret.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 2x2 Metric Grid */}
+                        <div className="grid grid-cols-2 gap-2 p-2.5 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/60 text-xs font-bold">
+                          <div>
+                            <span className="text-[10px] text-zinc-500 block">سعر الرصد:</span>
+                            <span className="font-mono font-black text-black dark:text-white">
+                              {isLocked ? "•••" : `${sig.entry_price?.toFixed(2)} ج.م`}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-zinc-500 block">
+                              {sig.status === "active" ? "السعر الحالي:" : "سعر الإغلاق:"}
+                            </span>
+                            <span className="font-mono font-black text-black dark:text-white">
+                              {isLocked ? "•••" : `${(sig.exit_price ?? sig.current_price)?.toFixed(2)} ج.م`}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">المستهدف الفني:</span>
+                            <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              {isLocked ? "•••" : `${sig.target_1?.toFixed(2)} ج.م`}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-rose-500 block">وقف الخسارة:</span>
+                            <span className="font-mono font-black text-rose-500">
+                              {isLocked ? "•••" : `${sig.stop_loss?.toFixed(2)} ج.م`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Footer: Scanner badge, date/time, and action button */}
+                        <div className="flex items-center justify-between pt-0.5 text-[11px]">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`px-2 py-0.5 text-[10px] font-black border ${badge.pillBg}`}>
+                              {badge.label}
+                            </span>
+                            <span className="text-zinc-500 font-mono text-[10px]">
+                              {sig.entry_date} ({sig.entry_time})
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openChart();
+                            }}
+                            className="px-2.5 py-1 bg-[#FFE600] hover:bg-yellow-300 text-black border border-black font-black text-[11px] flex items-center gap-1 shadow-[1px_1px_0px_#000] cursor-pointer"
+                          >
+                            <BarChart2 className="w-3.5 h-3.5" />
+                            <span>{isLocked ? "ترقية لـ PRO" : "الشارت"}</span>
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 {/* Desktop Table View */}
-                <div className="overflow-x-auto w-full">
+                <div className="hidden md:block overflow-x-auto w-full">
                   <table className="w-full text-left border-collapse whitespace-nowrap">
                     <thead>
                       <tr className="text-xs font-black uppercase text-black dark:text-white bg-zinc-100 dark:bg-zinc-900 border-b-4 border-black dark:border-white select-none">
@@ -1399,10 +1547,10 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
           </div>
 
           {/* Month Summary Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 p-3 sm:p-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 p-2.5 sm:p-4">
             <div>
               <span className="text-[10px] font-bold text-zinc-500 uppercase block">إشارات الشهر</span>
-              <span className="text-xl font-black font-mono text-black dark:text-white">
+              <span className="text-sm sm:text-xl font-black font-mono text-black dark:text-white truncate block">
                 {monthStats.total > 0
                   ? `${monthStats.total} مغلقة`
                   : viewedActiveSignals.length > 0
@@ -1412,14 +1560,14 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
             </div>
             <div>
               <span className="text-[10px] font-bold text-zinc-500 uppercase block">نسبة النجاح</span>
-              <span className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+              <span className="text-sm sm:text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 block">
                 {monthStats.winRate.toFixed(1)}%
               </span>
             </div>
             <div>
               <span className="text-[10px] font-bold text-zinc-500 uppercase block">صافي العائد المحقق</span>
               <span
-                className={`text-xl font-black font-mono block ${
+                className={`text-sm sm:text-xl font-black font-mono block ${
                   monthStats.netReturn >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                 }`}
               >
@@ -1428,7 +1576,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
             </div>
             <div>
               <span className="text-[10px] font-bold text-zinc-500 uppercase block">أفضل إشارة في الشهر</span>
-              <span className="text-base sm:text-lg font-black font-mono text-indigo-600 dark:text-indigo-400 truncate block">
+              <span className="text-xs sm:text-lg font-black font-mono text-indigo-600 dark:text-indigo-400 truncate block">
                 {monthStats.bestSignal
                   ? `${monthStats.bestSignal.symbol} (+${getSignalReturn(monthStats.bestSignal).toFixed(1)}%)`
                   : "—"}
@@ -1440,16 +1588,20 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
           {calendarViewType === "grid" ? (
             <div className="space-y-2">
               <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-xs font-black uppercase tracking-wider text-black dark:text-white">
-                {["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"].map((dName, i) => (
-                  <div
-                    key={dName}
-                    className={`py-1.5 border-2 border-black dark:border-white ${
-                      i >= 5 ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-500" : "bg-[#FFE600] text-black"
-                    }`}
-                  >
-                    {dName}
-                  </div>
-                ))}
+                {["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"].map((dName, i) => {
+                  const shortNames = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
+                  return (
+                    <div
+                      key={dName}
+                      className={`py-1 sm:py-1.5 border-2 border-black dark:border-white ${
+                        i >= 5 ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-500" : "bg-[#FFE600] text-black"
+                      }`}
+                    >
+                      <span className="hidden sm:inline">{dName}</span>
+                      <span className="sm:hidden">{shortNames[i]}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="grid grid-cols-7 gap-1 sm:gap-2">
@@ -1474,7 +1626,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                           setDayModalFilter("all");
                         }
                       }}
-                      className={`min-h-[70px] sm:min-h-[85px] p-1.5 sm:p-2 border-2 flex flex-col justify-between transition-all ${
+                      className={`min-h-[52px] sm:min-h-[85px] p-1 sm:p-2 border-2 flex flex-col justify-between transition-all select-none ${
                         hasClosed || hasCreated ? "cursor-pointer" : ""
                       } ${
                         isToday ? "border-amber-500 bg-amber-500/15" : ""
@@ -1492,52 +1644,93 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                           : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-400"
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs font-black font-mono ${isToday ? "bg-amber-400 text-black px-1" : ""}`}>
-                          {cell.dayNum}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          {hasClosed && (
-                            <span className="px-1 py-0.2 bg-black text-[#FFE600] text-[8px] font-black">
-                              {dayClosed.length} إغلاق
+                      {/* Desktop Rich View */}
+                      <div className="hidden sm:flex flex-col justify-between h-full">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs font-black font-mono ${isToday ? "bg-amber-400 text-black px-1" : ""}`}>
+                            {cell.dayNum}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {hasClosed && (
+                              <span className="px-1 py-0.2 bg-black text-[#FFE600] text-[8px] font-black">
+                                {dayClosed.length} إغلاق
+                              </span>
+                            )}
+                            {hasCreated && (
+                              <span className="px-1 py-0.2 bg-amber-400 text-black text-[8px] font-black">
+                                ⚡ {dayCreated.length}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {hasClosed ? (
+                          <div className="my-1 text-center font-mono">
+                            <span
+                              className={`text-[11px] font-black px-1 py-0.5 border border-black ${
+                                netDailyPct >= 0
+                                  ? "bg-emerald-200 text-emerald-900"
+                                  : "bg-rose-200 text-rose-900"
+                              }`}
+                            >
+                              {netDailyPct >= 0 ? "+" : ""}{netDailyPct.toFixed(1)}%
                             </span>
-                          )}
-                          {hasCreated && (
-                            <span className="px-1 py-0.2 bg-amber-400 text-black text-[8px] font-black">
-                              ⚡ {dayCreated.length}
-                            </span>
-                          )}
+                          </div>
+                        ) : hasCreated ? (
+                          <div className="text-[10px] font-black text-amber-600 text-center">
+                            رصد جديد ⚡
+                          </div>
+                        ) : (
+                          <div className="text-[9px] text-zinc-400 text-center">
+                            {cell.isWeekend ? "عطلة" : "—"}
+                          </div>
+                        )}
+
+                        <div className="text-[9px] text-zinc-500 truncate font-mono text-center">
+                          {hasClosed
+                            ? dayClosed.map((s) => s.symbol).slice(0, 2).join(", ")
+                            : hasCreated
+                            ? dayCreated.map((s) => s.symbol).slice(0, 2).join(", ")
+                            : ""}
                         </div>
                       </div>
 
-                      {hasClosed ? (
-                        <div className="my-1 text-center font-mono">
-                          <span
-                            className={`text-[11px] font-black px-1 py-0.5 border border-black ${
-                              netDailyPct >= 0
-                                ? "bg-emerald-200 text-emerald-900"
-                                : "bg-rose-200 text-rose-900"
-                            }`}
-                          >
-                            {netDailyPct >= 0 ? "+" : ""}{netDailyPct.toFixed(1)}%
+                      {/* Mobile Compact View */}
+                      <div className="sm:hidden flex flex-col justify-between h-full space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[11px] font-black font-mono ${isToday ? "bg-amber-400 text-black px-0.5" : ""}`}>
+                            {cell.dayNum}
                           </span>
+                          {hasClosed ? (
+                            <span className="px-0.5 bg-black text-[#FFE600] text-[8px] font-black">
+                              {dayClosed.length}
+                            </span>
+                          ) : hasCreated ? (
+                            <span className="text-[8px] text-amber-600 font-bold">⚡</span>
+                          ) : null}
                         </div>
-                      ) : hasCreated ? (
-                        <div className="text-[10px] font-black text-amber-600 text-center">
-                          رصد جديد ⚡
-                        </div>
-                      ) : (
-                        <div className="text-[9px] text-zinc-400 text-center">
-                          {cell.isWeekend ? "عطلة" : "—"}
-                        </div>
-                      )}
 
-                      <div className="text-[9px] text-zinc-500 truncate font-mono text-center">
-                        {hasClosed
-                          ? dayClosed.map((s) => s.symbol).slice(0, 2).join(", ")
-                          : hasCreated
-                          ? dayCreated.map((s) => s.symbol).slice(0, 2).join(", ")
-                          : ""}
+                        {hasClosed ? (
+                          <div className="text-center font-mono">
+                            <span
+                              className={`text-[8px] font-black px-0.5 py-0.2 border border-black inline-block leading-tight ${
+                                netDailyPct >= 0
+                                  ? "bg-emerald-200 text-emerald-950"
+                                  : "bg-rose-200 text-rose-950"
+                              }`}
+                            >
+                              {netDailyPct >= 0 ? "+" : ""}{netDailyPct.toFixed(0)}%
+                            </span>
+                          </div>
+                        ) : hasCreated ? (
+                          <div className="text-[8px] font-black text-amber-600 text-center truncate">
+                            {dayCreated.length}⚡
+                          </div>
+                        ) : (
+                          <div className="text-[8px] text-zinc-400 text-center">
+                            {cell.isWeekend ? "عطلة" : "—"}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

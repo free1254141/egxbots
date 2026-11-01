@@ -36,7 +36,7 @@ test.each(['get_stock', 'get_comparison'])('%s gets the provider snapshot automa
     const result = await executeAgenticTool(tool, { symbols: ['COMI'] }, client, 'offline');
     const row = (result.stocks || result.comparison)[0];
     expect(row).toMatchObject({ close: 110, date: null, quote_source: 'tradingview', price_type: 'provider_quote',
-        final_close_confirmed: false, live_quote_available: true, fetched_at: stamp, rsi_14: 45, indicators_source: 'tradingview', king_ai_score: null });
+        final_close_confirmed: false, live_quote_available: true, fetched_at: stamp, rsi_14: 45, indicators_source: 'tradingview', king_ai_score: 0.4 });
     expect(row.fetched_at_cairo).toContain('13:00:00');
     expect(provider).toHaveBeenCalledTimes(1);
     expect(client.queries.every(q => q.ops.some((op: any[]) => op[0] === 'limit'))).toBe(true);
