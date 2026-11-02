@@ -10,6 +10,8 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import requests
+import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional
@@ -145,7 +147,7 @@ def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
     except Exception as e:
         logger.warning(f"[SCANNER_PY] get_telegram_bot delivery failed: {e}")
 
-    # 2. Direct HTTP fallback (using ARTORO_AI_BOT with relay fallback)
+    # 2. Direct HTTP fallback (using ARTORO_AI_BOT with relay fallback and HTML error recovery)
     token = os.getenv("ARTORO_AI_BOT") or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.warning(f"[SCANNER_PY] Skipped Telegram dispatch (no token found in env: ARTORO_AI_BOT/TELEGRAM_BOT_TOKEN)")
@@ -173,14 +175,24 @@ def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
             }
             if thread_id is not None:
                 payload["message_thread_id"] = thread_id
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                method="POST",
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                if resp.status == 200:
+
+            resp = requests.post(url, json=payload, timeout=timeout)
+            try:
+                res_json = resp.json()
+            except Exception:
+                res_json = {}
+
+            if resp.status_code == 200 and res_json.get("ok"):
+                return True
+
+            # If HTML parse error or rejected, retry without parse_mode
+            desc = str(res_json.get("description", "")).lower()
+            if "can't parse" in desc or "parse_mode" in desc or "entities" in desc or resp.status_code == 400:
+                plain_payload = dict(payload)
+                plain_payload.pop("parse_mode", None)
+                plain_payload["text"] = re.sub(r"<[^>]+>", "", text)
+                resp2 = requests.post(url, json=plain_payload, timeout=timeout)
+                if resp2.status_code == 200 and resp2.json().get("ok"):
                     return True
         except Exception as e:
             logger.warning(f"[SCANNER_PY] Telegram send failed from {base}: {e}")
@@ -734,12 +746,13 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         text = "\n".join(lines)
         if send_telegram_alert(vip_channel, text):
             alerts_dispatched = 1
-
-        for s in final_vol + final_bo + final_os:
-            sym = s["symbol"]
-            sent_keys.add(f"{sym}:volume_surge")
-            sent_keys.add(f"{sym}:breakout")
-            sent_keys.add(f"{sym}:rsi_oversold")
+            for s in final_vol + final_bo + final_os:
+                sym = s["symbol"]
+                sent_keys.add(f"{sym}:volume_surge")
+                sent_keys.add(f"{sym}:breakout")
+                sent_keys.add(f"{sym}:rsi_oversold")
+        else:
+            logger.warning("[SCANNER_PY] VIP alert dispatch failed; signals NOT marked as sent so next scan will retry.")
 
     # Update config and bot_states
     sent_today["sent_keys"] = list(sent_keys)[-200:]

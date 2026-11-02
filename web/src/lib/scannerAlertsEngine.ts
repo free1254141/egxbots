@@ -196,6 +196,20 @@ export async function sendTelegramAlert(chatId: string | number, text: string): 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) return true;
       console.warn(`[SCANNER_ALERTS] Telegram send failed from ${base}:`, data?.description || res.statusText);
+      const desc = String(data?.description || "").toLowerCase();
+      if (desc.includes("can't parse") || desc.includes("parse_mode") || desc.includes("entities")) {
+        const fallbackPayload: any = { ...payload, text: text.replace(/<[^>]+>/g, "") };
+        delete fallbackPayload.parse_mode;
+        const retryRes = await fetch(`${base}/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fallbackPayload),
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        const retryData = await retryRes.json().catch(() => ({}));
+        if (retryRes.ok && retryData?.ok) return true;
+      }
       if (base === relayUrl) continue;
     } catch (err: any) {
       console.warn(`[SCANNER_ALERTS] Telegram send exception from ${base}:`, err?.message || err);
@@ -591,23 +605,27 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       if (sent) alertsDispatchedCount++;
     }
 
-    // Register newly sent keys into sentToday (tag all categories for alerted symbols to avoid repeat cross-scanner alerts today)
-    for (const v of freshVolume) {
-      sentKeysSet.add(`${v.symbol}:volume_surge`);
-      sentKeysSet.add(`${v.symbol}:breakout`);
-      sentKeysSet.add(`${v.symbol}:rsi_oversold`);
+    if (alertsDispatchedCount > 0) {
+      // Register newly sent keys into sentToday (tag all categories for alerted symbols to avoid repeat cross-scanner alerts today)
+      for (const v of freshVolume) {
+        sentKeysSet.add(`${v.symbol}:volume_surge`);
+        sentKeysSet.add(`${v.symbol}:breakout`);
+        sentKeysSet.add(`${v.symbol}:rsi_oversold`);
+      }
+      for (const b of freshBreakout) {
+        sentKeysSet.add(`${b.symbol}:volume_surge`);
+        sentKeysSet.add(`${b.symbol}:breakout`);
+        sentKeysSet.add(`${b.symbol}:rsi_oversold`);
+      }
+      for (const o of freshOversold) {
+        sentKeysSet.add(`${o.symbol}:volume_surge`);
+        sentKeysSet.add(`${o.symbol}:breakout`);
+        sentKeysSet.add(`${o.symbol}:rsi_oversold`);
+      }
+      for (const d of freshDisclosures) sentKeysSet.add(`disclosure:${d.id}`);
+    } else {
+      console.warn(`[SCANNER_ALERTS] Telegram alerts delivery failed; fresh signals NOT marked as sent so they can be retried.`);
     }
-    for (const b of freshBreakout) {
-      sentKeysSet.add(`${b.symbol}:volume_surge`);
-      sentKeysSet.add(`${b.symbol}:breakout`);
-      sentKeysSet.add(`${b.symbol}:rsi_oversold`);
-    }
-    for (const o of freshOversold) {
-      sentKeysSet.add(`${o.symbol}:volume_surge`);
-      sentKeysSet.add(`${o.symbol}:breakout`);
-      sentKeysSet.add(`${o.symbol}:rsi_oversold`);
-    }
-    for (const d of freshDisclosures) sentKeysSet.add(`disclosure:${d.id}`);
   }
 
   // ── STEP 5.5: Tracked Signals Lifecycle & Targets/Stop-Loss Management ──────
