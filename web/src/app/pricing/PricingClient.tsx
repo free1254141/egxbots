@@ -401,12 +401,25 @@ export default function PricingClient() {
     if (!clean) return;
     setPromoChecking(true);
     try {
+      let shouldTrack = trackClick;
+      if (shouldTrack) {
+        try {
+          if (sessionStorage.getItem(`egx_tracked_ref_${clean}`) === "1") {
+            shouldTrack = false;
+          }
+        } catch {}
+      }
       const res = await fetch(
-        `/api/payment/easykash/validate-promo?code=${encodeURIComponent(clean)}${trackClick ? "&track=1" : ""}`,
+        `/api/payment/easykash/validate-promo?code=${encodeURIComponent(clean)}${shouldTrack ? "&track=1" : ""}`,
         { cache: "no-store" }
       );
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.valid) {
+        if (shouldTrack) {
+          try {
+            sessionStorage.setItem(`egx_tracked_ref_${clean}`, "1");
+          } catch {}
+        }
         setAppliedPromo({
           code: data.code,
           name: data.name,
@@ -424,6 +437,13 @@ export default function PricingClient() {
           );
         }
       } else {
+        if (data?.self_referral) {
+          setAppliedPromo(null);
+          setPromoInput("");
+          try {
+            localStorage.removeItem("egx_affiliate_ref");
+          } catch {}
+        }
         if (!silent) {
           toast.error(data?.error || (isAr ? "كود الخصم غير صحيح أو منتهي الصلاحية" : "Invalid or expired promo code"));
         }
@@ -507,6 +527,12 @@ export default function PricingClient() {
       } catch {}
     }
   }, []);
+
+  useEffect(() => {
+    if (user?.id && appliedPromo?.code) {
+      applyPromoCode(appliedPromo.code, false, true);
+    }
+  }, [user?.id]);
 
   if (loading) {
     return (

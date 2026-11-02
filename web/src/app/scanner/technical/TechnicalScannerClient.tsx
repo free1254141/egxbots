@@ -13,6 +13,7 @@ import { useTechnicalScanner } from "@/contexts/TechnicalScannerContext";
 import type { TechResult } from "@/lib/api";
 import StockLogo from "@/components/StockLogo";
 import UnusualActivity from "@/components/UnusualActivity";
+import TrapDetector from "@/components/TrapDetector";
 import ScannerTemplates, { type ScannerTemplateId } from "@/components/ScannerTemplates";
 import TradingViewChart from "@/components/TradingViewChartDynamic";
 import { isShariaCompliant } from "@/lib/shariaStocks";
@@ -1446,6 +1447,7 @@ export default function TechnicalScannerPage() {
                 <ScannerTemplates onSelect={applyTemplate} />
             </div>
             <UnusualActivity />
+            <TrapDetector />
 
             {/* --- Horizontal Filter Pills Bar Wrapper (Fixed z-index and clipping wrapper) --- */}
             <div className="relative filter-wrapper !z-50">

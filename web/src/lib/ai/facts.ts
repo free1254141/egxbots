@@ -55,7 +55,11 @@ export type FactField =
     | "position_pct"
     | "scenario_capital"
     | "scenario_loss_pct"
-    | "scenario_loss_amount";
+    | "scenario_loss_amount"
+    | "fair_value"
+    | "upside_pct"
+    | "purification_amount"
+    | "zakat_amount";
 
 export type FactUnit = "egp" | "percent" | "ratio" | "points" | "count" | "unitless" | "shares";
 
@@ -123,6 +127,10 @@ pe_ratio: "ratio", eps: "egp", market_cap: "egp", breadth_total: "count", breadt
     scenario_capital: "egp",
     scenario_loss_pct: "percent",
     scenario_loss_amount: "egp",
+    fair_value: "egp",
+    upside_pct: "percent",
+    purification_amount: "egp",
+    zakat_amount: "egp",
 };
 
 const VALUE_KEYS: Array<{ key: string; field: FactField }> = [
@@ -217,6 +225,11 @@ const VALUE_KEYS: Array<{ key: string; field: FactField }> = [
     { key: "scenario_capital", field: "scenario_capital" },
     { key: "scenario_loss_pct", field: "scenario_loss_pct" },
     { key: "scenario_loss_amount", field: "scenario_loss_amount" },
+    { key: "fair_value", field: "fair_value" },
+    { key: "upside_pct", field: "upside_pct" },
+    { key: "fair_value_upside_pct", field: "upside_pct" },
+    { key: "purification_amount_egp", field: "purification_amount" },
+    { key: "zakat_amount_egp", field: "zakat_amount" },
 ];
 
 function toNumber(value: unknown): number | null {

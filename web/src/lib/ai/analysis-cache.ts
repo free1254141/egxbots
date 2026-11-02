@@ -318,10 +318,10 @@ const SINGLE_STOCK_SUB_INTENTS: Array<[string, RegExp]> = [
 ];
 
 const PURE_ANALYSIS_WORDS =
-    /حلل|تحليل|تقييم|تقرير|رايك|شوف|شوفلي|اعرض|تفاصيل|حاله|وضع|analy/;
+    /حلل|تحليل|تقييم|تقرير|رايك|شوف|شوفلي|اعرض|تفاصيل|حاله|وضع|توقعات\s+سهم|analy/;
 
 const NON_STANDARD_STOCK_WORDS =
-    /اشتري|شراء|ادخل|اخرج|توقع|هيوصل|هيطلع|هينزل|مستقبل|مضاربه|استثمار|rsi|macd|ema|sma|adx|stoch|مؤشر|تشبع/;
+    /اشتري|شراء|ادخل|اخرج|هيوصل|هيطلع|هينزل|مستقبل|مضاربه|استثمار|rsi|macd|ema|sma|adx|stoch|مؤشر|تشبع/;
 
 /**
  * Classify a single-stock query into a strict canonical intent bucket, or return
@@ -380,6 +380,7 @@ export function buildAnalysisCacheKey(
     // 1. Single stock canonical intents
     if (explicitSymbols.length === 1) {
         const sym = explicitSymbols[0].toUpperCase();
+        if (sym === "START" || sym === "MENU" || sym === "PANEL" || sym === "HELP") return null;
         const intent = classifyStockIntent(normalized, explicitSymbols);
         if (!intent) return null;
         return intent === "analysis" ? `vip_stock_${sym}` : `vip_stock_${sym}_${intent}`;
@@ -400,21 +401,21 @@ export function buildAnalysisCacheKey(
 
     // 3. Canonical Market-Wide Buttons & Repeatable Queries (only short, direct requests)
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-    if (wordCount > 7) return null;
+    if (wordCount > 10) return null;
 
     if (/ملخص\s+السوق|حاله\s+السوق|وضع\s+السوق|market\s+summary/.test(normalized)) {
         return "vip_market_summary";
     }
-    if (/^(?:ايه\s+)?(?:اقوي|اقوى|افضل)\s+الاسهم(?:\s+النهارده|\s+اليوم|\s+الان)?$/.test(normalized)) {
+    if (/^(?:ايه\s+)?(?:اقوي|اقوى|افضل)\s+الاسهم(?:\s+النهارده|\s+اليوم|\s+الان|\s+ايه)?$/.test(normalized)) {
         return "vip_top_stocks";
     }
-    if (/اسهم\s+التجميع|تجميع\s+وسيوله|السيوله\s+والتجميع|accumulation/.test(normalized)) {
+    if (/اسهم\s+التجميع|تجميع\s+وسيوله|السيوله\s+والتجميع|تجمع\s+سيوله|accumulation/.test(normalized)) {
         return "vip_accumulation";
     }
     if (/المسح\s+الفني|مسح\s+فني|الماسح\s+الذكي|tech\s+screener/.test(normalized)) {
         return "vip_tech_screener";
     }
-    if (/اخبار\s+السوق|اخبار\s+البورصه|market\s+news/.test(normalized)) {
+    if (/اخبار\s+(?:وافصاحات\s+)?(?:السوق|البورصه)|اهم\s+اخبار\s+وافصاحات|market\s+news/.test(normalized)) {
         return "vip_market_news";
     }
     if (/توصيات\s+الاسبوع\s+(?:الحالي|ده|هذا)|هذا\s+الاسبوع/.test(normalized)) {
@@ -423,7 +424,7 @@ export function buildAnalysisCacheKey(
     if (/توصيات\s+الاسبوع\s+(?:اللي\s+فات|الماضي|السابق)/.test(normalized)) {
         return "vip_recs_last_week";
     }
-    if (/التوصيات\s+المفتوحه|كل\s+التوصيات|التوصيات\s+النشطه| التوصيات\s+الحاليه|open\s+recommendations/.test(normalized)) {
+    if (/التوصيات\s+المفتوحه|كل\s+التوصيات|التوصيات\s+النشطه|التوصيات\s+الحاليه|التوصيات\s+الان|التوصيات\s+اليوم|open\s+recommendations/.test(normalized)) {
         return "vip_open_recommendations";
     }
     if (/(?:اقوي|اقوى|افضل)\s+(?:القطاعات|قطاع)|اي\s+القطاعات\s+الاقوي/.test(normalized)) {

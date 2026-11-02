@@ -715,7 +715,7 @@ def fetch_tradingview_fundamentals_bulk(
     def _has_core_fund_metrics(d: dict) -> bool:
         if not isinstance(d, dict):
             return False
-        core = ["marketCap", "peRatio", "eps", "dividendYield", "beta", "high52", "low52"]
+        core = ["marketCap", "peRatio", "eps", "bookValuePerShare", "pbRatio", "dividendYield", "beta", "high52", "low52"]
         for k in core:
             if d.get(k) is not None:
                 return True
@@ -748,7 +748,7 @@ def fetch_tradingview_fundamentals_bulk(
                             "description",
                             "market_cap_basic",
                             "price_earnings_ttm",
-                            "earnings_per_share_basic_ttm",
+                            "earnings_per_share_basic_ttm", "book_value_per_share_fq", "price_book_fq", "return_on_equity", "net_income", "total_shares_outstanding_fundamental",
                             "dividend_yield_recent",
                             "sector",
                             "industry",
@@ -785,7 +785,7 @@ def fetch_tradingview_fundamentals_bulk(
                     data = {
                         "marketCap": mcap,
                         "peRatio": _finite_float(row.get("price_earnings_ttm")),
-                        "eps": _finite_float(row.get("earnings_per_share_basic_ttm")),
+                        "eps": _finite_float(row.get("earnings_per_share_basic_ttm")) if _finite_float(row.get("earnings_per_share_basic_ttm")) is not None else (round(_finite_float(row.get("net_income")) / _finite_float(row.get("total_shares_outstanding_fundamental")), 4) if market != "crypto" and _finite_float(row.get("net_income")) is not None and (_finite_float(row.get("total_shares_outstanding_fundamental")) or 0) > 0 else None), "bookValuePerShare": _finite_float(row.get("book_value_per_share_fq")) if market != "crypto" else None, "pbRatio": _finite_float(row.get("price_book_fq")) if market != "crypto" else None, "roe": _finite_float(row.get("return_on_equity")) if market != "crypto" else None,
                         "dividendYield": _finite_float(row.get("dividend_yield_recent")),
                         "sector": row.get("sector"),
                         "industry": row.get("industry"),

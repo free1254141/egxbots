@@ -79,11 +79,11 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
     }
     if (bySymbol.size === 0) return reasons;
 
-    const percentFields = new Set(["breadth_advancing_pct","change_pct", "profit_pct", "premium_pct", "backtest_return_pct", "backtest_drawdown_pct", "backtest_win_rate_pct"]);
+    const percentFields = new Set(["breadth_advancing_pct","change_pct", "profit_pct", "premium_pct", "backtest_return_pct", "backtest_drawdown_pct", "backtest_win_rate_pct", "upside_pct"]);
     const currencyFields = new Set([
         "backtest_final_equity", "eps", "market_cap",
         "price", "close", "support", "resistance", "sma_50", "sma_200", "ema_50", "ema_200", "target_price", "stop_loss", "exit_price",
-        "bb_upper", "bb_lower", "highest_price", "market_value", "cost_basis", "profit_value", "entry_price",
+        "bb_upper", "bb_lower", "highest_price", "market_value", "cost_basis", "profit_value", "entry_price", "fair_value", "purification_amount", "zakat_amount",
     ]);
     const metricFields = (prefix: string, percentage: boolean): Set<string> | null => {
         prefix = prefix.replace(/[*_`]/g, '').replace(/\s+/g, ' ');
@@ -94,6 +94,7 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
             [/ربح|خسار|عائد|مكسب/i, ["profit_pct", "backtest_return_pct"]],
             [/ارتفع|ارتفاع|صعد|هبط|(?<!أقصى\s)(?<!اقصى\s)هبوط|انخفض|نزل|تغير|تراجع/i, ["change_pct"]],
             [/علاوه|علاوة/i, ["premium_pct"]],
+            [/(?:نسبة|هامش)?\s*(?:الرخص|التضخم|الفرق|علاوة|خصم|upside)/i, ["upside_pct"]],
         ] : [
             [/ربحية.*سهم|EPS/i,["eps"]], [/القيمة السوقية للشركة|market.?cap/i,["market_cap"]],
             [/قيمة.*نهاي|رأس.*مال.*نهاي|equity/i, ["backtest_final_equity"]],
@@ -107,6 +108,9 @@ export function checkAttribution(reply: string, facts: FactRecord[]): string[] {
             [/القيمه\s*السوقيه|القيمة\s*السوقية|قيمة.*(?:مركز|محفظ).*سوقي|قيمة\s*(?:المركز|محفظتي)/i, ["market_value"]],
             [/تكلفه|تكلفة|التكلفة|التكلفه/i, ["cost_basis"]],
             [/ربح|خسار/i, ["profit_value"]],
+            [/(?:السعر|سعر|القيمة|قيمة)\s*(?:العادل|العادلة|fair.?value)/i, ["fair_value"]],
+            [/تطهير/i, ["purification_amount"]],
+            [/زكاة/i, ["zakat_amount"]],
         ];
         let latest = -1;
         let selected: string[] | null = null;

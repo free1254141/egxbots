@@ -888,6 +888,7 @@ export async function POST(req: NextRequest) {
                                     correlation_id: correlationId,
                                     cached: true,
                                     response_origin: "cache",
+                                    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, provider_calls: 0, tool_calls: Array.isArray(cached.tools?.results) ? cached.tools.results.length : 0, model: "cache (0 tokens)" },
                                     suggested_buttons: suggestedButtons,
                                 };
 

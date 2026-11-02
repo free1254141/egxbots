@@ -2,6 +2,12 @@ import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 import { isShariaCompliant } from '../shariaStocks';
+import {
+    executeFairValueTool,
+    executeShariaCleanserTool,
+    executePriceTrapsTool,
+    executeRebalancePortfolioTool
+} from './feature-tools';
 
 const readBatches = new Set(['get_stock', 'get_stock_levels', 'get_comparison', 'get_fundamentals']);
 export function requestToolCost(name: string, args: any): number {
@@ -75,6 +81,18 @@ export const REQUEST_DATA_TOOLS_SCHEMA = [
 
 export async function executeRequestTool(name: string, args: any, db: any, userId: string, cache: ChartHistoryCache,
     access: { isPro: boolean }): Promise<any> {
+    if (name === 'get_fair_value') {
+        return await executeFairValueTool(args, db);
+    }
+    if (name === 'get_sharia_cleanser') {
+        return await executeShariaCleanserTool(args, db);
+    }
+    if (name === 'get_price_traps') {
+        return await executePriceTrapsTool(args, db, access.isPro);
+    }
+    if (name === 'rebalance_portfolio') {
+        return await executeRebalancePortfolioTool(args, db, userId);
+    }
     if (name === 'enable_autonomous_recommendations') {
         if (!access.isPro) {
             return {

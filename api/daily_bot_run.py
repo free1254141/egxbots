@@ -3791,6 +3791,13 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as reminder_error:
                 _record_step("telegram_subscription_reminders", False, str(reminder_error)[:500], 0)
                 print(f"[SUBSCRIPTION_REMINDERS] Failed: {reminder_error}")
+        if phase == "close" and not dry_run:
+            try:
+                from api.trap_detector import sync_daily_traps_to_market_cache
+                traps_res = await asyncio.to_thread(sync_daily_traps_to_market_cache, supabase)
+                print(f"[TRAP_DETECTOR] {traps_res}")
+            except Exception as traps_err:
+                print(f"[TRAP_DETECTOR] Failed: {traps_err}")
         print(f"\n--- Daily Bot Run Job Completed: {dt.datetime.now()} ---")
         return {"status": "completed", "job_run_id": job_run_id, **summarise_daily_steps(steps_log)}
 

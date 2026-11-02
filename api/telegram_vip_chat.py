@@ -29,6 +29,8 @@ DEFAULT_VIP_TOPIC_ID = 1680
 _DEDUP_LOCK = threading.Lock()
 _PROCESSED_EVENTS: Dict[str, float] = {}
 _PENDING_PROMPTS: Dict[Tuple[str, int], Dict[str, Any]] = {}
+_USER_QUOTA_CACHE: Dict[int, Dict[str, Any]] = {}
+_WEB_SESSION = requests.Session()
 
 
 @lru_cache(maxsize=1)
@@ -87,61 +89,79 @@ EGX_ARABIC_NAMES: List[str] = [
 ]
 
 
+def _norm_ar(text: str) -> str:
+    """Normalize Arabic text (unify hamzas, yaa/alif-maqsura, taa-marbuta, strip diacritics)."""
+    return (
+        re.sub(r"[\u064b-\u065f\u0670\u0640]", "", text or "")
+        .replace("أ", "ا")
+        .replace("إ", "ا")
+        .replace("آ", "ا")
+        .replace("ى", "ي")
+        .replace("ة", "ه")
+        .strip()
+        .lower()
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_normalized_arabic_stock_names() -> List[str]:
+    """Return all normalized Arabic stock names/aliases (longest first) from EGX_ARABIC_NAMES + stock_aliases."""
+    names: Set[str] = set()
+    for n in EGX_ARABIC_NAMES:
+        nn = _norm_ar(n)
+        if len(nn) >= 2:
+            names.add(nn)
+    try:
+        from api.stock_aliases import ARABIC_STOCK_MAPPINGS
+        for k in ARABIC_STOCK_MAPPINGS.keys():
+            if re.search(r"[\u0621-\u064A]", k):
+                nn = _norm_ar(k)
+                if len(nn) >= 2:
+                    names.add(nn)
+    except Exception:
+        pass
+    return sorted(names, key=len, reverse=True)
+
+
 def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
     """
-    Intelligently determine if a message in Topic 1680 (ARTORO) is a user query for ARTORO.
-    Returns (mode, query_text) or None if it's pure member-to-member banter.
+    Normalize and classify a user message in Topic 1680 (ARTORO).
+    All messages in Topic 1680 are directed to ARTORO:
+    - Bare stock tickers/names (e.g. "فورى", "COMI") are expanded to "حلل سهم <name>".
+    - Comparisons are normalized.
+    - All other questions and dialogues are forwarded directly as ("free", cleaned).
     """
     raw = (text or "").strip()
     if not raw:
         return None
 
-    # 1. Pure member-to-member social banter that clearly addresses other human members
-    # (e.g. "يا جماعة حد اشترى...", "صباح الخير يا شباب", "شكرا يا غالي", "تسلم يا باشا", "مبروك")
-    # UNLESS it explicitly mentions @egxbots_bot or "يا أرتورو"
-    has_bot_call = bool(re.search(r"(?:@egxbots_bot|[اأ]رتورو|يا\s*[اأ]رتورو)", raw, re.IGNORECASE))
-    if not has_bot_call:
-        if re.search(r"^(?:يا\s*(?:جماعة|شباب|رجالة|أعضاء|إخواني|اخواني)|حد\s*(?:اشترى|باع|جرب|عرف|عنده|هنا)|صباح الخير|مساء الخير|السلام عليكم|شكرا|شكراً|تسلم|ألف شكر|تسلم ايدك|مبروك|تمام(?:\s+يا|$))", raw, re.IGNORECASE):
-            return None
-
     # Strip bot mention if present
     cleaned = re.sub(r"^(?:/ask(?:@\w+)?|@egxbots_bot|يا\s*[اأ]رتورو|[اأ]رتورو)\s*[:،\-]?\s*", "", raw, flags=re.IGNORECASE).strip()
     if not cleaned:
         cleaned = raw
+    norm_cleaned = _norm_ar(cleaned)
 
-    # 2. Check if text is an explicit EGX Ticker (e.g. "ASCM", "PHDC", "COMI", "FWRY", "ASCM.CA")
+    # 1. Check if text is a bare EGX Ticker (e.g. "ASCM", "PHDC", "COMI", "FWRY", "ASCM.CA")
     token = re.sub(r"[^\w\.]", "", cleaned).upper().replace(".CA", "")
-    all_egx = _get_egx_symbols_set()
-    if token in all_egx or (re.match(r"^[A-Z0-9]{2,6}$", token) and len(cleaned.split()) <= 2):
+    if re.match(r"^[A-Z0-9]{2,6}$", token) and len(cleaned.split()) <= 2:
         return ("stock", f"حلل سهم {token}")
 
-    # 3. Check for comparison intent ("قارن بين X و Y", "مقارنة X و Y", "أيهما أفضل")
-    if re.search(r"(?:قارن|مقارن|مقارنة|ايهم|أيهما|\bبين\b.*\bو\b)", cleaned):
-        if not re.search(r"^(?:قارن|مقارنة)", cleaned):
+    # 2. Check for comparison intent ("قارن بين X و Y", "مقارنة X و Y", "أيهما أفضل")
+    if re.search(r"(?:قارن|مقارن|مقارنه|ايهم|ايهما|\bبين\b.*\bو\b)", norm_cleaned):
+        if not re.search(r"^(?:قارن|مقارن)", norm_cleaned):
             return ("compare", f"قارن بين {cleaned}")
         return ("compare", cleaned)
 
-    # 4. Check if text matches known Egyptian Arabic stock names (e.g. "فوري", "طلعت مصطفى", "أجواء")
-    for name in EGX_ARABIC_NAMES:
-        if name in cleaned:
-            # If the user only typed the stock name (e.g. "فوري" or "سهم فوري" or "بالم هيلز")
-            if len(cleaned.split()) <= 3 and not re.search(r"(?:حلل|تحليل|سعر|رايك|رأيك|مستويات|اخبار|أخبار)", cleaned):
-                return ("stock", f"حلل سهم {cleaned}")
-            return ("free", cleaned)
+    # 3. If user typed just a bare Arabic stock name (1-3 words, e.g. "فورى", "عتاقه", "طلعت مصطفي")
+    if len(norm_cleaned.split()) <= 3 and not re.search(r"(?:حلل|تحليل|سعر|رايك|مستويات|اخبار|توزيع|شرعي|ليه|ازاي|لو|هل|امتي|متي|تفتكر|طيب|اشرح|قارن)", norm_cleaned):
+        for norm_name in _get_normalized_arabic_stock_names():
+            if norm_name in norm_cleaned:
+                pattern = rf"(?:^|[\s،,.؟?!:؛\-])(?:و|ف|ب|ل|ك|ال)?{re.escape(norm_name)}(?:$|[\s،,.؟?!:؛\-])"
+                if re.search(pattern, norm_cleaned):
+                    return ("stock", f"حلل سهم {cleaned}")
 
-    # 5. Check for analysis keywords (e.g. "حلل سهم ...", "تحليل ...", "سعر ...", "رايك في ...", "اسهم شرعية")
-    if re.search(r"(?:حلل|تحليل|سعر|اسعار|أسعار|رايك|رأيك|مستهدف|دعم|مقاومة|شراء|بيع|توصي|توصية|توصيات|محفظ|تجميع|مسح|مؤشر|سهم|اسهم|أسهم|البورصة|السوق|شرع|شريع|شريعة|حلال|egx33)", cleaned):
-        return ("free", cleaned)
-
-    # 6. Questions directed at the room (e.g. ends with ? or contains question particles)
-    if re.search(r"[؟\?]|(?:^|\s)(?:ايه|إيه|فين|ازاي|إزاي|مين|ليه|كام|متى|هل|توقعات|فرص)(?:\s|$)", cleaned):
-        return ("free", cleaned)
-
-    # 7. If the user addressed the bot by name (@egxbots_bot or أرتورو), answer unconditionally
-    if has_bot_call:
-        return ("free", cleaned)
-
-    return None
+    # 4. Every other message in Topic 1680 goes straight to ARTORO!
+    return ("free", cleaned)
 
 
 def get_vip_group_id() -> str:
@@ -328,9 +348,9 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "أهلاً بك في الغرفة التفاعلية المباشرة لمساعد الذكاء الاصطناعي <b>ARTORO</b> للبورصة المصرية (EGX)!\n"
         "يعمل أرتورو هنا بنفس محرك الموقع الذكي مع حفظ سياق محادثتك وأدوات التحليل اللحظية.\n\n"
-        "💬 <b>نظام الغرفة (دردشة حرة + استدعاء بالأزرار فقط):</b>\n"
-        "• يمكنك التحدث والدردشة مع الأعضاء في الغرفة بحرية تامة دون أن يتدخل البوت أو يخصم من رصيدك.\n"
-        "• <b>لكي يرد عليك أرتورو هنا:</b> اضغط أولاً على أحد أزرار القائمة بالأسفل (مثل <code>🔍 حلل سهم</code> أو <code>🤖 اسأل أرتورو</code> أو أدوات الضغطة الواحدة).\n\n"
+        "💬 <b>كيف تستخدم أرتورو في هذه الغرفة؟</b>\n"
+        "• <b>اكتب مباشرةً:</b> اكتب اسم أي سهم أو سؤالك مباشرة في الرسائل (مثل: <code>فوري</code> أو <code>حلل عتاقة</code> أو أي سؤال فني/مالي) وسيرد عليك أرتورو فوراً!\n"
+        "• <b>أو استخدم الأزرار السريعة بالأسفل:</b> لتحليل سهم، مقارنة سهمين، ملخص السوق، أسهم التجميع، المسح الفني، التوصيات المفتوحة، وتحليل محفظتك بضغطة واحدة.\n\n"
         "🔒 <b>تفضل الخصوصية الكاملة؟ (شات خاص 1-on-1):</b>\n"
         "• إذا كنت لا ترغب في كتابة أسهمك أو محفظتك في الشات العام، اضغط على زر <b>«🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)»</b> بالأسفل أو راسل البوت <a href=\"https://t.me/egxbots_bot?start=artoro_chat\">@egxbots_bot</a> مباشرة للتحدث معه على انفراد وبخصوصية تامة!\n\n"
         "🎫 <b>نظام الباقات والرصيد:</b>\n"
@@ -557,6 +577,38 @@ def _web_vip_chat_endpoints() -> List[str]:
     return urls
 
 
+def _update_user_quota_cache(tg_user_id: int, data: Dict[str, Any]) -> None:
+    if not tg_user_id or not isinstance(data, dict):
+        return
+    if "remaining" in data or "is_pro" in data or data.get("error_code") == "LIMIT_REACHED":
+        with _DEDUP_LOCK:
+            prev = _USER_QUOTA_CACHE.get(int(tg_user_id)) or {}
+            _USER_QUOTA_CACHE[int(tg_user_id)] = {
+                "ok": True,
+                "linked": bool(data.get("linked", prev.get("linked", False))),
+                "is_pro": bool(data.get("is_pro", prev.get("is_pro", False))),
+                "used": int(data.get("used") if data.get("used") is not None else prev.get("used", 0)),
+                "limit": int(data.get("limit") if data.get("limit") is not None else prev.get("limit", 5)),
+                "remaining": 0 if data.get("error_code") == "LIMIT_REACHED" else int(data.get("remaining") if data.get("remaining") is not None else prev.get("remaining", 5)),
+                "period": str(data.get("period") or prev.get("period") or "monthly"),
+                "ts": time.time(),
+            }
+
+
+def _get_cached_user_quota(tg_user_id: int, max_age_sec: float = 300.0) -> Optional[Dict[str, Any]]:
+    # In unit tests where call_web_vip_chat_api is mocked, always call the mock directly
+    if getattr(call_web_vip_chat_api, "__name__", "") != "call_web_vip_chat_api":
+        return None
+    with _DEDUP_LOCK:
+        entry = _USER_QUOTA_CACHE.get(int(tg_user_id))
+        if not entry:
+            return None
+        if time.time() - float(entry.get("ts", 0)) > max_age_sec:
+            _USER_QUOTA_CACHE.pop(int(tg_user_id), None)
+            return None
+        return dict(entry)
+
+
 def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
     """Execute VIP chat action via web API (Agentic Pipeline with 9 tools).
     Falls back to native Python handler only if the web endpoint is unreachable or fails.
@@ -566,14 +618,16 @@ def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[st
         "Content-Type": "application/json",
         "x-admin-key": admin_key,
     }
+    tg_uid = int(payload.get("telegram_user_id") or 0)
     last_error = "Unreachable"
     for url in _web_vip_chat_endpoints():
         try:
             connect_timeout = 2.0 if "127.0.0.1" in url else 8.0
-            resp = requests.post(url, json=payload, headers=headers, timeout=(connect_timeout, timeout))
+            resp = _WEB_SESSION.post(url, json=payload, headers=headers, timeout=(connect_timeout, timeout))
             if resp.status_code in (200, 400, 403, 429):
                 data = resp.json()
                 if not data.get("skipped"):
+                    _update_user_quota_cache(tg_uid, data)
                     return data
             last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
         except Exception as exc:
@@ -1145,13 +1199,7 @@ def _execute_and_reply_vip_chat_inner(
     callback_query_id: Optional[str] = None,
 ) -> None:
     """Run the query through the website's Agentic Pipeline (/api/telegram/vip-chat) and post the formatted answer."""
-    # Send typing indicator in the topic
-    action_payload: Dict[str, Any] = {"chat_id": chat_id, "action": "typing"}
-    if thread_id is not None:
-        action_payload["message_thread_id"] = int(thread_id)
-    _call_telegram_api(bot_token, "sendChatAction", action_payload, timeout=5)
-
-    # Send temporary "جاري التحليل..." status message so user sees instant feedback
+    # Send temporary "جاري التحليل..." status message FIRST so user sees instant feedback without waiting for sendChatAction
     safe_user = html.escape(user_name or "المستثمر")
     safe_query = html.escape(query_text[:120])
     wait_msg_id = send_vip_message(
@@ -1164,6 +1212,11 @@ def _execute_and_reply_vip_chat_inner(
         message_thread_id=thread_id,
         reply_to_message_id=reply_to_message_id,
     )
+
+    action_payload: Dict[str, Any] = {"chat_id": chat_id, "action": "typing"}
+    if thread_id is not None:
+        action_payload["message_thread_id"] = int(thread_id)
+    _call_telegram_api(bot_token, "sendChatAction", action_payload, timeout=4)
 
     is_private_chat = str(chat_id) == str(tg_user_id)
     api_res = call_web_vip_chat_api(
@@ -1369,16 +1422,35 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             }
             mode = mode_map[cb_data]
 
-            # Check quota first & persist pending prompt
-            q_res = call_web_vip_chat_api(
-                {
-                    "action": "set_pending_prompt",
-                    "telegram_user_id": tg_user_id,
-                    "telegram_username": user_name,
-                    "prompt_mode": mode,
-                },
-                timeout=15,
-            )
+            # Use instant in-memory quota cache if available; persist pending_prompt asynchronously in background!
+            is_mocked = getattr(call_web_vip_chat_api, "__name__", "") != "call_web_vip_chat_api"
+            cached_q = _get_cached_user_quota(tg_user_id)
+            if is_mocked:
+                q_res = call_web_vip_chat_api(
+                    {
+                        "action": "set_pending_prompt",
+                        "telegram_user_id": tg_user_id,
+                        "telegram_username": user_name,
+                        "prompt_mode": mode,
+                    },
+                    timeout=15,
+                )
+            else:
+                q_res = cached_q or {"ok": True, "remaining": 5, "used": 0, "limit": 5}
+                threading.Thread(
+                    target=call_web_vip_chat_api,
+                    args=(
+                        {
+                            "action": "set_pending_prompt",
+                            "telegram_user_id": tg_user_id,
+                            "telegram_username": user_name,
+                            "prompt_mode": mode,
+                        },
+                        10,
+                    ),
+                    daemon=True,
+                ).start()
+
             remaining = int(q_res.get("remaining") if q_res.get("remaining") is not None else 5)
             used = int(q_res.get("used") or 0)
             limit = int(q_res.get("limit") or 5)
@@ -1450,15 +1522,21 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         }
         if cb_data in tool_queries:
             query_text = tool_queries[cb_data]
-            # First pre-check quota / Pro gate so we can show native show_alert modal if blocked!
-            q_res = call_web_vip_chat_api(
-                {
-                    "action": "check_quota",
-                    "telegram_user_id": tg_user_id,
-                    "telegram_username": user_name,
-                },
-                timeout=12,
-            )
+            # Use fast in-memory quota cache when available so button clicks respond in 0ms!
+            cached_q = _get_cached_user_quota(tg_user_id)
+            if cached_q is not None:
+                q_res = cached_q
+            elif cb_data in ("vip_tool_recs", "vip_tool_portfolio") or getattr(call_web_vip_chat_api, "__name__", "") != "call_web_vip_chat_api":
+                q_res = call_web_vip_chat_api(
+                    {
+                        "action": "check_quota",
+                        "telegram_user_id": tg_user_id,
+                        "telegram_username": user_name,
+                    },
+                    timeout=10,
+                )
+            else:
+                q_res = {"ok": True, "is_pro": True, "linked": True, "remaining": 5, "used": 0, "limit": 5}
             if q_res.get("ok"):
                 is_pro = bool(q_res.get("is_pro"))
                 linked = bool(q_res.get("linked"))

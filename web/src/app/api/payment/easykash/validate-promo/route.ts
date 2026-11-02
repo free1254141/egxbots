@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: aff, error } = await supabase
       .from("affiliates")
-      .select("id,code,name,discount_percent,is_active,clicks_count")
+      .select("id,user_id,code,name,discount_percent,is_active,clicks_count")
       .eq("code", rawCode)
       .eq("is_active", true)
       .maybeSingle();
@@ -32,6 +33,21 @@ export async function GET(req: NextRequest) {
         valid: false,
         error: "كود الخصم غير صحيح أو منتهي الصلاحية",
       });
+    }
+
+    // Prevent self-referral in UI so it matches backend checkout validation
+    try {
+      const auth = await createSupabaseServerClient(req);
+      const { data: { user } } = await auth.auth.getUser();
+      if (user?.id && aff.user_id && String(aff.user_id) === String(user.id)) {
+        return NextResponse.json({
+          valid: false,
+          self_referral: true,
+          error: "لا يمكنك استخدام كود الإحالة الخاص بك على حسابك الشخصي",
+        });
+      }
+    } catch {
+      // Guest user or session check skipped
     }
 
     if (track) {

@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const backendUrl = (
     process.env.PYTHON_BACKEND_URL ||
     process.env.TRADING_SIGNALS_API_URL ||
-    "http://127.0.0.1:8000"
+    (process.env.VERCEL ? "https://weeasdwee-ai-bot.hf.space" : "http://127.0.0.1:8000")
   ).replace(/\/$/, "");
 
   try {

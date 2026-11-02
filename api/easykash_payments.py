@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import os
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
@@ -290,16 +290,18 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
     commission_amount = Decimal("0.00")
     if clean_promo:
         aff_check = validate_affiliate_code(clean_promo, track_click=False)
-        if aff_check.get("valid") and str(aff_check.get("user_id") or "") != str(user_id):
+        if aff_check.get("valid"):
+            if str(aff_check.get("user_id") or "") == str(user_id):
+                raise ValueError("لا يمكنك استخدام كود الإحالة الخاص بك على حسابك الشخصي")
             affiliate_info = aff_check
             disc_pct = Decimal(str(aff_check.get("discount_percent") or 0))
             comm_pct = Decimal(str(aff_check.get("commission_percent") or 25))
             if disc_pct > 0:
-                discount_amount = (amount * disc_pct / Decimal("100")).quantize(Decimal("1"))
+                discount_amount = (amount * disc_pct / Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
                 if amount - discount_amount < Decimal("20.00"):
                     discount_amount = max(Decimal("0.00"), amount - Decimal("20.00"))
                 amount = (amount - discount_amount).quantize(Decimal("0.01"))
-            commission_amount = (amount * comm_pct / Decimal("100")).quantize(Decimal("0.01"))
+            commission_amount = (amount * comm_pct / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     row = {
         "id": order_id,

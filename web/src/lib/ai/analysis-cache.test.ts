@@ -76,11 +76,16 @@ describe("buildAnalysisCacheKey (smart intent filtering & demand-driven keys)", 
 
     test("canonical quick tools and repeatable market-wide queries are cached", () => {
         expect(buildAnalysisCacheKey("ملخص السوق وأقوى الأسهم", [], false)).toBe("vip_market_summary");
+        expect(buildAnalysisCacheKey("أقوى الأسهم النهارده وملخص السوق", [], false)).toBe("vip_market_summary");
         expect(buildAnalysisCacheKey("أقوى الأسهم النهارده", [], false)).toBe("vip_top_stocks");
         expect(buildAnalysisCacheKey("أسهم التجميع والسيولة", [], false)).toBe("vip_accumulation");
+        expect(buildAnalysisCacheKey("أقوى أسهم التجميع والسيولة الذكية اليوم", [], false)).toBe("vip_accumulation");
         expect(buildAnalysisCacheKey("المسح الفني", [], false)).toBe("vip_tech_screener");
+        expect(buildAnalysisCacheKey("أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات", [], false)).toBe("vip_tech_screener");
         expect(buildAnalysisCacheKey("أخبار السوق", [], false)).toBe("vip_market_news");
+        expect(buildAnalysisCacheKey("أهم أخبار وإفصاحات البورصة المصرية اليوم", [], false)).toBe("vip_market_news");
         expect(buildAnalysisCacheKey("هات كل التوصيات المفتوحه", [], false)).toBe("vip_open_recommendations");
+        expect(buildAnalysisCacheKey("هات كل التوصيات المفتوحة حالياً", [], false)).toBe("vip_open_recommendations");
         expect(buildAnalysisCacheKey("عايز توصيات الاسبوع الحالى", [], false)).toBe("vip_recs_this_week");
         expect(buildAnalysisCacheKey("عايز توصيات الاسبوع اللى فات", [], false)).toBe("vip_recs_last_week");
         expect(buildAnalysisCacheKey("اي القطاعات الاقوى النهارده", [], false)).toBe("vip_top_sectors");

@@ -15,7 +15,7 @@ function getBackendUrl(): string {
   return (
     process.env.PYTHON_BACKEND_URL ||
     process.env.TRADING_SIGNALS_API_URL ||
-    "http://127.0.0.1:8000"
+    (process.env.VERCEL ? "https://weeasdwee-ai-bot.hf.space" : "http://127.0.0.1:8000")
   ).replace(/\/$/, "");
 }
 
@@ -45,9 +45,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         return NextResponse.json({ error: "صيغة الوقت غير صالحة (HH:MM)" }, { status: 400 });
       }
       updates.scheduled_time = t;
+      // Reset last_run_date when user changes scheduled time so the new time can fire today
+      updates.last_run_date = null;
     }
     if (body.days_of_week !== undefined) {
       updates.days_of_week = body.days_of_week === "all_days" ? "all_days" : "trading_days";
+      updates.last_run_date = null;
     }
     if (body.telegram_chat_id !== undefined) {
       updates.telegram_chat_id = body.telegram_chat_id ? String(body.telegram_chat_id).trim() : null;

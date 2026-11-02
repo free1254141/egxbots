@@ -152,13 +152,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const { data: existingAff } = await supabase
+      .from("affiliates")
+      .select("id,phone")
+      .eq("code", code)
+      .maybeSingle();
+
+    const resolvedPhone = phone || existingAff?.phone || "";
+
     const { data, error } = await supabase
       .from("affiliates")
       .upsert(
         {
           code,
           name,
-          phone,
+          phone: resolvedPhone,
           payment_method: paymentMethod,
           discount_percent: discountPercent,
           commission_percent: commissionPercent,

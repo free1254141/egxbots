@@ -309,20 +309,21 @@ def test_unprompted_group_chat_is_ignored_without_button_press():
         # Ensure user has no pending prompt
         set_local_pending_prompt(-1002083067817, 556677, None)
 
+        # Any message in Topic 1680 is directed to ARTORO and processed!
         msg_data = {
             "message": {
                 "message_id": 205,
                 "chat": {"id": -1002083067817, "type": "supergroup"},
                 "message_thread_id": 1680,
                 "from": {"id": 556677, "first_name": "Omar"},
-                "text": "يا جماعة حد اشترى في فوري النهارده؟ إيه رأيكم في السوق؟",
+                "text": "فورى",
             }
         }
         handled = handle_vip_chat_update(msg_data, "TEST_TOKEN")
         assert handled is True
-        # Zero web API calls (no quota deducted) and zero Telegram messages sent by ARTORO
-        assert len(web_calls) == 0
-        assert len(tg_calls) == 0
+        time.sleep(0.15)
+        assert len(web_calls) == 1
+        assert web_calls[0]["message"] == "حلل سهم فورى" 
 
 
 def test_private_bot_button_in_topic_and_direct_private_chat():

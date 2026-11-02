@@ -18,10 +18,16 @@ import {
   Sparkles,
   Gauge,
   Star,
-  ExternalLink
+  ExternalLink,
+  Scale,
+  Calculator,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import Link from "next/link";
 import { formatMarketUpdate } from "@/lib/market-update-time";
+import { computeSingleStockFairValue } from "@/lib/market/fair-value";
 
 interface HistoricalPrice {
   date: string;
@@ -183,6 +189,9 @@ export default function StockDetailClient({
   // Watchlist toast state
   const [watchToast, setWatchToast] = useState<{ msg: string; type: "success" | "info" } | null>(null);
 
+  // Fair value formula toggle
+  const [showFairValueFormula, setShowFairValueFormula] = useState(false);
+
   // Active chart hover point state
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [recommendationMarkers, setRecommendationMarkers] = useState<RecommendationChartMarker[]>([]);
@@ -196,6 +205,18 @@ export default function StockDetailClient({
 
   // Extract fundamentals
   const fundData = fundamentals?.data || {};
+
+  // Fair Value computation
+  const fairValueInfo = useMemo(() => {
+    const close = Number(latestPrice?.close ?? latestTech?.close ?? 0);
+    if (!close || close <= 0) return null;
+    return computeSingleStockFairValue({
+      symbol,
+      close,
+      fundData,
+      latestTech,
+    });
+  }, [symbol, latestPrice, latestTech, fundData]);
   const companyName = fundData.name || fundData.Name || symbol;
   const sector = fundData.sector || fundData.Sector || null;
   const country = fundData.country || fundData.CountryName || (exchange === "EGX" ? "Egypt" : "US");
@@ -570,6 +591,175 @@ export default function StockDetailClient({
           </div>
         </div>
       </div>
+
+      {/* Fair Value & Step-by-Step Calculation Formula Card */}
+      {fairValueInfo && (
+        <div className="app-panel p-6 bg-[var(--app-surface)] border-2 border-emerald-500/30 rounded-none shadow-[4px_4px_0px_0px_rgba(16,185,129,0.3)]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--app-border)]">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-none bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                <Scale className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-black text-[var(--app-text)] font-mono">
+                    {language === "ar" ? "السعر العادل ومؤشر الرخص" : "Fair Value & Valuation"}
+                  </h2>
+                  <span
+                    className={`px-2 py-0.5 text-xs font-black uppercase rounded-none border ${
+                      fairValueInfo.status === "undervalued"
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                        : fairValueInfo.status === "overvalued"
+                        ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                    }`}
+                  >
+                    {fairValueInfo.status === "undervalued"
+                      ? language === "ar" ? "أقل من السعر العادل (رخيص) 🟢" : "Undervalued 🟢"
+                      : fairValueInfo.status === "overvalued"
+                      ? language === "ar" ? "أعلى من السعر العادل (متضخم) 🔴" : "Overvalued 🔴"
+                      : language === "ar" ? "في النطاق العادل ⚖️" : "Fair Range ⚖️"}
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
+                  {language === "ar"
+                    ? `النموذج المعتمد: ${fairValueInfo.modelLabelAr} — تحديث يومي بعد إغلاق الجلسة`
+                    : `Model: ${fairValueInfo.modelType}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {fairValueInfo.isSharia && (
+                <Link
+                  href="/sharia"
+                  className="px-3 py-1.5 text-xs font-bold bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition-colors flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{language === "ar" ? "حاسبة التطهير الشرعي" : "Sharia Cleanser"}</span>
+                </Link>
+              )}
+              <Link
+                href="/fair-value"
+                className="px-3 py-1.5 text-xs font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors flex items-center gap-1.5"
+              >
+                <span>{language === "ar" ? "شاشة السعر العادل للسوق" : "Market Fair Value"}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-5">
+            <div className="p-4 bg-slate-900/30 border border-[var(--app-border)]">
+              <span className="text-xs text-[var(--app-text-faint)] block uppercase tracking-wider font-semibold">
+                {language === "ar" ? "السعر الحالي" : "Current Price"}
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-3xl font-black font-mono text-[var(--app-text)]">
+                  {fairValueInfo.currentPrice.toFixed(2)}
+                </span>
+                <span className="text-sm font-bold font-mono text-[var(--app-text-muted)]">
+                  {currency}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30">
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 block uppercase tracking-wider font-bold">
+                {language === "ar" ? "السعر العادل المستهدف" : "Fair Value Target"}
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-3xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {fairValueInfo.fairValue.toFixed(2)}
+                </span>
+                <span className="text-sm font-bold font-mono text-emerald-600/70 dark:text-emerald-400/70">
+                  {currency}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-900/30 border border-[var(--app-border)]">
+              <span className="text-xs text-[var(--app-text-faint)] block uppercase tracking-wider font-semibold">
+                {language === "ar" ? "هامش الأمان / فرق التقييم" : "Valuation Discount / Upside"}
+              </span>
+              <div
+                className={`text-3xl font-black font-mono mt-1 ${
+                  fairValueInfo.upsidePct > 0
+                    ? "text-emerald-500"
+                    : fairValueInfo.upsidePct < 0
+                    ? "text-rose-500"
+                    : "text-amber-500"
+                }`}
+                dir="ltr"
+              >
+                {fairValueInfo.upsidePct > 0 ? "+" : ""}
+                {fairValueInfo.upsidePct.toFixed(1)}%
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Meter Bar */}
+          <div className="space-y-1 mb-5">
+            <div className="flex justify-between text-xs text-[var(--app-text-faint)]">
+              <span>{language === "ar" ? "متضخم سعرياً" : "Overvalued"}</span>
+              <span className="font-bold text-[var(--app-text)]">{fairValueInfo.modelLabelAr}</span>
+              <span>{language === "ar" ? "رخيص (فرصة قيمة)" : "Undervalued"}</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-gradient-to-l from-emerald-500/40 via-amber-500/30 to-rose-500/40 relative overflow-hidden">
+              <div
+                className="absolute top-0 bottom-0 w-3 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981]"
+                style={{
+                  right: `calc(${Math.max(6, Math.min(94, Math.round(50 + fairValueInfo.upsidePct * 0.9)))}% - 6px)`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Collapsible Step-by-Step Formula Method */}
+          <div className="border border-[var(--app-border)] bg-slate-900/40">
+            <button
+              type="button"
+              onClick={() => setShowFairValueFormula(!showFairValueFormula)}
+              className="w-full flex items-center justify-between p-3 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-white/[0.03] transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Calculator className="w-4 h-4 text-emerald-500" />
+                <span>
+                  {language === "ar"
+                    ? `طريقة ومعادلة حساب السعر العادل لسهم ${symbol} بالتفصيل`
+                    : `Step-by-step Fair Value Calculation Formula for ${symbol}`}
+                </span>
+              </span>
+              {showFairValueFormula ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </button>
+
+            {showFairValueFormula && (
+              <div className="p-4 pt-1 border-t border-[var(--app-border)] text-xs text-[var(--app-text-muted)] space-y-2 leading-relaxed">
+                <div className="font-bold text-[var(--app-text)]">
+                  {fairValueInfo.formulaEquationAr}
+                </div>
+                <div
+                  className="font-mono text-emerald-500 bg-black/40 p-2 border border-[var(--app-border)] text-left"
+                  dir="ltr"
+                >
+                  {fairValueInfo.formulaSubstitutionAr}
+                </div>
+                <ul className="space-y-1.5 pt-1 text-[var(--app-text-muted)]">
+                  {fairValueInfo.formulaStepsAr.map((step, idx) => (
+                    <li key={idx} className="flex items-start gap-1.5">
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Chart & AI Score */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

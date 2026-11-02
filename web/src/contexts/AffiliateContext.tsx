@@ -209,6 +209,35 @@ export function AffiliateProvider({ children }: { children: ReactNode }) {
     [userId]
   );
 
+  // Capture ?ref= or ?promo= referral links on any landing page across the site
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (pathname?.startsWith("/pricing")) return; // PricingClient handles /pricing directly with UI toast
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const rawRef = (params.get("ref") || params.get("promo") || "").trim().toUpperCase();
+      if (!rawRef || rawRef.length > 32) return;
+
+      const trackKey = `egx_tracked_ref_${rawRef}`;
+      const alreadyTracked = sessionStorage.getItem(trackKey) === "1";
+
+      fetch(
+        `/api/payment/easykash/validate-promo?code=${encodeURIComponent(rawRef)}${alreadyTracked ? "" : "&track=1"}`,
+        { cache: "no-store" }
+      )
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.valid && data?.code) {
+            localStorage.setItem("egx_affiliate_ref", data.code);
+            sessionStorage.setItem(trackKey, "1");
+          }
+        })
+        .catch(() => {});
+    } catch {
+      // ignore storage or URL parse errors
+    }
+  }, [pathname]);
+
   // Load only when relevant (e.g. on /affiliate page or when user opens affiliate feature)
   useEffect(() => {
     if (authLoading || !userId) return;

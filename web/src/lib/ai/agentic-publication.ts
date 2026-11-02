@@ -24,6 +24,7 @@ const memoryTools = new Set(["get_stock", "get_stock_levels", "get_market", "get
 memoryTools.add("apply_chart_strategy"); memoryTools.add("compare_strategies_history");
 memoryTools.add("get_fundamentals"); memoryTools.add("get_sector_peers"); memoryTools.add("get_market_breadth");
 memoryTools.add("screen_stocks"); memoryTools.add("analyze_portfolio_risk");
+memoryTools.add("get_fair_value"); memoryTools.add("get_sharia_cleanser"); memoryTools.add("get_price_traps"); memoryTools.add("rebalance_portfolio");
 /** Remove duplicate aliases/payload text, without removing source, dates, identity or unknown values. */
 export function compactEvidence(record: AgenticEvidence): AgenticEvidence {
     const data = { ...record.data };
@@ -108,7 +109,11 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         get_fundamentals: "stock_fundamentals", get_sector_peers: "stock_fundamentals", get_market_breadth: "stock_technical_indicators+deterministic-breadth",
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation",
         enable_autonomous_recommendations: "user_consent+client_action",
-        disable_autonomous_recommendations: "user_consent+client_action" } as any)[tool],
+        disable_autonomous_recommendations: "user_consent+client_action",
+        get_fair_value: "stock_fundamentals+stock_technical_indicators+fair-value-engine",
+        get_sharia_cleanser: "sharia_stocks+corporate_actions",
+        get_price_traps: "stock_prices+trap_detector",
+        rebalance_portfolio: "positions+stock_fundamentals+stock_technical_indicators" } as any)[tool],
         data_time: dates.length === 1 ? dates[0] : data?.date || data?.session_date || null, symbols,
         availability: data?.status === "error" ? "error" : data?.availability === "missing" || (!verifiedEmptyScreen && !rows.length && !data?.egx30?.close && !data?.persisted && !data?.strategies?.length)
             ? "missing" : plannedPartial || missing || data?.valuation_complete === false || data?.scan_complete === false
@@ -453,6 +458,10 @@ function groundedTableDate(cell: string, dates: string[]): string | null {
 function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     const text = label.replace(/[*_]/g, "");
     // Specific financial labels take precedence over generic profit/currency words.
+    if (/(?:السعر|سعر|القيمة|قيمة).*(?:العادل|العادلة)|fair.?value/i.test(text)) return ["fair_value"];
+    if (/(?:نسبة|هامش).*(?:الرخص|التضخم|الفرق|علاوة|خصم)|upside/i.test(text)) return ["upside_pct"];
+    if (/مبلغ.*تطهير|تطهير/i.test(text)) return ["purification_amount"];
+    if (/زكاة/i.test(text)) return ["zakat_amount"];
     if (/مضاعف.*ربحي|مكرر.*ربحي|P\/?E|pe.?ratio/i.test(text)) return ["pe_ratio"];
     if (/ربحية.*سهم|EPS/i.test(text)) return ["eps"];
     if (/القيمة السوقية للشركة|قيمة.*سوقية.*شركة|market.?cap/i.test(text)) return ["market_cap"];
@@ -809,7 +818,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     if (corporateReadClaim && !(currentEvidence || evidence).some(e => e.tool === "get_corporate_actions" && e.availability !== "error"))
         reasons.push("corporate_action_read_claim_without_tool");
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|enable_autonomous_recommendations|disable_autonomous_recommendations|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|enable_autonomous_recommendations|disable_autonomous_recommendations|get_fair_value|get_sharia_cleanser|get_price_traps|rebalance_portfolio|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");

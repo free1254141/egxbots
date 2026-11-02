@@ -10,6 +10,13 @@ import { hasActiveProSubscription, paymentsEnabled, planLimits } from "./plan-ga
 import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
 import { getCanonicalStockName } from "./stock-names";
 import { calculateStockCompositeScore } from "./stock-scoring";
+import { computeSingleStockFairValue } from "../market/fair-value";
+import {
+    executeFairValueTool,
+    executeShariaCleanserTool,
+    executePriceTrapsTool,
+    executeRebalancePortfolioTool
+} from "./feature-tools";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -137,6 +144,10 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         if (toolName === "get_live_quote") return await executeLiveQuoteTool(normalized,checkedClient(executionSupabase(supabase)));
         if (PLANNED_READ_TOOL_NAMES.has(toolName)) return await executePlannedReadTool(toolName, normalized, checkedClient(executionSupabase(supabase)), todayInCairo());
         if (chartTool) return await executeChartStrategyTool(toolName, normalized, checkedClient(executionSupabase(supabase)), chartHistoryCache);
+        if (toolName === "get_fair_value") return await executeFairValueTool(normalized, checkedClient(executionSupabase(supabase)));
+        if (toolName === "get_sharia_cleanser") return await executeShariaCleanserTool(normalized, checkedClient(executionSupabase(supabase)));
+        if (toolName === "get_price_traps") return await executePriceTrapsTool(normalized, checkedClient(executionSupabase(supabase)), true);
+        if (toolName === "rebalance_portfolio") return await executeRebalancePortfolioTool(normalized, checkedClient(executionSupabase(supabase)), userId);
         return await executeRawTool(toolName,normalized,checkedClient(executionSupabase(supabase)),userId);
     } catch (error:any) {
         if (toolName === "manage_portfolio") {
@@ -217,7 +228,7 @@ async function executeRawTool(
 
                 const { data: indRows } = await supabase
                     .from("stock_technical_indicators")
-                    .select("date, close, change_pct, volume, r_vol, rsi_14, macd, macd_signal, macd_histogram, bb_upper, bb_lower, ema_50, ema_200, king_ai_score, egx_ai_score")
+                    .select("date, close, change_pct, volume, r_vol, rsi_14, macd, macd_signal, macd_histogram, bb_upper, bb_lower, ema_50, ema_200, vwap_20, king_ai_score, egx_ai_score")
                     .eq("exchange", "EGX").eq("symbol", sym)
                     .order("date", { ascending: false })
                     .limit(1);
@@ -267,6 +278,12 @@ async function executeRawTool(
                     .eq("symbol", sym)
                     .order("scan_date", { ascending: false })
                     .limit(1);
+                const { data: fundRows } = await supabase
+                    .from("stock_fundamentals")
+                    .select("symbol, name, name_ar, data")
+                    .eq("exchange", "EGX")
+                    .eq("symbol", sym)
+                    .limit(1);
 
                 const { data: pRows } = await supabase
                     .from("stock_prices")
@@ -306,6 +323,35 @@ async function executeRawTool(
                         wyckoff_phase: wyckoff.wyckoff_phase,
                         is_sharia_compliant: isShariaCompliant(sym),
                     });
+
+                    let fairValueData: Record<string, any> = {};
+                    try {
+                        const val = computeSingleStockFairValue({
+                            symbol: sym,
+                            close: ind.close,
+                            fundRow: fundRows?.[0] || null,
+                            fundData: fundRows?.[0]?.data || null,
+                            latestTech: ind,
+                        });
+                        fairValueData = {
+                            fair_value: val.fairValue,
+                            fair_value_upside_pct: val.upsidePct,
+                            fair_value_status: val.status,
+                            fair_value_status_ar:
+                                val.status === "undervalued"
+                                    ? "أقل من السعر العادل (رخيص) 🟢"
+                                    : val.status === "overvalued"
+                                    ? "أعلى من السعر العادل (متضخم) 🔴"
+                                    : "في النطاق العادل ⚖️",
+                            fair_value_model: val.modelLabelAr,
+                            fair_value_model_type: val.modelType,
+                            fair_value_formula_ar: val.formulaEquationAr,
+                            fair_value_substitution_ar: val.formulaSubstitutionAr,
+                            fair_value_steps_ar: val.formulaStepsAr,
+                        };
+                    } catch {
+                        // ignore
+                    }
                     return {
                         symbol: sym,
                         name: stockData.name_ar || stockData.name || sym,
@@ -341,6 +387,7 @@ async function executeRawTool(
                         composite_grade: composite.grade,
                         composite_verdict: composite.verdictLabel,
                         composite_breakdown: composite.breakdownSummary,
+                        ...fairValueData,
                         ...history
                     };
                 }
@@ -1737,7 +1784,7 @@ async function executeRawTool(
             const data = await mapStockReads(symbols, async sym => {
                 const { data: indRows } = await supabase
                     .from("stock_technical_indicators")
-                    .select("symbol, close, change_pct, r_vol, rsi_14, macd, macd_signal, macd_histogram, ema_50, ema_200, bb_upper, bb_lower, king_ai_score, egx_ai_score, date")
+                    .select("symbol, close, change_pct, r_vol, rsi_14, macd, macd_signal, macd_histogram, ema_50, ema_200, vwap_20, bb_upper, bb_lower, king_ai_score, egx_ai_score, date")
                     .eq("exchange", "EGX").eq("symbol", sym)
                     .order("date", { ascending: false })
                     .limit(1);
@@ -1746,6 +1793,12 @@ async function executeRawTool(
                     .select("scan_date, acc_score, dist_score, wyckoff_phase, vol_ratio, signal, consecutive_acc_days, consecutive_dist_days")
                     .eq("symbol", sym)
                     .order("scan_date", { ascending: false })
+                    .limit(1);
+                const { data: fundRows } = await supabase
+                    .from("stock_fundamentals")
+                    .select("symbol, name, name_ar, data")
+                    .eq("exchange", "EGX")
+                    .eq("symbol", sym)
                     .limit(1);
                 const quote = await reconcileStockQuote(supabase, sym, indRows?.[0]);
                 const wyckoff = wyckoffRows?.[0] || {};
@@ -1767,6 +1820,32 @@ async function executeRawTool(
                         wyckoff_phase: wyckoff.wyckoff_phase,
                         is_sharia_compliant: isShariaCompliant(sym),
                     });
+
+                    let fairValueData: Record<string, any> = {};
+                    try {
+                        const val = computeSingleStockFairValue({
+                            symbol: sym,
+                            close: quote.close,
+                            fundRow: fundRows?.[0] || null,
+                            fundData: fundRows?.[0]?.data || null,
+                            latestTech: { ...quote, vwap_20: indRows?.[0]?.vwap_20 },
+                        });
+                        fairValueData = {
+                            fair_value: val.fairValue,
+                            fair_value_upside_pct: val.upsidePct,
+                            fair_value_status: val.status,
+                            fair_value_status_ar:
+                                val.status === "undervalued"
+                                    ? "أقل من السعر العادل (رخيص) 🟢"
+                                    : val.status === "overvalued"
+                                    ? "أعلى من السعر العادل (متضخم) 🔴"
+                                    : "في النطاق العادل ⚖️",
+                            fair_value_model: val.modelLabelAr,
+                            fair_value_model_type: val.modelType,
+                        };
+                    } catch {
+                        // ignore
+                    }
                     return {
                         symbol: sym,
                         name_ar: canonical.name_ar,
@@ -1788,6 +1867,7 @@ async function executeRawTool(
                         composite_score: composite.totalScore,
                         composite_grade: composite.grade,
                         composite_verdict: composite.verdictLabel,
+                        ...fairValueData,
                     };
                 } else {
                     return {

@@ -605,7 +605,16 @@ export async function POST(req: NextRequest) {
                     metadata: {
                         ...commonMeta,
                         tables: result.tables || [],
-                        usage: (result as any).usage || null,
+                        usage: isCached
+                            ? {
+                                  prompt_tokens: 0,
+                                  completion_tokens: 0,
+                                  total_tokens: 0,
+                                  provider_calls: 0,
+                                  tool_calls: Array.isArray(result.tools?.results) ? result.tools.results.length : 0,
+                                  model: "cache (0 tokens)",
+                              }
+                            : ((result as any).usage || null),
                         response_origin: isCached ? "cache" : ((result as any).response_origin || "llm"),
                         publication_review: (result as any).publication_review || null,
                         cached: isCached,

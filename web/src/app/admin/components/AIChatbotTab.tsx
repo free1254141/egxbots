@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { 
     Loader2, Sparkles, MessageSquare, Link as LinkIcon, User, RefreshCw, 
     Search, Clock, Trash2, Maximize, Minimize, Database, 
-    Zap, Crown, ArrowDown, Folder, Archive, CheckCircle2 
+    Zap, Crown, ArrowDown, ArrowUp, Folder, Archive, CheckCircle2 
 } from "lucide-react";
 import { toast } from "sonner";
 import { ChatUsageDetails, UserChatCost } from "./ChatUsageDetails";
@@ -235,6 +235,19 @@ export default function AIChatbotTab() {
         if (!activeSession) return selectedGroup?.logs || [];
         return activeSession.logs;
     }, [activeSession, selectedGroup]);
+
+    const ADMIN_INITIAL_VISIBLE_COUNT = 20;
+    const [adminVisibleCount, setAdminVisibleCount] = useState<number>(ADMIN_INITIAL_VISIBLE_COUNT);
+
+    useEffect(() => {
+        setAdminVisibleCount(ADMIN_INITIAL_VISIBLE_COUNT);
+    }, [activeSession?.id]);
+
+    const hasMoreAdminOlder = activeMessages.length > adminVisibleCount;
+    const visibleActiveMessages = useMemo(() => {
+        if (activeMessages.length <= adminVisibleCount) return activeMessages;
+        return activeMessages.slice(activeMessages.length - adminVisibleCount);
+    }, [activeMessages, adminVisibleCount]);
 
     // Read status for user and session
     const lastSessionReadTime = useMemo(() => {
@@ -649,10 +662,23 @@ export default function AIChatbotTab() {
                                             </div>
                                             {/* Conversation Timeline */}
                                             <div ref={messagesContainerRef} className="flex-1 min-h-0 min-w-0 overflow-y-auto p-2 sm:p-4 space-y-4 relative">
-                                                {activeMessages.map((log, index) => {
+                                                {hasMoreAdminOlder && (
+                                                    <div className="flex justify-center py-2 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setAdminVisibleCount(prev => prev + 20)}
+                                                            className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black border border-zinc-300 dark:border-zinc-700 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 shadow-sm transition-all active:scale-95 cursor-pointer"
+                                                            title="تحميل الرسائل السابقة"
+                                                        >
+                                                            <ArrowUp className="w-3.5 h-3.5 text-indigo-500" />
+                                                            <span>تحميل رسائل سابقة ({activeMessages.length - adminVisibleCount} متبقية)</span>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                {visibleActiveMessages.map((log, index) => {
                                                     const msgTime = new Date(log.created_at).getTime();
                                                     const isMsgUnread = lastSessionReadTime > 0 && msgTime > lastSessionReadTime;
-                                                    const isFirstUnread = isMsgUnread && (index === 0 || new Date(activeMessages[index - 1].created_at).getTime() <= lastSessionReadTime);
+                                                    const isFirstUnread = isMsgUnread && (index === 0 || new Date(visibleActiveMessages[index - 1].created_at).getTime() <= lastSessionReadTime);
 
                                                     return (
                                                         <div 

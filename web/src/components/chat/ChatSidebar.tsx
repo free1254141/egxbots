@@ -19,6 +19,7 @@ interface ChatSidebarProps {
     onRenameSession: (id: string, newTitle: string) => void;
     isOpen: boolean;
     onToggle: () => void;
+    isExpanded?: boolean;
 }
 
 export function ChatSidebar({
@@ -29,7 +30,8 @@ export function ChatSidebar({
     onDeleteSession,
     onRenameSession,
     isOpen,
-    onToggle
+    onToggle,
+    isExpanded = false
 }: ChatSidebarProps) {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editTitle, setEditTitle] = useState("");
@@ -64,7 +66,10 @@ export function ChatSidebar({
                 rounded-none border-0 bg-white shadow-[-18px_0_45px_rgba(2,6,23,0.22)]
                 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:w-[290px] max-md:max-w-[88vw] max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
                 dark:bg-black
-                md:relative md:w-[250px] md:rounded-[22px] md:border md:border-slate-200/80 md:bg-white md:shadow-[0_18px_55px_rgba(2,6,23,0.16)] dark:md:border-white/20 dark:md:bg-black dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)] md:z-auto
+                ${isExpanded
+                    ? "md:relative md:w-[260px] md:rounded-none md:border-y-0 md:border-l-0 md:border-r md:border-zinc-200 dark:md:border-white/20 md:bg-white dark:md:bg-black md:shadow-none md:z-auto"
+                    : "md:relative md:w-[250px] md:rounded-[22px] md:border md:border-slate-200/80 md:bg-white md:shadow-[0_18px_55px_rgba(2,6,23,0.16)] dark:md:border-white/20 dark:md:bg-black dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)] md:z-auto"
+                }
             `}>
                 {/* Top Header & New Chat Button */}
                 <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-200/80 p-3 dark:border-white/20">

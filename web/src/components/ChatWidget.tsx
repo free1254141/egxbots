@@ -395,6 +395,7 @@ export default function ChatWidget() {
         };
     }, [modelMenuOpen]);
 
+    const isInitialPositionedRef = useRef(false);
     const hasMoreOlder = messages.length > visibleCount;
     const visibleMessages = useMemo(() => {
         if (messages.length <= visibleCount) return messages;
@@ -411,14 +412,16 @@ export default function ChatWidget() {
         setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
 
         requestAnimationFrame(() => {
-            if (container) {
-                const newScrollHeight = container.scrollHeight;
-                const heightDiff = newScrollHeight - prevScrollHeight;
-                if (heightDiff > 0) {
-                    container.scrollTop = prevScrollTop + heightDiff;
+            requestAnimationFrame(() => {
+                if (container && prevScrollHeight > 0) {
+                    const newScrollHeight = container.scrollHeight;
+                    const heightDiff = newScrollHeight - prevScrollHeight;
+                    if (heightDiff > 0) {
+                        container.scrollTop = prevScrollTop + heightDiff;
+                    }
                 }
-            }
-            setIsLoadingOlder(false);
+                setIsLoadingOlder(false);
+            });
         });
     }, [visibleCount, messages.length, isLoadingOlder]);
 
@@ -427,7 +430,8 @@ export default function ChatWidget() {
         const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
         setIsUserScrolledUp(!isAtBottom);
 
-        if (scrollTop < 80 && hasMoreOlder && !isLoadingOlder) {
+        // Only auto-trigger when initial positioning at bottom is complete and user deliberately scrolled to the top edge (< 40px)
+        if (isInitialPositionedRef.current && isUserScrolledUp && scrollTop < 40 && hasMoreOlder && !isLoadingOlder) {
             handleLoadMoreOlder();
         }
     };
@@ -446,6 +450,18 @@ export default function ChatWidget() {
     useEffect(() => {
         setIsUserScrolledUp(false);
         setVisibleCount(INITIAL_VISIBLE_COUNT);
+        isInitialPositionedRef.current = false;
+
+        // Instant scroll to bottom so the container doesn't animate through top edge
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        bottomRef.current?.scrollIntoView({ behavior: "instant" as ScrollBehavior });
+
+        const timer = setTimeout(() => {
+            isInitialPositionedRef.current = true;
+        }, 400);
+        return () => clearTimeout(timer);
     }, [activeSessionId]);
 
     useEffect(() => {
@@ -563,8 +579,8 @@ export default function ChatWidget() {
 
     return (
         <div 
-                        className={isChatRoute || isExpanded ? "fixed inset-0 z-[9999] flex flex-col h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
-                fixed z-[9999] flex gap-1 bg-transparent origin-bottom-right
+            className={isChatRoute || isExpanded ? "fixed inset-0 z-[9999] flex flex-row h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
+                fixed z-[9999] flex flex-row gap-2 bg-transparent origin-bottom-right
                 animate-in fade-in slide-in-from-bottom-5 duration-200
                 max-md:fixed max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:w-full max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
                 md:bottom-4 md:right-4 md:w-[min(95vw,1080px)] md:h-[min(92vh,840px)] md:rounded-[24px] md:p-0
@@ -582,6 +598,7 @@ export default function ChatWidget() {
                     onRenameSession={renameSession}
                     isOpen={isSidebarOpen}
                     onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+                    isExpanded={isExpanded || isChatRoute}
                 />
             )}
 

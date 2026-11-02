@@ -468,6 +468,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                         }
                         void fetchSessionMessages(latestServerSession.id);
                     }
+                } else if (activeId && activeExistsOnServer && !activeSessionIsSending) {
+                    // Always sync latest messages for the active room from server
+                    void fetchSessionMessages(activeId);
                 }
                 setRemainingQuota(data.remaining_quota);
                 if (typeof data.quota_limit === "number") setQuotaLimit(data.quota_limit);

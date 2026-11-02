@@ -13,6 +13,7 @@ import { usePortfolio, type PortfolioRow, type PortfolioSnapshot } from "@/conte
 import PortfolioPerformanceDashboard from "./PortfolioPerformanceDashboard";
 import PortfolioOverview from "./PortfolioOverview";
 import PortfolioTransactions from "./PortfolioTransactions";
+import PortfolioRebalancerModal from "./PortfolioRebalancerModal";
 import { usePortfolioReport } from "./usePortfolioReport";
 import styles from "./MyPortfolioSection.module.css";
 
@@ -287,6 +288,7 @@ export default function MyPortfolioSection({ onPortfolioUpdated }: { onPortfolio
                                 <MessageSquare className="h-4 w-4" />
                                 {isAr ? "حلل محفظتي" : "Analyze Portfolio"}
                             </button>
+                            <PortfolioRebalancerModal disabled={positions.length === 0} isAr={isAr} />
                         </>
                     )}
 

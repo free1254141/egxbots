@@ -44,12 +44,13 @@ export async function GET(req: NextRequest) {
     if (!aff) {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name")
+        .select("display_name, username, whatsapp_number")
         .eq("id", user.id)
         .maybeSingle();
 
       const displayName =
-        profile?.full_name ||
+        profile?.display_name ||
+        profile?.username ||
         user.user_metadata?.full_name ||
         user.user_metadata?.name ||
         (user.email ? user.email.split("@")[0] : "شريك EGX BOTS");
