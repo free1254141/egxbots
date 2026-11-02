@@ -5,7 +5,7 @@ import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
 
 export const runtime = "nodejs";
-export const revalidate = 86400;
+export const revalidate = 3600;
 export const preferredRegion = "fra1";
 
 export interface TrapSignalRow {
@@ -41,6 +41,33 @@ function finite(value: unknown): number | null {
 const getCachedTrapsSnapshot = unstable_cache(
   async (): Promise<TrapsSnapshot> => {
     const supabase = getSupabaseServiceClient({ cacheMarketData: true });
+
+    // 1. Try precomputed daily traps cache first
+    try {
+      const { data: cacheRow } = await supabase
+        .from("market_cache")
+        .select("payload, computed_at")
+        .eq("cache_key", "scanner_traps_EGX")
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        cacheRow?.payload &&
+        Array.isArray(cacheRow.payload.bearTraps) &&
+        cacheRow.payload.bearTraps.length > 0
+      ) {
+        return {
+          asOf: cacheRow.payload.asOf || null,
+          bearTraps: cacheRow.payload.bearTraps.slice(0, 8),
+          bullTraps: (cacheRow.payload.bullTraps || []).slice(0, 8),
+          totalBearTraps: cacheRow.payload.totalBearTraps ?? cacheRow.payload.bearTraps.length,
+          totalBullTraps: cacheRow.payload.totalBullTraps ?? (cacheRow.payload.bullTraps || []).length,
+        };
+      }
+    } catch (e) {
+      console.warn("[api/scan/traps] market_cache read fallback:", e);
+    }
+
     const { data: latestRows, error: latestError } = await supabase
       .from("stock_technical_indicators")
       .select("date")

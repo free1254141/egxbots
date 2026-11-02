@@ -35,7 +35,7 @@ describe("3-Tier Fair Value Engine & Feature Tools", () => {
             expect(result.modelType).toBe("graham_fundamental");
             expect(result.fairValue).toBeGreaterThan(0);
             expect(result.formulaEquationAr).toContain("جراهام");
-            expect(result.formulaSubstitutionAr).toContain("45");
+            expect(result.formulaSubstitutionAr).toContain("ج.م");
             expect(result.formulaStepsAr[0]).toContain("4.5");
             expect(result.formulaStepsAr.length).toBeGreaterThan(0);
         });

@@ -67,9 +67,9 @@ export async function POST(req: NextRequest) {
 
     // 1. Fetch positions, profile, subscriptions, and current quota usage in parallel
     const [posRes, profileRes, subRes, limitRowsRes] = await Promise.all([
-      supabase
+      serviceClient
         .from("positions")
-        .select("id, symbol, quantity, entry_price, target_price, stop_loss_price, created_at")
+        .select("id, symbol, name, quantity, entry_price, target_price, stop_price, created_at, status")
         .eq("user_id", user.id)
         .eq("status", "open")
         .limit(50),
@@ -92,7 +92,34 @@ export async function POST(req: NextRequest) {
         .gte("date", calMonthStartStr),
     ]);
 
-    const openPositions = posRes.data || [];
+    let openPositions = (posRes.data || []).map((p: any) => ({
+      ...p,
+      symbol: String(p.symbol || "").toUpperCase().replace(/\.CA$/, ""),
+      quantity: Number(p.quantity || 0),
+      entry_price: Number(p.entry_price || 0),
+    }));
+
+    if (openPositions.length === 0) {
+      try {
+        const { getPortfolioSnapshot } = await import("@/lib/ai/portfolio-tools");
+        const snap = await getPortfolioSnapshot(serviceClient, user.id);
+        if (snap.positions && snap.positions.length > 0) {
+          openPositions = snap.positions.map((p: any) => ({
+            id: p.id,
+            symbol: String(p.symbol || "").toUpperCase().replace(/\.CA$/, ""),
+            name: p.name,
+            quantity: Number(p.quantity || 0),
+            entry_price: Number(p.entry_price || p.last_price || 0),
+            current_price: p.last_price,
+            market_value: p.market_value,
+            created_at: p.added_at,
+          }));
+        }
+      } catch (e) {
+        console.warn("[rebalance] fallback snapshot failed:", e);
+      }
+    }
+
     if (openPositions.length === 0) {
       return NextResponse.json(
         { error: "محفظتك فارغة حالياً. أضف أسهماً إلى محفظتك أولاً لتشغيل إعادة التدوير الذكي." },
@@ -198,11 +225,11 @@ export async function POST(req: NextRequest) {
 
     const rawHoldings = openPositions.map((pos: any) => {
       const sym = String(pos.symbol || "").trim().toUpperCase();
-      const qty = Math.max(0, Number(pos.quantity) || 0);
-      const entry = Math.max(0, Number(pos.entry_price) || 0);
+      const qty = Math.max(1, Number(pos.quantity) || 100);
       const ind = indMap.get(sym);
       const fv = fvMap.get(sym);
-      const currentPrice = Number(ind?.close || fv?.currentPrice || entry || 0);
+      const currentPrice = Number(ind?.close || fv?.currentPrice || pos.current_price || pos.entry_price || 1);
+      const entry = Math.max(0.01, Number(pos.entry_price) || currentPrice);
       const marketValue = qty * currentPrice;
       totalStocksValue += marketValue;
       return { sym, qty, entry, currentPrice, marketValue, ind, fv };
