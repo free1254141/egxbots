@@ -241,6 +241,7 @@ export default function ChatWidget() {
     const isChartRoute = pathname === "/chart" || pathname.startsWith("/chart");
     const [input, setInput] = useState("");
     const [isExpanded, setIsExpanded] = useState(false);
+    const isWideView = isExpanded || isChatRoute;
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
     const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
     const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -562,16 +563,12 @@ export default function ChatWidget() {
 
     return (
         <div 
-            className={isChatRoute ? "fixed inset-0 z-[9999] flex flex-col h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
+                        className={isChatRoute || isExpanded ? "fixed inset-0 z-[9999] flex flex-col h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
                 fixed z-[9999] flex gap-1 bg-transparent origin-bottom-right
                 animate-in fade-in slide-in-from-bottom-5 duration-200
                 max-md:fixed max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:w-full max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
-                md:bottom-6 md:right-6 md:rounded-[32px] md:p-3 md:min-w-[400px] md:min-h-[320px] md:max-w-[100vw] md:max-h-[100vh]
-                transition-[width,height] duration-200
-                ${isExpanded 
-                    ? "w-full h-[100dvh] md:w-[calc(100vw-3rem)] md:h-[calc(100vh-3rem)]"
-                    : "w-full h-[100dvh] md:w-[740px] md:h-[680px]"
-                }
+                md:bottom-4 md:right-4 md:w-[min(95vw,1080px)] md:h-[min(92vh,840px)] md:rounded-[24px] md:p-0
+                transition-all duration-200
             `}
         >
             {/* Sidebar Drawer */}
@@ -589,7 +586,7 @@ export default function ChatWidget() {
             )}
 
             {/* Main Chat Container */}
-            <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${isChatRoute ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
+            <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${(isChatRoute || isExpanded) ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
                 {/* Header */}
                 <div className="relative z-30 flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0">
                     <div className="flex items-center gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight">
@@ -907,7 +904,7 @@ export default function ChatWidget() {
                             )}
 
                             {messages.length === 0 && (
-                                <div className="max-w-2xl mx-auto w-full py-4 px-2 space-y-6 dir-rtl animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className={`mx-auto w-full py-4 px-2 space-y-6 dir-rtl animate-in fade-in slide-in-from-bottom-2 duration-300 ${isWideView ? "max-w-5xl lg:max-w-6xl xl:max-w-7xl" : "max-w-2xl"}`}>
                                     {/* Header & Logo */}
                                     <div className="flex flex-col items-center text-center space-y-2.5">
                                         <div className="relative">
@@ -1062,7 +1059,7 @@ export default function ChatWidget() {
                                 return (
                                 <div
                                     key={msg.id || `msg-${originalIdx}`}
-                                    className="flex gap-2 sm:gap-4 w-full max-w-3xl mx-auto min-w-0"
+                                    className={`flex gap-2 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
                                 >
                                     <div className={`
                                         h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
@@ -1120,7 +1117,7 @@ export default function ChatWidget() {
                             })}
 
                             {isLoading && !messages[messages.length - 1]?.content && (
-                                <div className="flex gap-3 w-full max-w-3xl mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300">
+                                <div className={`flex gap-3 w-full mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
                                     <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
                                         <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" />
                                     </div>
@@ -1156,6 +1153,7 @@ export default function ChatWidget() {
                             )}
                         </>
                     )}
+                    <div className="h-6 shrink-0" />
                     <div ref={bottomRef} />
                 </div>
                 {isUserScrolledUp && messages.length > 0 && (
@@ -1176,7 +1174,7 @@ export default function ChatWidget() {
                 <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
                     {isInitializing || accessError ? null : user ? (
                         <>
-                        <form onSubmit={handleSubmit} className="space-y-2">
+                        <form onSubmit={handleSubmit} className={`space-y-2 mx-auto w-full transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
                             {/* Image Previews List */}
                             {imagePreviews.length > 0 && (
                                 <div className="flex items-center gap-2 overflow-x-auto pb-1">

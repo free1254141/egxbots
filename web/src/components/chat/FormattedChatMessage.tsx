@@ -1345,7 +1345,7 @@ export function FormattedChatMessage({
                             <div 
                                 className={`${
                                     block.stocks.length === 1 
-                                        ? "w-full max-w-xl mx-auto" 
+                                        ? "w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto" 
                                         : "grid grid-cols-1 md:grid-cols-2 gap-4"
                                 }`}
                             >
@@ -1385,7 +1385,7 @@ export function FormattedChatMessage({
                     );
                 } else if (block.type === "stock_card") {
                     return (
-                        <div key={bIdx} className="my-4 w-full max-w-xl mx-auto space-y-2">
+                        <div key={bIdx} className="my-4 w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto space-y-2">
                             <StockCard 
                                 stock={block.stock} 
                                 onSymbolClick={(symbol) => {

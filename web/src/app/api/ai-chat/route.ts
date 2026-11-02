@@ -21,6 +21,12 @@ import { generateV2Response, generateV2Stream } from "@/lib/ai/final-v2";
 import { getDeepSeekApiKey, getExperientialApiKey, getNvidiaApiKeys, isUnlimitedChatUser } from "@/lib/ai/server-secrets";
 import { uploadChatImages } from "@/lib/ai/chat-storage";
 import { createChatMessageTimestamps, orderChatMessages } from "@/lib/ai/chat-order";
+import {
+    buildAnalysisCacheKey,
+    getVipAnalysisCache,
+    personalizeCachedAnalysis,
+    setVipAnalysisCache,
+} from "@/lib/ai/analysis-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -850,6 +856,104 @@ export async function POST(req: NextRequest) {
                             sessionState.last_symbols = explicitSymbols;
                         }
 
+                        const isPortfolio = Boolean(detectPortfolioIntent(message || ""));
+                        const cacheKey = !hasImages && !chartContext
+                            ? buildAnalysisCacheKey(message || "", explicitSymbols, isPortfolio)
+                            : null;
+
+                        if (cacheKey) {
+                            const cached = await getVipAnalysisCache(cacheKey, supabase);
+                            if (cached) {
+                                const personalizedReply = await personalizeCachedAnalysis(
+                                    cached.reply,
+                                    userId,
+                                    explicitSymbols[0],
+                                    supabase
+                                );
+                                const streamingTotalLatencyMs = Date.now() - totalRequestStartTime;
+                                sendEvent({ type: "status", status: "ready", message: "Analyzing..." });
+                                if (cached.tables && Array.isArray(cached.tables) && cached.tables.length > 0) {
+                                    sendEvent({ type: "tables", data: cached.tables });
+                                }
+                                sendEvent({ type: "token", content: personalizedReply });
+
+                                const suggestedButtons = sanitizeSuggestedButtons(
+                                    Array.isArray(cached.extra?.suggested_buttons) && cached.extra.suggested_buttons.length > 0
+                                        ? cached.extra.suggested_buttons
+                                        : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
+                                );
+
+                                const provenance = {
+                                    ...(cached.extra?.provenance || {}),
+                                    correlation_id: correlationId,
+                                    cached: true,
+                                    response_origin: "cache",
+                                    suggested_buttons: suggestedButtons,
+                                };
+
+                                if (clientMessageId) {
+                                    await supabase.from("ai_chat_idempotency").update({
+                                        status: "completed",
+                                        response: personalizedReply,
+                                        updated_at: new Date().toISOString()
+                                    }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+                                }
+
+                                if (activeSessionId) {
+                                    const messageTimestamps = createChatMessageTimestamps(requestReceivedAt, Date.now());
+                                    await insertChatMessages(supabase, [
+                                        {
+                                            session_id: activeSessionId,
+                                            user_id: userId,
+                                            role: "user",
+                                            content: sanitizeUserMessage(message || ""),
+                                            client_message_id: clientMessageId || null,
+                                            image_url: finalSavedImageUrl,
+                                            created_at: messageTimestamps.user
+                                        },
+                                        {
+                                            session_id: activeSessionId,
+                                            user_id: userId,
+                                            role: "assistant",
+                                            content: personalizedReply,
+                                            latency_ms: streamingTotalLatencyMs,
+                                            metadata: provenance,
+                                            created_at: messageTimestamps.assistant
+                                        }
+                                    ]);
+                                    await updateSessionState(supabase, activeSessionId, userId, {
+                                        current_symbol: explicitSymbols[0] || sessionState.current_symbol,
+                                        last_symbols: explicitSymbols.length > 0 ? explicitSymbols : sessionState.last_symbols,
+                                        summary: sessionState.summary,
+                                        current_sector: sessionState.current_sector,
+                                    });
+                                }
+
+                                sendEvent({
+                                    type: "done",
+                                    reply: personalizedReply,
+                                    session_id: activeSessionId,
+                                    remaining_quota: calcRemainingQuota(),
+                                    quota_limit: isUnlimited ? 999 : userMonthlyCap,
+                                    is_pro: isUnlimited || userIsPro,
+                                    suggested_buttons: suggestedButtons,
+                                    session_state: {
+                                        current_symbol: explicitSymbols[0] || sessionState.current_symbol,
+                                        last_symbols: explicitSymbols.length > 0 ? explicitSymbols : sessionState.last_symbols,
+                                    },
+                                    tables: cached.tables || [],
+                                    chart_actions: [],
+                                    latency_ms: streamingTotalLatencyMs,
+                                });
+
+                                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                                streamClosed = true;
+                                clearInterval(heartbeat);
+                                controller.close();
+                                return;
+                            }
+                        }
+
                         // Use new pipeline for streaming
                         const pipelineStream = runPipelineStream(
                             message || "",
@@ -979,6 +1083,27 @@ export async function POST(req: NextRequest) {
                                          suggested_buttons: suggestedButtons,
                                      };
                                     if (clientMessageId) await supabase.from("ai_chat_idempotency").update({ status: "completed", response: replyText, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+                                     if (
+                                         cacheKey &&
+                                         replyText &&
+                                         replyText.length > 50 &&
+                                         !streamBlocked &&
+                                         responseMetadata.response_kind === "normal"
+                                     ) {
+                                         setVipAnalysisCache(
+                                             cacheKey,
+                                             {
+                                                 reply: replyText,
+                                                 tables: streamTables || [],
+                                                 tools: { results: toolsResults },
+                                                 extra: {
+                                                     suggested_buttons: suggestedButtons || [],
+                                                     provenance: extractProvenanceFromToolResults(toolsResults, streamTables) || {},
+                                                 },
+                                             },
+                                             supabase
+                                         ).catch((err) => console.warn("[ai-chat] cache save error:", err));
+                                     }
                                     const sessionUpdate = event.data.session_update;
 
                                     const newCount = limitData?.chat_count || 0;

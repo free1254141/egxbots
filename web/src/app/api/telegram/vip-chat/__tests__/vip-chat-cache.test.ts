@@ -71,7 +71,7 @@ jest.mock("@/lib/supabase/route-data", () => {
     };
 });
 
-describe("VIP Chat Route 15-Minute Cache Integration", () => {
+describe("VIP Chat Route Demand-Driven Cache & Smart Tool Bypass", () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
@@ -94,7 +94,7 @@ describe("VIP Chat Route 15-Minute Cache Integration", () => {
         });
     }
 
-    test("first query is a cache miss, runs pipeline, and populates cache", async () => {
+    test("first query is a cache miss, runs pipeline, and warms cache for subsequent asks", async () => {
         const { runPipeline } = require("@/lib/ai/pipeline");
 
         const req1 = makeRequest({
@@ -113,7 +113,7 @@ describe("VIP Chat Route 15-Minute Cache Integration", () => {
         expect(runPipeline).toHaveBeenCalledTimes(1);
         expect(data1.reply).toContain("تقرير تفصيلي ممتاز لسهم");
 
-        // Second request for the same stock within 15 minutes by different user
+        // Second request for the same stock by a different user hits the warmed cache
         const req2 = makeRequest({
             action: "chat",
             telegram_user_id: 99999999,
@@ -128,10 +128,10 @@ describe("VIP Chat Route 15-Minute Cache Integration", () => {
         expect(data2.ok).toBe(true);
         expect(data2.cached).toBe(true); // HIT!
         expect(runPipeline).toHaveBeenCalledTimes(1); // Pipeline NOT called again!
-        expect(data2.reply).toBe(data1.reply); // Exact 100% same high-quality analysis
+        expect(data2.reply).toBe(data1.reply);
     });
 
-    test("market summary button uses cache on second click", async () => {
+    test("market summary button warms cache on first click and hits on second click", async () => {
         const { runPipeline } = require("@/lib/ai/pipeline");
         const callCountBefore = runPipeline.mock.calls.length;
 
@@ -159,6 +159,24 @@ describe("VIP Chat Route 15-Minute Cache Integration", () => {
         expect(data2.reply).toBe(data1.reply);
     });
 
+    test("open-ended dialogues and custom questions bypass cache and go directly to the 9 tools", async () => {
+        const { runPipeline } = require("@/lib/ai/pipeline");
+        const callCountBefore = runPipeline.mock.calls.length;
+
+        // Even though FWRY is already cached as vip_stock_FWRY, a custom question about FWRY must bypass cache!
+        const reqCustom = makeRequest({
+            action: "chat",
+            telegram_user_id: 55555555,
+            telegram_username: "custom_trader",
+            message: "ليه سهم فوري بينزل وهل اشتري على 16.5؟",
+        });
+        const resCustom = await POST(reqCustom);
+        const dataCustom = await resCustom.json();
+        expect(dataCustom.ok).toBe(true);
+        expect(dataCustom.cached).toBe(false); // Directly executed tools!
+        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 1);
+    });
+
     test("portfolio queries never use cache", async () => {
         const { runPipeline } = require("@/lib/ai/pipeline");
         const callCountBefore = runPipeline.mock.calls.length;
@@ -182,7 +200,7 @@ describe("VIP Chat Route 15-Minute Cache Integration", () => {
         });
         const res2 = await POST(req2);
         const data2 = await res2.json();
-        expect(data2.cached).toBe(false); // Bypasses cache because it's a personal/holding inquiry!
+        expect(data2.cached).toBe(false);
         expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 2);
     });
 });

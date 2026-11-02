@@ -425,7 +425,7 @@ export function StockCard({
 
             {/* Quantitative Trading Plan / Technical Levels (2x2 Grid) */}
             {(entryRange || target1 || stopLoss || support1 || resistance1) && (
-                <div className="mt-3.5 grid grid-cols-2 gap-2 sm:gap-2.5 relative z-10">
+                <div className="mt-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 relative z-10">
                     {/* Cell 1: Entry / Support 1 */}
                     <div className="p-2.5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
                         <div className="flex items-center gap-1 text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">

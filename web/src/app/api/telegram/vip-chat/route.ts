@@ -12,6 +12,7 @@ import { SessionState, SessionSummary } from "@/lib/ai/types";
 import {
     buildAnalysisCacheKey,
     getVipAnalysisCache,
+    personalizeCachedAnalysis,
     setVipAnalysisCache,
 } from "@/lib/ai/analysis-cache";
 
@@ -463,12 +464,18 @@ export async function POST(req: NextRequest) {
         let latencyMs = 0;
 
         if (cacheKey) {
-            const cached = await getVipAnalysisCache(cacheKey, supabase, 15 * 60 * 1000);
+            const cached = await getVipAnalysisCache(cacheKey, supabase);
             if (cached) {
                 isCached = true;
                 latencyMs = Date.now() - startTime;
+                const personalizedReply = await personalizeCachedAnalysis(
+                    cached.reply,
+                    userInfo.linkedUserId,
+                    explicitSymbols[0],
+                    supabase
+                );
                 result = {
-                    response: cached.reply,
+                    response: personalizedReply,
                     tables: cached.tables || [],
                     tools: cached.tools || { results: [], formattedText: "" },
                     summary_state: cached.summary_state || null,
@@ -499,14 +506,18 @@ export async function POST(req: NextRequest) {
             );
             latencyMs = Date.now() - startTime;
 
-            if (cacheKey && result?.response && result.response.length > 50) {
+            if (
+                cacheKey &&
+                result?.response &&
+                result.response.length > 50 &&
+                result.response_origin !== "fallback"
+            ) {
                 setVipAnalysisCache(
                     cacheKey,
                     {
                         reply: result.response,
                         tables: result.tables || [],
                         tools: result.tools || { results: [], formattedText: "" },
-                        summary_state: (result as any).summary_state || null,
                     },
                     supabase
                 ).catch((err) => console.warn("[vip-chat] cache save error:", err));
@@ -595,7 +606,7 @@ export async function POST(req: NextRequest) {
                         ...commonMeta,
                         tables: result.tables || [],
                         usage: (result as any).usage || null,
-                        response_origin: isCached ? "cache_15m" : ((result as any).response_origin || "llm"),
+                        response_origin: isCached ? "cache" : ((result as any).response_origin || "llm"),
                         publication_review: (result as any).publication_review || null,
                         cached: isCached,
                     },
