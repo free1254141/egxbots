@@ -1407,7 +1407,7 @@ async function executeRawTool(
             const date = dates?.[0]?.[dateField] ?? null;
             if (!date) return { status:"success", availability:"missing", preset, date:null, stocks:[] };
             let query = supabase.from(table).select(table === "stock_scans_summary"
-                ? "symbol,scan_date,acc_score,dist_score,vol_ratio,wyckoff_phase,signal,consecutive_acc_days,consecutive_dist_days,change_pct,rsi_14,volume"
+                ? "symbol,scan_date,acc_score,dist_score,vol_ratio,wyckoff_phase,signal,consecutive_acc_days,consecutive_dist_days"
                 : "symbol,date,close,change_pct,r_vol,rsi_14,macd,macd_signal,macd_histogram,ema_50,ema_200,king_ai_score,egx_ai_score")
                 .eq(dateField,date);
             if (table === "stock_technical_indicators") query = query.eq("exchange","EGX");
@@ -1440,18 +1440,11 @@ async function executeRawTool(
             }
             if (table === "stock_scans_summary" && stocks.length > 0) {
                 const symbols = stocks.map((s: any) => s.symbol);
-                const { data: latestIndDates } = await supabase
-                    .from("stock_technical_indicators")
-                    .select("date")
-                    .eq("exchange", "EGX")
-                    .order("date", { ascending: false })
-                    .limit(1);
-                const indDate = latestIndDates?.[0]?.date || date;
                 const { data: indicators } = await supabase
                     .from("stock_technical_indicators")
                     .select("symbol,close,change_pct,r_vol,rsi_14,macd,macd_signal,macd_histogram,ema_50,ema_200,king_ai_score,egx_ai_score")
                     .eq("exchange", "EGX")
-                    .eq("date", indDate)
+                    .eq("date", date)
                     .in("symbol", symbols)
                     .limit(symbols.length || 60);
                 const indMap = new Map((indicators || []).map((ind: any) => [ind.symbol, ind]));
@@ -1460,9 +1453,9 @@ async function executeRawTool(
                     return {
                         ...s,
                         close: ind.close ?? null,
-                        change_pct: ind.change_pct ?? s.change_pct ?? null,
+                        change_pct: ind.change_pct ?? null,
                         r_vol: ind.r_vol ?? s.vol_ratio ?? null,
-                        rsi_14: ind.rsi_14 ?? s.rsi_14 ?? null,
+                        rsi_14: ind.rsi_14 ?? null,
                         macd: ind.macd ?? null,
                         macd_signal: ind.macd_signal ?? null,
                         macd_histogram: ind.macd_histogram ?? null,
@@ -1472,71 +1465,9 @@ async function executeRawTool(
                         egx_ai_score: ind.egx_ai_score ?? null,
                     };
                 });
-                const missingClose = stocks.filter((s: any) => s.close == null).map((s: any) => s.symbol);
-                if (missingClose.length > 0) {
-                    const { data: priceRows } = await supabase
-                        .from("stock_prices")
-                        .select("symbol,close,change_pct")
-                        .eq("exchange", "EGX")
-                        .in("symbol", missingClose)
-                        .order("date", { ascending: false })
-                        .limit(missingClose.length * 2);
-                    const priceMap = new Map<string, any>();
-                    for (const pr of (priceRows || [])) {
-                        if (!priceMap.has(pr.symbol)) priceMap.set(pr.symbol, pr);
-                    }
-                    stocks = stocks.map((s: any) => {
-                        if (s.close != null) return s;
-                        const p = priceMap.get(s.symbol);
-                        return {
-                            ...s,
-                            close: p?.close ?? null,
-                            change_pct: s.change_pct ?? p?.change_pct ?? null,
-                        };
-                    });
-                }
-            } else if (table === "stock_technical_indicators" && stocks.length > 0) {
-                const symbols = stocks.map((s: any) => s.symbol);
-                const { data: wyckoffRows } = await supabase
-                    .from("stock_scans_summary")
-                    .select("symbol,acc_score,dist_score,wyckoff_phase,consecutive_acc_days,consecutive_dist_days")
-                    .in("symbol", symbols)
-                    .order("scan_date", { ascending: false })
-                    .limit(symbols.length * 2);
-                const wyckMap = new Map<string, any>();
-                for (const w of (wyckoffRows || [])) {
-                    if (!wyckMap.has(w.symbol)) wyckMap.set(w.symbol, w);
-                }
-                stocks = stocks.map((s: any) => {
-                    const w = wyckMap.get(s.symbol) || {};
-                    return {
-                        ...s,
-                        acc_score: w.acc_score ?? null,
-                        dist_score: w.dist_score ?? null,
-                        wyckoff_phase: w.wyckoff_phase ?? null,
-                        consecutive_acc_days: typeof w.consecutive_acc_days === "number" ? w.consecutive_acc_days : null,
-                        consecutive_dist_days: typeof w.consecutive_dist_days === "number" ? w.consecutive_dist_days : null,
-                    };
-                });
             }
             stocks = stocks.slice(0, 10).map((s: any) => {
                 const canonical = getCanonicalStockName(s.symbol);
-                const composite = calculateStockCompositeScore({
-                    close: s.close,
-                    rsi_14: s.rsi_14,
-                    macd: s.macd,
-                    macd_signal: s.macd_signal,
-                    macd_histogram: s.macd_histogram,
-                    ema_50: s.ema_50,
-                    ema_200: s.ema_200,
-                    r_vol: s.r_vol,
-                    king_ai_score: s.king_ai_score,
-                    egx_ai_score: s.egx_ai_score,
-                    acc_score: s.acc_score,
-                    dist_score: s.dist_score,
-                    wyckoff_phase: s.wyckoff_phase,
-                    is_sharia_compliant: isShariaCompliant(s.symbol),
-                });
                 return {
                     ...s,
                     name_ar: canonical.name_ar,
@@ -1544,9 +1475,6 @@ async function executeRawTool(
                     sector: canonical.sector || s.sector || null,
                     is_sharia_compliant: isShariaCompliant(s.symbol),
                     sharia_index: isShariaCompliant(s.symbol) ? "EGX33" : null,
-                    composite_score: composite.totalScore,
-                    composite_grade: composite.grade,
-                    composite_verdict: composite.verdictLabel,
                 };
             });
             return { status:"success", preset, date, sharia_only: shariaScanOnly, stocks, accumulation_stocks: toolName === "get_accumulation_stocks" ? stocks : undefined,
