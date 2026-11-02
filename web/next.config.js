@@ -59,6 +59,14 @@ const nextConfig = {
         destination: '/api/automations/:path*',
       },
       {
+        source: '/api/telegram/:path*',
+        destination: '/api/telegram/:path*',
+      },
+      {
+        source: '/api/ai-chat/:path*',
+        destination: '/api/ai-chat/:path*',
+      },
+      {
         source: '/api/:path*',
         destination: `${BACKEND_URL}/:path*`,
       },

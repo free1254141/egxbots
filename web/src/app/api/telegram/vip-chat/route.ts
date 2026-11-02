@@ -9,6 +9,11 @@ import {
 } from "@/lib/ai/plan-gate";
 import { detectPortfolioIntent, normalizeArabicIntent } from "@/lib/ai/intent-policy";
 import { SessionState, SessionSummary } from "@/lib/ai/types";
+import {
+    buildAnalysisCacheKey,
+    getVipAnalysisCache,
+    setVipAnalysisCache,
+} from "@/lib/ai/analysis-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -450,21 +455,63 @@ export async function POST(req: NextRequest) {
         const messageId = `tg_msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
         const startTime = Date.now();
-        const result = await runPipeline(
-            rawMessage,
-            [],
-            sessionState,
-            sessionSummary,
-            formattedHistory,
-            supabase,
-            apiKeys,
-            effectiveUserId,
-            sessionId,
-            messageId,
-            "deepseek-chat",
-            { isPro: userInfo.isPro, chatSource, skipReview: true, gateMode: "audit_only" }
-        );
-        const latencyMs = Date.now() - startTime;
+        const isPortfolio = Boolean(detectPortfolioIntent(rawMessage));
+        const cacheKey = buildAnalysisCacheKey(rawMessage, explicitSymbols, isPortfolio);
+
+        let result: any = null;
+        let isCached = false;
+        let latencyMs = 0;
+
+        if (cacheKey) {
+            const cached = await getVipAnalysisCache(cacheKey, supabase, 15 * 60 * 1000);
+            if (cached) {
+                isCached = true;
+                latencyMs = Date.now() - startTime;
+                result = {
+                    response: cached.reply,
+                    tables: cached.tables || [],
+                    tools: cached.tools || { results: [], formattedText: "" },
+                    summary_state: cached.summary_state || null,
+                    session_update: {
+                        current_symbol: explicitSymbols[0] || sessionState.current_symbol,
+                        last_symbols: explicitSymbols.length > 0 ? explicitSymbols : sessionState.last_symbols,
+                        summary: sessionState.summary,
+                        current_sector: sessionState.current_sector,
+                    },
+                };
+            }
+        }
+
+        if (!result) {
+            result = await runPipeline(
+                rawMessage,
+                [],
+                sessionState,
+                sessionSummary,
+                formattedHistory,
+                supabase,
+                apiKeys,
+                effectiveUserId,
+                sessionId,
+                messageId,
+                "deepseek-chat",
+                { isPro: userInfo.isPro, chatSource, skipReview: true, gateMode: "audit_only" }
+            );
+            latencyMs = Date.now() - startTime;
+
+            if (cacheKey && result?.response && result.response.length > 50) {
+                setVipAnalysisCache(
+                    cacheKey,
+                    {
+                        reply: result.response,
+                        tables: result.tables || [],
+                        tools: result.tools || { results: [], formattedText: "" },
+                        summary_state: (result as any).summary_state || null,
+                    },
+                    supabase
+                ).catch((err) => console.warn("[vip-chat] cache save error:", err));
+            }
+        }
 
         const updatedSessionState = {
             current_symbol: result.session_update?.current_symbol ?? sessionState.current_symbol,
@@ -548,8 +595,9 @@ export async function POST(req: NextRequest) {
                         ...commonMeta,
                         tables: result.tables || [],
                         usage: (result as any).usage || null,
-                        response_origin: (result as any).response_origin || "llm",
+                        response_origin: isCached ? "cache_15m" : ((result as any).response_origin || "llm"),
                         publication_review: (result as any).publication_review || null,
+                        cached: isCached,
                     },
                     created_at: new Date().toISOString(),
                 },
@@ -572,6 +620,7 @@ export async function POST(req: NextRequest) {
             remaining: newRemaining,
             period: userInfo.period,
             latency_ms: latencyMs,
+            cached: isCached,
         });
     } catch (err: any) {
         console.error("[api/telegram/vip-chat] Error:", err);

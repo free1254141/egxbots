@@ -39,6 +39,12 @@ These instructions apply to the entire repository, including AI assistants, revi
   4. Bounced/failed count.
   5. Detailed list of users who opened and clicked (with timestamps).
 
+## 🚫 Strict Git Push Rule (No Automatic Git Push)
+
+- **NEVER** push changes to Git (`git push`) automatically under any circumstances.
+- You must ALWAYS wait for the user to explicitly request or approve pushing to Git (e.g., "ارفع", "ادفع لجيت", "git push").
+- All local edits, commits, and builds remain strictly local until explicit user authorization to push.
+
 ## AI Chat Architecture (Agentic Function Calling)
 
 - All user chat queries are routed through the pure LLM-driven Agentic architecture in `web/src/lib/ai/agentic-pipeline.ts` (delegated from `web/src/lib/ai/pipeline.ts`).
