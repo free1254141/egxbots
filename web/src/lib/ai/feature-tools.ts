@@ -290,12 +290,27 @@ export async function executePriceTrapsTool(
 ): Promise<any> {
   try {
     const trapType = args.trap_type || "all";
-    const { data: cacheRow } = await db
-      .from("market_cache")
-      .select("payload, updated_at")
-      .eq("cache_key", "scanner_traps_EGX")
-      .limit(1)
-      .maybeSingle();
+    let cacheRow: any = null;
+    try {
+      const cacheQuery = db
+        .from("market_cache")
+        .select("payload, updated_at, computed_at");
+      if (typeof cacheQuery.in === "function") {
+        const inQuery = cacheQuery.in("cache_key", ["scanner_traps_EGX", "daily_traps_snapshot"]);
+        const ordered = typeof inQuery.order === "function" ? inQuery.order("computed_at", { ascending: false }) : inQuery;
+        const res = await (typeof ordered.limit === "function" ? ordered.limit(1) : ordered);
+        if (res && res.data) {
+          cacheRow = Array.isArray(res.data) ? res.data[0] : res.data;
+        }
+      }
+      if (!cacheRow) {
+        const eqQuery = db.from("market_cache").select("payload, updated_at").eq("cache_key", "scanner_traps_EGX");
+        const res = typeof eqQuery.maybeSingle === "function" ? await eqQuery.maybeSingle() : await eqQuery.limit(1);
+        cacheRow = res?.data;
+      }
+    } catch {
+      cacheRow = null;
+    }
 
     const payload = cacheRow?.payload || {};
     const bearTraps = Array.isArray(payload.bearTraps) ? payload.bearTraps : [];

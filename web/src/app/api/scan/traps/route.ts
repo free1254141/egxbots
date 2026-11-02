@@ -44,12 +44,14 @@ const getCachedTrapsSnapshot = unstable_cache(
 
     // 1. Try precomputed daily traps cache first
     try {
-      const { data: cacheRow } = await supabase
+      const { data: cacheRows } = await supabase
         .from("market_cache")
         .select("payload, computed_at")
-        .eq("cache_key", "scanner_traps_EGX")
-        .limit(1)
-        .maybeSingle();
+        .in("cache_key", ["scanner_traps_EGX", "daily_traps_snapshot"])
+        .order("computed_at", { ascending: false })
+        .limit(1);
+
+      const cacheRow = cacheRows?.[0];
 
       if (
         cacheRow?.payload &&

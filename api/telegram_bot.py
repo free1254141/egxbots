@@ -611,32 +611,36 @@ class TelegramBot:
 
         is_priv = self._is_private_chat(msg)
 
+        if not is_priv:
+            # STRICT GROUP SILENCE: All group topics outside Topic 1680 (ARTORO) must be 100% silent.
+            # Topic 1680 is handled exclusively by is_vip_chat_update before reaching here.
+            # Suppress all commands (/daily, /weekly, /help, /start) and any messages in public groups/topics.
+            self._log(f"Silently ignored non-private message/command from chat {chat_id}: {text[:35]}")
+            return
+
+        # --- Private 1-on-1 Chat with @egxbots_bot ---
         if text.startswith("/start"):
             parts = text.split()
             if len(parts) > 1:
                 user_id_param = parts[1].strip()
                 if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot"):
                     self._handle_start_with_user_id(chat_id, user_id_param, msg)
-                    if is_priv:
-                        send_vip_message(
-                            bot_token=self.token,
-                            chat_id=chat_id,
-                            text=build_welcome_panel_html(is_private=True, chat_id=chat_id),
-                            reply_markup=build_vip_chat_keyboard(is_private=True),
-                        )
+                    send_vip_message(
+                        bot_token=self.token,
+                        chat_id=chat_id,
+                        text=build_welcome_panel_html(is_private=True, chat_id=chat_id),
+                        reply_markup=build_vip_chat_keyboard(is_private=True),
+                    )
                     return
-            if is_priv and raw_update:
+            if raw_update:
                 handle_vip_chat_update(raw_update, self.token)
             else:
                 self._handle_start(chat_id)
-        elif text.startswith("/daily"):
-            self._handle_daily(chat_id)
-        elif text.startswith("/weekly"):
-            self._handle_weekly(chat_id)
         elif text.startswith("/help"):
             self._handle_help(chat_id)
-        elif is_priv and raw_update:
-            # Any other message in private chat with @egxbots_bot goes directly to ARTORO AI!
+        elif raw_update:
+            # Any other message/command in private chat (/daily, /weekly, bare tickers, questions)
+            # goes straight to ARTORO AI!
             handle_vip_chat_update(raw_update, self.token)
 
     # ── command handlers ─────────────────────────────────────────────
@@ -943,30 +947,42 @@ class TelegramBot:
     def _handle_help(self, chat_id):
         self._reply(
             chat_id,
-            "📋 *الأوامر المتاحة / Available Commands:*\n\n"
-            "🔗 /start — ربط حسابك بالمنصة\n"
-            "🚀 /daily — التوصيات اليومية الجديدة\n"
-            "📊 /weekly — تقرير الأداء الأسبوعي للمنصة\n"
-            "❓ /help — عرض هذه القائمة\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔗 /start — Link your account\n"
-            "🚀 /daily — Daily AI recommendations\n"
-            "📊 /weekly — Weekly platform performance report\n"
-            "❓ /help — Show this menu",
+            "🤖 *مساعد أرتورو الذكي — EGX BOTS*\n\n"
+            "يمكنك التحدث معي مباشرةً في هذا الشات الخاص وكتابة أي سؤال عن البورصة المصرية:\n"
+            "• اكتب اسم أي سهم لتحليله (مثال: `حلل فوري` أو `COMI`)\n"
+            "• اكتب للمقارنة: `قارن بين التجاري الدولي وفوري`\n"
+            "• اطلب ملخص السوق: `ملخص السوق وأقوى الأسهم`\n"
+            "• اطلب التوصيات: `التوصيات اليومية المفتوحة`\n"
+            "• أو اضغط الأزرار بالأسفل لاستخدام الأدوات بضغطة واحدة!\n\n"
+            "🔗 /start — إعادة فتح لوحة التحكم الرئيسية",
         )
 
     # ── bot menu setup ───────────────────────────────────────────────
 
     def _setup_bot_menu(self):
-        """Register bot commands and set the menu button (web_app or commands)."""
-        commands = [
-            {"command": "start", "description": "🔗 ربط الحساب / Link account"},
-            {"command": "daily", "description": "🚀 التوصيات اليومية / Daily recommendations"},
-            {"command": "weekly", "description": "📊 تقرير الأداء الأسبوعي / Weekly report"},
+        """Register bot commands strictly for private chats and clear from group chats."""
+        # 1. Clear any commands registered for group chats, administrators, and default/all
+        try:
+            self._call_api("deleteMyCommands", {"scope": {"type": "all_group_chats"}})
+            self._call_api("deleteMyCommands", {"scope": {"type": "all_chat_administrators"}})
+            self._call_api("deleteMyCommands", {})
+            self._log("Successfully cleared bot commands from all group chats and default scope.")
+        except Exception as e:
+            self._log(f"Error clearing group commands: {e}")
+
+        # 2. Register commands strictly for private 1-on-1 chats only
+        private_commands = [
+            {"command": "start", "description": "🤖 بدء محادثة أرتورو / Start ARTORO"},
             {"command": "help", "description": "❓ مساعدة / Help"},
         ]
-        self._call_api("setMyCommands", {"commands": commands})
-        self._log(f"Commands registered: {[c['command'] for c in commands]}")
+        self._call_api(
+            "setMyCommands",
+            {
+                "commands": private_commands,
+                "scope": {"type": "all_private_chats"},
+            },
+        )
+        self._log(f"Commands registered for private chats only: {[c['command'] for c in private_commands]}")
 
         # Set menu button — use WebApp if WEB_ORIGIN is set, otherwise default to commands
         web_origin = get_web_origin()

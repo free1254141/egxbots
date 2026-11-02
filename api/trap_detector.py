@@ -148,12 +148,14 @@ def sync_daily_traps_to_market_cache(supabase_client: Any) -> Dict[str, Any]:
     bars_map = {str(b["symbol"]).strip().upper(): b for b in (bars_res.data or []) if b.get("symbol")}
     snapshot = detect_daily_traps(ind_res.data or [], bars_map, as_of=as_of)
 
-    supabase_client.table("market_cache").upsert({
-        "cache_key": "daily_traps_snapshot",
-        "country": "Egypt",
-        "payload": snapshot,
-        "computed_at": datetime.now(timezone.utc).isoformat(),
-    }, on_conflict="cache_key,country").execute()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for key in ("daily_traps_snapshot", "scanner_traps_EGX"):
+        supabase_client.table("market_cache").upsert({
+            "cache_key": key,
+            "country": "Egypt",
+            "payload": snapshot,
+            "computed_at": now_iso,
+        }, on_conflict="cache_key,country").execute()
 
     return {
         "ok": True,

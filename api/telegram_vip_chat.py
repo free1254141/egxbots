@@ -1744,9 +1744,27 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     elif pending_mode == "free":
         query_text = cleaned_input
     else:
-        # In Private 1-on-1 Chat with @egxbots_bot, users can type directly
+        # In Private 1-on-1 Chat with @egxbots_bot, users can type directly or use short commands
         if is_private:
-            query_text = cleaned_input
+            cmd_lower = cleaned_input.lower().split("@")[0].strip()
+            if cmd_lower in ("/daily", "daily", "/recs", "recs"):
+                query_text = "أهم التوصيات اليومية والفرص المتاحة اليوم"
+            elif cmd_lower in ("/weekly", "weekly"):
+                query_text = "تقرير الأداء الأسبوعي وملخص السوق"
+            elif cmd_lower in ("/market", "market"):
+                query_text = "ملخص السوق وأقوى الأسهم اليوم"
+            elif cmd_lower in ("/accum", "accum"):
+                query_text = "أسهم التجميع والسيولة الذكية اليوم"
+            elif cmd_lower in ("/scan", "scan"):
+                query_text = "أفضل الأسهم حسب المسح الفني والمؤشرات"
+            elif cmd_lower in ("/portfolio", "portfolio"):
+                query_text = "حلل محفظتي الاستثمارية بالتفصيل"
+            else:
+                detected = detect_topic_query_intent(cleaned_input)
+                if detected:
+                    query_text = detected[1]
+                else:
+                    query_text = cleaned_input
         else:
             # In the Public Group Topic (1680), intelligently detect query intent!
             detected = detect_topic_query_intent(text)
