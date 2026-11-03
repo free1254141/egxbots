@@ -565,12 +565,14 @@ export async function POST(req: NextRequest) {
         const chartContext = sanitizeChartContext(body.chart_context);
         const rawMessage = typeof body.message === "string" ? body.message : "";
         const message = sanitizeUserMessage(rawMessage);
-        const isVoiceCall = Boolean(body.is_voice_call);
-        const isVoiceNote = Boolean(body.is_voice_note);
-        const isVoice = Boolean(body.is_voice || isVoiceCall || isVoiceNote);
+        const isVoiceCall = Boolean(body.is_voice_call ?? body.isVoiceCall);
+        const isVoiceNote = Boolean(body.is_voice_note ?? body.isVoiceNote);
+        const isVoice = Boolean(body.is_voice ?? body.isVoice ?? isVoiceCall ?? isVoiceNote);
         const messageChannel = typeof body.channel === "string" ? body.channel : (isVoiceCall ? "voice_call" : (isVoiceNote ? "voice_note" : "chat"));
-        const audioDuration = typeof body.audio_duration === "number" ? body.audio_duration : undefined;
-        const voiceAudioUrl = typeof body.voice_audio_url === "string" && (body.voice_audio_url.startsWith("http://") || body.voice_audio_url.startsWith("https://")) ? body.voice_audio_url : undefined;
+        const rawAudioDuration = body.audio_duration ?? body.audioDuration;
+        const audioDuration = typeof rawAudioDuration === "number" && rawAudioDuration > 0 ? rawAudioDuration : undefined;
+        const rawVoiceUrl = typeof (body.voice_audio_url ?? body.voiceAudioUrl) === "string" ? (body.voice_audio_url ?? body.voiceAudioUrl).trim() : undefined;
+        const voiceAudioUrl = rawVoiceUrl && (rawVoiceUrl.startsWith("http://") || rawVoiceUrl.startsWith("https://")) ? rawVoiceUrl : undefined;
         const { history, image, images, model: userRequestedModel, session_id: inputSessionId, stream } = body;
         clientMessageId = typeof body.client_message_id === "string" ? body.client_message_id.trim().slice(0, 128) : "";
 

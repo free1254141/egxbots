@@ -17,11 +17,16 @@ function createChatRequest(input) {
             ...(input.autonomousRecommendations ? { autonomous_recommendations: true } : {}),
             ...(input.isVoice ? {
                 is_voice: true,
+                isVoice: true,
                 is_voice_call: Boolean(input.isVoiceCall ?? (!input.isVoiceNote)),
+                isVoiceCall: Boolean(input.isVoiceCall ?? (!input.isVoiceNote)),
                 is_voice_note: Boolean(input.isVoiceNote),
+                isVoiceNote: Boolean(input.isVoiceNote),
                 channel: input.channel || (input.isVoiceNote ? "voice_note" : "voice_call"),
                 audio_duration: input.audioDuration,
+                audioDuration: input.audioDuration,
                 voice_audio_url: input.voiceAudioUrl,
+                voiceAudioUrl: input.voiceAudioUrl,
             } : {}),
         }),
     };
