@@ -1974,6 +1974,9 @@ export interface PipelineOptions {
     skipReview?: boolean;
     gateMode?: "audit_only" | "strict";
     autonomousRecommendations?: boolean;
+    isVoice?: boolean;
+    isVoiceCall?: boolean;
+    isVoiceNote?: boolean;
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */
@@ -1998,6 +2001,9 @@ export async function* runPipelineStream(
                 : (process.env.AGENTIC_GATE_MODE === "strict"
                     ? "strict"
                     : (process.env.AGENTIC_GATE_MODE === "audit_only" ? "audit_only" : (isTestEnv ? "strict" : "audit_only"))),
+            isVoice: options.isVoice,
+            isVoiceCall: options.isVoiceCall,
+            isVoiceNote: options.isVoiceNote,
         };
         yield* runAgenticPipelineStream(
             userMessage, images, sessionState, sessionSummary, history,

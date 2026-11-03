@@ -1664,7 +1664,7 @@ export default function ChatWidget() {
                 isOpen={isVoiceCallOpen}
                 onClose={() => setIsVoiceCallOpen(false)}
                 onSendMessage={async (text) => {
-                    const reply = await sendMessage(text, undefined, { isVoice: true });
+                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true });
                     return reply || "";
                 }}
                 isPro={isPro}

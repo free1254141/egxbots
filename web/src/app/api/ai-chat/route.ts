@@ -1024,6 +1024,9 @@ export async function POST(req: NextRequest) {
                                 skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
                                 gateMode: "audit_only",
                                 autonomousRecommendations,
+                                isVoice,
+                                isVoiceCall,
+                                isVoiceNote,
                             }
                         );
 

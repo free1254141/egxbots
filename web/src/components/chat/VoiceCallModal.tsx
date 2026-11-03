@@ -305,6 +305,7 @@ export function VoiceCallModal({
         stopListening();
         stopSpeaking();
         setCallState("processing");
+        setLatestSpokenText(null);
 
         const nowStr = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
         setConversationLog((prev) => [...prev, { sender: "user", text: cleaned, time: nowStr }]);
@@ -527,6 +528,36 @@ export function VoiceCallModal({
                                     <Zap className="w-3.5 h-3.5" />
                                     <span>إرسال</span>
                                 </button>
+                            </div>
+                        )}
+
+                        {/* Processing Status Banner */}
+                        {callState === "processing" && (
+                            <div className="p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-300 font-medium animate-pulse text-center">
+                                ⏳ أرتورو يحلل السهم ويجهز الرد الصوتي المختصر...
+                            </div>
+                        )}
+
+                        {/* 🌟 Live Spoken Assistant Response Display (Live on Screen during Call) */}
+                        {(callState === "speaking" || latestSpokenText) && latestSpokenText && (
+                            <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-b from-amber-950/60 to-zinc-900/90 border border-amber-500/40 text-amber-100 text-xs sm:text-sm font-medium leading-relaxed text-right shadow-xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 max-h-48 sm:max-h-56 overflow-y-auto w-full">
+                                <div className="flex items-center justify-between text-[11px] text-amber-400 font-bold mb-2 border-b border-amber-500/20 pb-1">
+                                    <span className="flex items-center gap-1.5">
+                                        <Volume2 className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                                        <span>رد أرتورو المباشر (صوت وكتابة):</span>
+                                    </span>
+                                    {callState === "speaking" ? (
+                                        <span className="text-[10px] text-amber-300 font-mono animate-pulse flex items-center gap-1">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                                            جاري التحدث 🔊
+                                        </span>
+                                    ) : (
+                                        <span className="text-[10px] text-zinc-400 font-mono">
+                                            مكتمل
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="whitespace-pre-wrap leading-relaxed select-text">{latestSpokenText}</p>
                             </div>
                         )}
 
