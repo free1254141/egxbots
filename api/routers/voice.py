@@ -56,7 +56,7 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
 
     # 1. Strip code blocks, but convert markdown tables into readable spoken text
     text = re.sub(r"```[\s\S]*?```", "", text)
-    text = re.sub(r"\|[\s-:]+\|[\s-:]*[\r\n]+", "\n", text)
+    text = re.sub(r"\|[\s:\-]+\|[\s:\-]*[\r\n]+", "\n", text)
     text = text.replace("|", "، ")
 
     # 2. Strip markdown syntax

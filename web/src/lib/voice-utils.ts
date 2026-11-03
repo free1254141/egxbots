@@ -226,7 +226,7 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
 
     // 1. Convert markdown table rows into spoken text instead of wiping them out
     // Strip markdown table separator lines like |---|---|
-    text = text.replace(/\|[\s-:]+\|[\s-:]*[\r\n]+/g, "\n");
+    text = text.replace(/\|[\s:\-]+\|[\s:\-]*[\r\n]+/g, "\n");
     // Replace remaining table pipe delimiters with natural pauses
     text = text.replace(/\|/g, "، ");
 
