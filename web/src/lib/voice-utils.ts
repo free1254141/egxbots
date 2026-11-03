@@ -411,6 +411,27 @@ export const EGX_STOCK_TICKERS: Record<string, string> = {
  * Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
  * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
  */
+export const ARABIC_MONTH_NAMES: Record<string, string> = {
+    "01": "يناير", "1": "يناير",
+    "02": "فبراير", "2": "فبراير",
+    "03": "مارس", "3": "مارس",
+    "04": "أبريل", "4": "أبريل",
+    "05": "مايو", "5": "مايو",
+    "06": "يونيو", "6": "يونيو",
+    "07": "يوليو", "7": "يوليو",
+    "08": "أغسطس", "8": "أغسطس",
+    "09": "سبتمبر", "9": "سبتمبر",
+    "10": "أكتوبر",
+    "11": "نوفمبر",
+    "12": "ديسمبر",
+};
+
+/**
+ * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
+ * Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
+ * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
+ * Converts numbers >= 1,000 million into billions (مليار جنيه) to prevent '6 آلاف مليون' anomalies.
+ */
 export function cleanVoiceText(rawText: string, maxChars: number = 600): string {
     if (!rawText || !rawText.trim()) return "";
 
@@ -452,7 +473,33 @@ export function cleanVoiceText(rawText: string, maxChars: number = 600): string 
     text = text.replace(/(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+/gm, () => tableReplacement);
     text = text.replace(/\|[^\n]+\|/g, "");
 
-    // 3. Strip trailing boilerplate disclaimers
+    // 3. Strip visual table headers/titles (e.g. جدول أسهم التجميع)
+    text = text.replace(/جدول\s+(?:أسهم\s+التجميع|فحص\s+كامل|الأسهم|الفرز|المؤشرات|التحليل)(?:\s*\([^)]*\))?[:\s]*/g, "");
+
+    // 4. Convert numeric dates like 03-11-2026 or 2026-11-03 into spoken Arabic months
+    text = text.replace(/\b(\d{1,2})[-/](\d{1,2})[-/](202\d)\b/g, (_, d, m, y) => `${parseInt(d, 10)} ${ARABIC_MONTH_NAMES[m] || m} ${y}`);
+    text = text.replace(/\b(202\d)[-/](\d{1,2})[-/](\d{1,2})\b/g, (_, y, m, d) => `${parseInt(d, 10)} ${ARABIC_MONTH_NAMES[m] || m} ${y}`);
+
+    // 5. Naturalize large financial numbers: convert >= 1,000 million to billions (مليار جنيه)
+    // E.g. "6,750.79 مليون جنيه" -> "6.75 مليار جنيه"
+    text = text.replace(/(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,}(?:\.\d+)?)\s*مليون(?:\s*جنيه)?/g, (match, rawNum) => {
+        const cleanVal = parseFloat(rawNum.replace(/,/g, ""));
+        const hasCurrency = match.includes("جنيه");
+        if (!isNaN(cleanVal) && cleanVal >= 1000) {
+            const billions = (cleanVal / 1000.0).toFixed(2).replace(/\.?0+$/, "");
+            return hasCurrency ? `${billions} مليار جنيه` : `${billions} مليار`;
+        }
+        return match;
+    });
+
+    // 6. Convert numerical ratios like 4.49:1 or 4.49 : 1 to "4.5 إلى 1"
+    text = text.replace(/(\d+(?:\.\d+)?)\s*:\s*(\d+)/g, (_, r1, r2) => {
+        const parsed = parseFloat(r1);
+        const r1Str = !isNaN(parsed) ? parsed.toFixed(1).replace(/\.?0+$/, "") : r1;
+        return `${r1Str} إلى ${r2}`;
+    });
+
+    // 7. Strip trailing boilerplate disclaimers
     text = text.replace(/تحليل EGX Bots مبني على أحدث البيانات[\s\S]*$/gi, "");
     text = text.replace(/تحليل مبني على أحدث البيانات المتاحة[\s\S]*$/gi, "");
     text = text.replace(/منصة EGX Bots لتحليل الأسهم المصرية[\s\S]*$/gi, "");
@@ -460,24 +507,24 @@ export function cleanVoiceText(rawText: string, maxChars: number = 600): string 
     text = text.replace(/منصة EGX BOTS ليست وسيطاً[\s\S]*$/gi, "");
     text = text.replace(/هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$/gi, "");
 
-    // 4. Remove markdown links [text](url) -> text
+    // 8. Remove markdown links [text](url) -> text
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
 
-    // 5. Remove markdown bold, italic, code, headers
+    // 9. Remove markdown bold, italic, code, headers
     text = text.replace(/#{1,6}\s*/g, "");
     text = text.replace(/[*`_~]/g, "");
 
-    // 6. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    // 10. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
     text = text.replace(/[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]/g, "");
 
-    // 7. Remove emojis and decorative icons
+    // 11. Remove emojis and decorative icons
     text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
     text = text.replace(/[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]/g, "");
 
-    // 8. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    // 12. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
     text = text.replace(/(?:والـ|الـ)\s*(?=[A-Za-z])/g, " ");
 
-    // 9. Natural spoken currency, indices, and stock terms into clear Arabic
+    // 13. Natural spoken currency, indices, and stock terms into clear Arabic
     text = text.replace(/(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)/gi, " جنيه");
     text = text.replace(/\b(?:ج\.م\.?|جم|EGP)\b/gi, " جنيه");
     text = text.replace(/%/g, " في المية ");
@@ -499,23 +546,23 @@ export function cleanVoiceText(rawText: string, maxChars: number = 600): string 
     text = text.replace(/\bSELL\b/gi, " بيع ");
     text = text.replace(/\bHOLD\b/gi, " احتفاظ ");
 
-    // 10. Replace standalone stock tickers with full Arabic company names
+    // 14. Replace standalone stock tickers with full Arabic company names
     for (const [sym, arName] of Object.entries(EGX_STOCK_TICKERS)) {
         const re = new RegExp(`\\b${sym}(?:\\.CA)?\\b`, "gi");
         text = text.replace(re, ` ${arName} `);
     }
 
-    // 11. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    // 15. Clean any remaining English characters/words so the voice engine NEVER pronounces English
     text = text.replace(/[A-Za-z]+(?:\.[A-Za-z]+)?/g, "");
 
-    // 12. Remove dense parenthesized number lists like (88.16 و 87.38)
+    // 16. Remove dense parenthesized number lists like (88.16 و 87.38)
     text = text.replace(/\([0-9.,\sو\+\-%]+\)/g, "");
 
-    // 13. Normalize whitespace and clean punctuation
+    // 17. Normalize whitespace and clean punctuation
     text = text.replace(/\s+/g, " ").trim();
     text = text.replace(/([،\.!\؟])\s*\1+/g, "$1");
 
-    // 14. Truncate smoothly at sentence boundary if exceeding maxChars
+    // 18. Truncate smoothly at sentence boundary if exceeding maxChars
     if (text.length > maxChars) {
         const cut = text.slice(0, maxChars);
         const lastPunct = Math.max(

@@ -225,11 +225,28 @@ EGX_STOCK_TICKERS: dict[str, str] = {
 }
 
 
+ARABIC_MONTH_NAMES: dict[str, str] = {
+    "01": "يناير", "1": "يناير",
+    "02": "فبراير", "2": "فبراير",
+    "03": "مارس", "3": "مارس",
+    "04": "أبريل", "4": "أبريل",
+    "05": "مايو", "5": "مايو",
+    "06": "يونيو", "6": "يونيو",
+    "07": "يوليو", "7": "يوليو",
+    "08": "أغسطس", "8": "أغسطس",
+    "09": "سبتمبر", "9": "سبتمبر",
+    "10": "أكتوبر",
+    "11": "نوفمبر",
+    "12": "ديسمبر",
+}
+
+
 def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     """
     Format and streamline technical market analysis into clear, natural conversational Arabic.
     Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
     Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
+    Converts numbers >= 1,000 million into billions (مليار جنيه) to prevent '6 آلاف مليون' anomalies.
     """
     if not raw_text or not raw_text.strip():
         return ""
@@ -269,7 +286,41 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+", lambda m: table_replacement, text, flags=re.MULTILINE)
     text = re.sub(r"\|[^\n]+\|", "", text)
 
-    # 3. Strip trailing boilerplate disclaimers without affecting core notes or alerts
+    # 3. Strip visual table headers/titles (e.g. جدول أسهم التجميع)
+    text = re.sub(r"جدول\s+(?:أسهم\s+التجميع|فحص\s+كامل|الأسهم|الفرز|المؤشرات|التحليل)(?:\s*\([^)]*\))?[:\s]*", "", text)
+
+    # 4. Convert numeric dates like 03-11-2026 or 2026-11-03 into spoken Arabic months
+    text = re.sub(r"\b(\d{1,2})[-/](\d{1,2})[-/](202\d)\b", lambda m: f"{int(m.group(1))} {ARABIC_MONTH_NAMES.get(m.group(2), m.group(2))} {m.group(3)}", text)
+    text = re.sub(r"\b(202\d)[-/](\d{1,2})[-/](\d{1,2})\b", lambda m: f"{int(m.group(3))} {ARABIC_MONTH_NAMES.get(m.group(2), m.group(2))} {m.group(1)}", text)
+
+    # 5. Naturalize large financial numbers: convert >= 1,000 million to billions (مليار جنيه)
+    # E.g. "6,750.79 مليون جنيه" -> "6.75 مليار جنيه"
+    def _millions_to_billions(m):
+        raw_num = m.group(1).replace(",", "")
+        has_currency = "جنيه" in m.group(0)
+        try:
+            val = float(raw_num)
+            if val >= 1000:
+                billions = round(val / 1000.0, 2)
+                billions_str = f"{billions:.2f}".rstrip("0").rstrip(".")
+                return f"{billions_str} مليار جنيه" if has_currency else f"{billions_str} مليار"
+        except ValueError:
+            pass
+        return m.group(0)
+
+    text = re.sub(r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,}(?:\.\d+)?)\s*مليون(?:\s*جنيه)?", _millions_to_billions, text)
+
+    # 6. Convert numerical ratios like 4.49:1 or 4.49 : 1 to "4.5 إلى 1"
+    def _ratio_replace(m):
+        try:
+            r1 = round(float(m.group(1)), 1)
+            r1_str = f"{r1}".rstrip("0").rstrip(".")
+            return f"{r1_str} إلى {m.group(2)}"
+        except ValueError:
+            return f"{m.group(1)} إلى {m.group(2)}"
+    text = re.sub(r"(\d+(?:\.\d+)?)\s*:\s*(\d+)", _ratio_replace, text)
+
+    # 7. Strip trailing boilerplate disclaimers without affecting core notes or alerts
     text = re.sub(r"تحليل EGX Bots مبني على أحدث البيانات[\s\S]*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"تحليل مبني على أحدث البيانات المتاحة[\s\S]*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"منصة EGX Bots لتحليل الأسهم المصرية[\s\S]*$", "", text, flags=re.IGNORECASE)
@@ -277,24 +328,24 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"منصة EGX BOTS ليست وسيطاً[\s\S]*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$", "", text, flags=re.IGNORECASE)
 
-    # 4. Strip markdown syntax
+    # 8. Strip markdown syntax
     text = re.sub(r"#{1,6}\s*", "", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
 
-    # 5. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    # 9. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
     text = re.sub(r"[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]", "", text)
 
-    # 6. Remove emojis and decorative icons
+    # 10. Remove emojis and decorative icons
     text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
     text = re.sub(r"[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]", "", text)
 
-    # 7. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    # 11. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
     text = re.sub(r"(?:والـ|الـ)\s*(?=[A-Za-z])", " ", text)
 
-    # 8. Financial terms, indices, and indicator acronyms into natural spoken Arabic
+    # 12. Financial terms, indices, and indicator acronyms into natural spoken Arabic
     text = re.sub(r"(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)", " جنيه ", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:ج\.م\.?|جم|EGP)\b", " جنيه ", text, flags=re.IGNORECASE)
     text = text.replace("%", " في المية ")
@@ -316,21 +367,21 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"\bSELL\b", " بيع ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bHOLD\b", " احتفاظ ", text, flags=re.IGNORECASE)
 
-    # 9. Replace standalone stock tickers with full Arabic company names
+    # 13. Replace standalone stock tickers with full Arabic company names
     for sym, ar_name in EGX_STOCK_TICKERS.items():
         text = re.sub(rf"\b{sym}(?:\.CA)?\b", f" {ar_name} ", text, flags=re.IGNORECASE)
 
-    # 10. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    # 14. Clean any remaining English characters/words so the voice engine NEVER pronounces English
     text = re.sub(r"[A-Za-z]+(?:\.[A-Za-z]+)?", "", text)
 
-    # 11. Remove dense parenthesized number lists like (88.16 و 87.38)
+    # 15. Remove dense parenthesized number lists like (88.16 و 87.38)
     text = re.sub(r"\([0-9.,\sو\+\-%]+\)", "", text)
 
-    # 12. Normalize whitespace and clean punctuation
+    # 16. Normalize whitespace and clean punctuation
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"([،\.\!؟])\s*\1+", r"\1", text)
 
-    # 13. Truncate smoothly at sentence boundary only if exceeding max_chars
+    # 17. Truncate smoothly at sentence boundary only if exceeding max_chars
     if len(text) > max_chars:
         cut = text[:max_chars]
         last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"), cut.rfind("\n"))

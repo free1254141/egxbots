@@ -181,4 +181,17 @@ describe("voice-utils", () => {
         expect(cleaned4).not.toContain("COMI");
         expect(/[A-Za-z]/.test(cleaned4)).toBe(false);
     });
+
+    it("naturalizes large financial numbers into billions and dates into Arabic months", () => {
+        const text = "إجمالي تداول 6,750.79 مليون جنيه في جلسة 03-11-2026 بنسبة 4.49:1 ومؤشر 1,200 مليون جنيه.";
+        const cleaned = cleanVoiceText(text);
+
+        expect(cleaned).toContain("6.75 مليار جنيه");
+        expect(cleaned).not.toContain("6,750");
+        expect(cleaned).not.toContain("6 آلاف");
+        expect(cleaned).toContain("1.2 مليار جنيه");
+        expect(cleaned).toContain("3 نوفمبر 2026");
+        expect(cleaned).not.toContain("03-11-2026");
+        expect(cleaned).toContain("4.5 إلى 1");
+    });
 });

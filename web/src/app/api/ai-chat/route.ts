@@ -927,7 +927,15 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 600) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
+                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 450) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
+                                if (spokenText) {
+                                    const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+                                    fetch(`${backendUrl}/api/voice/tts`, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ text: spokenText, voice: "ar-EG-ShakirNeural", rate: "+10%" })
+                                    }).catch(() => {});
+                                }
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -1130,9 +1138,12 @@ export async function POST(req: NextRequest) {
                                          ...extractProvenanceFromToolResults(toolsResults, streamTables),
                                          correlation_id: correlationId,
                                          publication_review: event.data?.publication_review || null,
-                                         usage: event.data?.usage || null,
+                                         usage: event.data?.response_origin === "cache"
+                                             ? { model: "cache (0 tokens)", prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+                                             : (event.data?.usage || null),
                                          diagnostic_trace: diagnostics.snapshot(),
                                          response_origin: event.data?.response_origin || null,
+                                         cached: event.data?.cached === true || event.data?.response_origin === "cache",
                                          response_task: event.data?.response_task || null,
                                          vision_error: event.data?.vision_error || null,
                                          response_kind: event.data?.vision_error ? "vision_fallback" : event.data?.response_origin === "fallback" ? "fallback" : "normal",
@@ -1167,7 +1178,15 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 600) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
+                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 450) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
+                                             if (spokenText) {
+                                                 const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+                                                 fetch(`${backendUrl}/api/voice/tts`, {
+                                                     method: "POST",
+                                                     headers: { "Content-Type": "application/json" },
+                                                     body: JSON.stringify({ text: spokenText, voice: "ar-EG-ShakirNeural", rate: "+10%" })
+                                                 }).catch(() => {});
+                                             }
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,

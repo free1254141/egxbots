@@ -43,6 +43,16 @@ def test_clean_text_removes_english_tickers_and_symbols():
     import re
     assert not re.search(r"[A-Za-z]", cleaned)
 
+def test_clean_text_financial_numbers_and_dates():
+    sample = "إجمالي تداول 6,750.79 مليون جنيه في جلسة 03-11-2026 بنسبة 4.49:1 ومؤشر 1,200 مليون جنيه."
+    cleaned = clean_text_for_speech(sample)
+    assert "6.75 مليار جنيه" in cleaned
+    assert "6,750" not in cleaned
+    assert "1.2 مليار جنيه" in cleaned
+    assert "3 نوفمبر 2026" in cleaned
+    assert "03-11-2026" not in cleaned
+    assert "4.5 إلى 1" in cleaned
+
 def test_voices_endpoint():
     res = client.get("/voice/voices")
     assert res.status_code == 200
