@@ -129,4 +129,28 @@ describe("voice-utils", () => {
         expect(isVoiceBetaTesterEmail("acursour@gmail.com")).toBe(false);
         expect(isVoiceBetaTesterEmail("weeeenew@gmail.com")).toBe(false);
     });
+
+    it("preserves 100% of answer text in cleanVoiceText without dropping tables or wiping notes", () => {
+        const textWithTableAndNotes = `تحليل سهم فوري:
+| السهم | السعر | الدعم | المقاومة |
+|---|---|---|---|
+| فوري | 15.80 ج.م | 15.20 ج.م | 16.50 ج.م |
+
+ملاحظة: السهم يحتاج إلى تأكيد السيولة فوق مستوى 16 جنيه للمتابعة.
+تنبيه: يجب تفعيل وقف الخسارة أسفل الدعم فوراً لحماية رأس المال.
+خطة التداول الموصى بها هي الدخول التدريجي على دفعات.`;
+
+        const cleaned = cleanVoiceText(textWithTableAndNotes);
+
+        // Verify table data is spoken
+        expect(cleaned).toContain("فوري");
+        expect(cleaned).toContain("15.80 جنيه");
+        expect(cleaned).toContain("15.20 جنيه");
+        expect(cleaned).toContain("16.50 جنيه");
+
+        // Verify notes and alerts are 100% spoken and NOT wiped out
+        expect(cleaned).toContain("ملاحظة: السهم يحتاج إلى تأكيد السيولة");
+        expect(cleaned).toContain("تنبيه: يجب تفعيل وقف الخسارة");
+        expect(cleaned).toContain("خطة التداول الموصى بها هي الدخول التدريجي");
+    });
 });

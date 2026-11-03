@@ -554,6 +554,17 @@ class TelegramBot:
                     updates = result.get("result", [])
                     for update in updates:
                         self._poll_offset = update["update_id"] + 1
+
+                        # ── ANTI-SPAM GUARD: Auto-detect & delete Russian spam / ban bot ──
+                        p_msg = update.get("message") or update.get("edited_message")
+                        if p_msg:
+                            try:
+                                from api.telegram_antispam import check_and_handle_spam
+                                if check_and_handle_spam(p_msg, self.token):
+                                    continue
+                            except Exception:
+                                pass
+
                         from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
                         if is_vip_chat_update(update):
                             handle_vip_chat_update(update, self.token)
@@ -580,6 +591,18 @@ class TelegramBot:
         try:
             uid = data.get("update_id", "?")
             self._log(f"Processing update: {uid}")
+
+            # ── ANTI-SPAM GUARD: Auto-detect & delete Russian spam / ban bot ──
+            msg = data.get("message") or data.get("edited_message")
+            if msg:
+                try:
+                    from api.telegram_antispam import check_and_handle_spam
+                    if check_and_handle_spam(msg, self.token):
+                        self._log(f"Anti-spam shield intercepted and handled update: {uid}")
+                        return
+                except Exception as spam_exc:
+                    self._log(f"Anti-spam check error: {spam_exc}")
+
             from api.telegram_vip_chat import is_vip_chat_update, handle_vip_chat_update
             if is_vip_chat_update(data):
                 handle_vip_chat_update(data, self.token)
@@ -612,6 +635,14 @@ class TelegramBot:
         is_priv = self._is_private_chat(msg)
 
         if not is_priv:
+            # Fallback anti-spam check
+            try:
+                from api.telegram_antispam import check_and_handle_spam
+                if check_and_handle_spam(msg, self.token):
+                    return
+            except Exception:
+                pass
+
             # STRICT GROUP SILENCE: All group topics outside Topic 1680 (ARTORO) must be 100% silent.
             # Topic 1680 is handled exclusively by is_vip_chat_update before reaching here.
             # Suppress all commands (/daily, /weekly, /help, /start) and any messages in public groups/topics.

@@ -44,33 +44,31 @@ def _get_cache_key(voice: str, rate: str, pitch: str, clean_text: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
+def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     """
     Format and streamline technical market analysis into clear, natural conversational Arabic.
-    Strips raw markdown syntax, markdown tables, and decorative symbols.
+    Preserves 100% of analytical text and converts tables into natural spoken words.
     """
     if not raw_text or not raw_text.strip():
         return ""
 
     text = raw_text
 
-    # 1. Strip code blocks and markdown table structures
+    # 1. Strip code blocks, but convert markdown tables into readable spoken text
     text = re.sub(r"```[\s\S]*?```", "", text)
-    text = re.sub(r"\|[^\n]+\|", "", text)
+    text = re.sub(r"\|[\s-:]+\|[\s-:]*[\r\n]+", "\n", text)
+    text = text.replace("|", "، ")
 
-    # 2. Extract leading executive summary if available
-    summary_match = re.search(
-        r"(?:ملخص تنفيذي|الرأي التوليفي|خلاصة القول|القرار الفني|الخلاصة)[:\s]+([^\n#]{30,250})",
-        text,
-    )
-    lead = summary_match.group(1).strip() if summary_match else ""
-
-    # 3. Strip markdown syntax
+    # 2. Strip markdown syntax
     text = re.sub(r"#{1,6}\s*", "", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+
+    # 3. Strip trailing boilerplate disclaimers without affecting core notes or alerts
+    text = re.sub(r"(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"منصة EGX BOTS ليست وسيطاً[\s\S]*$", "", text, flags=re.IGNORECASE)
 
     # 4. Remove emojis and decorative icons
     text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
@@ -90,10 +88,7 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
     # Normalize whitespace
     text = re.sub(r"\s+", " ", text).strip()
 
-    if lead and lead not in text[:120]:
-        text = f"{lead}. {text}"
-
-    # Truncate smoothly at sentence boundary if exceeding max_chars
+    # Truncate smoothly at sentence boundary only if exceeding max_chars (default 10,000)
     if len(text) > max_chars:
         cut = text[:max_chars]
         last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"), cut.rfind("\n"))
@@ -109,9 +104,9 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = DEFAULT_VOICE
-    rate: Optional[str] = "+10%"
+    rate: Optional[str] = "+12%"
     pitch: Optional[str] = "+0Hz"
-    max_chars: Optional[int] = 3500
+    max_chars: Optional[int] = 10000
 
 
 @router.get("/voices")

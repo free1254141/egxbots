@@ -219,13 +219,16 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
  * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
  * Strips markdown tables, links, disclaimers, and technical syntax so audio synthesis speaks cleanly.
  */
-export function cleanVoiceText(rawText: string, maxChars: number = 2500): string {
+export function cleanVoiceText(rawText: string, maxChars: number = 10000): string {
     if (!rawText) return "";
 
     let text = rawText;
 
-    // 1. Remove markdown tables (| col | col |)
-    text = text.replace(/\|[^\n]+\|/g, " ");
+    // 1. Convert markdown table rows into spoken text instead of wiping them out
+    // Strip markdown table separator lines like |---|---|
+    text = text.replace(/\|[\s-:]+\|[\s-:]*[\r\n]+/g, "\n");
+    // Replace remaining table pipe delimiters with natural pauses
+    text = text.replace(/\|/g, "، ");
 
     // 2. Remove markdown links [text](url) -> text
     text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
@@ -234,12 +237,10 @@ export function cleanVoiceText(rawText: string, maxChars: number = 2500): string
     text = text.replace(/#{1,6}\s*/g, "");
     text = text.replace(/[*`_~]/g, "");
 
-    // 4. Strip standard disclaimer paragraphs that should NOT be spoken in a phone call
-    text = text.replace(/تنبيه:[\s\S]*$/gi, "");
-    text = text.replace(/ملاحظة:[\s\S]*$/gi, "");
-    text = text.replace(/هذا التحليل لأغراض[\s\S]*$/gi, "");
-    text = text.replace(/منصة EGX BOTS[\s\S]*$/gi, "");
-    text = text.replace(/إخلاء مسؤولية:[\s\S]*$/gi, "");
+    // 4. Strip ONLY trailing generic disclaimer sentences at the very bottom (preserve all notes, alerts, and analytical paragraphs!)
+    text = text.replace(/(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$/gi, "");
+    text = text.replace(/منصة EGX BOTS ليست وسيطاً[\s\S]*$/gi, "");
+    text = text.replace(/هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$/gi, "");
 
     // 5. Remove emojis and decorative icons
     text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
@@ -256,7 +257,7 @@ export function cleanVoiceText(rawText: string, maxChars: number = 2500): string
     // 7. Normalize whitespace
     text = text.replace(/\s+/g, " ").trim();
 
-    // 8. Truncate smoothly at sentence boundary
+    // 8. Truncate smoothly at sentence boundary ONLY if exceeding maxChars (default 10,000)
     if (text.length > maxChars) {
         const cut = text.slice(0, maxChars);
         const lastPunct = Math.max(

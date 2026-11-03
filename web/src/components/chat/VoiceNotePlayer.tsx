@@ -18,30 +18,51 @@ interface VoiceNotePlayerProps {
 const globalAudioBlobCache = new Map<string, string>();
 const globalAudioFetchPromises = new Map<string, Promise<string>>();
 
-function fetchAudioBlobUrl(url: string): Promise<string> {
-    if (globalAudioBlobCache.has(url)) {
-        return Promise.resolve(globalAudioBlobCache.get(url)!);
+function getAudioCacheKey(audioUrl?: string, spokenText?: string): string {
+    if (audioUrl) return audioUrl;
+    if (spokenText) return `tts:ar-EG-ShakirNeural:${spokenText}`;
+    return "";
+}
+
+function fetchAudioBlobUrl(audioUrl?: string, spokenText?: string): Promise<string> {
+    const key = getAudioCacheKey(audioUrl, spokenText);
+    if (!key) return Promise.reject(new Error("No audio target"));
+    if (globalAudioBlobCache.has(key)) {
+        return Promise.resolve(globalAudioBlobCache.get(key)!);
     }
-    if (globalAudioFetchPromises.has(url)) {
-        return globalAudioFetchPromises.get(url)!;
+    if (globalAudioFetchPromises.has(key)) {
+        return globalAudioFetchPromises.get(key)!;
     }
-    const p = fetch(url)
-        .then(res => {
-            if (!res.ok) throw new Error("Audio fetch failed: " + res.status);
-            return res.blob();
-        })
-        .then(blob => {
-            const blobUrl = URL.createObjectURL(blob);
-            globalAudioBlobCache.set(url, blobUrl);
-            globalAudioFetchPromises.delete(url);
-            return blobUrl;
-        })
-        .catch(err => {
-            globalAudioFetchPromises.delete(url);
-            throw err;
-        });
-    globalAudioFetchPromises.set(url, p);
-    return p;
+
+    const fetchPromise = (async () => {
+        let res: Response;
+        if (audioUrl) {
+            res = await fetch(audioUrl);
+        } else {
+            // Robust JSON POST handles full multi-paragraph responses without URL query limits (avoids 414 URI Too Long)
+            res = await fetch("/api/voice/tts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    text: spokenText,
+                    voice: "ar-EG-ShakirNeural",
+                    rate: "+12%",
+                }),
+            });
+        }
+        if (!res.ok) throw new Error("Audio fetch failed: " + res.status);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        globalAudioBlobCache.set(key, blobUrl);
+        globalAudioFetchPromises.delete(key);
+        return blobUrl;
+    })().catch(err => {
+        globalAudioFetchPromises.delete(key);
+        throw err;
+    });
+
+    globalAudioFetchPromises.set(key, fetchPromise);
+    return fetchPromise;
 }
 
 export function VoiceNotePlayer({
@@ -54,11 +75,11 @@ export function VoiceNotePlayer({
 }: VoiceNotePlayerProps) {
     const isUser = role === "user";
 
-    // Clean spoken text for natural Egyptian Arabic TTS synthesis (entire answer up to 3500 chars)
+    // Clean spoken text for natural Egyptian Arabic TTS synthesis (100% of answer up to 10,000 chars)
     const spokenOpinion = useMemo(() => {
         if (isUser) return text ? text.trim() : "";
-        // For assistant: Always clean the full response text up to 3500 chars so 100% of the answer is spoken!
-        return text ? cleanVoiceText(text, 3500) : (spokenText ? cleanVoiceText(spokenText, 3500) : "");
+        // For assistant: Always clean the full response text so 100% of the answer is spoken!
+        return text ? cleanVoiceText(text, 10000) : (spokenText ? cleanVoiceText(spokenText, 10000) : "");
     }, [spokenText, text, isUser]);
 
     // Initial realistic duration estimate based on Arabic speech cadence (~12 chars per second)
@@ -79,19 +100,47 @@ export function VoiceNotePlayer({
         if (audioUrl && (audioUrl.startsWith("blob:") || audioUrl.startsWith("data:"))) {
             return audioUrl;
         }
+        const initialKey = getAudioCacheKey(audioUrl, spokenOpinion);
+        if (initialKey && globalAudioBlobCache.has(initialKey)) {
+            return globalAudioBlobCache.get(initialKey)!;
+        }
         return null;
     });
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    // Determine target audio URL
-    const rawAudioTarget = useMemo(() => {
-        if (audioUrl) return audioUrl;
-        if (!isUser && spokenOpinion) {
-            return `/api/voice/tts?text=${encodeURIComponent(spokenOpinion)}&voice=ar-EG-ShakirNeural`;
+    // Audio target key
+    const targetKey = useMemo(() => {
+        return getAudioCacheKey(audioUrl, spokenOpinion);
+    }, [audioUrl, spokenOpinion]);
+
+    // Background prefetch with in-memory caching for zero-delay instant replay
+    useEffect(() => {
+        if (!targetKey) return;
+
+        if (audioUrl && (audioUrl.startsWith("blob:") || audioUrl.startsWith("data:"))) {
+            setCachedBlobUrl(audioUrl);
+            return;
         }
-        return undefined;
-    }, [audioUrl, isUser, spokenOpinion]);
+
+        if (globalAudioBlobCache.has(targetKey)) {
+            setCachedBlobUrl(globalAudioBlobCache.get(targetKey)!);
+            return;
+        }
+
+        let isMounted = true;
+        fetchAudioBlobUrl(audioUrl, spokenOpinion)
+            .then(blobUrl => {
+                if (isMounted) {
+                    setCachedBlobUrl(blobUrl);
+                }
+            })
+            .catch(() => {});
+
+        return () => {
+            isMounted = false;
+        };
+    }, [targetKey, audioUrl, spokenOpinion]);
 
     // Exact audio duration calculation via Web Audio API (solves WebM Infinity duration bug in Chrome)
     useEffect(() => {
@@ -100,13 +149,12 @@ export function VoiceNotePlayer({
             return;
         }
 
-        const target = cachedBlobUrl || rawAudioTarget;
-        if (!target) return;
+        if (!cachedBlobUrl) return;
 
         let cancelled = false;
 
         // Fetch buffer and decode exact PCM frames
-        fetch(target)
+        fetch(cachedBlobUrl)
             .then(res => res.arrayBuffer())
             .then(buf => {
                 if (cancelled) return null;
@@ -127,44 +175,15 @@ export function VoiceNotePlayer({
         return () => {
             cancelled = true;
         };
-    }, [rawAudioTarget, cachedBlobUrl, durationSeconds]);
-
-    // Background prefetch with in-memory caching for zero-delay instant replay
-    useEffect(() => {
-        if (!rawAudioTarget) return;
-
-        if (rawAudioTarget.startsWith("blob:") || rawAudioTarget.startsWith("data:")) {
-            setCachedBlobUrl(rawAudioTarget);
-            return;
-        }
-
-        if (globalAudioBlobCache.has(rawAudioTarget)) {
-            setCachedBlobUrl(globalAudioBlobCache.get(rawAudioTarget)!);
-            return;
-        }
-
-        let isMounted = true;
-        fetchAudioBlobUrl(rawAudioTarget)
-            .then(blobUrl => {
-                if (isMounted) {
-                    setCachedBlobUrl(blobUrl);
-                }
-            })
-            .catch(() => {});
-
-        return () => {
-            isMounted = false;
-        };
-    }, [rawAudioTarget]);
+    }, [cachedBlobUrl, durationSeconds]);
 
     // Setup HTML5 Audio element instance
     useEffect(() => {
-        const activeSrc = cachedBlobUrl || rawAudioTarget;
-        if (!activeSrc) return;
+        if (!cachedBlobUrl) return;
 
         const audio = new Audio();
         audio.preload = "auto";
-        audio.src = activeSrc;
+        audio.src = cachedBlobUrl;
         audioRef.current = audio;
 
         const updateExactDuration = () => {
@@ -226,25 +245,47 @@ export function VoiceNotePlayer({
             audio.src = "";
             audioRef.current = null;
         };
-    }, [rawAudioTarget, autoPlay, isUser, cachedBlobUrl]);
+    }, [cachedBlobUrl, autoPlay, isUser]);
 
     const togglePlay = () => {
-        if (!audioRef.current) return;
-        if (isPlaying) {
-            audioRef.current.pause();
-            setIsPlaying(false);
-        } else {
-            setIsLoadingAudio(true);
-            audioRef.current.play()
-                .then(() => {
-                    setIsPlaying(true);
-                    setIsLoadingAudio(false);
-                })
-                .catch(() => {
-                    setIsPlaying(false);
-                    setIsLoadingAudio(false);
-                });
+        if (cachedBlobUrl && audioRef.current) {
+            if (isPlaying) {
+                audioRef.current.pause();
+                setIsPlaying(false);
+            } else {
+                setIsLoadingAudio(true);
+                audioRef.current.play()
+                    .then(() => {
+                        setIsPlaying(true);
+                        setIsLoadingAudio(false);
+                    })
+                    .catch(() => {
+                        setIsPlaying(false);
+                        setIsLoadingAudio(false);
+                    });
+            }
+            return;
         }
+
+        // If audio blob is not ready yet, trigger fetch and play immediately when ready
+        setIsLoadingAudio(true);
+        fetchAudioBlobUrl(audioUrl, spokenOpinion)
+            .then(blobUrl => {
+                setCachedBlobUrl(blobUrl);
+                const audio = new Audio();
+                audio.preload = "auto";
+                audio.src = blobUrl;
+                audioRef.current = audio;
+                return audio.play();
+            })
+            .then(() => {
+                setIsPlaying(true);
+                setIsLoadingAudio(false);
+            })
+            .catch(() => {
+                setIsPlaying(false);
+                setIsLoadingAudio(false);
+            });
     };
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
