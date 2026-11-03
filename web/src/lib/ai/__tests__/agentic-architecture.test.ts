@@ -2759,4 +2759,88 @@ describe("Agentic tool correctness and failure boundaries", () => {
         // Must emit plan without crashing and handle vision properly
         expect(planEmitted).toBeDefined();
     });
+    test("system prompt enforces Zero Hallucination Stock Grounding Rule", () => {
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("قاعدة الإلزام الصارم لاستدعاء أدوات الأسعار والدعوم والمقاومات والمستهدفات ومنع التخمين من الذاكرة");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("Zero Hallucination Stock Grounding");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("يُمنع منعاً باتاً (STRICTLY PROHIBITED) كتابة أو تخمين أو تقدير أو ذكر أي سعر لسهم");
+    });
+
+    test("system prompt enforces Large Portfolio Review and Cleanup Protocol (Action Plan First, Data Second)", () => {
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("Large Portfolio Review");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("Action Plan First, Data Second");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("سلة الخروج الفوري وإيقاف النزيف");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("سلة التخفيف عند الارتداد");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("سلة الاحتفاظ");
+        expect(AGENTIC_SYSTEM_PROMPT).toContain("جدول تنفيذي لأكبر 5 مراكز خاسرة فقط");
+    });
+
+    test("executeAgenticTool normalizes single symbol argument to symbols array for get_stock and get_stock_levels", async () => {
+        const d = db(q => {
+            if (q.table === "stocks") return { data: [{ symbol: "FWRY", name: "Fawry", name_ar: "فوري" }], error: null };
+            if (q.table === "stock_technical_indicators") return { data: [{ symbol: "FWRY", close: 16.12, date: "2026-11-03", change_pct: 1.5 }], error: null };
+            if (q.table === "stock_prices") return { data: [{ symbol: "FWRY", date: "2026-11-03", high: 16.3, low: 15.8, close: 16.12, open: 15.9 }], error: null };
+            if (q.table === "bot_states") return { data: [{ state: { active_signals: [] } }], error: null };
+            return { data: [], error: null };
+        });
+
+        const stockRes = await executeAgenticTool("get_stock", { symbol: "FWRY" }, d.client, "test-user");
+        expect(stockRes.status).toBe("success");
+        expect(stockRes.stocks).toHaveLength(1);
+        expect(stockRes.stocks[0].symbol).toBe("FWRY");
+
+        const levelsRes = await executeAgenticTool("get_stock_levels", { symbol: "FWRY" }, d.client, "test-user");
+        expect(levelsRes.status).toBe("success");
+        expect(levelsRes.levels).toHaveLength(1);
+        expect(levelsRes.levels[0].symbol).toBe("FWRY");
+    });
+
+    test("get_recommendations enriches active scanner signals with latest closing price from stock_technical_indicators", async () => {
+        const fakeCairoDate = "2026-11-03";
+        const d = db(q => {
+            if (q.table === "bot_states") {
+                return {
+                    data: [{
+                        state: {
+                            active_signals: [
+                                {
+                                    id: "sig_fwry_1",
+                                    symbol: "FWRY",
+                                    scanner_type: "volume_surge",
+                                    entry_date: fakeCairoDate,
+                                    entry_price: 15.88,
+                                    current_price: 15.88,
+                                    target_1: 16.50,
+                                    target_2: 17.00,
+                                    stop_loss: 15.40,
+                                    return_pct: 0.0
+                                }
+                            ],
+                            closed_signals: []
+                        }
+                    }],
+                    error: null
+                };
+            }
+            if (q.table === "stock_technical_indicators") {
+                return {
+                    data: [
+                        { symbol: "FWRY", close: 16.12, change_pct: 1.51, date: fakeCairoDate }
+                    ],
+                    error: null
+                };
+            }
+            if (q.table === "scan_results") {
+                return { data: [], count: 0, error: null };
+            }
+            return { data: [], error: null };
+        });
+
+        const res = await executeAgenticTool("get_recommendations", { status: "open", timeframe: "all" }, d.client, "test-user");
+        expect(res.status).toBe("success");
+        const fwryRec = res.recommendations.find((r: any) => r.symbol === "FWRY");
+        expect(fwryRec).toBeDefined();
+        expect(fwryRec.current_price).toBe(16.12);
+        expect(fwryRec.entry_price).toBe(15.88);
+        expect(fwryRec.unrealized_return_pct).toBe(1.51);
+    });
 });

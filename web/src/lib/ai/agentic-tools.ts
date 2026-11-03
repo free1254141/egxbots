@@ -122,9 +122,10 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         if (!args || Array.isArray(args) || typeof args !== "object") throw new Error("مدخلات الأداة يجب أن تكون كائناً");
         const chartTool = ["list_chart_strategies", "apply_chart_strategy", "compare_strategies_history"].includes(toolName);
         for (const [key,values] of Object.entries(enums)) if (!(chartTool && key === "timeframe") && args[key] != null && !values.includes(String(args[key]).toLowerCase())) throw new Error("قيمة مدخل الأداة غير مدعومة: "+key);
+        const rawSymbols = args.symbols || (args.symbol ? [args.symbol] : undefined);
         if (args.symbols != null && (!Array.isArray(args.symbols) || args.symbols.length > (toolName === "analyze_portfolio_risk" ? 30 : 10) || args.symbols.some((s:any)=>typeof s !== "string" || !/^[A-Za-z0-9.]{2,12}$/.test(s.trim())))) throw new Error("الحد الأقصى 10 رموز موثقة لكل أداة");
-        if (["get_stock","get_stock_levels","get_comparison"].includes(toolName) && !args.symbols?.length) throw new Error("رموز الأسهم مطلوبة");
-        const normalized = {...args, ...(args.symbols ? {symbols:Array.from(new Set(args.symbols.map(normalizeSymbol)))} : {})};
+        if (["get_stock","get_stock_levels","get_comparison"].includes(toolName) && !rawSymbols?.length) throw new Error("رموز الأسهم مطلوبة");
+        const normalized = {...args, ...(rawSymbols ? {symbols:Array.from(new Set(rawSymbols.map(normalizeSymbol)))} : {})};
         if (toolName === "enable_autonomous_recommendations") {
             return {
                 status: "success",
@@ -1147,6 +1148,34 @@ async function executeRawTool(
             }
             const dedupedActiveSignals = Array.from(activeScannerMap.values());
 
+            // Enrich active scanner signals with real-time / latest closing prices from stock_technical_indicators
+            const activeSymbols = Array.from(new Set(dedupedActiveSignals.map((s: any) => s.symbol).filter(Boolean)));
+            const latestPriceMap = new Map<string, { close: number; change_pct: number; date: string }>();
+            if (activeSymbols.length > 0) {
+                try {
+                    const { data: latestRows } = await supabase
+                        .from("stock_technical_indicators")
+                        .select("symbol, close, change_pct, date")
+                        .in("symbol", activeSymbols)
+                        .order("date", { ascending: false })
+                        .limit(Math.max(50, activeSymbols.length * 5));
+                    if (latestRows) {
+                        for (const row of latestRows) {
+                            const sym = row.symbol ? String(row.symbol).toUpperCase() : "";
+                            if (sym && !latestPriceMap.has(sym) && row.close != null && Number.isFinite(Number(row.close))) {
+                                latestPriceMap.set(sym, {
+                                    close: Number(row.close),
+                                    change_pct: Number(row.change_pct || 0),
+                                    date: row.date ? String(row.date).slice(0, 10) : ""
+                                });
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[get_recommendations] Failed to fetch latest prices for scanner signals:", err);
+                }
+            }
+
             const filteredClosedScannerSignals = filterScannerBySymbols(rawClosedSignals)
                 .filter((c: any) => isScannerDateInTimeframe(c.exit_date || c.entry_date));
 
@@ -1160,6 +1189,16 @@ async function executeRawTool(
                         ? "🧲 مضاربة لحظية (تشبع بيعي)"
                         : "⚡ مضاربة لحظية (إسكان 15 دقيقة)";
                     const canonical = getCanonicalStockName(s.symbol);
+                    const symUpper = s.symbol ? String(s.symbol).toUpperCase() : "";
+                    const latestPriceInfo = symUpper ? latestPriceMap.get(symUpper) : null;
+                    const entryPrice = finite(s.entry_price);
+                    const currentPrice = (latestPriceInfo?.close != null && Number.isFinite(latestPriceInfo.close))
+                        ? latestPriceInfo.close
+                        : (finite(s.current_price) ?? entryPrice);
+                    const currentDate = latestPriceInfo?.date || s.entry_date || null;
+                    const unrealizedReturn = (entryPrice && currentPrice != null && entryPrice > 0)
+                        ? Number((((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2))
+                        : (finite(s.return_pct) ?? 0);
                     return {
                         id: s.id || `scanner_${s.symbol}_${s.entry_date}`,
                         symbol: s.symbol,
@@ -1173,7 +1212,7 @@ async function executeRawTool(
                         recommendation_type: scannerTypeArabic,
                         time_horizon: "1 - 3 جلسات تداول (مضاربة لحظية)",
                         holding_days: s.sessions_count || 1,
-                        entry_price: finite(s.entry_price),
+                        entry_price: entryPrice,
                         target_price: finite(s.target_1),
                         target_2: finite(s.target_2),
                         stop_loss: finite(s.stop_loss),
@@ -1182,10 +1221,10 @@ async function executeRawTool(
                         signal_date: s.entry_date || null,
                         entry_time: s.entry_time || null,
                         closed_date: null,
-                        current_price: finite(s.current_price) ?? finite(s.entry_price),
-                        current_date: s.entry_date || null,
+                        current_price: currentPrice,
+                        current_date: currentDate,
                         realized_return_pct: null,
-                        unrealized_return_pct: finite(s.return_pct) ?? 0,
+                        unrealized_return_pct: unrealizedReturn,
                         max_gain_pct: finite(s.max_gain_pct)
                     };
                 })

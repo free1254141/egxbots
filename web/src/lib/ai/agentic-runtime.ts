@@ -661,12 +661,38 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                     if (round === 0 && !social && !assistant.incomplete && providerCalls < AGENTIC_BUDGET.providerCalls && remainingExecutionMs() > 3500) {
                         const earlyEvidence = [...previousEvidence, ...evidence, ...(currentImageEvidence() ? [currentImageEvidence()!] : [])];
                         const earlyIssues = checkAgenticDraft(draft, earlyEvidence, userMessage, evidence);
-                        if (earlyIssues.some(r => r.startsWith("table_value_not_grounded:") || r === "ungrounded_technical_table_without_evidence" || r === "claimed_refresh_without_current_tool")) {
+                        const userStockHints = knownSymbolHints(userMessage);
+                        const tickerMatch = (userMessage.match(/\b[A-Z]{2,6}\b/g) || []).filter(s => !["RSI", "MACD", "EMA", "SMA", "EPS", "PE", "EGX", "EGX30", "EGX70", "USD", "EGP"].includes(s.toUpperCase()));
+                        const isPriceOrLevelInquiry = /(?:سعر|سعره|بكام|كام|دعوم|مقاومات|دعم|مقاومة|مستهدف|مستهدفاته|أهداف|اهداف|تحليل|شراء|بيع|وقف)/i.test(userMessage) && (userStockHints.length > 0 || tickerMatch.length > 0);
+                        const draftedLevelsWithoutEvidence = !evidence.length && /(?:السعر\s*الحالي|سعر\s*الإغلاق|الدعم\s*الأول|الدعم\s*الثاني|المقاومة\s*الأولى|المقاومة\s*الثانية|المستهدف\s*الأول|المستهدف\s*الثاني)\s*[:=]\s*\d+/i.test(draft);
+                        const needsStockToolCall = (isPriceOrLevelInquiry || draftedLevelsWithoutEvidence) && evidence.length === 0;
+
+                        if (needsStockToolCall || earlyIssues.some(r => r.startsWith("table_value_not_grounded:") || r === "ungrounded_technical_table_without_evidence" || r === "claimed_refresh_without_current_tool")) {
                             messages.push(assistant, {
                                 role: "user",
-                                content: "المسودة تحتوي على جداول أو أرقام فنية غير مسندة لأدلة موثقة في هذه الجولة. استدعِ الآن الأدوات اللازمة للسؤال (مثل get_stock وget_stock_levels للتحليل والمستويات، أو get_recommendations للتوصيات، أو get_sector_peers للبدائل القطاعية) ولا تكتب أرقاماً من الذاكرة."
+                                content: "المسودة تفتقر للأدلة الموثقة أو تذكر أسعاراً ومستويات دون استدعاء الأدوات. استدعِ فوراً أداة get_stock و get_stock_levels (أو get_recommendations للتوصيات) لجلب الأسعار الحقيقية اللحظية ومستويات الدعم والمقاومة من قاعدة البيانات والمزود ولا تكتب أرقاماً من الذاكرة."
                             });
                             continue;
+                        }
+                    }
+                    if (!social && evidence.length === 0 && providerCalls < AGENTIC_BUDGET.providerCalls && remainingExecutionMs() > 2500) {
+                        const userStockHints = knownSymbolHints(userMessage);
+                        const tickerMatch = (userMessage.match(/\b[A-Z]{2,6}\b/g) || []).filter(s => !["RSI", "MACD", "EMA", "SMA", "EPS", "PE", "EGX", "EGX30", "EGX70", "USD", "EGP"].includes(s.toUpperCase()));
+                        const isPriceOrLevelInquiry = /(?:سعر|سعره|بكام|كام|دعوم|مقاومات|دعم|مقاومة|مستهدف|مستهدفاته|أهداف|اهداف|تحليل|شراء|بيع|وقف)/i.test(userMessage) && (userStockHints.length > 0 || tickerMatch.length > 0);
+                        if (isPriceOrLevelInquiry) {
+                            const candidateSymbols = [...new Set([...userStockHints.flatMap(h => h.symbols), ...tickerMatch])];
+                            if (candidateSymbols.length > 0) {
+                                const targetSym = candidateSymbols[0];
+                                const autoCalls: AgenticToolCall[] = [
+                                    { id: `auto_stock_${targetSym}`, type: "function", function: { name: "get_stock", arguments: JSON.stringify({ symbols: [targetSym] }) } },
+                                    { id: `auto_levels_${targetSym}`, type: "function", function: { name: "get_stock_levels", arguments: JSON.stringify({ symbols: [targetSym] }) } }
+                                ];
+                                yield { type: "plan", data: { intent: "agentic_tools", tools: autoCalls.map(c => c.function?.name), entities: { symbols: [targetSym] }, round } };
+                                yield { type: "status", data: { status: "tools", message: "جلب الأسعار الحقيقية والمستويات الفنية المؤكدة للسهم..." } };
+                                await executeCalls(autoCalls);
+                                yield emitData();
+                                continue;
+                            }
                         }
                     }
                     break;
