@@ -1,6 +1,79 @@
 /**
- * Utility functions for ARTORO Voice Call and Speech Synthesis.
+ * Utility functions for ARTORO Voice Call, Voice Notes, and Speech Synthesis.
  */
+
+/**
+ * Robust Speech-to-Text cleaner for Arabic mobile browsers (Web Speech API).
+ * 1. Deduplicates stuttered syllables within words (e.g. "حلحلحل" -> "حلل", "هلهلهل" -> "هل", "هتعصبهتعصب" -> "هتعصب").
+ * 2. Corrects common phonetic Egyptian dialect misrecognitions (e.g. "لسام" -> "لسهم", "فوى" -> "فوري").
+ * 3. Splits glued question words (e.g. "الساعههل" -> "الساعه هل").
+ * 4. Deduplicates repeated consecutive words and repeated phrases (e.g. "هل الساعه هل الساعه" -> "هل الساعه").
+ */
+export function cleanVoiceTranscript(rawText: string): string {
+    if (!rawText) return "";
+    let text = rawText.trim();
+
+    // 1. Phonetic Arabic financial corrections
+    const phoneticFixes: Array<[RegExp, string]> = [
+        [/(?<![\u0600-\u06FF])لسام(?![\u0600-\u06FF])/g, "لسهم"],
+        [/(?<![\u0600-\u06FF])لسهام(?![\u0600-\u06FF])/g, "للأسهم"],
+        [/(?<![\u0600-\u06FF])سهمسهم(?![\u0600-\u06FF])/g, "سهم"],
+        [/(?<![\u0600-\u06FF])حللحلل(?![\u0600-\u06FF])/g, "حلل"],
+        [/(?<![\u0600-\u06FF])حلحلحل(?![\u0600-\u06FF])/g, "حلل"],
+        [/(?<![\u0600-\u06FF])فوى(?![\u0600-\u06FF])/g, "فوري"],
+        [/(?<![\u0600-\u06FF])فوري\s+فوري(?![\u0600-\u06FF])/g, "فوري"],
+        [/(?<![\u0600-\u06FF])تجاري\s+تجاري(?![\u0600-\u06FF])/g, "تجاري"],
+    ];
+    for (const [pattern, replacement] of phoneticFixes) {
+        text = text.replace(pattern, replacement);
+    }
+
+    // 2. Syllable stutter deduplication within Arabic words
+    const words = text.split(/\s+/);
+    const cleanedWords: string[] = [];
+
+    for (const w of words) {
+        let token = w;
+        if (/^[\u0600-\u06FF]+$/.test(token)) {
+            for (let chunkLen = 2; chunkLen <= 5; chunkLen++) {
+                if (token.length >= chunkLen * 2) {
+                    const chunk = token.slice(0, chunkLen);
+                    const repeatedPattern = new RegExp(`^(${chunk})+$`);
+                    if (repeatedPattern.test(token)) {
+                        token = chunk === "حل" ? "حلل" : chunk;
+                        break;
+                    }
+                }
+            }
+            if (token === "حل") token = "حلل";
+        }
+        cleanedWords.push(token);
+    }
+    text = cleanedWords.join(" ");
+
+    // 3. Handle attached word-gluing like "الساعههل" -> "الساعه هل"
+    for (const prefix of ["هل", "كام", "مين", "ايه", "إيه", "شو", "فين"]) {
+        const re = new RegExp(`([^\\s]+)(${prefix}\\s)`, "g");
+        text = text.replace(re, "$1 $2");
+    }
+
+    // 4. Remove consecutive duplicate words and multi-word phrases (Arabic-safe without \b)
+    let deduped = text.split(/\s+/).filter(Boolean);
+
+    // Deduplicate repeated phrases of length 4 down to 1
+    for (let phraseLen = 4; phraseLen >= 1; phraseLen--) {
+        for (let i = 0; i <= deduped.length - phraseLen * 2; i++) {
+            const phrase1 = deduped.slice(i, i + phraseLen).join(" ");
+            const phrase2 = deduped.slice(i + phraseLen, i + phraseLen * 2).join(" ");
+            if (phrase1.length > 0 && phrase1 === phrase2) {
+                deduped.splice(i + phraseLen, phraseLen);
+                i--; // re-check at same index
+            }
+        }
+    }
+
+    return deduped.join(" ").trim();
+}
 
 /**
  * Intelligently extracts human conversational analysis and ARTORO's opinion on a stock
@@ -16,85 +89,130 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
 
     const text = replyText;
 
-    // 1. Look for explicit opinion/verdict sections first
+    // 0. If the text is already a concise conversational prose response (no markdown tables, no indicator acronyms, no section headers)
+    if (!text.includes("|") && !/\b(RSI|MACD|EMA|SMA)\b/i.test(text) && !/(?:الرأي الفني|الرأي التوليفي|ملخص تنفيذي)/i.test(text) && text.length < 900) {
+        const cleanShort = cleanVoiceText(text, 250);
+        if (cleanShort && cleanShort.length > 25 && !/(?:تنبيه:|ملاحظة:|إخلاء مسؤولية)/i.test(cleanShort)) {
+            return cleanShort;
+        }
+    }
+
+    // 1. Look for explicit synthesized opinion/verdict sections first
     const opinionPatterns = [
-        /(?:💡\s*)?(?:الرأي الفني وخلاصة أرتورو|الرأي الفني|خلاصة أرتورو|خلاصة التحليل|النظرة الفنية|التوصية الفنية|توصية أرتورو|رأي أرتورو|الخلاصة|التقييم الفني)[:\s*]+([^\n]+(?:\n[^\n]+){0,2})/i,
-        /(?:🎯\s*)?(?:الرأي|التقييم|النصيحة|التوصية)[:\s*]+([^\n]+(?:\n[^\n]+)?)/i,
+        // الرأي التوليفي وخطة التحرك
+        /(?:###\s*)?(?:💡\s*)?(?:الرأي التوليفي وخطة التحرك|الرأي التوليفي|خطة التحرك|القرار التنفيذي|الرأي الفني وخلاصة أرتورو|الرأي الفني|خلاصة أرتورو|خلاصة التحليل|النظرة الفنية|التوصية الفنية|توصية أرتورو|رأي أرتورو)[:\s*]+([^\n]+(?:\n[^\n]+){0,3})/i,
+        // ملخص تنفيذي
+        /(?:###\s*)?(?:📊\s*)?(?:ملخص تنفيذي|الخلاصة التنفيذية)[:\s*]+([^\n]+(?:\n[^\n]+){0,3})/i,
+        // القرار
+        /(?:[0-9]\.\s*)?\*\*(?:القرار التنفيذي|القرار|التوصية)\*\*[:\s*]+([^\n]+)/i,
     ];
 
     let extractedOpinion = "";
     for (const pat of opinionPatterns) {
         const m = text.match(pat);
         if (m && m[1]) {
-            extractedOpinion = m[1].trim();
-            break;
+            const candidate = m[1].trim();
+            if (!/(?:تنبيه:|ملاحظة:|إخلاء مسؤولية|شهادة إغلاق|حدود البيانات)/i.test(candidate)) {
+                extractedOpinion = candidate;
+                break;
+            }
         }
     }
 
-    // 2. Look for stock situation / accumulation
-    const accumMatch = text.match(/(?:حركة السيولة والتجميع|درجة التجميع|وضع السيولة|حالة السهم)[:\s*]+([^\n]+)/i);
-    const accumText = accumMatch && accumMatch[1] ? accumMatch[1].trim() : "";
-
-    // 3. Look for target / support levels if opinion is short
-    let levelsText = "";
-    const supportMatch = text.match(/(?:الدعم الأول|الدعم الرئيسي)[:\s*]+([0-9.]+\s*(?:ج\.م\.?|جم|جنيه)?)/i);
-    const targetMatch = text.match(/(?:المقاومة الأولى|المستهدف|المقاومة الرئيسية)[:\s*]+([0-9.]+\s*(?:ج\.م\.?|جم|جنيه)?)/i);
-    if (supportMatch && targetMatch) {
-        levelsText = `مستوى الدعم عند ${supportMatch[1]} والمقاومة المستهدفة ${targetMatch[1]}`;
+    // 2. Look for stock accumulation / smart money (strictly liquidity & accumulation, never portfolio lines)
+    const accumMatch = text.match(/(?:حركة السيولة والتجميع|درجة التجميع|وضع السيولة|حالة السيولة|تدفق السيولة الذكية)[:\s*]+([^\n]+)/i);
+    let accumText = accumMatch && accumMatch[1] ? accumMatch[1].trim() : "";
+    if (accumText.includes("محفظتك") || accumText.includes("غير مسجل") || accumText.includes("مسجل لديك")) {
+        accumText = "";
     }
 
-    let candidate = "";
-    if (extractedOpinion) {
-        if (accumText && !extractedOpinion.includes(accumText)) {
-            candidate = `${accumText}. ${extractedOpinion}`;
+    // 3. Extract structured stock parameters for a complete human synthesis if opinion needs context
+    let stockName = "";
+    const nameM = text.match(/تحليل سهم ([^\n\(\)]+)/i);
+    if (nameM) {
+        stockName = nameM[1].trim();
+    }
+
+    let price = "";
+    const priceM = text.match(/(?:السعر الأخير|السعر الحالي|الإغلاق الحالي)[:\s*]+\*?\*?([0-9.,]+)\s*(?:ج\.م|جم|جنيه)?/i);
+    if (priceM) {
+        price = priceM[1].trim() + " جنيه";
+    }
+
+    let trendBadge = "";
+    const badgeM = text.match(/التقييم الفني العام[:\s*]+\*?\*?([^\n\|]+)/i);
+    if (badgeM) {
+        trendBadge = badgeM[1].replace(/[*#]/g, "").trim();
+        trendBadge = trendBadge.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").trim();
+        trendBadge = trendBadge.replace(/\(سكور.*?\)/g, "").trim();
+    }
+
+    let support = "";
+    const supM = text.match(/الدعم الأول\s*\|\s*([0-9.,]+)/i) || text.match(/(?:الدعم الأول|أقرب دعم حاسم)[:\s*]+([0-9.,]+)/i);
+    if (supM) {
+        support = supM[1].trim() + " جنيه";
+    }
+
+    let resistance = "";
+    const resM = text.match(/المقاومة الأولى\s*\|\s*([0-9.,]+)/i) || text.match(/المقاومة الأولى[:\s*]+([0-9.,]+)/i);
+    if (resM) {
+        resistance = resM[1].trim() + " جنيه";
+    }
+
+    let result = "";
+    if (extractedOpinion && extractedOpinion.length > 25) {
+        let cleanOp = extractedOpinion;
+        // Clean list markers: "1. الاتجاه: ... 2. القرار: ..."
+        cleanOp = cleanOp.replace(/[0-9]+\.\s*\*\*[^*]+\*\*[:\s]*/g, "، ");
+        cleanOp = cleanOp.replace(/[*#_`~|]/g, "");
+        if (accumText && !cleanOp.includes(accumText)) {
+            result = `${accumText}. ${cleanOp}`;
         } else {
-            candidate = extractedOpinion;
+            result = cleanOp;
         }
-    } else if (accumText) {
-        candidate = levelsText ? `${accumText}. ${levelsText}.` : accumText;
     } else {
-        // Fallback: Scan non-indicator lines and reject technical noise
-        const lines = text.split("\n");
-        const cleanLines: string[] = [];
-        for (const line of lines) {
-            const l = line.trim();
-            if (!l || l.startsWith("|") || l.startsWith("#") || l.startsWith("⚠️") || l.startsWith("تنبيه:") || l.startsWith("ملاحظة:")) {
-                continue;
-            }
-            if (/\b(RSI|MACD|EMA|SMA|P\/E|ATR|Bollinger)\b/i.test(l)) {
-                continue;
-            }
-            if (/(مؤشر القوة|مؤشر الماكد|متوسط متحرك|مضاعف الربحية|مؤشرات فنية)/i.test(l)) {
-                continue;
-            }
-            cleanLines.push(l);
+        // Synthesize structured human opinion
+        const parts: string[] = [];
+        if (stockName && price) {
+            parts.push(`سهم ${stockName} يتداول حالياً عند ${price}`);
         }
-        candidate = cleanLines.slice(0, 3).join(" ");
+        if (trendBadge) {
+            parts.push(`والتقييم العام للسهم ${trendBadge}`);
+        }
+        if (support && resistance) {
+            parts.push(`أهم مستوى دعم هو ${support} والمقاومة المستهدفة عند ${resistance}`);
+        } else if (support) {
+            parts.push(`وأهم مستوى دعم للمتابعة هو ${support}`);
+        }
+        parts.push("القرار الفني هو المتابعة بحذر لحين وضوح السيولة والاتجاه.");
+        result = parts.join("، ");
     }
 
-    // Clean formatting, english tickers in parentheses e.g. (FWRY), markdown syntax
-    candidate = candidate.replace(/\([A-Za-z0-9_.]+\)/g, "");
-    candidate = candidate.replace(/[*_#`~]/g, "");
-    candidate = candidate.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
-    candidate = candidate.replace(/[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑]/g, "");
-    candidate = candidate.replace(/(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)/gi, " جنيه");
-    candidate = candidate.replace(/\b(?:ج\.م\.?|جم|EGP)\b/gi, " جنيه");
-    candidate = candidate.replace(/%/g, " في المية");
-    candidate = candidate.replace(/\s+/g, " ").trim();
+    // Clean technical jargon, tickers, emojis, and disclaimers
+    result = result.replace(/\([A-Za-z0-9_.]+\)/g, ""); // remove (FWRY)
+    result = result.replace(/\b(RSI|MACD|EMA|SMA|P\/E|EPS|ATR|Bollinger)\b/gi, "");
+    result = result.replace(/[*#_`~|•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑]/g, " ");
+    result = result.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ");
+    result = result.replace(/(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)/gi, " جنيه");
+    result = result.replace(/\b(?:ج\.م\.?|جم|EGP)\b/gi, " جنيه");
+    result = result.replace(/%/g, " في المية ");
+    result = result.replace(/إشارة نموذج لا إثبات لشراء مؤسسات\.?/g, "");
+    result = result.replace(/حالة السهم في محفظتك.*$/g, "");
+    result = result.replace(/\s+/g, " ").trim();
 
-    // Ensure it smoothly finishes at a sentence boundary around 240 chars
-    if (candidate.length > 240) {
-        const cut = candidate.slice(0, 240);
+    // Limit to ~230 chars smoothly at punctuation
+    if (result.length > 230) {
+        const cut = result.slice(0, 230);
         const lastPunct = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("،"), cut.lastIndexOf("!"), cut.lastIndexOf("؟"));
         if (lastPunct > 80) {
-            candidate = cut.slice(0, lastPunct + 1);
+            result = cut.slice(0, lastPunct + 1);
         } else {
             const lastSpace = cut.lastIndexOf(" ");
-            candidate = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + ".";
+            result = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + ".";
         }
     }
 
-    return candidate.trim();
+    return result.trim();
 }
 
 /**

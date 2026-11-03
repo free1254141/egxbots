@@ -1,7 +1,14 @@
-import { cleanVoiceText, extractVoiceAnalysisSpeech } from "../voice-utils";
+import { cleanVoiceText, cleanVoiceTranscript, extractVoiceAnalysisSpeech } from "../voice-utils";
 import { isVoiceBetaTester, isVoiceBetaTesterEmail } from "../chat-sharing";
 
 describe("voice-utils", () => {
+    it("cleans STT syllable stuttering, phonetic misrecognitions, and word repetitions", () => {
+        expect(cleanVoiceTranscript("حلحلحل لسام ابو قير")).toBe("حلل لسهم ابو قير");
+        expect(cleanVoiceTranscript("هتعصبهتعصب التجميع")).toBe("هتعصب التجميع");
+        expect(cleanVoiceTranscript("هلهلهل الساعههل الساعه بتاعه مصطفى")).toBe("هل الساعه بتاعه مصطفى");
+        expect(cleanVoiceTranscript("فوى فوى")).toBe("فوري");
+        expect(cleanVoiceTranscript("")).toBe("");
+    });
     it("cleans markdown and extracts spoken summary without losing digits", () => {
         const sample = `📊 **تحليل سهم فوري (FWRY)**
 السهم يتداول حالياً عند 8.45 ج.م بارتفاع +1.5%.
@@ -65,6 +72,36 @@ describe("voice-utils", () => {
         expect(voiceSpeech).not.toContain("EGX BOTS");
         expect(voiceSpeech).not.toContain("|");
         expect(voiceSpeech).not.toContain("**");
+    });
+
+    it("extracts clean financial decision from real production stock dashboard without speaking disclaimers or portfolio lines", () => {
+        const prodFwrySample = `### 📊 تحليل سهم فوري لتكنولوجيا البنوك والمدفوعات الإلكترونية (FWRY)
+
+**السعر الأخير:** 15.88 ج.م (تغير الجلسة: +0.83% بتاريخ 03-11-2026) | **التقييم الفني العام:** 🔴 سلبي / مخاطرة مرتفعة (سكور 32/100 — D)
+
+**ملخص تنفيذي:**
+1. **الاتجاه:** السهم في مسار هابط واضح تحت متوسطي EMA 50 (18.20) وEMA 200 (17.90).
+2. **أقرب دعم حاسم:** 15.27 ج.م (قاع 20 جلسة)؛ كسره بإغلاق يفتح الطريق إلى 14.66 ج.م.
+3. **القرار التنفيذي:** لا يوجد ما يبرر الشراء الاستثماري الآن؛ توجد إشارة مضاربة لحظية نشطة بوقف صارم.
+
+### 📌 حالة السهم في محفظتك
+السهم غير مسجل ضمن مراكز محفظتك الاستثمارية المحفوظة.
+
+### الرأي التوليفي وخطة التحرك
+مالياً السهم متضخم عن قيمته العادلة، وفنياً تحت كل متوسطاته مع تصريف مسيطر، فلا يوجد أساس للتجميع الاستثماري عند المستويات الحالية. الدعم الحاسم عند 15.27 ج.م والمقاومة الأولى 19.25 ج.م.
+
+✅ تحليل EGX Bots مبني على أحدث البيانات المتاحة ومؤرّخ بمصدره — ليس نصيحة استثمارية.`;
+
+        const speech = extractVoiceAnalysisSpeech(prodFwrySample, "حلل سهم فوري");
+
+        // MUST be concise, professional financial opinion
+        expect(speech).not.toContain("في محفظتك");
+        expect(speech).not.toContain("إشارة نموذج لا إثبات");
+        expect(speech).not.toContain("ليس نصيحة استثمارية");
+        expect(speech).not.toContain("FWRY");
+        expect(speech).not.toContain("EMA");
+        expect(speech).toContain("لا يوجد ما يبرر الشراء الاستثماري");
+        expect(speech.length).toBeLessThan(250);
     });
 
     it("handles short empty or null inputs gracefully", () => {

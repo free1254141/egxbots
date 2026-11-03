@@ -18,6 +18,9 @@ export interface PipelineOptions {
     skipReview?: boolean;
     gateMode?: "audit_only" | "strict";
     autonomousRecommendations?: boolean;
+    isVoice?: boolean;
+    isVoiceCall?: boolean;
+    isVoiceNote?: boolean;
 }
 
 export interface AgenticToolCall {
@@ -475,9 +478,12 @@ export async function* runAgenticPipelineStream(
     requestedModel?: string,
     options: PipelineOptions = {}
 ): AsyncGenerator<{ type: string; data: any }> {
+    const isVoice = Boolean(options.isVoice || options.isVoiceCall || options.isVoiceNote);
+    const activeSystemPrompt = isVoice ? `${AGENTIC_SYSTEM_PROMPT}\n\n${VOICE_INTERACTION_SYSTEM_PROMPT}` : AGENTIC_SYSTEM_PROMPT;
+
     yield* runAgenticRuntime({ userMessage, images, sessionState, sessionSummary, history,
         supabase, apiKeys, userId, sessionId, messageId, requestedModel, options,
-        systemPrompt: AGENTIC_SYSTEM_PROMPT, toolsSchema: AGENTIC_TOOLS_SCHEMA });
+        systemPrompt: activeSystemPrompt, toolsSchema: AGENTIC_TOOLS_SCHEMA });
 }
 
 export async function runAgenticPipeline(

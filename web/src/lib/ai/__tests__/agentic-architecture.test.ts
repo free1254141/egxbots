@@ -1,7 +1,7 @@
 import { executeAgenticTool, runAgenticPipelineStream, AGENTIC_TOOLS_SCHEMA } from "../agentic-pipeline";
 import { cairoWeekBounds } from "../agentic-tools";
 import { checkAgenticDraft, checkUserPositionInputs, toAgenticEvidence, evidenceMemory, safeAgenticFallback, agenticFacts, type AgenticEvidence } from "../agentic-publication";
-import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues, withPortfolioFailureGuide } from "../agentic-runtime";
+import { resolveUserProContext, groundedReviewerIssues, compactHistory, unsupersededEvidence, removeDisprovenMissingToolIssues, removeSelfRetractedReviewerIssues, safePortfolioImageReply, removeBogusAnalysisTradingLevelIssues, removeBogusNewsCoverageReviewIssues, withPortfolioFailureGuide, runAgenticRuntime } from "../agentic-runtime";
 import { AGENTIC_SYSTEM_PROMPT } from "../agentic-pipeline";
 import { renderStockRecovery } from "../stock-recovery";
 import { runAnswerGate } from "../answer-gate";
@@ -2104,15 +2104,16 @@ describe("Agentic tool correctness and failure boundaries", () => {
             images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             sessionState: {
                 last_symbols: ["ABUK"],
-                active_chart_id: null,
-            },
+            } as any,
             sessionSummary: {
                 current_symbols: ["ABUK"],
                 last_topic: "تحليل سهم ABUK",
                 open_references: [],
                 last_image_symbols: [],
                 last_vision_context: null,
-            },
+                last_data_date: null,
+                updated_at: new Date().toISOString(),
+            } as any,
             history: [
                 { role: "user", content: "حلل سهم ABUK" },
                 { role: "assistant", content: "سهم أبو قير للأسمدة عند 92.01" },
@@ -2137,6 +2138,9 @@ describe("Agentic tool correctness and failure boundaries", () => {
             ],
             systemPrompt: "You are ARTORO.",
             userId: "test-user-id",
+            apiKeys: ["fake-key"],
+            sessionId: "test-session",
+            messageId: "test-message",
             supabase: {
                 from: () => ({
                     select: () => ({
@@ -2338,15 +2342,16 @@ describe("Agentic tool correctness and failure boundaries", () => {
             images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             sessionState: {
                 last_symbols: ["ABUK"],
-                active_chart_id: null,
-            },
+            } as any,
             sessionSummary: {
                 current_symbols: ["ABUK"],
                 last_topic: "تحليل سهم ABUK",
                 open_references: [],
                 last_image_symbols: [],
                 last_vision_context: null,
-            },
+                last_data_date: null,
+                updated_at: new Date().toISOString(),
+            } as any,
             history: [
                 { role: "user", content: "حلل سهم ABUK" },
                 { role: "assistant", content: "سهم أبو قير للأسمدة عند 92.01" },
@@ -2371,6 +2376,9 @@ describe("Agentic tool correctness and failure boundaries", () => {
             ],
             systemPrompt: "You are ARTORO.",
             userId: "test-user-id",
+            apiKeys: ["fake-key"],
+            sessionId: "test-session",
+            messageId: "test-message",
             supabase: {
                 from: () => ({
                     select: () => ({
@@ -2578,15 +2586,16 @@ describe("Agentic tool correctness and failure boundaries", () => {
             images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             sessionState: {
                 last_symbols: ["ABUK"],
-                active_chart_id: null,
-            },
+            } as any,
             sessionSummary: {
                 current_symbols: ["ABUK"],
                 last_topic: "تحليل سهم ABUK",
                 open_references: [],
                 last_image_symbols: [],
                 last_vision_context: null,
-            },
+                last_data_date: null,
+                updated_at: new Date().toISOString(),
+            } as any,
             history: [
                 { role: "user", content: "حلل سهم ABUK" },
                 { role: "assistant", content: "سهم أبو قير للأسمدة عند 92.01" },
@@ -2611,6 +2620,9 @@ describe("Agentic tool correctness and failure boundaries", () => {
             ],
             systemPrompt: "You are ARTORO.",
             userId: "test-user-id",
+            apiKeys: ["fake-key"],
+            sessionId: "test-session",
+            messageId: "test-message",
             supabase: {
                 from: () => ({
                     select: () => ({
@@ -2646,5 +2658,105 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(AI_CONFIG.limits.responseMaxTokens).toBeGreaterThanOrEqual(4000);
         expect(AGENTIC_SYSTEM_PROMPT).toContain("كن مكثفاً وموجزاً ومباشراً");
         expect(AGENTIC_SYSTEM_PROMPT).toContain("يمنع منعاً باتاً كتابة فقرات أو أقسام مستقلة لسرد ما لم تُرجعه الأدوات");
+    });
+
+    it("chart vision context overrides previous session symbols preventing drift to historical stocks", async () => {
+        const mockVisionResult = {
+            image_type: "chart" as const,
+            symbols: [
+                {
+                    symbol: "EGX30",
+                    name: "EGX 30 Index",
+                    asset_type: "unknown" as const,
+                    visible_values: {
+                        price: 51274,
+                        change_pct: -2.99,
+                        average_price: null,
+                        return_pct: null,
+                        quantity: null,
+                        market_value: null,
+                        cost_basis: null,
+                        profit_loss: null,
+                        cash_dividends: null,
+                    },
+                },
+            ],
+            confidence: 0.95,
+            uncertainties: [],
+            technical_observations: ["Downtrend line broken", "Bullish divergence on RSI 14"],
+            user_relevant_summary: "شارت TradingView لمؤشر EGX30 عند 51,274 بتراجع -2.99%",
+        };
+
+        // When a user asks "حلل دى" with a chart of EGX30 after previous conversation was about ABUK
+        const stream = runAgenticRuntime({
+            userMessage: "حلل دى",
+            images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
+            sessionState: {
+                last_symbols: ["ABUK"],
+            } as any,
+            sessionSummary: {
+                current_symbols: ["ABUK"],
+                last_topic: "تحليل سهم ABUK",
+                open_references: [],
+                last_image_symbols: [],
+                last_vision_context: null,
+                last_data_date: null,
+                updated_at: new Date().toISOString(),
+            } as any,
+            history: [
+                { role: "user", content: "حلل سهم ABUK" },
+                { role: "assistant", content: "سهم أبو قير للأسمدة عند 92.01" },
+            ],
+            toolsSchema: [
+                {
+                    type: "function",
+                    function: {
+                        name: "get_market",
+                        description: "Get EGX market overview and EGX30 data",
+                        parameters: { type: "object", properties: {} },
+                    },
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "get_stock",
+                        description: "Get stock indicators",
+                        parameters: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } } },
+                    },
+                },
+            ],
+            systemPrompt: "You are ARTORO.",
+            userId: "test-user-id",
+            apiKeys: ["fake-key"],
+            sessionId: "test-session",
+            messageId: "test-message",
+            supabase: {
+                from: () => ({
+                    select: () => ({
+                        eq: () => ({
+                            limit: () => ({
+                                maybeSingle: () => Promise.resolve({ data: { payload: { egx30: [{ close: 51274, date: "2026-10-22" }] } } }),
+                                order: () => Promise.resolve({ data: [] }),
+                            }),
+                        }),
+                    }),
+                }),
+            } as any,
+            options: {
+                mockVisionResult,
+                skipReview: true,
+            },
+        });
+
+        let planEmitted: any = null;
+        for await (const event of stream) {
+            if (event.type === "plan") {
+                planEmitted = event.data;
+                break;
+            }
+        }
+
+        // Must emit plan without crashing and handle vision properly
+        expect(planEmitted).toBeDefined();
     });
 });

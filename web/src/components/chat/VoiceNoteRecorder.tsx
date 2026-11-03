@@ -3,18 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Mic, Trash2, Send, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
-function cleanTranscriptText(text: string): string {
-    if (!text) return "";
-    const words = text.trim().split(/\s+/);
-    const result: string[] = [];
-    for (const w of words) {
-        if (result.length === 0 || result[result.length - 1] !== w) {
-            result.push(w);
-        }
-    }
-    return result.join(" ");
-}
+import { cleanVoiceTranscript } from "@/lib/voice-utils";
 
 interface VoiceNoteRecorderProps {
     isRecording: boolean;
@@ -121,11 +110,19 @@ export function VoiceNoteRecorder({
                     rec.maxAlternatives = 1;
 
                     rec.onresult = (event: any) => {
-                        let fullText = "";
+                        let finalStr = "";
+                        let interimStr = "";
                         for (let i = 0; i < event.results.length; i++) {
-                            fullText += " " + event.results[i][0].transcript;
+                            const item = event.results[i];
+                            const piece = item[0]?.transcript || "";
+                            if (item.isFinal) {
+                                finalStr += (finalStr ? " " : "") + piece.trim();
+                            } else {
+                                interimStr += (interimStr ? " " : "") + piece.trim();
+                            }
                         }
-                        setTranscript(cleanTranscriptText(fullText));
+                        const combined = (finalStr + " " + interimStr).trim();
+                        setTranscript(cleanVoiceTranscript(combined));
                     };
 
                     rec.onerror = () => {};
@@ -149,7 +146,7 @@ export function VoiceNoteRecorder({
         setIsSubmitting(true);
 
         const currentDuration = duration;
-        const currentTranscript = cleanTranscriptText(transcript) || "حلل هذا السهم في البورصة المصرية";
+        const currentTranscript = cleanVoiceTranscript(transcript) || "حلل هذا السهم في البورصة المصرية";
 
         // Stop recognition
         if (recognitionRef.current) {

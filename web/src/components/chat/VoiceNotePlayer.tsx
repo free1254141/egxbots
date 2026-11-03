@@ -2,12 +2,13 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { Play, Pause, Volume2, Mic, Bot, ChevronDown, ChevronUp } from "lucide-react";
-import { cleanVoiceText } from "@/lib/voice-utils";
+import { cleanVoiceText, extractVoiceAnalysisSpeech } from "@/lib/voice-utils";
 
 interface VoiceNotePlayerProps {
     role: "user" | "assistant" | "system";
     audioUrl?: string;
     text: string;
+    spokenText?: string;
     durationSeconds?: number;
     autoPlay?: boolean;
     tables?: any[];
@@ -17,6 +18,7 @@ export function VoiceNotePlayer({
     role,
     audioUrl,
     text,
+    spokenText,
     durationSeconds,
     autoPlay = false,
 }: VoiceNotePlayerProps) {
@@ -26,10 +28,13 @@ export function VoiceNotePlayer({
     const [isTextExpanded, setIsTextExpanded] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
+    // Spoken opinion for voice synthesis
+    const spokenOpinion = spokenText || (role === "assistant" && text ? extractVoiceAnalysisSpeech(text) : "");
+
     // Resolved audio source
     const resolvedAudioSrc = audioUrl || (
-        role === "assistant" && text
-            ? `/api/voice/tts?text=${encodeURIComponent(cleanVoiceText(text, 170))}&voice=ar-EG-ShakirNeural`
+        role === "assistant" && spokenOpinion
+            ? `/api/voice/tts?text=${encodeURIComponent(cleanVoiceText(spokenOpinion, 250))}&voice=ar-EG-ShakirNeural`
             : undefined
     );
 

@@ -16,7 +16,7 @@ import {
     Zap
 } from "lucide-react";
 import { toast } from "sonner";
-import { extractVoiceAnalysisSpeech, cleanVoiceText, playConnectionChime } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, cleanVoiceText, cleanVoiceTranscript, playConnectionChime } from "@/lib/voice-utils";
 
 interface VoiceCallModalProps {
     isOpen: boolean;
@@ -147,12 +147,20 @@ export function VoiceCallModal({
             rec.onresult = (event: any) => {
                 if (!isOpenRef.current || isProcessingRef.current || callStateRef.current === "speaking") return;
 
-                let fullTranscript = "";
+                let finalStr = "";
+                let interimStr = "";
                 for (let i = 0; i < event.results.length; ++i) {
-                    fullTranscript += event.results[i][0].transcript;
+                    const item = event.results[i];
+                    const piece = item[0]?.transcript || "";
+                    if (item.isFinal) {
+                        finalStr += (finalStr ? " " : "") + piece.trim();
+                    } else {
+                        interimStr += (interimStr ? " " : "") + piece.trim();
+                    }
                 }
 
-                const cleanedTranscript = fullTranscript.trim();
+                const combined = (finalStr + " " + interimStr).trim();
+                const cleanedTranscript = cleanVoiceTranscript(combined);
                 setTranscript(cleanedTranscript);
 
                 // Voice Activity Detection (VAD): If silence for 1.1s after speaking, trigger send!
