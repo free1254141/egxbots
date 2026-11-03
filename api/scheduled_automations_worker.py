@@ -214,12 +214,10 @@ def _is_user_pro(user_id: str) -> bool:
     if user_id in ADMIN_USER_IDS:
         return True
 
-    # 2. Check profile role & admin Telegram chat IDs
-    prof = _supabase_request(f"profiles?id=eq.{user_id}&select=telegram_chat_id,role&limit=1") or []
+    # 2. Check profile admin Telegram chat IDs
+    prof = _supabase_request(f"profiles?id=eq.{user_id}&select=telegram_chat_id&limit=1") or []
     if prof and isinstance(prof, list) and len(prof) > 0:
         if str(prof[0].get("telegram_chat_id") or "") in ADMIN_TG_IDS:
-            return True
-        if str(prof[0].get("role") or "").lower() in {"admin", "pro"}:
             return True
 
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -466,7 +464,7 @@ def _fetch_market_indicators_brief(
     # 3. Open Recommendations (if prompt asks about recommendations / توصيات / إيجابية / صفقات)
     if any(k in combined_text for k in ("توصي", "صفق", "مفتوح", "إشارات", "اشارات", "مرشح", "ايجاب", "إيجاب", "شراء")):
         rec_rows = _supabase_request(
-            "current_public_recommendations?status=eq.open&select=symbol,name,entry_price,target_price,stop_loss,last_close,profit_loss_pct&limit=10"
+            "scan_results?is_public=eq.true&status=eq.open&select=symbol,name,entry_price,target_price,stop_loss,last_close,profit_loss_pct&limit=10"
         ) or []
         if isinstance(rec_rows, list) and rec_rows:
             rec_lines = ["🎯 التوصيات والصفقات المفتوحة المعتمدة حالياً على المنصة:"]
