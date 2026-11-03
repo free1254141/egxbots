@@ -365,7 +365,26 @@ async function resolveSessionBundleAndHistory(
         historyPromise = Promise.resolve({ data: [] });
     }
 
-    const [bundle, historyRes] = await Promise.all([sessionBundlePromise, historyPromise]);
+    let bundle: SessionDataBundle;
+    let historyRes: any;
+    try {
+        const timeoutPromise = new Promise((_, reject) => {
+            const timer = setTimeout(() => reject(new Error("SESSION_BUNDLE_TIMEOUT")), 2500);
+            if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+        });
+        const [b, h] = await Promise.race([
+            Promise.all([sessionBundlePromise, historyPromise]),
+            timeoutPromise
+        ]) as any;
+        bundle = b;
+        historyRes = h;
+    } catch {
+        bundle = {
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        };
+        historyRes = { data: [] };
+    }
     let sessionState = bundle.sessionState;
     const sessionSummary = bundle.sessionSummary;
 
@@ -718,19 +737,35 @@ export async function POST(req: NextRequest) {
             const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
             const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
 
-            const [limitRowsRes, monthRowsRes] = await Promise.all([
-                supabase
-                    .from("ai_chatbot_limits")
-                    .select("chat_count")
-                    .eq("user_id", userId)
-                    .gte("date", monthStartStr),
-                supabase
-                    .from("ai_chat_messages")
-                    .select("id, client_message_id")
-                    .eq("user_id", userId)
-                    .eq("role", "user")
-                    .gte("created_at", effectiveStart.toISOString()),
-            ]);
+            let limitRowsRes: any = { data: [] };
+            let monthRowsRes: any = { data: [] };
+            try {
+                const quotaTimeout = new Promise((_, reject) => {
+                    const timer = setTimeout(() => reject(new Error("QUOTA_CHECK_TIMEOUT")), 2500);
+                    if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+                });
+                const [lRes, mRes] = await Promise.race([
+                    Promise.all([
+                        supabase
+                            .from("ai_chatbot_limits")
+                            .select("chat_count")
+                            .eq("user_id", userId)
+                            .gte("date", monthStartStr),
+                        supabase
+                            .from("ai_chat_messages")
+                            .select("id, client_message_id")
+                            .eq("user_id", userId)
+                            .eq("role", "user")
+                            .gte("created_at", effectiveStart.toISOString()),
+                    ]),
+                    quotaTimeout
+                ]) as any;
+                limitRowsRes = lRes;
+                monthRowsRes = mRes;
+            } catch {
+                limitRowsRes = { data: [] };
+                monthRowsRes = { data: [] };
+            }
 
             const limitsSum = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
             const msgsCount = new Set((monthRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;

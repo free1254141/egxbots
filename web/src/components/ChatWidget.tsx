@@ -5,7 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
+import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -29,6 +30,61 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
 }
 
 export default function ChatWidget() {
+    const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
+    const [isSpeechListening, setIsSpeechListening] = useState(false);
+    const speechRecognitionRef = useRef<any>(null);
+
+    const toggleSpeechInput = () => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            toast.error("المتصفح لا يدعم التسجيل الصوتي. يُرجى استخدام متصفح Chrome أو Edge.");
+            return;
+        }
+
+        if (isSpeechListening) {
+            if (speechRecognitionRef.current) {
+                try { speechRecognitionRef.current.abort(); } catch {}
+                speechRecognitionRef.current = null;
+            }
+            setIsSpeechListening(false);
+            toast.info("تم إيقاف الكتابة بالصوت");
+            return;
+        }
+
+        try {
+            const rec = new SpeechRecognition();
+            rec.lang = "ar-EG";
+            rec.continuous = false;
+            rec.interimResults = true;
+
+            rec.onstart = () => {
+                setIsSpeechListening(true);
+                toast.info("أرتورو يستمع إليك... تحدث الآن ليكتب بدلاً منك 🎙️");
+            };
+
+            rec.onresult = (e: any) => {
+                let transcript = "";
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    transcript += e.results[i][0].transcript;
+                }
+                setInput((prev: string) => (prev ? `${prev} ${transcript}` : transcript));
+            };
+
+            rec.onerror = () => {
+                setIsSpeechListening(false);
+            };
+
+            rec.onend = () => {
+                setIsSpeechListening(false);
+            };
+
+            rec.start();
+            speechRecognitionRef.current = rec;
+        } catch (err) {
+            console.error("Speech input error:", err);
+            setIsSpeechListening(false);
+        }
+    };
     const { 
         isOpen, 
         setIsOpen, 
@@ -770,6 +826,21 @@ export default function ChatWidget() {
                                 </div>
                             )}
                         </div>
+                        {/* 📞 Live Voice Call with ARTORO */}
+                        <button
+                            type="button"
+                            onClick={() => setIsVoiceCallOpen(true)}
+                            className="grid h-9 w-9 place-items-center rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative"
+                            title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
+                            aria-label="مكالمة صوتية مع أرتورو"
+                        >
+                            <Phone className="h-[18px] w-[18px] text-emerald-500 animate-pulse" />
+                            <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                            </span>
+                        </button>
+
                         {!isChatRoute && (
                             <button
                                 onClick={() => setIsExpanded(!isExpanded)}
@@ -1283,6 +1354,20 @@ export default function ChatWidget() {
                                     title={isLoading ? (language === "ar" ? "إيقاف الرد" : "Stop generation") : (language === "ar" ? "إرسال" : "Send")}
                                 >
                                     {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
+                                </button>
+
+                                {/* 🎙️ Voice Typing Dictation */}
+                                <button
+                                    type="button"
+                                    onClick={toggleSpeechInput}
+                                    className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                                        isSpeechListening
+                                            ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse"
+                                            : "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-white/20 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                                    }`}
+                                    title={isSpeechListening ? "إيقاف الاستماع" : "التحدث بالصوت للكتابة (Voice Typing)"}
+                                >
+                                    {isSpeechListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                                 </button>
                             </div>
 

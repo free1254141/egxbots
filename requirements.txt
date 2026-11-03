@@ -24,3 +24,5 @@ huggingface_hub>=0.24.0
 Pillow==11.3.0
 arabic-reshaper==3.0.0
 python-bidi==0.6.7
+
+edge-tts>=7.0.0

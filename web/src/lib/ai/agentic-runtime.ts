@@ -97,11 +97,19 @@ export async function resolveUserProContext(supabase: any, userId: string, optio
     if (supabase && userId && isUuid(userId)) {
         try {
             const client = executionSupabase(supabase);
-            const [subRes, inviteRes, posRes] = await Promise.allSettled([
+            const timeoutPromise = new Promise((_, reject) => {
+                const timer = setTimeout(() => reject(new Error("PRO_CONTEXT_TIMEOUT")), 2500);
+                if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+            });
+            const fetchPromise = Promise.allSettled([
                 !isPro ? client.from("subscriptions").select("plan_id, status, current_period_end").eq("user_id", userId).in("status", ["active", "trialing"]).order("current_period_end", { ascending: false }).limit(5) : Promise.resolve(null),
                 client.from("pro_telegram_invites").select("invite_link, invite_expires_at").eq("user_id", userId).maybeSingle(),
                 client.from("positions").select("symbol, quantity, entry_price").eq("user_id", userId).eq("status", "open").limit(50),
             ]);
+            const settled = await Promise.race([fetchPromise, timeoutPromise]) as PromiseSettledResult<any>[];
+            const subRes = settled[0];
+            const inviteRes = settled[1];
+            const posRes = settled[2];
 
             if (subRes.status === "fulfilled" && subRes.value?.data && hasActiveProSubscription(subRes.value.data)) {
                 isPro = true;
@@ -595,7 +603,15 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                             message: "القيم التي طلب النموذج حفظها لا تطابق القيم المؤكدة في الصورة؛ لم يتم حفظ أي مركز.",
                             profile_action: { url: "/profile#portfolio", label: "افتح البروفايل عند قسم محفظتي" } };
                     } else {
-                        output = await executeRequestTool(call.function.name, args, client, input.userId, chartHistoryCache, { isPro: options.isPro === true });
+                        const timeoutMs = 5000;
+                        const toolTimer = new Promise((_, reject) => {
+                            const timer = setTimeout(() => reject(new Error("TOOL_TIMEOUT")), timeoutMs);
+                            if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+                        });
+                        output = await Promise.race([
+                            executeRequestTool(call.function.name, args, client, input.userId, chartHistoryCache, { isPro: options.isPro === true }),
+                            toolTimer
+                        ]);
                     }
                     if (isWrite) cache.clear();
                     activeCache.set(fingerprint, output);

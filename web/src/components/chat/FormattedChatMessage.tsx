@@ -2,7 +2,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { parseMarkdownTable, exportTableToExcel } from "@/lib/excelExport";
-import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle } from "lucide-react";
+import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle, Volume2, VolumeX } from "lucide-react";
+import { toast } from "sonner";
 import StockCard, { StockData } from "./StockCard";
 import ScheduleAutomationModal from "./ScheduleAutomationModal";
 import type { ChatTable } from "@/contexts/ChatContext";
@@ -107,13 +108,17 @@ export const EGX_STOCKS_METADATA: Record<string, { name: string; sector: string;
 
 function parseNum(val: string | undefined): number | undefined {
     if (!val) return undefined;
-    const str = String(val).trim();
+    let str = String(val).trim();
     if (!str || str === "-" || str === "—" || str === "N/A" || str === "null") return undefined;
     // CRITICAL: Guard against dates (e.g. 30-10-2026 or 2026-10-30 or 30/10/2026)
     // parseFloat("30-10-2026") evaluates to 30, which falsely becomes 30.00 EGP price!
     if (/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(str)) {
         return undefined;
     }
+    // Normalize Eastern Arabic numerals:
+    str = str.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
+    // Normalize Arabic decimal separator (٫ or ،) to . if followed by digits
+    str = str.replace(/[٫،](?=\d)/g, ".");
     const cleaned = str.replace(/[^\d.-]/g, "");
     if (!cleaned) return undefined;
     const n = parseFloat(cleaned);
@@ -267,16 +272,28 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
                     changePct = rowChange;
                 }
             }
-        } else if (/الدعم الأول|دعم أول|الدعم 1/i.test(key)) {
+        } else if (/الدعم/i.test(key)) {
             hasSupport = true;
-            support1 = parseNum(val);
-        } else if (/الدعم الثاني|دعم ثان|الدعم 2/i.test(key)) {
-            support2 = parseNum(val);
-        } else if (/المقاومة الأولى|مقاومة أولى|المقاومة 1/i.test(key)) {
+            if (val.includes("/")) {
+                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+                if (parts[0] !== undefined) support1 = parts[0];
+                if (parts[1] !== undefined) support2 = parts[1];
+            } else if (/ثاني|2/i.test(key)) {
+                support2 = parseNum(val);
+            } else {
+                support1 = parseNum(val);
+            }
+        } else if (/المقاومة|مقاومة/i.test(key)) {
             hasResistance = true;
-            resistance1 = parseNum(val);
-        } else if (/المقاومة الثانية|مقاومة ثانية|المقاومة 2/i.test(key)) {
-            resistance2 = parseNum(val);
+            if (val.includes("/")) {
+                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+                if (parts[0] !== undefined) resistance1 = parts[0];
+                if (parts[1] !== undefined) resistance2 = parts[1];
+            } else if (/ثاني|2/i.test(key)) {
+                resistance2 = parseNum(val);
+            } else {
+                resistance1 = parseNum(val);
+            }
         } else if (/RSI/i.test(key)) {
             hasRsi = true;
             rsi = parseNum(val);
@@ -290,21 +307,30 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
             eps = parseNum(val);
         } else if (/القيمة السوقية/i.test(key)) {
             marketCap = val;
-        } else if (/مرحلة وايكوف/i.test(key)) {
+        } else if (/مرحلة وايكوف|وايكوف/i.test(key)) {
             wyckoffPhase = val;
-        } else if (/EMA\s*50/i.test(key)) {
-            hasEma = true;
-            ema50 = parseNum(val);
-        } else if (/EMA\s*200/i.test(key)) {
-            hasEma = true;
-            ema200 = parseNum(val);
         } else if (/EMA/i.test(key)) {
             hasEma = true;
-        } else if (/KING|نموذج KING|King\s*AI/i.test(key)) {
-            kingAiScore = parseNum(val);
-        } else if (/EGX\s*AI|نموذج EGX/i.test(key)) {
-            egxAiScore = parseNum(val);
-        } else if (/سكور|Composite|EGX\s*Score/i.test(key)) {
+            if (val.includes("/")) {
+                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+                if (parts[0] !== undefined) ema50 = parts[0];
+                if (parts[1] !== undefined) ema200 = parts[1];
+            } else if (/200/i.test(key)) {
+                ema200 = parseNum(val);
+            } else {
+                ema50 = parseNum(val);
+            }
+        } else if (/KING.*EGX|KING|EGX/i.test(key)) {
+            if (/KING/i.test(key) && /EGX/i.test(key) && val.includes("/")) {
+                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+                if (parts[0] !== undefined) kingAiScore = parts[0];
+                if (parts[1] !== undefined) egxAiScore = parts[1];
+            } else if (/KING/i.test(key)) {
+                kingAiScore = parseNum(val);
+            } else if (/EGX/i.test(key)) {
+                egxAiScore = parseNum(val);
+            }
+        } else if (/سكور|التقييم الشامل|Composite|EGX\s*Score/i.test(key)) {
             compositeScore = parseNum(val);
             const gradeMatch = (val + " " + extraVal).match(/\b(A\+|A|B|C|D)\b/i);
             if (gradeMatch) compositeGrade = gradeMatch[1].toUpperCase();
@@ -333,6 +359,7 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     if (symbolMatch) {
         if (symbolMatch[2]) {
             name = symbolMatch[1].replace(/###|📊/g, "").trim();
+            name = name.replace(/^[0-9\s\u0030-\u0039\uFE0F\u20E3\u2700-\u27BF\.\-—–]+/u, "").trim();
             symbol = symbolMatch[2].trim().toUpperCase();
         } else {
             symbol = symbolMatch[1].trim().toUpperCase();
@@ -353,9 +380,11 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
 
     if (!symbol) return null;
 
-    // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY)
+    // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC)
     if (!price || price === 0) {
-        const textPriceMatch = cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+-]?[\d\.]+)/i)
+        const textPriceMatch = cleanRecent.match(/[\—\–\-]\s*([\d\.]+)\s*ج\.م/i)
+                            || cleanRecent.match(/([\d\.]+)\s*ج\.م\s*\([+-]?[\d\.]+%?\)/i)
+                            || cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+-]?[\d\.]+)/i)
                             || cleanRecent.match(/([+-]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
                             || cleanRecent.match(/(?:سعر السهم|سعر|الإغلاق)\s*[:=]?\s*([+-]?[\d\.]+)\s*ج\.م/i);
         if (textPriceMatch) {
@@ -365,7 +394,8 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
 
     // Price change percentage from text
     if (changePct === undefined) {
-        const changeMatch = cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)\s*%/i)
+        const changeMatch = cleanRecent.match(/\(([+-]?[\d\.]+)%\)/i)
+                         || cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)\s*%/i)
                          || cleanRecent.match(/([+-]?[\d\.]+)\s*%\s*بتاريخ/i)
                          || cleanRecent.match(/،\s*([+-]?[\d\.]+)\s*%\s*\)/i)
                          || cleanRecent.match(/\(\s*([+-]?[\d\.]+)\s*%\s*\)/i);
@@ -1005,6 +1035,63 @@ export function FormattedChatMessage({
     const [copiedText, setCopiedText] = useState(false);
     const [savingToPortfolio, setSavingToPortfolio] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+        const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+    const [loadingAudio, setLoadingAudio] = useState(false);
+    const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (audioPlayerRef.current) {
+                audioPlayerRef.current.pause();
+                audioPlayerRef.current = null;
+            }
+        };
+    }, []);
+
+    const handleToggleSpeech = async () => {
+        if (isPlayingAudio && audioPlayerRef.current) {
+            audioPlayerRef.current.pause();
+            setIsPlayingAudio(false);
+            return;
+        }
+
+        try {
+            setLoadingAudio(true);
+            const res = await fetch("/api/voice/tts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    text: content,
+                    voice: "ar-EG-ShakirNeural",
+                }),
+            });
+
+            if (!res.ok) throw new Error("TTS failed");
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audioPlayerRef.current = audio;
+
+            audio.onended = () => {
+                setIsPlayingAudio(false);
+                URL.revokeObjectURL(url);
+            };
+            audio.onerror = () => {
+                setIsPlayingAudio(false);
+                URL.revokeObjectURL(url);
+            };
+
+            await audio.play();
+            setIsPlayingAudio(true);
+        } catch {
+            toast.error("تعذر تشغيل الصوت، يرجى المحاولة لاحقاً");
+            setIsPlayingAudio(false);
+        } finally {
+            setLoadingAudio(false);
+        }
+    };
+
     const [portfolioFeedback, setPortfolioFeedback] = useState<{
         ok: boolean;
         message: string;
@@ -1480,6 +1567,36 @@ export function FormattedChatMessage({
                     >
                         <Clock className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                         <span>أتمتة السؤال يومياً</span>
+                    </button>
+
+                    {/* 🔊 Voice Note Audio Player */}
+                    <button
+                        type="button"
+                        onClick={handleToggleSpeech}
+                        disabled={loadingAudio}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-75 ${
+                            isPlayingAudio 
+                                ? "bg-amber-500/20 text-amber-900 dark:text-amber-300 border-amber-500" 
+                                : "bg-blue-500/10 hover:bg-blue-500/20 text-blue-900 dark:text-blue-300 border-blue-500/40"
+                        }`}
+                        title="استمع للتحليل بصوت أرتورو المصري الذكي"
+                    >
+                        {loadingAudio ? (
+                            <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />
+                                <span>جاري تحضير الصوت...</span>
+                            </>
+                        ) : isPlayingAudio ? (
+                            <>
+                                <Volume2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 animate-bounce" />
+                                <span>إيقاف الصوت</span>
+                            </>
+                        ) : (
+                            <>
+                                <Volume2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                                <span>استمع للتحليل (Voice)</span>
+                            </>
+                        )}
                     </button>
 
                     {typeof latencyMs === "number" && latencyMs > 0 && (

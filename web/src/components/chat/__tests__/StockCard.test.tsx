@@ -220,7 +220,7 @@ describe("StockCard Component", () => {
 
         // Both stock cards should be rendered
         expect(screen.getByText("#CRST")).toBeTruthy();
-        expect(screen.getByText("2.49")).toBeTruthy();
+        expect(screen.getAllByText("2.49").length).toBeGreaterThan(0);
         expect(screen.getByText("#LCSW")).toBeTruthy();
         expect(screen.getAllByText("35.73").length).toBeGreaterThan(0);
     });

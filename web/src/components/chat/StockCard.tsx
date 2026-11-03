@@ -128,16 +128,18 @@ export function StockCard({
     const symbol = rawSymbol.replace(/[\*\#\`]/g, "").trim().toUpperCase().replace(".CA", "");
     const canonical = getCanonicalStockName(symbol);
     const cleanRawName = String(stockData.nameAr || stockData.companyName || stockData.name || "").replace(/[\*\#\`]/g, "").trim();
-    const nameAr = (cleanRawName && cleanRawName !== symbol && cleanRawName.length > 2)
-        ? cleanRawName
+    const strippedName = cleanRawName.replace(/^[0-9\s\u0030-\u0039\uFE0F\u20E3\u2700-\u27BF\.\-—–]+/u, "").trim();
+    const finalName = strippedName && strippedName.length > 2 ? strippedName : cleanRawName;
+    const nameAr = (finalName && finalName !== symbol && finalName.length > 2)
+        ? finalName
         : (canonical.name_ar || symbol);
     const nameEn = stockData.nameEn || canonical.name_en || (nameAr !== symbol ? symbol : undefined);
     
-    // Parse price
+    // Parse price - ALWAYS format with English numerals to prevent monospace font breakage and Arabic numeral comma distortion
     const rawPrice = typeof stockData.price === "number" ? stockData.price : parseFloat(String(stockData.price || "0"));
     const formattedPrice = isNaN(rawPrice) 
         ? "0.00" 
-        : rawPrice.toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        : rawPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     
     const currency = stockData.currency || "ج.م";
 
@@ -331,8 +333,8 @@ export function StockCard({
                                 {nameAr}
                             </h3>
                             {nameEn && nameEn !== nameAr && (
-                                <span className="text-[11px] text-zinc-400 font-mono hidden sm:inline-block">
-                                    ({nameEn})
+                                <span className="text-[11px] text-zinc-400 font-mono hidden sm:inline-block" dir="ltr">
+                                    ({nameEn.replace(/^[\(\[]+|[\)\]]+$/g, "")})
                                 </span>
                             )}
                         </div>
