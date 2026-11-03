@@ -183,15 +183,30 @@ describe("voice-utils", () => {
     });
 
     it("naturalizes large financial numbers into billions and dates into Arabic months", () => {
-        const text = "إجمالي تداول 6,750.79 مليون جنيه في جلسة 03-11-2026 بنسبة 4.49:1 ومؤشر 1,200 مليون جنيه.";
+        const text = "جلسة 03-11-2026 بنسبة 4.49:1 ومؤشر 1,200 مليون جنيه.";
         const cleaned = cleanVoiceText(text);
 
-        expect(cleaned).toContain("6.75 مليار جنيه");
-        expect(cleaned).not.toContain("6,750");
-        expect(cleaned).not.toContain("6 آلاف");
         expect(cleaned).toContain("1.2 مليار جنيه");
         expect(cleaned).toContain("3 نوفمبر 2026");
         expect(cleaned).not.toContain("03-11-2026");
         expect(cleaned).toContain("4.5 إلى 1");
+    });
+
+    it("strips market breadth statistical preamble and dense stock counts from speech", () => {
+        const sample = `أقوى أسهم التجميع والسيولة الذكية جلسة 03-11-2026
+سياق السوق: 184 سهم صاعد مقابل 41 هابط (نسبة 4.49:1)، وإجمالي تداول 6,750.79 مليون جنيه (92.65 في المية من متوسط 20 جلسة)، و88.55 في المية من السيولة دخلت أسهمها صاعدة. 28 سهما بانحدار حجمي.
+جدول أسهم التجميع (مرتبة بدرجة التجميع)
+| السهم | السعر | درجة التجميع |
+|---|---|---|
+| SEIG | 12.5 | 90 |
+| AFMC | 45.0 | 85 |
+قراءة سريعة - السعودية المصرية للاستثمار والتمويل: هو الأقوى نموذجيا بدرجة تجميع 90 وصفر تصريف.`;
+
+        const cleaned = cleanVoiceText(sample);
+        expect(cleaned).not.toContain("سياق السوق");
+        expect(cleaned).not.toContain("صاعد مقابل");
+        expect(cleaned).toContain("السعودية المصرية للاستثمار والتمويل");
+        expect(cleaned).toContain("مطاحن الإسكندرية");
+        expect(cleaned).not.toContain("6,750");
     });
 });

@@ -184,8 +184,13 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
         } else if (support) {
             parts.push(`وأهم مستوى دعم للمتابعة هو ${support}`);
         }
-        parts.push("القرار الفني هو المتابعة بحذر لحين وضوح السيولة والاتجاه.");
-        result = parts.join("، ");
+        if (parts.length > 0) {
+            parts.push("القرار الفني هو المتابعة بحذر لحين وضوح السيولة والاتجاه.");
+            result = parts.join("، ");
+        } else {
+            // For general market screens, tables, or stock lists
+            result = cleanVoiceText(text, 350);
+        }
     }
 
     // Clean technical jargon, tickers, emojis, and disclaimers
@@ -472,6 +477,12 @@ export function cleanVoiceText(rawText: string, maxChars: number = 600): string 
     // Completely remove all markdown table blocks
     text = text.replace(/(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+/gm, () => tableReplacement);
     text = text.replace(/\|[^\n]+\|/g, "");
+
+    // 2b. Strip market breadth statistical preamble and dense stock count parentheticals
+    // E.g. 'سياق السوق: 184 سهم صاعد مقابل 41 هابط... وإجمالي تداول 6,750 مليون جنيه'
+    text = text.replace(/(?:سياق السوق|سياق الجلسة|حالة السوق|أداء المؤشر)[:\s*]+[^\n]+(?:\r?\n)?/g, "");
+    text = text.replace(/\b\d+\s+سهم\s+صاعد\s+مقابل\s+\d+\s+هابط[^\n\.]*[\.\n]?/g, "");
+    text = text.replace(/\(من\s+\d+\s+سهماً:[^)]+\)/g, "");
 
     // 3. Strip visual table headers/titles (e.g. جدول أسهم التجميع)
     text = text.replace(/جدول\s+(?:أسهم\s+التجميع|فحص\s+كامل|الأسهم|الفرز|المؤشرات|التحليل)(?:\s*\([^)]*\))?[:\s]*/g, "");

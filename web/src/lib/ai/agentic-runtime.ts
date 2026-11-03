@@ -1083,8 +1083,10 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     }
     // -------------------------------------------------------------------
     // Save to dynamic cache if this was an eligible canonical read intent
+    // (Voice interactions are concise audio summaries and must NEVER pollute canonical cache)
     // -------------------------------------------------------------------
-    if (candidateCacheKey && origin !== "cache" && response && response.length > 50 && (finalPassed || gateMode === "audit_only") && !shouldSkipCache) {
+    const isVoiceMode = Boolean(options?.isVoice || options?.isVoiceNote || options?.isVoiceCall);
+    if (candidateCacheKey && origin !== "cache" && response && !isVoiceMode && (finalPassed || gateMode === "audit_only") && !shouldSkipCache) {
         setVipAnalysisCache(
             candidateCacheKey,
             {

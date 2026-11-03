@@ -154,8 +154,11 @@ it("removes the safety gate and masks open >50% opportunities with a Pro badge a
 it("encrypts anonymous open signals and marks >50% opportunities without exposing identity", async () => {
   const { GET } = await import("@/app/api/ai_bot/recommendations/route");
   const rows = await getRows(await GET(request(null)));
-  expect(rows.some((r: any) => r.id === "fresh")).toBe(false);
-  expect(rows.map((r: any) => r.id)).toEqual(["old-high-safety", "old-safe", "old-high-return", "old-loss", "recent-loss", "fresh-loss", "large-win", "threshold-win"]);
+  expect(rows.some((r: any) => r.id === "fresh")).toBe(true);
+  expect(rows.map((r: any) => r.id)).toEqual(["fresh", "old-high-safety", "old-safe", "old-high-return", "old-loss", "recent-loss", "fresh-loss", "large-win", "threshold-win"]);
+  expect(rows.find((r: any) => r.id === "fresh")).toMatchObject({ locked: true, exchange: "EGX", signal: "BUY", status: "open", precision: 0.9 });
+  expect(rows.find((r: any) => r.id === "fresh").symbol).toBeUndefined();
+  expect(rows.find((r: any) => r.id === "fresh").name).toBeUndefined();
   expect(rows.find((r: any) => r.id === "old-high-safety")).toMatchObject({ locked: true, exchange: "EGX", signal: "BUY", status: "open", precision: 0.8 });
   expect(rows.find((r: any) => r.id === "old-safe")).toMatchObject({ locked: true, exchange: "EGX", signal: "SELL", status: "open", profit_loss_pct: 25 });
   expect(rows.find((r: any) => r.id === "old-safe").symbol).toBeUndefined();

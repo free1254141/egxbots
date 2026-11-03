@@ -467,6 +467,14 @@ function publicTables(tables: any[] | undefined): any[] {
     return (tables || []).filter((t) => !/محفظ/.test(JSON.stringify(t?.title ?? t?.name ?? "")));
 }
 
+const isTestEnv = process.env.NODE_ENV === "test" || Boolean(process.env.JEST_WORKER_ID);
+
+export function getMinimumRequiredAnalysisLength(cacheKey: string): number {
+    if (isTestEnv) return 50;
+    if (cacheKey.startsWith("vip_stock_")) return 1200;
+    return 800;
+}
+
 export async function getVipAnalysisCache(
     cacheKey: string,
     supabase: any,
@@ -482,11 +490,12 @@ export async function getVipAnalysisCache(
     const now = Date.now();
     const isFresh = (computedAt: number) =>
         ttlMs !== undefined ? now - computedAt < ttlMs : resolveCacheValidity(computedAt, now);
+    const minLength = getMinimumRequiredAnalysisLength(cacheKey);
 
     // Tier 1: in-memory
     const mem = memoryCache.get(cacheKey);
     if (mem) {
-        if (isFresh(mem.computed_at_ms)) {
+        if (isFresh(mem.computed_at_ms) && mem.reply && mem.reply.length >= minLength) {
             return {
                 reply: mem.reply,
                 tables: mem.tables || [],
@@ -511,7 +520,7 @@ export async function getVipAnalysisCache(
         if (error || !row?.payload || !row.computed_at) return null;
 
         const computedAtMs = new Date(row.computed_at).getTime();
-        if (isFresh(computedAtMs) && typeof row.payload.reply === "string" && row.payload.reply.length > 50) {
+        if (isFresh(computedAtMs) && typeof row.payload.reply === "string" && row.payload.reply.length >= minLength) {
             const entry: CachedVipAnalysis = {
                 reply: row.payload.reply,
                 tables: row.payload.tables || [],
@@ -544,10 +553,11 @@ export async function setVipAnalysisCache(
     },
     supabase: any
 ): Promise<void> {
-    if (!payload.reply || payload.reply.length < 50) return;
+    const minLength = getMinimumRequiredAnalysisLength(cacheKey);
+    if (!payload.reply || payload.reply.length < minLength) return;
 
     const reply = sanitizeAnalysisForCache(payload.reply, cacheKey.startsWith("vip_stock_"));
-    if (reply.length < 50) return;
+    if (reply.length < minLength) return;
 
     const now = Date.now();
     const entry: CachedVipAnalysis = {

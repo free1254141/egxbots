@@ -286,6 +286,12 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+", lambda m: table_replacement, text, flags=re.MULTILINE)
     text = re.sub(r"\|[^\n]+\|", "", text)
 
+    # 2b. Strip market breadth statistical preamble and dense stock count parentheticals
+    # E.g. 'سياق السوق: 184 سهم صاعد مقابل 41 هابط... وإجمالي تداول 6,750 مليون جنيه'
+    text = re.sub(r"(?:سياق السوق|سياق الجلسة|حالة السوق|أداء المؤشر)[:\s*]+[^\n]+(?:\r?\n)?", "", text)
+    text = re.sub(r"\b\d+\s+سهم\s+صاعد\s+مقابل\s+\d+\s+هابط[^\n\.]*[\.\n]?", "", text)
+    text = re.sub(r"\(من\s+\d+\s+سهماً:[^)]+\)", "", text)
+
     # 3. Strip visual table headers/titles (e.g. جدول أسهم التجميع)
     text = re.sub(r"جدول\s+(?:أسهم\s+التجميع|فحص\s+كامل|الأسهم|الفرز|المؤشرات|التحليل)(?:\s*\([^)]*\))?[:\s]*", "", text)
 

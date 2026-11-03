@@ -927,7 +927,7 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 450) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
+                                const spokenText = (isVoiceNote || isVoiceCall) ? extractVoiceAnalysisSpeech(personalizedReply, message) : null;
                                 if (spokenText) {
                                     const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                     fetch(`${backendUrl}/api/voice/tts`, {
@@ -1150,10 +1150,11 @@ export async function POST(req: NextRequest) {
                                          suggested_buttons: suggestedButtons,
                                      };
                                     if (clientMessageId) await supabase.from("ai_chat_idempotency").update({ status: "completed", response: replyText, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+                                     const isVoiceMode = Boolean(isVoice || isVoiceNote || isVoiceCall);
                                      if (
                                          cacheKey &&
                                          replyText &&
-                                         replyText.length > 50 &&
+                                         !isVoiceMode &&
                                          !streamBlocked &&
                                          responseMetadata.response_kind === "normal"
                                      ) {
@@ -1178,7 +1179,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 450) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
+                                             const spokenText = (isVoiceNote || isVoiceCall) ? extractVoiceAnalysisSpeech(replyText, message) : null;
                                              if (spokenText) {
                                                  const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                                  fetch(`${backendUrl}/api/voice/tts`, {

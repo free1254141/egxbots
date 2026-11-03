@@ -229,5 +229,50 @@ describe("Model-Driven Cache Runtime Integration", () => {
         // Parallel calls must not be hijacked by single-tool cache
         expect(done.response_origin).not.toBe("cache");
     });
+
+    test("voice interactions (isVoice / isVoiceNote) never write to canonical cache", async () => {
+        const dummyClient = mockDb();
+        const shortVoiceReply = "فوري في جلسة اليوم صاعدة بشكل طفيف للمضاربة السريعة فقط.";
+
+        // Round 0: tool call
+        // Round 1: writer generates short voice reply
+        // Review: passes
+        const fetchMock = jest.fn()
+            .mockResolvedValueOnce(response({
+                tool_calls: [{
+                    id: "call-1",
+                    type: "function",
+                    function: { name: "get_stock", arguments: JSON.stringify({ symbol: "FWRY" }) },
+                }],
+            }))
+            .mockResolvedValueOnce(response({ content: shortVoiceReply }))
+            .mockResolvedValueOnce(response({ content: JSON.stringify({ passed: true, reasons: [] }) }));
+        global.fetch = fetchMock as any;
+
+        const events: any[] = [];
+        for await (const e of runAgenticPipelineStream(
+            "حلل فوري صوتي",
+            [],
+            { current_symbol: null, last_symbols: [], summary: null },
+            null,
+            [],
+            dummyClient,
+            [],
+            "test-user",
+            "test-session",
+            "test-msg",
+            "deepseek-chat",
+            { timeoutMs: 5000, skipCache: false, isVoice: true, isVoiceNote: true }
+        )) {
+            events.push(e);
+        }
+
+        const done = events.find(e => e.type === "done")?.data;
+        expect(done).toBeDefined();
+
+        // Memory cache MUST remain clean — voice response must never pollute the canonical cache
+        const hit = await getVipAnalysisCache("vip_stock_FWRY", dummyClient);
+        expect(hit).toBeNull();
+    });
 });
 

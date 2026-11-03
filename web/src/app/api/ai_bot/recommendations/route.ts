@@ -75,16 +75,9 @@ export async function GET(req: NextRequest) {
       if (!Number.isFinite(endAt)) return null;
       return Math.floor(Math.max(0, endAt - createdMs) / DAY_MS);
     };
-    // Anonymous visitors must never receive today's actionable picks.
-    // Settled outcomes are public immediately, including losses; a closed
-    // recommendation can no longer be traded on its original signal.
-    if (!authenticated) {
-      visibleData = visibleData.filter((row: Record<string, unknown>) => {
-        if (closed(row)) return true;
-        const createdMs = new Date(String(row.created_at)).getTime();
-        return Number.isFinite(createdMs) && createdMs <= cutoffTime;
-      });
-    }
+    // Actionable picks for anonymous and Free users are safely locked and masked
+    // by `if (locked)` below (withholding symbol, name, and trade prices).
+    // Settled outcomes (wins/losses) remain public for auditing.
 
     const symbols = Array.from(new Set(visibleData.map((row: Record<string, unknown>) => String(row.symbol || "")).filter(Boolean)));
     const { data: fundamentals } = symbols.length

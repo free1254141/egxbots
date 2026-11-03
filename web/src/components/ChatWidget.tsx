@@ -1,1707 +1,1709 @@
-"use client";
-
-import { useChat, AVAILABLE_AI_MODELS } from "@/contexts/ChatContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
-import { useRouter, usePathname } from "next/navigation";
-import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
-import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
-import { playConnectionChime } from "@/lib/voice-utils";
-import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
-import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { createPortal } from "react-dom";
-import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
-import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
-import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
-import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
-import { isChatAdminEmail, isVoiceBetaTester } from "@/lib/chat-sharing";
-import { toast } from "sonner";
-import { broadcastEntitlements } from "@/lib/entitlements";
-
-function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
-    return (
-        <span className={`artoro-brand-mark artoro-brand-mark--${size}`} role="img" aria-label="ARTORO V3">
-            <span className="artoro-brand-mark__core">
-                <NextImage src="/favicon_io/apple-touch-icon.png" alt="ARTORO AI" width={48} height={48} className="h-full w-full object-contain" priority />
-            </span>
-            {size !== "header" && <span className="artoro-brand-mark__version" aria-hidden="true">V3</span>}
-        </span>
-    );
-}
-
-export default function ChatWidget() {
-    const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
-    const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
-    const { 
-        isOpen, 
-        setIsOpen, 
-        messages, 
-        sendMessage, 
-        stopResponding,
-        isLoading, 
-        remainingQuota,
-        quotaLimit = 5,
-        isPro = false,
-        isInitializing,
-        accessError,
-        retryAccess,
-        showUpgradeModal,
-        setShowUpgradeModal,
-        selectedModel, 
-        setSelectedModel,
-        sessions,
-        activeSessionId,
-        createNewSession,
-        switchSession,
-        deleteSession,
-        renameSession,
-        isSidebarOpen,
-        setIsSidebarOpen,
-        autonomousRecommendations,
-        setAutonomousRecommendations,
-        isAccessReady
-    } = useChat();
-
-    const { language } = useLanguage();
-    const [foundersEndsAt, setFoundersEndsAt] = useState<string | null>(null);
-    const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!foundersEndsAt) { setFoundersCountdown(null); return; }
-        const update = () => {
-            const diffMs = new Date(foundersEndsAt).getTime() - Date.now();
-            if (diffMs <= 0) { setFoundersCountdown("00:00:00"); return; }
-            const d = Math.floor(diffMs / 86400000);
-            const h = Math.floor((diffMs % 86400000) / 3600000);
-            const m = Math.floor((diffMs % 3600000) / 60000);
-            const s = Math.floor((diffMs % 60000) / 1000);
-            if (d > 0) setFoundersCountdown(`${d}ي ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
-            else setFoundersCountdown(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
-        };
-        update();
-        const iv = setInterval(update, 1000);
-        return () => clearInterval(iv);
-    }, [foundersEndsAt]);
-    const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
-    const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
-    const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
-
-    // Autonomous Recommendations preferences
-    const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
-
-    const handleToggleAutonomousRecs = () => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-        if (!activePro && !autonomousRecommendations) {
-            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
-            setShowUpgradeModal(true);
-            return;
-        }
-        if (autonomousRecommendations) {
-            setAutonomousRecommendations(false);
-            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
-        } else {
-            setShowAutonomousModal(true);
-        }
-    };
-
-    const handleConfirmAutonomousRecs = () => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-        if (!activePro) {
-            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
-            setShowUpgradeModal(true);
-            return;
-        }
-        setShowAutonomousModal(false);
-        setAutonomousRecommendations(true);
-        toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
-    };
-
-    // Auto-disable autonomous recs ONLY after server access check is ready and confirms user is not Pro
-    useEffect(() => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-        if (isAccessReady && !activePro && autonomousRecommendations) {
-            setAutonomousRecommendations(false);
-        }
-    }, [isAccessReady, isPro, autonomousRecommendations, setAutonomousRecommendations]);
-
-    // Chat Wallpaper preferences
-    const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);
-    const [wallpaperId, setWallpaperId] = useState<string>(DEFAULT_WALLPAPER_ID);
-    const [wallpaperOpacity, setWallpaperOpacity] = useState<number>(DEFAULT_WALLPAPER_OPACITY);
-    const [customWallpaperImage, setCustomWallpaperImage] = useState<string | undefined>(undefined);
-
-    // Chat Settings dropdown
-    const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-    const settingsMenuRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!isSettingsOpen) return;
-        const handleClickOutside = (e: MouseEvent) => {
-            if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) {
-                setIsSettingsOpen(false);
-            }
-        };
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                setIsSettingsOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        document.addEventListener("keydown", handleKeyDown);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-            document.removeEventListener("keydown", handleKeyDown);
-        };
-    }, [isSettingsOpen]);
-
-    useEffect(() => {
-        const cfg = getSavedWallpaperConfig();
-        setWallpaperId(cfg.id);
-        setWallpaperOpacity(cfg.opacity);
-        setCustomWallpaperImage(cfg.customImage);
-
-        const handleWallpaperChange = (e: Event) => {
-            const detail = (e as CustomEvent).detail;
-            if (detail) {
-                setWallpaperId(detail.id);
-                setWallpaperOpacity(detail.opacity);
-                setCustomWallpaperImage(detail.customImage);
-            }
-        };
-        window.addEventListener("artoro-wallpaper-changed", handleWallpaperChange);
-        return () => window.removeEventListener("artoro-wallpaper-changed", handleWallpaperChange);
-    }, []);
-
-    const activeWallpaper = useMemo(() => {
-        if (wallpaperId === "custom" && customWallpaperImage) {
-            return {
-                backgroundColor: "#000000",
-                backgroundImage: `url(${customWallpaperImage})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center" as const,
-                backgroundRepeat: "no-repeat" as const,
-            };
-        }
-        const found = CHAT_WALLPAPERS.find(w => w.id === wallpaperId);
-        return found ? found.style : CHAT_WALLPAPERS[0].style;
-    }, [wallpaperId, customWallpaperImage]);
-
-    useEffect(() => {
-        if (!showUpgradeModal) return;
-        let active = true;
-        fetch("/api/user/quota", { cache: "no-store" })
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-                if (!active || !data?.ok) return;
-                if (data.plan?.trial_eligible !== undefined) {
-                    setTrialEligibleModal(Boolean(data.plan.trial_eligible));
-                }
-                if (data.plan?.telegram_linked !== undefined) {
-                    setTelegramLinkedModal(Boolean(data.plan.telegram_linked));
-                }
-            })
-            .catch(() => {});
-
-        fetch("/api/payment/easykash/config")
-            .then(r => r.ok ? r.json() : null)
-            .then(cfg => {
-                if (active && cfg?.founders?.ends_at) {
-                    setFoundersEndsAt(cfg.founders.ends_at);
-                }
-            })
-            .catch(() => {});
-
-        return () => { active = false; };
-    }, [showUpgradeModal]);
-
-    const handleActivateTrialFromModal = async () => {
-        setTrialStartingModal(true);
-        try {
-            const res = await fetch("/api/subscription/trial", { method: "POST" });
-            const data = await res.json();
-            if (res.ok && data?.success) {
-                toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
-                setShowUpgradeModal(false);
-                broadcastEntitlements(true);
-            } else {
-                toast.error(data?.message || "تعذر تفعيل التجربة");
-            }
-        } catch {
-            toast.error("حدث خطأ في الاتصال");
-        } finally {
-            setTrialStartingModal(false);
-        }
-    };
-    const { user } = useAuth();
-    const router = useRouter();
-    let pathname = "";
-    try {
-        pathname = typeof usePathname === "function" ? (usePathname() || "") : "";
-    } catch {
-        pathname = "";
-    }
-    const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat");
-    const isChartRoute = pathname === "/chart" || pathname.startsWith("/chart");
-    const [input, setInput] = useState("");
-    const [isExpanded, setIsExpanded] = useState(false);
-    const isWideView = isExpanded || isChatRoute;
-    const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-    const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
-    const [modelMenuOpen, setModelMenuOpen] = useState(false);
-    const [modelMenuPos, setModelMenuPos] = useState<{ bottom: number; left: number; width: number } | null>(null);
-    const [loadingStep, setLoadingStep] = useState<1 | 2 | 3>(1);
-    const [sharingMessageId, setSharingMessageId] = useState<string | null>(null);
-    const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
-    const INITIAL_VISIBLE_COUNT = 20;
-    const LOAD_MORE_STEP = 20;
-    const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
-    const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
-    const isChatAdmin = isChatAdminEmail(user?.email);
-    const isVoiceTester = isVoiceBetaTester(user);
-
-    const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
-        setIsRecordingVoiceNote(false);
-        const localBlobUrl = URL.createObjectURL(audioBlob);
-
-        // Upload user's real microphone audio to Supabase Storage with retry
-        let permanentAudioUrl: string | undefined = undefined;
-        for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-                const formData = new FormData();
-                const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
-                formData.append("file", audioBlob, `voice_note_${Date.now()}.${ext}`);
-                if (activeSessionId) formData.append("sessionId", activeSessionId);
-                if (user?.id) formData.append("userId", user.id);
-
-                const uploadRes = await fetch("/api/voice/upload", {
-                    method: "POST",
-                    body: formData,
-                });
-                if (uploadRes.ok) {
-                    const uploadData = await uploadRes.json();
-                    if (uploadData?.url) {
-                        permanentAudioUrl = uploadData.url;
-                        primeAudioCache(permanentAudioUrl, localBlobUrl);
-                        break;
-                    }
-                }
-            } catch (uploadErr) {
-                console.warn(`[ChatWidget] Voice upload attempt ${attempt + 1} failed:`, uploadErr);
-            }
-        }
-
-        if (!permanentAudioUrl) {
-            console.warn("[ChatWidget] Failed to persist voice audio to storage, fallback to local URL");
-        }
-
-        await sendMessage(transcript, undefined, {
-            isVoice: true,
-            isVoiceNote: true,
-            voiceAudioUrl: permanentAudioUrl || localBlobUrl,
-            audioDuration: duration,
-        });
-    };
-
-    const handleDownloadImage = async (url: string) => {
-        try {
-            const response = await fetch(url);
-            const blob = await response.blob();
-            const blobUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = blobUrl;
-            const ext = blob.type.split("/")[1] || "png";
-            a.download = `egxbots-image-${Date.now()}.${ext.replace(/[^a-z0-9]/gi, "")}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(blobUrl);
-            toast.success(language === "ar" ? "تم تحميل الصورة بنجاح" : "Image downloaded successfully");
-        } catch {
-            const a = document.createElement("a");
-            a.href = url;
-            a.target = "_blank";
-            a.download = `egxbots-image-${Date.now()}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
-    };
-
-    const shareAnswer = useCallback(async (messageIndex: number) => {
-        const answerMessage = messages[messageIndex];
-        const questionMessage = [...messages.slice(0, messageIndex)].reverse().find(message => message.role === "user");
-        if (!answerMessage?.content || !questionMessage?.content) return;
-        const shareKey = answerMessage.id || String(messageIndex);
-        setSharingMessageId(shareKey);
-        try {
-            const response = await fetch("/api/chat/share", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: questionMessage.content, answer: answerMessage.content }),
-            });
-            const data = await response.json();
-            if (!response.ok || !data.url) throw new Error(data.error || "تعذر إنشاء الرابط");
-            await navigator.clipboard.writeText(data.url);
-            toast.success("تم نشر الإجابة ونسخ رابط المدونة");
-        } catch (error) {
-            toast.error(error instanceof Error ? error.message : "تعذر نشر الإجابة");
-        } finally {
-            setSharingMessageId(null);
-        }
-    }, [messages]);
-
-    useEffect(() => {
-        if (!isLoading) {
-            setLoadingStep(1);
-            return;
-        }
-        setLoadingStep(1);
-        const timer1 = setTimeout(() => setLoadingStep(2), 1600);
-        const timer2 = setTimeout(() => setLoadingStep(3), 3600);
-        return () => {
-            clearTimeout(timer1);
-            clearTimeout(timer2);
-        };
-    }, [isLoading]);
-
-    useEffect(() => {
-        const handlePortfolioAnalysis = (event: Event) => {
-            const message = (event as CustomEvent<string>).detail || "حلل محفظتي";
-            setIsOpen(true);
-            setInput(message);
-            window.setTimeout(() => {
-                void sendMessage(message);
-                setInput("");
-            }, 0);
-        };
-        window.addEventListener("open-chat-with-message", handlePortfolioAnalysis);
-        return () => window.removeEventListener("open-chat-with-message", handlePortfolioAnalysis);
-    }, [sendMessage, setIsOpen]);
-
-    // Automatically open ChatWidget modal if URL contains chat=open parameter
-    useEffect(() => {
-        if (typeof window !== "undefined") {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get("chat") === "open" || params.get("chat") === "1" || params.get("openChat") === "true") {
-                setIsOpen(true);
-            }
-        }
-    }, [setIsOpen]);
-    
-    const bottomRef = useRef<HTMLDivElement>(null);
-    const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const modelMenuRef = useRef<HTMLDivElement>(null);
-    const portalMenuRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-    // Dynamic auto-expand textarea height as user types
-    useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = "40px";
-            if (input.length > 0) textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
-        }
-    }, [input, isOpen, isExpanded]);
-
-    // Close model menu when clicking outside
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            const target = event.target as Node;
-            if (
-                modelMenuRef.current &&
-                !modelMenuRef.current.contains(target) &&
-                portalMenuRef.current &&
-                !portalMenuRef.current.contains(target)
-            ) {
-                setModelMenuOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
-    // Recalculate position on scroll/resize
-    useEffect(() => {
-        if (!modelMenuOpen) return;
-        const update = () => {
-            if (modelMenuRef.current) {
-                const rect = modelMenuRef.current.getBoundingClientRect();
-                setModelMenuPos({
-                    bottom: window.innerHeight - rect.top + 8,
-                    left: rect.left,
-                    width: Math.max(rect.width, 288)
-                });
-            }
-        };
-        update();
-        window.addEventListener("scroll", update, true);
-        window.addEventListener("resize", update);
-        return () => {
-            window.removeEventListener("scroll", update, true);
-            window.removeEventListener("resize", update);
-        };
-    }, [modelMenuOpen]);
-
-    const isInitialPositionedRef = useRef(false);
-    const hasMoreOlder = messages.length > visibleCount;
-    const visibleMessages = useMemo(() => {
-        if (messages.length <= visibleCount) return messages;
-        return messages.slice(messages.length - visibleCount);
-    }, [messages, visibleCount]);
-
-    const handleLoadMoreOlder = useCallback(() => {
-        if (visibleCount >= messages.length || isLoadingOlder) return;
-        setIsLoadingOlder(true);
-        const container = scrollContainerRef.current;
-        const prevScrollHeight = container ? container.scrollHeight : 0;
-        const prevScrollTop = container ? container.scrollTop : 0;
-
-        setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
-
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                if (container && prevScrollHeight > 0) {
-                    const newScrollHeight = container.scrollHeight;
-                    const heightDiff = newScrollHeight - prevScrollHeight;
-                    if (heightDiff > 0) {
-                        container.scrollTop = prevScrollTop + heightDiff;
-                    }
-                }
-                setIsLoadingOlder(false);
-            });
-        });
-    }, [visibleCount, messages.length, isLoadingOlder]);
-
-    const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-        setIsUserScrolledUp(!isAtBottom);
-
-        // Only auto-trigger when initial positioning at bottom is complete and user deliberately scrolled to the top edge (< 40px)
-        if (isInitialPositionedRef.current && isUserScrolledUp && scrollTop < 40 && hasMoreOlder && !isLoadingOlder) {
-            handleLoadMoreOlder();
-        }
-    };
-
-    const scrollToBottom = useCallback(() => {
-        setIsUserScrolledUp(false);
-        if (scrollContainerRef.current && typeof scrollContainerRef.current.scrollTo === "function") {
-            scrollContainerRef.current.scrollTo({
-                top: scrollContainerRef.current.scrollHeight,
-                behavior: "smooth",
-            });
-        }
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, []);
-
-    useEffect(() => {
-        setIsUserScrolledUp(false);
-        setVisibleCount(INITIAL_VISIBLE_COUNT);
-        isInitialPositionedRef.current = false;
-
-        // Instant scroll to bottom so the container doesn't animate through top edge
-        if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-        }
-        bottomRef.current?.scrollIntoView({ behavior: "instant" as ScrollBehavior });
-
-        const timer = setTimeout(() => {
-            isInitialPositionedRef.current = true;
-        }, 400);
-        return () => clearTimeout(timer);
-    }, [activeSessionId]);
-
-    useEffect(() => {
-        if (!isUserScrolledUp) {
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        }
-    }, [messages, isOpen, isLoading, isUserScrolledUp]);
-
-    async function compressAndResizeImage(base64Str: string, maxDim = 1600, quality = 0.85): Promise<string> {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-                let width = img.width;
-                let height = img.height;
-                if (width > maxDim || height > maxDim) {
-                    if (width > height) {
-                        height = Math.round((height * maxDim) / width);
-                        width = maxDim;
-                    } else {
-                        width = Math.round((width * maxDim) / height);
-                        height = maxDim;
-                    }
-                }
-                const canvas = document.createElement("canvas");
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                if (!ctx) {
-                    resolve(base64Str);
-                    return;
-                }
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, width, height);
-                ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL("image/jpeg", quality));
-            };
-            img.onerror = () => resolve(base64Str);
-            img.src = base64Str;
-        });
-    }
-
-    const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-        if (!activePro) {
-            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
-            setShowUpgradeModal(true);
-            e.target.value = "";
-            return;
-        }
-        const files = Array.from(e.target.files || []);
-        if (files.length === 0) return;
-
-        const validFiles = files.slice(0, 3 - imagePreviews.length);
-
-        validFiles.forEach(file => {
-            if (file.size > 8 * 1024 * 1024) {
-                alert(language === "ar" ? "حجم الصورة كبير جداً (الأقصى 8MB)" : "Image too large (Max 8MB)");
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = async () => {
-                if (typeof reader.result === "string") {
-                    const compressed = await compressAndResizeImage(reader.result);
-                    setImagePreviews(prev => [...prev, compressed]);
-                }
-            };
-            reader.readAsDataURL(file);
-        });
-
-        e.target.value = "";
-    }, [imagePreviews.length, language]);
-
-    const removeImage = useCallback((index: number) => {
-        setImagePreviews(prev => prev.filter((_, i) => i !== index));
-    }, []);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (isLoading) {
-            stopResponding();
-            return;
-        }
-        if ((!input.trim() && imagePreviews.length === 0) || !user || isInitializing || accessError) return;
-
-        setIsUserScrolledUp(false);
-        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-
-        const textToSend = input;
-        const currentPreviews = [...imagePreviews];
-
-        setInput("");
-        setImagePreviews([]);
-
-        // Keep images separate: a side-by-side composite shrank each screenshot
-        // to a fraction of the available pixels and made dense text unreadable.
-        await sendMessage(textToSend, currentPreviews.length ? currentPreviews : undefined);
-    };
-
-    if (!isOpen && !isChatRoute) {
-        if (isChartRoute) {
-            return null;
-        }
-        return (
-            <button
-                onClick={() => setIsOpen(true)}
-                className="fixed bottom-3 sm:bottom-5 right-3 sm:right-5 z-[9999] flex h-13 w-13 sm:h-[72px] sm:w-[72px] items-center justify-center rounded-[18px] sm:rounded-[24px] border border-white/70 bg-white/85 p-2 shadow-[0_12px_34px_rgba(2,6,23,0.24)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(2,6,23,0.32)] active:translate-y-0 animate-in fade-in zoom-in"
-                title="افتح ARTORO V3"
-                aria-label="افتح ARTORO V3"
-            >
-                <ArtoroBrandMark size="launcher" />
-            </button>
-        );
-    }
-
-    return (
-        <div 
-            className={isChatRoute || isExpanded ? "fixed inset-0 z-[9999] flex flex-row h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
-                fixed z-[9999] flex flex-row gap-2 bg-transparent origin-bottom-right
-                animate-in fade-in slide-in-from-bottom-5 duration-200
-                max-md:fixed max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:w-full max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
-                md:bottom-4 md:right-4 md:w-[min(95vw,1080px)] md:h-[min(92vh,840px)] md:rounded-[24px] md:p-0
-                transition-all duration-200
-            `}
-        >
-            {/* Sidebar Drawer */}
-            {user && !isInitializing && !accessError && (
-                <ChatSidebar
-                    sessions={sessions}
-                    activeSessionId={activeSessionId}
-                    onSelectSession={switchSession}
-                    onNewChat={createNewSession}
-                    onDeleteSession={deleteSession}
-                    onRenameSession={renameSession}
-                    isOpen={isSidebarOpen}
-                    onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-                    isExpanded={isExpanded || isChatRoute}
-                />
-            )}
-
-            {/* Main Chat Container */}
-            <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${(isChatRoute || isExpanded) ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
-                {/* Header */}
-                <div className="relative z-30 flex items-center justify-between px-2.5 sm:px-4 py-2 sm:py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0">
-                    <div className="flex items-center gap-1.5 sm:gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight min-w-0">
-                        {user && !isInitializing && !accessError && !isSidebarOpen && (
-                            <button
-                                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900 shrink-0 cursor-pointer"
-                                title="فتح سجل المحادثات"
-                                aria-label="فتح سجل المحادثات"
-                            >
-                                <PanelLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                            </button>
-                        )}
-                        <div className="shrink-0 scale-90 sm:scale-100 origin-left">
-                            <ArtoroBrandMark size="header" />
-                        </div>
-                        <span className="text-xs sm:text-[15px] font-black tracking-wider text-zinc-950 dark:text-white truncate">ARTORO</span>
-                        <span className="hidden sm:inline-flex rounded-md bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950 border border-amber-500/50 shadow-xs shrink-0">V3</span>
-                    </div>
-                    <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-                        {user && !isInitializing && !accessError && (
-                            <div className="text-[9px] sm:text-[10px] font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs shrink-0 whitespace-nowrap">
-                                {quotaLimit >= 999 
-                                    ? (<><span className="sm:hidden">♾️ Pro</span><span className="hidden sm:inline">Unlimited ♾️</span></>)
-                                    : isPro 
-                                        ? (<><span className="sm:hidden">👑 {remainingQuota}</span><span className="hidden sm:inline">{remainingQuota}/{quotaLimit || 350} Left</span></>)
-                                        : (<><span className="sm:hidden">{remainingQuota}/{quotaLimit || 10}</span><span className="hidden sm:inline">{remainingQuota}/{quotaLimit || 10} Left</span></>)
-                                }
-                            </div>
-                        )}
-                        {/* Settings Dropdown Button & Popover */}
-                        <div className="relative shrink-0" ref={settingsMenuRef}>
-                            <button
-                                type="button"
-                                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                                className={`relative grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border text-zinc-800 shadow-xs transition active:scale-95 cursor-pointer dark:text-white ${
-                                    isSettingsOpen
-                                        ? "border-amber-400 bg-amber-500/10 text-amber-600 dark:border-amber-400 dark:text-amber-300"
-                                        : autonomousRecommendations
-                                            ? "border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:border-emerald-500/60 dark:text-emerald-400"
-                                            : "border-zinc-300 bg-white hover:border-zinc-400 hover:bg-zinc-100 dark:border-white/20 dark:bg-black dark:hover:bg-zinc-900"
-                                }`}
-                                title="إعدادات الشات"
-                                aria-label="إعدادات الشات"
-                                aria-expanded={isSettingsOpen}
-                            >
-                                <Settings className={`h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform duration-200 ${isSettingsOpen ? "rotate-45 text-amber-500" : ""}`} />
-                                {autonomousRecommendations && (
-                                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-white dark:border-black"></span>
-                                    </span>
-                                )}
-                            </button>
-
-                            {/* Mobile Backdrop Overlay */}
-                            {isSettingsOpen && (
-                                <div
-                                    className="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 sm:hidden animate-in fade-in duration-150"
-                                    onClick={() => setIsSettingsOpen(false)}
-                                    aria-hidden="true"
-                                />
-                            )}
-
-                            {/* Dropdown Menu Popover */}
-                            {isSettingsOpen && (
-                                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full ltr:sm:right-0 rtl:sm:left-0 sm:mt-2 w-auto sm:w-72 max-h-[85vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-white/95 p-3.5 sm:p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in zoom-in-95 duration-150 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
-                                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-100 dark:border-zinc-800/80">
-                                        <div className="flex items-center gap-1.5 text-xs font-black text-zinc-900 dark:text-white">
-                                            <Settings className="h-3.5 w-3.5 text-amber-500" />
-                                            <span>{language === "ar" ? "إعدادات الشات" : "Chat Settings"}</span>
-                                        </div>
-                                        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">ARTORO</span>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        {/* 1. Autonomous Recommendations Mode */}
-                                        <div className={`rounded-xl border p-2.5 transition ${
-                                            autonomousRecommendations
-                                                ? "border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/30 dark:bg-emerald-950/20"
-                                                : "border-zinc-200/80 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/60"
-                                        }`}>
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
-                                                        autonomousRecommendations
-                                                            ? "bg-emerald-500/15 text-emerald-500"
-                                                            : "bg-zinc-200/60 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                                                    }`}>
-                                                        <Sparkles className="h-4 w-4" />
-                                                    </div>
-                                                    <div className="flex flex-col">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="text-xs font-bold text-zinc-900 dark:text-white">
-                                                                {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
-                                                            </span>
-                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) && (
-                                                                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-black text-amber-600 dark:text-amber-400 border border-amber-500/40">
-                                                                    PRO 👑
-                                                                </span>
-                                                            )}
-                                                            {autonomousRecommendations && (
-                                                                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400">
-                                                                    {language === "ar" ? "نشط ⚡" : "Active ⚡"}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true"))
-                                                                ? (language === "ar" ? "ميزة حصرية لمشتركي Pro" : "Exclusive to Pro members")
-                                                                : autonomousRecommendations
-                                                                    ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
-                                                                    : (language === "ar" ? "مقترحات ذكاء اصطناعي حرة" : "Free AI-generated trade ideas")}
-                                                        </span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Switch Toggle */}
-                                                <button
-                                                    type="button"
-                                                    role="switch"
-                                                    dir="ltr"
-                                                    aria-checked={autonomousRecommendations}
-                                                    onClick={() => {
-                                                        handleToggleAutonomousRecs();
-                                                        setIsSettingsOpen(false);
-                                                    }}
-                                                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                                        autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700"
-                                                    }`}
-                                                    title={autonomousRecommendations
-                                                        ? (language === "ar" ? "إيقاف وضع التوصيات الحرة" : "Disable Autonomous Recs")
-                                                        : (language === "ar" ? "تفعيل وضع التوصيات الحرة" : "Enable Autonomous Recs")}
-                                                >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                                                            autonomousRecommendations ? "translate-x-5" : "translate-x-0"
-                                                        }`}
-                                                    />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* 2. Chat Wallpaper Setting */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setShowWallpaperModal(true);
-                                                setIsSettingsOpen(false);
-                                            }}
-                                            className="w-full flex items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-2.5 text-right transition hover:border-amber-400 hover:bg-amber-50/50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-amber-500/40 dark:hover:bg-zinc-900 cursor-pointer"
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                                                    <Palette className="h-4 w-4" />
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">
-                                                        {language === "ar" ? "ورق حائط وخلفية الشات" : "Chat Wallpaper"}
-                                                    </span>
-                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                        {language === "ar" ? "زخارف التداول، ألوان، أو صورة" : "Doodles, colors or custom image"}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                                                {language === "ar" ? "تغيير" : "Change"}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        {/* 📞 Live Voice Call with ARTORO (Strictly weeessd57 beta testing) */}
-                        {isVoiceTester && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    playConnectionChime();
-                                    setIsVoiceCallOpen(true);
-                                }}
-                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
-                                title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
-                                aria-label="مكالمة صوتية مع أرتورو"
-                            >
-                                <Phone className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-emerald-500 animate-pulse" />
-                                <span className="absolute -top-1 -right-1 flex h-2 w-2 sm:h-2.5 sm:w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500"></span>
-                                </span>
-                            </button>
-                        )}
-
-                        {!isChatRoute && (
-                            <button
-                                onClick={() => setIsExpanded(!isExpanded)}
-                                className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900 shrink-0"
-                                title={isExpanded ? "تعديل الحجم الافتراضي" : "تكبير النافذة"}
-                                aria-label={isExpanded ? "استعادة حجم النافذة" : "تكبير النافذة"}
-                            >
-                                {isExpanded ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}
-                            </button>
-                        )}
-                        <button
-                            onClick={() => isChatRoute ? router.push("/") : setIsOpen(false)}
-                            className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-rose-950/40 shrink-0 cursor-pointer"
-                            title={isChatRoute ? "الرئيسية" : "إغلاق"}
-                            aria-label={isChatRoute ? "الذهاب للرئيسية" : "إغلاق الشات"}
-                        >
-                            <X className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Messages Body */}
-                <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-black">
-                    {/* WhatsApp Style Wallpaper Layer */}
-                    <div 
-                        className="pointer-events-none absolute inset-0 z-0 transition-all duration-300"
-                        style={{
-                            ...activeWallpaper,
-                            opacity: (wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY) / 100,
-                        }}
-                    />
-                    <div 
-                        ref={scrollContainerRef} 
-                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none overscroll-y-contain" 
-                        style={{
-                            WebkitOverflowScrolling: "touch",
-                            touchAction: "pan-y",
-                            overscrollBehaviorY: "contain"
-                        }}
-                        onScroll={handleScroll}
-                    >
-                    {isInitializing ? (
-                        <div role="status" aria-live="polite" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
-                            <Loader2 aria-hidden="true" className="h-6 w-6 motion-safe:animate-spin text-amber-500" />
-                            <span>جاري تجهيز الشات...</span>
-                        </div>
-                    ) : accessError ? (
-                        <div role="alert" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
-                            <span>تعذر تحميل الشات. حاول مرة تانية.</span>
-                            <button type="button" onClick={retryAccess} className="rounded-xl bg-amber-400 px-4 py-2 font-bold text-black">إعادة المحاولة</button>
-                        </div>
-                    ) : !user ? (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 my-auto min-h-[300px]">
-                            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
-                                <Lock className="h-8 w-8" />
-                            </div>
-                            <div className="space-y-1">
-                                <h3 className="font-bold text-lg text-black dark:text-white">تسجيل الدخول مطلوب</h3>
-                                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-[260px] leading-relaxed">
-                                    يرجى تسجيل الدخول أولاً لتتمكن من التحدث مع المساعد الذكي واستعراض تحليلات الأسهم.
-                                </p>
-                            </div>
-                            <div className="flex flex-col w-full gap-2 pt-2 max-w-[240px]">
-                                <button
-                                    onClick={() => {
-                                        if (!isChatRoute) setIsOpen(false);
-                                        router.push(isChatRoute ? "/login?redirect=/chat" : "/login?redirect=/chart");
-                                    }}
-                                    className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition-all shadow-md active:scale-95"
-                                >
-                                    <LogIn className="h-4 w-4" />
-                                    تسجيل الدخول
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (!isChatRoute) setIsOpen(false);
-                                        router.push(isChatRoute ? "/signup?redirect=/chat" : "/signup");
-                                    }}
-                                    className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-black dark:text-white text-xs font-medium transition-all"
-                                >
-                                    <UserPlus className="h-3.5 w-3.5" />
-                                    إنشاء حساب جديد
-                                </button>
-                            </div>
-                        </div>
-                    ) : (
-                        <>
-                            {autonomousRecommendations && (
-                                <div className="flex items-center justify-between p-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/15 to-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-900 dark:text-emerald-200 mb-3 font-semibold shadow-xs animate-in fade-in">
-                                    <div className="flex items-center gap-2">
-                                        <span className="relative flex h-2 w-2 shrink-0">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                        </span>
-                                        <span>⚡ <strong>وضع التوصيات الحرة المستقلة مفعّل:</strong> تحليلات الذكاء الاصطناعي استرشادية، وقرارك بمسؤوليتك بالكامل.</span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setAutonomousRecommendations(false);
-                                            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
-                                        }}
-                                        className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold transition shrink-0 cursor-pointer"
-                                    >
-                                        إيقاف
-                                    </button>
-                                </div>
-                            )}
-
-                            {!isPro && remainingQuota === 1 && (
-                                <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-base">⚠️</span>
-                                        <span>متبقي لك رسالة واحدة في باقتك المجانية</span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowUpgradeModal(true)}
-                                        className="px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black text-[11px] font-black border border-black shadow-[1px_1px_0_0_#000] transition-all cursor-pointer"
-                                    >
-                                        ترقية إلى Pro
-                                    </button>
-                                </div>
-                            )}
-
-                            {!isPro && remainingQuota === 0 && (
-                                <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-base">🛑</span>
-                                        <span>استهلكت باقتك المجانية ({quotaLimit || 10}/{quotaLimit || 10})</span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowUpgradeModal(true)}
-                                        className="px-3 py-1.5 bg-[#FFE600] hover:bg-yellow-300 text-black text-xs font-black border-2 border-black shadow-[2px_2px_0_0_#000] transition-all cursor-pointer animate-pulse"
-                                    >
-                                        اشترك في Pro الآن
-                                    </button>
-                                </div>
-                            )}
-
-                            {isPro && remainingQuota === 0 && (
-                                <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-base">🛑</span>
-                                        <span>استهلكت رصيدك الشهري لخطة Pro ({quotaLimit || 350}/{quotaLimit || 350})</span>
-                                    </div>
-                                </div>
-                            )}
-
-                            {messages.length === 0 && (
-                                <div className={`mx-auto w-full py-4 px-2 space-y-6 dir-rtl animate-in fade-in slide-in-from-bottom-2 duration-300 ${isWideView ? "max-w-5xl lg:max-w-6xl xl:max-w-7xl" : "max-w-2xl"}`}>
-                                    {/* Header & Logo */}
-                                    <div className="flex flex-col items-center text-center space-y-2.5">
-                                        <div className="relative">
-                                            <ArtoroBrandMark size="hero" />
-                                            <span className="absolute -bottom-1.5 -right-3 rounded-full border border-white/70 bg-white px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-slate-700 shadow-sm dark:border-white/15 dark:bg-slate-800 dark:text-slate-100">
-                                                AI PRO
-                                            </span>
-                                        </div>
-                                        <span className="text-[11px] font-extrabold tracking-[0.22em] text-slate-500 dark:text-slate-400">ARTORO V3</span>
-                                        <h3 className="font-black text-xl sm:text-2xl text-black dark:text-white tracking-tight">
-                                            اسأل السوق أو حلل محفظتك بالذكاء الاصطناعي
-                                        </h3>
-                                        <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 max-w-lg leading-relaxed font-medium">
-                                            مساعد استثماري متصل مباشرة ببيانات البورصة المصرية اللحظية، مستويات وايكوف، ونماذج تعلم آلي متطورة.
-                                        </p>
-                                    </div>
-
-                                    {/* Portfolio Image Upload Hero Card */}
-                                    <div 
-                                        onClick={() => {
-                                            const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-                                            if (!activePro) {
-                                                toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
-                                                setShowUpgradeModal(true);
-                                                return;
-                                            }
-                                            fileInputRef.current?.click();
-                                        }}
-                                        className="group relative cursor-pointer rounded-2xl border border-dashed border-amber-500/40 dark:border-white/20 bg-amber-500/5 hover:bg-amber-500/10 dark:bg-black dark:hover:bg-zinc-950 p-4 sm:p-5 transition-all shadow-xs text-right"
-                                    >
-                                        <div className="flex items-start sm:items-center justify-between gap-3">
-                                            <div className="space-y-1 flex-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
-                                                        {(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
-                                                    </span>
-                                                    <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
-                                                        حلل محفظتك الاستثمارية من صورة
-                                                    </h4>
-                                                </div>
-                                                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
-                                                    ارفع سكرين شوت لمحفظتك من (ثندر أو تطبيق وسيطك)، وسيقوم المساعد فوراً بقراءة الأسهم، حساب نسب السيولة، وتحليل المخاطر والأهداف الفنية لكل سهم.
-                                                </p>
-                                            </div>
-                                            <button 
-                                                type="button"
-                                                className="shrink-0 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs active:translate-x-0.5 transition-all flex items-center gap-1.5"
-                                            >
-                                                <ImagePlus className="w-4 h-4" />
-                                                <span className="hidden sm:inline">رفع لقطة شاشة</span>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Smart Categorized Questions Grid */}
-                                    <div className="space-y-3">
-                                        <div className="flex items-center justify-between border-b border-black/15 dark:border-white/15 pb-1">
-                                            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                                                أسئلة واقتراحات شائعة للبدء:
-                                            </span>
-                                            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                                                اضغط على أي سؤال للإرسال فوراً ⚡
-                                            </span>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                            {[
-                                                {
-                                                    icon: "🔥",
-                                                    tag: "سيولة وزخم",
-                                                    text: "إيه أقوى الأسهم اللي بتجمع سيولة وأحجام تداول النهاردة؟"
-                                                },
-                                                {
-                                                    icon: "📊",
-                                                    tag: "وايكوف",
-                                                    text: "هل فيه أسهم في مناطق تجميع وايكوف ومؤشرات إيجابية؟"
-                                                },
-                                                {
-                                                    icon: "⚖️",
-                                                    tag: "مقارنة",
-                                                    text: "قارن لي بين البنك التجاري الدولي (COMI) ومجموعة طلعت مصطفى (TMGH)"
-                                                },
-                                                {
-                                                    icon: "🛡️",
-                                                    tag: "إدارة مخاطر",
-                                                    text: "إزاي أوزع سيولتي وأحمي محفظتي عند تذبذب المؤشر العام؟"
-                                                },
-                                                {
-                                                    icon: "🏭",
-                                                    tag: "قطاعات",
-                                                    text: "ما هو أنشط قطاع في البورصة المصرية حالياً ولماذا؟"
-                                                },
-                                                {
-                                                    icon: "📈",
-                                                    tag: "أسهم متصدرة",
-                                                    text: "ما هي أكثر الأسهم ارتفاعاً وتصدرت حركة السوق اليوم؟"
-                                                }
-                                            ].map((q, qIdx) => (
-                                                <button
-                                                    key={qIdx}
-                                                    type="button"
-                                                    onClick={() => sendMessage(q.text)}
-                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-black border border-zinc-300 dark:border-white/20 rounded-xl shadow-xs dark:shadow-[3px_3px_0_0_#fff] hover:border-amber-500 hover:bg-amber-50/60 dark:hover:bg-zinc-950 hover:-translate-y-0.5 active:translate-y-0 transition-all group cursor-pointer"
-                                                >
-                                                    <span className="text-base shrink-0 p-1.5 rounded-lg bg-zinc-100 dark:bg-black border border-zinc-300 dark:border-white/30">
-                                                        {q.icon}
-                                                    </span>
-                                                    <div className="flex flex-col min-w-0 flex-1">
-                                                        <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 mb-0.5">
-                                                            {q.tag}
-                                                        </span>
-                                                        <span className="text-xs font-bold text-zinc-950 dark:text-white group-hover:text-amber-800 dark:group-hover:text-amber-300 leading-snug">
-                                                            {q.text}
-                                                        </span>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Load older messages button when history is chunked */}
-                            {hasMoreOlder && (
-                                <div className="flex justify-center py-2 shrink-0">
-                                    <button
-                                        type="button"
-                                        onClick={handleLoadMoreOlder}
-                                        disabled={isLoadingOlder}
-                                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black border border-zinc-300 dark:border-white/20 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-                                        title="تحميل الرسائل السابقة"
-                                        aria-label="تحميل الرسائل السابقة"
-                                    >
-                                        {isLoadingOlder ? (
-                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                                        ) : (
-                                            <ArrowUp className="h-3.5 w-3.5 text-amber-500" />
-                                        )}
-                                        <span>
-                                            {language === "ar"
-                                                ? `تحميل رسائل سابقة (${messages.length - visibleCount} متبقية)`
-                                                : `Load older messages (${messages.length - visibleCount} remaining)`
-                                            }
-                                        </span>
-                                    </button>
-                                </div>
-                            )}
-
-                            {visibleMessages.map((msg, vIdx) => {
-                                const originalIdx = messages.length <= visibleCount ? vIdx : (messages.length - visibleCount + vIdx);
-                                const isLastMessage = originalIdx === messages.length - 1;
-                                return (
-                                <div
-                                    key={msg.id || `msg-${originalIdx}`}
-                                    className={`flex gap-2 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
-                                >
-                                    <div className={`
-                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
-                                        ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
-                                    `}>
-                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
-                                    </div>
-                                    <div className={`
-                                        flex-1 rounded-2xl border p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
-                                        ${msg.role === "user"
-                                            ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
-                                            : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
-                                    `}>
-                                        {/* Show image thumbnails if present */}
-                                        {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
-                                            <div className="mb-2.5 flex flex-wrap gap-2">
-                                                {(msg.images || [msg.imagePreviewUrl || msg.imageUrl!]).filter(img => img && img !== "[image]").map((img, i) => (
-                                                    <div
-                                                        key={i}
-                                                        onClick={() => setPreviewModalImage(img)}
-                                                        className="relative group cursor-pointer overflow-hidden border-2 border-black dark:border-white shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#fff] hover:scale-[1.02] transition-all bg-black/5"
-                                                        title="انقر لتكبير وتحميل الصورة"
-                                                    >
-                                                        <img
-                                                            src={img}
-                                                            alt={`Attached ${i + 1}`}
-                                                            className="max-w-[200px] max-h-44 object-cover"
-                                                        />
-                                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                                                            <ZoomIn className="w-4 h-4 text-[#FFE600]" />
-                                                            <span>تكبير / تحميل</span>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
-                                            <VoiceNotePlayer
-                                                role={msg.role}
-                                                audioUrl={msg.voiceAudioUrl}
-                                                text={msg.content || ""}
-                                                durationSeconds={msg.voiceDuration}
-                                                autoPlay={msg.role === "assistant" && isLastMessage}
-                                                tables={msg.tables}
-                                            />
-                                        ) : (
-                                            <FormattedChatMessage 
-                                                content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
-                                                role={msg.role} 
-                                                suggestedButtons={msg.suggestedButtons}
-                                                showSuggestedButtons={isLastMessage}
-                                                onButtonClick={(btnText) => sendMessage(btnText)}
-                                                isStreaming={msg.isStreaming}
-                                                tables={msg.tables}
-                                                showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
-                                                showVoiceButton={isVoiceTester}
-                                                onShare={() => shareAnswer(originalIdx)}
-                                                sharing={sharingMessageId === (msg.id || String(originalIdx))}
-                                                latencyMs={msg.latencyMs}
-                                                userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
-                                            />
-                                        )}
-
-                                    </div>
-                                </div>
-                                );
-                            })}
-
-                            {isLoading && !messages[messages.length - 1]?.content && (
-                                <div className={`flex gap-3 w-full mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
-                                    <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
-                                        <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" />
-                                    </div>
-                                    <div className="flex-1 flex flex-col gap-0.5 overflow-hidden">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400 transition-all duration-300">
-                                                {loadingStep === 1 && (imagePreviews.length > 0 ? "🧠 جاري قراءة الصورة واستيعاب السؤال..." : "🧠 جاري قراءة السؤال واستيعاب السياق...")}
-                                                {loadingStep === 2 && "🔍 جاري استعلام بيانات وأسعار البورصة المصرية..."}
-                                                {loadingStep === 3 && "📊 جاري صياغة التقرير المالي والرد النهائي..."}
-                                            </span>
-                                        </div>
-                                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
-                                            مرحلة {loadingStep} من 3
-                                        </span>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={stopResponding}
-                                        className="flex items-center gap-1 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30 rounded-xl px-2.5 py-1 text-xs font-bold transition-all shrink-0 mr-2"
-                                        title={language === "ar" ? "إيقاف الاستجابة" : "Stop Responding"}
-                                    >
-                                        <X className="h-3.5 w-3.5" />
-                                        <span>{language === "ar" ? "إيقاف" : "Stop"}</span>
-                                    </button>
-
-                                    <div className="flex items-center gap-1 shrink-0">
-                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 1 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
-                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 2 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
-                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 3 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    )}
-                    <div className="h-6 shrink-0" />
-                    <div ref={bottomRef} />
-                </div>
-                {isUserScrolledUp && messages.length > 0 && (
-                    <button
-                        type="button"
-                        onClick={scrollToBottom}
-                        className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 rounded-full border border-zinc-300 dark:border-white/30 bg-white/95 dark:bg-black/95 px-3.5 py-2 text-xs font-extrabold text-zinc-900 dark:text-white shadow-lg dark:shadow-[3px_3px_0_0_#FFE600] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-zinc-900 active:scale-95 cursor-pointer animate-in fade-in slide-in-from-bottom-2"
-                        title={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
-                        aria-label={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
-                    >
-                        <ArrowDown className="h-4 w-4 text-amber-500 animate-bounce" />
-                        <span>{language === "ar" ? "آخر رسالة" : "Latest message"}</span>
-                    </button>
-                )}
-                </div>
-
-                {/* Input Form */}
-                <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
-                    {isInitializing || accessError ? null : user ? (
-                        <>
-                        <form onSubmit={handleSubmit} className={`space-y-2 mx-auto w-full transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
-                            {/* Image Previews List */}
-                            {imagePreviews.length > 0 && (
-                                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                                    {imagePreviews.map((img, idx) => (
-                                        <div key={idx} className="relative shrink-0">
-                                            <img
-                                                src={img}
-                                                alt={`Preview ${idx + 1}`}
-                                                className="h-16 w-16 rounded-lg border-2 border-amber-500/40 object-cover shadow-sm"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => removeImage(idx)}
-                                                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors shadow-md"
-                                                title="Remove"
-                                            >
-                                                <XCircle className="h-4 w-4" />
-                                            </button>
-                                            <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1 rounded">
-                                                #{idx + 1}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Voice Note Recorder or Text Input Container */}
-                            {isRecordingVoiceNote ? (
-                                <VoiceNoteRecorder
-                                    isRecording={isRecordingVoiceNote}
-                                    onCancel={() => setIsRecordingVoiceNote(false)}
-                                    onSend={handleSendVoiceNote}
-                                />
-                            ) : (
-                            <div className="relative flex items-end gap-2 bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-2xl p-2 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-xs dark:shadow-[4px_4px_0_0_#fff]">
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    multiple
-                                    accept="image/png,image/jpeg,image/webp,image/gif"
-                                    className="hidden"
-                                    onChange={handleImageSelect}
-                                />
-
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
-                                        if (!activePro) {
-                                            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
-                                            setShowUpgradeModal(true);
-                                            return;
-                                        }
-                                        fileInputRef.current?.click();
-                                    }}
-                                    disabled={isLoading}
-                                    className="h-9 w-9 shrink-0 rounded-xl bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 text-slate-600 dark:text-white flex items-center justify-center transition-all disabled:opacity-50 relative mb-0.5"
-                                    title={language === "ar" ? "إرفاق صور للتحليل" : "Attach images for analysis"}
-                                >
-                                    <ImagePlus className="h-4 w-4" />
-                                    {imagePreviews.length > 0 && (
-                                        <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-black">
-                                            {imagePreviews.length}
-                                        </span>
-                                    )}
-                                </button>
-
-                                <textarea
-                                    ref={textareaRef}
-                                    rows={1}
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) {
-                                            e.preventDefault();
-                                            handleSubmit(e);
-                                        }
-                                    }}
-                                    placeholder={
-                                        imagePreviews.length > 0
-                                            ? (language === "ar" ? `أضف وصفاً لـ (${imagePreviews.length}) صور (اختياري)...` : `Add description for (${imagePreviews.length}) images (optional)...`) 
-                                             : (language === "ar" ? "اسأل ARTORO..." : "Ask ARTORO...")
-                                    }
-                                    className="flex-1 min-w-0 h-10 min-h-[40px] max-h-[160px] py-2 px-3 bg-transparent text-base md:text-sm text-slate-900 dark:text-white placeholder:text-zinc-400 focus:outline-none resize-none leading-6 overflow-y-auto"
-                                />
-
-                                <button
-                                    type={isLoading ? "button" : "submit"}
-                                    onClick={isLoading ? () => stopResponding() : undefined}
-                                    disabled={!isLoading && (!input.trim() && imagePreviews.length === 0)}
-                                    className={`h-10 w-10 shrink-0 rounded-xl border border-transparent dark:border-white/20 flex items-center justify-center transition-all mb-0.5 ${
-                                        isLoading
-                                            ? "bg-red-500 hover:bg-red-600 text-white cursor-pointer shadow-sm active:scale-95"
-                                            : "bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
-                                    }`}
-                                    title={isLoading ? (language === "ar" ? "إيقاف الرد" : "Stop generation") : (language === "ar" ? "إرسال" : "Send")}
-                                >
-                                    {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
-                                </button>
-
-                                {/* 🎙️ Voice Note Record Button (Strictly weeessd57 beta testing) */}
-                                {isVoiceTester && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsRecordingVoiceNote(true)}
-                                        className="h-10 w-10 shrink-0 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 hover:text-emerald-400 flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 mb-0.5"
-                                        title="تسجيل فويس نوت (Voice Note)"
-                                    >
-                                        <Mic className="h-4 w-4" />
-                                    </button>
-                                )}
-                            </div>
-                            )}
-
-                            {/* Bottom Bar: Custom Modern Model Selector Dropdown Menu */}
-                            <div className="flex items-center justify-between pt-1">
-                                {(() => {
-                                    const currentModelObj = AVAILABLE_AI_MODELS.find(m => m.id === selectedModel) || AVAILABLE_AI_MODELS[0];
-                                    return (
-                                        <div className="relative inline-block" ref={modelMenuRef}>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (!modelMenuOpen && modelMenuRef.current) {
-                                                        const rect = modelMenuRef.current.getBoundingClientRect();
-                                                        setModelMenuPos({
-                                                            bottom: window.innerHeight - rect.top + 8,
-                                                            left: Math.max(4, Math.min(rect.left, window.innerWidth - 292)),
-                                                            width: Math.max(rect.width, 288)
-                                                        });
-                                                    }
-                                                    setModelMenuOpen(!modelMenuOpen);
-                                                }}
-                                                className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black hover:bg-zinc-200 dark:hover:bg-zinc-900 border border-zinc-300 dark:border-white/30 rounded-xl px-2.5 py-1 text-[11px] text-zinc-900 dark:text-white font-black transition-all shadow-xs active:scale-95"
-                                            >
-                                                <Cpu className="h-3 w-3 text-amber-600 dark:text-amber-400 shrink-0" />
-                                                <span className="flex items-center gap-1">
-                                                    <span>{currentModelObj?.name}</span>
-                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-400 font-black">
-                                                        {language === "ar" ? currentModelObj?.badgeAr : currentModelObj?.badgeEn}
-                                                    </span>
-                                                </span>
-                                                <ChevronDown className={`h-3 w-3 text-zinc-600 dark:text-zinc-400 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
-                                            </button>
-
-                                            {/* Model dropdown rendered as portal to escape overflow:hidden */}
-                                            {modelMenuOpen && modelMenuPos && typeof document !== "undefined" && createPortal(
-                                                <div
-                                                    ref={portalMenuRef}
-                                                    style={{
-                                                        position: "fixed",
-                                                        bottom: modelMenuPos.bottom,
-                                                        left: modelMenuPos.left,
-                                                        width: modelMenuPos.width,
-                                                        zIndex: 99999
-                                                    }}
-                                                    className="bg-white dark:bg-black backdrop-blur-xl border border-zinc-300 dark:border-white/20 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
-                                                >
-                                                    <div className="px-2.5 py-1.5 text-[10px] font-black uppercase text-zinc-700 dark:text-zinc-400 tracking-wider border-b border-zinc-200 dark:border-zinc-800 mb-1">
-                                                        {language === "ar" ? "🤖 اختر موديل الذكاء الاصطناعي" : "🤖 Select AI Model"}
-                                                    </div>
-                                                    {AVAILABLE_AI_MODELS.map((m) => {
-                                                        const isSelected = selectedModel === m.id;
-                                                        return (
-                                                            <button
-                                                                key={m.id}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setSelectedModel(m.id);
-                                                                    setModelMenuOpen(false);
-                                                                }}
-                                                                className={`
-                                                                    w-full text-left flex items-start justify-between p-2.5 rounded-xl text-xs transition-all
-                                                                    ${isSelected
-                                                                        ? "bg-amber-500/15 dark:bg-amber-500/20 border border-amber-500/50 text-zinc-950 dark:text-white"
-                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border border-transparent"}
-                                                                `}
-                                                            >
-                                                                <div className="flex flex-col gap-0.5 min-w-0 pr-2">
-                                                                    <div className="flex items-center gap-1.5 font-bold text-zinc-950 dark:text-white">
-                                                                        <span>{m.name}</span>
-                                                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold">
-                                                                            {language === "ar" ? m.badgeAr : m.badgeEn}
-                                                                        </span>
-                                                                        {isSelected && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-bold">✓ نشط</span>}
-                                                                    </div>
-                                                                    <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-normal leading-tight">
-                                                                        {language === "ar" ? m.descAr : m.descEn}
-                                                                    </span>
-                                                                </div>
-                                                                {isSelected && <Check className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>,
-                                                document.body
-                                            )}
-                                        </div>
-                                    );
-                                })()}
-
-                                <span className="text-[10px] text-zinc-600 dark:text-zinc-500 font-semibold">
-                                    {language === "ar" ? "Shift+Enter لسطر جديد" : "Shift+Enter for newline"}
-                                </span>
-                            </div>
-                        </form>
-                        <div className="text-[10px] text-zinc-600 dark:text-zinc-400 text-center pt-1 font-semibold leading-tight">
-                            {language === "ar"
-                                ? "ℹ️ مخرجات المساعد لأغراض التحليل الفني والتعليم فقط وليست استشارة مالية ملزمة."
-                                : "ℹ️ AI outputs are for educational technical analysis only and not financial advice."}
-                        </div>
-                        </>
-                    ) : (
-                        <div className="text-center text-xs text-zinc-500 dark:text-zinc-400 py-1">
-                            🔒 سجل الدخول أولاً لتتمكن من كتابة وإرسال الأسئلة.
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Paywall / Upgrade Modal */}
-            {showUpgradeModal && (
-                <div 
-                    className="fixed inset-0 z-[100001] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200 dir-rtl"
-                    onClick={() => setShowUpgradeModal(false)}
-                >
-                    <div 
-                        className="max-w-md w-full border-4 border-black dark:border-white bg-white dark:bg-black p-6 sm:p-7 space-y-5 shadow-[8px_8px_0_0_#FFE600] text-right"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Modal Header */}
-                        <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3">
-                            <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 bg-[#FFE600] text-black text-xs font-black uppercase border-2 border-black">
-                                    ترقية الحساب ⚡
-                                </span>
-                            </div>
-                            <button
-                                onClick={() => setShowUpgradeModal(false)}
-                                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white transition-all cursor-pointer"
-                            >
-                                <X className="w-5 h-5 stroke-[2.5]" />
-                            </button>
-                        </div>
-
-                        {/* Title & Description */}
-                        <div className="space-y-2">
-                            <h3 className="text-xl sm:text-2xl font-black text-black dark:text-white leading-tight">
-                                {remainingQuota <= 0
-                                    ? `لقد استهلكت باقتك المجانية (${quotaLimit || 10}/${quotaLimit || 10})`
-                                    : "ميزة حصرية لمشتركي باقة Pro 👑"}
-                            </h3>
-                            <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
-                                🔥 <strong>عرض المؤسسين:</strong> اشترك الآن بـ <strong>100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — {foundersCountdown ? `متبقي ⏰ ${foundersCountdown}` : "متاح لمدة 15 يوماً فقط!"} وثبّت سعرك طول ما بتجدد!
-                            </div>
-                            <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
-                                تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ انضم الآن لقناة الـ VIP واحصل على جميع مميزات Pro بدون قيود.
-                            </p>
-                        </div>
-
-                        {/* Feature Highlights */}
-                        <div className="space-y-2.5 py-2">
-                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>350 رسالة شات بوت ذكي شهرياً</span>
-                            </div>
-                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>رفع وتحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI)</span>
-                            </div>
-                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>فتح التوصيات المفتوحة وإشارات الدخول اللحظية وتفعيل وضع التوصيات الحرة</span>
-                            </div>
-                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام + حتى 10 أسهم في المحفظة</span>
-                            </div>
-                        </div>
-
-                        {/* Conversion & Action Buttons */}
-                        <div className="space-y-2.5 pt-2">
-                            {trialEligibleModal && !isPro && (
-                                <button
-                                    onClick={handleActivateTrialFromModal}
-                                    disabled={trialStartingModal}
-                                    className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-xs sm:text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                                >
-                                    {trialStartingModal ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                        <>
-                                            <Sparkles className="w-4 h-4 text-yellow-300" />
-                                            <span>جرّب Pro الآن لمدة 3 أيام مجاناً ⚡</span>
-                                        </>
-                                    )}
-                                </button>
-                            )}
-
-                            {!telegramLinkedModal && (
-                                <a
-                                    href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "https://t.me/egxbots_bot"}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="w-full py-2.5 px-3 bg-[#0088cc] hover:bg-[#0077b5] text-white font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                                >
-                                    <span>🎁 احصل على +10 رسائل فوراً عبر ربط تليجرام</span>
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                            )}
-
-                            <button
-                                onClick={() => {
-                                    setShowUpgradeModal(false);
-                                    setIsOpen(false);
-                                    router.push("/pricing?plan=pro");
-                                }}
-                                className="w-full py-3 px-4 bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                            >
-                                <span>اشترك في عرض المؤسسين بـ 100 ج.م شهرياً (تثبيت مدى الحياة) ⚡</span>
-                                <span>←</span>
-                            </button>
-
-                            <button
-                                onClick={() => setShowUpgradeModal(false)}
-                                className="w-full py-1.5 px-4 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-                            >
-                                إغلاق النافذة
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Fullscreen Image Lightbox Modal */}
-            {previewModalImage && (
-                <div 
-                    className="fixed inset-0 z-[100000] bg-black/90 backdrop-blur-md flex flex-col items-center justify-between p-4 sm:p-6 animate-in fade-in duration-200"
-                    onClick={() => setPreviewModalImage(null)}
-                >
-                    {/* Modal Header */}
-                    <div 
-                        className="w-full max-w-4xl flex items-center justify-between py-2 border-b-2 border-white/20 shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center gap-2 text-white font-black text-sm">
-                            <NextImage src="/favicon_io/apple-touch-icon.png" alt="Logo" width={24} height={24} className="w-6 h-6 object-contain" />
-                            <span>معاينة الصورة المرفقة</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => handleDownloadImage(previewModalImage)}
-                                className="flex items-center gap-2 px-4 py-2 bg-[#FFE600] text-black font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#fff] hover:bg-yellow-300 active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer"
-                                title="تحميل الصورة إلى جهازك"
-                            >
-                                <Download className="w-4 h-4 stroke-[2.5]" />
-                                <span>تحميل الصورة</span>
-                            </button>
-                            <button
-                                onClick={() => setPreviewModalImage(null)}
-                                className="p-1.5 bg-white/10 hover:bg-white/20 text-white border-2 border-white/30 transition-all cursor-pointer"
-                                title="إغلاق"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Modal Image Body */}
-                    <div 
-                        className="flex-1 flex items-center justify-center max-w-5xl w-full my-4 overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <img 
-                            src={previewModalImage} 
-                            alt="Enlarged Chat Attachment" 
-                            className="max-w-full max-h-[75vh] object-contain border-4 border-black dark:border-white shadow-[8px_8px_0_0_#FFE600] bg-zinc-950" 
-                        />
-                    </div>
-
-                    {/* Modal Footer hint */}
-                    <div className="text-zinc-400 text-xs font-medium text-center shrink-0">
-                        انقر في أي مكان خارج الصورة أو اضغط على زر الإغلاق للعودة
-                    </div>
-                </div>
-            )}
-
-            {/* WhatsApp Style Chat Wallpaper Modal */}
-            <ChatWallpaperModal
-                isOpen={showWallpaperModal}
-                onClose={() => setShowWallpaperModal(false)}
-                currentId={wallpaperId}
-                currentOpacity={wallpaperOpacity}
-                currentCustomImage={customWallpaperImage}
-                onApply={(id, opacity, customImg) => {
-                    setWallpaperId(id);
-                    setWallpaperOpacity(opacity);
-                    setCustomWallpaperImage(customImg);
-                }}
-                isAr={language === "ar"}
-            />
-
-            {/* Autonomous Recommendations Disclaimer Modal */}
-            <AutonomousRecsModal
-                isOpen={showAutonomousModal}
-                onClose={() => setShowAutonomousModal(false)}
-                onConfirm={handleConfirmAutonomousRecs}
-                isAr={language === "ar"}
-            />
-
-            {/* Live Voice Call with ARTORO */}
-            <VoiceCallModal
-                isOpen={isVoiceCallOpen}
-                onClose={() => setIsVoiceCallOpen(false)}
-                onSendMessage={async (text, options) => {
-                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true, ...options });
-                    return reply || "";
-                }}
-                isPro={isPro}
-                remainingQuota={remainingQuota}
-            />
-        </div>
-    );
-}
+"use client";
+
+import { useChat, AVAILABLE_AI_MODELS } from "@/contexts/ChatContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { useRouter, usePathname } from "next/navigation";
+import NextImage from "next/image";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
+import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
+import { playConnectionChime } from "@/lib/voice-utils";
+import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
+import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
+import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
+import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
+import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
+import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
+import { isChatAdminEmail, isVoiceBetaTester } from "@/lib/chat-sharing";
+import { toast } from "sonner";
+import { broadcastEntitlements } from "@/lib/entitlements";
+
+function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
+    return (
+        <span className={`artoro-brand-mark artoro-brand-mark--${size}`} role="img" aria-label="ARTORO V3">
+            <span className="artoro-brand-mark__core">
+                <NextImage src="/favicon_io/apple-touch-icon.png" alt="ARTORO AI" width={48} height={48} className="h-full w-full object-contain" priority />
+            </span>
+            {size !== "header" && <span className="artoro-brand-mark__version" aria-hidden="true">V3</span>}
+        </span>
+    );
+}
+
+export default function ChatWidget() {
+    const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
+    const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
+    const { 
+        isOpen, 
+        setIsOpen, 
+        messages, 
+        sendMessage, 
+        stopResponding,
+        isLoading, 
+        remainingQuota,
+        quotaLimit = 5,
+        isPro = false,
+        isInitializing,
+        accessError,
+        retryAccess,
+        showUpgradeModal,
+        setShowUpgradeModal,
+        selectedModel, 
+        setSelectedModel,
+        sessions,
+        activeSessionId,
+        createNewSession,
+        switchSession,
+        deleteSession,
+        renameSession,
+        isSidebarOpen,
+        setIsSidebarOpen,
+        autonomousRecommendations,
+        setAutonomousRecommendations,
+        isAccessReady
+    } = useChat();
+
+    const { language } = useLanguage();
+    const [foundersEndsAt, setFoundersEndsAt] = useState<string | null>(null);
+    const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!foundersEndsAt) { setFoundersCountdown(null); return; }
+        const update = () => {
+            const diffMs = new Date(foundersEndsAt).getTime() - Date.now();
+            if (diffMs <= 0) { setFoundersCountdown("00:00:00"); return; }
+            const d = Math.floor(diffMs / 86400000);
+            const h = Math.floor((diffMs % 86400000) / 3600000);
+            const m = Math.floor((diffMs % 3600000) / 60000);
+            const s = Math.floor((diffMs % 60000) / 1000);
+            if (d > 0) setFoundersCountdown(`${d}ي ${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+            else setFoundersCountdown(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+        };
+        update();
+        const iv = setInterval(update, 1000);
+        return () => clearInterval(iv);
+    }, [foundersEndsAt]);
+    const [trialEligibleModal, setTrialEligibleModal] = useState<boolean>(false);
+    const [telegramLinkedModal, setTelegramLinkedModal] = useState<boolean>(false);
+    const [trialStartingModal, setTrialStartingModal] = useState<boolean>(false);
+
+    // Autonomous Recommendations preferences
+    const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
+
+    const handleToggleAutonomousRecs = () => {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro && !autonomousRecommendations) {
+            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
+            setShowUpgradeModal(true);
+            return;
+        }
+        if (autonomousRecommendations) {
+            setAutonomousRecommendations(false);
+            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
+        } else {
+            setShowAutonomousModal(true);
+        }
+    };
+
+    const handleConfirmAutonomousRecs = () => {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro) {
+            toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
+            setShowUpgradeModal(true);
+            return;
+        }
+        setShowAutonomousModal(false);
+        setAutonomousRecommendations(true);
+        toast.success(language === "ar" ? "تم تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي 🟢" : "AI Autonomous Recommendations enabled 🟢");
+    };
+
+    // Auto-disable autonomous recs ONLY after server access check is ready and confirms user is not Pro
+    useEffect(() => {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (isAccessReady && !activePro && autonomousRecommendations) {
+            setAutonomousRecommendations(false);
+        }
+    }, [isAccessReady, isPro, autonomousRecommendations, setAutonomousRecommendations]);
+
+    // Chat Wallpaper preferences
+    const [showWallpaperModal, setShowWallpaperModal] = useState<boolean>(false);
+    const [wallpaperId, setWallpaperId] = useState<string>(DEFAULT_WALLPAPER_ID);
+    const [wallpaperOpacity, setWallpaperOpacity] = useState<number>(DEFAULT_WALLPAPER_OPACITY);
+    const [customWallpaperImage, setCustomWallpaperImage] = useState<string | undefined>(undefined);
+
+    // Chat Settings dropdown
+    const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+    const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!isSettingsOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) {
+                setIsSettingsOpen(false);
+            }
+        };
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                setIsSettingsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("keydown", handleKeyDown);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [isSettingsOpen]);
+
+    useEffect(() => {
+        const cfg = getSavedWallpaperConfig();
+        setWallpaperId(cfg.id);
+        setWallpaperOpacity(cfg.opacity);
+        setCustomWallpaperImage(cfg.customImage);
+
+        const handleWallpaperChange = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (detail) {
+                setWallpaperId(detail.id);
+                setWallpaperOpacity(detail.opacity);
+                setCustomWallpaperImage(detail.customImage);
+            }
+        };
+        window.addEventListener("artoro-wallpaper-changed", handleWallpaperChange);
+        return () => window.removeEventListener("artoro-wallpaper-changed", handleWallpaperChange);
+    }, []);
+
+    const activeWallpaper = useMemo(() => {
+        if (wallpaperId === "custom" && customWallpaperImage) {
+            return {
+                backgroundColor: "#000000",
+                backgroundImage: `url(${customWallpaperImage})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center" as const,
+                backgroundRepeat: "no-repeat" as const,
+            };
+        }
+        const found = CHAT_WALLPAPERS.find(w => w.id === wallpaperId);
+        return found ? found.style : CHAT_WALLPAPERS[0].style;
+    }, [wallpaperId, customWallpaperImage]);
+
+    useEffect(() => {
+        if (!showUpgradeModal) return;
+        let active = true;
+        fetch("/api/user/quota", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!active || !data?.ok) return;
+                if (data.plan?.trial_eligible !== undefined) {
+                    setTrialEligibleModal(Boolean(data.plan.trial_eligible));
+                }
+                if (data.plan?.telegram_linked !== undefined) {
+                    setTelegramLinkedModal(Boolean(data.plan.telegram_linked));
+                }
+            })
+            .catch(() => {});
+
+        fetch("/api/payment/easykash/config")
+            .then(r => r.ok ? r.json() : null)
+            .then(cfg => {
+                if (active && cfg?.founders?.ends_at) {
+                    setFoundersEndsAt(cfg.founders.ends_at);
+                }
+            })
+            .catch(() => {});
+
+        return () => { active = false; };
+    }, [showUpgradeModal]);
+
+    const handleActivateTrialFromModal = async () => {
+        setTrialStartingModal(true);
+        try {
+            const res = await fetch("/api/subscription/trial", { method: "POST" });
+            const data = await res.json();
+            if (res.ok && data?.success) {
+                toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
+                setShowUpgradeModal(false);
+                broadcastEntitlements(true);
+            } else {
+                toast.error(data?.message || "تعذر تفعيل التجربة");
+            }
+        } catch {
+            toast.error("حدث خطأ في الاتصال");
+        } finally {
+            setTrialStartingModal(false);
+        }
+    };
+    const { user } = useAuth();
+    const router = useRouter();
+    let pathname = "";
+    try {
+        pathname = typeof usePathname === "function" ? (usePathname() || "") : "";
+    } catch {
+        pathname = "";
+    }
+    const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat");
+    const isChartRoute = pathname === "/chart" || pathname.startsWith("/chart");
+    const [input, setInput] = useState("");
+    const [isExpanded, setIsExpanded] = useState(false);
+    const isWideView = isExpanded || isChatRoute;
+    const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+    const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
+    const [modelMenuOpen, setModelMenuOpen] = useState(false);
+    const [modelMenuPos, setModelMenuPos] = useState<{ bottom: number; left: number; width: number } | null>(null);
+    const [loadingStep, setLoadingStep] = useState<1 | 2 | 3>(1);
+    const [sharingMessageId, setSharingMessageId] = useState<string | null>(null);
+    const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+    const INITIAL_VISIBLE_COUNT = 20;
+    const LOAD_MORE_STEP = 20;
+    const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
+    const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
+    const isChatAdmin = isChatAdminEmail(user?.email);
+    const isVoiceTester = isVoiceBetaTester(user);
+
+    const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
+        setIsRecordingVoiceNote(false);
+        const localBlobUrl = URL.createObjectURL(audioBlob);
+
+        // Upload user's real microphone audio to Supabase Storage with retry
+        let permanentAudioUrl: string | undefined = undefined;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const formData = new FormData();
+                const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
+                formData.append("file", audioBlob, `voice_note_${Date.now()}.${ext}`);
+                if (activeSessionId) formData.append("sessionId", activeSessionId);
+                if (user?.id) formData.append("userId", user.id);
+
+                const uploadRes = await fetch("/api/voice/upload", {
+                    method: "POST",
+                    body: formData,
+                });
+                if (uploadRes.ok) {
+                    const uploadData = await uploadRes.json();
+                    if (uploadData?.url) {
+                        permanentAudioUrl = uploadData.url;
+                        primeAudioCache(permanentAudioUrl, localBlobUrl);
+                        break;
+                    }
+                }
+            } catch (uploadErr) {
+                console.warn(`[ChatWidget] Voice upload attempt ${attempt + 1} failed:`, uploadErr);
+            }
+        }
+
+        if (!permanentAudioUrl) {
+            console.warn("[ChatWidget] Failed to persist voice audio to storage, fallback to local URL");
+        }
+
+        await sendMessage(transcript, undefined, {
+            isVoice: true,
+            isVoiceNote: true,
+            voiceAudioUrl: permanentAudioUrl || localBlobUrl,
+            audioDuration: duration,
+        });
+    };
+
+    const handleDownloadImage = async (url: string) => {
+        try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = blobUrl;
+            const ext = blob.type.split("/")[1] || "png";
+            a.download = `egxbots-image-${Date.now()}.${ext.replace(/[^a-z0-9]/gi, "")}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(blobUrl);
+            toast.success(language === "ar" ? "تم تحميل الصورة بنجاح" : "Image downloaded successfully");
+        } catch {
+            const a = document.createElement("a");
+            a.href = url;
+            a.target = "_blank";
+            a.download = `egxbots-image-${Date.now()}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+    };
+
+    const shareAnswer = useCallback(async (messageIndex: number) => {
+        const answerMessage = messages[messageIndex];
+        const questionMessage = [...messages.slice(0, messageIndex)].reverse().find(message => message.role === "user");
+        if (!answerMessage?.content || !questionMessage?.content) return;
+        const shareKey = answerMessage.id || String(messageIndex);
+        setSharingMessageId(shareKey);
+        try {
+            const response = await fetch("/api/chat/share", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: questionMessage.content, answer: answerMessage.content }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.url) throw new Error(data.error || "تعذر إنشاء الرابط");
+            await navigator.clipboard.writeText(data.url);
+            toast.success("تم نشر الإجابة ونسخ رابط المدونة");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "تعذر نشر الإجابة");
+        } finally {
+            setSharingMessageId(null);
+        }
+    }, [messages]);
+
+    useEffect(() => {
+        if (!isLoading) {
+            setLoadingStep(1);
+            return;
+        }
+        setLoadingStep(1);
+        const timer1 = setTimeout(() => setLoadingStep(2), 1600);
+        const timer2 = setTimeout(() => setLoadingStep(3), 3600);
+        return () => {
+            clearTimeout(timer1);
+            clearTimeout(timer2);
+        };
+    }, [isLoading]);
+
+    useEffect(() => {
+        const handlePortfolioAnalysis = (event: Event) => {
+            const message = (event as CustomEvent<string>).detail || "حلل محفظتي";
+            setIsOpen(true);
+            setInput(message);
+            window.setTimeout(() => {
+                void sendMessage(message);
+                setInput("");
+            }, 0);
+        };
+        window.addEventListener("open-chat-with-message", handlePortfolioAnalysis);
+        return () => window.removeEventListener("open-chat-with-message", handlePortfolioAnalysis);
+    }, [sendMessage, setIsOpen]);
+
+    // Automatically open ChatWidget modal if URL contains chat=open parameter
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get("chat") === "open" || params.get("chat") === "1" || params.get("openChat") === "true") {
+                setIsOpen(true);
+            }
+        }
+    }, [setIsOpen]);
+    
+    const bottomRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const modelMenuRef = useRef<HTMLDivElement>(null);
+    const portalMenuRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    // Dynamic auto-expand textarea height as user types
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "40px";
+            if (input.length > 0) textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+        }
+    }, [input, isOpen, isExpanded]);
+
+    // Close model menu when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            const target = event.target as Node;
+            if (
+                modelMenuRef.current &&
+                !modelMenuRef.current.contains(target) &&
+                portalMenuRef.current &&
+                !portalMenuRef.current.contains(target)
+            ) {
+                setModelMenuOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    // Recalculate position on scroll/resize
+    useEffect(() => {
+        if (!modelMenuOpen) return;
+        const update = () => {
+            if (modelMenuRef.current) {
+                const rect = modelMenuRef.current.getBoundingClientRect();
+                setModelMenuPos({
+                    bottom: window.innerHeight - rect.top + 8,
+                    left: rect.left,
+                    width: Math.max(rect.width, 288)
+                });
+            }
+        };
+        update();
+        window.addEventListener("scroll", update, true);
+        window.addEventListener("resize", update);
+        return () => {
+            window.removeEventListener("scroll", update, true);
+            window.removeEventListener("resize", update);
+        };
+    }, [modelMenuOpen]);
+
+    const isInitialPositionedRef = useRef(false);
+    const hasMoreOlder = messages.length > visibleCount;
+    const visibleMessages = useMemo(() => {
+        if (messages.length <= visibleCount) return messages;
+        return messages.slice(messages.length - visibleCount);
+    }, [messages, visibleCount]);
+
+    const handleLoadMoreOlder = useCallback(() => {
+        if (visibleCount >= messages.length || isLoadingOlder) return;
+        setIsLoadingOlder(true);
+        const container = scrollContainerRef.current;
+        const prevScrollHeight = container ? container.scrollHeight : 0;
+        const prevScrollTop = container ? container.scrollTop : 0;
+
+        setVisibleCount(prev => Math.min(messages.length, prev + LOAD_MORE_STEP));
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (container && prevScrollHeight > 0) {
+                    const newScrollHeight = container.scrollHeight;
+                    const heightDiff = newScrollHeight - prevScrollHeight;
+                    if (heightDiff > 0) {
+                        container.scrollTop = prevScrollTop + heightDiff;
+                    }
+                }
+                setIsLoadingOlder(false);
+            });
+        });
+    }, [visibleCount, messages.length, isLoadingOlder]);
+
+    const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
+        setIsUserScrolledUp(!isAtBottom);
+
+        // Only auto-trigger when initial positioning at bottom is complete and user deliberately scrolled to the top edge (< 40px)
+        if (isInitialPositionedRef.current && isUserScrolledUp && scrollTop < 40 && hasMoreOlder && !isLoadingOlder) {
+            handleLoadMoreOlder();
+        }
+    };
+
+    const scrollToBottom = useCallback(() => {
+        setIsUserScrolledUp(false);
+        if (scrollContainerRef.current && typeof scrollContainerRef.current.scrollTo === "function") {
+            scrollContainerRef.current.scrollTo({
+                top: scrollContainerRef.current.scrollHeight,
+                behavior: "smooth",
+            });
+        }
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, []);
+
+    useEffect(() => {
+        setIsUserScrolledUp(false);
+        setVisibleCount(INITIAL_VISIBLE_COUNT);
+        isInitialPositionedRef.current = false;
+
+        // Instant scroll to bottom so the container doesn't animate through top edge
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+        bottomRef.current?.scrollIntoView({ behavior: "instant" as ScrollBehavior });
+
+        const timer = setTimeout(() => {
+            isInitialPositionedRef.current = true;
+        }, 400);
+        return () => clearTimeout(timer);
+    }, [activeSessionId]);
+
+    useEffect(() => {
+        if (!isUserScrolledUp) {
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [messages, isOpen, isLoading, isUserScrolledUp]);
+
+    async function compressAndResizeImage(base64Str: string, maxDim = 1600, quality = 0.85): Promise<string> {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+                if (width > maxDim || height > maxDim) {
+                    if (width > height) {
+                        height = Math.round((height * maxDim) / width);
+                        width = maxDim;
+                    } else {
+                        width = Math.round((width * maxDim) / height);
+                        height = maxDim;
+                    }
+                }
+                const canvas = document.createElement("canvas");
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) {
+                    resolve(base64Str);
+                    return;
+                }
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL("image/jpeg", quality));
+            };
+            img.onerror = () => resolve(base64Str);
+            img.src = base64Str;
+        });
+    }
+
+    const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        if (!activePro) {
+            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+            setShowUpgradeModal(true);
+            e.target.value = "";
+            return;
+        }
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        const validFiles = files.slice(0, 3 - imagePreviews.length);
+
+        validFiles.forEach(file => {
+            if (file.size > 8 * 1024 * 1024) {
+                alert(language === "ar" ? "حجم الصورة كبير جداً (الأقصى 8MB)" : "Image too large (Max 8MB)");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = async () => {
+                if (typeof reader.result === "string") {
+                    const compressed = await compressAndResizeImage(reader.result);
+                    setImagePreviews(prev => [...prev, compressed]);
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        e.target.value = "";
+    }, [imagePreviews.length, language]);
+
+    const removeImage = useCallback((index: number) => {
+        setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (isLoading) {
+            stopResponding();
+            return;
+        }
+        if ((!input.trim() && imagePreviews.length === 0) || !user || isInitializing || accessError) return;
+
+        setIsUserScrolledUp(false);
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+
+        const textToSend = input;
+        const currentPreviews = [...imagePreviews];
+
+        setInput("");
+        setImagePreviews([]);
+
+        // Keep images separate: a side-by-side composite shrank each screenshot
+        // to a fraction of the available pixels and made dense text unreadable.
+        await sendMessage(textToSend, currentPreviews.length ? currentPreviews : undefined);
+    };
+
+    if (!isOpen && !isChatRoute) {
+        if (isChartRoute) {
+            return null;
+        }
+        return (
+            <button
+                onClick={() => setIsOpen(true)}
+                className="fixed bottom-3 sm:bottom-5 right-3 sm:right-5 z-[9999] flex h-13 w-13 sm:h-[72px] sm:w-[72px] items-center justify-center rounded-[18px] sm:rounded-[24px] border border-white/70 bg-white/85 p-2 shadow-[0_12px_34px_rgba(2,6,23,0.24)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(2,6,23,0.32)] active:translate-y-0 animate-in fade-in zoom-in"
+                title="افتح ARTORO V3"
+                aria-label="افتح ARTORO V3"
+            >
+                <ArtoroBrandMark size="launcher" />
+            </button>
+        );
+    }
+
+    return (
+        <div 
+            className={isChatRoute || isExpanded ? "fixed inset-0 z-[9999] flex flex-row h-[100dvh] max-h-[100dvh] w-full bg-[#09090b] overflow-hidden p-0 m-0 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" : `
+                fixed z-[9999] flex flex-row gap-2 bg-transparent origin-bottom-right
+                animate-in fade-in slide-in-from-bottom-5 duration-200
+                max-md:fixed max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:w-full max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:gap-0 max-md:p-0 max-md:pt-[env(safe-area-inset-top,0px)] max-md:pb-[env(safe-area-inset-bottom,0px)]
+                md:bottom-4 md:right-4 md:w-[min(95vw,1080px)] md:h-[min(92vh,840px)] md:rounded-[24px] md:p-0
+                transition-all duration-200
+            `}
+        >
+            {/* Sidebar Drawer */}
+            {user && !isInitializing && !accessError && (
+                <ChatSidebar
+                    sessions={sessions}
+                    activeSessionId={activeSessionId}
+                    onSelectSession={switchSession}
+                    onNewChat={createNewSession}
+                    onDeleteSession={deleteSession}
+                    onRenameSession={renameSession}
+                    isOpen={isSidebarOpen}
+                    onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+                    isExpanded={isExpanded || isChatRoute}
+                />
+            )}
+
+            {/* Main Chat Container */}
+            <div className={`flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden bg-white shadow-none dark:bg-black ${(isChatRoute || isExpanded) ? "rounded-none border-0" : "rounded-none border-0 md:rounded-[24px] md:border md:border-slate-200/80 md:shadow-[0_18px_55px_rgba(2,6,23,0.26)] dark:md:border-white/20 dark:md:shadow-[0_22px_60px_rgba(0,0,0,0.85)]"}`}>
+                {/* Header */}
+                <div className="relative z-30 flex items-center justify-between px-2.5 sm:px-4 py-2 sm:py-3 border-b border-zinc-200 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2 text-zinc-950 dark:text-white font-black uppercase tracking-tight min-w-0">
+                        {user && !isInitializing && !accessError && !isSidebarOpen && (
+                            <button
+                                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900 shrink-0 cursor-pointer"
+                                title="فتح سجل المحادثات"
+                                aria-label="فتح سجل المحادثات"
+                            >
+                                <PanelLeft className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+                            </button>
+                        )}
+                        <div className="shrink-0 scale-90 sm:scale-100 origin-left">
+                            <ArtoroBrandMark size="header" />
+                        </div>
+                        <span className="text-xs sm:text-[15px] font-black tracking-wider text-zinc-950 dark:text-white truncate">ARTORO</span>
+                        <span className="hidden sm:inline-flex rounded-md bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950 border border-amber-500/50 shadow-xs shrink-0">V3</span>
+                    </div>
+                    <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                        {user && !isInitializing && !accessError && (
+                            <div className="text-[9px] sm:text-[10px] font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs shrink-0 whitespace-nowrap">
+                                {quotaLimit >= 999 
+                                    ? (<><span className="sm:hidden">♾️ Pro</span><span className="hidden sm:inline">Unlimited ♾️</span></>)
+                                    : isPro 
+                                        ? (<><span className="sm:hidden">👑 {remainingQuota}</span><span className="hidden sm:inline">{remainingQuota}/{quotaLimit || 350} Left</span></>)
+                                        : (<><span className="sm:hidden">{remainingQuota}/{quotaLimit || 10}</span><span className="hidden sm:inline">{remainingQuota}/{quotaLimit || 10} Left</span></>)
+                                }
+                            </div>
+                        )}
+                        {/* Settings Dropdown Button & Popover */}
+                        <div className="relative shrink-0" ref={settingsMenuRef}>
+                            <button
+                                type="button"
+                                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                                className={`relative grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border text-zinc-800 shadow-xs transition active:scale-95 cursor-pointer dark:text-white ${
+                                    isSettingsOpen
+                                        ? "border-amber-400 bg-amber-500/10 text-amber-600 dark:border-amber-400 dark:text-amber-300"
+                                        : autonomousRecommendations
+                                            ? "border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:border-emerald-500/60 dark:text-emerald-400"
+                                            : "border-zinc-300 bg-white hover:border-zinc-400 hover:bg-zinc-100 dark:border-white/20 dark:bg-black dark:hover:bg-zinc-900"
+                                }`}
+                                title="إعدادات الشات"
+                                aria-label="إعدادات الشات"
+                                aria-expanded={isSettingsOpen}
+                            >
+                                <Settings className={`h-4 w-4 sm:h-[18px] sm:w-[18px] transition-transform duration-200 ${isSettingsOpen ? "rotate-45 text-amber-500" : ""}`} />
+                                {autonomousRecommendations && (
+                                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-white dark:border-black"></span>
+                                    </span>
+                                )}
+                            </button>
+
+                            {/* Mobile Backdrop Overlay */}
+                            {isSettingsOpen && (
+                                <div
+                                    className="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 sm:hidden animate-in fade-in duration-150"
+                                    onClick={() => setIsSettingsOpen(false)}
+                                    aria-hidden="true"
+                                />
+                            )}
+
+                            {/* Dropdown Menu Popover */}
+                            {isSettingsOpen && (
+                                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:top-full ltr:sm:right-0 rtl:sm:left-0 sm:mt-2 w-auto sm:w-72 max-h-[85vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-white/95 p-3.5 sm:p-3 shadow-2xl backdrop-blur-md z-50 animate-in fade-in zoom-in-95 duration-150 dark:border-zinc-800 dark:bg-zinc-950/95 dark:shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
+                                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-100 dark:border-zinc-800/80">
+                                        <div className="flex items-center gap-1.5 text-xs font-black text-zinc-900 dark:text-white">
+                                            <Settings className="h-3.5 w-3.5 text-amber-500" />
+                                            <span>{language === "ar" ? "إعدادات الشات" : "Chat Settings"}</span>
+                                        </div>
+                                        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">ARTORO</span>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        {/* 1. Autonomous Recommendations Mode */}
+                                        <div className={`rounded-xl border p-2.5 transition ${
+                                            autonomousRecommendations
+                                                ? "border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/30 dark:bg-emerald-950/20"
+                                                : "border-zinc-200/80 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/60"
+                                        }`}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                                                        autonomousRecommendations
+                                                            ? "bg-emerald-500/15 text-emerald-500"
+                                                            : "bg-zinc-200/60 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                                                    }`}>
+                                                        <Sparkles className="h-4 w-4" />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                                                {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
+                                                            </span>
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) && (
+                                                                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-black text-amber-600 dark:text-amber-400 border border-amber-500/40">
+                                                                    PRO 👑
+                                                                </span>
+                                                            )}
+                                                            {autonomousRecommendations && (
+                                                                <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                                                                    {language === "ar" ? "نشط ⚡" : "Active ⚡"}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true"))
+                                                                ? (language === "ar" ? "ميزة حصرية لمشتركي Pro" : "Exclusive to Pro members")
+                                                                : autonomousRecommendations
+                                                                    ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
+                                                                    : (language === "ar" ? "مقترحات ذكاء اصطناعي حرة" : "Free AI-generated trade ideas")}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Switch Toggle */}
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    dir="ltr"
+                                                    aria-checked={autonomousRecommendations}
+                                                    onClick={() => {
+                                                        handleToggleAutonomousRecs();
+                                                        setIsSettingsOpen(false);
+                                                    }}
+                                                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                        autonomousRecommendations ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700"
+                                                    }`}
+                                                    title={autonomousRecommendations
+                                                        ? (language === "ar" ? "إيقاف وضع التوصيات الحرة" : "Disable Autonomous Recs")
+                                                        : (language === "ar" ? "تفعيل وضع التوصيات الحرة" : "Enable Autonomous Recs")}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                                                            autonomousRecommendations ? "translate-x-5" : "translate-x-0"
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* 2. Chat Wallpaper Setting */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowWallpaperModal(true);
+                                                setIsSettingsOpen(false);
+                                            }}
+                                            className="w-full flex items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-2.5 text-right transition hover:border-amber-400 hover:bg-amber-50/50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-amber-500/40 dark:hover:bg-zinc-900 cursor-pointer"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                                                    <Palette className="h-4 w-4" />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                                        {language === "ar" ? "ورق حائط وخلفية الشات" : "Chat Wallpaper"}
+                                                    </span>
+                                                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                                        {language === "ar" ? "زخارف التداول، ألوان، أو صورة" : "Doodles, colors or custom image"}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                                                {language === "ar" ? "تغيير" : "Change"}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {/* 📞 Live Voice Call with ARTORO (Strictly weeessd57 beta testing) */}
+                        {isVoiceTester && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    playConnectionChime();
+                                    setIsVoiceCallOpen(true);
+                                }}
+                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
+                                title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
+                                aria-label="مكالمة صوتية مع أرتورو"
+                            >
+                                <Phone className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-emerald-500 animate-pulse" />
+                                <span className="absolute -top-1 -right-1 flex h-2 w-2 sm:h-2.5 sm:w-2.5">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500"></span>
+                                </span>
+                            </button>
+                        )}
+
+                        {!isChatRoute && (
+                            <button
+                                onClick={() => setIsExpanded(!isExpanded)}
+                                className="hidden md:grid h-9 w-9 place-items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-zinc-900 shrink-0"
+                                title={isExpanded ? "تعديل الحجم الافتراضي" : "تكبير النافذة"}
+                                aria-label={isExpanded ? "استعادة حجم النافذة" : "تكبير النافذة"}
+                            >
+                                {isExpanded ? <Minimize2 className="h-[18px] w-[18px]" /> : <Maximize2 className="h-[18px] w-[18px]" />}
+                            </button>
+                        )}
+                        <button
+                            onClick={() => isChatRoute ? router.push("/") : setIsOpen(false)}
+                            className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs transition hover:border-rose-400 hover:bg-rose-50 hover:text-rose-600 active:scale-95 dark:border-white/20 dark:bg-black dark:text-white dark:hover:bg-rose-950/40 shrink-0 cursor-pointer"
+                            title={isChatRoute ? "الرئيسية" : "إغلاق"}
+                            aria-label={isChatRoute ? "الذهاب للرئيسية" : "إغلاق الشات"}
+                        >
+                            <X className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Messages Body */}
+                <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-black">
+                    {/* WhatsApp Style Wallpaper Layer */}
+                    <div 
+                        className="pointer-events-none absolute inset-0 z-0 transition-all duration-300"
+                        style={{
+                            ...activeWallpaper,
+                            opacity: (wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY) / 100,
+                        }}
+                    />
+                    <div 
+                        ref={scrollContainerRef} 
+                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none overscroll-y-contain" 
+                        style={{
+                            WebkitOverflowScrolling: "touch",
+                            touchAction: "pan-y",
+                            overscrollBehaviorY: "contain"
+                        }}
+                        onScroll={handleScroll}
+                    >
+                    {isInitializing ? (
+                        <div role="status" aria-live="polite" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+                            <Loader2 aria-hidden="true" className="h-6 w-6 motion-safe:animate-spin text-amber-500" />
+                            <span>جاري تجهيز الشات...</span>
+                        </div>
+                    ) : accessError ? (
+                        <div role="alert" className="h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+                            <span>تعذر تحميل الشات. حاول مرة تانية.</span>
+                            <button type="button" onClick={retryAccess} className="rounded-xl bg-amber-400 px-4 py-2 font-bold text-black">إعادة المحاولة</button>
+                        </div>
+                    ) : !user ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 my-auto min-h-[300px]">
+                            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
+                                <Lock className="h-8 w-8" />
+                            </div>
+                            <div className="space-y-1">
+                                <h3 className="font-bold text-lg text-black dark:text-white">تسجيل الدخول مطلوب</h3>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-[260px] leading-relaxed">
+                                    يرجى تسجيل الدخول أولاً لتتمكن من التحدث مع المساعد الذكي واستعراض تحليلات الأسهم.
+                                </p>
+                            </div>
+                            <div className="flex flex-col w-full gap-2 pt-2 max-w-[240px]">
+                                <button
+                                    onClick={() => {
+                                        if (!isChatRoute) setIsOpen(false);
+                                        router.push(isChatRoute ? "/login?redirect=/chat" : "/login?redirect=/chart");
+                                    }}
+                                    className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition-all shadow-md active:scale-95"
+                                >
+                                    <LogIn className="h-4 w-4" />
+                                    تسجيل الدخول
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (!isChatRoute) setIsOpen(false);
+                                        router.push(isChatRoute ? "/signup?redirect=/chat" : "/signup");
+                                    }}
+                                    className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-black dark:text-white text-xs font-medium transition-all"
+                                >
+                                    <UserPlus className="h-3.5 w-3.5" />
+                                    إنشاء حساب جديد
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            {autonomousRecommendations && (
+                                <div className="flex items-center justify-between p-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/15 to-emerald-500/10 border border-emerald-500/40 text-[11px] text-emerald-900 dark:text-emerald-200 mb-3 font-semibold shadow-xs animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="relative flex h-2 w-2 shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </span>
+                                        <span>⚡ <strong>وضع التوصيات الحرة المستقلة مفعّل:</strong> تحليلات الذكاء الاصطناعي استرشادية، وقرارك بمسؤوليتك بالكامل.</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAutonomousRecommendations(false);
+                                            toast.info(language === "ar" ? "تم إيقاف وضع التوصيات الحرة — العودة للوضع القياسي" : "Autonomous recommendations disabled");
+                                        }}
+                                        className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold transition shrink-0 cursor-pointer"
+                                    >
+                                        إيقاف
+                                    </button>
+                                </div>
+                            )}
+
+                            {!isPro && remainingQuota === 1 && (
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/15 border-2 border-amber-500/40 text-xs text-amber-800 dark:text-amber-200 mb-4 font-bold animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-base">⚠️</span>
+                                        <span>متبقي لك رسالة واحدة في باقتك المجانية</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowUpgradeModal(true)}
+                                        className="px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black text-[11px] font-black border border-black shadow-[1px_1px_0_0_#000] transition-all cursor-pointer"
+                                    >
+                                        ترقية إلى Pro
+                                    </button>
+                                </div>
+                            )}
+
+                            {!isPro && remainingQuota === 0 && (
+                                <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-base">🛑</span>
+                                        <span>استهلكت باقتك المجانية ({quotaLimit || 10}/{quotaLimit || 10})</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowUpgradeModal(true)}
+                                        className="px-3 py-1.5 bg-[#FFE600] hover:bg-yellow-300 text-black text-xs font-black border-2 border-black shadow-[2px_2px_0_0_#000] transition-all cursor-pointer animate-pulse"
+                                    >
+                                        اشترك في Pro الآن
+                                    </button>
+                                </div>
+                            )}
+
+                            {isPro && remainingQuota === 0 && (
+                                <div className="flex items-center justify-between p-3.5 rounded-xl bg-rose-500/15 border-2 border-rose-500/40 text-xs text-rose-800 dark:text-rose-200 mb-4 font-bold animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-base">🛑</span>
+                                        <span>استهلكت رصيدك الشهري لخطة Pro ({quotaLimit || 350}/{quotaLimit || 350})</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {messages.length === 0 && (
+                                <div className={`mx-auto w-full py-4 px-2 space-y-6 dir-rtl animate-in fade-in slide-in-from-bottom-2 duration-300 ${isWideView ? "max-w-5xl lg:max-w-6xl xl:max-w-7xl" : "max-w-2xl"}`}>
+                                    {/* Header & Logo */}
+                                    <div className="flex flex-col items-center text-center space-y-2.5">
+                                        <div className="relative">
+                                            <ArtoroBrandMark size="hero" />
+                                            <span className="absolute -bottom-1.5 -right-3 rounded-full border border-white/70 bg-white px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-slate-700 shadow-sm dark:border-white/15 dark:bg-slate-800 dark:text-slate-100">
+                                                AI PRO
+                                            </span>
+                                        </div>
+                                        <span className="text-[11px] font-extrabold tracking-[0.22em] text-slate-500 dark:text-slate-400">ARTORO V3</span>
+                                        <h3 className="font-black text-xl sm:text-2xl text-black dark:text-white tracking-tight">
+                                            اسأل السوق أو حلل محفظتك بالذكاء الاصطناعي
+                                        </h3>
+                                        <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 max-w-lg leading-relaxed font-medium">
+                                            مساعد استثماري متصل مباشرة ببيانات البورصة المصرية اللحظية، مستويات وايكوف، ونماذج تعلم آلي متطورة.
+                                        </p>
+                                    </div>
+
+                                    {/* Portfolio Image Upload Hero Card */}
+                                    <div 
+                                        onClick={() => {
+                                            const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                            if (!activePro) {
+                                                toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+                                                setShowUpgradeModal(true);
+                                                return;
+                                            }
+                                            fileInputRef.current?.click();
+                                        }}
+                                        className="group relative cursor-pointer rounded-2xl border border-dashed border-amber-500/40 dark:border-white/20 bg-amber-500/5 hover:bg-amber-500/10 dark:bg-black dark:hover:bg-zinc-950 p-4 sm:p-5 transition-all shadow-xs text-right"
+                                    >
+                                        <div className="flex items-start sm:items-center justify-between gap-3">
+                                            <div className="space-y-1 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
+                                                        {(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
+                                                    </span>
+                                                    <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
+                                                        حلل محفظتك الاستثمارية من صورة
+                                                    </h4>
+                                                </div>
+                                                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed font-medium">
+                                                    ارفع سكرين شوت لمحفظتك من (ثندر أو تطبيق وسيطك)، وسيقوم المساعد فوراً بقراءة الأسهم، حساب نسب السيولة، وتحليل المخاطر والأهداف الفنية لكل سهم.
+                                                </p>
+                                            </div>
+                                            <button 
+                                                type="button"
+                                                className="shrink-0 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs active:translate-x-0.5 transition-all flex items-center gap-1.5"
+                                            >
+                                                <ImagePlus className="w-4 h-4" />
+                                                <span className="hidden sm:inline">رفع لقطة شاشة</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Smart Categorized Questions Grid */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between border-b border-black/15 dark:border-white/15 pb-1">
+                                            <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                                أسئلة واقتراحات شائعة للبدء:
+                                            </span>
+                                            <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                                اضغط على أي سؤال للإرسال فوراً ⚡
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                            {[
+                                                {
+                                                    icon: "🔥",
+                                                    tag: "سيولة وزخم",
+                                                    text: "إيه أقوى الأسهم اللي بتجمع سيولة وأحجام تداول النهاردة؟"
+                                                },
+                                                {
+                                                    icon: "📊",
+                                                    tag: "وايكوف",
+                                                    text: "هل فيه أسهم في مناطق تجميع وايكوف ومؤشرات إيجابية؟"
+                                                },
+                                                {
+                                                    icon: "⚖️",
+                                                    tag: "مقارنة",
+                                                    text: "قارن لي بين البنك التجاري الدولي (COMI) ومجموعة طلعت مصطفى (TMGH)"
+                                                },
+                                                {
+                                                    icon: "🛡️",
+                                                    tag: "إدارة مخاطر",
+                                                    text: "إزاي أوزع سيولتي وأحمي محفظتي عند تذبذب المؤشر العام؟"
+                                                },
+                                                {
+                                                    icon: "🏭",
+                                                    tag: "قطاعات",
+                                                    text: "ما هو أنشط قطاع في البورصة المصرية حالياً ولماذا؟"
+                                                },
+                                                {
+                                                    icon: "📈",
+                                                    tag: "أسهم متصدرة",
+                                                    text: "ما هي أكثر الأسهم ارتفاعاً وتصدرت حركة السوق اليوم؟"
+                                                }
+                                            ].map((q, qIdx) => (
+                                                <button
+                                                    key={qIdx}
+                                                    type="button"
+                                                    onClick={() => sendMessage(q.text)}
+                                                    className="flex items-start gap-2.5 p-3 text-right bg-white dark:bg-black border border-zinc-300 dark:border-white/20 rounded-xl shadow-xs dark:shadow-[3px_3px_0_0_#fff] hover:border-amber-500 hover:bg-amber-50/60 dark:hover:bg-zinc-950 hover:-translate-y-0.5 active:translate-y-0 transition-all group cursor-pointer"
+                                                >
+                                                    <span className="text-base shrink-0 p-1.5 rounded-lg bg-zinc-100 dark:bg-black border border-zinc-300 dark:border-white/30">
+                                                        {q.icon}
+                                                    </span>
+                                                    <div className="flex flex-col min-w-0 flex-1">
+                                                        <span className="text-[10px] font-black text-amber-700 dark:text-amber-400 mb-0.5">
+                                                            {q.tag}
+                                                        </span>
+                                                        <span className="text-xs font-bold text-zinc-950 dark:text-white group-hover:text-amber-800 dark:group-hover:text-amber-300 leading-snug">
+                                                            {q.text}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Load older messages button when history is chunked */}
+                            {hasMoreOlder && (
+                                <div className="flex justify-center py-2 shrink-0">
+                                    <button
+                                        type="button"
+                                        onClick={handleLoadMoreOlder}
+                                        disabled={isLoadingOlder}
+                                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black border border-zinc-300 dark:border-white/20 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 shadow-xs transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                                        title="تحميل الرسائل السابقة"
+                                        aria-label="تحميل الرسائل السابقة"
+                                    >
+                                        {isLoadingOlder ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />
+                                        ) : (
+                                            <ArrowUp className="h-3.5 w-3.5 text-amber-500" />
+                                        )}
+                                        <span>
+                                            {language === "ar"
+                                                ? `تحميل رسائل سابقة (${messages.length - visibleCount} متبقية)`
+                                                : `Load older messages (${messages.length - visibleCount} remaining)`
+                                            }
+                                        </span>
+                                    </button>
+                                </div>
+                            )}
+
+                            {visibleMessages.map((msg, vIdx) => {
+                                const originalIdx = messages.length <= visibleCount ? vIdx : (messages.length - visibleCount + vIdx);
+                                const isLastMessage = originalIdx === messages.length - 1;
+                                return (
+                                <div
+                                    key={msg.id || `msg-${originalIdx}`}
+                                    className={`flex gap-2 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
+                                >
+                                    <div className={`
+                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
+                                        ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
+                                    `}>
+                                        {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
+                                    </div>
+                                    <div className={`
+                                        flex-1 rounded-2xl border p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
+                                        ${msg.role === "user"
+                                            ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
+                                            : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
+                                    `}>
+                                        {/* Show image thumbnails if present */}
+                                        {((msg.images && msg.images.length > 0) || (msg.imageUrl && msg.imageUrl !== "[image]") || msg.imagePreviewUrl) && (
+                                            <div className="mb-2.5 flex flex-wrap gap-2">
+                                                {(msg.images || [msg.imagePreviewUrl || msg.imageUrl!]).filter(img => img && img !== "[image]").map((img, i) => (
+                                                    <div
+                                                        key={i}
+                                                        onClick={() => setPreviewModalImage(img)}
+                                                        className="relative group cursor-pointer overflow-hidden border-2 border-black dark:border-white shadow-[3px_3px_0_0_#000] dark:shadow-[3px_3px_0_0_#fff] hover:scale-[1.02] transition-all bg-black/5"
+                                                        title="انقر لتكبير وتحميل الصورة"
+                                                    >
+                                                        <img
+                                                            src={img}
+                                                            alt={`Attached ${i + 1}`}
+                                                            className="max-w-[200px] max-h-44 object-cover"
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
+                                                            <ZoomIn className="w-4 h-4 text-[#FFE600]" />
+                                                            <span>تكبير / تحميل</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
+                                            <VoiceNotePlayer
+                                                role={msg.role}
+                                                audioUrl={msg.voiceAudioUrl}
+                                                text={msg.content || ""}
+                                                durationSeconds={msg.voiceDuration}
+                                                autoPlay={msg.role === "assistant" && isLastMessage}
+                                                tables={msg.tables}
+                                            />
+                                        ) : (
+                                            <FormattedChatMessage 
+                                                content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
+                                                role={msg.role} 
+                                                suggestedButtons={msg.suggestedButtons}
+                                                showSuggestedButtons={isLastMessage}
+                                                onButtonClick={(btnText) => sendMessage(btnText)}
+                                                isStreaming={msg.isStreaming}
+                                                tables={msg.tables}
+                                                showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
+                                                showVoiceButton={true}
+                                                onShare={() => shareAnswer(originalIdx)}
+                                                sharing={sharingMessageId === (msg.id || String(originalIdx))}
+                                                latencyMs={msg.latencyMs}
+                                                userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
+                                            />
+                                        )}
+
+                                    </div>
+                                </div>
+                                );
+                            })}
+
+                            {isLoading && !messages[messages.length - 1]?.content && (
+                                <div className={`flex gap-3 w-full mx-auto items-center p-3 rounded-2xl bg-white dark:bg-black border border-slate-200 dark:border-white/20 shadow-xs dark:shadow-[3px_3px_0_0_#FFE600] transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
+                                    <div className="h-8 w-8 rounded-full border border-slate-200 dark:border-white bg-white dark:bg-black flex items-center justify-center shrink-0 shadow-xs p-1">
+                                        <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={24} height={24} className="w-5 h-5 object-contain animate-pulse" />
+                                    </div>
+                                    <div className="flex-1 flex flex-col gap-0.5 overflow-hidden">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-bold text-amber-600 dark:text-amber-400 transition-all duration-300">
+                                                {loadingStep === 1 && (imagePreviews.length > 0 ? "🧠 جاري قراءة الصورة واستيعاب السؤال..." : "🧠 جاري قراءة السؤال واستيعاب السياق...")}
+                                                {loadingStep === 2 && "🔍 جاري استعلام بيانات وأسعار البورصة المصرية..."}
+                                                {loadingStep === 3 && "📊 جاري صياغة التقرير المالي والرد النهائي..."}
+                                            </span>
+                                        </div>
+                                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
+                                            مرحلة {loadingStep} من 3
+                                        </span>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={stopResponding}
+                                        className="flex items-center gap-1 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30 rounded-xl px-2.5 py-1 text-xs font-bold transition-all shrink-0 mr-2"
+                                        title={language === "ar" ? "إيقاف الاستجابة" : "Stop Responding"}
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                        <span>{language === "ar" ? "إيقاف" : "Stop"}</span>
+                                    </button>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 1 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
+                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 2 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
+                                        <div className={`h-2 w-2 rounded-full transition-all duration-300 ${loadingStep === 3 ? "bg-amber-500 scale-125 animate-bounce" : "bg-zinc-400 dark:bg-zinc-600"}`}></div>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+                    <div className="h-6 shrink-0" />
+                    <div ref={bottomRef} />
+                </div>
+                {isUserScrolledUp && messages.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={scrollToBottom}
+                        className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 rounded-full border border-zinc-300 dark:border-white/30 bg-white/95 dark:bg-black/95 px-3.5 py-2 text-xs font-extrabold text-zinc-900 dark:text-white shadow-lg dark:shadow-[3px_3px_0_0_#FFE600] backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-zinc-900 active:scale-95 cursor-pointer animate-in fade-in slide-in-from-bottom-2"
+                        title={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
+                        aria-label={language === "ar" ? "النزول لآخر رسالة" : "Scroll to latest message"}
+                    >
+                        <ArrowDown className="h-4 w-4 text-amber-500 animate-bounce" />
+                        <span>{language === "ar" ? "آخر رسالة" : "Latest message"}</span>
+                    </button>
+                )}
+                </div>
+
+                {/* Input Form */}
+                <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
+                    {isInitializing || accessError ? null : user ? (
+                        <>
+                        <form onSubmit={handleSubmit} className={`space-y-2 mx-auto w-full transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
+                            {/* Image Previews List */}
+                            {imagePreviews.length > 0 && (
+                                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                                    {imagePreviews.map((img, idx) => (
+                                        <div key={idx} className="relative shrink-0">
+                                            <img
+                                                src={img}
+                                                alt={`Preview ${idx + 1}`}
+                                                className="h-16 w-16 rounded-lg border-2 border-amber-500/40 object-cover shadow-sm"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => removeImage(idx)}
+                                                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors shadow-md"
+                                                title="Remove"
+                                            >
+                                                <XCircle className="h-4 w-4" />
+                                            </button>
+                                            <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] font-bold px-1 rounded">
+                                                #{idx + 1}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Voice Note Recorder or Text Input Container */}
+                            {isRecordingVoiceNote ? (
+                                <VoiceNoteRecorder
+                                    isRecording={isRecordingVoiceNote}
+                                    onCancel={() => setIsRecordingVoiceNote(false)}
+                                    onSend={handleSendVoiceNote}
+                                />
+                            ) : (
+                            <div className="relative flex items-end gap-2 bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-2xl p-2 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-xs dark:shadow-[4px_4px_0_0_#fff]">
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    accept="image/png,image/jpeg,image/webp,image/gif"
+                                    className="hidden"
+                                    onChange={handleImageSelect}
+                                />
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                        if (!activePro) {
+                                            toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
+                                            setShowUpgradeModal(true);
+                                            return;
+                                        }
+                                        fileInputRef.current?.click();
+                                    }}
+                                    disabled={isLoading}
+                                    className="h-9 w-9 shrink-0 rounded-xl bg-slate-100 dark:bg-black hover:bg-slate-200 dark:hover:bg-zinc-900 border border-slate-200 dark:border-white/30 text-slate-600 dark:text-white flex items-center justify-center transition-all disabled:opacity-50 relative mb-0.5"
+                                    title={language === "ar" ? "إرفاق صور للتحليل" : "Attach images for analysis"}
+                                >
+                                    <ImagePlus className="h-4 w-4" />
+                                    {imagePreviews.length > 0 && (
+                                        <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-black">
+                                            {imagePreviews.length}
+                                        </span>
+                                    )}
+                                </button>
+
+                                {/* 🎙️ Voice Note Tool (Public for all users - next to Image Upload) */}
+                                <button
+                                    type="button"
+                                    onClick={() => setIsRecordingVoiceNote(true)}
+                                    disabled={isLoading}
+                                    className="h-9 w-9 shrink-0 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center transition-all disabled:opacity-50 cursor-pointer shadow-xs active:scale-95 relative mb-0.5"
+                                    title={language === "ar" ? "تسجيل رسالة صوتية (Voice Note)" : "Record voice note"}
+                                    aria-label="تسجيل فويس نوت"
+                                >
+                                    <Mic className="h-4 w-4" />
+                                </button>
+
+
+
+                                <textarea
+                                    ref={textareaRef}
+                                    rows={1}
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) {
+                                            e.preventDefault();
+                                            handleSubmit(e);
+                                        }
+                                    }}
+                                    placeholder={
+                                        imagePreviews.length > 0
+                                            ? (language === "ar" ? `أضف وصفاً لـ (${imagePreviews.length}) صور (اختياري)...` : `Add description for (${imagePreviews.length}) images (optional)...`) 
+                                             : (language === "ar" ? "اسأل ARTORO..." : "Ask ARTORO...")
+                                    }
+                                    className="flex-1 min-w-0 h-10 min-h-[40px] max-h-[160px] py-2 px-3 bg-transparent text-base md:text-sm text-slate-900 dark:text-white placeholder:text-zinc-400 focus:outline-none resize-none leading-6 overflow-y-auto"
+                                />
+
+                                <button
+                                    type={isLoading ? "button" : "submit"}
+                                    onClick={isLoading ? () => stopResponding() : undefined}
+                                    disabled={!isLoading && (!input.trim() && imagePreviews.length === 0)}
+                                    className={`h-10 w-10 shrink-0 rounded-xl border border-transparent dark:border-white/20 flex items-center justify-center transition-all mb-0.5 ${
+                                        isLoading
+                                            ? "bg-red-500 hover:bg-red-600 text-white cursor-pointer shadow-sm active:scale-95"
+                                            : "bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold disabled:opacity-50 disabled:cursor-not-allowed shadow-sm active:scale-95"
+                                    }`}
+                                    title={isLoading ? (language === "ar" ? "إيقاف الرد" : "Stop generation") : (language === "ar" ? "إرسال" : "Send")}
+                                >
+                                    {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
+                                </button>
+                            </div>
+                            )}
+
+                            {/* Bottom Bar: Custom Modern Model Selector Dropdown Menu */}
+                            <div className="flex items-center justify-between pt-1">
+                                {(() => {
+                                    const currentModelObj = AVAILABLE_AI_MODELS.find(m => m.id === selectedModel) || AVAILABLE_AI_MODELS[0];
+                                    return (
+                                        <div className="relative inline-block" ref={modelMenuRef}>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (!modelMenuOpen && modelMenuRef.current) {
+                                                        const rect = modelMenuRef.current.getBoundingClientRect();
+                                                        setModelMenuPos({
+                                                            bottom: window.innerHeight - rect.top + 8,
+                                                            left: Math.max(4, Math.min(rect.left, window.innerWidth - 292)),
+                                                            width: Math.max(rect.width, 288)
+                                                        });
+                                                    }
+                                                    setModelMenuOpen(!modelMenuOpen);
+                                                }}
+                                                className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black hover:bg-zinc-200 dark:hover:bg-zinc-900 border border-zinc-300 dark:border-white/30 rounded-xl px-2.5 py-1 text-[11px] text-zinc-900 dark:text-white font-black transition-all shadow-xs active:scale-95"
+                                            >
+                                                <Cpu className="h-3 w-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                                                <span className="flex items-center gap-1">
+                                                    <span>{currentModelObj?.name}</span>
+                                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-400 font-black">
+                                                        {language === "ar" ? currentModelObj?.badgeAr : currentModelObj?.badgeEn}
+                                                    </span>
+                                                </span>
+                                                <ChevronDown className={`h-3 w-3 text-zinc-600 dark:text-zinc-400 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
+                                            </button>
+
+                                            {/* Model dropdown rendered as portal to escape overflow:hidden */}
+                                            {modelMenuOpen && modelMenuPos && typeof document !== "undefined" && createPortal(
+                                                <div
+                                                    ref={portalMenuRef}
+                                                    style={{
+                                                        position: "fixed",
+                                                        bottom: modelMenuPos.bottom,
+                                                        left: modelMenuPos.left,
+                                                        width: modelMenuPos.width,
+                                                        zIndex: 99999
+                                                    }}
+                                                    className="bg-white dark:bg-black backdrop-blur-xl border border-zinc-300 dark:border-white/20 shadow-2xl rounded-2xl p-1.5 space-y-0.5"
+                                                >
+                                                    <div className="px-2.5 py-1.5 text-[10px] font-black uppercase text-zinc-700 dark:text-zinc-400 tracking-wider border-b border-zinc-200 dark:border-zinc-800 mb-1">
+                                                        {language === "ar" ? "🤖 اختر موديل الذكاء الاصطناعي" : "🤖 Select AI Model"}
+                                                    </div>
+                                                    {AVAILABLE_AI_MODELS.map((m) => {
+                                                        const isSelected = selectedModel === m.id;
+                                                        return (
+                                                            <button
+                                                                key={m.id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setSelectedModel(m.id);
+                                                                    setModelMenuOpen(false);
+                                                                }}
+                                                                className={`
+                                                                    w-full text-left flex items-start justify-between p-2.5 rounded-xl text-xs transition-all
+                                                                    ${isSelected
+                                                                        ? "bg-amber-500/15 dark:bg-amber-500/20 border border-amber-500/50 text-zinc-950 dark:text-white"
+                                                                        : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border border-transparent"}
+                                                                `}
+                                                            >
+                                                                <div className="flex flex-col gap-0.5 min-w-0 pr-2">
+                                                                    <div className="flex items-center gap-1.5 font-bold text-zinc-950 dark:text-white">
+                                                                        <span>{m.name}</span>
+                                                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold">
+                                                                            {language === "ar" ? m.badgeAr : m.badgeEn}
+                                                                        </span>
+                                                                        {isSelected && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-bold">✓ نشط</span>}
+                                                                    </div>
+                                                                    <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-normal leading-tight">
+                                                                        {language === "ar" ? m.descAr : m.descEn}
+                                                                    </span>
+                                                                </div>
+                                                                {isSelected && <Check className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>,
+                                                document.body
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                <span className="text-[10px] text-zinc-600 dark:text-zinc-500 font-semibold">
+                                    {language === "ar" ? "Shift+Enter لسطر جديد" : "Shift+Enter for newline"}
+                                </span>
+                            </div>
+                        </form>
+                        <div className="text-[10px] text-zinc-600 dark:text-zinc-400 text-center pt-1 font-semibold leading-tight">
+                            {language === "ar"
+                                ? "ℹ️ مخرجات المساعد لأغراض التحليل الفني والتعليم فقط وليست استشارة مالية ملزمة."
+                                : "ℹ️ AI outputs are for educational technical analysis only and not financial advice."}
+                        </div>
+                        </>
+                    ) : (
+                        <div className="text-center text-xs text-zinc-500 dark:text-zinc-400 py-1">
+                            🔒 سجل الدخول أولاً لتتمكن من كتابة وإرسال الأسئلة.
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Paywall / Upgrade Modal */}
+            {showUpgradeModal && (
+                <div 
+                    className="fixed inset-0 z-[100001] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200 dir-rtl"
+                    onClick={() => setShowUpgradeModal(false)}
+                >
+                    <div 
+                        className="max-w-md w-full border-4 border-black dark:border-white bg-white dark:bg-black p-6 sm:p-7 space-y-5 shadow-[8px_8px_0_0_#FFE600] text-right"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between border-b-2 border-black dark:border-white pb-3">
+                            <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-[#FFE600] text-black text-xs font-black uppercase border-2 border-black">
+                                    ترقية الحساب ⚡
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => setShowUpgradeModal(false)}
+                                className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-900 text-black dark:text-white border-2 border-black dark:border-white transition-all cursor-pointer"
+                            >
+                                <X className="w-5 h-5 stroke-[2.5]" />
+                            </button>
+                        </div>
+
+                        {/* Title & Description */}
+                        <div className="space-y-2">
+                            <h3 className="text-xl sm:text-2xl font-black text-black dark:text-white leading-tight">
+                                {remainingQuota <= 0
+                                    ? `لقد استهلكت باقتك المجانية (${quotaLimit || 10}/${quotaLimit || 10})`
+                                    : "ميزة حصرية لمشتركي باقة Pro 👑"}
+                            </h3>
+                            <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
+                                🔥 <strong>عرض المؤسسين:</strong> اشترك الآن بـ <strong>100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — {foundersCountdown ? `متبقي ⏰ ${foundersCountdown}` : "متاح لمدة 15 يوماً فقط!"} وثبّت سعرك طول ما بتجدد!
+                            </div>
+                            <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
+                                تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ انضم الآن لقناة الـ VIP واحصل على جميع مميزات Pro بدون قيود.
+                            </p>
+                        </div>
+
+                        {/* Feature Highlights */}
+                        <div className="space-y-2.5 py-2">
+                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
+                                <span>350 رسالة شات بوت ذكي شهرياً</span>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
+                                <span>رفع وتحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI)</span>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
+                                <span>فتح التوصيات المفتوحة وإشارات الدخول اللحظية وتفعيل وضع التوصيات الحرة</span>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                                <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
+                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام + حتى 10 أسهم في المحفظة</span>
+                            </div>
+                        </div>
+
+                        {/* Conversion & Action Buttons */}
+                        <div className="space-y-2.5 pt-2">
+                            {trialEligibleModal && !isPro && (
+                                <button
+                                    onClick={handleActivateTrialFromModal}
+                                    disabled={trialStartingModal}
+                                    className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-xs sm:text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                    {trialStartingModal ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <>
+                                            <Sparkles className="w-4 h-4 text-yellow-300" />
+                                            <span>جرّب Pro الآن لمدة 3 أيام مجاناً ⚡</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
+
+                            {!telegramLinkedModal && (
+                                <a
+                                    href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "https://t.me/egxbots_bot"}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full py-2.5 px-3 bg-[#0088cc] hover:bg-[#0077b5] text-white font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                >
+                                    <span>🎁 احصل على +10 رسائل فوراً عبر ربط تليجرام</span>
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                            )}
+
+                            <button
+                                onClick={() => {
+                                    setShowUpgradeModal(false);
+                                    setIsOpen(false);
+                                    router.push("/pricing?plan=pro");
+                                }}
+                                className="w-full py-3 px-4 bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                                <span>اشترك في عرض المؤسسين بـ 100 ج.م شهرياً (تثبيت مدى الحياة) ⚡</span>
+                                <span>←</span>
+                            </button>
+
+                            <button
+                                onClick={() => setShowUpgradeModal(false)}
+                                className="w-full py-1.5 px-4 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                            >
+                                إغلاق النافذة
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Fullscreen Image Lightbox Modal */}
+            {previewModalImage && (
+                <div 
+                    className="fixed inset-0 z-[100000] bg-black/90 backdrop-blur-md flex flex-col items-center justify-between p-4 sm:p-6 animate-in fade-in duration-200"
+                    onClick={() => setPreviewModalImage(null)}
+                >
+                    {/* Modal Header */}
+                    <div 
+                        className="w-full max-w-4xl flex items-center justify-between py-2 border-b-2 border-white/20 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center gap-2 text-white font-black text-sm">
+                            <NextImage src="/favicon_io/apple-touch-icon.png" alt="Logo" width={24} height={24} className="w-6 h-6 object-contain" />
+                            <span>معاينة الصورة المرفقة</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => handleDownloadImage(previewModalImage)}
+                                className="flex items-center gap-2 px-4 py-2 bg-[#FFE600] text-black font-black text-xs border-2 border-black shadow-[3px_3px_0_0_#fff] hover:bg-yellow-300 active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer"
+                                title="تحميل الصورة إلى جهازك"
+                            >
+                                <Download className="w-4 h-4 stroke-[2.5]" />
+                                <span>تحميل الصورة</span>
+                            </button>
+                            <button
+                                onClick={() => setPreviewModalImage(null)}
+                                className="p-1.5 bg-white/10 hover:bg-white/20 text-white border-2 border-white/30 transition-all cursor-pointer"
+                                title="إغلاق"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Modal Image Body */}
+                    <div 
+                        className="flex-1 flex items-center justify-center max-w-5xl w-full my-4 overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <img 
+                            src={previewModalImage} 
+                            alt="Enlarged Chat Attachment" 
+                            className="max-w-full max-h-[75vh] object-contain border-4 border-black dark:border-white shadow-[8px_8px_0_0_#FFE600] bg-zinc-950" 
+                        />
+                    </div>
+
+                    {/* Modal Footer hint */}
+                    <div className="text-zinc-400 text-xs font-medium text-center shrink-0">
+                        انقر في أي مكان خارج الصورة أو اضغط على زر الإغلاق للعودة
+                    </div>
+                </div>
+            )}
+
+            {/* WhatsApp Style Chat Wallpaper Modal */}
+            <ChatWallpaperModal
+                isOpen={showWallpaperModal}
+                onClose={() => setShowWallpaperModal(false)}
+                currentId={wallpaperId}
+                currentOpacity={wallpaperOpacity}
+                currentCustomImage={customWallpaperImage}
+                onApply={(id, opacity, customImg) => {
+                    setWallpaperId(id);
+                    setWallpaperOpacity(opacity);
+                    setCustomWallpaperImage(customImg);
+                }}
+                isAr={language === "ar"}
+            />
+
+            {/* Autonomous Recommendations Disclaimer Modal */}
+            <AutonomousRecsModal
+                isOpen={showAutonomousModal}
+                onClose={() => setShowAutonomousModal(false)}
+                onConfirm={handleConfirmAutonomousRecs}
+                isAr={language === "ar"}
+            />
+
+            {/* Live Voice Call with ARTORO */}
+            <VoiceCallModal
+                isOpen={isVoiceCallOpen}
+                onClose={() => setIsVoiceCallOpen(false)}
+                onSendMessage={async (text, options) => {
+                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true, ...options });
+                    return reply || "";
+                }}
+                isPro={isPro}
+                remainingQuota={remainingQuota}
+            />
+        </div>
+    );
+}
