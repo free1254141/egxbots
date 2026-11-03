@@ -49,6 +49,7 @@ export function VoiceCallModal({
     const micStreamRef = useRef<MediaStream | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
+    const liveTranscriptRef = useRef<string>("");
     const setIsMuted = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
         _setIsMuted((prev) => {
             const next = typeof val === "function" ? val(prev) : val;
@@ -191,14 +192,20 @@ export function VoiceCallModal({
 
                 const combined = (finalStr + " " + interimStr).trim();
                 const cleanedTranscript = cleanVoiceTranscript(combined);
+                liveTranscriptRef.current = cleanedTranscript;
                 setTranscript(cleanedTranscript);
 
-                // Voice Activity Detection (VAD): If silence for 1.1s after speaking, trigger send!
+                // Auto-send on silence (650ms after user pauses speaking) - Hands-free natural call
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 if (cleanedTranscript.length >= 2) {
                     silenceTimerRef.current = setTimeout(() => {
-                        handleVoiceQuery(cleanedTranscript);
-                    }, 1100);
+                        const q = liveTranscriptRef.current?.trim();
+                        if (q && q.length >= 2 && !isProcessingRef.current && callStateRef.current === "listening") {
+                            liveTranscriptRef.current = "";
+                            setTranscript("");
+                            handleVoiceQuery(q);
+                        }
+                    }, 650);
                 }
             };
 
@@ -216,7 +223,17 @@ export function VoiceCallModal({
             };
 
             rec.onend = () => {
-                // Continuously keep listening active across consecutive questions
+                // 1. If user spoke a query and recognition ended, SUBMIT IMMEDIATELY without waiting!
+                const pending = liveTranscriptRef.current?.trim();
+                if (pending && pending.length >= 2 && !isProcessingRef.current && callStateRef.current === "listening") {
+                    liveTranscriptRef.current = "";
+                    setTranscript("");
+                    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                    handleVoiceQuery(pending);
+                    return;
+                }
+
+                // 2. Idle silence: wait 1.5s to prevent Android/Chrome mic activation ding loops!
                 if (
                     isOpenRef.current &&
                     callStateRef.current === "listening" &&
@@ -226,11 +243,11 @@ export function VoiceCallModal({
                     if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
                     recognitionRestartTimerRef.current = setTimeout(() => {
                         try {
-                            if (isOpenRef.current && callStateRef.current === "listening" && !isMutedRef.current) {
+                            if (isOpenRef.current && callStateRef.current === "listening" && !isMutedRef.current && !isProcessingRef.current) {
                                 startListening();
                             }
                         } catch {}
-                    }, 250);
+                    }, 1500);
                 }
             };
 
@@ -349,6 +366,9 @@ export function VoiceCallModal({
         if (!cleaned || isProcessingRef.current || !isOpenRef.current) return;
 
         isProcessingRef.current = true;
+        liveTranscriptRef.current = "";
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
         stopListening();
         stopSpeaking();
         setCallState("processing");
