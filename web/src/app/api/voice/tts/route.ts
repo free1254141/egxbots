@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,14 @@ const BACKEND_URL = (
     process.env.TRADING_SIGNALS_API_URL ||
     "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
+
+// Global Node.js in-memory LRU cache for 0ms replay and instant audio delivery
+const nodeTtsCache = new Map<string, Buffer>();
+const MAX_NODE_CACHE_ENTRIES = 500;
+
+function getCacheKey(voice: string, rate: string, text: string): string {
+    return crypto.createHash("sha256").update(`${voice}:${rate}:${text}`).digest("hex");
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -17,8 +26,24 @@ export async function POST(req: NextRequest) {
         }
 
         const voice = String(body?.voice || "ar-EG-ShakirNeural");
-        const rate = String(body?.rate || "+0%");
+        const rate = String(body?.rate || "+10%");
         const pitch = String(body?.pitch || "+0Hz");
+
+        const cacheKey = getCacheKey(voice, rate, text);
+
+        // 1. Check Node.js memory cache (0ms instant response)
+        const cached = nodeTtsCache.get(cacheKey);
+        if (cached) {
+            return new NextResponse(new Uint8Array(cached), {
+                status: 200,
+                headers: {
+                    "Content-Type": "audio/mpeg",
+                    "Content-Length": String(cached.byteLength),
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                    "X-TTS-Cache": "HIT-NODE-RAM",
+                },
+            });
+        }
 
         const backendRes = await fetch(`${BACKEND_URL}/api/voice/tts`, {
             method: "POST",
@@ -26,7 +51,6 @@ export async function POST(req: NextRequest) {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({ text, voice, rate, pitch }),
-            cache: "no-store",
         });
 
         if (!backendRes.ok) {
@@ -34,23 +58,25 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ detail: errText }, { status: backendRes.status });
         }
 
-        if (backendRes.body) {
-            return new NextResponse(backendRes.body as any, {
-                status: 200,
-                headers: {
-                    "Content-Type": "audio/mpeg",
-                    "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-                },
-            });
+        const arrayBuffer = await backendRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Store in memory cache
+        if (buffer.length > 500) {
+            if (nodeTtsCache.size >= MAX_NODE_CACHE_ENTRIES) {
+                const firstKey = nodeTtsCache.keys().next().value;
+                if (firstKey) nodeTtsCache.delete(firstKey);
+            }
+            nodeTtsCache.set(cacheKey, buffer);
         }
 
-        const audioBuffer = await backendRes.arrayBuffer();
-        return new NextResponse(audioBuffer, {
+        return new NextResponse(new Uint8Array(buffer), {
             status: 200,
             headers: {
                 "Content-Type": "audio/mpeg",
-                "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
-                "Content-Length": String(audioBuffer.byteLength),
+                "Content-Length": String(buffer.byteLength),
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-TTS-Cache": backendRes.headers.get("X-TTS-Cache") || "MISS",
             },
         });
     } catch (err: any) {
@@ -68,11 +94,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ detail: "Query parameter 'text' is required" }, { status: 400 });
     }
     const voice = searchParams.get("voice") || "ar-EG-ShakirNeural";
+    const rate = searchParams.get("rate") || "+10%";
 
     const syntheticReq = new NextRequest(req.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice }),
+        body: JSON.stringify({ text, voice, rate }),
     });
 
     return POST(syntheticReq);

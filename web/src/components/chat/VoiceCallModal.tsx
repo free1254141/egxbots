@@ -29,6 +29,8 @@ interface VoiceCallModalProps {
 
 type CallState = "connecting" | "listening" | "processing" | "speaking" | "muted" | "ended";
 
+const callAudioBlobCache = new Map<string, string>();
+
 export function VoiceCallModal({
     isOpen,
     onClose,
@@ -290,8 +292,10 @@ export function VoiceCallModal({
         };
 
         try {
-            // Attempt 1: Native HTML5 progressive streaming audio from Edge-TTS
-            const ttsUrl = `/api/voice/tts?text=${encodeURIComponent(spokenSummary)}&voice=ar-EG-ShakirNeural`;
+            // Native HTML5 progressive streaming audio from Edge-TTS with 0ms client/server cache & energetic +12% pacing
+            const ttsUrl = `/api/voice/tts?text=${encodeURIComponent(spokenSummary)}&voice=ar-EG-ShakirNeural&rate=%2B12%25`;
+            const activeAudioSrc = callAudioBlobCache.get(ttsUrl) || ttsUrl;
+
             const audio = new Audio();
             audio.preload = "auto";
             audioRef.current = audio;
@@ -306,7 +310,20 @@ export function VoiceCallModal({
                 onPlaybackFinished();
             };
 
-            audio.src = ttsUrl;
+            // Prefetch and store in cache for instant replay if not already cached
+            if (!callAudioBlobCache.has(ttsUrl)) {
+                fetch(ttsUrl)
+                    .then(res => res.ok ? res.blob() : null)
+                    .then(blob => {
+                        if (blob) {
+                            const blobUrl = URL.createObjectURL(blob);
+                            callAudioBlobCache.set(ttsUrl, blobUrl);
+                        }
+                    })
+                    .catch(() => {});
+            }
+
+            audio.src = activeAudioSrc;
             const playPromise = audio.play();
             if (playPromise !== undefined) {
                 await playPromise;

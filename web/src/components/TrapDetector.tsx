@@ -259,8 +259,8 @@ export default function TrapDetector() {
               >
                 <span>
                   {ar
-                    ? `مراجعة إشارات أمس (${perf.review?.signalDate})`
-                    : `Review Yesterday's Signals (${perf.review?.signalDate})`}
+                    ? `نتائج إشارات الأمس في تداول اليوم (${perf.review?.outcomeDate || "اليوم"})`
+                    : `Yesterday's Signals in Today's Session (${perf.review?.outcomeDate || "Today"})`}
                 </span>
                 {showReview ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
               </button>

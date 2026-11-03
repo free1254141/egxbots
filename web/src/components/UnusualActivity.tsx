@@ -215,8 +215,8 @@ export default function UnusualActivity() {
               >
                 <span>
                   {ar
-                    ? `مراجعة إشارات أمس (${perf.review?.signalDate})`
-                    : `Review Yesterday's Signals (${perf.review?.signalDate})`}
+                    ? `نتائج إشارات الأمس في تداول اليوم (${perf.review?.outcomeDate || "اليوم"})`
+                    : `Yesterday's Signals in Today's Session (${perf.review?.outcomeDate || "Today"})`}
                 </span>
                 {showReview ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
               </button>
@@ -228,7 +228,9 @@ export default function UnusualActivity() {
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
               <span className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
                 <Flame className="h-3.5 w-3.5 text-amber-500" />
-                {ar ? "أقوى تحرك اليوم من إشارات أمس:" : "Top Performer Today:"}
+                {ar
+                  ? `أقوى تحرك اليوم (${perf.review?.outcomeDate || "اليوم"}) من إشارات الأمس (${perf.review?.signalDate || "أمس"}):`
+                  : `Top Performer Today (${perf.review?.outcomeDate || "Today"}) from Yesterday:`}
               </span>
               <b className="font-mono text-zinc-950 dark:text-white">{topMover.symbol}</b>
               <span className="text-zinc-600 dark:text-zinc-400">

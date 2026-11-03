@@ -14,6 +14,36 @@ interface VoiceNotePlayerProps {
     tables?: any[];
 }
 
+// Global in-memory cache for audio blob URLs to guarantee instant <5ms playback and deduplicate network calls
+const globalAudioBlobCache = new Map<string, string>();
+const globalAudioFetchPromises = new Map<string, Promise<string>>();
+
+function fetchAudioBlobUrl(url: string): Promise<string> {
+    if (globalAudioBlobCache.has(url)) {
+        return Promise.resolve(globalAudioBlobCache.get(url)!);
+    }
+    if (globalAudioFetchPromises.has(url)) {
+        return globalAudioFetchPromises.get(url)!;
+    }
+    const p = fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error("Audio fetch failed: " + res.status);
+            return res.blob();
+        })
+        .then(blob => {
+            const blobUrl = URL.createObjectURL(blob);
+            globalAudioBlobCache.set(url, blobUrl);
+            globalAudioFetchPromises.delete(url);
+            return blobUrl;
+        })
+        .catch(err => {
+            globalAudioFetchPromises.delete(url);
+            throw err;
+        });
+    globalAudioFetchPromises.set(url, p);
+    return p;
+}
+
 export function VoiceNotePlayer({
     role,
     audioUrl,
@@ -35,9 +65,9 @@ export function VoiceNotePlayer({
     const initialEstimatedDuration = useMemo(() => {
         if (durationSeconds && durationSeconds > 0) return durationSeconds;
         if (spokenOpinion.length > 0) {
-            return Math.max(5, Math.round(spokenOpinion.length / 12));
+            return Math.max(3, Math.round(spokenOpinion.length / 12));
         }
-        return 10;
+        return 5;
     }, [durationSeconds, spokenOpinion]);
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -45,7 +75,12 @@ export function VoiceNotePlayer({
     const [duration, setDuration] = useState(initialEstimatedDuration);
     const [isTextExpanded, setIsTextExpanded] = useState(false);
     const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-    const [cachedBlobUrl, setCachedBlobUrl] = useState<string | null>(null);
+    const [cachedBlobUrl, setCachedBlobUrl] = useState<string | null>(() => {
+        if (audioUrl && (audioUrl.startsWith("blob:") || audioUrl.startsWith("data:"))) {
+            return audioUrl;
+        }
+        return null;
+    });
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -58,48 +93,75 @@ export function VoiceNotePlayer({
         return undefined;
     }, [audioUrl, isUser, spokenOpinion]);
 
-    // Background prefetch into Blob for instant seek support, while direct audio starts immediately
+    // Exact audio duration calculation via Web Audio API (solves WebM Infinity duration bug in Chrome)
     useEffect(() => {
-        if (!rawAudioTarget || rawAudioTarget.startsWith("blob:") || rawAudioTarget.startsWith("data:")) {
+        if (durationSeconds && durationSeconds > 0) {
+            setDuration(durationSeconds);
+            return;
+        }
+
+        const target = cachedBlobUrl || rawAudioTarget;
+        if (!target) return;
+
+        let cancelled = false;
+
+        // Fetch buffer and decode exact PCM frames
+        fetch(target)
+            .then(res => res.arrayBuffer())
+            .then(buf => {
+                if (cancelled) return null;
+                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                if (!AudioContextClass) return null;
+                const ctx = new AudioContextClass();
+                return ctx.decodeAudioData(buf);
+            })
+            .then(decoded => {
+                if (!cancelled && decoded && decoded.duration && isFinite(decoded.duration) && decoded.duration > 0) {
+                    setDuration(Math.max(1, Math.round(decoded.duration)));
+                }
+            })
+            .catch(() => {
+                // Non-blocking fallback
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [rawAudioTarget, cachedBlobUrl, durationSeconds]);
+
+    // Background prefetch with in-memory caching for zero-delay instant replay
+    useEffect(() => {
+        if (!rawAudioTarget) return;
+
+        if (rawAudioTarget.startsWith("blob:") || rawAudioTarget.startsWith("data:")) {
+            setCachedBlobUrl(rawAudioTarget);
+            return;
+        }
+
+        if (globalAudioBlobCache.has(rawAudioTarget)) {
+            setCachedBlobUrl(globalAudioBlobCache.get(rawAudioTarget)!);
             return;
         }
 
         let isMounted = true;
-        let createdUrl: string | null = null;
-
-        fetch(rawAudioTarget)
-            .then(res => {
-                if (!res.ok) throw new Error("TTS background fetch failed");
-                return res.blob();
-            })
-            .then(blob => {
-                if (!isMounted) return;
-                createdUrl = URL.createObjectURL(blob);
-                setCachedBlobUrl(createdUrl);
-                // If audioRef is already loaded, update src smoothly for seeking without interrupting if playing
-                if (audioRef.current && !isPlaying) {
-                    const savedTime = audioRef.current.currentTime;
-                    audioRef.current.src = createdUrl;
-                    audioRef.current.currentTime = savedTime;
+        fetchAudioBlobUrl(rawAudioTarget)
+            .then(blobUrl => {
+                if (isMounted) {
+                    setCachedBlobUrl(blobUrl);
                 }
             })
-            .catch(() => {
-                // Non-blocking background caching
-            });
+            .catch(() => {});
 
         return () => {
             isMounted = false;
-            if (createdUrl) {
-                URL.revokeObjectURL(createdUrl);
-            }
         };
-    }, [rawAudioTarget, isPlaying]);
+    }, [rawAudioTarget]);
 
-    // Setup Audio instance with progressive streaming for sub-second start latency (<350ms)
+    // Setup HTML5 Audio element instance
     useEffect(() => {
-        if (!rawAudioTarget) return;
-
         const activeSrc = cachedBlobUrl || rawAudioTarget;
+        if (!activeSrc) return;
+
         const audio = new Audio();
         audio.preload = "auto";
         audio.src = activeSrc;
@@ -151,7 +213,6 @@ export function VoiceNotePlayer({
                         setIsLoadingAudio(false);
                     })
                     .catch(() => {
-                        // Handled: Autoplay blocked by browser policy without user gesture
                         setIsPlaying(false);
                         setIsLoadingAudio(false);
                     });
@@ -219,78 +280,73 @@ export function VoiceNotePlayer({
                         </>
                     ) : (
                         <>
-                            <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
-                            <span className="text-amber-300 truncate">
-                                {isLoadingAudio ? "جاري تشغيل الرد الصوتي... 🎙️" : "رد أرتورو الصوتي (Voice Note)"}
-                            </span>
+                            <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="text-amber-300 truncate">رد أرتورو الصوتي 🎙️</span>
                         </>
                     )}
                 </div>
-                <span className="font-mono text-[10px] sm:text-[11px] text-zinc-300 shrink-0">
-                    {formatTime(currentTime > 0 ? currentTime : effectiveMaxDuration)}
-                </span>
-            </div>
-
-            {/* Audio controls & interactive scrubber */}
-            <div className="flex items-center gap-2.5 sm:gap-3 pt-0.5">
-                <button
-                    type="button"
-                    onClick={togglePlay}
-                    disabled={isLoadingAudio && !isPlaying}
-                    className={`grid h-9 w-9 sm:h-10 sm:w-10 shrink-0 place-items-center rounded-full transition active:scale-95 cursor-pointer shadow-md disabled:opacity-60 ${
-                        isUser 
-                            ? "bg-emerald-500 text-black hover:bg-emerald-400" 
-                            : "bg-amber-500 text-black hover:bg-amber-400"
-                    }`}
-                    title={isPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
-                    aria-label={isPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
-                >
-                    {isLoadingAudio ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-black" />
-                    ) : isPlaying ? (
-                        <Pause className="w-4 h-4 fill-current" />
-                    ) : (
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                    )}
-                </button>
-
-                {/* Progress bar / scrubber with full range and duration accuracy */}
-                <div className="flex-1 flex flex-col justify-center min-w-0">
-                    <input
-                        type="range"
-                        min={0}
-                        max={effectiveMaxDuration}
-                        step={0.1}
-                        value={Math.min(currentTime, effectiveMaxDuration)}
-                        onChange={handleSeek}
-                        className={`w-full h-1.5 sm:h-2 rounded-lg appearance-none cursor-pointer transition ${
-                            isUser 
-                                ? "bg-white/20 accent-emerald-400 hover:accent-emerald-300" 
-                                : "bg-white/20 accent-amber-400 hover:accent-amber-300"
-                        }`}
-                        title="مرر لتقديم أو تأخير الصوت"
-                    />
-                    <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-zinc-400 font-mono mt-1 px-0.5">
-                        <span className="text-zinc-200">{formatTime(currentTime)}</span>
-                        <span>{formatTime(effectiveMaxDuration)}</span>
-                    </div>
+                <div className="flex items-center gap-2 shrink-0 text-[10px] sm:text-[11px] font-mono opacity-80">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>/</span>
+                    <span>{formatTime(effectiveMaxDuration)}</span>
                 </div>
             </div>
 
-            {/* Expandable text reveal button (WhatsApp style) */}
-            {text && (
-                <div className="pt-1.5 border-t border-white/10">
+            {/* Audio waveform / player scrubber controls */}
+            <div className="flex items-center gap-2 pt-0.5">
+                <button
+                    type="button"
+                    onClick={togglePlay}
+                    disabled={isLoadingAudio && !cachedBlobUrl}
+                    className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 cursor-pointer shadow-md ${
+                        isUser
+                            ? "bg-emerald-500 hover:bg-emerald-400 text-black"
+                            : "bg-amber-500 hover:bg-amber-400 text-black"
+                    }`}
+                    title={isPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
+                >
+                    {isLoadingAudio && !cachedBlobUrl ? (
+                        <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                    ) : isPlaying ? (
+                        <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
+                    ) : (
+                        <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current ml-0.5" />
+                    )}
+                </button>
+
+                <div className="flex-1 flex flex-col justify-center gap-1 min-w-0">
+                    <input
+                        type="range"
+                        min="0"
+                        max={effectiveMaxDuration}
+                        step="0.1"
+                        value={currentTime}
+                        onChange={handleSeek}
+                        className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-white/20 accent-${
+                            isUser ? "emerald-400" : "amber-400"
+                        }`}
+                    />
+                </div>
+            </div>
+
+            {/* Text Transcript Accordion (Optional expansion) */}
+            {text && text.trim() && (
+                <div className="pt-1 border-t border-white/5">
                     <button
                         type="button"
                         onClick={() => setIsTextExpanded(!isTextExpanded)}
-                        className="flex items-center justify-between w-full text-[11px] sm:text-xs text-zinc-300 hover:text-white transition cursor-pointer py-0.5"
+                        className="flex items-center gap-1 text-[10px] sm:text-[11px] opacity-70 hover:opacity-100 transition-opacity cursor-pointer py-0.5"
                     >
-                        <span>{isTextExpanded ? "إخفاء التفاصيل المكتوبة" : (isUser ? "عرض نص الرسالة 📝" : "عرض التحليل المكتوب بالكامل 📝")}</span>
-                        {isTextExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
+                        <span>{isTextExpanded ? "إخفاء النص" : "عرض النص المكتوب"}</span>
+                        {isTextExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                        ) : (
+                            <ChevronDown className="w-3 h-3" />
+                        )}
                     </button>
 
                     {isTextExpanded && (
-                        <div className="mt-1.5 p-2.5 max-h-56 overflow-y-auto rounded-xl bg-black/50 border border-white/10 text-xs sm:text-sm leading-relaxed text-zinc-200 whitespace-pre-wrap animate-in fade-in duration-150">
+                        <div className="mt-1.5 p-2 rounded-xl bg-black/30 border border-white/10 text-xs sm:text-sm leading-relaxed text-zinc-200 select-text whitespace-pre-wrap max-h-60 overflow-y-auto">
                             {text}
                         </div>
                     )}

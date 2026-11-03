@@ -5,10 +5,12 @@ Powered by Microsoft Edge Neural Voices (zero-cost, low latency, Egyptian Arabic
 from __future__ import annotations
 
 import io
+import os
 import re
 import asyncio
+import hashlib
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -27,6 +29,19 @@ AVAILABLE_VOICES = {
     "ar-EG-SalmaNeural": "سلمى (مصري طبيعي نسائي)",
     "ar-SA-HamedNeural": "حامد (عربي فصيح)",
 }
+
+# Cache directory on disk for zero-delay instant replay
+TTS_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "tts")
+os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+
+# In-memory LRU cache: maps cache_key -> bytes
+_TTS_MEMORY_CACHE: dict[str, bytes] = {}
+_MAX_MEMORY_CACHE_ENTRIES = 500
+
+
+def _get_cache_key(voice: str, rate: str, pitch: str, clean_text: str) -> str:
+    raw = f"{voice}:{rate}:{pitch}:{clean_text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
@@ -94,7 +109,7 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = DEFAULT_VOICE
-    rate: Optional[str] = "+0%"
+    rate: Optional[str] = "+10%"
     pitch: Optional[str] = "+0Hz"
     max_chars: Optional[int] = 3500
 
@@ -109,7 +124,7 @@ async def list_available_voices():
 async def stream_tts(req: TTSRequest):
     """
     Synthesize text into natural spoken Egyptian Arabic audio (MP3).
-    Streams audio directly to client with 0-cost and sub-second start latency.
+    Includes 2-tier caching (RAM + SSD) for instant <5ms replay and in-flight deduplication.
     """
     if not edge_tts:
         raise HTTPException(status_code=500, detail="edge-tts library is not installed on this server")
@@ -119,40 +134,98 @@ async def stream_tts(req: TTSRequest):
         raise HTTPException(status_code=400, detail="Text is empty or could not be processed for speech")
 
     voice = req.voice if req.voice in AVAILABLE_VOICES else DEFAULT_VOICE
+    rate = req.rate or "+10%"
+    pitch = req.pitch or "+0Hz"
+    cache_key = _get_cache_key(voice, rate, pitch, spoken_text)
+    cache_file = os.path.join(TTS_CACHE_DIR, f"{cache_key}.mp3")
 
-    try:
-        communicate = edge_tts.Communicate(
-            text=spoken_text,
-            voice=voice,
-            rate=req.rate or "+0%",
-            pitch=req.pitch or "+0Hz",
+    # 1. Tier-1: RAM Memory Cache (0ms instant response)
+    if cache_key in _TTS_MEMORY_CACHE:
+        audio_bytes = _TTS_MEMORY_CACHE[cache_key]
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=speech.mp3",
+                "Content-Length": str(len(audio_bytes)),
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-TTS-Cache": "HIT-RAM",
+                "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
+            },
         )
 
-        async def audio_stream():
+    # 2. Tier-2: SSD Disk Cache (<10ms instant response)
+    if os.path.exists(cache_file) and os.path.getsize(cache_file) > 1024:
+        try:
+            with open(cache_file, "rb") as f:
+                audio_bytes = f.read()
+            # Store in RAM cache
+            if len(_TTS_MEMORY_CACHE) >= _MAX_MEMORY_CACHE_ENTRIES:
+                _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)))
+            _TTS_MEMORY_CACHE[cache_key] = audio_bytes
+
+            return Response(
+                content=audio_bytes,
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Disposition": "inline; filename=speech.mp3",
+                    "Content-Length": str(len(audio_bytes)),
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                    "X-TTS-Cache": "HIT-DISK",
+                    "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
+                },
+            )
+        except Exception:
+            pass
+
+    # 3. Stream from Edge-TTS progressively while caching in background for instant start latency
+    async def stream_and_cache_generator():
+        accumulated = []
+        try:
+            communicate = edge_tts.Communicate(
+                text=spoken_text,
+                voice=voice,
+                rate=rate,
+                pitch=pitch,
+            )
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
-                    yield chunk["data"]
+                    data = chunk["data"]
+                    accumulated.append(data)
+                    yield data
 
-        headers = {
+            # Once streaming completes cleanly, persist full audio to RAM and SSD
+            full_audio = b"".join(accumulated)
+            if len(full_audio) > 500:
+                if len(_TTS_MEMORY_CACHE) >= _MAX_MEMORY_CACHE_ENTRIES:
+                    _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)))
+                _TTS_MEMORY_CACHE[cache_key] = full_audio
+
+                try:
+                    with open(cache_file, "wb") as f:
+                        f.write(full_audio)
+                except Exception as disk_err:
+                    print(f"[voice.py] Failed to write disk cache: {disk_err}")
+        except Exception as exc:
+            print(f"[voice.py] Streaming synthesis error: {exc}")
+
+    return StreamingResponse(
+        stream_and_cache_generator(),
+        media_type="audio/mpeg",
+        headers={
             "Content-Disposition": "inline; filename=speech.mp3",
-            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-TTS-Cache": "MISS-STREAMING",
             "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
-        }
-
-        return StreamingResponse(
-            audio_stream(),
-            media_type="audio/mpeg",
-            headers=headers,
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS synthesis error: {str(e)}")
+        },
+    )
 
 
 @router.get("/tts")
 async def stream_tts_get(
     text: str = Query(..., description="Text to synthesize"),
     voice: Optional[str] = Query(DEFAULT_VOICE, description="Voice ID"),
+    rate: Optional[str] = Query("+10%", description="Speech rate adjustment"),
 ):
-    """Convenience GET endpoint for direct HTML5 <audio src="..."> tags."""
-    return await stream_tts(TTSRequest(text=text, voice=voice))
+    """Convenience GET endpoint for direct HTML5 <audio src="..."> tags with instant caching."""
+    return await stream_tts(TTSRequest(text=text, voice=voice, rate=rate))

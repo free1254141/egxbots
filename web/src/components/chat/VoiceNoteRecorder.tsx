@@ -25,6 +25,7 @@ export function VoiceNoteRecorder({
     const recognitionRef = useRef<any>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const startTimeRef = useRef<number>(0);
 
     useEffect(() => {
         if (!isRecording) {
@@ -41,6 +42,7 @@ export function VoiceNoteRecorder({
 
     const cleanup = () => {
         if (timerRef.current) clearInterval(timerRef.current);
+        startTimeRef.current = 0;
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.onend = null;
@@ -69,6 +71,7 @@ export function VoiceNoteRecorder({
         setDuration(0);
         setTranscript("");
         audioChunksRef.current = [];
+        startTimeRef.current = Date.now();
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -92,10 +95,14 @@ export function VoiceNoteRecorder({
 
             mediaRecorder.start(100);
 
-            // Timer
+            // High-precision timer referenced to wall-clock time
             timerRef.current = setInterval(() => {
-                setDuration((prev) => prev + 1);
-            }, 1000);
+                if (startTimeRef.current > 0) {
+                    setDuration(Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000)));
+                } else {
+                    setDuration((prev) => prev + 1);
+                }
+            }, 500);
 
             // 2. Setup Background SpeechRecognition for zero-token DeepSeek transcription
             const SpeechRecognition =
@@ -145,7 +152,9 @@ export function VoiceNoteRecorder({
         if (isSubmitting) return;
         setIsSubmitting(true);
 
-        const currentDuration = duration;
+        const exactDuration = startTimeRef.current > 0
+            ? Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
+            : Math.max(1, duration);
         const currentTranscript = cleanVoiceTranscript(transcript) || "حلل هذا السهم في البورصة المصرية";
 
         // Stop recognition
@@ -164,7 +173,7 @@ export function VoiceNoteRecorder({
                     type: mediaRecorderRef.current?.mimeType || "audio/webm",
                 });
                 try {
-                    await onSend(blob, currentTranscript, currentDuration);
+                    await onSend(blob, currentTranscript, exactDuration);
                 } finally {
                     cleanup();
                 }
@@ -173,7 +182,7 @@ export function VoiceNoteRecorder({
         } else {
             const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
             try {
-                await onSend(blob, currentTranscript, currentDuration);
+                await onSend(blob, currentTranscript, exactDuration);
             } finally {
                 cleanup();
             }

@@ -1573,7 +1573,12 @@ export async function GET(req: NextRequest) {
                 timestamp: new Date(m.created_at).getTime(),
                 imageUrl: m.image_url || undefined,
                 latencyMs: typeof m.latency_ms === "number" && m.latency_ms > 0 ? m.latency_ms : undefined,
-                suggestedButtons: m.role === "assistant" ? sanitizeSuggestedButtons(m.metadata?.suggested_buttons) : undefined
+                suggestedButtons: m.role === "assistant" ? sanitizeSuggestedButtons(m.metadata?.suggested_buttons) : undefined,
+                isVoice: Boolean(m.metadata?.is_voice),
+                isVoiceNote: Boolean(m.metadata?.is_voice_note),
+                voiceAudioUrl: typeof m.metadata?.voice_audio_url === "string" ? m.metadata.voice_audio_url : undefined,
+                voiceDuration: typeof m.metadata?.audio_duration === "number" ? m.metadata.audio_duration : undefined,
+                spokenText: typeof m.metadata?.spoken_text === "string" ? m.metadata.spoken_text : undefined,
             })));
 
             return NextResponse.json({ history: formattedHistory });
