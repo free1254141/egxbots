@@ -219,160 +219,265 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
 // Guarantees that the TTS audio engine NEVER speaks English tickers/letters, and always speaks Arabic names.
 export const EGX_STOCK_TICKERS: Record<string, string> = {
     ABUK: "أبو قير للأسمدة",
-    TMGH: "طلعت مصطفى",
-    COMI: "التجاري الدولي",
-    FWRY: "فوري",
-    SWDY: "السويدي إليكتريك",
-    ETEL: "المصرية للاتصالات",
-    MFPC: "موبكو",
-    SKPC: "سيدي كرير",
-    AMOC: "أموك",
-    EKHO: "المصرية الكويتية",
-    BTFH: "بلتون",
-    HRHO: "هيرميس",
-    CICH: "سي آي كابيتال",
-    EFIH: "إي فاينانس",
-    ISPH: "ابن سينا فارما",
-    PHAR: "إيبيكو",
-    ESRS: "حديد عز",
-    HELI: "مصر الجديدة للإسكان",
-    PHDC: "بالم هيلز",
-    MASR: "مدينة مصر للإسكان",
-    MNHD: "مدينة مصر للإسكان",
-    OCDI: "سوديك",
-    EMFD: "إعمار مصر",
-    ORHD: "أوراسكوم للتنمية",
-    ORAS: "أوراسكوم كونستراكشون",
-    EGAL: "مصر للألومنيوم",
-    TAQA: "طاقة عربية",
-    EGAS: "غاز مصر",
-    AUTO: "جي بي أوتو",
-    GBCO: "جي بي كوربوريشن",
-    ADIB: "أبوظبي الإسلامي",
-    CIEB: "كريدي أجريكول",
-    QNBE: "بنك قطر الوطني",
-    QNBA: "بنك قطر الوطني",
-    FAIT: "فيصل الإسلامي",
-    HDBK: "بنك التعمير والإسكان",
-    CCAP: "القلعة",
-    VALU: "فاليو",
-    ORWE: "النساجون الشرقيون",
-    EGCH: "كيما",
-    EFIC: "المالية والصناعية",
-    KZPC: "كفر الزيات للمبيدات",
-    FERC: "فيركيم مصر",
-    JUFO: "جهينة",
-    DOMT: "دومتي",
-    EFID: "إيديتا",
-    OLFI: "عبور لاند",
-    POUL: "القاهرة للدواجن",
-    ISMA: "الإسماعيلية للدواجن",
-    MPCO: "المنصورة للدواجن",
-    SUGR: "الدلتا للسكر",
-    EAST: "إيسترن كومباني",
-    MCQE: "أسمنت قنا",
-    MBSC: "أسمنت بني سويف",
-    ARCC: "العربية للأسمنت",
-    SVCE: "أسمنت جنوب الوادي",
-    SCEM: "أسمنت سيناء",
-    LCSW: "ليسيكو مصر",
-    ECAP: "العز للسيراميك",
-    CERA: "ريماس",
-    IRAX: "العز الدخيلة للصلب",
-    ATQA: "مصر الوطنية للصلب",
-    IRON: "الحديد والصلب",
-    MBEG: "إم بي للهندسة",
-    IEEC: "المشروعات الصناعية والهندسية",
-    EEII: "العربية للصناعات الهندسية",
-    ALUM: "العربية للألومنيوم",
-    KORA: "قرة للطاقة",
-    ELEC: "الكابلات الكهربائية",
-    RAYA: "راية القابضة",
-    RACC: "راية لمراكز الاتصالات",
-    ETRS: "إيجيترانس",
-    ALCN: "الإسكندرية لتداول الحاويات",
-    EGBE: "البنك المصري الخليجي",
-    SAUD: "بنك البركة",
-    EXPA: "بنك تنمية الصادرات",
-    CANA: "بنك قناة السويس",
-    UBEE: "البنك المتحد",
-    SEIG: "السعودية المصرية للاستثمار",
-    ODIN: "أودن للاستثمارات",
-    CNFN: "كونتكت المالية",
-    ATLC: "التوفيق للتأجير",
-    PRMH: "برايم القابضة",
-    GTWL: "جولدن تكس",
+    ACAMD: "العربية لاستصلاح الأراضي",
     ACGC: "العربية لحليج الأقطان",
-    DEIN: "دايس للملابس",
-    DSCW: "دايس للملابس",
-    KABO: "كابو",
-    SPIN: "سبينالكس",
-    TALM: "تعليم لخدمات الإدارة",
-    CEFM: "مطاحن مصر الوسطى",
-    EDFM: "مطاحن شرق الدلتا",
-    SCFM: "مطاحن جنوب القاهرة",
-    MILS: "مطاحن شمال القاهرة",
-    AFMC: "مطاحن الإسكندرية",
-    WCDF: "مطاحن وسط وغرب الدلتا",
-    UEFM: "مطاحن مصر العليا",
-    MPCI: "ممفيس للأدوية",
-    NIPH: "النيل للأدوية",
-    AXPH: "الإسكندرية للأدوية",
-    CPCI: "القاهرة للأدوية",
-    AMES: "المركز الطبي الجديد",
-    CLHO: "مستشفى كليوباترا",
-    SIPC: "سبأ الدولية للأدوية",
-    SPMD: "سبيد ميديكال",
-    RMDA: "راميدا للأدوية",
     ADCI: "العربية للأدوية",
-    ELSH: "الشمس للإسكان",
-    ELKA: "القاهرة للإسكان",
-    UNIT: "المتحدة للإسكان",
-    ZMID: "زهراء المعادي",
+    ADIB: "أبوظبي الإسلامي",
+    AFMC: "مطاحن الإسكندرية",
+    AIFI: "الإسكندرية للاستثمارات المالية",
+    AIH: "العروبة للسمسرة",
+    AJWA: "أجواء للصناعات الغذائية",
+    ALCN: "الإسكندرية لتداول الحاويات",
+    ALEX: "الإسكندرية للغزل والنسيج",
+    ALUM: "العربية للألومنيوم",
+    AMER: "عامر جروب",
+    AMES: "المركز الطبي الجديد",
+    AMIA: "العربية للمحابس",
+    AMOC: "أموك",
+    ANFI: "الإسكندرية الوطنية للإلكترونيات",
+    ARAB: "المطورون العرب",
+    ARCC: "العربية للأسمنت",
+    ARVA: "الإسكندرية للخدمات الطبية",
+    ATCP: "العربية للتجارة والتوزيع",
+    ATLC: "التوفيق للتأجير",
+    ATQA: "مصر الوطنية للصلب",
+    AUTO: "جي بي أوتو",
+    AXPH: "الإسكندرية للأدوية",
+    BINV: "بي انفستمنتس",
+    BIOC: "بي بي أو كابيتال",
+    BOLA: "بدر الدين للمقاولات",
+    BRAQ: "البراق للاستثمارات",
+    BTFH: "بلتون",
+    CANA: "بنك قناة السويس",
+    CCAP: "القلعة للاستشارات",
+    CEFM: "مطاحن مصر الوسطى",
+    CERA: "ريماس",
+    CFGH: "كونكريت فاشون",
+    CHSH: "القناة للتوكيلات الملاحية",
+    CICH: "سي آي كابيتال",
+    CIEB: "كريدي أجريكول",
+    CLHO: "مستشفى كليوباترا",
+    CMRI: "العامة للصوامع والتخزين",
+    CNFN: "كونتكت المالية",
+    COMI: "التجاري الدولي",
+    COSG: "القاهرة للزيوت",
+    CPCI: "القاهرة للأدوية",
+    CPPC: "القاهرة للأدوية",
     CRST: "كريست مارك",
-    RREI: "العربية للاستثمار العقاري",
+    CSAG: "القناة للتوكيلات الملاحية",
+    DAPH: "مصر للأسمنت قنا",
+    DEIN: "دايس للملابس",
+    DOMT: "دومتي",
+    DSCW: "دايس للملابس",
+    EAST: "الشرقية للدخان",
+    ECAP: "العز للسيراميك الجوهرة",
+    ECAZ: "العز للسيراميك الجوهرة",
+    EDFM: "مطاحن شرق الدلتا",
+    EEII: "العربية للصناعات الهندسية",
+    EFIC: "المالية والصناعية المصرية",
+    EFID: "إيديتا للصناعات الغذائية",
+    EFIH: "إي فاينانس",
+    EGAL: "مصر للألومنيوم",
+    EGAS: "غاز مصر",
+    EGBE: "البنك المصري الخليجي",
+    EGCH: "كيما للأسمدة",
+    EHDR: "المصريين للإسكان",
+    EKHO: "المصرية الكويتية القابضة",
+    EKHOA: "المصرية الكويتية",
+    ELEC: "الكابلات الكهربائية",
+    ELKA: "القاهرة للإسكان",
+    ELNA: "النصر للملابس كابو",
+    ELSH: "الشمس للإسكان",
+    ELWA: "الوادى للاستثمار السياحي",
+    EMFD: "إعمار مصر للتنمية",
+    EPPC: "الأهرام للطباعة",
+    EPPK: "الأهرام للطباعة",
+    ESRS: "حديد عز",
+    ETEL: "المصرية للاتصالات",
+    ETRS: "إيجيترانس",
+    EXPA: "بنك تنمية الصادرات",
+    FAIT: "بنك فيصل الإسلامي",
+    FENG: "فيركيم مصر للأسمدة",
+    FERC: "فيركيم مصر للأسمدة",
+    FWRY: "فوري للمدفوعات الإلكترونية",
+    GBCO: "جي بي كوربوريشن",
+    GDWA: "جدوى للتنمية الصناعية",
+    GEBE: "المصرية لتطوير صناعة البناء ليفت سلاب",
+    GMCI: "العامة لمنتجات الخزف والصيني شيني",
+    GOCO: "الخليجية الكندية للاستثمار",
+    GTWL: "جولدن تكس للأصواف",
+    HDBK: "بنك التعمير والإسكان",
+    HELI: "مصر الجديدة للإسكان",
+    HRHO: "إي إف جي القابضة هيرميس",
+    IBMD: "ابن سينا فارما",
+    IDHC: "التشخيص المتكاملة القابضة",
+    IDRE: "رواد السياحة",
+    IEEC: "المشروعات الصناعية والهندسية",
+    IFAP: "الدولية للأسمدة والكيماويات",
+    IIOC: "الدولية للتأجير التمويلي إينكوليس",
+    INCO: "المؤشر للبرمجيات",
+    IPMC: "المطاحن المصرية",
+    IRAX: "العز الدخيلة للصلب",
+    IRON: "الحديد والصلب المصرية",
+    ISMA: "الإسماعيلية للدواجن",
+    ISPH: "ابن سينا فارما",
+    JUFO: "جهينة للصناعات الغذائية",
+    KABO: "كابو للملابس",
+    KABR: "كفر الزيات للمبيدات",
+    KORA: "قرة للطاقة",
+    KZPC: "كفر الزيات للمبيدات",
+    LCSW: "ليسيكو مصر",
     MAAL: "مرسيليا المصرية الخليجية",
-    OBRI: "العبور للاستثمار العقاري",
+    MASR: "مدينة مصر للإسكان والتعمير",
+    MBEG: "إم بي للهندسة",
+    MBSC: "أسمنت بني سويف",
+    MCQE: "أسمنت قنا",
+    MEPA: "الشرق الأوسط لصناعة الزجاج",
+    MFPC: "موبكو للأسمدة",
+    MILS: "مطاحن شمال القاهرة",
+    MIPH: "مينا فارم للأدوية",
+    MNHD: "مدينة مصر للإسكان",
+    MOIL: "الخدمات الملاحية والبترولية ماريديف",
+    MPCI: "ممفيس للأدوية",
+    MPCO: "المنصورة للدواجن",
+    MRCO: "مرسى علم للتنمية السياحية",
     NCCW: "النصر للأعمال المدنية",
+    NDRL: "ناشيونال دريلنج",
+    NIPH: "النيل للأدوية",
+    OBRI: "العبور للاستثمار العقاري",
+    OCDI: "سوديك السادس من أكتوبر للتنمية",
+    ODIN: "أودن للاستثمارات المالية",
+    OFH: "أوراسكوم المالية القابضة",
+    OIFI: "أوراسكوم للاستثمار القابضة",
+    OLFI: "عبور لاند للصناعات الغذائية",
+    ORAS: "أوراسكوم كونستراكشون",
+    ORHD: "أوراسكوم للتنمية مصر",
+    ORWE: "النساجون الشرقيون",
+    PHAR: "إيبيكو للأدوية",
+    PHDC: "بالم هيلز للتعمير",
+    POUL: "القاهرة للدواجن",
+    PRCL: "العامة لمنتجات الخزف والصيني",
+    PRDC: "الرواد للسياحة",
+    PRMH: "برايم القابضة للاستثمارات",
+    QNBA: "بنك قطر الوطني الأهلي",
+    QNBE: "بنك قطر الوطني",
+    RACC: "راية لمراكز الاتصالات",
+    RAKT: "العامة لصناعة الورق راكتا",
+    RAYA: "راية القابضة للاستثمارات المالية",
+    REAC: "العقارية للبنوك الوطنية للتنمية",
+    RMDA: "العاشر من رمضان للأدوية راميدا",
+    ROTO: "رواد مصر للاستثمار السياحي",
+    RREI: "العربية للاستثمار العقاري",
+    SAIB: "بنك الشركة المصرفية",
+    SAUD: "بنك البركة مصر",
+    SCEM: "أسمنت سيناء",
+    SCFM: "مطاحن جنوب القاهرة",
+    SEIG: "السعودية المصرية للاستثمار والتمويل",
+    SIPC: "سبأ الدولية للأدوية",
+    SKPC: "سيدي كرير للبتروكيماويات",
+    SNFC: "الشرقية الوطنية للأمن الغذائي",
+    SPIN: "سبينالكس للإسكندرية للغزل والنسيج",
+    SPMD: "سبيد ميديكال",
+    SUGR: "الدلتا للسكر",
+    SVCE: "أسمنت جنوب الوادي",
+    SWDY: "السويدي إليكتريك",
+    TALM: "تعليم لخدمات الإدارة",
+    TAQA: "طاقة عربية",
+    TMGH: "مجموعة طلعت مصطفى",
+    TRTO: "ترانس أوكاشنز",
+    UBEE: "البنك المتحد",
+    UEFM: "مطاحن مصر العليا",
+    UNIP: "يونيباك للورق والكرتون",
+    UNIT: "المتحدة للإسكان والتعمير",
+    VALU: "فاليو",
+    VERT: "فيرتيكا للبرمجيات",
+    WCDF: "مطاحن وسط وغرب الدلتا",
+    ZMID: "زهراء المعادي للاستثمار والتعمير",
 };
+
 
 /**
  * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
  * Strips markdown tables, links, disclaimers, and technical syntax so audio synthesis speaks cleanly.
  * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
  */
-export function cleanVoiceText(rawText: string, maxChars: number = 10000): string {
-    if (!rawText) return "";
+/**
+ * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
+ * Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
+ * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
+ */
+/**
+ * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
+ * Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
+ * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
+ */
+export function cleanVoiceText(rawText: string, maxChars: number = 600): string {
+    if (!rawText || !rawText.trim()) return "";
 
     let text = rawText;
 
-    // 1. Convert markdown table rows into spoken text instead of wiping them out
-    text = text.replace(/\|[\s:\-]+\|[\s:\-]*[\r\n]+/g, "\n");
-    text = text.replace(/\|/g, "، ");
+    // 1. Strip code blocks
+    text = text.replace(/```[\s\S]*?```/g, "");
 
-    // 2. Remove markdown links [text](url) -> text
-    text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
+    // 2. Extract prominent stock names from markdown tables before removing the table
+    const tableLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith("|") && l.endsWith("|"));
+    const extractedStocks: string[] = [];
+    if (tableLines.length >= 3) {
+        for (const row of tableLines.slice(2)) {
+            const cells = row.split("|").map(c => c.trim()).filter(Boolean);
+            if (cells.length > 0) {
+                let stockCell = cells[0];
+                stockCell = stockCell.replace(/\([A-Za-z0-9\.\-]+\)/g, "").trim();
+                for (const [sym, ar] of Object.entries(EGX_STOCK_TICKERS)) {
+                    if (new RegExp(`\\b${sym}\\b`, "i").test(cells[0])) {
+                        stockCell = ar;
+                        break;
+                    }
+                }
+                stockCell = stockCell.replace(/[A-Za-z0-9\.\-]+/g, "").trim();
+                if (stockCell && !extractedStocks.includes(stockCell) && stockCell.length > 2) {
+                    extractedStocks.push(stockCell);
+                }
+                if (extractedStocks.length >= 4) break;
+            }
+        }
+    }
 
-    // 3. Remove markdown bold, italic, code, headers
-    text = text.replace(/#{1,6}\s*/g, "");
-    text = text.replace(/[*`_~]/g, "");
+    // Replace markdown table blocks with a single smooth transitional sentence
+    const tableReplacement = extractedStocks.length > 0
+        ? `\nومن أبرز الأسهم في القائمة: ${extractedStocks.join("، و")}، والجدول التفصيلي كامل بجميع الأسعار معروض على شاشتك.\n`
+        : (tableLines.length > 0 ? "\nوالجدول التفصيلي كامل بجميع الأسعار والنسب معروض على شاشتك.\n" : "");
 
-    // 4. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
-    text = text.replace(/[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]/g, "");
+    // Completely remove all markdown table blocks
+    text = text.replace(/(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+/gm, () => tableReplacement);
+    text = text.replace(/\|[^\n]+\|/g, "");
 
-    // 5. Strip ONLY trailing generic disclaimer sentences at the very bottom
+    // 3. Strip trailing boilerplate disclaimers
+    text = text.replace(/تحليل EGX Bots مبني على أحدث البيانات[\s\S]*$/gi, "");
+    text = text.replace(/تحليل مبني على أحدث البيانات المتاحة[\s\S]*$/gi, "");
+    text = text.replace(/منصة EGX Bots لتحليل الأسهم المصرية[\s\S]*$/gi, "");
     text = text.replace(/(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$/gi, "");
     text = text.replace(/منصة EGX BOTS ليست وسيطاً[\s\S]*$/gi, "");
     text = text.replace(/هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$/gi, "");
 
-    // 6. Remove emojis and decorative icons
+    // 4. Remove markdown links [text](url) -> text
+    text = text.replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1");
+
+    // 5. Remove markdown bold, italic, code, headers
+    text = text.replace(/#{1,6}\s*/g, "");
+    text = text.replace(/[*`_~]/g, "");
+
+    // 6. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    text = text.replace(/[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]/g, "");
+
+    // 7. Remove emojis and decorative icons
     text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
     text = text.replace(/[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]/g, "");
 
-    // 7. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    // 8. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
     text = text.replace(/(?:والـ|الـ)\s*(?=[A-Za-z])/g, " ");
 
-    // 8. Natural spoken currency, indices, and stock terms into clear Arabic
+    // 9. Natural spoken currency, indices, and stock terms into clear Arabic
     text = text.replace(/(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)/gi, " جنيه");
     text = text.replace(/\b(?:ج\.م\.?|جم|EGP)\b/gi, " جنيه");
     text = text.replace(/%/g, " في المية ");
@@ -386,6 +491,7 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
     text = text.replace(/(?:متوسط\s*)?\bEMA\b/gi, " المتوسط المتحرك ");
     text = text.replace(/(?:متوسط\s*)?\bSMA\b/gi, " المتوسط المتحرك ");
     text = text.replace(/\bP\/E\b/gi, " مضاعف الربحية ");
+    text = text.replace(/\bP\/B\b/gi, " القيمة الدفترية ");
     text = text.replace(/\bEPS\b/gi, " ربحية السهم ");
     text = text.replace(/(?:وقف الخسارة\s*)?\bSL\b/gi, " وقف الخسارة ");
     text = text.replace(/(?:جني الأرباح\s*|الهدف\s*)?\bTP\b/gi, " المستهدف ");
@@ -393,20 +499,23 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
     text = text.replace(/\bSELL\b/gi, " بيع ");
     text = text.replace(/\bHOLD\b/gi, " احتفاظ ");
 
-    // 9. Replace standalone stock tickers with full Arabic company names
+    // 10. Replace standalone stock tickers with full Arabic company names
     for (const [sym, arName] of Object.entries(EGX_STOCK_TICKERS)) {
         const re = new RegExp(`\\b${sym}(?:\\.CA)?\\b`, "gi");
         text = text.replace(re, ` ${arName} `);
     }
 
-    // 10. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    // 11. Clean any remaining English characters/words so the voice engine NEVER pronounces English
     text = text.replace(/[A-Za-z]+(?:\.[A-Za-z]+)?/g, "");
 
-    // 11. Normalize whitespace and clean punctuation
-    text = text.replace(/\s+/g, " ").trim();
-    text = text.replace(/([،\.!؟])\s*\1+/g, "$1");
+    // 12. Remove dense parenthesized number lists like (88.16 و 87.38)
+    text = text.replace(/\([0-9.,\sو\+\-%]+\)/g, "");
 
-    // 12. Truncate smoothly at sentence boundary ONLY if exceeding maxChars (default 10,000)
+    // 13. Normalize whitespace and clean punctuation
+    text = text.replace(/\s+/g, " ").trim();
+    text = text.replace(/([،\.!\؟])\s*\1+/g, "$1");
+
+    // 14. Truncate smoothly at sentence boundary if exceeding maxChars
     if (text.length > maxChars) {
         const cut = text.slice(0, maxChars);
         const lastPunct = Math.max(
@@ -426,6 +535,7 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
 
     return text.trim();
 }
+
 
 /**
  * Plays a soft dual-tone synthesizer chime via Web Audio API to indicate connection

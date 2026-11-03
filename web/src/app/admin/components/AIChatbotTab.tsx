@@ -28,6 +28,9 @@ import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 
 
 
+// Global in-memory audio blob cache for 0ms instant replay in admin panel
+const adminAudioBlobCache = new Map<string, string>();
+
 export default function AIChatbotTab() {
 
     const [usageTotals, setUsageTotals] = useState<{ users: Record<string, any>; complete: boolean } | null>(null);
@@ -65,107 +68,121 @@ export default function AIChatbotTab() {
     const messagesContainerRef = useRef<HTMLDivElement>(null);
 
     const [playingLogId, setPlayingLogId] = useState<string | null>(null);
+    const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
 
     const adminAudioRef = useRef<HTMLAudioElement | null>(null);
 
 
 
-    const playAudioForLog = (id: string, text: string, directAudioUrl?: string | null) => {
-
+    const playAudioForLog = async (id: string, text: string, directAudioUrl?: string | null) => {
         if (playingLogId === id) {
-
             if (adminAudioRef.current) {
-
                 adminAudioRef.current.pause();
-
                 adminAudioRef.current = null;
-
             }
-
             setPlayingLogId(null);
-
             return;
-
         }
-
-
 
         if (adminAudioRef.current) {
-
             adminAudioRef.current.pause();
-
             adminAudioRef.current = null;
-
         }
-
-
 
         const isUserVoice = id.startsWith("user_");
 
-
-
-        let url = "";
-
         if (directAudioUrl && typeof directAudioUrl === "string" && directAudioUrl.trim()) {
-
-            // Play user's actual microphone voice recording!
-
-            url = directAudioUrl.trim();
-
-        } else if (isUserVoice) {
-
-            // Strict rule: NEVER play synthetic AI voice pretending to be the user!
-
-            toast.error("لم يتم العثور على تسجيل مايكروفون حقيقي محفوظ لهذه الرسالة (أُرسلت كنص أو قبل التحديث)");
-
+            const audio = new Audio(directAudioUrl.trim());
+            adminAudioRef.current = audio;
+            setPlayingLogId(id);
+            audio.onended = () => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+            };
+            audio.onerror = () => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+                toast.error("تعذر تشغيل الملف الصوتي للعميل");
+            };
+            audio.play().catch(() => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+            });
             return;
-
-        } else {
-
-            // Synthetic TTS for assistant replies only
-
-            const cleaned = (text.includes("###") || text.includes("|")) ? extractVoiceAnalysisSpeech(text) : (cleanVoiceText(text, 2500) || text.slice(0, 300));
-
-            url = `/api/voice/tts?text=${encodeURIComponent(cleaned)}&voice=ar-EG-ShakirNeural`;
-
         }
 
-        const audio = new Audio(url);
+        if (isUserVoice) {
+            toast.error("لم يتم العثور على تسجيل مايكروفون حقيقي محفوظ لهذه الرسالة (أُرسلت كنص أو قبل التحديث)");
+            return;
+        }
 
-        adminAudioRef.current = audio;
+        // 1. Instant 0ms Replay if already in memory blob cache
+        const cachedBlobUrl = adminAudioBlobCache.get(id);
+        if (cachedBlobUrl) {
+            const audio = new Audio(cachedBlobUrl);
+            adminAudioRef.current = audio;
+            setPlayingLogId(id);
+            audio.onended = () => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+            };
+            audio.play().catch(() => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+            });
+            return;
+        }
 
-        setPlayingLogId(id);
+        // 2. Clean and cap text to max 600 characters (omits tables, English symbols, etc.)
+        const cleaned = cleanVoiceText(text, 600) || text.slice(0, 300);
+        if (!cleaned.trim()) {
+            toast.error("لا يوجد نص صالح للتشغيل الصوتي");
+            return;
+        }
 
+        setLoadingAudioId(id);
+        try {
+            const res = await fetch("/api/voice/tts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    text: cleaned,
+                    voice: "ar-EG-ShakirNeural",
+                    rate: "+10%"
+                })
+            });
 
+            if (!res.ok) {
+                throw new Error(`TTS failed with status ${res.status}`);
+            }
 
-        audio.onended = () => {
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            adminAudioBlobCache.set(id, blobUrl);
 
+            const audio = new Audio(blobUrl);
+            adminAudioRef.current = audio;
+            setPlayingLogId(id);
+            setLoadingAudioId(null);
+
+            audio.onended = () => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+            };
+
+            audio.onerror = () => {
+                setPlayingLogId(null);
+                adminAudioRef.current = null;
+                toast.error("تعذر تشغيل الملف الصوتي");
+            };
+
+            await audio.play();
+        } catch (err) {
+            console.error("Admin TTS playback error:", err);
+            setLoadingAudioId(null);
             setPlayingLogId(null);
-
-            adminAudioRef.current = null;
-
-        };
-
-
-
-        audio.onerror = () => {
-
-            setPlayingLogId(null);
-
-            adminAudioRef.current = null;
-
             toast.error("تعذر تشغيل الملف الصوتي");
-
-        };
-
-
-
-        audio.play().catch(() => {
-
-            setPlayingLogId(null);
-
-        });
-
+        }
     };
 
     const firstUnreadRef = useRef<HTMLDivElement>(null);
@@ -1724,17 +1741,37 @@ export default function AIChatbotTab() {
 
                                                                                     type="button"
 
+                                                                                    disabled={loadingAudioId === `spoken_${log.id}`}
+
                                                                                     onClick={() => playAudioForLog(`spoken_${log.id}`, log.spoken_text || extractVoiceAnalysisSpeech(log.reply))}
 
-                                                                                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-black cursor-pointer transition active:scale-95 flex items-center gap-1.5 shadow-sm"
+                                                                                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-black text-xs font-black cursor-pointer transition active:scale-95 flex items-center gap-1.5 shadow-sm"
 
                                                                                     title="استمع للمكالمة بنفس النص الصوتي تماماً"
 
                                                                                 >
 
-                                                                                    <Volume2 className="w-3.5 h-3.5" />
+                                                                                    {loadingAudioId === `spoken_${log.id}` ? (
 
-                                                                                    <span>{playingLogId === `spoken_${log.id}` ? "إيقاف ⏸️" : "استمع للمكالمة 🔊"}</span>
+                                                                                        <>
+
+                                                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+
+                                                                                            <span>جاري التجهيز...</span>
+
+                                                                                        </>
+
+                                                                                    ) : (
+
+                                                                                        <>
+
+                                                                                            <Volume2 className="w-3.5 h-3.5" />
+
+                                                                                            <span>{playingLogId === `spoken_${log.id}` ? "إيقاف ⏸️" : "استمع للمكالمة 🔊"}</span>
+
+                                                                                        </>
+
+                                                                                    )}
 
                                                                                 </button>
 
@@ -1742,7 +1779,7 @@ export default function AIChatbotTab() {
 
                                                                             <p className="text-xs leading-relaxed font-sans text-zinc-800 dark:text-zinc-200 bg-white/40 dark:bg-black/40 p-2 rounded-lg border border-amber-500/20 whitespace-pre-wrap">
 
-                                                                                &quot;{log.spoken_text || extractVoiceAnalysisSpeech(log.reply)}&quot;
+                                                                                &quot;{cleanVoiceText(log.spoken_text || extractVoiceAnalysisSpeech(log.reply), 600)}&quot;
 
                                                                             </p>
 

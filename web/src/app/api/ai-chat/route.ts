@@ -927,7 +927,7 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 10000) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
+                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 600) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -1167,7 +1167,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 10000) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
+                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 600) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,

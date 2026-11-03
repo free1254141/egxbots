@@ -130,7 +130,7 @@ describe("voice-utils", () => {
         expect(isVoiceBetaTesterEmail("weeeenew@gmail.com")).toBe(false);
     });
 
-    it("preserves 100% of answer text in cleanVoiceText without dropping tables or wiping notes", () => {
+    it("omits raw markdown tables and numbers in speech while preserving human analytical notes and zero English letters", () => {
         const textWithTableAndNotes = `تحليل سهم فوري:
 | السهم | السعر | الدعم | المقاومة |
 |---|---|---|---|
@@ -142,11 +142,9 @@ describe("voice-utils", () => {
 
         const cleaned = cleanVoiceText(textWithTableAndNotes);
 
-        // Verify table data is spoken
-        expect(cleaned).toContain("فوري");
-        expect(cleaned).toContain("15.80 جنيه");
-        expect(cleaned).toContain("15.20 جنيه");
-        expect(cleaned).toContain("16.50 جنيه");
+        // Verify raw table cells with comma-separated numbers are omitted from speech
+        expect(cleaned).not.toContain("|");
+        expect(cleaned).toContain("ومن أبرز الأسهم في القائمة: فوري، والجدول التفصيلي كامل بجميع الأسعار معروض على شاشتك");
 
         // Verify notes and alerts are 100% spoken and NOT wiped out
         expect(cleaned).toContain("ملاحظة: السهم يحتاج إلى تأكيد السيولة");

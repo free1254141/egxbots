@@ -48,128 +48,187 @@ def _get_cache_key(voice: str, rate: str, pitch: str, clean_text: str) -> str:
 # Guarantees that the TTS audio engine NEVER speaks English tickers/letters, and always speaks Arabic names.
 EGX_STOCK_TICKERS: dict[str, str] = {
     "ABUK": "أبو قير للأسمدة",
-    "TMGH": "طلعت مصطفى",
-    "COMI": "التجاري الدولي",
-    "FWRY": "فوري",
-    "SWDY": "السويدي إليكتريك",
-    "ETEL": "المصرية للاتصالات",
-    "MFPC": "موبكو",
-    "SKPC": "سيدي كرير",
-    "AMOC": "أموك",
-    "EKHO": "المصرية الكويتية",
-    "BTFH": "بلتون",
-    "HRHO": "هيرميس",
-    "CICH": "سي آي كابيتال",
-    "EFIH": "إي فاينانس",
-    "ISPH": "ابن سينا فارما",
-    "PHAR": "إيبيكو",
-    "ESRS": "حديد عز",
-    "HELI": "مصر الجديدة للإسكان",
-    "PHDC": "بالم هيلز",
-    "MASR": "مدينة مصر للإسكان",
-    "MNHD": "مدينة مصر للإسكان",
-    "OCDI": "سوديك",
-    "EMFD": "إعمار مصر",
-    "ORHD": "أوراسكوم للتنمية",
-    "ORAS": "أوراسكوم كونستراكشون",
-    "EGAL": "مصر للألومنيوم",
-    "TAQA": "طاقة عربية",
-    "EGAS": "غاز مصر",
-    "AUTO": "جي بي أوتو",
-    "GBCO": "جي بي كوربوريشن",
-    "ADIB": "أبوظبي الإسلامي",
-    "CIEB": "كريدي أجريكول",
-    "QNBE": "بنك قطر الوطني",
-    "QNBA": "بنك قطر الوطني",
-    "FAIT": "فيصل الإسلامي",
-    "HDBK": "بنك التعمير والإسكان",
-    "CCAP": "القلعة",
-    "VALU": "فاليو",
-    "ORWE": "النساجون الشرقيون",
-    "EGCH": "كيما",
-    "EFIC": "المالية والصناعية",
-    "KZPC": "كفر الزيات للمبيدات",
-    "FERC": "فيركيم مصر",
-    "JUFO": "جهينة",
-    "DOMT": "دومتي",
-    "EFID": "إيديتا",
-    "OLFI": "عبور لاند",
-    "POUL": "القاهرة للدواجن",
-    "ISMA": "الإسماعيلية للدواجن",
-    "MPCO": "المنصورة للدواجن",
-    "SUGR": "الدلتا للسكر",
-    "EAST": "إيسترن كومباني",
-    "MCQE": "أسمنت قنا",
-    "MBSC": "أسمنت بني سويف",
-    "ARCC": "العربية للأسمنت",
-    "SVCE": "أسمنت جنوب الوادي",
-    "SCEM": "أسمنت سيناء",
-    "LCSW": "ليسيكو مصر",
-    "ECAP": "العز للسيراميك",
-    "CERA": "ريماس",
-    "IRAX": "العز الدخيلة للصلب",
-    "ATQA": "مصر الوطنية للصلب",
-    "IRON": "الحديد والصلب",
-    "MBEG": "إم بي للهندسة",
-    "IEEC": "المشروعات الصناعية والهندسية",
-    "EEII": "العربية للصناعات الهندسية",
-    "ALUM": "العربية للألومنيوم",
-    "KORA": "قرة للطاقة",
-    "ELEC": "الكابلات الكهربائية",
-    "RAYA": "راية القابضة",
-    "RACC": "راية لمراكز الاتصالات",
-    "ETRS": "إيجيترانس",
-    "ALCN": "الإسكندرية لتداول الحاويات",
-    "EGBE": "البنك المصري الخليجي",
-    "SAUD": "بنك البركة",
-    "EXPA": "بنك تنمية الصادرات",
-    "CANA": "بنك قناة السويس",
-    "UBEE": "البنك المتحد",
-    "SEIG": "السعودية المصرية للاستثمار",
-    "ODIN": "أودن للاستثمارات",
-    "CNFN": "كونتكت المالية",
-    "ATLC": "التوفيق للتأجير",
-    "PRMH": "برايم القابضة",
-    "GTWL": "جولدن تكس",
+    "ACAMD": "العربية لاستصلاح الأراضي",
     "ACGC": "العربية لحليج الأقطان",
-    "DEIN": "دايس للملابس",
-    "DSCW": "دايس للملابس",
-    "KABO": "كابو",
-    "SPIN": "سبينالكس",
-    "TALM": "تعليم لخدمات الإدارة",
-    "CEFM": "مطاحن مصر الوسطى",
-    "EDFM": "مطاحن شرق الدلتا",
-    "SCFM": "مطاحن جنوب القاهرة",
-    "MILS": "مطاحن شمال القاهرة",
-    "AFMC": "مطاحن الإسكندرية",
-    "WCDF": "مطاحن وسط وغرب الدلتا",
-    "UEFM": "مطاحن مصر العليا",
-    "MPCI": "ممفيس للأدوية",
-    "NIPH": "النيل للأدوية",
-    "AXPH": "الإسكندرية للأدوية",
-    "CPCI": "القاهرة للأدوية",
-    "AMES": "المركز الطبي الجديد",
-    "CLHO": "مستشفى كليوباترا",
-    "SIPC": "سبأ الدولية للأدوية",
-    "SPMD": "سبيد ميديكال",
-    "RMDA": "راميدا للأدوية",
     "ADCI": "العربية للأدوية",
-    "ELSH": "الشمس للإسكان",
-    "ELKA": "القاهرة للإسكان",
-    "UNIT": "المتحدة للإسكان",
-    "ZMID": "زهراء المعادي",
+    "ADIB": "أبوظبي الإسلامي",
+    "AFMC": "مطاحن الإسكندرية",
+    "AIFI": "الإسكندرية للاستثمارات المالية",
+    "AIH": "العروبة للسمسرة",
+    "AJWA": "أجواء للصناعات الغذائية",
+    "ALCN": "الإسكندرية لتداول الحاويات",
+    "ALEX": "الإسكندرية للغزل والنسيج",
+    "ALUM": "العربية للألومنيوم",
+    "AMER": "عامر جروب",
+    "AMES": "المركز الطبي الجديد",
+    "AMIA": "العربية للمحابس",
+    "AMOC": "أموك",
+    "ANFI": "الإسكندرية الوطنية للإلكترونيات",
+    "ARAB": "المطورون العرب",
+    "ARCC": "العربية للأسمنت",
+    "ARVA": "الإسكندرية للخدمات الطبية",
+    "ATCP": "العربية للتجارة والتوزيع",
+    "ATLC": "التوفيق للتأجير",
+    "ATQA": "مصر الوطنية للصلب",
+    "AUTO": "جي بي أوتو",
+    "AXPH": "الإسكندرية للأدوية",
+    "BINV": "بي انفستمنتس",
+    "BIOC": "بي بي أو كابيتال",
+    "BOLA": "بدر الدين للمقاولات",
+    "BRAQ": "البراق للاستثمارات",
+    "BTFH": "بلتون",
+    "CANA": "بنك قناة السويس",
+    "CCAP": "القلعة للاستشارات",
+    "CEFM": "مطاحن مصر الوسطى",
+    "CERA": "ريماس",
+    "CFGH": "كونكريت فاشون",
+    "CHSH": "القناة للتوكيلات الملاحية",
+    "CICH": "سي آي كابيتال",
+    "CIEB": "كريدي أجريكول",
+    "CLHO": "مستشفى كليوباترا",
+    "CMRI": "العامة للصوامع والتخزين",
+    "CNFN": "كونتكت المالية",
+    "COMI": "التجاري الدولي",
+    "COSG": "القاهرة للزيوت",
+    "CPCI": "القاهرة للأدوية",
+    "CPPC": "القاهرة للأدوية",
     "CRST": "كريست مارك",
-    "RREI": "العربية للاستثمار العقاري",
+    "CSAG": "القناة للتوكيلات الملاحية",
+    "DAPH": "مصر للأسمنت قنا",
+    "DEIN": "دايس للملابس",
+    "DOMT": "دومتي",
+    "DSCW": "دايس للملابس",
+    "EAST": "الشرقية للدخان",
+    "ECAP": "العز للسيراميك الجوهرة",
+    "ECAZ": "العز للسيراميك الجوهرة",
+    "EDFM": "مطاحن شرق الدلتا",
+    "EEII": "العربية للصناعات الهندسية",
+    "EFIC": "المالية والصناعية المصرية",
+    "EFID": "إيديتا للصناعات الغذائية",
+    "EFIH": "إي فاينانس",
+    "EGAL": "مصر للألومنيوم",
+    "EGAS": "غاز مصر",
+    "EGBE": "البنك المصري الخليجي",
+    "EGCH": "كيما للأسمدة",
+    "EHDR": "المصريين للإسكان",
+    "EKHO": "المصرية الكويتية القابضة",
+    "EKHOA": "المصرية الكويتية",
+    "ELEC": "الكابلات الكهربائية",
+    "ELKA": "القاهرة للإسكان",
+    "ELNA": "النصر للملابس كابو",
+    "ELSH": "الشمس للإسكان",
+    "ELWA": "الوادى للاستثمار السياحي",
+    "EMFD": "إعمار مصر للتنمية",
+    "EPPC": "الأهرام للطباعة",
+    "EPPK": "الأهرام للطباعة",
+    "ESRS": "حديد عز",
+    "ETEL": "المصرية للاتصالات",
+    "ETRS": "إيجيترانس",
+    "EXPA": "بنك تنمية الصادرات",
+    "FAIT": "بنك فيصل الإسلامي",
+    "FENG": "فيركيم مصر للأسمدة",
+    "FERC": "فيركيم مصر للأسمدة",
+    "FWRY": "فوري للمدفوعات الإلكترونية",
+    "GBCO": "جي بي كوربوريشن",
+    "GDWA": "جدوى للتنمية الصناعية",
+    "GEBE": "المصرية لتطوير صناعة البناء ليفت سلاب",
+    "GMCI": "العامة لمنتجات الخزف والصيني شيني",
+    "GOCO": "الخليجية الكندية للاستثمار",
+    "GTWL": "جولدن تكس للأصواف",
+    "HDBK": "بنك التعمير والإسكان",
+    "HELI": "مصر الجديدة للإسكان",
+    "HRHO": "إي إف جي القابضة هيرميس",
+    "IBMD": "ابن سينا فارما",
+    "IDHC": "التشخيص المتكاملة القابضة",
+    "IDRE": "رواد السياحة",
+    "IEEC": "المشروعات الصناعية والهندسية",
+    "IFAP": "الدولية للأسمدة والكيماويات",
+    "IIOC": "الدولية للتأجير التمويلي إينكوليس",
+    "INCO": "المؤشر للبرمجيات",
+    "IPMC": "المطاحن المصرية",
+    "IRAX": "العز الدخيلة للصلب",
+    "IRON": "الحديد والصلب المصرية",
+    "ISMA": "الإسماعيلية للدواجن",
+    "ISPH": "ابن سينا فارما",
+    "JUFO": "جهينة للصناعات الغذائية",
+    "KABO": "كابو للملابس",
+    "KABR": "كفر الزيات للمبيدات",
+    "KORA": "قرة للطاقة",
+    "KZPC": "كفر الزيات للمبيدات",
+    "LCSW": "ليسيكو مصر",
     "MAAL": "مرسيليا المصرية الخليجية",
-    "OBRI": "العبور للاستثمار العقاري",
+    "MASR": "مدينة مصر للإسكان والتعمير",
+    "MBEG": "إم بي للهندسة",
+    "MBSC": "أسمنت بني سويف",
+    "MCQE": "أسمنت قنا",
+    "MEPA": "الشرق الأوسط لصناعة الزجاج",
+    "MFPC": "موبكو للأسمدة",
+    "MILS": "مطاحن شمال القاهرة",
+    "MIPH": "مينا فارم للأدوية",
+    "MNHD": "مدينة مصر للإسكان",
+    "MOIL": "الخدمات الملاحية والبترولية ماريديف",
+    "MPCI": "ممفيس للأدوية",
+    "MPCO": "المنصورة للدواجن",
+    "MRCO": "مرسى علم للتنمية السياحية",
     "NCCW": "النصر للأعمال المدنية",
+    "NDRL": "ناشيونال دريلنج",
+    "NIPH": "النيل للأدوية",
+    "OBRI": "العبور للاستثمار العقاري",
+    "OCDI": "سوديك السادس من أكتوبر للتنمية",
+    "ODIN": "أودن للاستثمارات المالية",
+    "OFH": "أوراسكوم المالية القابضة",
+    "OIFI": "أوراسكوم للاستثمار القابضة",
+    "OLFI": "عبور لاند للصناعات الغذائية",
+    "ORAS": "أوراسكوم كونستراكشون",
+    "ORHD": "أوراسكوم للتنمية مصر",
+    "ORWE": "النساجون الشرقيون",
+    "PHAR": "إيبيكو للأدوية",
+    "PHDC": "بالم هيلز للتعمير",
+    "POUL": "القاهرة للدواجن",
+    "PRCL": "العامة لمنتجات الخزف والصيني",
+    "PRDC": "الرواد للسياحة",
+    "PRMH": "برايم القابضة للاستثمارات",
+    "QNBA": "بنك قطر الوطني الأهلي",
+    "QNBE": "بنك قطر الوطني",
+    "RACC": "راية لمراكز الاتصالات",
+    "RAKT": "العامة لصناعة الورق راكتا",
+    "RAYA": "راية القابضة للاستثمارات المالية",
+    "REAC": "العقارية للبنوك الوطنية للتنمية",
+    "RMDA": "العاشر من رمضان للأدوية راميدا",
+    "ROTO": "رواد مصر للاستثمار السياحي",
+    "RREI": "العربية للاستثمار العقاري",
+    "SAIB": "بنك الشركة المصرفية",
+    "SAUD": "بنك البركة مصر",
+    "SCEM": "أسمنت سيناء",
+    "SCFM": "مطاحن جنوب القاهرة",
+    "SEIG": "السعودية المصرية للاستثمار والتمويل",
+    "SIPC": "سبأ الدولية للأدوية",
+    "SKPC": "سيدي كرير للبتروكيماويات",
+    "SNFC": "الشرقية الوطنية للأمن الغذائي",
+    "SPIN": "سبينالكس للإسكندرية للغزل والنسيج",
+    "SPMD": "سبيد ميديكال",
+    "SUGR": "الدلتا للسكر",
+    "SVCE": "أسمنت جنوب الوادي",
+    "SWDY": "السويدي إليكتريك",
+    "TALM": "تعليم لخدمات الإدارة",
+    "TAQA": "طاقة عربية",
+    "TMGH": "مجموعة طلعت مصطفى",
+    "TRTO": "ترانس أوكاشنز",
+    "UBEE": "البنك المتحد",
+    "UEFM": "مطاحن مصر العليا",
+    "UNIP": "يونيباك للورق والكرتون",
+    "UNIT": "المتحدة للإسكان والتعمير",
+    "VALU": "فاليو",
+    "VERT": "فيرتيكا للبرمجيات",
+    "WCDF": "مطاحن وسط وغرب الدلتا",
+    "ZMID": "زهراء المعادي للاستثمار والتعمير",
 }
 
 
 def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     """
     Format and streamline technical market analysis into clear, natural conversational Arabic.
-    Preserves 100% of analytical text and converts tables into natural spoken words.
+    Omits raw tables and numbers, speaking natural human insights and stock names in Arabic only.
     Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
     """
     if not raw_text or not raw_text.strip():
@@ -177,34 +236,65 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
 
     text = raw_text
 
-    # 1. Strip code blocks, but convert markdown tables into readable spoken text
+    # 1. Strip code blocks
     text = re.sub(r"```[\s\S]*?```", "", text)
-    text = re.sub(r"\|[\s:\-]+\|[\s:\-]*[\r\n]+", "\n", text)
-    text = text.replace("|", "، ")
 
-    # 2. Strip markdown syntax
+    # 2. Extract prominent stock names from markdown tables before removing the table
+    table_lines = [line.strip() for line in text.splitlines() if line.strip().startswith("|") and line.strip().endswith("|")]
+    extracted_stocks = []
+    if len(table_lines) >= 3:
+        for row in table_lines[2:]:
+            cells = [c.strip() for c in row.split("|")[1:-1]]
+            if cells and cells[0]:
+                stock_cell = cells[0]
+                stock_clean = re.sub(r"\([A-Za-z0-9\.\-]+\)", "", stock_cell).strip()
+                for sym, ar in EGX_STOCK_TICKERS.items():
+                    if re.search(rf"\b{sym}\b", stock_cell, re.IGNORECASE):
+                        stock_clean = ar
+                        break
+                stock_clean = re.sub(r"[A-Za-z0-9\.\-]+", "", stock_clean).strip()
+                if stock_clean and stock_clean not in extracted_stocks and len(stock_clean) > 2:
+                    extracted_stocks.append(stock_clean)
+                if len(extracted_stocks) >= 4:
+                    break
+
+    # Replace markdown table blocks with a single smooth transitional sentence
+    table_replacement = ""
+    if extracted_stocks:
+        table_replacement = f"\nومن أبرز الأسهم في القائمة: {'، و'.join(extracted_stocks)}، والجدول التفصيلي كامل بجميع الأسعار معروض على شاشتك.\n"
+    elif table_lines:
+        table_replacement = "\nوالجدول التفصيلي كامل بجميع الأسعار والنسب معروض على شاشتك.\n"
+
+    # Completely remove all markdown table blocks
+    text = re.sub(r"(?:^[ \t]*\|[^\n]+\|[ \t]*(?:\r?\n)?)+", lambda m: table_replacement, text, flags=re.MULTILINE)
+    text = re.sub(r"\|[^\n]+\|", "", text)
+
+    # 3. Strip trailing boilerplate disclaimers without affecting core notes or alerts
+    text = re.sub(r"تحليل EGX Bots مبني على أحدث البيانات[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"تحليل مبني على أحدث البيانات المتاحة[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"منصة EGX Bots لتحليل الأسهم المصرية[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"منصة EGX BOTS ليست وسيطاً[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$", "", text, flags=re.IGNORECASE)
+
+    # 4. Strip markdown syntax
     text = re.sub(r"#{1,6}\s*", "", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
 
-    # 3. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    # 5. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
     text = re.sub(r"[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]", "", text)
 
-    # 4. Strip trailing boilerplate disclaimers without affecting core notes or alerts
-    text = re.sub(r"(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"منصة EGX BOTS ليست وسيطاً[\s\S]*$", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$", "", text, flags=re.IGNORECASE)
-
-    # 5. Remove emojis and decorative icons
+    # 6. Remove emojis and decorative icons
     text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
     text = re.sub(r"[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]", "", text)
 
-    # 6. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    # 7. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
     text = re.sub(r"(?:والـ|الـ)\s*(?=[A-Za-z])", " ", text)
 
-    # 7. Financial terms, indices, and indicator acronyms into natural spoken Arabic
+    # 8. Financial terms, indices, and indicator acronyms into natural spoken Arabic
     text = re.sub(r"(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)", " جنيه ", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:ج\.م\.?|جم|EGP)\b", " جنيه ", text, flags=re.IGNORECASE)
     text = text.replace("%", " في المية ")
@@ -218,6 +308,7 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"(?:متوسط\s*)?\bEMA\b", " المتوسط المتحرك ", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:متوسط\s*)?\bSMA\b", " المتوسط المتحرك ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bP/E\b", " مضاعف الربحية ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bP/B\b", " القيمة الدفترية ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bEPS\b", " ربحية السهم ", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:وقف الخسارة\s*)?\bSL\b", " وقف الخسارة ", text, flags=re.IGNORECASE)
     text = re.sub(r"(?:جني الأرباح\s*|الهدف\s*)?\bTP\b", " المستهدف ", text, flags=re.IGNORECASE)
@@ -225,18 +316,21 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"\bSELL\b", " بيع ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bHOLD\b", " احتفاظ ", text, flags=re.IGNORECASE)
 
-    # 8. Replace standalone stock tickers with full Arabic company names
+    # 9. Replace standalone stock tickers with full Arabic company names
     for sym, ar_name in EGX_STOCK_TICKERS.items():
         text = re.sub(rf"\b{sym}(?:\.CA)?\b", f" {ar_name} ", text, flags=re.IGNORECASE)
 
-    # 9. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    # 10. Clean any remaining English characters/words so the voice engine NEVER pronounces English
     text = re.sub(r"[A-Za-z]+(?:\.[A-Za-z]+)?", "", text)
 
-    # 10. Normalize whitespace and clean punctuation
+    # 11. Remove dense parenthesized number lists like (88.16 و 87.38)
+    text = re.sub(r"\([0-9.,\sو\+\-%]+\)", "", text)
+
+    # 12. Normalize whitespace and clean punctuation
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"([،\.\!؟])\s*\1+", r"\1", text)
 
-    # 11. Truncate smoothly at sentence boundary only if exceeding max_chars (default 10,000)
+    # 13. Truncate smoothly at sentence boundary only if exceeding max_chars
     if len(text) > max_chars:
         cut = text[:max_chars]
         last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"), cut.rfind("\n"))
