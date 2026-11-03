@@ -36,9 +36,24 @@ export function VoiceCallModal({
     isPro = false,
     remainingQuota = 10,
 }: VoiceCallModalProps) {
-    const [callState, setCallState] = useState<CallState>("connecting");
+    const [callState, _setCallState] = useState<CallState>("connecting");
+    const callStateRef = useRef<CallState>("connecting");
+    const setCallState = useCallback((newState: CallState) => {
+        callStateRef.current = newState;
+        _setCallState(newState);
+    }, []);
+
     const [callDuration, setCallDuration] = useState(0);
-    const [isMuted, setIsMuted] = useState(false);
+    const [isMuted, _setIsMuted] = useState(false);
+    const isMutedRef = useRef(false);
+    const setIsMuted = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+        _setIsMuted((prev) => {
+            const next = typeof val === "function" ? val(prev) : val;
+            isMutedRef.current = next;
+            return next;
+        });
+    }, []);
+
     const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
     const [transcript, setTranscript] = useState("");
     const [latestSpokenText, setLatestSpokenText] = useState<string | null>(null);
@@ -47,12 +62,6 @@ export function VoiceCallModal({
     // Synchronous refs to prevent React state closure bugs
     const isOpenRef = useRef(isOpen);
     isOpenRef.current = isOpen;
-
-    const callStateRef = useRef<CallState>(callState);
-    callStateRef.current = callState;
-
-    const isMutedRef = useRef(isMuted);
-    isMutedRef.current = isMuted;
 
     const isSpeakerMutedRef = useRef(isSpeakerMuted);
     isSpeakerMutedRef.current = isSpeakerMuted;
@@ -186,23 +195,21 @@ export function VoiceCallModal({
             };
 
             rec.onend = () => {
-                // Safely restart if still in listening mode
+                // Continuously keep listening active across consecutive questions
                 if (
                     isOpenRef.current &&
-                    callStateRef.current !== "speaking" &&
-                    callStateRef.current !== "processing" &&
-                    callStateRef.current !== "ended" &&
+                    callStateRef.current === "listening" &&
                     !isMutedRef.current &&
                     !isProcessingRef.current
                 ) {
                     if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
                     recognitionRestartTimerRef.current = setTimeout(() => {
                         try {
-                            if (isOpenRef.current && callStateRef.current !== "speaking") {
-                                rec.start();
+                            if (isOpenRef.current && callStateRef.current === "listening" && !isMutedRef.current) {
+                                startListening();
                             }
                         } catch {}
-                    }, 150);
+                    }, 250);
                 }
             };
 
@@ -232,10 +239,16 @@ export function VoiceCallModal({
         setLatestSpokenText(spokenSummary);
 
         const onPlaybackFinished = () => {
-            if (isOpenRef.current) {
-                setCallState("listening");
-                startListening();
-            }
+            if (!isOpenRef.current) return;
+            stopSpeaking();
+            setCallState("listening");
+            setTranscript("");
+            if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+            recognitionRestartTimerRef.current = setTimeout(() => {
+                if (isOpenRef.current && callStateRef.current === "listening" && !isMutedRef.current) {
+                    startListening();
+                }
+            }, 200);
         };
 
         try {
@@ -297,10 +310,11 @@ export function VoiceCallModal({
         }
     };
 
-    // User interrupts assistant speaking
+    // User interrupts assistant speaking to ask the next question immediately
     const handleInterrupt = () => {
         stopSpeaking();
         setCallState("listening");
+        setTranscript("");
         startListening();
     };
 
