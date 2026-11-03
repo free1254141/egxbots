@@ -35,17 +35,6 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
 export default function ChatWidget() {
     const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
     const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
-
-    const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
-        setIsRecordingVoiceNote(false);
-        const audioUrl = URL.createObjectURL(audioBlob);
-        await sendMessage(transcript, undefined, {
-            isVoice: true,
-            isVoiceNote: true,
-            voiceAudioUrl: audioUrl,
-            audioDuration: duration,
-        });
-    };
     const { 
         isOpen, 
         setIsOpen, 
@@ -272,6 +261,41 @@ export default function ChatWidget() {
     const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
     const isVoiceTester = isVoiceBetaTester(user);
+
+    const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
+        setIsRecordingVoiceNote(false);
+        const localBlobUrl = URL.createObjectURL(audioBlob);
+
+        // Upload user's real microphone audio to Supabase Storage in the background
+        let permanentAudioUrl: string | undefined = undefined;
+        try {
+            const formData = new FormData();
+            const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
+            formData.append("file", audioBlob, `voice_note_${Date.now()}.${ext}`);
+            if (activeSessionId) formData.append("sessionId", activeSessionId);
+            if (user?.id) formData.append("userId", user.id);
+
+            const uploadRes = await fetch("/api/voice/upload", {
+                method: "POST",
+                body: formData,
+            });
+            if (uploadRes.ok) {
+                const uploadData = await uploadRes.json();
+                if (uploadData?.url) {
+                    permanentAudioUrl = uploadData.url;
+                }
+            }
+        } catch (uploadErr) {
+            console.warn("[ChatWidget] Failed to upload voice audio to storage, fallback to local URL:", uploadErr);
+        }
+
+        await sendMessage(transcript, undefined, {
+            isVoice: true,
+            isVoiceNote: true,
+            voiceAudioUrl: permanentAudioUrl || localBlobUrl,
+            audioDuration: duration,
+        });
+    };
 
     const handleDownloadImage = async (url: string) => {
         try {
@@ -1663,8 +1687,8 @@ export default function ChatWidget() {
             <VoiceCallModal
                 isOpen={isVoiceCallOpen}
                 onClose={() => setIsVoiceCallOpen(false)}
-                onSendMessage={async (text) => {
-                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true });
+                onSendMessage={async (text, options) => {
+                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true, ...options });
                     return reply || "";
                 }}
                 isPro={isPro}

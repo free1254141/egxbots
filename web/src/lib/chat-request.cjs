@@ -21,6 +21,7 @@ function createChatRequest(input) {
                 is_voice_note: Boolean(input.isVoiceNote),
                 channel: input.channel || (input.isVoiceNote ? "voice_note" : "voice_call"),
                 audio_duration: input.audioDuration,
+                voice_audio_url: input.voiceAudioUrl,
             } : {}),
         }),
     };

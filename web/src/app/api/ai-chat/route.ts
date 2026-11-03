@@ -570,6 +570,7 @@ export async function POST(req: NextRequest) {
         const isVoice = Boolean(body.is_voice || isVoiceCall || isVoiceNote);
         const messageChannel = typeof body.channel === "string" ? body.channel : (isVoiceCall ? "voice_call" : (isVoiceNote ? "voice_note" : "chat"));
         const audioDuration = typeof body.audio_duration === "number" ? body.audio_duration : undefined;
+        const voiceAudioUrl = typeof body.voice_audio_url === "string" && (body.voice_audio_url.startsWith("http://") || body.voice_audio_url.startsWith("https://")) ? body.voice_audio_url : undefined;
         const { history, image, images, model: userRequestedModel, session_id: inputSessionId, stream } = body;
         clientMessageId = typeof body.client_message_id === "string" ? body.client_message_id.trim().slice(0, 128) : "";
 
@@ -958,7 +959,7 @@ export async function POST(req: NextRequest) {
                                             content: sanitizeUserMessage(message || ""),
                                             client_message_id: clientMessageId || null,
                                             image_url: finalSavedImageUrl,
-                                            metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
+                                            metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}), ...(voiceAudioUrl ? { voice_audio_url: voiceAudioUrl } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
                                             created_at: messageTimestamps.user
                                         },
                                         {
@@ -1183,7 +1184,7 @@ export async function POST(req: NextRequest) {
                                                     content: sanitizeUserMessage(message || (hasImages ? "📷 [Image attached]" : "")),
                                                     client_message_id: clientMessageId || null,
                                              image_url: finalSavedImageUrl,
-                                             metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
+                                             metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}), ...(voiceAudioUrl ? { voice_audio_url: voiceAudioUrl } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
                                                     created_at: messageTimestamps.user
                                                 },
                                                 {

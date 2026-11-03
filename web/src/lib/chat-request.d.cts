@@ -12,5 +12,6 @@ export interface ChatRequestInput {
     isVoiceNote?: boolean;
     channel?: string;
     audioDuration?: number;
+    voiceAudioUrl?: string;
 }
 export function createChatRequest(input: ChatRequestInput): { method: string; headers: Record<string, string>; body: string };

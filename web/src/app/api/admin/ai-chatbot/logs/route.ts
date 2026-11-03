@@ -280,6 +280,7 @@ export async function GET(req: NextRequest) {
                             is_voice_note: Boolean(meta?.is_voice_note || userMeta?.is_voice_note),
                             channel: meta?.channel || userMeta?.channel || null,
                             audio_duration: meta?.audio_duration || userMeta?.audio_duration || null,
+                            voice_audio_url: userMeta?.voice_audio_url || meta?.voice_audio_url || null,
                             spoken_text: meta?.spoken_text || null,
                             is_pro: isProUser(msg.user_id),
                         });
@@ -333,6 +334,7 @@ export async function GET(req: NextRequest) {
                             is_voice_note: Boolean(meta?.is_voice_note),
                             channel: meta?.channel || null,
                             audio_duration: meta?.audio_duration || null,
+                            voice_audio_url: meta?.voice_audio_url || null,
                             spoken_text: meta?.spoken_text || null,
                             is_pro: isProUser(msg.user_id),
                         });

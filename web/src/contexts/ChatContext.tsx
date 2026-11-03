@@ -1530,6 +1530,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     audioDuration: options?.audioDuration,
 
+                    voiceAudioUrl: options?.voiceAudioUrl,
+
                 }),
 
                 signal: abortControllerRef.current.signal,

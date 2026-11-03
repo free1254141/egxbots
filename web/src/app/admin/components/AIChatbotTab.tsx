@@ -34,7 +34,7 @@ export default function AIChatbotTab() {
     const [playingLogId, setPlayingLogId] = useState<string | null>(null);
     const adminAudioRef = useRef<HTMLAudioElement | null>(null);
 
-    const playAudioForLog = (id: string, text: string) => {
+    const playAudioForLog = (id: string, text: string, directAudioUrl?: string | null) => {
         if (playingLogId === id) {
             if (adminAudioRef.current) {
                 adminAudioRef.current.pause();
@@ -49,8 +49,15 @@ export default function AIChatbotTab() {
             adminAudioRef.current = null;
         }
 
-        const cleaned = text.length > 250 ? extractVoiceAnalysisSpeech(text) : (cleanVoiceText(text, 250) || text.slice(0, 150));
-        const url = `/api/voice/tts?text=${encodeURIComponent(cleaned)}&voice=ar-EG-ShakirNeural`;
+        let url = "";
+        if (directAudioUrl && typeof directAudioUrl === "string" && directAudioUrl.trim()) {
+            // Play user's actual microphone voice recording!
+            url = directAudioUrl.trim();
+        } else {
+            // Synthetic TTS fallback
+            const cleaned = text.length > 250 ? extractVoiceAnalysisSpeech(text) : (cleanVoiceText(text, 1500) || text.slice(0, 150));
+            url = `/api/voice/tts?text=${encodeURIComponent(cleaned)}&voice=ar-EG-ShakirNeural`;
+        }
         const audio = new Audio(url);
         adminAudioRef.current = audio;
         setPlayingLogId(id);
@@ -772,12 +779,20 @@ export default function AIChatbotTab() {
                                                                         <div className="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={() => playAudioForLog(`user_${log.id}`, log.message)}
-                                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer transition active:scale-95"
-                                                                                title="استمع لصوت رسالة المستخدم"
+                                                                                onClick={() => playAudioForLog(`user_${log.id}`, log.message, log.voice_audio_url)}
+                                                                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition active:scale-95 ${
+                                                                                    log.voice_audio_url 
+                                                                                        ? "bg-emerald-500/20 hover:bg-emerald-500/30 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 shadow-sm" 
+                                                                                        : "bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                                                                                }`}
+                                                                                title={log.voice_audio_url ? "استمع لصوت المستخدم الحقيقي المسجل من المايكروفون" : "استمع لرسالة المستخدم"}
                                                                             >
                                                                                 <Volume2 className="w-3.5 h-3.5" />
-                                                                                <span>{playingLogId === `user_${log.id}` ? "إيقاف الصوت ⏸️" : "استمع لرسالة المستخدم 🔊"}</span>
+                                                                                <span>
+                                                                                    {playingLogId === `user_${log.id}` 
+                                                                                        ? "إيقاف الصوت ⏸️" 
+                                                                                        : (log.voice_audio_url ? "استمع لصوت المستخدم الحقيقي 🎙️" : "استمع لرسالة المستخدم 🔊")}
+                                                                                </span>
                                                                             </button>
                                                                         </div>
                                                                     )}

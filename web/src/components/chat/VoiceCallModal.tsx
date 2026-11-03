@@ -21,7 +21,7 @@ import { extractVoiceAnalysisSpeech, cleanVoiceText, cleanVoiceTranscript, playC
 interface VoiceCallModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSendMessage: (text: string) => Promise<any>;
+    onSendMessage: (text: string, options?: { audioDuration?: number; voiceAudioUrl?: string }) => Promise<any>;
     lastAssistantMessage?: { role: string; content: string } | null;
     isPro?: boolean;
     remainingQuota?: number;
@@ -46,6 +46,9 @@ export function VoiceCallModal({
     const [callDuration, setCallDuration] = useState(0);
     const [isMuted, _setIsMuted] = useState(false);
     const isMutedRef = useRef(false);
+    const micStreamRef = useRef<MediaStream | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
     const setIsMuted = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
         _setIsMuted((prev) => {
             const next = typeof val === "function" ? val(prev) : val;
@@ -150,6 +153,22 @@ export function VoiceCallModal({
             rec.onstart = () => {
                 if (isOpenRef.current && !isMutedRef.current && callStateRef.current !== "speaking" && !isProcessingRef.current) {
                     setCallState("listening");
+                    if (micStreamRef.current && typeof MediaRecorder !== "undefined") {
+                        try {
+                            const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+                                ? "audio/webm;codecs=opus"
+                                : (MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "");
+                            const mr = mimeType ? new MediaRecorder(micStreamRef.current, { mimeType }) : new MediaRecorder(micStreamRef.current);
+                            audioChunksRef.current = [];
+                            mr.ondataavailable = (e) => {
+                                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+                            };
+                            mr.start(200);
+                            mediaRecorderRef.current = mr;
+                        } catch (mrErr) {
+                            console.warn("[VoiceCall] MediaRecorder start warning:", mrErr);
+                        }
+                    }
                 }
             };
 
@@ -334,8 +353,34 @@ export function VoiceCallModal({
         setTranscript("");
 
         try {
-            console.log("[VoiceCall] Sending query to DeepSeek AI:", cleaned);
-            const aiResponse = await onSendMessage(cleaned);
+            let audioBlobToUpload: Blob | null = null;
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                try {
+                    mediaRecorderRef.current.stop();
+                    if (audioChunksRef.current.length > 0) {
+                        audioBlobToUpload = new Blob(audioChunksRef.current, { type: audioChunksRef.current[0].type || "audio/webm" });
+                    }
+                } catch {}
+            }
+
+            let voiceAudioUrl: string | undefined = undefined;
+            if (audioBlobToUpload && audioBlobToUpload.size > 1000) {
+                try {
+                    const formData = new FormData();
+                    const ext = audioBlobToUpload.type.includes("mp4") ? "mp4" : "webm";
+                    formData.append("file", audioBlobToUpload, `call_user_${Date.now()}.${ext}`);
+                    const upRes = await fetch("/api/voice/upload", { method: "POST", body: formData });
+                    if (upRes.ok) {
+                        const upData = await upRes.json();
+                        if (upData?.url) voiceAudioUrl = upData.url;
+                    }
+                } catch (upErr) {
+                    console.warn("[VoiceCall] Failed to upload call audio:", upErr);
+                }
+            }
+
+            console.log("[VoiceCall] Sending query to DeepSeek AI:", cleaned, "voiceAudioUrl:", voiceAudioUrl);
+            const aiResponse = await onSendMessage(cleaned, { voiceAudioUrl });
             const replyText = typeof aiResponse === "string" ? aiResponse : (aiResponse?.content || "");
 
             console.log("[VoiceCall] Received AI reply length:", replyText.length);
@@ -357,6 +402,16 @@ export function VoiceCallModal({
     // Initial connection sequence on modal open
     useEffect(() => {
         if (isOpen) {
+            // Acquire audio stream for capturing user real voice turns
+            if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        micStreamRef.current = stream;
+                    })
+                    .catch(err => {
+                        console.warn("[VoiceCall] getUserMedia for audio recording not acquired:", err);
+                    });
+            }
             setCallState("connecting");
             setCallDuration(0);
             setTranscript("");
@@ -379,10 +434,24 @@ export function VoiceCallModal({
                 clearTimeout(connectTimer);
                 stopListening();
                 stopSpeaking();
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                    try { mediaRecorderRef.current.stop(); } catch {}
+                }
+                if (micStreamRef.current) {
+                    micStreamRef.current.getTracks().forEach(t => t.stop());
+                    micStreamRef.current = null;
+                }
             };
         } else {
             stopListening();
             stopSpeaking();
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                try { mediaRecorderRef.current.stop(); } catch {}
+            }
+            if (micStreamRef.current) {
+                micStreamRef.current.getTracks().forEach(t => t.stop());
+                micStreamRef.current = null;
+            }
         }
     }, [isOpen, startListening, stopListening, stopSpeaking]);
 
