@@ -200,11 +200,11 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
     result = result.replace(/حالة السهم في محفظتك.*$/g, "");
     result = result.replace(/\s+/g, " ").trim();
 
-    // Limit to ~230 chars smoothly at punctuation
-    if (result.length > 230) {
-        const cut = result.slice(0, 230);
+    // Limit to ~1500 chars smoothly at sentence boundary
+    if (result.length > 1500) {
+        const cut = result.slice(0, 1500);
         const lastPunct = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("،"), cut.lastIndexOf("!"), cut.lastIndexOf("؟"));
-        if (lastPunct > 80) {
+        if (lastPunct > 150) {
             result = cut.slice(0, lastPunct + 1);
         } else {
             const lastSpace = cut.lastIndexOf(" ");
@@ -216,11 +216,10 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
 }
 
 /**
- * Cleans rich markdown chat replies into concise, natural spoken Egyptian Arabic sentences.
- * Strips markdown tables, links, disclaimers, technical syntax, and limits speech to ~35-45 words
- * so audio synthesis is fast (<1.5s) and conversational.
+ * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
+ * Strips markdown tables, links, disclaimers, and technical syntax so audio synthesis speaks cleanly.
  */
-export function cleanVoiceText(rawText: string, maxChars: number = 180): string {
+export function cleanVoiceText(rawText: string, maxChars: number = 1500): string {
     if (!rawText) return "";
 
     let text = rawText;

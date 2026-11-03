@@ -1158,7 +1158,7 @@ export default function ChatWidget() {
                                                 ))}
                                             </div>
                                         )}
-                                        {(msg.isVoiceNote || msg.voiceAudioUrl) ? (
+                                        {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
                                             <VoiceNotePlayer
                                                 role={msg.role}
                                                 audioUrl={msg.voiceAudioUrl}
@@ -1169,7 +1169,7 @@ export default function ChatWidget() {
                                             />
                                         ) : (
                                             <FormattedChatMessage 
-                                                content={msg.content || msg.statusText || ""} 
+                                                content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 
                                                 role={msg.role} 
                                                 suggestedButtons={msg.suggestedButtons}
                                                 showSuggestedButtons={isLastMessage}
