@@ -17,7 +17,7 @@ import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
 import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
 import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
-import { isChatAdminEmail } from "@/lib/chat-sharing";
+import { isChatAdminEmail, isVoiceBetaTester } from "@/lib/chat-sharing";
 import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
 
@@ -271,6 +271,7 @@ export default function ChatWidget() {
     const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
     const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
+    const isVoiceTester = isVoiceBetaTester(user);
 
     const handleDownloadImage = async (url: string) => {
         try {
@@ -794,8 +795,8 @@ export default function ChatWidget() {
                                 </div>
                             )}
                         </div>
-                        {/* 📞 Live Voice Call with ARTORO (Admin only for testing) */}
-                        {isChatAdmin && (
+                        {/* 📞 Live Voice Call with ARTORO (Strictly weeessd57 beta testing) */}
+                        {isVoiceTester && (
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1176,6 +1177,7 @@ export default function ChatWidget() {
                                                 isStreaming={msg.isStreaming}
                                                 tables={msg.tables}
                                                 showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
+                                                showVoiceButton={isVoiceTester}
                                                 onShare={() => shareAnswer(originalIdx)}
                                                 sharing={sharingMessageId === (msg.id || String(originalIdx))}
                                                 latencyMs={msg.latencyMs}
@@ -1347,8 +1349,8 @@ export default function ChatWidget() {
                                     {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
                                 </button>
 
-                                {/* 🎙️ Voice Note Record Button (Admin only: weeessd57) */}
-                                {isChatAdmin && (
+                                {/* 🎙️ Voice Note Record Button (Strictly weeessd57 beta testing) */}
+                                {isVoiceTester && (
                                     <button
                                         type="button"
                                         onClick={() => setIsRecordingVoiceNote(true)}

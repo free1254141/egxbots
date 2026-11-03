@@ -21,6 +21,7 @@ interface FormattedChatMessageProps {
     isStreaming?: boolean;
     tables?: ChatTable[];
     showShareButton?: boolean;
+    showVoiceButton?: boolean;
     onShare?: () => void;
     sharing?: boolean;
     latencyMs?: number;
@@ -1024,6 +1025,7 @@ export function FormattedChatMessage({
     isStreaming = false,
     tables = [],
     showShareButton = false,
+    showVoiceButton = false,
     onShare,
     sharing = false,
     latencyMs,
@@ -1569,7 +1571,9 @@ export function FormattedChatMessage({
                         <span>أتمتة السؤال يومياً</span>
                     </button>
 
-                    {/* 🔊 Voice Note Audio Player */}
+                    {/* 🔊 Voice Note Audio Player (Admin beta tester only) */}
+                    {showVoiceButton && (
+
                     <button
                         type="button"
                         onClick={handleToggleSpeech}
@@ -1598,6 +1602,7 @@ export function FormattedChatMessage({
                             </>
                         )}
                     </button>
+                    )}
 
                     {typeof latencyMs === "number" && latencyMs > 0 && (
                         <span

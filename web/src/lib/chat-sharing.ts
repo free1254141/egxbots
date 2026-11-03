@@ -17,3 +17,41 @@ export function isChatAdminEmail(email: string | null | undefined): boolean {
     if (clean.includes("weeessd57") || clean.includes("weeeessd57") || clean.includes("weeasd57")) return true;
     return false;
 }
+
+/**
+ * Strict gatekeeper for experimental Voice features (Live Phone Call 📞 & Voice Notes 🎙️).
+ * STRICT RULE: Only the primary admin account (weeessd57) is granted access.
+ * Secondary admin emails (e.g. acursour@gmail.com, weeeenew@gmail.com) and regular users are strictly excluded!
+ */
+export function isVoiceBetaTester(user: { email?: string | null; id?: string | null } | null | undefined): boolean {
+    if (!user) return false;
+
+    // Explicit known user ID for weeessd57 in Supabase
+    if (user.id === "ba9c27e8-f62d-452f-8a29-dc77fd092207") return true;
+
+    if (!user.email) return false;
+    const clean = user.email.trim().toLowerCase();
+
+    // Explicitly reject any secondary or other admin emails
+    if (clean.includes("acursour") || clean.includes("weeeenew")) {
+        return false;
+    }
+
+    // Must strictly match weeessd57 or its recorded account variants
+    const allowedExact = [
+        "weeessd57@gmail.com",
+        "weeeessd57@gmail.com",
+        "weeasd57@gmail.com",
+        "weessd57@gmail.com",
+    ];
+    if (allowedExact.includes(clean)) return true;
+
+    const allowedPrefixes = ["weeessd57@", "weeeessd57@", "weeasd57@", "weessd57@"];
+    return allowedPrefixes.some(prefix => clean.startsWith(prefix));
+}
+
+export function isVoiceBetaTesterEmail(email: string | null | undefined): boolean {
+    if (!email) return false;
+    return isVoiceBetaTester({ email });
+}
+

@@ -4,6 +4,18 @@ import React, { useState, useEffect, useRef } from "react";
 import { Mic, Trash2, Send, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+function cleanTranscriptText(text: string): string {
+    if (!text) return "";
+    const words = text.trim().split(/\s+/);
+    const result: string[] = [];
+    for (const w of words) {
+        if (result.length === 0 || result[result.length - 1] !== w) {
+            result.push(w);
+        }
+    }
+    return result.join(" ");
+}
+
 interface VoiceNoteRecorderProps {
     isRecording: boolean;
     onCancel: () => void;
@@ -111,9 +123,9 @@ export function VoiceNoteRecorder({
                     rec.onresult = (event: any) => {
                         let fullText = "";
                         for (let i = 0; i < event.results.length; i++) {
-                            fullText += event.results[i][0].transcript;
+                            fullText += " " + event.results[i][0].transcript;
                         }
-                        setTranscript(fullText.trim());
+                        setTranscript(cleanTranscriptText(fullText));
                     };
 
                     rec.onerror = () => {};
@@ -137,7 +149,7 @@ export function VoiceNoteRecorder({
         setIsSubmitting(true);
 
         const currentDuration = duration;
-        const currentTranscript = transcript.trim() || "حلل هذا السهم في البورصة المصرية";
+        const currentTranscript = cleanTranscriptText(transcript) || "حلل هذا السهم في البورصة المصرية";
 
         // Stop recognition
         if (recognitionRef.current) {
@@ -180,39 +192,41 @@ export function VoiceNoteRecorder({
     if (!isRecording) return null;
 
     return (
-        <div className="w-full flex items-center justify-between gap-2 p-2 sm:p-2.5 rounded-2xl bg-zinc-900 border-2 border-emerald-500/50 shadow-lg text-white animate-in slide-in-from-bottom-2 duration-200">
+        <div className="w-full flex items-center justify-between gap-1 sm:gap-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-zinc-900/95 backdrop-blur-md border border-emerald-500/50 shadow-lg text-white animate-in slide-in-from-bottom-2 duration-200 min-w-0 max-w-full overflow-hidden">
             {/* Delete / Cancel button */}
             <button
                 type="button"
                 onClick={onCancel}
                 disabled={isSubmitting}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/10 hover:bg-rose-500/20 hover:text-rose-400 text-zinc-300 transition active:scale-95 cursor-pointer"
+                className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-white/10 hover:bg-rose-500/20 hover:text-rose-400 text-zinc-300 transition active:scale-95 cursor-pointer"
                 title="إلغاء التسجيل"
+                aria-label="إلغاء التسجيل"
             >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-400" />
             </button>
 
-            {/* Central Recording Indicator & Timer */}
-            <div className="flex-1 flex items-center justify-center gap-3 px-2">
-                <span className="flex h-3 w-3 relative">
+            {/* Central Recording Indicator & Timer & Waves & Live Transcript */}
+            <div className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2.5 px-1 min-w-0 overflow-hidden">
+                <span className="flex h-2.5 w-2.5 shrink-0 relative">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
                 </span>
-                <span className="text-xs font-mono font-bold text-rose-300">
+                
+                <span className="text-[11px] sm:text-xs font-mono font-bold text-rose-300 shrink-0">
                     {formatTime(duration)}
                 </span>
                 
                 {/* Audio waves animation */}
-                <div className="flex items-center gap-0.5 h-4">
-                    <span className="w-1 h-2 bg-emerald-400 rounded-full animate-bounce"></span>
-                    <span className="w-1 h-4 bg-emerald-400 rounded-full animate-pulse"></span>
-                    <span className="w-1 h-3 bg-emerald-400 rounded-full animate-bounce [animation-delay:150ms]"></span>
-                    <span className="w-1 h-4 bg-emerald-400 rounded-full animate-pulse [animation-delay:300ms]"></span>
-                    <span className="w-1 h-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:200ms]"></span>
+                <div className="hidden xs:flex items-center gap-0.5 h-3.5 shrink-0">
+                    <span className="w-0.5 sm:w-1 h-2 bg-emerald-400 rounded-full animate-bounce"></span>
+                    <span className="w-0.5 sm:w-1 h-3.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                    <span className="w-0.5 sm:w-1 h-2.5 bg-emerald-400 rounded-full animate-bounce [animation-delay:150ms]"></span>
+                    <span className="w-0.5 sm:w-1 h-3.5 bg-emerald-400 rounded-full animate-pulse [animation-delay:300ms]"></span>
+                    <span className="w-0.5 sm:w-1 h-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:200ms]"></span>
                 </div>
 
-                <span className="text-[11px] text-zinc-300 font-medium truncate max-w-[140px] sm:max-w-[200px]">
-                    {transcript ? `"${transcript}"` : "تسجيل فويس نوت..."}
+                <span className="text-[10px] sm:text-[11px] text-zinc-300 font-medium truncate flex-1 min-w-0 text-center sm:text-right">
+                    {transcript ? `"${transcript}"` : "أرتورو يستمع لصوتك..."}
                 </span>
             </div>
 
@@ -221,15 +235,16 @@ export function VoiceNoteRecorder({
                 type="button"
                 onClick={handleSend}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black shadow-md cursor-pointer transition active:scale-95 shrink-0"
+                className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-black text-xs font-black shadow-md cursor-pointer transition active:scale-95 shrink-0"
                 title="إرسال الفويس نوت"
+                aria-label="إرسال الفويس نوت"
             >
                 {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
                 ) : (
                     <>
                         <span>إرسال</span>
-                        <Send className="w-3.5 h-3.5" />
+                        <Send className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </>
                 )}
             </button>

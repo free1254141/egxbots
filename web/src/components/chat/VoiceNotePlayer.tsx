@@ -108,48 +108,49 @@ export function VoiceNotePlayer({
     const isUser = role === "user";
 
     return (
-        <div className={`flex flex-col space-y-2 p-3 rounded-2xl transition-all ${
+        <div className={`flex flex-col space-y-1.5 sm:space-y-2 p-2 sm:p-2.5 md:p-3 rounded-2xl transition-all max-w-full overflow-hidden ${
             isUser 
                 ? "bg-emerald-950/60 border border-emerald-500/30 text-emerald-100" 
                 : "bg-zinc-900/90 border border-amber-500/30 text-zinc-100 shadow-md"
         }`}>
             {/* Header label */}
-            <div className="flex items-center justify-between text-[11px] font-bold opacity-80 pb-1 border-b border-white/10">
-                <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-bold opacity-80 pb-1 border-b border-white/10">
+                <div className="flex items-center gap-1.5 truncate min-w-0">
                     {isUser ? (
                         <>
-                            <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-emerald-300">رسالة صوتية (Voice Note)</span>
+                            <Mic className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+                            <span className="text-emerald-300 truncate">رسالة صوتية (Voice Note)</span>
                         </>
                     ) : (
                         <>
-                            <Volume2 className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                            <span className="text-amber-300">رد أرتورو الصوتي (Voice Note)</span>
+                            <Volume2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                            <span className="text-amber-300 truncate">رد أرتورو الصوتي (Voice Note)</span>
                         </>
                     )}
                 </div>
-                <span className="font-mono text-[10px] text-zinc-400">
+                <span className="font-mono text-[9px] sm:text-[10px] text-zinc-400 shrink-0">
                     {formatTime(currentTime > 0 ? currentTime : duration)}
                 </span>
             </div>
 
             {/* Audio waveform & controls */}
-            <div className="flex items-center gap-2.5 pt-1">
+            <div className="flex items-center gap-2 sm:gap-2.5 pt-0.5">
                 <button
                     type="button"
                     onClick={togglePlay}
-                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-full transition active:scale-95 cursor-pointer shadow-md ${
+                    className={`grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-full transition active:scale-95 cursor-pointer shadow-md ${
                         isUser 
                             ? "bg-emerald-500 text-black hover:bg-emerald-400" 
                             : "bg-amber-500 text-black hover:bg-amber-400"
                     }`}
                     title={isPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
+                    aria-label={isPlaying ? "إيقاف مؤقت" : "تشغيل الصوت"}
                 >
-                    {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                    {isPlaying ? <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" /> : <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current ml-0.5" />}
                 </button>
 
                 {/* Progress bar / scrubber */}
-                <div className="flex-1 flex flex-col justify-center">
+                <div className="flex-1 flex flex-col justify-center min-w-0">
                     <input
                         type="range"
                         min={0}
@@ -159,7 +160,7 @@ export function VoiceNotePlayer({
                         onChange={handleSeek}
                         className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-white/20 accent-amber-400 hover:accent-amber-300 transition"
                     />
-                    <div className="flex justify-between items-center text-[9px] text-zinc-400 font-mono mt-1 px-0.5">
+                    <div className="flex justify-between items-center text-[9px] text-zinc-400 font-mono mt-0.5 px-0.5">
                         <span>{formatTime(currentTime)}</span>
                         <span>{formatTime(duration)}</span>
                     </div>
@@ -179,7 +180,7 @@ export function VoiceNotePlayer({
                     </button>
 
                     {isTextExpanded && (
-                        <div className="mt-1 p-2 rounded-xl bg-black/40 border border-white/10 text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap animate-in fade-in duration-150">
+                        <div className="mt-1 p-2 max-h-48 overflow-y-auto rounded-xl bg-black/40 border border-white/10 text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap animate-in fade-in duration-150">
                             {text}
                         </div>
                     )}

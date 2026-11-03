@@ -1,4 +1,5 @@
 import { cleanVoiceText, extractVoiceAnalysisSpeech } from "../voice-utils";
+import { isVoiceBetaTester, isVoiceBetaTesterEmail } from "../chat-sharing";
 
 describe("voice-utils", () => {
     it("cleans markdown and extracts spoken summary without losing digits", () => {
@@ -71,5 +72,24 @@ describe("voice-utils", () => {
         expect(cleanVoiceText("   ")).toBe("");
         expect(cleanVoiceText("أهلاً بك")).toBe("أهلاً بك");
         expect(extractVoiceAnalysisSpeech("")).toContain("تمام يا فندم");
+    });
+
+    it("strictly restricts voice features exclusively to weeessd57 and rejects all other emails", () => {
+        // Allowed: primary admin
+        expect(isVoiceBetaTester({ email: "weeessd57@gmail.com" })).toBe(true);
+        expect(isVoiceBetaTester({ email: "weeeessd57@gmail.com" })).toBe(true);
+        expect(isVoiceBetaTester({ email: "weeasd57@gmail.com" })).toBe(true);
+        expect(isVoiceBetaTester({ id: "ba9c27e8-f62d-452f-8a29-dc77fd092207" })).toBe(true);
+        expect(isVoiceBetaTesterEmail("weeessd57@gmail.com")).toBe(true);
+
+        // Strictly REJECTED: secondary admin emails and regular users
+        expect(isVoiceBetaTester({ email: "acursour@gmail.com" })).toBe(false);
+        expect(isVoiceBetaTester({ email: "weeeenew@gmail.com" })).toBe(false);
+        expect(isVoiceBetaTester({ email: "regular_user@gmail.com" })).toBe(false);
+        expect(isVoiceBetaTester({ email: "test@example.com" })).toBe(false);
+        expect(isVoiceBetaTester(null)).toBe(false);
+        expect(isVoiceBetaTester(undefined)).toBe(false);
+        expect(isVoiceBetaTesterEmail("acursour@gmail.com")).toBe(false);
+        expect(isVoiceBetaTesterEmail("weeeenew@gmail.com")).toBe(false);
     });
 });
