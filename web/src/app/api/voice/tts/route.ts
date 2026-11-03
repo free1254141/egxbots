@@ -34,8 +34,17 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ detail: errText }, { status: backendRes.status });
         }
 
-        const audioBuffer = await backendRes.arrayBuffer();
+        if (backendRes.body) {
+            return new NextResponse(backendRes.body as any, {
+                status: 200,
+                headers: {
+                    "Content-Type": "audio/mpeg",
+                    "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+                },
+            });
+        }
 
+        const audioBuffer = await backendRes.arrayBuffer();
         return new NextResponse(audioBuffer, {
             status: 200,
             headers: {

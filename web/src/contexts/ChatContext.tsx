@@ -1532,7 +1532,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(currentSessionId);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -1550,7 +1550,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(currentSessionId);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -1568,7 +1568,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(currentSessionId);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -1596,7 +1596,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(currentSessionId);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -1654,7 +1654,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 flushStoredMessages(currentSessionId);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -1950,7 +1950,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 updateAssistantMsgInState(assistantMsg);
 
-                return;
+                return assistantMsg.content;
 
             }
 
@@ -2003,6 +2003,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             updateAssistantMsgInState(assistantMsg);
 
             flushStoredMessages(currentSessionId);
+
+            return assistantMsg.content;
 
         } finally {
 

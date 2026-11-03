@@ -62,7 +62,8 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 500) -> str:
     text = re.sub(r"[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]", "", text)
 
     # 5. Clean standalone currency abbreviations without mangling Arabic words (e.g. تجميع)
-    text = re.sub(r"(?:\b|\d\s*)(?:ج\.م\.?|جم|EGP)(?:\b|\s*)", " جنيه ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)", " جنيه ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:ج\.م\.?|جم|EGP)\b", " جنيه ", text, flags=re.IGNORECASE)
     text = text.replace("%", " في المية ")
     text = re.sub(r"\bEGX30\b", " إيجي إكس 30 ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bEGX70\b", " إيجي إكس 70 ", text, flags=re.IGNORECASE)
@@ -80,11 +81,12 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 500) -> str:
     # Truncate smoothly at sentence boundary if exceeding max_chars
     if len(text) > max_chars:
         cut = text[:max_chars]
-        last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"))
-        if last_punct > 120:
+        last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"), cut.rfind("\n"))
+        if last_punct > 60:
             text = cut[:last_punct + 1]
         else:
-            text = cut
+            last_space = cut.rfind(" ")
+            text = (cut[:last_space] if last_space > 0 else cut) + "..."
 
     return text.strip()
 

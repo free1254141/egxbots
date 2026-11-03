@@ -7,6 +7,7 @@ import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
 import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
 import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
+import { playConnectionChime } from "@/lib/voice-utils";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -836,7 +837,10 @@ export default function ChatWidget() {
                         {/* 📞 Live Voice Call with ARTORO */}
                         <button
                             type="button"
-                            onClick={() => setIsVoiceCallOpen(true)}
+                            onClick={() => {
+                                playConnectionChime();
+                                setIsVoiceCallOpen(true);
+                            }}
                             className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
                             title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
                             aria-label="مكالمة صوتية مع أرتورو"
