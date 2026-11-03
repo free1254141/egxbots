@@ -44,6 +44,16 @@ export type ChatMessage = {
 
     latencyMs?: number;
 
+    isVoice?: boolean;
+
+    isVoiceNote?: boolean;
+
+    isVoiceCall?: boolean;
+
+    voiceAudioUrl?: string;
+
+    voiceDuration?: number;
+
 };
 
 
@@ -108,7 +118,7 @@ interface ChatContextType {
 
     messages: ChatMessage[];
 
-    sendMessage: (text: string, imageInput?: string | string[], options?: { isVoice?: boolean }) => Promise<any>;
+    sendMessage: (text: string, imageInput?: string | string[], options?: { isVoice?: boolean; isVoiceNote?: boolean; isVoiceCall?: boolean; audioDuration?: number; voiceAudioUrl?: string }) => Promise<any>;
 
     stopResponding: () => void;
 
@@ -1266,7 +1276,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
-    const sendMessage = useCallback(async (text: string, imageInput?: string | string[], options?: { isVoice?: boolean }): Promise<any> => {
+    const sendMessage = useCallback(async (text: string, imageInput?: string | string[], options?: { isVoice?: boolean; isVoiceNote?: boolean; isVoiceCall?: boolean; audioDuration?: number; voiceAudioUrl?: string }): Promise<any> => {
 
         text = cleanChatText(text);
 
@@ -1340,11 +1350,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
+        const isVoice = Boolean(options?.isVoice || options?.isVoiceNote || options?.isVoiceCall);
+        const isVoiceNote = Boolean(options?.isVoiceNote);
+        const isVoiceCall = Boolean(options?.isVoiceCall ?? (options?.isVoice && !options?.isVoiceNote));
+
         const newUserMsg: ChatMessage = {
 
             role: "user",
 
-            content: text || (imagesList.length > 0 ? `📷 [${imagesList.length} Images attached]` : ""),
+            content: text || (isVoiceNote ? "رسالة صوتية 🎙️" : imagesList.length > 0 ? `📷 [${imagesList.length} Images attached]` : ""),
 
             timestamp: Date.now(),
 
@@ -1353,6 +1367,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             imagePreviewUrl: imagesList[0] || undefined,
 
             images: imagesList.length > 0 ? imagesList : undefined,
+
+            isVoice,
+
+            isVoiceNote,
+
+            isVoiceCall,
+
+            voiceAudioUrl: options?.voiceAudioUrl,
+
+            voiceDuration: options?.audioDuration,
 
         };
 
@@ -1396,7 +1420,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             isStreaming: true,
 
-            statusText: "جاري تحليل السؤال...",
+            statusText: isVoiceNote ? "أرتورو يستمع للرسالة الصوتية..." : "جاري تحليل السؤال...",
+
+            isVoice,
+
+            isVoiceNote,
+
+            isVoiceCall,
 
         };
 
@@ -1492,7 +1522,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     autonomousRecommendations,
 
-                    isVoice: Boolean(options?.isVoice),
+                    isVoice,
+
+                    isVoiceCall,
+
+                    isVoiceNote,
+
+                    audioDuration: options?.audioDuration,
 
                 }),
 

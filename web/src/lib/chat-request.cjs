@@ -15,7 +15,13 @@ function createChatRequest(input) {
             stream: true,
             chart_context: input.chartContext,
             ...(input.autonomousRecommendations ? { autonomous_recommendations: true } : {}),
-            ...(input.isVoice ? { is_voice_call: true, channel: input.channel || "voice_call" } : {}),
+            ...(input.isVoice ? {
+                is_voice: true,
+                is_voice_call: Boolean(input.isVoiceCall ?? (!input.isVoiceNote)),
+                is_voice_note: Boolean(input.isVoiceNote),
+                channel: input.channel || (input.isVoiceNote ? "voice_note" : "voice_call"),
+                audio_duration: input.audioDuration,
+            } : {}),
         }),
     };
 }

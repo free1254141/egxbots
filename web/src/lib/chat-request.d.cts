@@ -8,6 +8,9 @@ export interface ChatRequestInput {
     chartContext?: unknown;
     autonomousRecommendations?: boolean;
     isVoice?: boolean;
+    isVoiceCall?: boolean;
+    isVoiceNote?: boolean;
     channel?: string;
+    audioDuration?: number;
 }
 export function createChatRequest(input: ChatRequestInput): { method: string; headers: Record<string, string>; body: string };

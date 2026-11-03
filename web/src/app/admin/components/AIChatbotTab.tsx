@@ -4,8 +4,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { 
     Loader2, Sparkles, MessageSquare, Link as LinkIcon, User, RefreshCw, 
     Search, Clock, Trash2, Maximize, Minimize, Database, 
-    Zap, Crown, ArrowDown, ArrowUp, Folder, Archive, CheckCircle2 
+    Zap, Crown, ArrowDown, ArrowUp, Folder, Archive, CheckCircle2, Volume2 
 } from "lucide-react";
+import { cleanVoiceText } from "@/lib/voice-utils";
 import { toast } from "sonner";
 import { ChatUsageDetails, UserChatCost } from "./ChatUsageDetails";
 import SupportTab from "./SupportTab";
@@ -30,6 +31,44 @@ export default function AIChatbotTab() {
     const [proOnly, setProOnly] = useState(false);
 
     const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const [playingLogId, setPlayingLogId] = useState<string | null>(null);
+    const adminAudioRef = useRef<HTMLAudioElement | null>(null);
+
+    const playAudioForLog = (id: string, text: string) => {
+        if (playingLogId === id) {
+            if (adminAudioRef.current) {
+                adminAudioRef.current.pause();
+                adminAudioRef.current = null;
+            }
+            setPlayingLogId(null);
+            return;
+        }
+
+        if (adminAudioRef.current) {
+            adminAudioRef.current.pause();
+            adminAudioRef.current = null;
+        }
+
+        const cleaned = cleanVoiceText(text, 200) || text.slice(0, 150);
+        const url = `/api/voice/tts?text=${encodeURIComponent(cleaned)}&voice=ar-EG-ShakirNeural`;
+        const audio = new Audio(url);
+        adminAudioRef.current = audio;
+        setPlayingLogId(id);
+
+        audio.onended = () => {
+            setPlayingLogId(null);
+            adminAudioRef.current = null;
+        };
+
+        audio.onerror = () => {
+            setPlayingLogId(null);
+            adminAudioRef.current = null;
+        };
+
+        audio.play().catch(() => {
+            setPlayingLogId(null);
+        });
+    };
     const firstUnreadRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -705,6 +744,12 @@ export default function AIChatbotTab() {
                                                                         غرفة: {log.session_title}
                                                                     </span>
                                                                 )}
+                                                                {(log.is_voice || log.is_voice_call || log.is_voice_note) && (
+                                                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                                                        {log.is_voice_call ? "📞 مكالمة صوتية حية" : "🎙️ فويس نوت (Voice Note)"}
+                                                                        {log.audio_duration ? ` (${log.audio_duration}s)` : ""}
+                                                                    </span>
+                                                                )}
                                                             </div>
 
                                                             {/* User Message */}
@@ -723,6 +768,19 @@ export default function AIChatbotTab() {
                                                                         </div>
                                                                     )}
                                                                     <p className="whitespace-pre-wrap">{log.message}</p>
+                                                                    {(log.is_voice || log.is_voice_call || log.is_voice_note) && (
+                                                                        <div className="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => playAudioForLog(`user_${log.id}`, log.message)}
+                                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer transition active:scale-95"
+                                                                                title="استمع لصوت رسالة المستخدم"
+                                                                            >
+                                                                                <Volume2 className="w-3.5 h-3.5" />
+                                                                                <span>{playingLogId === `user_${log.id}` ? "إيقاف الصوت ⏸️" : "استمع لرسالة المستخدم 🔊"}</span>
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                                 <div className="w-7 h-7 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400 text-xs shrink-0">
                                                                     <User className="w-3.5 h-3.5" />
@@ -768,6 +826,19 @@ export default function AIChatbotTab() {
                                                                         </div>
                                                                     </span>
                                                                     <ChatUsageDetails log={log} />
+                                                                    {(log.is_voice || log.is_voice_call || log.is_voice_note) && log.reply && (
+                                                                        <div className="mb-2 pb-2 border-b border-indigo-100 dark:border-zinc-800 flex items-center gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => playAudioForLog(`asst_${log.id}`, log.reply)}
+                                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 cursor-pointer transition active:scale-95"
+                                                                                title="استمع لرد أرتورو الصوتي"
+                                                                            >
+                                                                                <Volume2 className="w-3.5 h-3.5" />
+                                                                                <span>{playingLogId === `asst_${log.id}` ? "إيقاف الصوت ⏸️" : "استمع لرد أرتورو الصوتي 🔊"}</span>
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
                                                                     <div className="min-w-0 max-w-full overflow-x-auto text-black dark:text-zinc-100">
                                                                         {log.reply && log.reply.trim().length > 0 ? (
                                                                             <FormattedChatMessage

@@ -8,6 +8,8 @@ import NextImage from "next/image";
 import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
 import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
 import { playConnectionChime } from "@/lib/voice-utils";
+import { VoiceNotePlayer } from "@/components/chat/VoiceNotePlayer";
+import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
@@ -32,59 +34,17 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
 
 export default function ChatWidget() {
     const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
-    const [isSpeechListening, setIsSpeechListening] = useState(false);
-    const speechRecognitionRef = useRef<any>(null);
+    const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
 
-    const toggleSpeechInput = () => {
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            toast.error("المتصفح لا يدعم التسجيل الصوتي. يُرجى استخدام متصفح Chrome أو Edge.");
-            return;
-        }
-
-        if (isSpeechListening) {
-            if (speechRecognitionRef.current) {
-                try { speechRecognitionRef.current.abort(); } catch {}
-                speechRecognitionRef.current = null;
-            }
-            setIsSpeechListening(false);
-            toast.info("تم إيقاف الكتابة بالصوت");
-            return;
-        }
-
-        try {
-            const rec = new SpeechRecognition();
-            rec.lang = "ar-EG";
-            rec.continuous = false;
-            rec.interimResults = true;
-
-            rec.onstart = () => {
-                setIsSpeechListening(true);
-                toast.info("أرتورو يستمع إليك... تحدث الآن ليكتب بدلاً منك 🎙️");
-            };
-
-            rec.onresult = (e: any) => {
-                let transcript = "";
-                for (let i = e.resultIndex; i < e.results.length; i++) {
-                    transcript += e.results[i][0].transcript;
-                }
-                setInput((prev: string) => (prev ? `${prev} ${transcript}` : transcript));
-            };
-
-            rec.onerror = () => {
-                setIsSpeechListening(false);
-            };
-
-            rec.onend = () => {
-                setIsSpeechListening(false);
-            };
-
-            rec.start();
-            speechRecognitionRef.current = rec;
-        } catch (err) {
-            console.error("Speech input error:", err);
-            setIsSpeechListening(false);
-        }
+    const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
+        setIsRecordingVoiceNote(false);
+        const audioUrl = URL.createObjectURL(audioBlob);
+        await sendMessage(transcript, undefined, {
+            isVoice: true,
+            isVoiceNote: true,
+            voiceAudioUrl: audioUrl,
+            audioDuration: duration,
+        });
     };
     const { 
         isOpen, 
@@ -834,23 +794,25 @@ export default function ChatWidget() {
                                 </div>
                             )}
                         </div>
-                        {/* 📞 Live Voice Call with ARTORO */}
-                        <button
-                            type="button"
-                            onClick={() => {
-                                playConnectionChime();
-                                setIsVoiceCallOpen(true);
-                            }}
-                            className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
-                            title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
-                            aria-label="مكالمة صوتية مع أرتورو"
-                        >
-                            <Phone className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-emerald-500 animate-pulse" />
-                            <span className="absolute -top-1 -right-1 flex h-2 w-2 sm:h-2.5 sm:w-2.5">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500"></span>
-                            </span>
-                        </button>
+                        {/* 📞 Live Voice Call with ARTORO (Admin only for testing) */}
+                        {isChatAdmin && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    playConnectionChime();
+                                    setIsVoiceCallOpen(true);
+                                }}
+                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
+                                title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
+                                aria-label="مكالمة صوتية مع أرتورو"
+                            >
+                                <Phone className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-emerald-500 animate-pulse" />
+                                <span className="absolute -top-1 -right-1 flex h-2 w-2 sm:h-2.5 sm:w-2.5">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500"></span>
+                                </span>
+                            </button>
+                        )}
 
                         {!isChatRoute && (
                             <button
@@ -1195,20 +1157,31 @@ export default function ChatWidget() {
                                                 ))}
                                             </div>
                                         )}
-                                        <FormattedChatMessage 
-                                            content={msg.content || msg.statusText || ""} 
-                                            role={msg.role} 
-                                            suggestedButtons={msg.suggestedButtons}
-                                            showSuggestedButtons={isLastMessage}
-                                            onButtonClick={(btnText) => sendMessage(btnText)}
-                                             isStreaming={msg.isStreaming}
-                                             tables={msg.tables}
-                                             showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
-                                             onShare={() => shareAnswer(originalIdx)}
-                                             sharing={sharingMessageId === (msg.id || String(originalIdx))}
-                                             latencyMs={msg.latencyMs}
-                                             userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
-                                         />
+                                        {(msg.isVoiceNote || msg.voiceAudioUrl) ? (
+                                            <VoiceNotePlayer
+                                                role={msg.role}
+                                                audioUrl={msg.voiceAudioUrl}
+                                                text={msg.content || ""}
+                                                durationSeconds={msg.voiceDuration}
+                                                autoPlay={msg.role === "assistant" && isLastMessage}
+                                                tables={msg.tables}
+                                            />
+                                        ) : (
+                                            <FormattedChatMessage 
+                                                content={msg.content || msg.statusText || ""} 
+                                                role={msg.role} 
+                                                suggestedButtons={msg.suggestedButtons}
+                                                showSuggestedButtons={isLastMessage}
+                                                onButtonClick={(btnText) => sendMessage(btnText)}
+                                                isStreaming={msg.isStreaming}
+                                                tables={msg.tables}
+                                                showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
+                                                onShare={() => shareAnswer(originalIdx)}
+                                                sharing={sharingMessageId === (msg.id || String(originalIdx))}
+                                                latencyMs={msg.latencyMs}
+                                                userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
+                                            />
+                                        )}
 
                                     </div>
                                 </div>
@@ -1300,7 +1273,14 @@ export default function ChatWidget() {
                                 </div>
                             )}
 
-                            {/* Textarea + Action buttons box */}
+                            {/* Voice Note Recorder or Text Input Container */}
+                            {isRecordingVoiceNote ? (
+                                <VoiceNoteRecorder
+                                    isRecording={isRecordingVoiceNote}
+                                    onCancel={() => setIsRecordingVoiceNote(false)}
+                                    onSend={handleSendVoiceNote}
+                                />
+                            ) : (
                             <div className="relative flex items-end gap-2 bg-white dark:bg-black border border-slate-200 dark:border-white/20 rounded-2xl p-2 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition-all shadow-xs dark:shadow-[4px_4px_0_0_#fff]">
                                 <input
                                     ref={fileInputRef}
@@ -1367,20 +1347,19 @@ export default function ChatWidget() {
                                     {isLoading ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
                                 </button>
 
-                                {/* 🎙️ Voice Typing Dictation */}
-                                <button
-                                    type="button"
-                                    onClick={toggleSpeechInput}
-                                    className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                                        isSpeechListening
-                                            ? "bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse"
-                                            : "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-white/20 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
-                                    }`}
-                                    title={isSpeechListening ? "إيقاف الاستماع" : "التحدث بالصوت للكتابة (Voice Typing)"}
-                                >
-                                    {isSpeechListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                                </button>
+                                {/* 🎙️ Voice Note Record Button (Admin only: weeessd57) */}
+                                {isChatAdmin && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsRecordingVoiceNote(true)}
+                                        className="h-10 w-10 shrink-0 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 hover:text-emerald-400 flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 mb-0.5"
+                                        title="تسجيل فويس نوت (Voice Note)"
+                                    >
+                                        <Mic className="h-4 w-4" />
+                                    </button>
+                                )}
                             </div>
+                            )}
 
                             {/* Bottom Bar: Custom Modern Model Selector Dropdown Menu */}
                             <div className="flex items-center justify-between pt-1">

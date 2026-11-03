@@ -275,6 +275,11 @@ export async function GET(req: NextRequest) {
                             correlation_id: meta?.correlation_id || null,
                             reply_created_at: assistantMsg?.created_at || null,
                             publication_review: meta?.publication_review || null,
+                            is_voice: Boolean(meta?.is_voice || userMeta?.is_voice || meta?.is_voice_call || userMeta?.is_voice_call || meta?.is_voice_note || userMeta?.is_voice_note),
+                            is_voice_call: Boolean(meta?.is_voice_call || userMeta?.is_voice_call),
+                            is_voice_note: Boolean(meta?.is_voice_note || userMeta?.is_voice_note),
+                            channel: meta?.channel || userMeta?.channel || null,
+                            audio_duration: meta?.audio_duration || userMeta?.audio_duration || null,
                             is_pro: isProUser(msg.user_id),
                         });
                     }
@@ -322,6 +327,11 @@ export async function GET(req: NextRequest) {
                             response_origin: meta?.response_origin || null,
                             correlation_id: meta?.correlation_id || null,
                             publication_review: meta?.publication_review || null,
+                            is_voice: Boolean(meta?.is_voice || meta?.is_voice_call || meta?.is_voice_note),
+                            is_voice_call: Boolean(meta?.is_voice_call),
+                            is_voice_note: Boolean(meta?.is_voice_note),
+                            channel: meta?.channel || null,
+                            audio_duration: meta?.audio_duration || null,
                             is_pro: isProUser(msg.user_id),
                         });
                     }
