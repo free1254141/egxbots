@@ -21,6 +21,7 @@ export interface PipelineOptions {
     isVoice?: boolean;
     isVoiceCall?: boolean;
     isVoiceNote?: boolean;
+    skipCache?: boolean;
 }
 
 export interface AgenticToolCall {

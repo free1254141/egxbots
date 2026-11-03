@@ -20,6 +20,12 @@ import { isUuid } from "./session";
 import { sanitizeChartContext, type ChartHistoryCache, type ChartAction } from "./chart-strategy-tools";
 import { AgenticEvidence, toAgenticEvidence, checkAgenticDraft, safeAgenticFallback, compactEvidence, evidenceMemory, evidenceRows, advisoryImageConsistency, advisoryTableRowCountConsistency } from "./agentic-publication";
 import { AGENTIC_PUBLICATION_CONTRACT } from "./agentic-contract";
+import {
+    resolveToolCallToCacheKey,
+    getVipAnalysisCache,
+    setVipAnalysisCache,
+    personalizeCachedAnalysis,
+} from "./analysis-cache";
 
 export const AGENTIC_BUDGET = { toolRounds: 3, toolCalls: 12, repairs: 1, providerCalls: 7 };
 interface RuntimeInput {
@@ -322,6 +328,8 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
         ? "deepseek-flash"
         : selectedModel;
     const client = executionSupabase(input.supabase);
+    const shouldSkipCache = Boolean(options.skipCache || (isTestEnv && options.skipCache !== false));
+    const hasHistory = Array.isArray(history) && history.length > 0;
     const gateMode: "audit_only" | "strict" =
         options.gateMode ??
         (process.env.AGENTIC_GATE_MODE === "strict"
@@ -517,7 +525,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
     }
 
     messages.push(...recentHistory, { role: "user", content: userMessage || "حلل الصورة المرفقة ضمن حدود وضوحها" });
-    let providerCalls = 0, toolCalls = 0, draft = "", origin = "llm";
+    let providerCalls = 0, toolCalls = 0, draft = "", origin = "llm", candidateCacheKey: string | null = null;
     let finishFailure: string | null = null;
     let social = false, executedRounds = 0;
     const request = async (body: any, stage = "chat"): Promise<any> => {
@@ -653,6 +661,55 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                 const calls: AgenticToolCall[] = assistant.tool_calls || [];
                 yield { type: "plan", data: { intent: calls.length ? "agentic_tools" : "general_chat",
                     tools: calls.map(c => c.function?.name), entities: { symbols: [...usedSymbols] }, round } };
+
+                // -------------------------------------------------------------------
+                // Dynamic Model-Driven Cache Check (Zero-Regex Intent Resolution)
+                // When the LLM decides the tool calls in Round 0, check if this canonical
+                // read query has already been analyzed and cached in market_cache / memory.
+                // -------------------------------------------------------------------
+                if (round === 0 && calls.length === 1 && !hasHistory && !inputImages.length && !context.chart_context && !shouldSkipCache) {
+                    const primaryCall = calls[0];
+                    let parsedArgs: any = {};
+                    try { parsedArgs = JSON.parse(primaryCall.function.arguments || "{}"); } catch {}
+                    const dynamicKey = resolveToolCallToCacheKey(primaryCall.function.name, parsedArgs);
+
+                    if (dynamicKey) {
+                        candidateCacheKey = dynamicKey;
+                        const cached = await getVipAnalysisCache(dynamicKey, client);
+                        if (cached && cached.reply && cached.reply.length > 50) {
+                            origin = "cache";
+                            draft = cached.reply;
+                            const targetSymbol = parsedArgs.symbol ? String(parsedArgs.symbol).toUpperCase() : undefined;
+                            const personalized = await personalizeCachedAnalysis(cached.reply, input.userId, targetSymbol, client);
+
+                            yield { type: "token", data: personalized };
+                            if (cached.tables && Array.isArray(cached.tables) && cached.tables.length > 0) {
+                                yield { type: "tables", data: cached.tables };
+                            }
+                            yield {
+                                type: "done",
+                                data: {
+                                    response: personalized,
+                                    tables: cached.tables || [],
+                                    response_origin: "cache",
+                                    cached: true,
+                                    session_update: { last_symbols: targetSymbol ? [targetSymbol] : [] },
+                                    summary_state: sessionSummary,
+                                    usage: accounting.summary(0),
+                                    publication_review: {
+                                        passed: true,
+                                        final_passed: true,
+                                        repaired: false,
+                                        reasons: [],
+                                        completion: "complete",
+                                        reviewer: "agentic_dynamic_cache"
+                                    }
+                                }
+                            };
+                            return;
+                        }
+                    }
+                }
                 if (!calls.length) {
                     const decoded = decodeAnswer(assistant);
                     draft = decoded.answer;
@@ -1023,6 +1080,20 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
             sessionUpdate.persisted = !error && Boolean(data?.[0]?.id);
             if (!sessionUpdate.persisted) console.warn("[Agentic] session persistence not confirmed");
         } catch { console.warn("[Agentic] session persistence failed"); }
+    }
+    // -------------------------------------------------------------------
+    // Save to dynamic cache if this was an eligible canonical read intent
+    // -------------------------------------------------------------------
+    if (candidateCacheKey && origin !== "cache" && response && response.length > 50 && (finalPassed || gateMode === "audit_only") && !shouldSkipCache) {
+        setVipAnalysisCache(
+            candidateCacheKey,
+            {
+                reply: response,
+                tables: [],
+                tools: { results: evidence },
+            },
+            client
+        ).catch(err => console.warn("[agentic-runtime] dynamic cache save error:", err));
     }
     // Emit only the checked canonical answer. SSE statuses still show progress while working.
     yield { type: "token", data: response };

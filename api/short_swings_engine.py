@@ -80,7 +80,8 @@ EXIT_REASON_LABELS = {
     "ema10_break": "كسر متوسط EMA10 (حماية أرباح)",
     "stop_be": "وقف التعادل (حماية رأس المال)",
     "stop_loss": "وقف الخسارة الأولي (-4%)",
-    "max_time": "انتهاء المدة الزمنية القصوى (20 جلسة)"
+    "max_time": "انتهاء المدة الزمنية القصوى (20 جلسة)",
+    "delisted_or_halted": "إغلاق لانتهاء المدة / توقف التداول"
 }
 
 def _price_date(value):
@@ -505,24 +506,40 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         & (close_pos >= 0.75)
     )
 
-    # Extreme RS Leader Breakout:
-    # When broad market breadth is below 45% (market stress/pullback), allow exceptional
-    # market leaders with strong momentum (+20% in 20 sessions) breaking to 20-day highs on high volume (>= 1.5x 20MA).
+    # Defensive Relative Strength Leader (when broad breadth is below 45%):
     sig_rs_leader = (
         (~mkt_ok)
         & trend_aligned
-        & (df["close"] > df["high20"])
-        & (df["volume"] >= df["vol_ma20"] * 1.5)
+        & (df["close"] >= df["high20"] * 0.985)
+        & (df["volume"] >= df["vol_ma20"] * 1.25)
         & (df["close"] > df["open"])
-        & (close_pos >= 0.75)
-        & (df["ret20"] >= 0.20)
+        & (close_pos >= 0.70)
+        & (df["ret20"] >= 0.07)
     )
 
-    df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader
+    # Defensive Momentum Pullback in low-breadth markets:
+    sig_defensive_pb = (
+        (~mkt_ok)
+        & df["liquid"]
+        & (df["close"] > df["ema20"])
+        & (df["ema20"] > df["ema50"])
+        & (df["ret20"] >= 0.02)
+        & (df["low"] <= df["ema10"] * 1.015)
+        & (df["close"] > df["ema10"])
+        & (df["volume"] >= df["vol_ma20"] * 1.1)
+        & (df["close"] > df["open"])
+        & (close_pos >= 0.65)
+    )
+
+    df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader | sig_defensive_pb
     df["sig_type"] = np.where(
         sig_rs_leader,
         "اختراق قمة مع قوة نسبية استثنائية (RS Leader)",
-        np.where(sig_base_bo, "اختراق قمة 20 جلسة مع انفجار سيولة", "ارتداد زخم من متوسط 10 أيام")
+        np.where(
+            sig_defensive_pb,
+            "ارتداد زخم دفاعي في سوق متراجع",
+            np.where(sig_base_bo, "اختراق قمة 20 جلسة مع انفجار سيولة", "ارتداد زخم من متوسط 10 أيام")
+        )
     )
 
     next_date_map = dict(zip(dates, dates[1:]))
@@ -598,11 +615,48 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         for sym in list(positions):
             p = positions[sym]
             b = market.get((sym, day))
-            if not b or b.volume <= 0 or b.high == b.low:
-                continue
             age = i - p["index"]
 
-            if age >= 1 and p["pending"]:
+            # If position has reached max holding limit (20 sessions), schedule/enforce exit
+            if age >= 20 and not p.get("pending"):
+                p["pending"] = "max_time"
+
+            if not b or b.volume <= 0 or b.high == b.low:
+                # Stock is not trading today or missing bar
+                p["missing_sessions"] = p.get("missing_sessions", 0) + 1
+                # If exit was pending, or max time reached (age >= 20), or stock missing for >= 5 sessions:
+                # Close the trade at last recorded price so it does not linger indefinitely as a phantom trade.
+                if p.get("pending") or age >= 20 or p["missing_sessions"] >= 5:
+                    fill_price = p["last"] * (1 - 0.0015)
+                    ret_pct = (fill_price / p["entry_price"] - 1) * 100
+                    m_info = meta.get(sym.upper().split(".")[0], {})
+                    reason_code = p.get("pending") or ("max_time" if age >= 20 else "delisted_or_halted")
+                    closed_trades.append({
+                        "symbol": sym,
+                        "name_ar": m_info.get("name_ar", sym),
+                        "name_en": m_info.get("name_en", sym),
+                        "sector": m_info.get("sector", "عام"),
+                        "entry_date": p["date"],
+                        "exit_date": p.get("last_date") or day,
+                        "entry_price": round(p["entry_price"], 3),
+                        "exit_price": round(fill_price, 3),
+                        "return_pct": round(ret_pct, 2),
+                        "max_gain_pct": round(p["max_gain"], 2),
+                        "sessions": min(age, 20),
+                        "holding_days": min(age, 20),
+                        "reason": reason_code,
+                        "exit_reason": EXIT_REASON_LABELS.get(reason_code, "إغلاق حسب الخطة"),
+                        "trigger_type": p["sig_type"],
+                        "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
+                    })
+                    del positions[sym]
+                continue
+
+            # Stock traded normally today
+            p["missing_sessions"] = 0
+            p["last_date"] = day
+
+            if age >= 1 and p.get("pending"):
                 fill_price = b.open * (1 - 0.0015)
                 ret_pct = (fill_price / p["entry_price"] - 1) * 100
                 m_info = meta.get(sym.upper().split(".")[0], {})
@@ -682,6 +736,8 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
             if not b:
                 continue
             p["last"] = b.close
+            p["last_date"] = day
+            p["missing_sessions"] = 0
             age = i - p["index"]
             if p.get('entry_kind') == 'intraday_observed' and age == 0:
                 # Daily high/low include time before observation. No inferred
@@ -762,7 +818,12 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
                                'ema10': bar.ema10 if bar else published['reference_close'],
                                'sig_type': published.get('trigger_type') or 'إشارة منشورة محفوظة'})
     today_rows.extend(today_signals_df.head(15).to_dict('records'))
-    if phase != 'close' or last_date != session_date:
+    # Allow actionable pending signals for the upcoming open when last_date is session_date,
+    # or overnight/weekend before the next session opens (within 4 days, before 15:00 Cairo time).
+    is_recent_close = (last_date == session_date) or (
+        (dt.date.fromisoformat(session_date) - dt.date.fromisoformat(last_date)).days <= 4 and now_cairo.hour < 15
+    )
+    if (phase not in ('close', None)) or (not is_recent_close):
         today_rows = []
     for s_row in today_rows:
         sym = s_row["symbol"]
@@ -802,7 +863,9 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
     # 6. Active running positions (Strict separation from pending entries)
     for sym, p in positions.items():
         b = market.get((sym, last_date))
-        curr_price = b.close if b else p["entry_price"]
+        if not b:
+            continue
+        curr_price = b.close
         if phase == 'midday' and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
             quotes = observed_quotes or {}
             current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo)

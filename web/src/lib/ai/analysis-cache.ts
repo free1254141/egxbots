@@ -48,6 +48,10 @@ const LINE_PLACEHOLDER = "\uE000";
 // Tier 1 In-Memory Cache (0ms latency, 0 CPU)
 const memoryCache = new Map<string, CachedVipAnalysis>();
 
+export function clearVipAnalysisMemoryCache(): void {
+    memoryCache.clear();
+}
+
 function pruneMemoryCache(): void {
     if (memoryCache.size <= 500) return;
     const now = Date.now();
@@ -576,3 +580,89 @@ export async function setVipAnalysisCache(
         console.warn(`[setVipAnalysisCache] Error saving to market_cache for ${cacheKey}:`, err);
     }
 }
+
+/**
+ * Map an agentic tool call directly to its canonical cache key.
+ * This allows the LLM (DeepSeek-V3) to determine user intent dynamically in Round 0,
+ * completely bypassing brittle regex while enjoying high cache hit rates and zero token waste.
+ */
+export function resolveToolCallToCacheKey(toolName: string, args: any): string | null {
+    if (!toolName) return null;
+    const safeArgs = args && typeof args === "object" ? args : {};
+
+    // 1. Single Stock Analysis & Levels
+    if (toolName === "get_stock" || toolName === "get_stock_levels") {
+        const rawSym = safeArgs.symbol || (Array.isArray(safeArgs.symbols) && safeArgs.symbols.length === 1 ? safeArgs.symbols[0] : null);
+        if (!rawSym || typeof rawSym !== "string") return null;
+        const sym = rawSym.trim().toUpperCase().replace(/\.CA$/, "");
+        if (sym.length < 2 || sym.length > 8) return null;
+        return `vip_stock_${sym}`;
+    }
+
+    // 2. Open / Historic Recommendations
+    if (toolName === "get_recommendations") {
+        const timeframe = String(safeArgs.timeframe || "").toLowerCase();
+        if (timeframe.includes("last_week") || timeframe.includes("past")) return "vip_recs_last_week";
+        if (timeframe.includes("this_week")) return "vip_recs_this_week";
+        return "vip_open_recommendations";
+    }
+
+    // 3. Accumulation & Smart Money Flow
+    if (toolName === "get_accumulation_stocks") {
+        return "vip_accumulation";
+    }
+
+    // 4. Market Overview & Top Gainers/Losers/Sectors
+    if (toolName === "get_market") {
+        const metric = String(safeArgs.metric || safeArgs.type || "").toLowerCase();
+        if (metric.includes("top") || metric.includes("gainers") || metric.includes("losers") || metric.includes("movers")) return "vip_top_stocks";
+        if (metric.includes("sector")) return "vip_top_sectors";
+        return "vip_market_summary";
+    }
+
+    // 5. Technical Screener / Scans
+    if (toolName === "get_technical_scan" || toolName === "screen_stocks") {
+        return "vip_tech_screener";
+    }
+
+    // 6. Two-Stock Comparison
+    if (toolName === "get_comparison") {
+        const rawSymbols = Array.isArray(safeArgs.symbols) ? safeArgs.symbols : [safeArgs.symbol1, safeArgs.symbol2];
+        const validSymbols = (rawSymbols || [])
+            .filter((s: any) => typeof s === "string" && s.trim().length >= 2)
+            .map((s: string) => s.trim().toUpperCase().replace(/\.CA$/, ""));
+        if (validSymbols.length === 2) {
+            validSymbols.sort();
+            return `vip_compare_${validSymbols.join("_")}`;
+        }
+        return null;
+    }
+
+    // 7. Fair Value
+    if (toolName === "get_fair_value") {
+        const sym = safeArgs.symbol ? String(safeArgs.symbol).trim().toUpperCase().replace(/\.CA$/, "") : null;
+        return sym ? `vip_fair_value_${sym}` : "vip_fair_value_undervalued";
+    }
+
+    // 8. Price Traps (Wyckoff Springs & Upthrusts)
+    if (toolName === "get_price_traps") {
+        return "vip_price_traps";
+    }
+
+    // 9. Market News
+    if (toolName === "get_news") {
+        const sym = safeArgs.symbol ? String(safeArgs.symbol).trim().toUpperCase().replace(/\.CA$/, "") : null;
+        return sym ? `vip_news_${sym}` : "vip_market_news";
+    }
+
+    // 10. Sharia Cleanser
+    if (toolName === "get_sharia_cleanser") {
+        const sym = safeArgs.symbol ? String(safeArgs.symbol).trim().toUpperCase().replace(/\.CA$/, "") : null;
+        return sym ? `vip_sharia_${sym}` : "vip_sharia_cleanser";
+    }
+
+    // User-specific or sensitive operations (portfolio, write actions, user settings)
+    // NEVER cache!
+    return null;
+}
+

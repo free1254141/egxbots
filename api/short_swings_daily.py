@@ -306,7 +306,7 @@ def _snapshot_matches(swings, as_of, phase):
     return bool(swings and swings.get('status') == 'ok' and swings.get('as_of') == as_of and swings.get('phase') == phase)
 
 
-def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None):
+def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None, force=False):
     from api.daily_recovery_state import read_checkpoint, replace_checkpoint, utc_now, parse_timestamp
     from api.daily_bot_run import _telegram_recommendation_writes_enabled
     if phase not in {"midday", "close"}:
@@ -321,14 +321,14 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
     if not dry_run:
         old = read_checkpoint(sb, key)
         payload = (old or {}).get("payload") or {}
-        if payload.get("status") == "completed":
+        if payload.get("status") == "completed" and not force:
             _RECOVERY_DONE.add(key)
             return {"success": True, "status": "noop", "message": "This short-swings phase already completed", "count": 0}
         _RECOVERY_DONE.discard(key)
         now = utc_now()
         last_start = parse_timestamp(payload.get("started_at"))
         retry_at = parse_timestamp(payload.get("retry_at"))
-        if ((payload.get("status") == "running" and last_start and now - last_start < dt.timedelta(minutes=45))
+        if not force and ((payload.get("status") == "running" and last_start and now - last_start < dt.timedelta(minutes=45))
                 or (retry_at and now < retry_at) or payload.get("attempts", 0) >= (2 if phase == 'midday' else 4)):
             return {"success": False, "status": "waiting", "message": "Short-swings attempt running, backing off or exhausted"}
         payload = {**payload, "status": "running", "attempts": payload.get("attempts", 0) + 1,
@@ -416,12 +416,12 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
         return {"success": False, "status": "failed", "message": str(error)[:400], "report": {"failures": [str(error)[:400]]}}
 
 
-def run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None):
+def run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None, force=False):
     """A phase must complete durably; known failures resume on bounded retries."""
     if not _DELIVERY_LOCK.acquire(blocking=False):
         return {"success": False, "status": "already_running", "message": "Short swings already running"}
     try:
-        return _run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase=phase, job_run_id=job_run_id, observed_quotes=observed_quotes)
+        return _run_daily_short_swings(trigger=trigger, dry_run=dry_run, phase=phase, job_run_id=job_run_id, observed_quotes=observed_quotes, force=force)
     except Exception as error:
         return {"success": False, "status": "checkpoint_unavailable", "message": type(error).__name__}
     finally:

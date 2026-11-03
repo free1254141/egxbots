@@ -2861,21 +2861,24 @@ def add_trade_levels(df: pd.DataFrame, risk_reward_ratio: float = 2.0, accelerat
     if stop_loss > min_stop_price:
         stop_loss = min_stop_price
 
-    # Ensure stop_loss is positive and reasonable
-    if stop_loss < current_price * 0.85:  # Max 15% loss regardless of score
-        stop_loss = current_price * 0.85
+    # Tighten maximum risk: cap initial stop loss at -6.5% for capital preservation in choppy/bear markets
+    # instead of bleeding all the way to -15%.
+    max_stop_distance_pct = 0.08 if acceleration_score >= 7 else 0.065
+    if stop_loss < current_price * (1 - max_stop_distance_pct):
+        stop_loss = current_price * (1 - max_stop_distance_pct)
 
-    # Target Price (T.P) = Current Price + (sl_multiplier * ATR * rr_ratio)
-    target_price = current_price + (sl_multiplier * current_atr * rr_ratio)
+    risk_distance = max(current_price - stop_loss, current_price * 0.02)
+
+    # Target Price (T.P) = Current Price + max(ATR expansion, risk_distance * 1.52)
+    # Mathematically guaranteeing healthy Reward / Risk >= 1.5
+    raw_target = current_price + max(sl_multiplier * current_atr * rr_ratio, risk_distance * 1.52)
     
-    # Cap and floor target based on acceleration score
-    max_target = current_price * (1 + max_target_pct)
-    min_target = current_price * 1.03  # Min 3% profit target
+    # Cap target based on acceleration score (allow up to 25% for high score, at least 10% for normal)
+    effective_max_target_pct = max(max_target_pct, (risk_distance / current_price) * 1.55)
+    max_target = current_price * (1 + max(effective_max_target_pct, 0.10))
+    min_target = current_price * 1.04  # Min 4% profit target
     
-    if target_price > max_target:
-        target_price = max_target
-    elif target_price < min_target:
-        target_price = min_target
+    target_price = min(max_target, max(min_target, raw_target))
 
     return round(float(target_price), 2), round(float(max(stop_loss, 0.01)), 2)
 

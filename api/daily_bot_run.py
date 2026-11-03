@@ -2333,31 +2333,13 @@ async def generate_daily_recommendations(
         print(f"[RECOMMENDATIONS] Capacity check unavailable: {capacity_error}")
         return no_buy("capacity_check_unavailable", "تعذر التحقق من سعة التوصيات؛ تم إيقاف الشراء احترازيًا لخطأ تقني، وليس بسبب تقييم سلبي للسوق.")
     market_gate = should_reject_new_buys()
-    if market_gate.get("blocked"):
+    is_market_stressed = bool(market_gate.get("blocked"))
+    if is_market_stressed:
         if run_context is not None:
             run_context.update(market_gate)
-        print(f"[RECOMMENDATIONS] Broad-market gate blocked new BUYs: {market_gate.get('reason')}")
-        # Run shadow scan to record blocked candidates for operator audit without publishing
-        try:
-            shadow_scan = fast_scan(
-                country="Egypt",
-                limit=50,
-                min_precision=0.5,
-                model_name="model_EGX.bin",
-                council_model="KING.bin",
-                validator_model="The_Council_Validator.bin",
-                bulk_cache_ttl_seconds=bulk_cache_ttl_seconds,
-                allow_blocked_gate=True,
-            )
-            shadow_results = shadow_scan.get("results", [])
-            audit["market_gate_blocked_candidates"] = [
-                {"symbol": item.get("symbol"), "last_close": item.get("last_close"),
-                 "precision": item.get("precision"), "council_score": item.get("council_score")}
-                for item in shadow_results[:10]
-            ]
-        except Exception as shadow_err:
-            print(f"[RECOMMENDATIONS] Shadow scan for audit skipped: {shadow_err}")
-        return no_buy("market_gate", market_gate.get("reason") or "قاطع أمان السوق منع شراء جديد.")
+        print(f"[RECOMMENDATIONS] Broad-market gate active: {market_gate.get('reason')} -> Switching to Adaptive Defensive Mode.")
+        audit["market_mode"] = "adaptive_defensive"
+        audit["market_gate_reason"] = market_gate.get("reason")
     resolved_model = "model_EGX.bin"
     
     # ── Load EGX30 index data unconditionally for trend check and adaptive selection ──
@@ -2461,15 +2443,16 @@ async def generate_daily_recommendations(
         elif os.path.exists(os.path.join(base_dir, "api", "models", "The_Council_Validator.bin")):
             validator_model = "The_Council_Validator.bin"
 
-    print(f"[RECOMMENDATIONS] Running ML fast scan for EGX stocks using model: {resolved_model} (council: {council_model}, validator: {validator_model})...")
+    print(f"[RECOMMENDATIONS] Running ML fast scan for EGX stocks using model: {resolved_model} (council: {council_model}, validator: {validator_model}, stressed={is_market_stressed})...")
     scan_resp = fast_scan(
         country="Egypt",
         limit=200,
-        min_precision=0.5,
+        min_precision=0.62 if is_market_stressed else 0.5,
         model_name=resolved_model,
         council_model=council_model,
         validator_model=validator_model,
         bulk_cache_ttl_seconds=bulk_cache_ttl_seconds,
+        allow_blocked_gate=True,
     )
     
     results = scan_resp.get("results", [])
@@ -2500,10 +2483,17 @@ async def generate_daily_recommendations(
             return score
 
         try:
-            env_thresh = os.getenv("COUNCIL_THRESHOLD", "55.0")
-            council_threshold = _normalize_percent_score(env_thresh, default=55.0)
+            env_thresh = os.getenv("COUNCIL_THRESHOLD")
+            if env_thresh:
+                council_threshold = _normalize_percent_score(env_thresh, default=55.0)
+            elif is_market_stressed:
+                # In market stress/correction, KING model is dormant (0.0), so 2-model consensus average is around 30-36%.
+                # Adaptive threshold allows top defensive consensus candidates (>= 30.0%)
+                council_threshold = 30.0
+            else:
+                council_threshold = 50.0
         except Exception:
-            council_threshold = 55.0
+            council_threshold = 30.0 if is_market_stressed else 50.0
 
         filtered_results = []
         for item in results:
@@ -3571,7 +3561,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
                     run_context=market_gate_context,
                 )
-                if market_gate.get("blocked"):
+                if generated_count and generated_count > 0:
+                    decision_details = f"Generated {generated_count} recommendations (Adaptive Mode)"
+                elif market_gate.get("blocked") and not generated_count:
                     decision_details = f"Skipped - {market_gate.get('reason')}"
                 else:
                     decision_details = market_gate_context.get("no_buy_reason") or f"Generated {generated_count} recommendations using {model_filter or 'default'}"
