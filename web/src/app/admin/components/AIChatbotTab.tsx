@@ -6,7 +6,7 @@ import {
     Search, Clock, Trash2, Maximize, Minimize, Database, 
     Zap, Crown, ArrowDown, ArrowUp, Folder, Archive, CheckCircle2, Volume2 
 } from "lucide-react";
-import { cleanVoiceText } from "@/lib/voice-utils";
+import { cleanVoiceText, extractVoiceAnalysisSpeech } from "@/lib/voice-utils";
 import { toast } from "sonner";
 import { ChatUsageDetails, UserChatCost } from "./ChatUsageDetails";
 import SupportTab from "./SupportTab";
@@ -49,7 +49,7 @@ export default function AIChatbotTab() {
             adminAudioRef.current = null;
         }
 
-        const cleaned = cleanVoiceText(text, 200) || text.slice(0, 150);
+        const cleaned = text.length > 250 ? extractVoiceAnalysisSpeech(text) : (cleanVoiceText(text, 250) || text.slice(0, 150));
         const url = `/api/voice/tts?text=${encodeURIComponent(cleaned)}&voice=ar-EG-ShakirNeural`;
         const audio = new Audio(url);
         adminAudioRef.current = audio;
@@ -826,17 +826,27 @@ export default function AIChatbotTab() {
                                                                         </div>
                                                                     </span>
                                                                     <ChatUsageDetails log={log} />
-                                                                    {(log.is_voice || log.is_voice_call || log.is_voice_note) && log.reply && (
-                                                                        <div className="mb-2 pb-2 border-b border-indigo-100 dark:border-zinc-800 flex items-center gap-2">
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => playAudioForLog(`asst_${log.id}`, log.reply)}
-                                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 cursor-pointer transition active:scale-95"
-                                                                                title="استمع لرد أرتورو الصوتي"
-                                                                            >
-                                                                                <Volume2 className="w-3.5 h-3.5" />
-                                                                                <span>{playingLogId === `asst_${log.id}` ? "إيقاف الصوت ⏸️" : "استمع لرد أرتورو الصوتي 🔊"}</span>
-                                                                            </button>
+                                                                    {/* Spoken Voice Analysis Box - What the user heard on the call */}
+                                                                    {(log.spoken_text || ((log.is_voice || log.is_voice_call) && log.reply)) && (
+                                                                        <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-950 dark:text-amber-200">
+                                                                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                                                <span className="font-black text-xs flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                                                                                    <Volume2 className="w-4 h-4 animate-pulse" />
+                                                                                    <span>ما سمعه المستخدم في المكالمة (Spoken Voice):</span>
+                                                                                </span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => playAudioForLog(`spoken_${log.id}`, log.spoken_text || extractVoiceAnalysisSpeech(log.reply))}
+                                                                                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-black cursor-pointer transition active:scale-95 flex items-center gap-1.5 shadow-sm"
+                                                                                    title="استمع للمكالمة بنفس النص الصوتي تماماً"
+                                                                                >
+                                                                                    <Volume2 className="w-3.5 h-3.5" />
+                                                                                    <span>{playingLogId === `spoken_${log.id}` ? "إيقاف ⏸️" : "استمع للمكالمة 🔊"}</span>
+                                                                                </button>
+                                                                            </div>
+                                                                            <p className="text-xs leading-relaxed font-sans text-zinc-800 dark:text-zinc-200 bg-white/40 dark:bg-black/40 p-2 rounded-lg border border-amber-500/20 whitespace-pre-wrap">
+                                                                                &quot;{log.spoken_text || extractVoiceAnalysisSpeech(log.reply)}&quot;
+                                                                            </p>
                                                                         </div>
                                                                     )}
                                                                     <div className="min-w-0 max-w-full overflow-x-auto text-black dark:text-zinc-100">

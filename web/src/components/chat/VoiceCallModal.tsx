@@ -16,7 +16,7 @@ import {
     Zap
 } from "lucide-react";
 import { toast } from "sonner";
-import { cleanVoiceText, playConnectionChime } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, cleanVoiceText, playConnectionChime } from "@/lib/voice-utils";
 
 interface VoiceCallModalProps {
     isOpen: boolean;
@@ -42,7 +42,7 @@ export function VoiceCallModal({
     const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
     const [transcript, setTranscript] = useState("");
     const [latestSpokenText, setLatestSpokenText] = useState<string | null>(null);
-    const [conversationLog, setConversationLog] = useState<Array<{ sender: "user" | "artoro"; text: string; time: string }>>([]);
+    const [conversationLog, setConversationLog] = useState<Array<{ sender: "user" | "artoro"; text: string; spokenText?: string; time: string }>>([]);
 
     // Synchronous refs to prevent React state closure bugs
     const isOpenRef = useRef(isOpen);
@@ -218,7 +218,9 @@ export function VoiceCallModal({
         stopListening();
         setCallState("speaking");
 
-        const spokenSummary = cleanVoiceText(fullText, 170) || "تمام يا فندم، تم تحديث بيانات السهم والتحليل على شاشتك.";
+        const spokenSummary = fullText.length > 300 
+            ? extractVoiceAnalysisSpeech(fullText) 
+            : (cleanVoiceText(fullText, 250) || "تمام يا فندم، تم تحديث بيانات السهم والتحليل على شاشتك.");
         setLatestSpokenText(spokenSummary);
 
         const onPlaybackFinished = () => {
@@ -315,9 +317,10 @@ export function VoiceCallModal({
 
             console.log("[VoiceCall] Received AI reply length:", replyText.length);
             const safeReply = replyText || "عفواً، تم استلام سؤالك وتحديث البيانات في الشات الرئيسي.";
+            const spokenOpinion = extractVoiceAnalysisSpeech(safeReply, cleaned);
 
-            setConversationLog((prev) => [...prev, { sender: "artoro", text: safeReply, time: nowStr }]);
-            await playSpeech(safeReply);
+            setConversationLog((prev) => [...prev, { sender: "artoro", text: safeReply, spokenText: spokenOpinion, time: nowStr }]);
+            await playSpeech(spokenOpinion);
         } catch (err: any) {
             console.error("[VoiceCall] Error executing AI query:", err);
             const failMessage = "عفواً يا فندم، حدث تأخر في الشبكة، برجاء تكرار سؤالك مرة أخرى.";
@@ -568,7 +571,7 @@ export function VoiceCallModal({
                                         <span>{item.sender === "user" ? "👤 أنت" : "🤖 أرتورو"}</span>
                                         <span>{item.time}</span>
                                     </div>
-                                    <p className="line-clamp-3 leading-relaxed">{item.text}</p>
+                                    <p className="line-clamp-3 leading-relaxed">{item.spokenText || item.text}</p>
                                 </div>
                             ))}
                         </div>

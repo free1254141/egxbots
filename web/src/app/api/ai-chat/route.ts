@@ -27,6 +27,7 @@ import {
     personalizeCachedAnalysis,
     setVipAnalysisCache,
 } from "@/lib/ai/analysis-cache";
+import { extractVoiceAnalysisSpeech } from "@/lib/voice-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -923,6 +924,7 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
+                                const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null;
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -931,6 +933,7 @@ export async function POST(req: NextRequest) {
                                     is_voice_note: isVoiceNote,
                                     channel: messageChannel,
                                     audio_duration: audioDuration,
+                                    spoken_text: spokenText,
                                     cached: true,
                                     response_origin: "cache",
                                     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, provider_calls: 0, tool_calls: Array.isArray(cached.tools?.results) ? cached.tools.results.length : 0, model: "cache (0 tokens)" },
@@ -1158,6 +1161,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
+                                             const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null;
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,
@@ -1165,6 +1169,7 @@ export async function POST(req: NextRequest) {
                                                 is_voice_note: isVoiceNote,
                                                 channel: messageChannel,
                                                 audio_duration: audioDuration,
+                                                spoken_text: spokenText,
                                             };
                                             const messageTimestamps = createChatMessageTimestamps(requestReceivedAt, Date.now());
                                             await insertChatMessages(supabase, [
