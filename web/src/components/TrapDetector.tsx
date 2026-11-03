@@ -2,12 +2,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, LockKeyhole, Rocket, ShieldAlert, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronUp,
+  Flame,
+  LockKeyhole,
+  Rocket,
+  ShieldAlert,
+  ShieldCheck,
+  Target,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isPro } from "@/lib/ai/plan-gate";
 import type { TrapsSnapshot, TrapSignalRow } from "@/app/api/scan/traps/route";
+import type { SignalPerformancePayload } from "@/app/api/scan/signal-performance/route";
 
 export default function TrapDetector() {
   const { language } = useLanguage();
@@ -15,6 +28,8 @@ export default function TrapDetector() {
   const ar = language === "ar";
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [snapshot, setSnapshot] = useState<TrapsSnapshot | null>(null);
+  const [perf, setPerf] = useState<SignalPerformancePayload | null>(null);
+  const [showReview, setShowReview] = useState(false);
   const [error, setError] = useState(false);
   const [activeTab, setActiveTab] = useState<"BEAR_TRAP" | "BULL_TRAP">("BEAR_TRAP");
   const [pro, setPro] = useState(false);
@@ -70,15 +85,23 @@ export default function TrapDetector() {
   useEffect(() => {
     if (!pro) return;
     const controller = new AbortController();
-    fetch("/api/scan/traps", { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed");
-        return res.json();
-      })
-      .then(setSnapshot)
-      .catch((cause) => {
-        if (cause?.name !== "AbortError") setError(true);
-      });
+
+    Promise.allSettled([
+      fetch("/api/scan/traps", { signal: controller.signal })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed");
+          return res.json();
+        })
+        .then(setSnapshot),
+      fetch("/api/scan/signal-performance", { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.ok) setPerf(data);
+        }),
+    ]).catch((cause) => {
+      if (cause?.name !== "AbortError") setError(true);
+    });
+
     return () => controller.abort();
   }, [pro]);
 
@@ -103,8 +126,8 @@ export default function TrapDetector() {
               </h2>
               <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
                 {ar
-                  ? "يرصد الكسر الوهمي للتجميع (Wyckoff Spring) والاختراق الكاذب للتصريف (Upthrust) بعد اكتمال شمعة الإغلاق اليومي."
-                  : "Detects Wyckoff Springs (Bear Traps) and Upthrusts (Bull Traps) after the daily closing candle settles."}
+                  ? "يرصد الكسر الوهمي للتجميع (Wyckoff Spring) والاختراق الكاذب للتصريف (Upthrust) بعد اكتمال شمعة الإغلاق اليومي مع إحصائيات نجاح تاريخية موثقة."
+                  : "Detects Wyckoff Springs (Bear Traps) and Upthrusts (Bull Traps) after the daily closing candle settles with verified historical performance."}
               </p>
             </div>
           </div>
@@ -123,6 +146,10 @@ export default function TrapDetector() {
 
   const rows: TrapSignalRow[] =
     activeTab === "BEAR_TRAP" ? snapshot?.bearTraps || [] : snapshot?.bullTraps || [];
+
+  const reviewSprings = perf?.review?.springs || [];
+  const reviewUpthrusts = perf?.review?.upthrusts || [];
+  const currentReviewList = activeTab === "BEAR_TRAP" ? reviewSprings : reviewUpthrusts;
 
   return (
     <section
@@ -146,7 +173,10 @@ export default function TrapDetector() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setActiveTab("BEAR_TRAP")}
+            onClick={() => {
+              setActiveTab("BEAR_TRAP");
+              setShowReview(false);
+            }}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black border-2 cursor-pointer transition-colors ${
               activeTab === "BEAR_TRAP"
                 ? "border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
@@ -162,7 +192,10 @@ export default function TrapDetector() {
 
           <button
             type="button"
-            onClick={() => setActiveTab("BULL_TRAP")}
+            onClick={() => {
+              setActiveTab("BULL_TRAP");
+              setShowReview(false);
+            }}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black border-2 cursor-pointer transition-colors ${
               activeTab === "BULL_TRAP"
                 ? "border-rose-500 bg-rose-500/15 text-rose-600 dark:text-rose-400"
@@ -177,6 +210,140 @@ export default function TrapDetector() {
           </button>
         </div>
       </div>
+
+      {/* ── Model Track Record Banner ──────────────────────────────────── */}
+      {perf && (
+        <div className="mt-3 rounded border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs dark:border-[#303744] dark:bg-[#151c27]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {activeTab === "BEAR_TRAP" ? (
+                <>
+                  <span className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                    <Target className="h-3.5 w-3.5" />
+                    {ar ? "دقة الارتداد الشرائي (Spring - 40 جلسة):" : "Wyckoff Spring 40-Session Track Record:"}
+                  </span>
+                  <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    {ar ? `نسبة صعود 3 أيام: ${perf.springs.hitRate3d}%` : `3-Day Rebound Hit: ${perf.springs.hitRate3d}%`}
+                  </span>
+                  <span className="text-zinc-600 dark:text-zinc-400 text-[11px]">
+                    {ar
+                      ? `(متوسط أقصى ربح: +${perf.springs.avgBest3d}% · تم اختبار ${perf.springs.events} نموذج)`
+                      : `(Avg max gain: +${perf.springs.avgBest3d}% across ${perf.springs.events} signals)`}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="inline-flex items-center gap-1 font-bold text-rose-600 dark:text-rose-400">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {ar ? "دقة تجنب فخاخ القمة (Upthrust - 40 جلسة):" : "Upthrust 40-Session Protection Record:"}
+                  </span>
+                  <span className="rounded bg-rose-500/15 px-2 py-0.5 font-mono font-bold text-rose-600 dark:text-rose-400">
+                    {ar
+                      ? `تأكيد هبوط اليوم التالي: ${perf.upthrusts.winRate}%`
+                      : `Next-Day Drop: ${perf.upthrusts.winRate}%`}
+                  </span>
+                  <span className="text-zinc-600 dark:text-zinc-400 text-[11px]">
+                    {ar
+                      ? `(متوسط تجنب خسارة: ${perf.upthrusts.avgBest3d}% · تم اختبار ${perf.upthrusts.events} نموذج)`
+                      : `(Avg drop: ${perf.upthrusts.avgBest3d}% across ${perf.upthrusts.events} signals)`}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {currentReviewList.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowReview(!showReview)}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:underline dark:text-emerald-400 cursor-pointer"
+              >
+                <span>
+                  {ar
+                    ? `مراجعة إشارات أمس (${perf.review?.signalDate})`
+                    : `Review Yesterday's Signals (${perf.review?.signalDate})`}
+                </span>
+                {showReview ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            )}
+          </div>
+
+          {/* Collapsible Review Table for Traps */}
+          {showReview && currentReviewList.length > 0 && (
+            <div className="mt-3 overflow-x-auto border-t border-emerald-500/20 pt-2">
+              <table className="w-full text-left text-[11px]" dir={ar ? "rtl" : "ltr"}>
+                <thead>
+                  <tr className="text-zinc-500 dark:text-zinc-400">
+                    <th className="py-1 px-2">{ar ? "السهم" : "Symbol"}</th>
+                    <th className="py-1 px-2">{ar ? "إغلاق الإشارة" : "Signal Close"}</th>
+                    <th className="py-1 px-2">
+                      {activeTab === "BEAR_TRAP"
+                        ? ar
+                          ? "أعلى قمة اليوم"
+                          : "Today's High"
+                        : ar
+                        ? "أدنى قاع اليوم"
+                        : "Today's Low"}
+                    </th>
+                    <th className="py-1 px-2">{ar ? "إغلاق اليوم" : "Today's Close"}</th>
+                    <th className="py-1 px-2">{ar ? "عائد الإغلاق" : "Return"}</th>
+                    <th className="py-1 px-2">{ar ? "ارتداد الذيل" : "Wick %"}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200/50 dark:divide-zinc-800">
+                  {currentReviewList.map((row) => (
+                    <tr key={row.symbol} className="hover:bg-emerald-500/5">
+                      <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
+                        <Link href={`/stocks/${row.symbol}`} className="hover:text-emerald-500">
+                          {row.symbol}
+                        </Link>
+                      </td>
+                      <td className="py-1 px-2 font-mono">{row.signalClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono font-bold">
+                        {activeTab === "BEAR_TRAP" ? (
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            {row.nextHigh?.toFixed(2) ?? "—"}{" "}
+                            {row.intradayHighPct != null && (
+                              <span className="text-[10px] font-normal">
+                                (+{row.intradayHighPct}%)
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-rose-600 dark:text-rose-400">
+                            {row.nextLow?.toFixed(2) ?? "—"}{" "}
+                            {row.intradayLowPct != null && (
+                              <span className="text-[10px] font-normal">
+                                ({row.intradayLowPct}%)
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1 px-2 font-mono">{row.nextClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono font-bold">
+                        <span
+                          className={
+                            row.retPct != null && row.retPct > 0
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : row.retPct != null && row.retPct < 0
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-zinc-500"
+                          }
+                        >
+                          {row.retPct != null ? `${row.retPct > 0 ? "+" : ""}${row.retPct}%` : "—"}
+                        </span>
+                      </td>
+                      <td className="py-1 px-2 font-mono text-zinc-500">
+                        {row.wickPct != null ? `${row.wickPct}%` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {error ? (
         <p className="mt-3 text-xs font-bold text-rose-600 dark:text-rose-400">

@@ -232,7 +232,8 @@ export async function personalizeCachedAnalysis(
 // ---------------------------------------------------------------------------
 
 function normalizeText(text: string): string {
-    return normalizeArabicIntent(text)
+    const cleanedDuplicates = (text || "").replace(/([^\s]+)\s+\1+/g, "$1");
+    return normalizeArabicIntent(cleanedDuplicates)
         .replace(/[أإآ]/g, "ا")
         .replace(/ى/g, "ي")
         .replace(/ة/g, "ه")
@@ -399,21 +400,21 @@ export function buildAnalysisCacheKey(
 
     if (explicitSymbols.length > 2) return null;
 
-    // 3. Canonical Market-Wide Buttons & Repeatable Queries (only short, direct requests)
+    // 3. Canonical Market-Wide Buttons & Repeatable Queries (only direct requests)
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-    if (wordCount > 10) return null;
+    if (wordCount > 15) return null;
 
     if (/ملخص\s+السوق|حاله\s+السوق|وضع\s+السوق|market\s+summary/.test(normalized)) {
         return "vip_market_summary";
     }
-    if (/^(?:ايه\s+)?(?:اقوي|اقوى|افضل)\s+الاسهم(?:\s+النهارده|\s+اليوم|\s+الان|\s+ايه)?$/.test(normalized)) {
-        return "vip_top_stocks";
-    }
-    if (/اسهم\s+التجميع|تجميع\s+وسيوله|السيوله\s+والتجميع|تجمع\s+سيوله|accumulation/.test(normalized)) {
+    if (/(?:اسهم\s+)?تجميع(?:\s+(?:مؤسسي|ذكي|حيتان|وسيوله|سيوله))?|تجميع\s+مؤسسي|تجميع\s+وسيوله|السيوله\s+والتجميع|تجمع\s+سيوله|بتجمع\s+سيوله|accumulation/.test(normalized)) {
         return "vip_accumulation";
     }
-    if (/المسح\s+الفني|مسح\s+فني|الماسح\s+الذكي|tech\s+screener/.test(normalized)) {
+    if (/المسح\s+الفني|مسح\s+فني|الماسح\s+الذكي|اسهم\s+علي\s+وشك\s+الانطلاق|اسهم\s+اعطت\s+اشار[ةه]\s+دخول|tech\s+screener/.test(normalized)) {
         return "vip_tech_screener";
+    }
+    if (/(?:اقوي|اقوى|افضل)\s+الاسهم(?:\s+(?:النهارده|اليوم|الان|في\s+السوق))?|top\s+stocks/i.test(normalized) && !/تجميع|تجمع|بتجمع|قطاع|فني|مسح/.test(normalized)) {
+        return "vip_top_stocks";
     }
     if (/اخبار\s+(?:وافصاحات\s+)?(?:السوق|البورصه)|اهم\s+اخبار\s+وافصاحات|market\s+news/.test(normalized)) {
         return "vip_market_news";
@@ -424,7 +425,7 @@ export function buildAnalysisCacheKey(
     if (/توصيات\s+الاسبوع\s+(?:اللي\s+فات|الماضي|السابق)/.test(normalized)) {
         return "vip_recs_last_week";
     }
-    if (/التوصيات\s+المفتوحه|كل\s+التوصيات|التوصيات\s+النشطه|التوصيات\s+الحاليه|التوصيات\s+الان|التوصيات\s+اليوم|open\s+recommendations/.test(normalized)) {
+    if (/(?:كل\s+)?(?:ال)?توصيات\s+(?:المفتوح[ةه]|النشط[ةه]|الحالي[ةه]|الان|اليوم|المتاح[ةه]|مفتوح[ةه]|نشط[ةه])|(?:كل\s+)?(?:ال)?توصيات\s+المفتوح[ةه](?:\s+حاليا)?|open\s+recommendations/.test(normalized)) {
         return "vip_open_recommendations";
     }
     if (/(?:اقوي|اقوى|افضل)\s+(?:القطاعات|قطاع)|اي\s+القطاعات\s+الاقوي/.test(normalized)) {

@@ -45,6 +45,7 @@ describe("buildAnalysisCacheKey (smart intent filtering & demand-driven keys)", 
     test("single stock comprehensive analysis phrasings map to the same canonical key", () => {
         expect(buildAnalysisCacheKey("سهم فوري", ["FWRY"], false)).toBe("vip_stock_FWRY");
         expect(buildAnalysisCacheKey("حلل عتاقه", ["ATQA"], false)).toBe("vip_stock_ATQA");
+        expect(buildAnalysisCacheKey("حلل سهم سهم موبكو", ["MFPC"], false)).toBe("vip_stock_MFPC");
         expect(buildAnalysisCacheKey("تحليل فني لسهم فوري", ["FWRY"], false)).toBe("vip_stock_FWRY");
         expect(buildAnalysisCacheKey("ايه رايك في سهم فوري", ["FWRY"], false)).toBe("vip_stock_FWRY");
         expect(buildAnalysisCacheKey("FWRY", ["FWRY"], false)).toBe("vip_stock_FWRY");
@@ -80,12 +81,17 @@ describe("buildAnalysisCacheKey (smart intent filtering & demand-driven keys)", 
         expect(buildAnalysisCacheKey("أقوى الأسهم النهارده", [], false)).toBe("vip_top_stocks");
         expect(buildAnalysisCacheKey("أسهم التجميع والسيولة", [], false)).toBe("vip_accumulation");
         expect(buildAnalysisCacheKey("أقوى أسهم التجميع والسيولة الذكية اليوم", [], false)).toBe("vip_accumulation");
+        expect(buildAnalysisCacheKey("هل في تجميع مؤسسي؟", [], false)).toBe("vip_accumulation");
+        expect(buildAnalysisCacheKey("إيه أقوى الأسهم اللي بتجمع سيولة وأحجام تداول النهاردة؟", [], false)).toBe("vip_accumulation");
         expect(buildAnalysisCacheKey("المسح الفني", [], false)).toBe("vip_tech_screener");
         expect(buildAnalysisCacheKey("أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات", [], false)).toBe("vip_tech_screener");
+        expect(buildAnalysisCacheKey("اسهم علي وشك الانطلاق", [], false)).toBe("vip_tech_screener");
+        expect(buildAnalysisCacheKey("أسهم أعطت إشاره دخول", [], false)).toBe("vip_tech_screener");
         expect(buildAnalysisCacheKey("أخبار السوق", [], false)).toBe("vip_market_news");
         expect(buildAnalysisCacheKey("أهم أخبار وإفصاحات البورصة المصرية اليوم", [], false)).toBe("vip_market_news");
         expect(buildAnalysisCacheKey("هات كل التوصيات المفتوحه", [], false)).toBe("vip_open_recommendations");
         expect(buildAnalysisCacheKey("هات كل التوصيات المفتوحة حالياً", [], false)).toBe("vip_open_recommendations");
+        expect(buildAnalysisCacheKey("توصيات اليوم", [], false)).toBe("vip_open_recommendations");
         expect(buildAnalysisCacheKey("عايز توصيات الاسبوع الحالى", [], false)).toBe("vip_recs_this_week");
         expect(buildAnalysisCacheKey("عايز توصيات الاسبوع اللى فات", [], false)).toBe("vip_recs_last_week");
         expect(buildAnalysisCacheKey("اي القطاعات الاقوى النهارده", [], false)).toBe("vip_top_sectors");

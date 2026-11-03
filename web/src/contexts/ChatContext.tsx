@@ -1,1050 +1,2104 @@
 "use client";
 
+
+
 import { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from "react";
+
 import { useAuth } from "@/contexts/AuthContext";
+
 import { ChatSession } from "@/components/chat/ChatSidebar";
+
 import { sanitizeReply, sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
+
 import { createChatRequest } from "@/lib/chat-request.cjs";
+
 import { orderChatMessages } from "@/lib/ai/chat-order";
 
+
+
 export type ChatMessage = {
+
     id?: string;
+
     role: "user" | "assistant" | "system";
+
     content: string;
+
     timestamp: number;
+
     imageUrl?: string;
+
     imagePreviewUrl?: string;
+
     images?: string[];
+
     actions?: ChatAction[];
+
     suggestedButtons?: string[];
+
     isStreaming?: boolean;
+
     statusText?: string;
+
     tables?: ChatTable[];
+
     latencyMs?: number;
+
 };
+
+
 
 export type ChatTable = {
+
     id: string;
+
     title: string;
+
     headers: string[];
+
     rows: string[][];
+
     source?: string;
+
     data_time?: string;
+
 };
+
+
 
 type ChatAction = {
+
     label: string;
+
     type: "navigate" | "function";
+
     value: string;
+
 };
 
+
+
 export const AVAILABLE_AI_MODELS = [
+
     { id: "deepseek-chat", name: "DeepSeek Flash", badgeAr: "الأسرع ⚡", badgeEn: "Fastest ⚡", descAr: "أسرع نموذج ديب سيك — استجابة فورية لتحليلات البورصة", descEn: "Fastest DeepSeek model — instant response for stock analysis" },
+
     { id: "deepseek-reasoner", name: "DeepSeek Pro", badgeAr: "الأعمق 🧠", badgeEn: "Reasoner 🧠", descAr: "النموذج الاستدلالي المتقدم لقرارات التداول والتحليلات العميقة", descEn: "Advanced reasoning model for deep analysis and trade decisions" },
+
 ];
+
+
 
 // Kept for future testing (stock analysis benchmarks):
+
 export const EXPERIMENTAL_AI_MODELS = [
+
     { id: "deepseek-v4.1-flash-uncensored", name: "DeepSeek V4.1 Flash", badgeAr: "V4.1 حر 🔥", badgeEn: "V4.1 Uncensored 🔥", descAr: "إصدار ديب سيك V4.1 فلاش غير المقيد عبر Experiential Labs", descEn: "DeepSeek V4.1 Flash Uncensored via Experiential Labs" },
+
     { id: "gpt-6-luna-decisions", name: "GPT-6 Luna Decisions", badgeAr: "قرارات 🎯", badgeEn: "Decisions 🎯", descAr: "محرك اتخاذ القرارات وفحص الأدلة الرقمية للبورصة المصرية", descEn: "Decision engine & structured evidence verification for EGX" },
+
 ];
 
+
+
 interface ChatContextType {
+
     isOpen: boolean;
+
     setIsOpen: (v: boolean) => void;
+
     messages: ChatMessage[];
-    sendMessage: (text: string, imageInput?: string | string[]) => Promise<void>;
+
+    sendMessage: (text: string, imageInput?: string | string[], options?: { isVoice?: boolean }) => Promise<any>;
+
     stopResponding: () => void;
+
     isLoading: boolean;
+
     remainingQuota: number;
+
     quotaLimit?: number;
+
     isPro?: boolean;
+
     isInitializing: boolean;
+
     accessError: boolean;
+
     retryAccess: () => void;
+
     showUpgradeModal: boolean;
+
     setShowUpgradeModal: (v: boolean) => void;
+
     selectedModel: string;
+
     setSelectedModel: (model: string) => void;
+
     sessions: ChatSession[];
+
     activeSessionId: string | null;
+
     createNewSession: () => void;
+
     switchSession: (sessionId: string) => Promise<void>;
+
     deleteSession: (sessionId: string) => Promise<void>;
+
     renameSession: (sessionId: string, newTitle: string) => Promise<void>;
+
     isSidebarOpen: boolean;
+
     setIsSidebarOpen: (v: boolean) => void;
+
     autonomousRecommendations: boolean;
+
     setAutonomousRecommendations: (enabled: boolean) => void;
+
     isAccessReady: boolean;
+
 }
+
+
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
+
+
 // Local Storage Persistence Helpers
+
 function getStoredSessions(): ChatSession[] {
+
     if (typeof window === "undefined") return [];
+
     try {
+
         const raw = localStorage.getItem("egxbots_chat_sessions_v2");
+
         return raw ? JSON.parse(raw) : [];
+
     } catch {
+
         return [];
+
     }
+
 }
+
+
 
 function saveStoredSessions(sessions: ChatSession[]) {
+
     if (typeof window === "undefined") return;
+
     try {
+
         localStorage.setItem("egxbots_chat_sessions_v2", JSON.stringify(sessions));
+
     } catch (e) {
+
         console.error("Failed to save sessions to localStorage:", e);
+
     }
+
 }
+
+
 
 function getStoredMessages(sessionId: string): ChatMessage[] {
+
     if (typeof window === "undefined" || !sessionId) return [];
+
     try {
+
         const raw = localStorage.getItem(`egxbots_msgs_${sessionId}`);
+
         return raw ? JSON.parse(raw) : [];
+
     } catch {
+
         return [];
+
     }
+
 }
+
+
 
 function saveStoredMessagesSync(sessionId: string, msgs: ChatMessage[]) {
+
     if (typeof window === "undefined" || !sessionId) return;
+
     try {
+
         // Preserve attached image preview URLs so user uploads persist across page refreshes
+
         const cleanMsgs = msgs.map(m => ({
+
             ...m,
+
             imagePreviewUrl: m.imagePreviewUrl || (m.imageUrl && m.imageUrl !== "[image]" ? m.imageUrl : undefined),
+
             imageUrl: m.imageUrl,
+
             images: m.images
+
         }));
+
         localStorage.setItem(`egxbots_msgs_${sessionId}`, JSON.stringify(cleanMsgs));
+
     } catch (e) {
+
         console.error("Failed to save messages to localStorage:", e);
+
     }
+
 }
+
+
 
 function stripMarkdownTables(text: string): string {
+
     // Generated tables can contain requested facts absent from the tool's
+
     // structured table. Never delete them merely because of their formatting.
+
     return text.replace(/\n{3,}/g, "\n\n").trim();
+
 }
+
+
 
 function cleanChatText(text: string): string {
+
     return stripEnvironmentLeak(sanitizeUiLabel(text || ""));
+
 }
 
+
+
 export function ChatProvider({ children }: { children: ReactNode }) {
+
     const { user, loading: authLoading } = useAuth();
+
     const userId = user?.id;
+
     const accessOwnerRef = useRef(userId);
+
     accessOwnerRef.current = userId;
+
     const [accessState, setAccessState] = useState<{ owner?: string; status: "loading" | "ready" | "error" }>({ status: "loading" });
+
     const accessRequestRef = useRef<{ owner: string; promise: Promise<void> } | null>(null);
+
     const accessCheckedAtRef = useRef(0);
+
     const isInitializing = Boolean(authLoading || (userId && (accessState.owner !== userId || accessState.status === "loading")));
+
     const accessError = Boolean(userId && accessState.owner === userId && accessState.status === "error");
+
     const chartContextRef = useRef<unknown>(undefined);
+
     const chartGenerationRef = useRef(0);
+
     const chartOwnerRef = useRef(user?.id);
+
     if (chartOwnerRef.current !== user?.id) {
+
         chartOwnerRef.current = user?.id;
+
         chartContextRef.current = undefined;
+
         chartGenerationRef.current++;
+
     }
+
     useEffect(() => {
+
         const receiveContext = (event: Event) => {
+
             const next = (event as CustomEvent).detail || undefined;
+
             if (JSON.stringify(next) !== JSON.stringify(chartContextRef.current)) chartGenerationRef.current++;
+
             chartContextRef.current = next;
+
         };
+
         window.addEventListener("strategy-lab-context", receiveContext);
+
         return () => window.removeEventListener("strategy-lab-context", receiveContext);
+
     }, []);
+
+
 
     const publishChartActions = (actions: unknown, requestContext: unknown, requestOwner: string | undefined, generation: number) => {
+
         if (!Array.isArray(actions) || !requestContext || generation !== chartGenerationRef.current || requestOwner !== chartOwnerRef.current || JSON.stringify(requestContext) !== JSON.stringify(chartContextRef.current)) return;
+
         for (const action of actions.slice(0, 10)) {
+
             window.dispatchEvent(new CustomEvent("strategy-lab-result", { detail: action }));
+
         }
+
     };
 
+
+
     const [isOpen, setIsOpen] = useState(false);
+
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+
     const [isLoading, setIsLoading] = useState(false);
+
     const [remainingQuota, setRemainingQuota] = useState<number>(10);
+
     const [quotaLimit, setQuotaLimit] = useState<number>(10);
+
     const [isPro, setIsPro] = useState<boolean>(() => {
+
         if (typeof window !== "undefined") {
+
             return localStorage.getItem("egx_pro_active") === "true";
+
         }
+
         return false;
+
     });
+
     const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
+
     const [selectedModel, setSelectedModelState] = useState<string>("deepseek-chat");
+
     const [sessions, setSessionsState] = useState<ChatSession[]>([]);
+
     const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
+
     const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+
     const [autonomousRecommendations, setAutonomousRecommendationsState] = useState<boolean>(false);
 
+
+
     useEffect(() => {
+
         if (typeof window !== "undefined") {
+
             const saved = localStorage.getItem("artoro_autonomous_recs_enabled");
+
             if (saved === "true") {
+
                 setAutonomousRecommendationsState(true);
+
             }
+
         }
+
     }, []);
+
+
 
     const setAutonomousRecommendations = useCallback((enabled: boolean) => {
+
         setAutonomousRecommendationsState(enabled);
+
         if (typeof window !== "undefined") {
+
             localStorage.setItem("artoro_autonomous_recs_enabled", String(enabled));
+
             window.dispatchEvent(new CustomEvent("artoro-autonomous-recs-changed", { detail: { enabled } }));
+
         }
+
         void fetch("/api/ai-chat?action=settings", {
+
             method: "POST",
+
             headers: { "Content-Type": "application/json" },
+
             body: JSON.stringify({ action: "update_settings", autonomous_recommendations: enabled }),
+
         }).catch((err) => {
+
             console.warn("Failed to persist autonomous recommendations to Supabase:", err);
+
         });
+
     }, []);
 
+
+
     useEffect(() => {
+
         const handleRecsChange = (e: Event) => {
+
             const detail = (e as CustomEvent).detail;
+
             if (detail && typeof detail.enabled === "boolean") {
+
                 setAutonomousRecommendationsState(detail.enabled);
+
             }
+
         };
+
         window.addEventListener("artoro-autonomous-recs-changed", handleRecsChange);
+
         return () => window.removeEventListener("artoro-autonomous-recs-changed", handleRecsChange);
+
     }, []);
+
+
+
 
 
     useEffect(() => {
+
         if (typeof window !== "undefined") {
+
             setIsSidebarOpen(window.innerWidth >= 768);
+
         }
+
     }, []);
+
+
 
     const sessionMessagesCache = useRef<Record<string, ChatMessage[]>>({});
+
     const loadingSessionIds = useRef<Record<string, boolean>>({});
+
     const activeSessionIdRef = useRef<string | null>(activeSessionId);
+
     const abortControllerRef = useRef<AbortController | null>(null);
+
     const saveTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
 
+
+
     const setActiveSessionId = useCallback((id: string | null) => {
+
         activeSessionIdRef.current = id;
+
         setActiveSessionIdState(id);
+
     }, []);
+
+
 
     // Flush debounced localStorage writes for a given session
+
     const flushStoredMessages = useCallback((sessionId: string, msgs?: ChatMessage[]) => {
+
         if (saveTimersRef.current[sessionId]) {
+
             clearTimeout(saveTimersRef.current[sessionId]);
+
             delete saveTimersRef.current[sessionId];
+
         }
+
         const targetMsgs = msgs || sessionMessagesCache.current[sessionId];
+
         if (targetMsgs) {
+
             saveStoredMessagesSync(sessionId, targetMsgs);
+
         }
+
     }, []);
+
+
 
     // Debounce localStorage writes (400ms) to prevent synchronous serialization on every stream token
+
     const debouncedSaveStoredMessages = useCallback((sessionId: string, msgs: ChatMessage[]) => {
+
         if (saveTimersRef.current[sessionId]) {
+
             clearTimeout(saveTimersRef.current[sessionId]);
+
         }
+
         saveTimersRef.current[sessionId] = setTimeout(() => {
+
             saveStoredMessagesSync(sessionId, msgs);
+
             delete saveTimersRef.current[sessionId];
+
         }, 400);
+
     }, []);
 
+
+
     // Unified helper to update session messages cache, state (if active), and schedule debounced save
+
     const setSessionMessages = useCallback((sessionId: string, updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+
         const prevMsgs = sessionMessagesCache.current[sessionId] || [];
+
         const nextMsgs = typeof updater === "function" ? updater(prevMsgs) : updater;
+
+
 
         sessionMessagesCache.current[sessionId] = nextMsgs;
 
+
+
         if (activeSessionIdRef.current === sessionId) {
+
             setMessages(nextMsgs);
+
         }
+
+
 
         debouncedSaveStoredMessages(sessionId, nextMsgs);
+
     }, [debouncedSaveStoredMessages]);
 
+
+
     const stopResponding = useCallback(() => {
+
         if (abortControllerRef.current) {
+
             abortControllerRef.current.abort();
+
             abortControllerRef.current = null;
+
             setIsLoading(false);
+
             loadingSessionIds.current = {};
+
         }
+
     }, []);
+
+
 
     const setSessions = useCallback((updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
+
         setSessionsState(prev => {
+
             const next = typeof updater === "function" ? updater(prev) : updater;
+
             saveStoredSessions(next);
+
             return next;
+
         });
+
     }, []);
+
+
 
     // Flush any pending localStorage saves on unmount
+
     useEffect(() => {
+
         return () => {
+
             Object.keys(saveTimersRef.current).forEach(sessionId => {
+
                 if (saveTimersRef.current[sessionId]) {
+
                     clearTimeout(saveTimersRef.current[sessionId]);
+
                     const pendingMsgs = sessionMessagesCache.current[sessionId];
+
                     if (pendingMsgs) {
+
                         saveStoredMessagesSync(sessionId, pendingMsgs);
+
                     }
+
                 }
+
             });
+
         };
+
     }, []);
+
+
 
     // Load initial sessions & messages from localStorage on mount
+
     useEffect(() => {
+
         const localSessions = getStoredSessions();
+
         if (localSessions.length > 0) {
+
             setSessionsState(localSessions);
+
             const latest = localSessions[0];
+
             setActiveSessionId(latest.id);
+
             const localMsgs = getStoredMessages(latest.id);
+
             if (localMsgs.length > 0) {
+
                 const sanitizedMessages = localMsgs.map(message => ({ ...message, content: cleanChatText(message.content || ""), suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean) }));
+
                 setMessages(sanitizedMessages);
+
                 sessionMessagesCache.current[latest.id] = sanitizedMessages;
+
             }
+
         }
+
     }, [setActiveSessionId]);
 
-    useEffect(() => {
-        setMessages(prev => prev.map(message => ({
-            ...message,
-            content: cleanChatText(message.content || ""),
-            suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean)
-        })));
-    }, []);
+
 
     useEffect(() => {
-        const savedModel = localStorage.getItem("egxbots_selected_model");
-        if (savedModel && AVAILABLE_AI_MODELS.some(m => m.id === savedModel)) {
-            setSelectedModelState(savedModel);
-        }
+
+        setMessages(prev => prev.map(message => ({
+
+            ...message,
+
+            content: cleanChatText(message.content || ""),
+
+            suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean)
+
+        })));
+
     }, []);
+
+
+
+    useEffect(() => {
+
+        const savedModel = localStorage.getItem("egxbots_selected_model");
+
+        if (savedModel && AVAILABLE_AI_MODELS.some(m => m.id === savedModel)) {
+
+            setSelectedModelState(savedModel);
+
+        }
+
+    }, []);
+
+
 
     const setSelectedModel = useCallback((model: string) => {
+
         setSelectedModelState(model);
+
         localStorage.setItem("egxbots_selected_model", model);
+
     }, []);
 
+
+
     // Deduplicate history reads per room. The cache is local-first; only one
+
     // background sync per session may hit the API at a time.
+
     const sessionFetchesRef = useRef<Record<string, Promise<void>>>({});
+
     const fetchSessionMessages = useCallback((sessionId: string): Promise<void> => {
+
         const pending = sessionFetchesRef.current[sessionId];
+
         if (pending) return pending;
 
+
+
         const request = (async () => {
+
             try {
+
                 const res = await fetch(`/api/ai-chat?session_id=${encodeURIComponent(sessionId)}`);
+
                 if (!res.ok) return;
+
                 const data = await res.json();
+
                 if (!Array.isArray(data.history) || data.history.length === 0) return;
 
+
+
                 const existing = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
+
                 const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
+
                 existing.forEach((m, idx) => {
+
                     if (m.imageUrl || m.imagePreviewUrl || m.images) {
+
                         localImageMap.set(idx, {
+
                             imageUrl: m.imageUrl,
+
                             imagePreviewUrl: m.imagePreviewUrl,
+
                             images: m.images
+
                         });
+
                     }
+
                 });
+
+
 
                 const mergedHistory: ChatMessage[] = orderChatMessages(data.history.map((srvMsg: ChatMessage, idx: number) => {
+
                     const localImg = localImageMap.get(idx);
+
                     return {
+
                         ...srvMsg,
+
                         content: cleanChatText(srvMsg.content || ""),
+
                         suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
+
                         imagePreviewUrl: srvMsg.imagePreviewUrl || localImg?.imagePreviewUrl || srvMsg.imageUrl || localImg?.imageUrl,
+
                         imageUrl: srvMsg.imageUrl || localImg?.imageUrl,
+
                         images: srvMsg.images || localImg?.images
+
                     };
+
                 }));
 
+
+
                 // Keep an in-flight assistant response visible while syncing history.
+
                 if (loadingSessionIds.current[sessionId]) {
+
                     const streamingMsg = existing.find(m => m.isStreaming);
+
                     if (streamingMsg && !mergedHistory.some(m => m.id === streamingMsg.id)) {
+
                         mergedHistory.push(streamingMsg);
+
                     }
+
                 }
+
+
 
                 // setSessionMessages updates the visible state only if this room is
+
                 // still active, so a late response cannot replace another room.
+
                 setSessionMessages(sessionId, mergedHistory);
+
                 flushStoredMessages(sessionId, mergedHistory);
+
             } catch (e) {
+
                 console.error("Failed to load session messages from server:", e);
+
             }
+
         })();
+
+
 
         sessionFetchesRef.current[sessionId] = request;
+
         void request.finally(() => {
+
             if (sessionFetchesRef.current[sessionId] === request) {
+
                 delete sessionFetchesRef.current[sessionId];
+
             }
+
         });
+
         return request;
+
     }, [setSessionMessages, flushStoredMessages]);
 
+
+
     // One account-scoped request supplies both history and quota to every chat consumer.
+
     const fetchSessions = useCallback((owner: string, background = false): Promise<void> => {
+
         if (accessRequestRef.current?.owner === owner) return accessRequestRef.current.promise;
+
         accessCheckedAtRef.current = Date.now();
+
         setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "loading" });
+
         const request = { owner, promise: Promise.resolve() };
+
         accessRequestRef.current = request;
+
         request.promise = (async () => {
+
             try {
+
                 const res = await fetch("/api/ai-chat?action=sessions");
+
                 if (!res.ok) throw new Error("CHAT_ACCESS_UNAVAILABLE");
+
                 const data = await res.json();
+
                 if (accessOwnerRef.current !== owner) return;
+
                 if (!Array.isArray(data.sessions) || typeof data.remaining_quota !== "number") throw new Error("CHAT_ACCESS_INVALID");
+
                 const serverSessionIds = new Set(data.sessions.map((session: ChatSession) => session.id));
+
                 setSessions(prevLocal => {
+
                     // Local session metadata is only a cache. Keep entries the
+
                     // authenticated server confirms so a prior account's rooms
+
                     // cannot remain selectable after an account change.
+
                     const localMap = new Map(prevLocal.filter(session => serverSessionIds.has(session.id)).map(s => [s.id, s]));
+
                     data.sessions.forEach((srvS: ChatSession) => localMap.set(srvS.id, srvS));
+
                     return Array.from(localMap.values()).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
                 });
 
+
+
                 // On first load, localStorage may point at an older room that no
+
                 // longer exists remotely. Prefer the server's newest room in that
+
                 // case; keep the current room when it is still a server session.
+
                 const activeId = activeSessionIdRef.current;
+
                 const activeExistsOnServer = !!activeId && data.sessions.some((s: ChatSession) => s.id === activeId);
+
                 const activeSessionIsSending = !!activeId && !!loadingSessionIds.current[activeId];
+
                 if (!activeExistsOnServer && !activeSessionIsSending) {
+
                     if (data.sessions.length === 0) {
+
                         // Clear a locally remembered room when this account has
+
                         // no server-side rooms. Do not leave another account's
+
                         // cached conversation visible in an empty account.
+
                         setActiveSessionId(null);
+
                         setMessages([]);
+
                     } else {
+
                         const latestServerSession = [...data.sessions].sort(
+
                             (a: ChatSession, b: ChatSession) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+
                         )[0];
+
                         setActiveSessionId(latestServerSession.id);
+
                         const localMessages = sessionMessagesCache.current[latestServerSession.id] || getStoredMessages(latestServerSession.id);
+
                         if (localMessages.length > 0) {
+
                             const sanitized = localMessages.map(message => ({
+
                                 ...message,
+
                                 content: cleanChatText(message.content || ""),
+
                                 suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean)
+
                             }));
+
                             sessionMessagesCache.current[latestServerSession.id] = sanitized;
+
                             setMessages(sanitized);
+
                         } else {
+
                             setMessages([]);
+
                         }
+
                         void fetchSessionMessages(latestServerSession.id);
+
                     }
+
                 } else if (activeId && activeExistsOnServer && !activeSessionIsSending) {
+
                     // Always sync latest messages for the active room from server
+
                     void fetchSessionMessages(activeId);
+
                 }
+
                 setRemainingQuota(data.remaining_quota);
+
                 if (typeof data.quota_limit === "number") setQuotaLimit(data.quota_limit);
+
                 if (typeof data.is_pro === "boolean") {
+
                     setIsPro(data.is_pro);
+
                     if (typeof window !== "undefined") {
+
                         localStorage.setItem("egx_pro_active", data.is_pro ? "true" : "false");
+
                     }
+
                 }
+
                 if (typeof data.autonomous_recommendations === "boolean") {
+
                     const isAutonomous = Boolean(data.is_pro && data.autonomous_recommendations);
+
                     setAutonomousRecommendationsState(isAutonomous);
+
                     if (typeof window !== "undefined") {
+
                         localStorage.setItem("artoro_autonomous_recs_enabled", String(isAutonomous));
+
                     }
+
                 }
+
                 setAccessState({ owner, status: "ready" });
+
             } catch (e) {
+
                 if (accessOwnerRef.current === owner) setAccessState(previous => background && previous.owner === owner && previous.status === "ready" ? previous : { owner, status: "error" });
+
                 console.error("Failed to fetch chat access:", e);
+
             } finally {
+
                 if (accessRequestRef.current === request) accessRequestRef.current = null;
+
             }
+
         })();
+
         return request.promise;
+
     }, [setActiveSessionId, setSessions, fetchSessionMessages]);
 
+
+
     const retryAccess = useCallback(() => {
+
         if (!authLoading && userId) void fetchSessions(userId);
+
     }, [authLoading, userId, fetchSessions]);
 
+
+
     // Payment completion is an explicit refresh; ordinary token rotation is not.
+
     useEffect(() => {
+
         const onEntitlements = (event: Event) => {
+
             const detail = (event as CustomEvent)?.detail;
+
             if (detail && typeof detail.is_pro === "boolean") {
+
                 setIsPro(detail.is_pro);
+
             }
+
             retryAccess();
+
         };
+
         const onStorage = (event: StorageEvent) => {
+
             if (event.key === "egx_entitlements_timestamp" || event.key === "egx_pro_active") {
+
                 if (typeof window !== "undefined") {
+
                     const stored = localStorage.getItem("egx_pro_active") === "true";
+
                     setIsPro(stored);
+
                 }
+
                 retryAccess();
+
             }
+
         };
+
         window.addEventListener("egx:entitlements-updated", onEntitlements);
+
         window.addEventListener("storage", onStorage);
+
         return () => {
+
             window.removeEventListener("egx:entitlements-updated", onEntitlements);
+
             window.removeEventListener("storage", onStorage);
+
         };
+
     }, [retryAccess]);
 
+
+
     // Refresh on a real return to an open chat, not on every token event or a timer.
+
     useEffect(() => {
+
         const onReturn = () => {
+
             if (authLoading || !userId || document.visibilityState !== "visible") return;
+
             if (!isOpen && !window.location.pathname.startsWith("/chat")) return;
+
             if (Date.now() - accessCheckedAtRef.current < 60_000) return;
+
             void fetchSessions(userId, true);
+
         };
+
         window.addEventListener("focus", onReturn);
+
         document.addEventListener("visibilitychange", onReturn);
+
         return () => {
+
             window.removeEventListener("focus", onReturn);
+
             document.removeEventListener("visibilitychange", onReturn);
+
         };
+
     }, [authLoading, userId, isOpen, fetchSessions]);
 
+
+
     // Switch active session instantly while preserving state
+
     const switchSession = useCallback(async (sessionId: string) => {
+
         if (activeSessionIdRef.current) {
+
             flushStoredMessages(activeSessionIdRef.current);
+
         }
+
+
 
         setActiveSessionId(sessionId);
 
+
+
         const isTargetLoading = !!loadingSessionIds.current[sessionId];
+
         setIsLoading(isTargetLoading);
 
+
+
         // 1. Memory Cache
+
         if (sessionMessagesCache.current[sessionId] && sessionMessagesCache.current[sessionId].length > 0) {
+
                 setMessages(sessionMessagesCache.current[sessionId].map(message => ({ ...message, content: cleanChatText(message.content), suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean) })));
+
         } else {
+
             // 2. localStorage
+
             const localMsgs = getStoredMessages(sessionId);
+
             if (localMsgs.length > 0) {
+
                 const sanitizedMessages = localMsgs.map(message => ({ ...message, content: cleanChatText(message.content), suggestedButtons: message.suggestedButtons?.map(cleanChatText).filter(Boolean) }));
+
                 sessionMessagesCache.current[sessionId] = sanitizedMessages;
+
                 setMessages(sanitizedMessages);
+
                 // Keep the sanitized version in memory too; otherwise a later
+
                 // switch can reintroduce unsanitized persisted text.
+
                 sessionMessagesCache.current[sessionId] = sanitizedMessages;
+
             } else {
+
                 setMessages([]);
+
             }
+
         }
+
+
 
         // 3. Fetch background sync from server
+
         await fetchSessionMessages(sessionId);
+
     }, [setActiveSessionId, flushStoredMessages, fetchSessionMessages]);
 
+
+
     const createNewSession = useCallback(() => {
+
         if (activeSessionIdRef.current) {
+
             flushStoredMessages(activeSessionIdRef.current);
+
         }
+
         setActiveSessionId(null);
+
         setMessages([]);
+
         setIsLoading(false);
+
     }, [setActiveSessionId, flushStoredMessages]);
 
+
+
     const deleteSession = useCallback(async (sessionId: string) => {
+
         if (saveTimersRef.current[sessionId]) {
+
             clearTimeout(saveTimersRef.current[sessionId]);
+
             delete saveTimersRef.current[sessionId];
+
         }
+
         delete sessionMessagesCache.current[sessionId];
+
         delete loadingSessionIds.current[sessionId];
+
         if (typeof window !== "undefined") {
+
             localStorage.removeItem(`egxbots_msgs_${sessionId}`);
+
         }
+
         setSessions(prev => prev.filter(s => s.id !== sessionId));
 
+
+
         if (activeSessionIdRef.current === sessionId) {
+
             createNewSession();
+
         }
 
+
+
         try {
+
             await fetch(`/api/ai-chat?session_id=${sessionId}`, { method: "DELETE" });
+
         } catch (e) {
+
             console.error("Failed to delete chat session from server:", e);
+
         }
+
     }, [createNewSession, setSessions]);
 
+
+
     const renameSession = useCallback(async (sessionId: string, newTitle: string) => {
+
         setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: newTitle } : s));
+
         try {
+
             await fetch("/api/ai-chat", {
+
                 method: "PUT",
+
                 headers: { "Content-Type": "application/json" },
+
                 body: JSON.stringify({ session_id: sessionId, title: newTitle })
+
             });
+
         } catch (e) {
+
             console.error("Failed to rename session on server:", e);
+
         }
+
     }, [setSessions]);
 
+
+
     useEffect(() => {
+
         if (authLoading) return;
+
         if (!userId) {
+
             setAccessState({ status: "loading" });
+
             setRemainingQuota(10);
+
             return;
+
         }
+
         void fetchSessions(userId);
+
     }, [authLoading, userId, fetchSessions]);
 
-    const sendMessage = useCallback(async (text: string, imageInput?: string | string[]) => {
+
+
+    const sendMessage = useCallback(async (text: string, imageInput?: string | string[], options?: { isVoice?: boolean }): Promise<any> => {
+
         text = cleanChatText(text);
+
         const imagesList: string[] = Array.isArray(imageInput)
+
             ? imageInput
+
             : (imageInput ? [imageInput] : []);
+
+
 
         if (!text.trim() && imagesList.length === 0) return;
 
+
+
         const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+
         if (!activePro && imagesList.length > 0) {
+
             setShowUpgradeModal(true);
+
             return;
+
         }
+
+
 
         let currentSessionId = activeSessionIdRef.current;
+
         if (!currentSessionId) {
+
             currentSessionId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "session-" + Date.now();
+
             setActiveSessionId(currentSessionId);
 
+
+
             const sessionTitle = text.trim()
+
                 ? text.trim().substring(0, 32) + (text.length > 32 ? "..." : "")
+
                 : (imagesList.length > 0 ? "تحليل صورة محفظة" : "محادثة جديدة");
 
+
+
             setSessions(prev => [{
+
                 id: currentSessionId!,
+
                 title: sessionTitle,
+
                 created_at: new Date().toISOString(),
+
                 updated_at: new Date().toISOString()
+
             }, ...prev]);
+
         }
 
+
+
         // One request per session at a time. The server's idempotency key is
+
         // intentionally per client message, so a fast double-submit otherwise
+
         // creates two different keys and spends quota / produces two answers.
+
         // The previous behavior also aborted the first request below.
+
         if (loadingSessionIds.current[currentSessionId]) return;
 
+
+
         const newUserMsg: ChatMessage = {
+
             role: "user",
+
             content: text || (imagesList.length > 0 ? `📷 [${imagesList.length} Images attached]` : ""),
+
             timestamp: Date.now(),
+
             imageUrl: imagesList[0] || undefined,
+
             imagePreviewUrl: imagesList[0] || undefined,
+
             images: imagesList.length > 0 ? imagesList : undefined,
+
         };
 
+
+
         const existingSessionMsgs = sessionMessagesCache.current[currentSessionId] || [];
+
         const nextMessages = [...existingSessionMsgs, newUserMsg];
+
+
 
         setSessionMessages(currentSessionId, nextMessages);
 
+
+
         // Mark loading state for this session
+
         loadingSessionIds.current[currentSessionId] = true;
+
         if (activeSessionIdRef.current === currentSessionId) {
+
             setIsLoading(true);
+
         }
 
+
+
         // Create optimistic assistant message
+
         const assistantMsgId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "msg-" + Date.now();
+
         const assistantMsg: ChatMessage = {
+
             id: assistantMsgId,
+
             role: "assistant",
+
             content: "",
+
             timestamp: newUserMsg.timestamp + 1,
+
             isStreaming: true,
+
             statusText: "جاري تحليل السؤال...",
+
         };
+
+
 
         const updateAssistantMsgInState = (updatedMsg: ChatMessage) => {
+
             setSessionMessages(currentSessionId!, prevMsgs => {
+
                 const existingIndex = prevMsgs.findIndex(m => m.id === updatedMsg.id);
+
                 if (existingIndex >= 0) {
+
                     const updated = [...prevMsgs];
+
                     updated[existingIndex] = updatedMsg;
+
                     return updated;
+
                 } else {
+
                     return [...prevMsgs, updatedMsg];
+
                 }
+
             });
+
         };
 
+
+
         // Render initial optimistic assistant message
+
         updateAssistantMsgInState(assistantMsg);
 
+
+
         try {
+
             if (remainingQuota <= 0) {
+
                 setShowUpgradeModal(true);
+
                 assistantMsg.content = "لقد استهلكت باقتك المجانية (10/10 رسائل). تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ اشترك الآن في Pro بـ 100 ج.م فقط شهرياً (عرض المؤسسين - لفترة محدودة 15 يوماً بدلاً من 200 ج.م) واشترك في قناة الـ VIP.";
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
-                return;
+
+                return assistantMsg.content;
+
             }
+
+
 
             if (abortControllerRef.current) {
+
                 abortControllerRef.current.abort();
+
             }
+
             abortControllerRef.current = new AbortController();
 
+
+
             const requestChartContext = chartContextRef.current;
+
             const requestChartOwner = chartOwnerRef.current;
+
             const requestChartGeneration = chartGenerationRef.current;
+
             const response = await fetch("/api/ai-chat", {
+
                 ...createChatRequest({
+
                     message: text,
+
                     history: existingSessionMsgs.map(m => ({ role: m.role, content: m.content })),
+
                     images: imagesList,
+
                     model: selectedModel,
+
                     sessionId: currentSessionId,
+
                     clientMessageId: `${currentSessionId}:${newUserMsg.timestamp}`,
+
                     chartContext: requestChartContext,
+
                     autonomousRecommendations,
+
+                    isVoice: Boolean(options?.isVoice),
+
                 }),
+
                 signal: abortControllerRef.current.signal,
+
             });
 
+
+
             if (response.status === 429) {
+
                 setRemainingQuota(0);
+
                 setShowUpgradeModal(true);
+
                 let detail = "لقد استهلكت باقتك المجانية (10/10 رسائل). 🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة (15 يوماً فقط) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!";
+
                 try {
+
                     const data = await response.json();
+
                     if (data.detail && typeof data.detail === "string") {
+
                         detail = data.detail;
+
                     }
+
                 } catch {}
+
                 assistantMsg.content = detail;
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
+
                 return;
+
             }
+
+
 
             if (response.status === 504 || response.status === 502) {
+
                 assistantMsg.content = "استغرقت الاستجابة وقتاً أطول من المعتاد بسبب الضغط على الموديل. يرجى إعادة المحاولة أو اختيار موديل أسرع مثل Llama 3.1 8B ⚡";
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
+
                 return;
+
             }
+
+
 
             if (response.status === 401) {
+
                 assistantMsg.content = "تحتاج إلى تسجيل الدخول لاستخدام المساعد الذكي. سجّل دخولك من زر الحساب أعلى الصفحة ثم أعد إرسال سؤالك.";
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
+
                 return;
+
             }
 
+
+
             if (!response.ok) {
+
                 let errorMsg = "حدث خطأ في السيرفر أثناء معالجة الطلب. يرجى المحاولة مرة أخرى لاحقاً.";
+
                 try {
+
                     const data = await response.json();
+
                     if (data.detail) errorMsg = data.detail;
+
                 } catch {}
+
                 assistantMsg.content = errorMsg;
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
+
                 return;
+
             }
+
+
 
             const contentType = response.headers.get("content-type") || "";
 
+
+
             // Fallback for non-streaming JSON responses
+
             if (contentType.includes("application/json") || !response.body) {
+
                 const data = await response.json();
+
                 publishChartActions(data.chart_actions, requestChartContext, requestChartOwner, requestChartGeneration);
+
                 if (data.enable_autonomous_recs === true) {
+
                     setAutonomousRecommendations(true);
+
                 }
+
                 if (data.remaining_quota !== undefined) {
+
                     setRemainingQuota(data.remaining_quota);
+
                 }
+
                 if (data.quota_limit !== undefined) {
+
                     setQuotaLimit(data.quota_limit);
+
                 }
+
                 if (data.is_pro !== undefined) {
+
                     setIsPro(Boolean(data.is_pro));
+
                 }
+
                 assistantMsg.content = stripMarkdownTables(sanitizeReply(data.reply || "معذرة، لم أتمكن من معالجة هذا الطلب."));
+
                 assistantMsg.tables = Array.isArray(data.tables) ? data.tables : undefined;
+
                 assistantMsg.suggestedButtons = Array.isArray(data.suggested_buttons) ? data.suggested_buttons.map((button: unknown) => sanitizeUiLabel(String(button))).filter(Boolean) : undefined;
+
                 assistantMsg.latencyMs = data.latency_ms || (Date.now() - newUserMsg.timestamp);
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 flushStoredMessages(currentSessionId);
+
                 return;
+
             }
+
+
 
             // SSE ReadableStream reading
+
             const reader = response.body.getReader();
+
             const decoder = new TextDecoder("utf-8");
+
             let buffer = "";
+
             let currentEventName = "";
+
             let lastRenderTime = 0;
+
             let receivedDone = false;
+
             let receivedError = false;
 
+
+
             while (true) {
+
                 const { done, value } = await reader.read();
+
                 if (done) break;
 
+
+
                 buffer += decoder.decode(value, { stream: true });
+
                 const lines = buffer.split("\n");
+
                 buffer = lines.pop() || "";
 
+
+
                 for (const line of lines) {
+
                     const trimmed = line.trim();
+
                     if (!trimmed) {
+
                         currentEventName = "";
+
                         continue;
+
                     }
+
+
 
                     if (trimmed.startsWith("event:")) {
+
                         currentEventName = trimmed.slice(6).trim();
+
                         continue;
+
                     }
+
+
 
                     if (trimmed.startsWith("data:")) {
+
                         const dataStr = trimmed.slice(5).trim();
+
                         if (dataStr === "[DONE]") {
+
                             // The transport marker alone does not carry the canonical
+
                             // answer, tables or quota; require the JSON done event.
+
                             continue;
+
                         }
+
+
 
                         try {
+
                             const parsed = JSON.parse(dataStr);
 
+
+
                             if (parsed.type === "error") {
+
                                 receivedError = true;
+
                                 assistantMsg.content = sanitizeReply(parsed.detail || "حدث خطأ في السيرفر أثناء معالجة الطلب. يرجى المحاولة مرة أخرى لاحقاً.");
+
                                 assistantMsg.isStreaming = false;
+
                                 assistantMsg.statusText = undefined;
+
                                 updateAssistantMsgInState(assistantMsg);
+
                             } else if (currentEventName === "enable_autonomous_recs" || parsed.type === "enable_autonomous_recs") {
+
                                 setAutonomousRecommendations(true);
+
                             } else if (currentEventName === "disable_autonomous_recs" || parsed.type === "disable_autonomous_recs") {
+
                                 setAutonomousRecommendations(false);
+
                             } else if (parsed.type === "image_urls" && Array.isArray(parsed.image_urls) && parsed.image_urls.length > 0) {
+
                                 setSessionMessages(currentSessionId, prevMsgs => 
+
                                     prevMsgs.map(m => (m.timestamp === newUserMsg.timestamp ? { ...m, imageUrl: parsed.image_urls[0], images: parsed.image_urls } : m))
+
                                 );
+
                             } else if (parsed.type === "tables" && Array.isArray(parsed.data)) {
+
                                 assistantMsg.tables = parsed.data;
+
                                 updateAssistantMsgInState(assistantMsg);
+
                             } else if (currentEventName === "status" || parsed.type === "status" || parsed.event === "status" || parsed.status) {
+
                                 const statusMsg = parsed.status || parsed.message || parsed.content;
+
                                 if (statusMsg) {
+
                                     assistantMsg.statusText = statusMsg;
+
                                     updateAssistantMsgInState(assistantMsg);
+
                                 }
+
                             } else if (currentEventName === "token" || parsed.type === "token" || parsed.event === "token" || parsed.token !== undefined || parsed.delta !== undefined) {
+
                                  const token = parsed.token ?? parsed.delta ?? parsed.content ?? parsed.text ?? "";
+
                                  // Accumulate stream tokens raw; sanitize once after the stream ends.
+
                                  // sanitizeReply adds structured output/disclaimers and is not token-safe.
+
                                  assistantMsg.content += token;
+
                                 assistantMsg.isStreaming = true;
+
                                 
+
                                 const now = Date.now();
+
                                 if (now - lastRenderTime > 35) {
+
                                     lastRenderTime = now;
+
                                     updateAssistantMsgInState(assistantMsg);
+
                                 }
+
                             } else if (currentEventName === "done" || parsed.type === "done" || parsed.event === "done") {
+
                                 receivedDone = true;
+
                                 publishChartActions(parsed.chart_actions, requestChartContext, requestChartOwner, requestChartGeneration);
+
                                 if (parsed.enable_autonomous_recs === true) {
+
                                     setAutonomousRecommendations(true);
+
                                 } else if (parsed.disable_autonomous_recs === true) {
+
                                     setAutonomousRecommendations(false);
+
                                 }
+
                                 if (parsed.reply) {
+
                                     assistantMsg.content = stripMarkdownTables(sanitizeReply(parsed.reply));
+
                                 } else if (assistantMsg.content) {
+
                                     assistantMsg.content = stripMarkdownTables(sanitizeReply(assistantMsg.content));
+
                                 }
+
                                 if (Array.isArray(parsed.suggested_buttons)) {
+
                                     assistantMsg.suggestedButtons = parsed.suggested_buttons.map((button: unknown) => sanitizeUiLabel(String(button))).filter(Boolean);
+
                                 }
+
                                 if (Array.isArray(parsed.tables)) assistantMsg.tables = parsed.tables;
+
                                 if (parsed.remaining_quota !== undefined) {
+
                                     setRemainingQuota(parsed.remaining_quota);
+
                                 }
+
                                 if (parsed.quota_limit !== undefined) {
+
                                     setQuotaLimit(parsed.quota_limit);
+
                                 }
+
                                 if (parsed.is_pro !== undefined) {
+
                                     setIsPro(Boolean(parsed.is_pro));
+
                                 }
+
                                 assistantMsg.latencyMs = parsed.latency_ms || (Date.now() - newUserMsg.timestamp);
+
                                 assistantMsg.isStreaming = false;
+
                                 updateAssistantMsgInState(assistantMsg);
+
                             } else {
+
                                 if (parsed.status) {
+
                                     assistantMsg.statusText = parsed.status;
+
                                 }
+
                                 if (parsed.token || parsed.delta || parsed.text) {
+
                                      assistantMsg.content += (parsed.token || parsed.delta || parsed.text);
+
                                 } else if (parsed.reply && !assistantMsg.content) {
+
                                     assistantMsg.content = sanitizeReply(parsed.reply);
+
                                 }
+
                                 if (Array.isArray(parsed.suggested_buttons)) {
+
                                     assistantMsg.suggestedButtons = parsed.suggested_buttons.map((button: unknown) => sanitizeUiLabel(String(button))).filter(Boolean);
+
                                 }
+
                                 if (parsed.remaining_quota !== undefined) {
+
                                     setRemainingQuota(parsed.remaining_quota);
+
                                 }
+
                                 if (parsed.quota_limit !== undefined) {
+
                                     setQuotaLimit(parsed.quota_limit);
+
                                 }
+
                                 if (parsed.is_pro !== undefined) {
+
                                     setIsPro(Boolean(parsed.is_pro));
+
                                 }
+
                                 updateAssistantMsgInState(assistantMsg);
+
                             }
+
                         } catch {
+
                             // Raw string token in data field
+
                              assistantMsg.content += dataStr;
+
                             assistantMsg.isStreaming = true;
+
                             updateAssistantMsgInState(assistantMsg);
+
                         }
+
                     }
+
                 }
+
             }
+
+
 
             // Stream complete
+
             if (!receivedDone && !receivedError) {
+
                 assistantMsg.content = assistantMsg.content
+
                     ? `${stripMarkdownTables(sanitizeReply(assistantMsg.content))}\n\nالرد انقطع قبل اكتماله. يمكنك الضغط على إعادة المحاولة أو إرسال: كمل الرد.`
+
                     : "الرد انقطع قبل اكتماله. يرجى إعادة المحاولة.";
+
                 assistantMsg.isStreaming = false;
+
                 assistantMsg.statusText = undefined;
+
                 updateAssistantMsgInState(assistantMsg);
+
                 return;
+
             }
+
             assistantMsg.isStreaming = false;
+
             if (!assistantMsg.content && assistantMsg.statusText) {
+
                 assistantMsg.content = sanitizeUiLabel(assistantMsg.statusText);
+
             } else {
+
                 assistantMsg.content = stripMarkdownTables(sanitizeReply(assistantMsg.content));
+
             }
+
             updateAssistantMsgInState(assistantMsg);
+
             flushStoredMessages(currentSessionId);
+
+            return assistantMsg.content;
+
+
 
         } catch (err: any) {
+
             if (err.name === "AbortError" || err.message?.includes("aborted") || err.message === "The user aborted a request.") {
+
                 console.log("Chat request aborted by user");
+
                 if (!assistantMsg.content) {
+
                     assistantMsg.content = "تم إيقاف الاستجابة بناءً على طلبك.";
+
                 }
+
             } else if (err.name === "TypeError" && (err.message?.includes("fetch") || err.message?.includes("Failed to fetch") || err.message?.includes("network"))) {
+
                 assistantMsg.content = "تعذر الاتصال بالشبكة. يرجى التحقق من اتصالك بالإنترنت وتجربة المحاولة مرة أخرى.";
+
             } else {
+
                     assistantMsg.content = sanitizeReply(err.message || "حدث خطأ أثناء الاتصال بالذكاء الاصطناعي.");
+
             }
+
             assistantMsg.isStreaming = false;
+
             assistantMsg.statusText = undefined;
+
             updateAssistantMsgInState(assistantMsg);
+
             flushStoredMessages(currentSessionId);
+
         } finally {
+
             abortControllerRef.current = null;
+
             loadingSessionIds.current[currentSessionId] = false;
+
             if (activeSessionIdRef.current === currentSessionId) {
+
                 setIsLoading(false);
+
             }
+
         }
+
     }, [remainingQuota, selectedModel, setActiveSessionId, setSessions, setSessionMessages, flushStoredMessages, autonomousRecommendations]);
 
+
+
     return (
+
         <ChatContext.Provider value={{
+
             isOpen,
+
             setIsOpen,
+
             messages,
+
             sendMessage,
+
             stopResponding,
+
             isLoading,
+
             remainingQuota,
+
             quotaLimit,
+
             isPro,
+
             isInitializing,
+
             accessError,
+
             retryAccess,
+
             showUpgradeModal,
+
             setShowUpgradeModal,
+
             selectedModel,
+
             setSelectedModel,
+
             sessions,
+
             activeSessionId,
+
             createNewSession,
+
             switchSession,
+
             deleteSession,
+
             renameSession,
+
             isSidebarOpen,
+
             setIsSidebarOpen,
+
             autonomousRecommendations,
+
             setAutonomousRecommendations,
+
             isAccessReady: accessState.status === "ready"
+
         }}>
+
             {children}
+
         </ChatContext.Provider>
+
     );
+
 }
 
+
+
 export function useChat() {
+
     const context = useContext(ChatContext);
+
     if (!context) throw new Error("useChat must be used within ChatProvider");
+
     return context;
+
 }
+

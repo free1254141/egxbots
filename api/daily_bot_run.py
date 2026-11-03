@@ -3731,6 +3731,13 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as traps_err:
                 print(f"[TRAP_DETECTOR] Failed: {traps_err}")
 
+            try:
+                from api.signal_performance import sync_signal_performance_to_market_cache
+                perf_res = await asyncio.to_thread(sync_signal_performance_to_market_cache, supabase)
+                print(f"[SIGNAL_PERF] {perf_res}")
+            except Exception as perf_err:
+                print(f"[SIGNAL_PERF] Failed: {perf_err}")
+
         if _stage_needed('cache_revalidation'):
             _start_step('cache_revalidation', 'Refresh only successfully completed daily datasets')
             try:

@@ -7,5 +7,7 @@ export interface ChatRequestInput {
     clientMessageId: string;
     chartContext?: unknown;
     autonomousRecommendations?: boolean;
+    isVoice?: boolean;
+    channel?: string;
 }
 export function createChatRequest(input: ChatRequestInput): { method: string; headers: Record<string, string>; body: string };
