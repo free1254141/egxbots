@@ -153,4 +153,34 @@ describe("voice-utils", () => {
         expect(cleaned).toContain("تنبيه: يجب تفعيل وقف الخسارة");
         expect(cleaned).toContain("خطة التداول الموصى بها هي الدخول التدريجي");
     });
+
+    it("guarantees ZERO English tickers, symbols, or letters in voice audio and speaks Arabic names only", () => {
+        const sample1 = "أبو قير للأسمدة (ABUK) 77.71 جنيه، هابط 3.59% في جلسة 3 نوفمبر.";
+        const cleaned1 = cleanVoiceText(sample1);
+        expect(cleaned1).toContain("أبو قير للأسمدة");
+        expect(cleaned1).not.toContain("ABUK");
+        expect(/[A-Za-z]/.test(cleaned1)).toBe(false);
+
+        const sample2 = "مجموعة طلعت مصطفى (TMGH) 79.80 جنيه، السهم ارتد من 77.20.";
+        const cleaned2 = cleanVoiceText(sample2);
+        expect(cleaned2).toContain("مجموعة طلعت مصطفى");
+        expect(cleaned2).not.toContain("TMGH");
+        expect(/[A-Za-z]/.test(cleaned2)).toBe(false);
+
+        const sample3 = "سهم ABUK صاعد ومؤشر RSI عند 55 و MACD إيجابي فوق EMA 50.";
+        const cleaned3 = cleanVoiceText(sample3);
+        expect(cleaned3).toContain("أبو قير للأسمدة");
+        expect(cleaned3).toContain("مؤشر القوة النسبية");
+        expect(cleaned3).toContain("مؤشر الماكد");
+        expect(cleaned3).toContain("المتوسط المتحرك");
+        expect(cleaned3).not.toContain("ABUK");
+        expect(/[A-Za-z]/.test(cleaned3)).toBe(false);
+
+        const sample4 = "البنك التجاري الدولي (COMI.CA) هابط 1% في مؤشر EGX30.";
+        const cleaned4 = cleanVoiceText(sample4);
+        expect(cleaned4).toContain("البنك التجاري الدولي");
+        expect(cleaned4).toContain("إيجي إكس 30");
+        expect(cleaned4).not.toContain("COMI");
+        expect(/[A-Za-z]/.test(cleaned4)).toBe(false);
+    });
 });

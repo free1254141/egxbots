@@ -44,10 +44,133 @@ def _get_cache_key(voice: str, rate: str, pitch: str, clean_text: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+# Comprehensive Egyptian Stock Exchange (EGX) Symbol to Arabic Company Name Dictionary
+# Guarantees that the TTS audio engine NEVER speaks English tickers/letters, and always speaks Arabic names.
+EGX_STOCK_TICKERS: dict[str, str] = {
+    "ABUK": "أبو قير للأسمدة",
+    "TMGH": "طلعت مصطفى",
+    "COMI": "التجاري الدولي",
+    "FWRY": "فوري",
+    "SWDY": "السويدي إليكتريك",
+    "ETEL": "المصرية للاتصالات",
+    "MFPC": "موبكو",
+    "SKPC": "سيدي كرير",
+    "AMOC": "أموك",
+    "EKHO": "المصرية الكويتية",
+    "BTFH": "بلتون",
+    "HRHO": "هيرميس",
+    "CICH": "سي آي كابيتال",
+    "EFIH": "إي فاينانس",
+    "ISPH": "ابن سينا فارما",
+    "PHAR": "إيبيكو",
+    "ESRS": "حديد عز",
+    "HELI": "مصر الجديدة للإسكان",
+    "PHDC": "بالم هيلز",
+    "MASR": "مدينة مصر للإسكان",
+    "MNHD": "مدينة مصر للإسكان",
+    "OCDI": "سوديك",
+    "EMFD": "إعمار مصر",
+    "ORHD": "أوراسكوم للتنمية",
+    "ORAS": "أوراسكوم كونستراكشون",
+    "EGAL": "مصر للألومنيوم",
+    "TAQA": "طاقة عربية",
+    "EGAS": "غاز مصر",
+    "AUTO": "جي بي أوتو",
+    "GBCO": "جي بي كوربوريشن",
+    "ADIB": "أبوظبي الإسلامي",
+    "CIEB": "كريدي أجريكول",
+    "QNBE": "بنك قطر الوطني",
+    "QNBA": "بنك قطر الوطني",
+    "FAIT": "فيصل الإسلامي",
+    "HDBK": "بنك التعمير والإسكان",
+    "CCAP": "القلعة",
+    "VALU": "فاليو",
+    "ORWE": "النساجون الشرقيون",
+    "EGCH": "كيما",
+    "EFIC": "المالية والصناعية",
+    "KZPC": "كفر الزيات للمبيدات",
+    "FERC": "فيركيم مصر",
+    "JUFO": "جهينة",
+    "DOMT": "دومتي",
+    "EFID": "إيديتا",
+    "OLFI": "عبور لاند",
+    "POUL": "القاهرة للدواجن",
+    "ISMA": "الإسماعيلية للدواجن",
+    "MPCO": "المنصورة للدواجن",
+    "SUGR": "الدلتا للسكر",
+    "EAST": "إيسترن كومباني",
+    "MCQE": "أسمنت قنا",
+    "MBSC": "أسمنت بني سويف",
+    "ARCC": "العربية للأسمنت",
+    "SVCE": "أسمنت جنوب الوادي",
+    "SCEM": "أسمنت سيناء",
+    "LCSW": "ليسيكو مصر",
+    "ECAP": "العز للسيراميك",
+    "CERA": "ريماس",
+    "IRAX": "العز الدخيلة للصلب",
+    "ATQA": "مصر الوطنية للصلب",
+    "IRON": "الحديد والصلب",
+    "MBEG": "إم بي للهندسة",
+    "IEEC": "المشروعات الصناعية والهندسية",
+    "EEII": "العربية للصناعات الهندسية",
+    "ALUM": "العربية للألومنيوم",
+    "KORA": "قرة للطاقة",
+    "ELEC": "الكابلات الكهربائية",
+    "RAYA": "راية القابضة",
+    "RACC": "راية لمراكز الاتصالات",
+    "ETRS": "إيجيترانس",
+    "ALCN": "الإسكندرية لتداول الحاويات",
+    "EGBE": "البنك المصري الخليجي",
+    "SAUD": "بنك البركة",
+    "EXPA": "بنك تنمية الصادرات",
+    "CANA": "بنك قناة السويس",
+    "UBEE": "البنك المتحد",
+    "SEIG": "السعودية المصرية للاستثمار",
+    "ODIN": "أودن للاستثمارات",
+    "CNFN": "كونتكت المالية",
+    "ATLC": "التوفيق للتأجير",
+    "PRMH": "برايم القابضة",
+    "GTWL": "جولدن تكس",
+    "ACGC": "العربية لحليج الأقطان",
+    "DEIN": "دايس للملابس",
+    "DSCW": "دايس للملابس",
+    "KABO": "كابو",
+    "SPIN": "سبينالكس",
+    "TALM": "تعليم لخدمات الإدارة",
+    "CEFM": "مطاحن مصر الوسطى",
+    "EDFM": "مطاحن شرق الدلتا",
+    "SCFM": "مطاحن جنوب القاهرة",
+    "MILS": "مطاحن شمال القاهرة",
+    "AFMC": "مطاحن الإسكندرية",
+    "WCDF": "مطاحن وسط وغرب الدلتا",
+    "UEFM": "مطاحن مصر العليا",
+    "MPCI": "ممفيس للأدوية",
+    "NIPH": "النيل للأدوية",
+    "AXPH": "الإسكندرية للأدوية",
+    "CPCI": "القاهرة للأدوية",
+    "AMES": "المركز الطبي الجديد",
+    "CLHO": "مستشفى كليوباترا",
+    "SIPC": "سبأ الدولية للأدوية",
+    "SPMD": "سبيد ميديكال",
+    "RMDA": "راميدا للأدوية",
+    "ADCI": "العربية للأدوية",
+    "ELSH": "الشمس للإسكان",
+    "ELKA": "القاهرة للإسكان",
+    "UNIT": "المتحدة للإسكان",
+    "ZMID": "زهراء المعادي",
+    "CRST": "كريست مارك",
+    "RREI": "العربية للاستثمار العقاري",
+    "MAAL": "مرسيليا المصرية الخليجية",
+    "OBRI": "العبور للاستثمار العقاري",
+    "NCCW": "النصر للأعمال المدنية",
+}
+
+
 def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     """
     Format and streamline technical market analysis into clear, natural conversational Arabic.
     Preserves 100% of analytical text and converts tables into natural spoken words.
+    Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
     """
     if not raw_text or not raw_text.strip():
         return ""
@@ -66,29 +189,54 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
 
-    # 3. Strip trailing boilerplate disclaimers without affecting core notes or alerts
+    # 3. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    text = re.sub(r"[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]", "", text)
+
+    # 4. Strip trailing boilerplate disclaimers without affecting core notes or alerts
     text = re.sub(r"(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"منصة EGX BOTS ليست وسيطاً[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$", "", text, flags=re.IGNORECASE)
 
-    # 4. Remove emojis and decorative icons
+    # 5. Remove emojis and decorative icons
     text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
     text = re.sub(r"[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]", "", text)
 
-    # 5. Clean standalone currency abbreviations without mangling Arabic words (e.g. تجميع)
+    # 6. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    text = re.sub(r"(?:والـ|الـ)\s*(?=[A-Za-z])", " ", text)
+
+    # 7. Financial terms, indices, and indicator acronyms into natural spoken Arabic
     text = re.sub(r"(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)", " جنيه ", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:ج\.م\.?|جم|EGP)\b", " جنيه ", text, flags=re.IGNORECASE)
     text = text.replace("%", " في المية ")
     text = re.sub(r"\bEGX30\b", " إيجي إكس 30 ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bEGX70\b", " إيجي إكس 70 ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bEGX100\b", " إيجي إكس 100 ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bEGX\b", " البورصة المصرية ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bUSD\b", " دولار ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:مؤشر\s*)?\bRSI\b", " مؤشر القوة النسبية ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:مؤشر\s*)?\bMACD\b", " مؤشر الماكد ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:متوسط\s*)?\bEMA\b", " المتوسط المتحرك ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:متوسط\s*)?\bSMA\b", " المتوسط المتحرك ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bP/E\b", " مضاعف الربحية ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bMACD\b", " مؤشر الماكد ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bRSI\b", " مؤشر القوة النسبية ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bEMA\b", " المتوسط المتحرك ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bEPS\b", " ربحية السهم ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:وقف الخسارة\s*)?\bSL\b", " وقف الخسارة ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:جني الأرباح\s*|الهدف\s*)?\bTP\b", " المستهدف ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bBUY\b", " شراء ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bSELL\b", " بيع ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bHOLD\b", " احتفاظ ", text, flags=re.IGNORECASE)
 
-    # Normalize whitespace
+    # 8. Replace standalone stock tickers with full Arabic company names
+    for sym, ar_name in EGX_STOCK_TICKERS.items():
+        text = re.sub(rf"\b{sym}(?:\.CA)?\b", f" {ar_name} ", text, flags=re.IGNORECASE)
+
+    # 9. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    text = re.sub(r"[A-Za-z]+(?:\.[A-Za-z]+)?", "", text)
+
+    # 10. Normalize whitespace and clean punctuation
     text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"([،\.\!؟])\s*\1+", r"\1", text)
 
-    # Truncate smoothly at sentence boundary only if exceeding max_chars (default 10,000)
+    # 11. Truncate smoothly at sentence boundary only if exceeding max_chars (default 10,000)
     if len(text) > max_chars:
         cut = text[:max_chars]
         last_punct = max(cut.rfind("."), cut.rfind("،"), cut.rfind("!"), cut.rfind("؟"), cut.rfind("\n"))

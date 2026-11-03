@@ -212,12 +212,134 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
         }
     }
 
-    return result.trim();
+    return cleanVoiceText(result, 1500);
 }
+
+// Comprehensive Egyptian Stock Exchange (EGX) Symbol to Arabic Company Name Dictionary
+// Guarantees that the TTS audio engine NEVER speaks English tickers/letters, and always speaks Arabic names.
+export const EGX_STOCK_TICKERS: Record<string, string> = {
+    ABUK: "أبو قير للأسمدة",
+    TMGH: "طلعت مصطفى",
+    COMI: "التجاري الدولي",
+    FWRY: "فوري",
+    SWDY: "السويدي إليكتريك",
+    ETEL: "المصرية للاتصالات",
+    MFPC: "موبكو",
+    SKPC: "سيدي كرير",
+    AMOC: "أموك",
+    EKHO: "المصرية الكويتية",
+    BTFH: "بلتون",
+    HRHO: "هيرميس",
+    CICH: "سي آي كابيتال",
+    EFIH: "إي فاينانس",
+    ISPH: "ابن سينا فارما",
+    PHAR: "إيبيكو",
+    ESRS: "حديد عز",
+    HELI: "مصر الجديدة للإسكان",
+    PHDC: "بالم هيلز",
+    MASR: "مدينة مصر للإسكان",
+    MNHD: "مدينة مصر للإسكان",
+    OCDI: "سوديك",
+    EMFD: "إعمار مصر",
+    ORHD: "أوراسكوم للتنمية",
+    ORAS: "أوراسكوم كونستراكشون",
+    EGAL: "مصر للألومنيوم",
+    TAQA: "طاقة عربية",
+    EGAS: "غاز مصر",
+    AUTO: "جي بي أوتو",
+    GBCO: "جي بي كوربوريشن",
+    ADIB: "أبوظبي الإسلامي",
+    CIEB: "كريدي أجريكول",
+    QNBE: "بنك قطر الوطني",
+    QNBA: "بنك قطر الوطني",
+    FAIT: "فيصل الإسلامي",
+    HDBK: "بنك التعمير والإسكان",
+    CCAP: "القلعة",
+    VALU: "فاليو",
+    ORWE: "النساجون الشرقيون",
+    EGCH: "كيما",
+    EFIC: "المالية والصناعية",
+    KZPC: "كفر الزيات للمبيدات",
+    FERC: "فيركيم مصر",
+    JUFO: "جهينة",
+    DOMT: "دومتي",
+    EFID: "إيديتا",
+    OLFI: "عبور لاند",
+    POUL: "القاهرة للدواجن",
+    ISMA: "الإسماعيلية للدواجن",
+    MPCO: "المنصورة للدواجن",
+    SUGR: "الدلتا للسكر",
+    EAST: "إيسترن كومباني",
+    MCQE: "أسمنت قنا",
+    MBSC: "أسمنت بني سويف",
+    ARCC: "العربية للأسمنت",
+    SVCE: "أسمنت جنوب الوادي",
+    SCEM: "أسمنت سيناء",
+    LCSW: "ليسيكو مصر",
+    ECAP: "العز للسيراميك",
+    CERA: "ريماس",
+    IRAX: "العز الدخيلة للصلب",
+    ATQA: "مصر الوطنية للصلب",
+    IRON: "الحديد والصلب",
+    MBEG: "إم بي للهندسة",
+    IEEC: "المشروعات الصناعية والهندسية",
+    EEII: "العربية للصناعات الهندسية",
+    ALUM: "العربية للألومنيوم",
+    KORA: "قرة للطاقة",
+    ELEC: "الكابلات الكهربائية",
+    RAYA: "راية القابضة",
+    RACC: "راية لمراكز الاتصالات",
+    ETRS: "إيجيترانس",
+    ALCN: "الإسكندرية لتداول الحاويات",
+    EGBE: "البنك المصري الخليجي",
+    SAUD: "بنك البركة",
+    EXPA: "بنك تنمية الصادرات",
+    CANA: "بنك قناة السويس",
+    UBEE: "البنك المتحد",
+    SEIG: "السعودية المصرية للاستثمار",
+    ODIN: "أودن للاستثمارات",
+    CNFN: "كونتكت المالية",
+    ATLC: "التوفيق للتأجير",
+    PRMH: "برايم القابضة",
+    GTWL: "جولدن تكس",
+    ACGC: "العربية لحليج الأقطان",
+    DEIN: "دايس للملابس",
+    DSCW: "دايس للملابس",
+    KABO: "كابو",
+    SPIN: "سبينالكس",
+    TALM: "تعليم لخدمات الإدارة",
+    CEFM: "مطاحن مصر الوسطى",
+    EDFM: "مطاحن شرق الدلتا",
+    SCFM: "مطاحن جنوب القاهرة",
+    MILS: "مطاحن شمال القاهرة",
+    AFMC: "مطاحن الإسكندرية",
+    WCDF: "مطاحن وسط وغرب الدلتا",
+    UEFM: "مطاحن مصر العليا",
+    MPCI: "ممفيس للأدوية",
+    NIPH: "النيل للأدوية",
+    AXPH: "الإسكندرية للأدوية",
+    CPCI: "القاهرة للأدوية",
+    AMES: "المركز الطبي الجديد",
+    CLHO: "مستشفى كليوباترا",
+    SIPC: "سبأ الدولية للأدوية",
+    SPMD: "سبيد ميديكال",
+    RMDA: "راميدا للأدوية",
+    ADCI: "العربية للأدوية",
+    ELSH: "الشمس للإسكان",
+    ELKA: "القاهرة للإسكان",
+    UNIT: "المتحدة للإسكان",
+    ZMID: "زهراء المعادي",
+    CRST: "كريست مارك",
+    RREI: "العربية للاستثمار العقاري",
+    MAAL: "مرسيليا المصرية الخليجية",
+    OBRI: "العبور للاستثمار العقاري",
+    NCCW: "النصر للأعمال المدنية",
+};
 
 /**
  * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
  * Strips markdown tables, links, disclaimers, and technical syntax so audio synthesis speaks cleanly.
+ * Guarantees ZERO English tickers or letters in speech audio: replaces tickers with Arabic company names.
  */
 export function cleanVoiceText(rawText: string, maxChars: number = 10000): string {
     if (!rawText) return "";
@@ -225,9 +347,7 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
     let text = rawText;
 
     // 1. Convert markdown table rows into spoken text instead of wiping them out
-    // Strip markdown table separator lines like |---|---|
     text = text.replace(/\|[\s:\-]+\|[\s:\-]*[\r\n]+/g, "\n");
-    // Replace remaining table pipe delimiters with natural pauses
     text = text.replace(/\|/g, "، ");
 
     // 2. Remove markdown links [text](url) -> text
@@ -237,27 +357,56 @@ export function cleanVoiceText(rawText: string, maxChars: number = 10000): strin
     text = text.replace(/#{1,6}\s*/g, "");
     text = text.replace(/[*`_~]/g, "");
 
-    // 4. Strip ONLY trailing generic disclaimer sentences at the very bottom (preserve all notes, alerts, and analytical paragraphs!)
+    // 4. Strip parenthesized English tickers like (ABUK), ( TMGH ), (COMI.CA)
+    text = text.replace(/[\(\[\{]\s*[A-Za-z0-9\.\-]{2,10}\s*[\)\]\}]/g, "");
+
+    // 5. Strip ONLY trailing generic disclaimer sentences at the very bottom
     text = text.replace(/(?:إخلاء مسؤولية|تنبيه):\s*هذا التحليل لأغراض تعليمية[\s\S]*$/gi, "");
     text = text.replace(/منصة EGX BOTS ليست وسيطاً[\s\S]*$/gi, "");
     text = text.replace(/هذا التحليل لأغراض العمل الفني والتعليم فقط[\s\S]*$/gi, "");
 
-    // 5. Remove emojis and decorative icons
+    // 6. Remove emojis and decorative icons
     text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "");
     text = text.replace(/[•–—▶️◀️⚡📈📉🎯🚨✅❌🔍⚖️💼📊💎👑🤖🔥📌💡⚠️🛑~_\^]/g, "");
 
-    // 6. Natural spoken currency & stock terms without eating preceding digits
+    // 7. Clean prefixes before English words (e.g. والـ P/E -> مضاعف الربحية)
+    text = text.replace(/(?:والـ|الـ)\s*(?=[A-Za-z])/g, " ");
+
+    // 8. Natural spoken currency, indices, and stock terms into clear Arabic
     text = text.replace(/(?<=\d)\s*(?:ج\.م\.?|جم|EGP)(?=\s|[^\w]|$)/gi, " جنيه");
     text = text.replace(/\b(?:ج\.م\.?|جم|EGP)\b/gi, " جنيه");
     text = text.replace(/%/g, " في المية ");
     text = text.replace(/\bEGX30\b/gi, " إيجي إكس 30 ");
     text = text.replace(/\bEGX70\b/gi, " إيجي إكس 70 ");
+    text = text.replace(/\bEGX100\b/gi, " إيجي إكس 100 ");
+    text = text.replace(/\bEGX\b/gi, " البورصة المصرية ");
+    text = text.replace(/\bUSD\b/gi, " دولار ");
+    text = text.replace(/(?:مؤشر\s*)?\bRSI\b/gi, " مؤشر القوة النسبية ");
+    text = text.replace(/(?:مؤشر\s*)?\bMACD\b/gi, " مؤشر الماكد ");
+    text = text.replace(/(?:متوسط\s*)?\bEMA\b/gi, " المتوسط المتحرك ");
+    text = text.replace(/(?:متوسط\s*)?\bSMA\b/gi, " المتوسط المتحرك ");
     text = text.replace(/\bP\/E\b/gi, " مضاعف الربحية ");
+    text = text.replace(/\bEPS\b/gi, " ربحية السهم ");
+    text = text.replace(/(?:وقف الخسارة\s*)?\bSL\b/gi, " وقف الخسارة ");
+    text = text.replace(/(?:جني الأرباح\s*|الهدف\s*)?\bTP\b/gi, " المستهدف ");
+    text = text.replace(/\bBUY\b/gi, " شراء ");
+    text = text.replace(/\bSELL\b/gi, " بيع ");
+    text = text.replace(/\bHOLD\b/gi, " احتفاظ ");
 
-    // 7. Normalize whitespace
+    // 9. Replace standalone stock tickers with full Arabic company names
+    for (const [sym, arName] of Object.entries(EGX_STOCK_TICKERS)) {
+        const re = new RegExp(`\\b${sym}(?:\\.CA)?\\b`, "gi");
+        text = text.replace(re, ` ${arName} `);
+    }
+
+    // 10. Clean any remaining English characters/words so the voice engine NEVER pronounces English
+    text = text.replace(/[A-Za-z]+(?:\.[A-Za-z]+)?/g, "");
+
+    // 11. Normalize whitespace and clean punctuation
     text = text.replace(/\s+/g, " ").trim();
+    text = text.replace(/([،\.!؟])\s*\1+/g, "$1");
 
-    // 8. Truncate smoothly at sentence boundary ONLY if exceeding maxChars (default 10,000)
+    // 12. Truncate smoothly at sentence boundary ONLY if exceeding maxChars (default 10,000)
     if (text.length > maxChars) {
         const cut = text.slice(0, maxChars);
         const lastPunct = Math.max(

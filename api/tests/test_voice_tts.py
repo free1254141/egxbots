@@ -27,6 +27,21 @@ def test_clean_text_for_speech():
     assert "في المية" in cleaned
     # Ensure word تجميع was not mangled into ت جنيه يع
     assert "تجميع" in cleaned
+    assert "FWRY" not in cleaned
+
+def test_clean_text_removes_english_tickers_and_symbols():
+    sample = "أبو قير للأسمدة (ABUK) 77.71 جنيه، هابط 3.59% مع سهم TMGH ومؤشر RSI 40 والبنك التجاري الدولي (COMI.CA)."
+    cleaned = clean_text_for_speech(sample)
+    assert "ABUK" not in cleaned
+    assert "TMGH" not in cleaned
+    assert "COMI" not in cleaned
+    assert "RSI" not in cleaned
+    assert "أبو قير للأسمدة" in cleaned
+    assert "طلعت مصطفى" in cleaned
+    assert "البنك التجاري الدولي" in cleaned
+    assert "مؤشر القوة النسبية" in cleaned
+    import re
+    assert not re.search(r"[A-Za-z]", cleaned)
 
 def test_voices_endpoint():
     res = client.get("/voice/voices")
