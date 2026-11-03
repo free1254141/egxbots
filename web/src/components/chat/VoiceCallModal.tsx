@@ -16,7 +16,7 @@ import {
     Zap
 } from "lucide-react";
 import { toast } from "sonner";
-import { extractVoiceAnalysisSpeech, cleanVoiceText, cleanVoiceTranscript, playConnectionChime } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, cleanVoiceText, cleanVoiceTranscript } from "@/lib/voice-utils";
 
 interface VoiceCallModalProps {
     isOpen: boolean;
@@ -115,6 +115,8 @@ export function VoiceCallModal({
     const stopSpeaking = useCallback(() => {
         if (audioRef.current) {
             try {
+                audioRef.current.onended = null;
+                audioRef.current.onerror = null;
                 audioRef.current.pause();
                 audioRef.current.currentTime = 0;
                 audioRef.current.src = "";
@@ -282,8 +284,9 @@ export function VoiceCallModal({
             };
 
             audio.onerror = () => {
-                console.warn("Edge-TTS stream error, falling back to Web Speech Synthesis");
-                fallbackToWebSpeech(spokenSummary, onPlaybackFinished);
+                if (!isOpenRef.current || callStateRef.current !== "speaking") return;
+                console.warn("[VoiceCall] Edge-TTS stream error, finishing playback cleanly without voice switch");
+                onPlaybackFinished();
             };
 
             audio.src = ttsUrl;
@@ -310,10 +313,13 @@ export function VoiceCallModal({
             utterance.lang = "ar-EG";
             utterance.rate = 1.05;
 
-            // Pick an Arabic voice if available in the browser
+            // Strictly select an Arabic male voice consistent with Shakir
             const voices = window.speechSynthesis.getVoices();
+            const maleVoice = voices.find((v) => v.lang.startsWith("ar") && /male|naayf|hamed|maged|shakir|tarik|hassan/i.test(v.name));
             const arVoice = voices.find((v) => v.lang.startsWith("ar"));
-            if (arVoice) utterance.voice = arVoice;
+            if (maleVoice) utterance.voice = maleVoice;
+            else if (arVoice) utterance.voice = arVoice;
+            utterance.pitch = 0.85;
 
             utterance.onend = () => {
                 onDone();
@@ -419,10 +425,7 @@ export function VoiceCallModal({
             setLatestSpokenText(null);
             isProcessingRef.current = false;
 
-            // Unlock audio context and play connection chime immediately
-            playConnectionChime();
-
-            // Transition directly to listening after brief connection feedback (400ms)
+            // Transition directly to listening after brief connection feedback (400ms) without beeping
             const connectTimer = setTimeout(() => {
                 if (isOpenRef.current) {
                     setCallState("listening");
@@ -453,7 +456,7 @@ export function VoiceCallModal({
                 micStreamRef.current = null;
             }
         }
-    }, [isOpen, startListening, stopListening, stopSpeaking]);
+    }, [isOpen]);
 
     const handleEndCall = () => {
         setCallState("ended");

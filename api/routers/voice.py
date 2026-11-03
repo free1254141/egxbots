@@ -29,7 +29,7 @@ AVAILABLE_VOICES = {
 }
 
 
-def clean_text_for_speech(raw_text: str, max_chars: int = 2000) -> str:
+def clean_text_for_speech(raw_text: str, max_chars: int = 3500) -> str:
     """
     Format and streamline technical market analysis into clear, natural conversational Arabic.
     Strips raw markdown syntax, markdown tables, and decorative symbols.
@@ -96,7 +96,7 @@ class TTSRequest(BaseModel):
     voice: Optional[str] = DEFAULT_VOICE
     rate: Optional[str] = "+0%"
     pitch: Optional[str] = "+0Hz"
-    max_chars: Optional[int] = 2000
+    max_chars: Optional[int] = 3500
 
 
 @router.get("/voices")
@@ -114,7 +114,7 @@ async def stream_tts(req: TTSRequest):
     if not edge_tts:
         raise HTTPException(status_code=500, detail="edge-tts library is not installed on this server")
 
-    spoken_text = clean_text_for_speech(req.text, max_chars=req.max_chars or 2000)
+    spoken_text = clean_text_for_speech(req.text, max_chars=req.max_chars or 3500)
     if not spoken_text:
         raise HTTPException(status_code=400, detail="Text is empty or could not be processed for speech")
 

@@ -24,11 +24,11 @@ export function VoiceNotePlayer({
 }: VoiceNotePlayerProps) {
     const isUser = role === "user";
 
-    // Clean spoken text for natural Egyptian Arabic TTS synthesis (up to 1500 chars)
+    // Clean spoken text for natural Egyptian Arabic TTS synthesis (entire answer up to 3500 chars)
     const spokenOpinion = useMemo(() => {
-        if (spokenText && spokenText.trim()) return spokenText.trim();
         if (isUser) return text ? text.trim() : "";
-        return text ? cleanVoiceText(text, 1500) : "";
+        // For assistant: Always clean the full response text up to 3500 chars so 100% of the answer is spoken!
+        return text ? cleanVoiceText(text, 3500) : (spokenText ? cleanVoiceText(spokenText, 3500) : "");
     }, [spokenText, text, isUser]);
 
     // Initial realistic duration estimate based on Arabic speech cadence (~12 chars per second)
@@ -45,7 +45,7 @@ export function VoiceNotePlayer({
     const [duration, setDuration] = useState(initialEstimatedDuration);
     const [isTextExpanded, setIsTextExpanded] = useState(false);
     const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-    const [blobAudioUrl, setBlobAudioUrl] = useState<string | null>(null);
+    const [cachedBlobUrl, setCachedBlobUrl] = useState<string | null>(null);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -53,45 +53,38 @@ export function VoiceNotePlayer({
     const rawAudioTarget = useMemo(() => {
         if (audioUrl) return audioUrl;
         if (!isUser && spokenOpinion) {
-            return `/api/voice/tts?text=${encodeURIComponent(cleanVoiceText(spokenOpinion, 1500))}&voice=ar-EG-ShakirNeural`;
+            return `/api/voice/tts?text=${encodeURIComponent(spokenOpinion)}&voice=ar-EG-ShakirNeural`;
         }
         return undefined;
     }, [audioUrl, isUser, spokenOpinion]);
 
-    // Prefetch remote TTS audio into a local Blob URL for exact duration and instant seeking
+    // Background prefetch into Blob for instant seek support, while direct audio starts immediately
     useEffect(() => {
-        if (!rawAudioTarget) {
-            setBlobAudioUrl(null);
-            return;
-        }
-
-        // If it's already a client Blob or data URL, use it directly
-        if (rawAudioTarget.startsWith("blob:") || rawAudioTarget.startsWith("data:")) {
-            setBlobAudioUrl(rawAudioTarget);
+        if (!rawAudioTarget || rawAudioTarget.startsWith("blob:") || rawAudioTarget.startsWith("data:")) {
             return;
         }
 
         let isMounted = true;
         let createdUrl: string | null = null;
-        setIsLoadingAudio(true);
 
         fetch(rawAudioTarget)
             .then(res => {
-                if (!res.ok) throw new Error(`TTS fetch returned status ${res.status}`);
+                if (!res.ok) throw new Error("TTS background fetch failed");
                 return res.blob();
             })
             .then(blob => {
                 if (!isMounted) return;
                 createdUrl = URL.createObjectURL(blob);
-                setBlobAudioUrl(createdUrl);
-                setIsLoadingAudio(false);
-            })
-            .catch(err => {
-                console.warn("[VoiceNotePlayer] Blob fetch failed, falling back to direct URL:", err);
-                if (isMounted) {
-                    setBlobAudioUrl(rawAudioTarget);
-                    setIsLoadingAudio(false);
+                setCachedBlobUrl(createdUrl);
+                // If audioRef is already loaded, update src smoothly for seeking without interrupting if playing
+                if (audioRef.current && !isPlaying) {
+                    const savedTime = audioRef.current.currentTime;
+                    audioRef.current.src = createdUrl;
+                    audioRef.current.currentTime = savedTime;
                 }
+            })
+            .catch(() => {
+                // Non-blocking background caching
             });
 
         return () => {
@@ -100,15 +93,16 @@ export function VoiceNotePlayer({
                 URL.revokeObjectURL(createdUrl);
             }
         };
-    }, [rawAudioTarget]);
+    }, [rawAudioTarget, isPlaying]);
 
-    // Setup Audio instance with finite duration and smooth event listeners
+    // Setup Audio instance with progressive streaming for sub-second start latency (<350ms)
     useEffect(() => {
-        if (!blobAudioUrl) return;
+        if (!rawAudioTarget) return;
 
+        const activeSrc = cachedBlobUrl || rawAudioTarget;
         const audio = new Audio();
         audio.preload = "auto";
-        audio.src = blobAudioUrl;
+        audio.src = activeSrc;
         audioRef.current = audio;
 
         const updateExactDuration = () => {
@@ -119,11 +113,16 @@ export function VoiceNotePlayer({
 
         audio.onloadedmetadata = updateExactDuration;
         audio.ondurationchange = updateExactDuration;
-        audio.oncanplaythrough = updateExactDuration;
+        audio.oncanplaythrough = () => {
+            updateExactDuration();
+            setIsLoadingAudio(false);
+        };
+        audio.oncanplay = () => {
+            setIsLoadingAudio(false);
+        };
 
         audio.ontimeupdate = () => {
             setCurrentTime(audio.currentTime);
-            // Dynamically expand duration if audio surpasses initial estimate
             if (audio.currentTime > duration) {
                 setDuration(Math.ceil(audio.currentTime));
             }
@@ -143,23 +142,30 @@ export function VoiceNotePlayer({
         };
 
         if (autoPlay && !isUser) {
+            setIsLoadingAudio(true);
             const playPromise = audio.play();
             if (playPromise !== undefined) {
                 playPromise
-                    .then(() => setIsPlaying(true))
+                    .then(() => {
+                        setIsPlaying(true);
+                        setIsLoadingAudio(false);
+                    })
                     .catch(() => {
                         // Handled: Autoplay blocked by browser policy without user gesture
                         setIsPlaying(false);
+                        setIsLoadingAudio(false);
                     });
             }
         }
 
         return () => {
+            audio.onended = null;
+            audio.onerror = null;
             audio.pause();
             audio.src = "";
             audioRef.current = null;
         };
-    }, [blobAudioUrl, autoPlay, isUser]);
+    }, [rawAudioTarget, autoPlay, isUser, cachedBlobUrl]);
 
     const togglePlay = () => {
         if (!audioRef.current) return;
@@ -167,9 +173,16 @@ export function VoiceNotePlayer({
             audioRef.current.pause();
             setIsPlaying(false);
         } else {
+            setIsLoadingAudio(true);
             audioRef.current.play()
-                .then(() => setIsPlaying(true))
-                .catch(() => setIsPlaying(false));
+                .then(() => {
+                    setIsPlaying(true);
+                    setIsLoadingAudio(false);
+                })
+                .catch(() => {
+                    setIsPlaying(false);
+                    setIsLoadingAudio(false);
+                });
         }
     };
 
@@ -208,7 +221,7 @@ export function VoiceNotePlayer({
                         <>
                             <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
                             <span className="text-amber-300 truncate">
-                                {isLoadingAudio ? "جاري تحضير الرد الصوتي... 🎙️" : "رد أرتورو الصوتي (Voice Note)"}
+                                {isLoadingAudio ? "جاري تشغيل الرد الصوتي... 🎙️" : "رد أرتورو الصوتي (Voice Note)"}
                             </span>
                         </>
                     )}
@@ -223,7 +236,7 @@ export function VoiceNotePlayer({
                 <button
                     type="button"
                     onClick={togglePlay}
-                    disabled={isLoadingAudio && !audioRef.current}
+                    disabled={isLoadingAudio && !isPlaying}
                     className={`grid h-9 w-9 sm:h-10 sm:w-10 shrink-0 place-items-center rounded-full transition active:scale-95 cursor-pointer shadow-md disabled:opacity-60 ${
                         isUser 
                             ? "bg-emerald-500 text-black hover:bg-emerald-400" 

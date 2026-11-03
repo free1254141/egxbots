@@ -219,7 +219,7 @@ export function extractVoiceAnalysisSpeech(replyText: string, userQuery: string 
  * Cleans rich markdown chat replies into natural spoken Egyptian Arabic sentences.
  * Strips markdown tables, links, disclaimers, and technical syntax so audio synthesis speaks cleanly.
  */
-export function cleanVoiceText(rawText: string, maxChars: number = 1500): string {
+export function cleanVoiceText(rawText: string, maxChars: number = 2500): string {
     if (!rawText) return "";
 
     let text = rawText;

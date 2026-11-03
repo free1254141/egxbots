@@ -27,7 +27,7 @@ import {
     personalizeCachedAnalysis,
     setVipAnalysisCache,
 } from "@/lib/ai/analysis-cache";
-import { extractVoiceAnalysisSpeech } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, cleanVoiceText } from "@/lib/voice-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -925,7 +925,7 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = (isVoiceCall || isVoiceNote) ? extractVoiceAnalysisSpeech(personalizedReply, message) : null;
+                                const spokenText = isVoiceNote ? cleanVoiceText(personalizedReply, 2500) : (isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : null);
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -1165,7 +1165,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = (isVoiceCall || isVoiceNote) ? extractVoiceAnalysisSpeech(replyText, message) : null;
+                                             const spokenText = isVoiceNote ? cleanVoiceText(replyText, 2500) : (isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : null);
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,
