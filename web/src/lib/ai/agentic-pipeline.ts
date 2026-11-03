@@ -392,9 +392,9 @@ export const AGENTIC_TOOLS_SCHEMA = [
 import { ARTORO_PLATFORM_CONTEXT } from "./platform-context";
 
 export const VOICE_INTERACTION_SYSTEM_PROMPT = `
-=== 🎙️ نظام التحدث الصوتي المباشر (VOICE CALL & VOICE NOTE MODE ACTIVE) ===
-أنت الآن تتحدث مع المستثمر عبر **مكالمة صوتية حية أو رسالة صوتية (Voice Note)** مباشرة، وليس نصاً كتابياً يقرأه بالعين!
-قواعد التحدث الصوتي الصارمة والإلزامية لـ DeepSeek:
+=== 📞 نظام المكالمة الصوتية الحية (LIVE VOICE CALL MODE ACTIVE) ===
+أنت الآن تتحدث مع المستثمر عبر **مكالمة هاتفية صوتية حية** مباشرة، وليس نصاً كتابياً يقرأه بالعين!
+قواعد التحدث في المكالمة الصوتية لـ DeepSeek:
 1. الإيجاز والتركيز والفائدة الفورية (Concise & Impactful):
    - يجب أن تكون إجابتك مباشرة وموجزة في حدود 3 إلى 5 أسطر فقط (من 50 إلى 90 كلمة كحد أقصى) لتناسب الاستماع السريع في أقل من 25 ثانية.
    - يمنع الإسهاب أو الحشو؛ قدّم الزبدة والخلاصة التي يحتاجها المستثمر فوراً دون مقدمات إنشائية.
@@ -402,7 +402,6 @@ export const VOICE_INTERACTION_SYSTEM_PROMPT = `
    - يمنع منعاً باتاً نطق أو كتابة أي رمز أو كود إنجليزي للسهم إطلاقاً (ممنوع نهائياً ذكر ABUK أو TMGH أو COMI أو SWDY أو FWRY أو أي كود إنجليزي).
    - اذكر دائماً اسم الشركة باللغة العربية فقط (مثل: «أبو قير للأسمدة»، «مجموعة طلعت مصطفى»، «البنك التجاري الدولي»، «السويدي إليكتريك»، «فوري»)!
    - لا تضع الرمز الإنجليزي بين قوسين أبداً في وضع الصوت (لا تكتب أبداً: «أبو قير (ABUK)» بل اكتب: «أبو قير للأسمدة» فقط).
-   - يمنع منعاً باتاً كتابة أو قراءة جداول ماركداون (Markdown Tables) أو أسطر فواصل.
    - يمنع ذكر الرموز البرمجية أو الحروف الإنجليزية للمؤشرات الفنية (يمنع قول RSI, MACD, EMA)، بل اذكر: «مؤشر القوة النسبية»، «مؤشر الماكد»، «المتوسط المتحرك»، «مضاعف الربحية».
 3. التركيز على الرأي الاستثماري والقرار العملي:
    - اذكر اسم السهم بالعربي وسعره الحالي.
@@ -481,8 +480,11 @@ export async function* runAgenticPipelineStream(
     requestedModel?: string,
     options: PipelineOptions = {}
 ): AsyncGenerator<{ type: string; data: any }> {
-    const isVoice = Boolean(options.isVoice || options.isVoiceCall || options.isVoiceNote);
-    const activeSystemPrompt = isVoice ? `${AGENTIC_SYSTEM_PROMPT}\n\n${VOICE_INTERACTION_SYSTEM_PROMPT}` : AGENTIC_SYSTEM_PROMPT;
+    // Only Live Phone Calls (isVoiceCall) require short telephone conversational output.
+    // Voice Notes in chat (isVoiceNote) produce the standard full written response with complete
+    // markdown tables, identical to regular chat, while spoken audio is synthesized separately via extractVoiceAnalysisSpeech.
+    const isLiveVoiceCall = Boolean(options.isVoiceCall);
+    const activeSystemPrompt = isLiveVoiceCall ? `${AGENTIC_SYSTEM_PROMPT}\n\n${VOICE_INTERACTION_SYSTEM_PROMPT}` : AGENTIC_SYSTEM_PROMPT;
 
     yield* runAgenticRuntime({ userMessage, images, sessionState, sessionSummary, history,
         supabase, apiKeys, userId, sessionId, messageId, requestedModel, options,
