@@ -934,7 +934,7 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = (isVoiceNote || isVoiceCall) ? extractVoiceAnalysisSpeech(personalizedReply, message) : null;
+                                const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? cleanVoiceText(personalizedReply, 2500) : null);
                                 if (spokenText) {
                                     const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                     fetch(`${backendUrl}/api/voice/tts`, {
@@ -1186,7 +1186,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = (isVoiceNote || isVoiceCall) ? extractVoiceAnalysisSpeech(replyText, message) : null;
+                                             const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : (isVoiceNote ? cleanVoiceText(replyText, 2500) : null);
                                              if (spokenText) {
                                                  const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                                  fetch(`${backendUrl}/api/voice/tts`, {
