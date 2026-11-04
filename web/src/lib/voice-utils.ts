@@ -459,26 +459,45 @@ export function cleanVoiceText(rawText: string, maxChars: number = 600): string 
     // 1. Strip code blocks
     text = text.replace(/```[\s\S]*?```/g, "");
 
-    // 2. Extract prominent stock names from markdown tables before removing the table
+    // 2. Extract prominent stock names ONLY from markdown stock screener/ranking tables
     const tableLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith("|") && l.endsWith("|"));
     const extractedStocks: string[] = [];
+    const NON_STOCK_TERMS = new Set([
+        "الإغلاق", "الإغلاق الحالي", "الدعم", "الدعم الأول", "الدعم الثاني",
+        "المقاومة", "المقاومة الأولى", "المقاومة الثانية", "المؤشر", "المقياس",
+        "المستوى / النقطة", "المستوى", "النقطة", "القيمة", "الوصف الفني",
+        "سكور التقييم الشامل", "القيمة السوقية", "السعر العادل", "التوزيعات النقدية",
+        "التوافق الشرعي", "ربحية السهم", "مضاعف الربحية", "الاتجاه", "القرار", "الحجم النسبي"
+    ]);
+
     if (tableLines.length >= 3) {
-        for (const row of tableLines.slice(2)) {
-            const cells = row.split("|").map(c => c.trim()).filter(Boolean);
-            if (cells.length > 0) {
-                let stockCell = cells[0];
-                stockCell = stockCell.replace(/\([A-Za-z0-9\.\-]+\)/g, "").trim();
-                for (const [sym, ar] of Object.entries(EGX_STOCK_TICKERS)) {
-                    if (new RegExp(`\\b${sym}\\b`, "i").test(cells[0])) {
-                        stockCell = ar;
-                        break;
+        // Strictly check if header row actually represents a list of stocks
+        const headerRow = tableLines[0];
+        const isStockListTable = headerRow.includes("السهم") || headerRow.includes("الشركة") || headerRow.includes("الرمز") || headerRow.includes("الكود");
+
+        if (isStockListTable) {
+            for (const row of tableLines.slice(2)) {
+                const cells = row.split("|").map(c => c.trim()).filter(Boolean);
+                if (cells.length > 0) {
+                    let stockCell = cells[0];
+                    stockCell = stockCell.replace(/\([A-Za-z0-9\.\-]+\)/g, "").trim();
+                    for (const [sym, ar] of Object.entries(EGX_STOCK_TICKERS)) {
+                        if (new RegExp(`\\b${sym}\\b`, "i").test(cells[0])) {
+                            stockCell = ar;
+                            break;
+                        }
                     }
+                    stockCell = stockCell.replace(/[A-Za-z0-9\.\-]+/g, "").trim();
+                    if (
+                        stockCell &&
+                        !NON_STOCK_TERMS.has(stockCell) &&
+                        !extractedStocks.includes(stockCell) &&
+                        stockCell.length > 2
+                    ) {
+                        extractedStocks.push(stockCell);
+                    }
+                    if (extractedStocks.length >= 4) break;
                 }
-                stockCell = stockCell.replace(/[A-Za-z0-9\.\-]+/g, "").trim();
-                if (stockCell && !extractedStocks.includes(stockCell) && stockCell.length > 2) {
-                    extractedStocks.push(stockCell);
-                }
-                if (extractedStocks.length >= 4) break;
             }
         }
     }

@@ -272,24 +272,40 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     # 1. Strip code blocks
     text = re.sub(r"```[\s\S]*?```", "", text)
 
-    # 2. Extract prominent stock names from markdown tables before removing the table
+    # 2. Extract prominent stock names ONLY from markdown stock screener/ranking tables
     table_lines = [line.strip() for line in text.splitlines() if line.strip().startswith("|") and line.strip().endswith("|")]
     extracted_stocks = []
+    non_stock_terms = {
+        "الإغلاق", "الإغلاق الحالي", "الدعم", "الدعم الأول", "الدعم الثاني",
+        "المقاومة", "المقاومة الأولى", "المقاومة الثانية", "المؤشر", "المقياس",
+        "المستوى / النقطة", "المستوى", "النقطة", "القيمة", "الوصف الفني",
+        "سكور التقييم الشامل", "القيمة السوقية", "السعر العادل", "التوزيعات النقدية",
+        "التوافق الشرعي", "ربحية السهم", "مضاعف الربحية", "الاتجاه", "القرار", "الحجم النسبي"
+    }
+
     if len(table_lines) >= 3:
-        for row in table_lines[2:]:
-            cells = [c.strip() for c in row.split("|")[1:-1]]
-            if cells and cells[0]:
-                stock_cell = cells[0]
-                stock_clean = re.sub(r"\([A-Za-z0-9\.\-]+\)", "", stock_cell).strip()
-                for sym, ar in EGX_STOCK_TICKERS.items():
-                    if re.search(rf"\b{sym}\b", stock_cell, re.IGNORECASE):
-                        stock_clean = ar
+        header_row = table_lines[0]
+        is_stock_list_table = any(k in header_row for k in ["السهم", "الشركة", "الرمز", "الكود"])
+        if is_stock_list_table:
+            for row in table_lines[2:]:
+                cells = [c.strip() for c in row.split("|")[1:-1]]
+                if cells and cells[0]:
+                    stock_cell = cells[0]
+                    stock_clean = re.sub(r"\([A-Za-z0-9\.\-]+\)", "", stock_cell).strip()
+                    for sym, ar in EGX_STOCK_TICKERS.items():
+                        if re.search(rf"\b{sym}\b", stock_cell, re.IGNORECASE):
+                            stock_clean = ar
+                            break
+                    stock_clean = re.sub(r"[A-Za-z0-9\.\-]+", "", stock_clean).strip()
+                    if (
+                        stock_clean
+                        and stock_clean not in non_stock_terms
+                        and stock_clean not in extracted_stocks
+                        and len(stock_clean) > 2
+                    ):
+                        extracted_stocks.append(stock_clean)
+                    if len(extracted_stocks) >= 4:
                         break
-                stock_clean = re.sub(r"[A-Za-z0-9\.\-]+", "", stock_clean).strip()
-                if stock_clean and stock_clean not in extracted_stocks and len(stock_clean) > 2:
-                    extracted_stocks.append(stock_clean)
-                if len(extracted_stocks) >= 4:
-                    break
 
     # Replace markdown table blocks with a single smooth transitional sentence
     table_replacement = ""

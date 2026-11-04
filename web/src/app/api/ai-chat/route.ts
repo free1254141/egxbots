@@ -27,7 +27,8 @@ import {
     personalizeCachedAnalysis,
     setVipAnalysisCache,
 } from "@/lib/ai/analysis-cache";
-import { extractVoiceAnalysisSpeech, cleanVoiceText } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, cleanVoiceText, VOICE_NOTE_TTS } from "@/lib/voice-utils";
+import { generateVoiceNoteSpokenScript } from "@/lib/ai/voice-summarizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -934,13 +935,13 @@ export async function POST(req: NextRequest) {
                                         : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
                                 );
 
-                                const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? cleanVoiceText(personalizedReply, 2500) : null);
+                                const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? await generateVoiceNoteSpokenScript(personalizedReply, message, getDeepSeekApiKey()) : null);
                                 if (spokenText) {
                                     const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                     fetch(`${backendUrl}/api/voice/tts`, {
                                         method: "POST",
                                         headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ text: spokenText, voice: "ar-EG-ShakirNeural", rate: "+10%" })
+                                        body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
                                     }).catch(() => {});
                                 }
                                 const provenance = {
@@ -1000,6 +1001,7 @@ export async function POST(req: NextRequest) {
                                 sendEvent({
                                     type: "done",
                                     reply: personalizedReply,
+                                    spoken_text: spokenText,
                                     session_id: activeSessionId,
                                     remaining_quota: calcRemainingQuota(),
                                     quota_limit: isUnlimited ? 999 : userMonthlyCap,
@@ -1183,16 +1185,22 @@ export async function POST(req: NextRequest) {
 
                                     const newCount = limitData?.chat_count || 0;
 
+                                    let spokenText: string | null = null;
+                                    if (isVoiceCall) {
+                                        spokenText = extractVoiceAnalysisSpeech(replyText, message);
+                                    } else if (isVoiceNote) {
+                                        spokenText = await generateVoiceNoteSpokenScript(replyText, message, getDeepSeekApiKey());
+                                    }
+
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(replyText, message) : (isVoiceNote ? cleanVoiceText(replyText, 2500) : null);
                                              if (spokenText) {
                                                  const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
                                                  fetch(`${backendUrl}/api/voice/tts`, {
                                                      method: "POST",
                                                      headers: { "Content-Type": "application/json" },
-                                                     body: JSON.stringify({ text: spokenText, voice: "ar-EG-ShakirNeural", rate: "+10%" })
+                                                     body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
                                                  }).catch(() => {});
                                              }
                                              const provenance = {
@@ -1264,6 +1272,7 @@ export async function POST(req: NextRequest) {
                                     sendEvent({
                                         type: "done",
                                         reply: replyText,
+                                        spoken_text: spokenText,
                                         session_id: activeSessionId,
                                         remaining_quota: calcRemainingQuota(),
                                         quota_limit: isUnlimited ? 999 : userMonthlyCap,

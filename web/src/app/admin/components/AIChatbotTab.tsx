@@ -134,7 +134,8 @@ export default function AIChatbotTab() {
         }
 
         // 2. Clean and cap text to max 600 characters (omits tables, English symbols, etc.)
-        const cleaned = cleanVoiceText(text, 600) || text.slice(0, 300);
+        // If text is already the model-generated spoken text, use it directly so backend cache is hit instantly in 0ms
+        const cleaned = text.trim() || cleanVoiceText(text, 1500) || text.slice(0, 300);
         if (!cleaned.trim()) {
             toast.error("لا يوجد نص صالح للتشغيل الصوتي");
             return;

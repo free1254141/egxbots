@@ -54,6 +54,8 @@ export type ChatMessage = {
 
     voiceDuration?: number;
 
+    spokenText?: string;
+
 };
 
 
@@ -1897,6 +1899,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 } else if (assistantMsg.content) {
 
                                     assistantMsg.content = stripMarkdownTables(sanitizeReply(assistantMsg.content));
+
+                                }
+
+                                if (parsed.spoken_text || parsed.spokenText) {
+
+                                    assistantMsg.spokenText = parsed.spoken_text || parsed.spokenText;
 
                                 }
 

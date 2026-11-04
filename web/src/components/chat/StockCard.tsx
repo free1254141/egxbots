@@ -320,38 +320,52 @@ export function StockCard({
             />
 
             {/* Top Header: Symbol Badge, Badges, & Share Actions */}
-            <div className="flex items-start justify-between gap-2 relative z-10">
-                <div className="flex items-center gap-2.5">
-                    {/* Symbol Pill Badge */}
-                    <div className="flex items-center justify-center rounded-xl bg-[#FFE600] text-black font-mono font-black text-xs sm:text-sm px-3 py-1.5 border-2 border-black shadow-[2px_2px_0_0_#000]">
-                        #{symbol}
-                    </div>
-
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <h3 className="font-black text-base sm:text-lg text-zinc-950 dark:text-white tracking-wide">
-                                {nameAr}
-                            </h3>
-                            {nameEn && nameEn !== nameAr && (
-                                <span className="text-[11px] text-zinc-400 font-mono hidden sm:inline-block" dir="ltr">
-                                    ({nameEn.replace(/^[\(\[]+|[\)\]]+$/g, "")})
-                                </span>
-                            )}
+            <div className="relative z-10 space-y-2">
+                {/* Top Row: Symbol + Name on Right, Copy Button on Left */}
+                <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {/* Symbol Pill Badge */}
+                        <div className="flex items-center justify-center rounded-lg sm:rounded-xl bg-[#FFE600] text-black font-mono font-black text-xs sm:text-sm px-2.5 py-1 sm:px-3 sm:py-1.5 border-2 border-black shadow-[2px_2px_0_0_#000] shrink-0">
+                            #{symbol}
                         </div>
 
-                        {sector && (
-                            <div className="flex items-center gap-1 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                                <Building2 className="w-3 h-3 text-amber-500" />
-                                <span>{sector}</span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                <h3 className="font-black text-sm sm:text-lg text-zinc-950 dark:text-white tracking-wide leading-tight">
+                                    {nameAr}
+                                </h3>
+                                {nameEn && nameEn !== nameAr && (
+                                    <span className="text-[10px] sm:text-[11px] text-zinc-400 font-mono hidden sm:inline-block" dir="ltr">
+                                        ({nameEn.replace(/^[\(\[]+|[\)\]]+$/g, "")})
+                                    </span>
+                                )}
                             </div>
-                        )}
+
+                            {sector && (
+                                <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                    <Building2 className="w-3 h-3 text-amber-500 shrink-0" />
+                                    <span className="truncate">{sector}</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
+
+                    {/* Copy Summary Action */}
+                    <button
+                        type="button"
+                        onClick={handleCopySignal}
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-200 dark:border-white/20 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-colors cursor-pointer shrink-0 mt-0.5"
+                        title="نسخ ملخص الإشارة"
+                        aria-label="نسخ ملخص الإشارة"
+                    >
+                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
                 </div>
 
-                {/* Badges on the Left */}
-                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                {/* Badges Row: Flows seamlessly below name without squishing */}
+                <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
                     {compositeScoreVal !== undefined && !isNaN(compositeScoreVal) && (
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-mono font-black shadow-sm ${
+                        <span className={`inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 rounded-full border text-[10px] sm:text-[11px] font-mono font-black shadow-xs ${
                             compositeScoreVal >= 80
                                 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
                                 : compositeScoreVal >= 65
@@ -360,62 +374,52 @@ export function StockCard({
                                         ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40"
                                         : "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40"
                         }`} title={compositeVerdict || `السكور الإجمالي: ${compositeScoreVal}/100`}>
-                            <Sparkles className="w-3 h-3 text-amber-500" />
+                            <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-amber-500 shrink-0" />
                             <span>سكور: {compositeScoreVal}/100</span>
                             {compositeGrade && <span className="opacity-80">({compositeGrade})</span>}
                         </span>
                     )}
                     {isShariah && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-black">
+                        <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] sm:text-[10px] font-black">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                             EGX33 شرعي
                         </span>
                     )}
 
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-black">
+                    <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[9px] sm:text-[10px] font-black">
                         <Sparkles className="w-2.5 h-2.5" />
                         {signalType}
                     </span>
-
-                    <button
-                        type="button"
-                        onClick={handleCopySignal}
-                        className="grid h-7 w-7 place-items-center rounded-lg border border-zinc-200 dark:border-white/20 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-colors cursor-pointer"
-                        title="نسخ ملخص الإشارة"
-                        aria-label="نسخ ملخص الإشارة"
-                    >
-                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
                 </div>
             </div>
 
             {/* Price & Change Banner */}
-            <div className="mt-3.5 pt-3 border-t border-zinc-200/80 dark:border-white/10 flex items-baseline justify-between gap-2 relative z-10">
-                <div className="flex items-baseline gap-1.5">
-                    <span className="font-mono font-black text-2xl sm:text-3xl text-zinc-950 dark:text-white tracking-tight">
+            <div className="mt-2.5 sm:mt-3.5 pt-2 sm:pt-3 border-t border-zinc-200/80 dark:border-white/10 flex items-baseline justify-between gap-2 relative z-10">
+                <div className="flex items-baseline gap-1 sm:gap-1.5">
+                    <span className="font-mono font-black text-xl sm:text-3xl text-zinc-950 dark:text-white tracking-tight">
                         {formattedPrice}
                     </span>
-                    <span className="text-xs font-black text-amber-600 dark:text-amber-400">
+                    <span className="text-[10px] sm:text-xs font-black text-amber-600 dark:text-amber-400">
                         {currency}
                     </span>
                 </div>
 
                 {/* Change Percent Pill */}
-                <div className="flex items-center gap-2">
-                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-xl font-mono text-xs sm:text-sm font-black border ${
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                    <div className={`flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl font-mono text-[11px] sm:text-sm font-black border ${
                         isPositive 
                             ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-600 dark:text-emerald-400" 
                             : isNegative 
                                 ? "bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400" 
                                 : "bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-white/20 text-zinc-700 dark:text-zinc-300"
                     }`}>
-                        {isPositive && <TrendingUp className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />}
-                        {isNegative && <TrendingDown className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 stroke-[2.5]" />}
-                        {!isPositive && !isNegative && <Minus className="w-3.5 h-3.5 text-zinc-500 stroke-[2.5]" />}
+                        {isPositive && <TrendingUp className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />}
+                        {isNegative && <TrendingDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-rose-600 dark:text-rose-400 stroke-[2.5]" />}
+                        {!isPositive && !isNegative && <Minus className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-zinc-500 stroke-[2.5]" />}
                         <span dir="ltr">{formattedChangePct}</span>
                     </div>
 
-                    <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                    <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
                         <span className="relative flex h-2 w-2">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -427,47 +431,47 @@ export function StockCard({
 
             {/* Quantitative Trading Plan / Technical Levels (2x2 Grid) */}
             {(entryRange || target1 || stopLoss || support1 || resistance1) && (
-                <div className="mt-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 relative z-10">
+                <div className="mt-2.5 sm:mt-3.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2.5 relative z-10">
                     {/* Cell 1: Entry / Support 1 */}
-                    <div className="p-2.5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
-                        <div className="flex items-center gap-1 text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
-                            <Zap className="w-3.5 h-3.5 text-amber-500" />
-                            <span>{target1 ? "نطاق الدخول" : "الدعم الأول"}</span>
+                    <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
+                        <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
+                            <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500 shrink-0" />
+                            <span className="truncate">{target1 ? "نطاق الدخول" : "الدعم الأول"}</span>
                         </div>
-                        <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-1">
+                        <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                             {entryRange || (support1 ? `${Number(support1).toFixed(2)} ج.م` : `${formattedPrice} ج.م`)}
                         </div>
                     </div>
 
                     {/* Cell 2: Target 1 / Resistance 1 */}
-                    <div className="p-2.5 rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/20 border border-emerald-500/20 flex flex-col justify-between">
-                        <div className="flex items-center gap-1 text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
-                            <Target className="w-3.5 h-3.5" />
-                            <span>{target1 ? "المستهدف 1" : "المقاومة الأولى"}</span>
+                    <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/20 border border-emerald-500/20 flex flex-col justify-between">
+                        <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                            <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                            <span className="truncate">{target1 ? "المستهدف 1" : "المقاومة الأولى"}</span>
                         </div>
-                        <div className="font-mono font-black text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 mt-1">
+                        <div className="font-mono font-black text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
                             {target1 ? (typeof target1 === "number" ? `${target1.toFixed(2)} ج.م` : String(target1)) : (resistance1 ? `${Number(resistance1).toFixed(2)} ج.م` : "عائق صعود")}
                         </div>
                     </div>
 
                     {/* Cell 3: Stop Loss / Support 2 */}
-                    <div className="p-2.5 rounded-2xl bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/20 flex flex-col justify-between">
-                        <div className="flex items-center gap-1 text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
-                            <ShieldAlert className="w-3.5 h-3.5" />
-                            <span>{target1 ? "وقف الخسارة" : "الدعم الحاسم (2)"}</span>
+                    <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/20 flex flex-col justify-between">
+                        <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
+                            <ShieldAlert className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                            <span className="truncate">{target1 ? "وقف الخسارة" : "الدعم الحاسم (2)"}</span>
                         </div>
-                        <div className="font-mono font-black text-xs sm:text-sm text-rose-600 dark:text-rose-400 mt-1">
+                        <div className="font-mono font-black text-xs sm:text-sm text-rose-600 dark:text-rose-400 mt-0.5 truncate">
                             {stopLoss ? (typeof stopLoss === "number" ? `${stopLoss.toFixed(2)} ج.م` : String(stopLoss)) : (support2 ? `${Number(support2).toFixed(2)} ج.م` : "كسر الدعم")}
                         </div>
                     </div>
 
                     {/* Cell 4: Target 2 / Resistance 2 / Risk:Reward */}
-                    <div className="p-2.5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
-                        <div className="flex items-center gap-1 text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
-                            <Scale className="w-3.5 h-3.5 text-cyan-500" />
-                            <span>{target2 ? "المستهدف 2" : (resistance2 ? "المقاومة 2" : "العائد للمخاطرة")}</span>
+                    <div className="p-1.5 sm:p-2.5 rounded-xl sm:rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-white/10 flex flex-col justify-between">
+                        <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-extrabold text-zinc-500 dark:text-zinc-400">
+                            <Scale className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-cyan-500 shrink-0" />
+                            <span className="truncate">{target2 ? "المستهدف 2" : (resistance2 ? "المقاومة 2" : "العائد للمخاطرة")}</span>
                         </div>
-                        <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-1">
+                        <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
                             {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ج.م` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ج.م` : (calculatedRR || "—"))}
                         </div>
                     </div>
@@ -475,13 +479,13 @@ export function StockCard({
             )}
 
             {/* Comprehensive Technical Indicators & Liquidity Panel */}
-            <div className="mt-3 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/10 space-y-2.5 relative z-10">
+            <div className="mt-2.5 sm:mt-3 p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/10 space-y-2 sm:space-y-2.5 relative z-10">
                 {/* Primary Row: RSI & Relative Volume */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
                     {/* RSI Meter */}
-                    <div className="flex items-center gap-2 flex-1 min-w-[140px]">
-                        <div className="flex items-center gap-1 text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                            <Activity className="w-3.5 h-3.5 text-amber-500" />
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-[130px]">
+                        <div className="flex items-center gap-1 text-[11px] sm:text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                            <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500 shrink-0" />
                             <span>RSI:</span>
                             <span className="font-mono font-black text-zinc-900 dark:text-white">
                                 {rsiVal !== undefined && !isNaN(rsiVal) ? rsiVal.toFixed(1) : "—"}
@@ -489,7 +493,7 @@ export function StockCard({
                         </div>
 
                         {rsiVal !== undefined && !isNaN(rsiVal) && (
-                            <div className="w-16 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                            <div className="w-12 sm:w-16 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                                 <div 
                                     className={`h-full rounded-full ${rsiProgressColor}`}
                                     style={{ width: `${Math.min(Math.max(rsiVal, 0), 100)}%` }}
@@ -497,15 +501,15 @@ export function StockCard({
                             </div>
                         )}
 
-                        <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border ${rsiColor}`}>
+                        <span className={`text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border ${rsiColor}`}>
                             {rsiLabel}
                         </span>
                     </div>
 
                     {/* Relative Volume Badge */}
                     {relativeVol && (
-                        <div className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                            <BarChart2 className="w-3 h-3 text-amber-500" />
+                        <div className="text-[10px] sm:text-[11px] font-black text-zinc-700 dark:text-zinc-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <BarChart2 className="w-3 h-3 text-amber-500 shrink-0" />
                             <span>السيولة: <strong>{String(relativeVol)}x</strong></span>
                         </div>
                     )}
@@ -513,47 +517,47 @@ export function StockCard({
 
                 {/* Secondary Indicators Row: MACD, EMAs, Wyckoff, PE, King AI */}
                 {(macdDesc || ema50 || ema200 || wyckoffPhase || peRatio || kingScoreVal !== undefined) && (
-                    <div className="pt-2 border-t border-zinc-200/60 dark:border-white/5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                    <div className="pt-1.5 sm:pt-2 border-t border-zinc-200/60 dark:border-white/5 flex flex-wrap items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold">
                         {kingScoreVal !== undefined && !isNaN(kingScoreVal) && (
-                            <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 font-mono font-bold ${
+                            <span className={`px-1.5 sm:px-2 py-0.5 rounded-md border flex items-center gap-1 font-mono font-bold ${
                                 (kingScoreVal > 1 ? kingScoreVal / 100 : kingScoreVal) >= 0.60 
-                                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30" 
-                                    : (kingScoreVal > 1 ? kingScoreVal / 100 : kingScoreVal) >= 0.50
-                                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                                        : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                                ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30" 
+                                : (kingScoreVal > 1 ? kingScoreVal / 100 : kingScoreVal) >= 0.50
+                                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                    : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30"
                             }`}>
-                                <Sparkles className="w-3 h-3 text-purple-500" />
+                                <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-purple-500 shrink-0" />
                                 <span>تقييم KING AI: <strong>{(kingScoreVal <= 1 ? kingScoreVal * 100 : kingScoreVal).toFixed(1)}%</strong></span>
                             </span>
                         )}
                         {wyckoffPhase && (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                                 <span>وايكوف:</span>
                                 <strong>{wyckoffPhase}</strong>
                             </span>
                         )}
 
                         {macdDesc && (
-                            <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
                                 <span>MACD:</span>
                                 <strong>{macdDesc}</strong>
                             </span>
                         )}
 
                         {ema50 && (
-                            <span className="px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
                                 EMA 50: {typeof ema50 === "number" ? ema50.toFixed(2) : ema50}
                             </span>
                         )}
 
                         {ema200 && (
-                            <span className="px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-white/10 font-mono">
                                 EMA 200: {typeof ema200 === "number" ? ema200.toFixed(2) : ema200}
                             </span>
                         )}
 
                         {peRatio && (
-                            <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-mono">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-mono">
                                 P/E: {typeof peRatio === "number" ? peRatio.toFixed(1) : peRatio}x
                             </span>
                         )}
@@ -562,24 +566,24 @@ export function StockCard({
             </div>
 
             {/* Actionable CTAs — Just like the Broker card in the reference screenshot */}
-            <div className="mt-4 pt-3 border-t border-zinc-200 dark:border-white/10 flex flex-col gap-2 relative z-10">
+            <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-zinc-200 dark:border-white/10 flex flex-col gap-2 relative z-10">
                 {/* Primary CTA Button: Open Chart */}
                 <button
                     type="button"
                     onClick={handleOpenChart}
-                    className="w-full py-2.5 px-4 rounded-xl bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-2 sm:py-2.5 px-3 sm:px-4 rounded-xl bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-xs sm:text-sm border-2 border-black shadow-[2px_2px_0_0_#000] sm:shadow-[3px_3px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer"
                 >
-                    <BarChart2 className="w-4 h-4 stroke-[2.5]" />
+                    <BarChart2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
                     <span>فتح الشارت والمستويات اللحظية</span>
-                    <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
+                    <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
                 </button>
 
                 {/* Secondary Quick-Action Buttons */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                     <button
                         type="button"
                         onClick={handleAddToPortfolio}
-                        className={`py-2 px-3 rounded-xl border text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                        className={`py-1.5 sm:py-2 px-2 sm:px-3 rounded-xl border text-[11px] sm:text-xs font-black transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer active:scale-95 ${
                             addedToPortfolio 
                                 ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
                                 : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20"
@@ -587,12 +591,12 @@ export function StockCard({
                     >
                         {addedToPortfolio ? (
                             <>
-                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                 <span>تمت الإضافة للمحفظة ✅</span>
                             </>
                         ) : (
                             <>
-                                <Briefcase className="w-3.5 h-3.5 text-amber-500" />
+                                <Briefcase className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-500" />
                                 <span>أضف للمحفظة</span>
                             </>
                         )}
@@ -608,9 +612,9 @@ export function StockCard({
                                 onSymbolClick(`أخبار سهم ${symbol}`);
                             }
                         }}
-                        className="py-2 px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-300 dark:border-white/20 text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                        className="py-1.5 sm:py-2 px-2 sm:px-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-300 dark:border-white/20 text-[11px] sm:text-xs font-black transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer active:scale-95"
                     >
-                        <Newspaper className="w-3.5 h-3.5 text-cyan-500" />
+                        <Newspaper className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-cyan-500" />
                         <span>آخر الأخبار</span>
                     </button>
                 </div>

@@ -228,11 +228,15 @@ function fetchAudioBlobUrl(audioUrl?: string, spokenText?: string, isUser = fals
 
 
 
-                    voice: "ar-EG-ShakirNeural",
+                    voice: VOICE_NOTE_TTS.voice,
 
 
 
-                    rate: "+12%",
+                    rate: VOICE_NOTE_TTS.rate,
+
+
+
+                    pitch: VOICE_NOTE_TTS.pitch,
 
 
 

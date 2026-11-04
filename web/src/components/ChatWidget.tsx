@@ -1185,6 +1185,7 @@ export default function ChatWidget() {
                                                     role={msg.role}
                                                     audioUrl={msg.voiceAudioUrl}
                                                     text={msg.content || ""}
+                                                    spokenText={msg.spokenText}
                                                     durationSeconds={msg.voiceDuration}
                                                     autoPlay={msg.role === "assistant" && isLastMessage && msg.timestamp > voiceAutoPlayCutoffRef.current + 1000}
                                                     tables={msg.tables}
