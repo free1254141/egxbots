@@ -5,8 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Phone, Mic, MicOff } from "lucide-react";
-import { VoiceCallModal } from "@/components/chat/VoiceCallModal";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Mic, MicOff } from "lucide-react";
 import { playConnectionChime } from "@/lib/voice-utils";
 import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
 import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
@@ -17,7 +16,7 @@ import { FormattedChatMessage } from "@/components/chat/FormattedChatMessage";
 import { ChatWallpaperModal } from "@/components/chat/ChatWallpaperModal";
 import { AutonomousRecsModal } from "@/components/chat/AutonomousRecsModal";
 import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT_WALLPAPER_OPACITY } from "@/lib/chat-wallpapers";
-import { isChatAdminEmail, isVoiceBetaTester } from "@/lib/chat-sharing";
+import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
 
@@ -33,7 +32,6 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
 }
 
 export default function ChatWidget() {
-    const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
     const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
     const { 
         isOpen, 
@@ -271,7 +269,6 @@ export default function ChatWidget() {
     const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
     const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
-    const isVoiceTester = isVoiceBetaTester(user);
 
     const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
         setIsRecordingVoiceNote(false);
@@ -838,25 +835,6 @@ export default function ChatWidget() {
                                 </div>
                             )}
                         </div>
-                        {/* 📞 Live Voice Call with ARTORO (Strictly weeessd57 beta testing) */}
-                        {isVoiceTester && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    playConnectionChime();
-                                    setIsVoiceCallOpen(true);
-                                }}
-                                className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-lg sm:rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all shadow-xs active:scale-95 cursor-pointer relative shrink-0"
-                                title="بدء مكالمة صوتية حية مع أرتورو (Live Voice Call)"
-                                aria-label="مكالمة صوتية مع أرتورو"
-                            >
-                                <Phone className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-emerald-500 animate-pulse" />
-                                <span className="absolute -top-1 -right-1 flex h-2 w-2 sm:h-2.5 sm:w-2.5">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-2.5 sm:w-2.5 bg-emerald-500"></span>
-                                </span>
-                            </button>
-                        )}
 
                         {!isChatRoute && (
                             <button
@@ -891,7 +869,7 @@ export default function ChatWidget() {
                     />
                     <div 
                         ref={scrollContainerRef} 
-                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 neobrutal-grid-bg !bg-transparent !bg-none overscroll-y-contain" 
+                        className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-1 sm:p-5 space-y-3 sm:space-y-4 neobrutal-grid-bg !bg-transparent !bg-none overscroll-y-contain" 
                         style={{
                             WebkitOverflowScrolling: "touch",
                             touchAction: "pan-y",
@@ -1164,16 +1142,16 @@ export default function ChatWidget() {
                                 return (
                                 <div
                                     key={msg.id || `msg-${originalIdx}`}
-                                    className={`flex gap-2 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
+                                    className={`flex gap-1.5 sm:gap-4 w-full mx-auto min-w-0 transition-all duration-300 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}
                                 >
                                     <div className={`
-                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
+                                        h-9 w-9 rounded-full border border-zinc-300 dark:border-white/20 hidden sm:flex items-center justify-center shrink-0 mt-1 shadow-xs p-1.5
                                         ${msg.role === "user" ? "bg-zinc-100 dark:bg-black text-zinc-900 dark:text-white" : "bg-white dark:bg-black"}
                                     `}>
                                         {msg.role === "user" ? <User className="h-4.5 w-4.5" /> : <NextImage src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={28} height={28} className="w-6 h-6 object-contain" />}
                                     </div>
                                     <div className={`
-                                        flex-1 rounded-2xl border p-3 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
+                                        flex-1 rounded-xl sm:rounded-2xl border p-1.5 sm:p-4 text-xs sm:text-sm max-w-full leading-relaxed min-w-0 overflow-hidden shadow-xs
                                         ${msg.role === "user"
                                             ? "bg-zinc-100 dark:bg-black border-zinc-300 dark:border-cyan-400/50 text-zinc-950 dark:text-cyan-100 dark:shadow-[4px_4px_0_0_#22d3ee]"
                                             : "bg-white dark:bg-black border-zinc-200 dark:border-white/20 text-zinc-950 dark:text-white dark:shadow-[4px_4px_0_0_#fff]"}
@@ -1724,18 +1702,6 @@ export default function ChatWidget() {
                 onClose={() => setShowAutonomousModal(false)}
                 onConfirm={handleConfirmAutonomousRecs}
                 isAr={language === "ar"}
-            />
-
-            {/* Live Voice Call with ARTORO */}
-            <VoiceCallModal
-                isOpen={isVoiceCallOpen}
-                onClose={() => setIsVoiceCallOpen(false)}
-                onSendMessage={async (text, options) => {
-                    const reply = await sendMessage(text, undefined, { isVoice: true, isVoiceCall: true, ...options });
-                    return reply || "";
-                }}
-                isPro={isPro}
-                remainingQuota={remainingQuota}
             />
         </div>
     );

@@ -310,7 +310,7 @@ export function StockCard({
     return (
         <div 
             dir="rtl"
-            className={`my-3 relative overflow-hidden rounded-3xl border-2 border-zinc-200 dark:border-white/15 bg-white dark:bg-[#0c0c0e] p-4 sm:p-5 text-right shadow-xl transition-all duration-300 hover:border-amber-400/80 hover:shadow-2xl group ${className}`}
+            className={`my-2 sm:my-3 relative overflow-hidden rounded-2xl sm:rounded-3xl border-2 border-zinc-200 dark:border-white/15 bg-white dark:bg-[#0c0c0e] p-2 sm:p-5 text-right shadow-xl transition-all duration-300 hover:border-amber-400/80 hover:shadow-2xl group w-full ${className}`}
         >
             {/* Top ambient color glow */}
             <div 
