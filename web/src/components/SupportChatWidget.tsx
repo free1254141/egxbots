@@ -146,7 +146,7 @@ export default function SupportChatWidget() {
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-3 sm:bottom-5 right-[68px] sm:right-[102px] z-[9998] flex h-13 w-13 sm:h-[72px] sm:w-[72px] rounded-[18px] sm:rounded-[24px] flex-col items-center justify-center rounded-[24px] border-2 border-black dark:border-white bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-2 shadow-[0_12px_34px_rgba(217,119,6,0.35)] dark:shadow-[0_12px_34px_rgba(0,0,0,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(217,119,6,0.48)] active:translate-y-0 animate-in fade-in zoom-in group"
+                className="fixed bottom-3 sm:bottom-5 right-[92px] sm:right-[128px] z-[9998] flex h-13 w-13 sm:h-[72px] sm:w-[72px] rounded-[18px] sm:rounded-[24px] flex-col items-center justify-center rounded-[24px] border-2 border-black dark:border-white bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-2 shadow-[0_12px_34px_rgba(217,119,6,0.35)] dark:shadow-[0_12px_34px_rgba(0,0,0,0.5)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_rgba(217,119,6,0.48)] active:translate-y-0 animate-in fade-in zoom-in group"
                 aria-label={isAr ? "خدمة عملاء VIP" : "VIP Customer Support"}
                 title={isAr ? "خدمة عملاء VIP للمشتركين" : "VIP Support for Pro Subscribers"}
             >

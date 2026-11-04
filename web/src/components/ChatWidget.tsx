@@ -65,6 +65,17 @@ export default function ChatWidget() {
         isAccessReady
     } = useChat();
 
+    // Voice notes must never auto-play just because the user opened the chat or
+    // switched back to it. Only replies that arrive *after* the panel was opened
+    // are allowed to autoplay. The cutoff is updated during render (not in an
+    // effect) so it is already correct before the child player's play effect.
+    const voiceAutoPlayCutoffRef = useRef<number>(Date.now());
+    const wasChatOpenRef = useRef<boolean>(isOpen);
+    if (isOpen && !wasChatOpenRef.current) {
+        voiceAutoPlayCutoffRef.current = Date.now();
+    }
+    wasChatOpenRef.current = isOpen;
+
     const { language } = useLanguage();
     const [foundersEndsAt, setFoundersEndsAt] = useState<string | null>(null);
     const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
@@ -1191,14 +1202,36 @@ export default function ChatWidget() {
                                             </div>
                                         )}
                                         {((msg.isVoiceNote || msg.voiceAudioUrl) && (msg.role === "user" || (!msg.isStreaming && Boolean(msg.content && msg.content.trim())))) ? (
-                                            <VoiceNotePlayer
-                                                role={msg.role}
-                                                audioUrl={msg.voiceAudioUrl}
-                                                text={msg.content || ""}
-                                                durationSeconds={msg.voiceDuration}
-                                                autoPlay={msg.role === "assistant" && isLastMessage}
-                                                tables={msg.tables}
-                                            />
+                                            <div className="space-y-2">
+                                                <VoiceNotePlayer
+                                                    role={msg.role}
+                                                    audioUrl={msg.voiceAudioUrl}
+                                                    text={msg.content || ""}
+                                                    durationSeconds={msg.voiceDuration}
+                                                    autoPlay={msg.role === "assistant" && isLastMessage && msg.timestamp > voiceAutoPlayCutoffRef.current + 1000}
+                                                    tables={msg.tables}
+                                                    hideTranscript={msg.role === "assistant"}
+                                                />
+                                                {msg.role === "assistant" && (
+                                                    <div className="pt-2 border-t border-zinc-200 dark:border-white/10">
+                                                        <FormattedChatMessage
+                                                            content={msg.content || ""}
+                                                            role={msg.role}
+                                                            suggestedButtons={msg.suggestedButtons}
+                                                            showSuggestedButtons={isLastMessage}
+                                                            onButtonClick={(btnText) => sendMessage(btnText)}
+                                                            isStreaming={msg.isStreaming}
+                                                            tables={msg.tables}
+                                                            showShareButton={isChatAdmin && isLastMessage}
+                                                            showVoiceButton={false}
+                                                            onShare={() => shareAnswer(originalIdx)}
+                                                            sharing={sharingMessageId === (msg.id || String(originalIdx))}
+                                                            latencyMs={msg.latencyMs}
+                                                            userQuery={messages.slice(0, originalIdx).reverse().find(m => m.role === "user")?.content}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
                                         ) : (
                                             <FormattedChatMessage 
                                                 content={msg.content || msg.statusText || (msg.isVoiceNote ? "أرتورو يُسجل الرد الصوتي... 🎙️" : "")} 

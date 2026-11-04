@@ -14,7 +14,7 @@ import { Play, Pause, Volume2, Mic, ChevronDown, ChevronUp, Loader2 } from "luci
 
 
 
-import { cleanVoiceText } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, VOICE_NOTE_TTS } from "@/lib/voice-utils";
 
 
 
@@ -51,6 +51,12 @@ interface VoiceNotePlayerProps {
 
 
     tables?: any[];
+
+
+
+    /** Assistant replies render their full formatted answer separately, so hide the raw transcript accordion. */
+
+    hideTranscript?: boolean;
 
 
 
@@ -110,7 +116,7 @@ function getAudioCacheKey(audioUrl?: string, spokenText?: string, isUser = false
 
 
 
-    if (!isUser && spokenText) return `tts:ar-EG-ShakirNeural:${spokenText}`;
+    if (!isUser && spokenText) return `tts:${VOICE_NOTE_TTS.voice}:${VOICE_NOTE_TTS.rate}:${spokenText}`;
 
 
 
@@ -330,6 +336,10 @@ export function VoiceNotePlayer({
 
 
 
+    hideTranscript = false,
+
+
+
 }: VoiceNotePlayerProps) {
 
 
@@ -354,11 +364,16 @@ export function VoiceNotePlayer({
 
 
 
-        // For assistant: Always clean the full response text so 100% of the answer is spoken!
+        // For assistant replies the server stores a short, natural `spoken_text`
+        // summary. Use it verbatim when available so the audio is concise and the
+        // pre-warmed TTS cache is an exact hit. Only fall back to local extraction
+        // for legacy messages that predate `spoken_text`.
 
 
 
-        return text ? cleanVoiceText(text, 10000) : (spokenText ? cleanVoiceText(spokenText, 10000) : "");
+        const stored = spokenText?.trim();
+        if (stored) return stored;
+        return text ? extractVoiceAnalysisSpeech(text) : "";
 
 
 
@@ -1243,7 +1258,7 @@ export function VoiceNotePlayer({
 
 
 
-            {text && text.trim() && (
+            {!hideTranscript && text && text.trim() && (
 
 
 

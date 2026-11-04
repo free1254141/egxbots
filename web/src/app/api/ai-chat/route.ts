@@ -801,11 +801,18 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 2. Consume / record chat quota in ai_chatbot_limits
-        if (!isUnlimited) {
-            const effectiveDailyLimit = userIsPro
-                ? Math.max(AI_CONFIG.limits.dailyMessages, userMonthlyCap)
-                : Math.max(10, userMonthlyCap);
+        // 2. Consume / record chat quota in ai_chatbot_limits.
+        // Voice notes are ALWAYS billable — even for unlimited/admin accounts — so
+        // the owner can verify the deduction in ai_chatbot_limits and /api/user/quota.
+        // Regular chat messages from unlimited accounts remain uncharged.
+        const chargeVoiceNoteQuota = isVoiceNote && !isVoiceCall;
+        if (!isUnlimited || chargeVoiceNoteQuota) {
+            // Postgres int4 upper bound: Number.MAX_SAFE_INTEGER would overflow the RPC param.
+            const effectiveDailyLimit = isUnlimited
+                ? 2147483647
+                : userIsPro
+                    ? Math.max(AI_CONFIG.limits.dailyMessages, userMonthlyCap)
+                    : Math.max(10, userMonthlyCap);
             const { data: quotaRows, error: quotaError } = await supabase.rpc("consume_ai_chat_quota", {
                 p_user_id: userId,
                 p_date: today,

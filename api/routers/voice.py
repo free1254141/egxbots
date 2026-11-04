@@ -38,9 +38,25 @@ os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 _TTS_MEMORY_CACHE: dict[str, bytes] = {}
 _MAX_MEMORY_CACHE_ENTRIES = 500
 
+# In-flight synthesis registry. The chat route pre-warms the exact same text/voice
+# that the browser is about to request; without this, both requests would run a
+# full neural synthesis in parallel and the browser would still wait for the
+# second (cold) run. Concurrent callers now share one synthesis task.
+_TTS_INFLIGHT: dict[str, "asyncio.Task"] = {}
 
-def _get_cache_key(voice: str, rate: str, pitch: str, clean_text: str) -> str:
-    raw = f"{voice}:{rate}:{pitch}:{clean_text}"
+# Optional premium provider (ElevenLabs). Enabled only when BOTH the API key and
+# a voice id are configured, so the zero-cost Edge neural voice remains default.
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2").strip()
+
+
+def _tts_provider() -> str:
+    return "elevenlabs" if (ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID) else "edge"
+
+
+def _get_cache_key(provider: str, voice: str, rate: str, pitch: str, clean_text: str) -> str:
+    raw = f"{provider}:{voice}:{rate}:{pitch}:{clean_text}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -383,9 +399,21 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     # 15. Remove dense parenthesized number lists like (88.16 و 87.38)
     text = re.sub(r"\([0-9.,\sو\+\-%]+\)", "", text)
 
-    # 16. Normalize whitespace and clean punctuation
+    # 16. Natural prosody: line breaks and list markers become soft pauses instead
+    # of one long run-on sentence, and punctuation pile-ups are removed so the
+    # neural voice does not stumble or produce robotic gaps.
+    text = re.sub(r"[ \t]*\r?\n+[ \t]*", "، ", text)
+    text = re.sub(r"(?:^|\s)[-*•]\s+", "، ", text)
+    text = re.sub(r"\s*[:：]\s*(?=[\u0600-\u06FF])", "، ", text)
+    text = re.sub(r"\s+(لكن|ولكن|إلا أن|بينما|في المقابل)\s+", r"، \1 ", text)
+    text = re.sub(r"(?:،\s*){2,}", "، ", text)
+    text = re.sub(r"\s+([،\.!؟])", r"\1", text)
+    text = re.sub(r"([،\.!؟])\s*\1+", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"([،\.\!؟])\s*\1+", r"\1", text)
+    text = re.sub(r"^[،\s]+", "", text)
+    # End with a full stop so the voice gets a clean, confident close.
+    if text and text[-1] not in ".!؟":
+        text += "."
 
     # 17. Truncate smoothly at sentence boundary only if exceeding max_chars
     if len(text) > max_chars:
@@ -400,10 +428,89 @@ def clean_text_for_speech(raw_text: str, max_chars: int = 10000) -> str:
     return text.strip()
 
 
+def _synthesize_elevenlabs_sync(text: str, rate: str) -> bytes:
+    """Premium human-like voice via ElevenLabs (optional, only when configured)."""
+    import requests
+
+    speed = 1.0
+    match = re.match(r"^\s*([+-])(\d+(?:\.\d+)?)%", rate or "")
+    if match:
+        delta = float(match.group(2)) / 100.0
+        speed = 1.0 + (delta if match.group(1) == "+" else -delta)
+    speed = max(0.7, min(1.2, speed))
+
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+        headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+        },
+        json={
+            "text": text,
+            "model_id": ELEVENLABS_MODEL_ID,
+            "output_format": "mp3_44100_128",
+            "voice_settings": {
+                "stability": 0.45,
+                "similarity_boost": 0.8,
+                "style": 0.12,
+                "use_speaker_boost": True,
+                "speed": speed,
+            },
+        },
+        timeout=45,
+    )
+    response.raise_for_status()
+    return response.content
+
+
+async def _synthesize_edge(text: str, voice: str, rate: str, pitch: str) -> bytes:
+    """Zero-cost Microsoft Edge neural voice (default)."""
+    if not edge_tts:
+        raise RuntimeError("edge-tts library is not installed on this server")
+    chunks: list[bytes] = []
+    communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            chunks.append(chunk["data"])
+    return b"".join(chunks)
+
+
+async def _synthesize_audio(text: str, voice: str, rate: str, pitch: str) -> tuple[bytes, str]:
+    """Synthesize with the configured provider, falling back to Edge on failure."""
+    if _tts_provider() == "elevenlabs":
+        try:
+            audio = await asyncio.to_thread(_synthesize_elevenlabs_sync, text, rate)
+            if audio and len(audio) > 500:
+                return audio, "elevenlabs"
+        except Exception as exc:
+            print(f"[voice.py] ElevenLabs failed, falling back to Edge: {exc}")
+    return await _synthesize_edge(text, voice, rate, pitch), "edge"
+
+
+def _remember_in_ram(cache_key: str, audio: bytes) -> None:
+    if len(audio) < 500:
+        return
+    if cache_key not in _TTS_MEMORY_CACHE and len(_TTS_MEMORY_CACHE) >= _MAX_MEMORY_CACHE_ENTRIES:
+        _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)))
+    _TTS_MEMORY_CACHE[cache_key] = audio
+
+
+def _store_audio(cache_key: str, cache_file: str, audio: bytes) -> None:
+    _remember_in_ram(cache_key, audio)
+    if len(audio) < 500:
+        return
+    try:
+        with open(cache_file, "wb") as f:
+            f.write(audio)
+    except Exception as disk_err:
+        print(f"[voice.py] Failed to write disk cache: {disk_err}")
+
+
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = DEFAULT_VOICE
-    rate: Optional[str] = "+12%"
+    rate: Optional[str] = "+10%"
     pitch: Optional[str] = "+0Hz"
     max_chars: Optional[int] = 10000
 
@@ -418,10 +525,15 @@ async def list_available_voices():
 async def stream_tts(req: TTSRequest):
     """
     Synthesize text into natural spoken Egyptian Arabic audio (MP3).
-    Includes 2-tier caching (RAM + SSD) for instant <5ms replay and in-flight deduplication.
+
+    Caching tiers:
+      1. Process RAM — instant replay.
+      2. SSD — instant after the first synthesis (survives restarts).
+      3. Single-flight — the chat pre-warm and the browser share one neural
+         synthesis instead of racing each other and doing the work twice.
     """
-    if not edge_tts:
-        raise HTTPException(status_code=500, detail="edge-tts library is not installed on this server")
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required for TTS")
 
     spoken_text = clean_text_for_speech(req.text, max_chars=req.max_chars or 3500)
     if not spoken_text:
@@ -430,7 +542,8 @@ async def stream_tts(req: TTSRequest):
     voice = req.voice if req.voice in AVAILABLE_VOICES else DEFAULT_VOICE
     rate = req.rate or "+10%"
     pitch = req.pitch or "+0Hz"
-    cache_key = _get_cache_key(voice, rate, pitch, spoken_text)
+    provider = _tts_provider()
+    cache_key = _get_cache_key(provider, voice, rate, pitch, spoken_text)
     cache_file = os.path.join(TTS_CACHE_DIR, f"{cache_key}.mp3")
 
     # 1. Tier-1: RAM Memory Cache (0ms instant response)
@@ -444,6 +557,7 @@ async def stream_tts(req: TTSRequest):
                 "Content-Length": str(len(audio_bytes)),
                 "Cache-Control": "public, max-age=31536000, immutable",
                 "X-TTS-Cache": "HIT-RAM",
+                "X-TTS-Provider": provider,
                 "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
             },
         )
@@ -453,11 +567,7 @@ async def stream_tts(req: TTSRequest):
         try:
             with open(cache_file, "rb") as f:
                 audio_bytes = f.read()
-            # Store in RAM cache
-            if len(_TTS_MEMORY_CACHE) >= _MAX_MEMORY_CACHE_ENTRIES:
-                _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)))
-            _TTS_MEMORY_CACHE[cache_key] = audio_bytes
-
+            _remember_in_ram(cache_key, audio_bytes)
             return Response(
                 content=audio_bytes,
                 media_type="audio/mpeg",
@@ -466,50 +576,41 @@ async def stream_tts(req: TTSRequest):
                     "Content-Length": str(len(audio_bytes)),
                     "Cache-Control": "public, max-age=31536000, immutable",
                     "X-TTS-Cache": "HIT-DISK",
+                    "X-TTS-Provider": provider,
                     "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
                 },
             )
         except Exception:
             pass
 
-    # 3. Stream from Edge-TTS progressively while caching in background for instant start latency
-    async def stream_and_cache_generator():
-        accumulated = []
-        try:
-            communicate = edge_tts.Communicate(
-                text=spoken_text,
-                voice=voice,
-                rate=rate,
-                pitch=pitch,
-            )
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    data = chunk["data"]
-                    accumulated.append(data)
-                    yield data
+    # 3. Tier-3: single-flight synthesis shared with the chat pre-warm.
+    async def _build() -> tuple[bytes, str]:
+        audio, used_provider = await _synthesize_audio(spoken_text, voice, rate, pitch)
+        _store_audio(cache_key, cache_file, audio)
+        return audio, used_provider
 
-            # Once streaming completes cleanly, persist full audio to RAM and SSD
-            full_audio = b"".join(accumulated)
-            if len(full_audio) > 500:
-                if len(_TTS_MEMORY_CACHE) >= _MAX_MEMORY_CACHE_ENTRIES:
-                    _TTS_MEMORY_CACHE.pop(next(iter(_TTS_MEMORY_CACHE)))
-                _TTS_MEMORY_CACHE[cache_key] = full_audio
+    inflight = _TTS_INFLIGHT.get(cache_key)
+    if inflight is None:
+        inflight = asyncio.create_task(_build())
+        _TTS_INFLIGHT[cache_key] = inflight
+        inflight.add_done_callback(lambda _task, key=cache_key: _TTS_INFLIGHT.pop(key, None))
 
-                try:
-                    with open(cache_file, "wb") as f:
-                        f.write(full_audio)
-                except Exception as disk_err:
-                    print(f"[voice.py] Failed to write disk cache: {disk_err}")
-        except Exception as exc:
-            print(f"[voice.py] Streaming synthesis error: {exc}")
+    try:
+        # shield(): a browser disconnect must not cancel the shared synthesis and
+        # waste the work the pre-warm (or another listener) is waiting for.
+        audio_bytes, used_provider = await asyncio.shield(inflight)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"TTS synthesis failed: {exc}") from exc
 
-    return StreamingResponse(
-        stream_and_cache_generator(),
+    return Response(
+        content=audio_bytes,
         media_type="audio/mpeg",
         headers={
             "Content-Disposition": "inline; filename=speech.mp3",
+            "Content-Length": str(len(audio_bytes)),
             "Cache-Control": "public, max-age=31536000, immutable",
-            "X-TTS-Cache": "MISS-STREAMING",
+            "X-TTS-Cache": "MISS-SYNTHESIZED",
+            "X-TTS-Provider": used_provider,
             "X-Spoken-Text": spoken_text[:100].encode("ascii", "ignore").decode(),
         },
     )

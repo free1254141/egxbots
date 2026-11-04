@@ -3,6 +3,20 @@
  */
 
 /**
+ * Single source of truth for the voice-note TTS profile.
+ *
+ * The API route pre-warms audio with these exact values and the browser
+ * requests with the same values, so the backend cache is always hit.
+ * Changing one side without the other turns every voice note into a cold,
+ * duplicated synthesis.
+ */
+export const VOICE_NOTE_TTS = {
+    voice: "ar-EG-ShakirNeural",
+    rate: "+10%",
+    pitch: "+0Hz",
+} as const;
+
+/**
  * Robust Speech-to-Text cleaner for Arabic mobile browsers (Web Speech API).
  * 1. Deduplicates stuttered syllables within words (e.g. "حلحلحل" -> "حلل", "هلهلهل" -> "هل", "هتعصبهتعصب" -> "هتعصب").
  * 2. Corrects common phonetic Egyptian dialect misrecognitions (e.g. "لسام" -> "لسهم", "فوى" -> "فوري").
