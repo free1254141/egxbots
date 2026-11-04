@@ -6,9 +6,7 @@ const PLACEHOLDER_VALUES = new Set([
 ]);
 
 const UNLIMITED_CHAT_EMAILS = new Set([
-    "weeessd57@gmail.com",
     "user@gmail.com",
-    "weeasd57@gmail.com",
     "abdallahsaied912@gmail.com",
     "session.flow.test@example.com",
 ]);

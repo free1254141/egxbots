@@ -1571,39 +1571,6 @@ export function FormattedChatMessage({
                         <span>أتمتة السؤال يومياً</span>
                     </button>
 
-                    {/* 🔊 Voice Note Audio Player (Admin beta tester only) */}
-                    {showVoiceButton && (
-
-                    <button
-                        type="button"
-                        onClick={handleToggleSpeech}
-                        disabled={loadingAudio}
-                        className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl border font-bold text-[11px] sm:text-xs transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-75 shrink-0 whitespace-nowrap ${
-                            isPlayingAudio 
-                                ? "bg-amber-500/20 text-amber-900 dark:text-amber-300 border-amber-500" 
-                                : "bg-blue-500/10 hover:bg-blue-500/20 text-blue-900 dark:text-blue-300 border-blue-500/40"
-                        }`}
-                        title="استمع للتحليل بصوت أرتورو المصري الذكي"
-                    >
-                        {loadingAudio ? (
-                            <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />
-                                <span>جاري تحضير الصوت...</span>
-                            </>
-                        ) : isPlayingAudio ? (
-                            <>
-                                <Volume2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 animate-bounce" />
-                                <span>إيقاف الصوت</span>
-                            </>
-                        ) : (
-                            <>
-                                <Volume2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                                <span>استمع للتحليل (Voice)</span>
-                            </>
-                        )}
-                    </button>
-                    )}
-
                     {typeof latencyMs === "number" && latencyMs > 0 && (
                         <span
                             className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs"

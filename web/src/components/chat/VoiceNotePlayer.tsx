@@ -15,6 +15,7 @@ import { Play, Pause, Volume2, Mic, ChevronDown, ChevronUp, Loader2 } from "luci
 
 
 import { extractVoiceAnalysisSpeech, VOICE_NOTE_TTS } from "@/lib/voice-utils";
+import { registerGlobalPlayingAudio, syncGlobalTime, unregisterGlobalPlayingAudio } from "./VoicePlaybackContext";
 
 
 
@@ -425,6 +426,7 @@ export function VoiceNotePlayer({
 
 
 
+    const instanceId = useMemo(() => `voice_${role}_${Math.random().toString(36).substring(2, 9)}`, [role]);
     const [isPlaying, setIsPlaying] = useState(false);
 
 
@@ -765,12 +767,13 @@ export function VoiceNotePlayer({
     // Cleanup audio instance only when component actually unmounts
     useEffect(() => {
         return () => {
+            unregisterGlobalPlayingAudio(instanceId);
             if (audioRef.current) {
                 audioRef.current.pause();
                 audioRef.current = null;
             }
         };
-    }, []);
+    }, [instanceId]);
 
     // Setup and synchronize HTML5 Audio element instance
     useEffect(() => {
@@ -802,16 +805,19 @@ export function VoiceNotePlayer({
         audio.ontimeupdate = () => {
             setCurrentTime(audio.currentTime);
             setDuration(prev => (audio.currentTime > prev ? Math.ceil(audio.currentTime) : prev));
+            syncGlobalTime(instanceId, audio.currentTime, audio.duration || duration);
         };
 
         audio.onended = () => {
             setIsPlaying(false);
             setCurrentTime(0);
+            unregisterGlobalPlayingAudio(instanceId);
         };
 
         audio.onerror = () => {
             setIsPlaying(false);
             setIsLoadingAudio(false);
+            unregisterGlobalPlayingAudio(instanceId);
         };
 
         if (audio.src !== cachedBlobUrl) {
@@ -824,10 +830,12 @@ export function VoiceNotePlayer({
                 .then(() => {
                     setIsPlaying(true);
                     setIsLoadingAudio(false);
+                    registerGlobalPlayingAudio(instanceId, audio, role, () => setIsPlaying(false));
                 })
                 .catch(() => {
                     setIsPlaying(false);
                     setIsLoadingAudio(false);
+                    unregisterGlobalPlayingAudio(instanceId);
                 });
         }
     }, [cachedBlobUrl, autoPlay, isUser]);
@@ -863,6 +871,8 @@ export function VoiceNotePlayer({
             audio.pause();
 
             setIsPlaying(false);
+
+            unregisterGlobalPlayingAudio(instanceId);
 
             return;
 
@@ -916,6 +926,8 @@ export function VoiceNotePlayer({
 
             setIsLoadingAudio(false);
 
+            registerGlobalPlayingAudio(instanceId, audio, role, () => setIsPlaying(false));
+
         } catch (err) {
 
             console.error("[VoiceNotePlayer] Play error:", err);
@@ -923,6 +935,8 @@ export function VoiceNotePlayer({
             setIsPlaying(false);
 
             setIsLoadingAudio(false);
+
+            unregisterGlobalPlayingAudio(instanceId);
 
         }
 

@@ -8,6 +8,7 @@ import NextImage from "next/image";
 import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Mic, MicOff } from "lucide-react";
 import { playConnectionChime } from "@/lib/voice-utils";
 import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
+import { useActiveVoicePlayback, formatVoiceTime } from "@/components/chat/VoicePlaybackContext";
 import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -269,6 +270,7 @@ export default function ChatWidget() {
     const [visibleCount, setVisibleCount] = useState<number>(INITIAL_VISIBLE_COUNT);
     const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
     const isChatAdmin = isChatAdminEmail(user?.email);
+    const activeVoice = useActiveVoicePlayback();
 
     const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
         setIsRecordingVoiceNote(false);
@@ -1187,7 +1189,7 @@ export default function ChatWidget() {
                                                     text={msg.content || ""}
                                                     spokenText={msg.spokenText}
                                                     durationSeconds={msg.voiceDuration}
-                                                    autoPlay={msg.role === "assistant" && isLastMessage && msg.timestamp > voiceAutoPlayCutoffRef.current + 1000}
+                                                    autoPlay={false}
                                                     tables={msg.tables}
                                                     hideTranscript={msg.role === "assistant"}
                                                 />
@@ -1202,7 +1204,6 @@ export default function ChatWidget() {
                                                             isStreaming={msg.isStreaming}
                                                             tables={msg.tables}
                                                             showShareButton={isChatAdmin && isLastMessage}
-                                                            showVoiceButton={false}
                                                             onShare={() => shareAnswer(originalIdx)}
                                                             sharing={sharingMessageId === (msg.id || String(originalIdx))}
                                                             latencyMs={msg.latencyMs}
@@ -1221,7 +1222,6 @@ export default function ChatWidget() {
                                                 isStreaming={msg.isStreaming}
                                                 tables={msg.tables}
                                                 showShareButton={isChatAdmin && msg.role === "assistant" && isLastMessage}
-                                                showVoiceButton={true}
                                                 onShare={() => shareAnswer(originalIdx)}
                                                 sharing={sharingMessageId === (msg.id || String(originalIdx))}
                                                 latencyMs={msg.latencyMs}
@@ -1287,6 +1287,40 @@ export default function ChatWidget() {
                     </button>
                 )}
                 </div>
+
+                {/* 🎵 Fixed Sticky Floating Audio Control Bar when any voice note is actively playing */}
+                {activeVoice && (
+                    <div className="px-3 sm:px-4 py-2 border-t border-amber-500/30 bg-zinc-950/95 dark:bg-black/95 backdrop-blur-md shrink-0 transition-all duration-300 z-30">
+                        <div className={`mx-auto flex items-center justify-between gap-3 ${isWideView ? "max-w-[96%] lg:max-w-[94%] xl:max-w-[1560px] 2xl:max-w-[1720px]" : "max-w-3xl lg:max-w-4xl"}`}>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="flex items-center gap-1 shrink-0 h-5 px-2 py-1 rounded-lg bg-[#FFE600]/10 border border-[#FFE600]/30">
+                                    <span className="w-1 h-3 bg-[#FFE600] rounded-full animate-pulse" />
+                                    <span className="w-1 h-4.5 bg-[#FFE600] rounded-full animate-pulse [animation-delay:150ms]" />
+                                    <span className="w-1 h-2 bg-[#FFE600] rounded-full animate-pulse [animation-delay:300ms]" />
+                                    <span className="w-1 h-3.5 bg-[#FFE600] rounded-full animate-pulse [animation-delay:200ms]" />
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-xs font-black text-[#FFE600] truncate">
+                                        {activeVoice.role === "assistant" ? "فويس نود أرتورو شغال الآن" : "تسجيلك الصوتي شغال الآن"}
+                                    </span>
+                                    <span className="text-[11px] font-mono text-zinc-300">
+                                        {formatVoiceTime(activeVoice.currentTime)} / {formatVoiceTime(activeVoice.duration)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={activeVoice.stop}
+                                className="flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-xl bg-red-500 hover:bg-red-600 active:scale-95 text-white text-xs font-black transition-all cursor-pointer shadow-sm shrink-0"
+                                title="إيقاف الصوت فوراً"
+                            >
+                                <Square className="w-3 h-3 fill-current" />
+                                <span>إيقاف الصوت</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Input Form */}
                 <div className="p-3 sm:p-4 border-t border-slate-200/80 dark:border-white/20 bg-white/95 dark:bg-black shrink-0 min-w-0 overflow-hidden">
