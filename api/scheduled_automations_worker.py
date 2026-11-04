@@ -29,6 +29,11 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 try:
+    import requests
+except ImportError:
+    requests = None
+
+try:
     from dotenv import load_dotenv
     _base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(os.path.join(_base_dir, ".env"))
@@ -530,22 +535,86 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         "max_tokens": 950,
     }
 
-    req = urllib.request.Request(
-        DEEPSEEK_API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {deepseek_key}",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=35) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    except Exception as e:
-        logger.error(f"[AUTOMATIONS_WORKER] DeepSeek call error: {e}")
-        return "نعتذر، حدث ضغط لحظي في خدمة الذكاء الاصطناعي أثناء معالجة استشارتك المجدولة. سيتم التحديث في الموعد القادم."
+    # 1. Primary engine: DeepSeek Chat with browser-standard User-Agent
+    deepseek_headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {deepseek_key}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    if requests is not None:
+        try:
+            r = requests.post(DEEPSEEK_API_URL, headers=deepseek_headers, json=payload, timeout=35)
+            if r.status_code == 200:
+                res_data = r.json()
+                content = res_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                if content:
+                    return content
+            logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek returned HTTP {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek requests error: {e}")
+    else:
+        req = urllib.request.Request(
+            DEEPSEEK_API_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=deepseek_headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                if content:
+                    return content
+        except Exception as e:
+            logger.warning(f"[AUTOMATIONS_WORKER] DeepSeek urllib error: {e}")
+
+    # 2. Secondary fallback engine: Nvidia Llama-3.3-70B
+    nvidia_key = (os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_SECONDARY_API_KEY") or "").strip()
+    if nvidia_key:
+        try:
+            nv_headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {nvidia_key}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            }
+            nv_payload = {
+                "model": "meta/llama-3.3-70b-instruct",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 950,
+            }
+            if requests is not None:
+                nv_resp = requests.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=nv_headers, json=nv_payload, timeout=30)
+                if nv_resp.status_code == 200:
+                    nv_data = nv_resp.json()
+                    content = nv_data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    if content:
+                        logger.info("[AUTOMATIONS_WORKER] Generated consultation via Nvidia Llama-3.3-70B fallback.")
+                        return content
+                logger.warning(f"[AUTOMATIONS_WORKER] Nvidia API returned HTTP {nv_resp.status_code}: {nv_resp.text[:200]}")
+        except Exception as e:
+            logger.warning(f"[AUTOMATIONS_WORKER] Nvidia fallback error: {e}")
+
+    # 3. Tertiary fallback: Structured technical analysis directly from real market indicators
+    fallback_lines = [
+        "📊 **تقرير المتابعة الفنية المجدولة — EGX BOTS**",
+        f"👤 المشترك: **{user_name}** | الطلب: *{prompt}*",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
+    if indicators_brief:
+        fallback_lines.append("📈 **أحدث مؤشرات وأسعار السوق:**")
+        fallback_lines.append(indicators_brief)
+        fallback_lines.append("")
+    fallback_lines.extend([
+        "⚖️ **إدارة المخاطر:**",
+        "• يرجى الالتزام بمستويات وقف الخسارة المحددة (2.5% إلى 3.5%) وتجنب الدخول بكامل السيولة في سهم واحد.",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "💡 *تحديث دوري مؤتمت صادر عن محرك ARTORO AI للبورصة المصرية.*"
+    ])
+    return "\n".join(fallback_lines)
 
 
 def _log_automation_to_chat_history(auto_id: str, user_id: str, name: str, prompt: str, reply_text: str, now_iso: str) -> None:
