@@ -117,6 +117,17 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="ltr" suppressHydrationWarning>
       <head>
+        {/* Google Tag (GTM / Google Ads) */}
+        <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-532ZRZ68" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+            `,
+          }}
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -192,6 +203,14 @@ export default function RootLayout({
         />
       </head>
       <body className="app-shell antialiased selection:dark:bg-blue-500/30 selection:light:bg-blue-300/30">
+        <noscript>
+          <iframe
+            src="https://www.googletagmanager.com/ns.html?id=GTM-532ZRZ68"
+            height="0"
+            width="0"
+            style={{ display: "none", visibility: "hidden" }}
+          />
+        </noscript>
         <Providers>
           <Suspense fallback={null}><Header /></Suspense>
           <main id="main-content" className="app-content-shell w-full pt-[var(--header-offset,88px)] pb-12 px-3 sm:px-6 md:px-8 mx-auto max-w-[1800px]">
