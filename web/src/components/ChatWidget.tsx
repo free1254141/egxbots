@@ -6,7 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
 import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Mic, MicOff } from "lucide-react";
-import { playConnectionChime } from "@/lib/voice-utils";
+import { playConnectionChime, cleanVoiceTranscript } from "@/lib/voice-utils";
 import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
 import { useActiveVoicePlayback, formatVoiceTime } from "@/components/chat/VoicePlaybackContext";
 import { VoiceNoteRecorder } from "@/components/chat/VoiceNoteRecorder";
@@ -275,6 +275,7 @@ export default function ChatWidget() {
     const handleSendVoiceNote = async (audioBlob: Blob, transcript: string, duration: number) => {
         setIsRecordingVoiceNote(false);
         const localBlobUrl = URL.createObjectURL(audioBlob);
+        let resolvedTranscript = (transcript || "").trim();
 
         // Upload user's real microphone audio to Supabase Storage with retry
         let permanentAudioUrl: string | undefined = undefined;
@@ -295,8 +296,11 @@ export default function ChatWidget() {
                     if (uploadData?.url) {
                         permanentAudioUrl = uploadData.url;
                         primeAudioCache(permanentAudioUrl, localBlobUrl);
-                        break;
                     }
+                    if (!resolvedTranscript && uploadData?.transcript) {
+                        resolvedTranscript = cleanVoiceTranscript(uploadData.transcript);
+                    }
+                    if (permanentAudioUrl) break;
                 }
             } catch (uploadErr) {
                 console.warn(`[ChatWidget] Voice upload attempt ${attempt + 1} failed:`, uploadErr);
@@ -307,7 +311,13 @@ export default function ChatWidget() {
             console.warn("[ChatWidget] Failed to persist voice audio to storage, fallback to local URL");
         }
 
-        await sendMessage(transcript, undefined, {
+        // If no speech was captured by client STT or server Whisper, alert the user rather than sending an empty/fake prompt
+        if (!resolvedTranscript) {
+            toast.error(language === "ar" ? "لم يتم التقاط صوت واضح لاسم السهم، يرجى التحدث قرب المايك أو كتابة الرسالة" : "No speech recognized. Please speak closer to the microphone or type your question.");
+            return;
+        }
+
+        await sendMessage(resolvedTranscript, undefined, {
             isVoice: true,
             isVoiceNote: true,
             voiceAudioUrl: permanentAudioUrl || localBlobUrl,

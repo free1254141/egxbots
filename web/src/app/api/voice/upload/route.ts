@@ -50,10 +50,50 @@ export async function POST(req: Request) {
             .from("chat-audio")
             .getPublicUrl(filePath);
 
+        // Optional server-side Whisper transcription fallback (Groq / OpenAI)
+        // High-speed, high-accuracy Arabic Egyptian financial transcription
+        let serverTranscript: string | null = null;
+        const groqKey = process.env.GROQ_API_KEY?.trim();
+        const openaiKey = process.env.OPENAI_API_KEY?.trim();
+
+        if (groqKey || openaiKey) {
+            try {
+                const whisperFormData = new FormData();
+                const audioBlob = new Blob([buffer], { type: mimeType });
+                whisperFormData.append("file", audioBlob, `voice_note.${ext}`);
+                whisperFormData.append("model", groqKey ? "whisper-large-v3-turbo" : "whisper-1");
+                whisperFormData.append("language", "ar");
+                whisperFormData.append("prompt", "تحليل أسهم البورصة المصرية: عتاقة، بلتون، فوري، أبو قير للأسمدة، التجاري الدولي، طلعت مصطفى، السويدي، حديد عز، القلعة، سيدي كرير");
+
+                const endpoint = groqKey
+                    ? "https://api.groq.com/openai/v1/audio/transcriptions"
+                    : "https://api.openai.com/v1/audio/transcriptions";
+
+                const whisperRes = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${groqKey || openaiKey}`,
+                    },
+                    body: whisperFormData,
+                    signal: AbortSignal.timeout(6000),
+                });
+
+                if (whisperRes.ok) {
+                    const whisperJson = await whisperRes.json();
+                    if (whisperJson?.text) {
+                        serverTranscript = whisperJson.text.trim();
+                    }
+                }
+            } catch (whisperErr) {
+                console.warn("[VoiceUpload] Server Whisper transcription fallback failed:", whisperErr);
+            }
+        }
+
         return NextResponse.json({
             ok: true,
             url: publicUrlData?.publicUrl || null,
             filePath,
+            transcript: serverTranscript,
         });
     } catch (e: any) {
         console.error("[VoiceUpload] Error:", e);

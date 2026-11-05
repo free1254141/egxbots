@@ -23,6 +23,7 @@ export function VoiceNoteRecorder({
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const recognitionRef = useRef<any>(null);
+    const transcriptRef = useRef<string>("");
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const startTimeRef = useRef<number>(0);
@@ -43,6 +44,7 @@ export function VoiceNoteRecorder({
     const cleanup = () => {
         if (timerRef.current) clearInterval(timerRef.current);
         startTimeRef.current = 0;
+        transcriptRef.current = "";
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.onend = null;
@@ -70,6 +72,7 @@ export function VoiceNoteRecorder({
     const startRecording = async () => {
         setDuration(0);
         setTranscript("");
+        transcriptRef.current = "";
         audioChunksRef.current = [];
         startTimeRef.current = Date.now();
 
@@ -104,7 +107,7 @@ export function VoiceNoteRecorder({
                 }
             }, 500);
 
-            // 2. Setup Background SpeechRecognition for zero-token DeepSeek transcription
+            // 2. Setup Background SpeechRecognition for real-time Egyptian Arabic transcription
             const SpeechRecognition =
                 (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -129,16 +132,30 @@ export function VoiceNoteRecorder({
                             }
                         }
                         const combined = (finalStr + " " + interimStr).trim();
-                        setTranscript(cleanVoiceTranscript(combined));
+                        const cleaned = cleanVoiceTranscript(combined);
+                        transcriptRef.current = cleaned;
+                        setTranscript(cleaned);
                     };
 
-                    rec.onerror = () => {};
-                    rec.onend = () => {};
+                    rec.onend = () => {
+                        // Keep SpeechRecognition running while recording audio
+                        if (startTimeRef.current > 0 && isRecording && recognitionRef.current) {
+                            try {
+                                rec.start();
+                            } catch {}
+                        }
+                    };
+
+                    rec.onerror = (err: any) => {
+                        if (err?.error === "not-allowed") {
+                            console.warn("[VoiceNoteRecorder] Mic permission error for speech recognition");
+                        }
+                    };
 
                     rec.start();
                     recognitionRef.current = rec;
                 } catch (e) {
-                    console.warn("Speech recognition not available for voice note, will use audio-only:", e);
+                    console.warn("Speech recognition not available for voice note, will use server fallback:", e);
                 }
             }
         } catch (err: any) {
@@ -155,7 +172,7 @@ export function VoiceNoteRecorder({
         const exactDuration = startTimeRef.current > 0
             ? Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
             : Math.max(1, duration);
-        const currentTranscript = cleanVoiceTranscript(transcript) || "حلل هذا السهم في البورصة المصرية";
+        const currentTranscript = cleanVoiceTranscript(transcriptRef.current || transcript);
 
         // Stop recognition
         if (recognitionRef.current) {

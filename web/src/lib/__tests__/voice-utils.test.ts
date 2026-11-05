@@ -7,6 +7,10 @@ describe("voice-utils", () => {
         expect(cleanVoiceTranscript("هتعصبهتعصب التجميع")).toBe("هتعصب التجميع");
         expect(cleanVoiceTranscript("هلهلهل الساعههل الساعه بتاعه مصطفى")).toBe("هل الساعه بتاعه مصطفى");
         expect(cleanVoiceTranscript("فوى فوى")).toBe("فوري");
+        expect(cleanVoiceTranscript("محل العتاء")).toBe("حلل عتاقة");
+        expect(cleanVoiceTranscript("محل بيتون")).toBe("حلل بلتون");
+        expect(cleanVoiceTranscript("محل سهم عتاقه")).toBe("حلل سهم عتاقة");
+        expect(cleanVoiceTranscript("سيد كرير")).toBe("سيدي كرير");
         expect(cleanVoiceTranscript("")).toBe("");
     });
     it("cleans markdown and extracts spoken summary without losing digits", () => {

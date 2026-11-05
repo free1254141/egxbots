@@ -17,9 +17,9 @@ export const VOICE_NOTE_TTS = {
 } as const;
 
 /**
- * Robust Speech-to-Text cleaner for Arabic mobile browsers (Web Speech API).
- * 1. Deduplicates stuttered syllables within words (e.g. "حلحلحل" -> "حلل", "هلهلهل" -> "هل", "هتعصبهتعصب" -> "هتعصب").
- * 2. Corrects common phonetic Egyptian dialect misrecognitions (e.g. "لسام" -> "لسهم", "فوى" -> "فوري").
+ * Robust Speech-to-Text cleaner for Arabic mobile browsers (Web Speech API) & Whisper.
+ * 1. Corrects common phonetic Egyptian dialect misrecognitions (e.g. "محل العتاء" -> "حلل عتاقة", "لسام" -> "لسهم", "فوى" -> "فوري").
+ * 2. Deduplicates stuttered syllables within words (e.g. "حلحلحل" -> "حلل", "هلهلهل" -> "هل", "هتعصبهتعصب" -> "هتعصب").
  * 3. Splits glued question words (e.g. "الساعههل" -> "الساعه هل").
  * 4. Deduplicates repeated consecutive words and repeated phrases (e.g. "هل الساعه هل الساعه" -> "هل الساعه").
  */
@@ -27,16 +27,47 @@ export function cleanVoiceTranscript(rawText: string): string {
     if (!rawText) return "";
     let text = rawText.trim();
 
-    // 1. Phonetic Arabic financial corrections
+    // 0. Pre-clean: Fix common Egyptian verbal opening mishearings where "حلل" is transcribed as "محل" or "حل"
+    // Examples: "محل العتاء" -> "حلل عتاقة", "محل بلتون" -> "حلل بلتون", "محل سهم" -> "حلل سهم"
+    text = text.replace(/^(?:محل|حل)\s+(?=[\u0600-\u06FF])/g, "حلل ");
+    text = text.replace(/(^|\s)(?:محل)\s+(سهم|لسهم|سهمك|عتاق|بلتون|بيتون|فوري|فوى|ابو|أبو|طلعت|حديد|السويد|التجاري|مصر)/g, "$1حلل $2");
+
+    // 1. Comprehensive Phonetic Arabic & EGX financial corrections
     const phoneticFixes: Array<[RegExp, string]> = [
+        // Core spoken financial tokens
         [/(?<![\u0600-\u06FF])لسام(?![\u0600-\u06FF])/g, "لسهم"],
         [/(?<![\u0600-\u06FF])لسهام(?![\u0600-\u06FF])/g, "للأسهم"],
         [/(?<![\u0600-\u06FF])سهمسهم(?![\u0600-\u06FF])/g, "سهم"],
         [/(?<![\u0600-\u06FF])حللحلل(?![\u0600-\u06FF])/g, "حلل"],
         [/(?<![\u0600-\u06FF])حلحلحل(?![\u0600-\u06FF])/g, "حلل"],
+
+        // Famous EGX stock misrecognitions from Google speech recognizer
+        [/(?<![\u0600-\u06FF])(?:العتاء|عتاقه|العتاقه)(?![\u0600-\u06FF])/g, "عتاقة"],
+        [/(?<![\u0600-\u06FF])(?:بيتون|بيلتون|بلتن)(?![\u0600-\u06FF])/g, "بلتون"],
         [/(?<![\u0600-\u06FF])فوى(?![\u0600-\u06FF])/g, "فوري"],
         [/(?<![\u0600-\u06FF])فوري\s+فوري(?![\u0600-\u06FF])/g, "فوري"],
         [/(?<![\u0600-\u06FF])تجاري\s+تجاري(?![\u0600-\u06FF])/g, "تجاري"],
+        [/(?<![\u0600-\u06FF])(?:ابوقير|ابو\s+غير|أبو\s+غير)(?![\u0600-\u06FF])/g, "أبو قير"],
+        [/(?<![\u0600-\u06FF])(?:سيد\s+كرير|سيدي\s+قرير|سيدى\s+كرير)(?![\u0600-\u06FF])/g, "سيدي كرير"],
+        [/(?<![\u0600-\u06FF])(?:ام\s+بي\s+للهندسة|امبي\s+للهندسة|امبي)(?![\u0600-\u06FF])/g, "إم بي للهندسة"],
+        [/(?<![\u0600-\u06FF])شينى(?![\u0600-\u06FF])/g, "شيني"],
+        [/(?<![\u0600-\u06FF])عز\s+حديد(?![\u0600-\u06FF])/g, "حديد عز"],
+        [/(?<![\u0600-\u06FF])جهينه(?![\u0600-\u06FF])/g, "جهينة"],
+        [/(?<![\u0600-\u06FF])اديتا(?![\u0600-\u06FF])/g, "إيديتا"],
+        [/(?<![\u0600-\u06FF])ابنسينا(?![\u0600-\u06FF])/g, "ابن سينا"],
+        [/(?<![\u0600-\u06FF])القلعه(?![\u0600-\u06FF])/g, "القلعة"],
+        [/(?<![\u0600-\u06FF])المصريه\s+للاتصالات(?![\u0600-\u06FF])/g, "المصرية للاتصالات"],
+        [/(?<![\u0600-\u06FF])مدينة\s+نصر(?![\u0600-\u06FF])/g, "مدينة مصر"],
+        [/(?<![\u0600-\u06FF])السويدى(?![\u0600-\u06FF])/g, "السويدي"],
+        [/(?<![\u0600-\u06FF])بالم\s+هيلس(?![\u0600-\u06FF])/g, "بالم هيلز"],
+        [/(?<![\u0600-\u06FF])دومتى(?![\u0600-\u06FF])/g, "دومتي"],
+        [/(?<![\u0600-\u06FF])العبور\s+لاند(?![\u0600-\u06FF])/g, "عبور لاند"],
+        [/(?<![\u0600-\u06FF])سبيد\s+مديكال(?![\u0600-\u06FF])/g, "سبيد ميديكال"],
+
+        // Egyptian dialect trading terminology
+        [/(?<![\u0600-\u06FF])وقف\s+خساره(?![\u0600-\u06FF])/g, "وقف الخسارة"],
+        [/(?<![\u0600-\u06FF])الترجت(?![\u0600-\u06FF])/g, "المستهدف"],
+        [/(?<![\u0600-\u06FF])القيمه\s+العادله(?![\u0600-\u06FF])/g, "القيمة العادلة"],
     ];
     for (const [pattern, replacement] of phoneticFixes) {
         text = text.replace(pattern, replacement);
