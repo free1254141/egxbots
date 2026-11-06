@@ -13,6 +13,8 @@ import {
     Activity,
     Shield,
     Sparkles,
+    Gem,
+    Scale,
     GitGraph,
     Search,
     Loader2,
@@ -267,70 +269,63 @@ export default function LandingClient() {
             .filter(Boolean) as Array<{ id: string; label: string; period: string; price: string; badge: string | null }>
         : [];
 
-    const scanners = [
-        {
-            href: "/scanner/backtests",
-            icon: Brain,
-            title: isAr ? "أفضل الأسهم (Top Stocks)" : "Top Stocks (AI Score)",
-            desc: isAr
-                ? "قائمة الأسهم اليومية مرتبة بناءً على تقييم الذكاء الاصطناعي (1-10) لفرص الصعود والهبوط."
-                : "Daily ranking of stocks rated from 1 to 10 by the AI score.",
-            badge: "AI LIVE",
-            colorClass: "neobrutal-bg-cyan",
-        },
-        {
-            href: "/scanner/technical",
-            icon: Activity,
-            title: isAr ? "الماسح الفني" : "Technical Scanner",
-            desc: isAr
-                ? "فلاتر فنية متقدمة وإشارات RSI وMACD وحجم التداول وفق أحدث تحديث بيانات متاح."
-                : "Technical filters including RSI, MACD, and volume on EGX stocks.",
-            badge: "POPULAR",
-            colorClass: "neobrutal-bg-yellow",
-        },
-    ];
-
     const steps = [
         {
             n: 1,
-            title: isAr ? "الذكاء الاصطناعي يحلل الأسهم" : "AI Analyzes Stocks",
+            title: isAr ? "نحدّث بيانات السوق بعد الإغلاق" : "Data Refresh After the Close",
             desc: isAr
-                ? "تحلل نماذج الذكاء الاصطناعي (Random Forest و LightGBM) أسهم البورصة المصرية مع كل تحديث يومي وتمنح كل سهم تقييماً من 1 إلى 10."
-                : "AI models (Random Forest & LightGBM) analyze EGX stocks with each daily data refresh and assign a 1-to-10 AI score.",
+                ? "بعد إغلاق جلسة البورصة المصرية نسحب أسعار الإغلاق والأحجام ونعيد حساب المؤشرات الفنية لكل الأسهم."
+                : "After the EGX session closes we pull closing prices and volumes, then recalculate technical indicators for every stock.",
             colorClass: "neobrutal-bg-yellow",
         },
         {
             n: 2,
-            title: isAr ? "امسح وفلتر الفرص" : "Scan & Filter Opportunities",
+            title: isAr ? "النماذج ترتّب الفرص" : "Models Rank the Opportunities",
             desc: isAr
-                ? "استخدم الماسح الفني لفلترة الأسهم حسب تقييم AI والمؤشرات الفنية لتحديد أفضل الفرص بدقة."
-                : "Use the technical scanner to filter stocks by AI score and technical indicators to pinpoint the best opportunities.",
+                ? "نماذج تعلّم آلي مدرَّبة على بيانات السوق المصري تمنح كل سهم تقييماً من 1 إلى 10، وتحدد مستويات الدخول والهدف ووقف الخسارة."
+                : "Machine-learning models trained on Egyptian market data score every stock from 1 to 10 and set entry, target and stop levels.",
             colorClass: "neobrutal-bg-pink",
         },
         {
             n: 3,
-            title: isAr ? "راجع أداء النماذج تاريخياً" : "Review Model Performance",
+            title: isAr ? "شوف التوصية حسب باقتك" : "See It on Your Plan",
             desc: isAr
-                ? "اطّلع على نتائج الاختبارات العكسية ونسب النجاح وأداء النماذج على البيانات التاريخية لتقييم جودة الإشارات."
-                : "Explore backtest results, win rates, and model performance on historical data to gauge signal quality.",
+                ? "توصيات اليوم تظهر لمشتركي Pro فوراً، وللباقة المجانية بعد 15 يوماً — مع فحص السعر العادل والتوافق الشرعي لكل سهم."
+                : "Today's picks appear for Pro immediately and for free accounts after 15 days, with fair-value and Sharia checks beside each one.",
             colorClass: "neobrutal-bg-green",
         },
         {
             n: 4,
-            title: isAr ? "استقبل الإشارات فوراً" : "Get Instant Signals",
+            title: isAr ? "تابع النتيجة لحد الإغلاق" : "Track the Outcome",
             desc: isAr
-                ? "احصل على إشارات الشراء والبيع لحظة ظهورها عبر تليجرام أو مباشرة من خلال واجهة المنصة."
-                : "Receive buy and sell signals the moment they appear via Telegram or directly through the platform interface.",
+                ? "كل توصية تُقيَّم تلقائياً عند الوصول للهدف أو وقف الخسارة وتُسجَّل في سجل النتائج، والتنبيهات توصلك على تليجرام."
+                : "Each pick is evaluated automatically when it reaches its target or stop, logged in the results record, and pushed to Telegram.",
             colorClass: "neobrutal-bg-cyan",
         },
     ];
 
     const features = [
         {
+            icon: Gem,
+            title: isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value & Cheapness",
+            desc: isAr
+                ? "قيمة تقديرية عادلة لكل سهم مع مؤشر يوضح هل يتداول أرخص أو أغلى من قيمته، مدعوم بمضاعفات السوق ونمو الأرباح."
+                : "An estimated fair value per stock plus a cheapness indicator based on market multiples and earnings growth.",
+            colorClass: "neobrutal-bg-yellow",
+        },
+        {
+            icon: Scale,
+            title: isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia Compliance & Purification",
+            desc: isAr
+                ? "فحص توافق السهم مع المعايير الشرعية، وحساب نسبة التطهير المطلوبة من التوزيعات النقدية قبل إعادة استثمارها."
+                : "Screens each stock against Sharia criteria and computes the dividend purification ratio before reinvesting.",
+            colorClass: "neobrutal-bg-green",
+        },
+        {
             icon: Brain,
             title: isAr ? "نماذج AI متقدمة" : "Advanced AI Models",
             desc: isAr
-                ? "تكامل كامل مع خوارزميات Random Forest و LightGBM لدقة أعلى في تحديد إشارات السوق."
+                ? "نماذج تعلّم آلي مدرَّبة على بيانات البورصة المصرية ترتّب الفرص بتقييم من 1 إلى 10."
                 : "A 1-to-10 AI score used to rank stock opportunities.",
             colorClass: "neobrutal-bg-yellow",
         },
@@ -338,7 +333,7 @@ export default function LandingClient() {
             icon: Smartphone,
             title: isAr ? "تنبيهات تليجرام فورية" : "Instant Telegram Alerts",
             desc: isAr
-                ? "توصيل إشارات الشراء والبيع بشكل آلي ومباشر على هاتفك فور ظهورها."
+                ? "توصلك التوصيات اليومية وقوائم المراقبة على تليجرام فور صدورها بعد إغلاق الجلسة."
                 : "Buy/sell signals delivered automatically and instantly to your phone.",
             colorClass: "neobrutal-bg-green",
         },
@@ -351,6 +346,55 @@ export default function LandingClient() {
             colorClass: "neobrutal-bg-pink",
         },
     ];
+
+    // Lightweight scroll reveal + number count-up. No animation library, and
+    // both respect "prefers-reduced-motion".
+    useEffect(() => {
+        const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]"));
+        if (!nodes.length) return;
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduce || typeof IntersectionObserver === "undefined") {
+            nodes.forEach((node) => node.classList.add("is-visible"));
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    entry.target.classList.add("is-visible");
+                    observer.unobserve(entry.target);
+                }
+            },
+            { rootMargin: "0px 0px -8% 0px", threshold: 0.12 }
+        );
+        nodes.forEach((node) => observer.observe(node));
+        return () => observer.disconnect();
+    }, [pricingPlans.length]);
+
+    const [animatedProof, setAnimatedProof] = useState({ recommendations: 0, closed: 0, win_rate: 0 });
+    useEffect(() => {
+        if (proof.recommendations == null || proof.closed == null || proof.win_rate == null) return;
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduce) {
+            setAnimatedProof({ recommendations: proof.recommendations, closed: proof.closed, win_rate: proof.win_rate });
+            return;
+        }
+        const started = performance.now();
+        const duration = 750;
+        let frame = 0;
+        const tick = (now: number) => {
+            const t = Math.min(1, (now - started) / duration);
+            const eased = 1 - Math.pow(1 - t, 3);
+            setAnimatedProof({
+                recommendations: Math.round((proof.recommendations as number) * eased),
+                closed: Math.round((proof.closed as number) * eased),
+                win_rate: Math.round((proof.win_rate as number) * eased),
+            });
+            if (t < 1) frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frame);
+    }, [proof.recommendations, proof.closed, proof.win_rate]);
 
     return (
         <div className="neobrutal-layout min-h-screen -mx-3 sm:-mx-6 md:-mx-8 overflow-hidden pb-16">
@@ -1202,11 +1246,11 @@ export default function LandingClient() {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                         {[
-                            { label: isAr ? "توصية منشورة" : "Published picks", value: proof.recommendations != null ? proof.recommendations.toLocaleString("en-US") : "—", tone: "text-indigo-600 dark:text-indigo-400" },
-                            { label: isAr ? "نتائج مغلقة" : "Closed outcomes", value: proof.closed != null ? proof.closed.toLocaleString("en-US") : "—", tone: "text-black dark:text-white" },
-                            { label: isAr ? "معدل النجاح" : "Win rate", value: proof.win_rate != null ? `${proof.win_rate}%` : "—", tone: "text-emerald-600 dark:text-emerald-400" },
+                            { label: isAr ? "توصية منشورة" : "Published picks", value: proof.recommendations != null ? animatedProof.recommendations.toLocaleString("en-US") : "—", tone: "text-indigo-600 dark:text-indigo-400" },
+                            { label: isAr ? "نتائج مغلقة" : "Closed outcomes", value: proof.closed != null ? animatedProof.closed.toLocaleString("en-US") : "—", tone: "text-black dark:text-white" },
+                            { label: isAr ? "معدل النجاح" : "Win rate", value: proof.win_rate != null ? `${animatedProof.win_rate}%` : "—", tone: "text-emerald-600 dark:text-emerald-400" },
                         ].map((card) => (
-                            <div key={card.label} className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950 p-5 sm:p-6 shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
+                            <div key={card.label} data-reveal className="landing-reveal border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950 p-5 sm:p-6 shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
                                 <div className={`text-3xl sm:text-4xl font-black font-mono ${card.tone}`}>{card.value}</div>
                                 <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400 leading-tight">{card.label}</div>
                             </div>
@@ -1217,67 +1261,6 @@ export default function LandingClient() {
                             ? "الأرقام محسوبة من التوصيات المنشورة على المنصة، وتُحدَّث تلقائياً. الأداء السابق لا يضمن النتائج المستقبلية."
                             : "Numbers are computed from recommendations published on the platform and refreshed automatically. Past performance does not guarantee future results."}
                     </p>
-                </div>
-            </section>
-
-            {/* Analysis Scanners / Tools Grid */}
-            <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">
-                <div className="max-w-6xl mx-auto">
-                    <div className="text-center mb-16">
-                        <div className="inline-block border-4 border-black dark:border-white px-3 py-1.5 neobrutal-bg-orange text-black dark:text-black font-black text-xs uppercase tracking-widest rotate-[1deg] mb-4">
-                            {isAr ? "قوة التحليل" : "POWERS & SCANNERS"}
-                        </div>
-                        <h2 className="text-3xl sm:text-5xl font-black text-black dark:text-white tracking-tight">
-                            {isAr ? "أدوات التحليل والمسح الذكي" : "Advanced Scanning Systems"}
-                        </h2>
-                        <p className="text-sm sm:text-base md:text-lg text-zinc-600 dark:text-zinc-400 max-w-xl mx-auto mt-4 font-bold">
-                            {isAr
-                                ? "نظامان متكاملان ومصممان خصيصاً للبورصة المصرية لتسهيل قرارات الاستثمار."
-                                : "Two robust systems engineered specifically for the EGX market to enhance your trading strategies."}
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:gap-10 max-w-4xl mx-auto">
-                        {scanners.map((item) => (
-                            <Link
-                                key={item.href}
-                                href={item.href}
-                                className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 flex flex-col overflow-hidden shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_rgba(255,255,255,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-200 group"
-                            >
-                                {/* Window title bar */}
-                                <div className="border-b-4 border-black dark:border-white px-4 py-3 bg-black dark:bg-zinc-800 flex justify-between items-center text-white select-none">
-                                    <span className="font-mono text-[10px] font-black uppercase tracking-widest">{item.badge}</span>
-                                    <div className="flex gap-1.5">
-                                        <span className="w-3.5 h-3.5 rounded-full bg-[#FF605C] border-2 border-black dark:border-white"></span>
-                                        <span className="w-3.5 h-3.5 rounded-full bg-[#FFBD2E] border-2 border-black dark:border-white"></span>
-                                        <span className="w-3.5 h-3.5 rounded-full bg-[#27C93F] border-2 border-black dark:border-white"></span>
-                                    </div>
-                                </div>
-
-                                {/* Body */}
-                                <div className="p-6 flex-1 flex flex-col bg-white dark:bg-zinc-950">
-                                    <div className={`w-14 h-14 border-4 border-black dark:border-white ${item.colorClass} flex items-center justify-center text-black dark:text-black mb-6 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]`}>
-                                        <item.icon className="w-8 h-8 text-black dark:text-black" />
-                                    </div>
-
-                                    <h3 className="text-xl sm:text-2xl font-black text-black dark:text-white mb-3 tracking-tight">
-                                        {item.title}
-                                    </h3>
-
-                                    <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed flex-1 font-bold">
-                                        {item.desc}
-                                    </p>
-
-                                    <div className="mt-8 pt-4 border-t-4 border-black dark:border-white flex items-center justify-between">
-                                        <span className="text-xs font-black uppercase tracking-widest text-black dark:text-white inline-flex items-center gap-2 group-hover:underline">
-                                            {isAr ? "افتح الأداة" : "Open Tool"}
-                                            <ArrowRight className={`w-4 h-4 transition-transform group-hover:translate-x-1 ${isAr ? "rotate-180 group-hover:-translate-x-1" : ""}`} />
-                                        </span>
-                                    </div>
-                                </div>
-                            </Link>
-                        ))}
-                    </div>
                 </div>
             </section>
 
@@ -1297,7 +1280,7 @@ export default function LandingClient() {
                         {steps.map((step) => (
                             <div
                                 key={step.n}
-                                className="border-4 border-black dark:border-white p-8 flex flex-col bg-white dark:bg-zinc-950 relative mt-6 md:mt-0 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_rgba(255,255,255,1)] transition-all duration-200 cursor-pointer"
+                                data-reveal className="landing-reveal border-4 border-black dark:border-white p-8 flex flex-col bg-white dark:bg-zinc-950 relative mt-6 md:mt-0 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_rgba(255,255,255,1)] transition-all duration-200 cursor-pointer"
                             >
                                 <div className={`absolute -top-7 -start-6 w-14 h-14 border-4 border-black dark:border-white ${step.colorClass} flex items-center justify-center font-black text-2xl text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]`}>
                                     {step.n}
@@ -1330,7 +1313,7 @@ export default function LandingClient() {
                         {features.map((feat) => (
                             <div
                                 key={feat.title}
-                                className="border-4 border-black dark:border-white p-6 sm:p-8 bg-white dark:bg-zinc-950 flex gap-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_rgba(255,255,255,1)] transition-all duration-200 cursor-pointer"
+                                data-reveal className="landing-reveal border-4 border-black dark:border-white p-6 sm:p-8 bg-white dark:bg-zinc-950 flex gap-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_rgba(255,255,255,1)] transition-all duration-200 cursor-pointer"
                             >
                                 <div className={`w-14 h-14 border-4 border-black dark:border-white ${feat.colorClass} flex items-center justify-center text-black dark:text-black shrink-0 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]`}>
                                     <feat.icon className="w-7 h-7 text-black dark:text-black" />
@@ -1370,7 +1353,7 @@ export default function LandingClient() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                             {pricingPlans.map((plan) => (
-                                <div key={plan.id} className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 flex flex-col shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
+                                <div key={plan.id} data-reveal className="landing-reveal border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 flex flex-col shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
                                     <div className="text-xs font-black uppercase tracking-widest text-zinc-500">{plan.label}</div>
                                     <div className="mt-3 flex items-baseline gap-1.5">
                                         <span className="text-4xl font-black font-mono text-black dark:text-white">{plan.price}</span>
