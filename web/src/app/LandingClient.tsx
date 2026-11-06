@@ -64,7 +64,7 @@ const FALLBACK_SIMILARITY_STOCKS = [
 ];
 
 export default function LandingClient() {
-    const { user } = useAuth();
+    const { user, signInWithGoogle } = useAuth();
     const { language } = useLanguage();
     const { setIsOpen } = useChat();
     const isAr = language === "ar";
@@ -84,6 +84,26 @@ export default function LandingClient() {
         users: null,
     });
     const [showStickyCta, setShowStickyCta] = useState(false);
+    const [googleLoading, setGoogleLoading] = useState(false);
+    const [googleError, setGoogleError] = useState<string | null>(null);
+
+    const handleGoogleSignup = async () => {
+        if (googleLoading) return;
+        setGoogleError(null);
+        setGoogleLoading(true);
+        trackEvent("hero_cta_click", { variant: "google", signed_in: false });
+        try {
+            const res = await signInWithGoogle();
+            // A successful call redirects to Google; only failures come back.
+            if (res?.error) {
+                setGoogleError(isAr ? "تعذّر بدء التسجيل بجوجل. جرّب تاني." : "Could not start Google sign-up. Please retry.");
+                setGoogleLoading(false);
+            }
+        } catch {
+            setGoogleError(isAr ? "تعذّر بدء التسجيل بجوجل. جرّب تاني." : "Could not start Google sign-up. Please retry.");
+            setGoogleLoading(false);
+        }
+    };
 
     useEffect(() => {
         setNewsLoading(true);
@@ -370,6 +390,26 @@ export default function LandingClient() {
                     {/* Primary action — kept right under the value proposition so a
                         first-time visitor can act without scrolling five screens. */}
                     <div className="landing-fade-up landing-delay-4 mb-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 px-4 max-w-2xl mx-auto">
+                        {!user && (
+                            <button
+                                type="button"
+                                onClick={handleGoogleSignup}
+                                disabled={googleLoading}
+                                className="h-16 px-7 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 text-black dark:text-white font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 flex items-center justify-center gap-3 text-base sm:text-lg disabled:opacity-60"
+                            >
+                                {googleLoading ? (
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                ) : (
+                                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
+                                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335" />
+                                    </svg>
+                                )}
+                                {isAr ? "ابدأ بجوجل" : "Continue with Google"}
+                            </button>
+                        )}
                         <Link
                             href={user ? "/scanner/backtests" : "/signup"}
                             onClick={() => trackEvent("hero_cta_click", { variant: "primary", signed_in: Boolean(user?.id) })}
@@ -386,6 +426,10 @@ export default function LandingClient() {
                             {isAr ? "شوف توصيات النهاردة" : "See Today's Picks"}
                         </Link>
                     </div>
+
+                    {googleError && (
+                        <p className="mb-4 text-xs sm:text-sm font-black text-rose-600 dark:text-rose-400">{googleError}</p>
+                    )}
 
                     <p className="landing-fade-up landing-delay-4 mb-10 text-xs sm:text-sm font-black text-black dark:text-white">
                         {proof.win_rate != null && proof.closed != null
@@ -1324,6 +1368,26 @@ export default function LandingClient() {
             {showStickyCta && (
                 <div className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-950 px-3 py-2.5 pr-20">
                     <div className="flex items-center gap-2 max-w-xl mx-auto">
+                        {!user && (
+                            <button
+                                type="button"
+                                onClick={handleGoogleSignup}
+                                disabled={googleLoading}
+                                aria-label={isAr ? "ابدأ بجوجل" : "Continue with Google"}
+                                className="w-12 h-12 shrink-0 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 flex items-center justify-center disabled:opacity-60"
+                            >
+                                {googleLoading ? (
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                ) : (
+                                    <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
+                                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
                         <Link
                             href={user ? "/scanner/backtests" : "/signup"}
                             onClick={() => trackEvent("sticky_cta_click", { signed_in: Boolean(user?.id) })}
