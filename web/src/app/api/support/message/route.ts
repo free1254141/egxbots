@@ -51,28 +51,44 @@ export async function POST(req: Request) {
 
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
 
-    // Look up profile to check phone number
+    // Profile lookup and the auto-acknowledgment check are independent, so they
+    // share one round trip instead of two sequential ones.
+    const [profileRes, recentAdminRes] = await Promise.all([
+      (async () => {
+        try {
+          return await supabase
+            .from("profiles")
+            .select("whatsapp_number")
+            .eq("id", user.id)
+            .maybeSingle();
+        } catch {
+          return { data: null } as { data: null };
+        }
+      })(),
+      (async () => {
+        try {
+          return await supabase
+            .from("support_messages")
+            .select("id, created_at")
+            .eq("session_id", sessionId)
+            .eq("sender", "admin")
+            .order("created_at", { ascending: false })
+            .limit(1);
+        } catch {
+          return { data: null } as { data: null };
+        }
+      })(),
+    ]);
+
     let phoneLine = "";
-    try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("whatsapp_number")
-        .eq("id", user.id)
-        .maybeSingle();
-      if (profile?.whatsapp_number) {
-        phoneLine = `<b>واتساب / الموبايل:</b> <code>${profile.whatsapp_number}</code>\n`;
-      }
-    } catch {}
+    const profile = profileRes?.data;
+    if (profile?.whatsapp_number) {
+      phoneLine = `<b>واتساب / الموبايل:</b> <code>${profile.whatsapp_number}</code>\n`;
+    }
 
     // Check if an automated acknowledgment should be inserted (if no admin message in last 15 min)
     try {
-      const { data: recentAdminMsgs } = await supabase
-        .from("support_messages")
-        .select("id, created_at")
-        .eq("session_id", sessionId)
-        .eq("sender", "admin")
-        .order("created_at", { ascending: false })
-        .limit(1);
+      const recentAdminMsgs = recentAdminRes?.data;
 
       const lastAdminTime = recentAdminMsgs?.[0]?.created_at ? new Date(recentAdminMsgs[0].created_at).getTime() : 0;
       const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;

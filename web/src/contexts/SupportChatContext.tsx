@@ -97,6 +97,12 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         isOpenRef.current = isOpen;
     }, [isOpen]);
 
+    // Newest confirmed (non-optimistic) message, used for incremental polling.
+    const messagesRef = useRef<SupportMessage[]>([]);
+    useEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+
     // Load history and subscribe to changes
     useEffect(() => {
         if (!sessionId) return;
@@ -181,10 +187,22 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         const syncMessages = async () => {
             if (typeof document !== "undefined" && document.hidden) return;
             try {
-                const res = await fetch(`/api/support/messages?session_id=${sessionId}`);
+                // Incremental: ask only for rows newer than the newest confirmed
+                // message. Optimistic "temp-" rows are skipped because their
+                // timestamps are client-side.
+                const confirmed = messagesRef.current.filter((m) => !m.id.startsWith("temp-"));
+                const since = confirmed.length ? confirmed[confirmed.length - 1].created_at : "";
+                const qs = new URLSearchParams({ session_id: sessionId });
+                if (since) qs.set("since", since);
+                const res = await fetch(`/api/support/messages?${qs.toString()}`);
                 const data = await res.json();
                 if (data.messages && Array.isArray(data.messages)) {
                     setMessages((prev) => {
+                        if (data.incremental) {
+                            const prevIds = new Set(prev.map((m) => m.id));
+                            const fresh = data.messages.filter((m: any) => !prevIds.has(m.id));
+                            return fresh.length ? [...prev, ...fresh] : prev;
+                        }
                         const prevIds = new Set(prev.map((m) => m.id));
                         const hasNew = data.messages.some((m: any) => !prevIds.has(m.id));
                         if (!hasNew && prev.length === data.messages.length) return prev;
