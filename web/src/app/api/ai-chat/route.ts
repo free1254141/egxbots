@@ -1085,6 +1085,7 @@ export async function POST(req: NextRequest) {
                                 isVoiceCall,
                                 isVoiceNote,
                                 userRules,
+                                skipCache: Boolean(userRules),
                             }
                         );
 
@@ -1411,6 +1412,7 @@ export async function POST(req: NextRequest) {
                 gateMode: "audit_only",
                 autonomousRecommendations,
                 userRules,
+                skipCache: Boolean(userRules),
             }
         );
 

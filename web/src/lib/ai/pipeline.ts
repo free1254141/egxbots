@@ -1977,6 +1977,7 @@ export interface PipelineOptions {
     isVoice?: boolean;
     isVoiceCall?: boolean;
     isVoiceNote?: boolean;
+    skipCache?: boolean;
     /** Standing per-user rules loaded from profiles.custom_ai_rules. */
     userRules?: string;
 }
