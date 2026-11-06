@@ -2365,6 +2365,7 @@ async def generate_daily_recommendations(
     model_name: Optional[str] = None,
     bulk_cache_ttl_seconds: Optional[int] = None,
     run_context: Optional[Dict[str, Any]] = None,
+    preview_only: bool = False,
 ):
     """
     Rank EGX candidates and publish only within the configured public capacity.
@@ -2378,9 +2379,10 @@ async def generate_daily_recommendations(
         if run_context is not None:
             run_context["no_buy_reason"] = reason
             run_context["no_buy_reason_code"] = code
-        _mark_daily_cache_payload("recommendation_decision_audit", audit)
+        if not preview_only:
+            _mark_daily_cache_payload("recommendation_decision_audit", audit)
         print(f"[RECOMMENDATION_DECISION] {json.dumps(audit, ensure_ascii=False)}")
-        return 0
+        return 0 if not preview_only else {"preview": True, "reason_code": code, "reason": reason, "candidates": []}
 
     daily_limit = max(1, min(5, int(os.getenv("PUBLIC_RECOMMENDATION_DAILY_LIMIT", "4"))))
     rolling_limit = max(1, min(30, int(os.getenv("PUBLIC_RECOMMENDATION_ROLLING_LIMIT", "20"))))
@@ -2693,6 +2695,42 @@ async def generate_daily_recommendations(
 
     # Sort by risk_adjusted_return descending to prioritize safer risk-reward profiles
     results.sort(key=lambda x: x.get("risk_adjusted_return", 0.0), reverse=True)
+
+    if preview_only:
+        def _rr(item):
+            entry_p = float(item.get("last_close") or 0.0)
+            target_p = float(item.get("target_price") or 0.0)
+            stop_p = float(item.get("stop_loss") or 0.0)
+            risk = entry_p - stop_p
+            return round((target_p - entry_p) / risk, 2) if risk > 0 else None
+
+        return {
+            "preview": True,
+            "session": expected_session(),
+            "market_gate": {
+                "blocked": bool(market_gate.get("blocked")),
+                "reason": market_gate.get("reason"),
+                "regime": market_gate.get("regime"),
+            },
+            "total_passed": len(results),
+            "daily_limit": daily_limit,
+            "candidates": [
+                {
+                    "symbol": item.get("symbol"),
+                    "name": item.get("name"),
+                    "close": item.get("last_close"),
+                    "target": item.get("target_price"),
+                    "stop": item.get("stop_loss"),
+                    "risk_reward": _rr(item),
+                    "precision": item.get("precision"),
+                    "council_score": item.get("council_score"),
+                    "sector": item.get("sector_name"),
+                    "signal_date": item.get("date"),
+                }
+                for item in results[: max(daily_limit, 10)]
+            ],
+        }
+
     
     # The database RPC checks and reserves capacity atomically across workers.
 

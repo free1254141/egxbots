@@ -917,10 +917,11 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
     audit = df[df['date'].isin(audit_dates) & (df['volume'] >= df['vol_ma20'] * 1.2)].copy()
     signal_audit = []
     for _, row in audit.sort_values(['date', 'turnover'], ascending=False).head(120).iterrows():
+        volume_ma20 = float(row['vol_ma20'] or 0.0)
         signal_audit.append({
             'symbol': row['symbol'], 'date': row['date'],
             'breadth': round(float(row['breadth']), 4),
-            'volume_ratio': round(float(row['volume'] / row['vol_ma20']), 3),
+            'volume_ratio': round(float(row['volume']) / volume_ma20, 3) if volume_ma20 > 0 else None,
             'liquid': bool(row['liquid']),
             'trend_aligned': bool(row['close'] > row['ema10'] > row['ema20'] > row['ema50']),
             'breakout': bool(row['close'] > row['high20']),
