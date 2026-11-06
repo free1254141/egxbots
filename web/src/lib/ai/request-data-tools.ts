@@ -2,6 +2,7 @@ import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 import { isShariaCompliant } from '../shariaStocks';
+import { applyUserRulesToToolArgs, mergeUserRule } from './user-preferences';
 import {
     executeFairValueTool,
     executeShariaCleanserTool,
@@ -80,7 +81,30 @@ export const REQUEST_DATA_TOOLS_SCHEMA = [
 ];
 
 export async function executeRequestTool(name: string, args: any, db: any, userId: string, cache: ChartHistoryCache,
-    access: { isPro: boolean }): Promise<any> {
+    access: { isPro: boolean; userRules?: string }): Promise<any> {
+    args = applyUserRulesToToolArgs(name, args || {}, access.userRules);
+    if (name === 'save_user_preference') {
+        const rule = String(args.rule || '').trim();
+        if (!rule) {
+            return { status: 'error', availability: 'error', message: 'لم أفهم القاعدة المطلوب حفظها. أعد صياغتها في جملة واحدة.' };
+        }
+        if (!userId) {
+            return { status: 'unauthenticated', availability: 'error', message: 'يجب تسجيل الدخول لحفظ قاعدة دائمة.' };
+        }
+        try {
+            const { data } = await db.from('profiles').select('custom_ai_rules').eq('id', userId).maybeSingle();
+            const existing = String(data?.custom_ai_rules || '').trim();
+            const next = mergeUserRule(existing, rule);
+            if (next === existing) {
+                return { status: 'success', availability: 'available', saved: false, rules: existing, message: 'القاعدة دي محفوظة بالفعل وهطبقها في كل المحادثات الجاية.' };
+            }
+            const { error } = await db.from('profiles').update({ custom_ai_rules: next }).eq('id', userId);
+            if (error) throw error;
+            return { status: 'success', availability: 'available', saved: true, rules: next, message: `تم حفظ القاعدة الدائمة: «${rule}». هطبقها تلقائياً في كل المحادثات الجاية.` };
+        } catch (error: any) {
+            return { status: 'error', availability: 'error', message: `تعذر حفظ القاعدة: ${error?.message || 'خطأ غير معروف'}` };
+        }
+    }
     if (name === 'get_fair_value') {
         return await executeFairValueTool(args, db);
     }

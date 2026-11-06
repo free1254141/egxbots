@@ -4,6 +4,7 @@ import { PLANNED_READ_TOOLS_SCHEMA } from "./planned-read-tools";
 import { SessionState, SessionSummary, VisionContext } from "./types";
 import { ExcelTable } from "./excel-tables";
 import { CHART_STRATEGY_TOOL_SCHEMA, type ChartContext } from "./chart-strategy-tools";
+import { buildUserRulesPrompt } from "./user-preferences";
 
 export interface PipelineOptions {
     diagnosticCapture?: (type: string, data: any) => void;
@@ -22,6 +23,8 @@ export interface PipelineOptions {
     isVoiceCall?: boolean;
     isVoiceNote?: boolean;
     skipCache?: boolean;
+    /** Standing per-user rules loaded from profiles.custom_ai_rules. */
+    userRules?: string;
 }
 
 export interface AgenticToolCall {
@@ -67,6 +70,23 @@ export const AGENTIC_TOOLS_SCHEMA = [
                         "description": "سبب الإيقاف بناءً على رغبة المستخدم"
                     }
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_user_preference",
+            "description": "حفظ قاعدة أو تفضيل دائم للمستخدم في ذاكرته عبر كل المحادثات القادمة (مثل: «من دلوقتي أي توصية تكون متوافقة مع الشريعة»، «أنا أفضّل السوينغ القصير فقط»، «تجنب الأسهم دي»، «كل تحليلاتي تكون مختصرة»). استدعِ هذه الأداة فوراً بمجرد أن يعبّر المستخدم عن قاعدة دائمة أو يطلب تذكّرها، ثم أكّد له أنها اتحفظت. لا تستخدمها للطلبات اللحظية المؤقتة.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rule": {
+                        "type": "string",
+                        "description": "نص القاعدة الدائمة كما فهمتها من المستخدم، بصياغة قصيرة وواضحة."
+                    }
+                },
+                "required": ["rule"]
             }
         }
     },
@@ -412,6 +432,7 @@ export const VOICE_INTERACTION_SYSTEM_PROMPT = `
 `;
 
 export const AGENTIC_SYSTEM_PROMPT = `أنت ARTORO، مساعد تحليل البورصة المصرية. افهم العامية والمتابعة من الحوار والرموز السابقة؛ اختيار النية والأدوات مسؤوليتك.
+قاعدة الذاكرة الدائمة (Standing Preferences): إذا عبّر المستخدم عن قاعدة دائمة تنطبق على كل المحادثات القادمة (مثل «من دلوقتي أي توصية تكون متوافقة مع الشريعة»، «أنا سوينغ قصير فقط»، «تجنب السهم الفلاني»، «خلي إجاباتك مختصرة»)، فاستدعِ أداة save_user_preference فوراً بنص القاعدة، وأكّد أنه اتحفظ. القواعد المحفوظة تُحقن تلقائياً في كل جلسة، والتزم بها دائماً قبل أي أداة أو رد.
 قاعدة الإلزام الصارم لاستدعاء أدوات الأسعار والدعوم والمقاومات والمستهدفات ومنع التخمين من الذاكرة (Zero Hallucination Stock Grounding): يُمنع منعاً باتاً (STRICTLY PROHIBITED) كتابة أو تخمين أو تقدير أو ذكر أي سعر لسهم، أو نسبة تغير، أو مستويات دعم ومقاومة، أو مستهدفات، أو مؤشرات فنية (RSI, MACD, EMA) من الذاكرة أو من أوزان النموذج التوليدي دون استدعاء فعلي للأداة المختصة (get_stock و get_stock_levels لتحليل ومستويات السهم، و get_live_quote عند طلب السعر اللحظي أو التأكد). أي سؤال يتضمن اسم أو رمز سهم وطلب سعره أو مستوياته أو دعومه ومقاوماته (مثل «سعر فوري كام دلوقتي ومستهدفاته»، «كم سعر كذا»، «أرقام ومستويات سهم كذا»، «فوري بكام») يلزم حتماً وفي الجولة الأولى (Round 0) استدعاء الأدوات المعنية لجلب الأرقام الحقيقية الموثقة من قاعدة البيانات والمزود. في وصف المصدر: صف سعر جلسة اليوم كسعر الإغلاق المتداول المتاح لتاريخ الجلسة؛ وإذا كان وقت الجلب بعد انتهاء جلسة تداول البورصة المصرية (بعد الساعة 15:00 بتوقيت القاهرة)، فلا تكرر التحفظ المربك «غير مؤكد كإغلاق نهائي» الذي يشكك في بيانات الجلسة المنتهية، بل اذكر ببساطة: سعر إغلاق جلسة [التاريخ]. RSI أقل من 30، مثل 26.72، داخل النطاق التقليدي للتشبع البيعي لا مجرد قربه، دون ضمان ارتداد. MACD السالب بالنسبة للصفر قد يكون أعلى إشارته؛ افصل العلاقتين. ترتيب أقصى الهبوط يعتمد على أصغر مقدار للمقياس في نفس الاختبار لا العائد. تعادل الأرقام اليوم لا يثبت ثباتها تاريخياً، ودرجة التجميع إشارة نموذج لا إثبات لشراء المؤسسات. إذا سأل المستخدم عن عدد أيام التجميع (مثل «التجميع كام يوم» أو «بقالها كام يوم تجميع»)، راجع الحقل consecutive_acc_days أو consecutive_dist_days من get_stock أو get_comparison أو get_accumulation_stocks وأجب بعدد الجلسات المتتالية المسجلة بدقة (مثلاً جلسة واحدة أو أكثر)، ولا تقل إنك لا تعرف أو إن الأداة تعرض لقطة يوم واحد فقط بدون عدد أيام.
 ${ARTORO_PLATFORM_CONTEXT}
 تصحيح مركز في متابعة: استخرج الرمز والكمية ومتوسط الشراء من الحوار والأدلة المحفوظة، مع أولوية آخر تصحيح صريح للمستخدم لكل حقل. «أسهمي ٢١١٤» بعد تحليل مركز واحد تصحيح كميته، لا رمز جديد ولا طلب إعادة إدخال بقية حقوله. استخدم متوسطه السابق إذا لم يغيره المستخدم واستدع calculate_position؛ إذا غيّر المتوسط في رسالة تالية استخدم الكمية المصححة واستدع calculate_position مجدداً في نفس الجولة. كل تغيير للكمية أو المتوسط يلزمه حساب جديد بالأداة؛ لا تحسب التكلفة أو الربح ذهنياً ولا تعِد استعمال حساب المركز قبل التصحيح، حتى إذا بقي السعر نفسه. عند تعدد مراكز محتملة اسأل عن الرمز فقط. الحساب مؤقت؛ لا تحفظ أو تحدث المحفظة دون طلب حفظ صريح.
@@ -484,7 +505,8 @@ export async function* runAgenticPipelineStream(
     // Voice Notes in chat (isVoiceNote) produce the standard full written response with complete
     // markdown tables, identical to regular chat, while spoken audio is synthesized separately via extractVoiceAnalysisSpeech.
     const isLiveVoiceCall = Boolean(options.isVoiceCall);
-    const activeSystemPrompt = isLiveVoiceCall ? `${AGENTIC_SYSTEM_PROMPT}\n\n${VOICE_INTERACTION_SYSTEM_PROMPT}` : AGENTIC_SYSTEM_PROMPT;
+    const activeSystemPrompt = (isLiveVoiceCall ? `${AGENTIC_SYSTEM_PROMPT}\n\n${VOICE_INTERACTION_SYSTEM_PROMPT}` : AGENTIC_SYSTEM_PROMPT)
+        + buildUserRulesPrompt(options.userRules);
 
     yield* runAgenticRuntime({ userMessage, images, sessionState, sessionSummary, history,
         supabase, apiKeys, userId, sessionId, messageId, requestedModel, options,

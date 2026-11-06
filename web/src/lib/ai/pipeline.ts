@@ -1977,6 +1977,8 @@ export interface PipelineOptions {
     isVoice?: boolean;
     isVoiceCall?: boolean;
     isVoiceNote?: boolean;
+    /** Standing per-user rules loaded from profiles.custom_ai_rules. */
+    userRules?: string;
 }
 
 /** Central publication decision for every response origin, including deterministic portfolio renderers. */
