@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { trackEvent } from "@/lib/gtm";
 
 import { broadcastEntitlements } from "@/lib/entitlements";
 export { broadcastEntitlements };
@@ -291,7 +292,16 @@ export default function PricingClient() {
             }
           } catch {}
         }
-        const response = await fetch("/api/payment/easykash/config", { headers, cache: "no-store" });
+        const response = await fetch(
+          user ? "/api/payment/easykash/config" : "/api/payment/public-config",
+          {
+            headers,
+            // Anonymous visitors share one CDN-cached document; signed-in
+            // visitors need their own grandfathered/promo state, so only that
+            // request must bypass the cache.
+            cache: user ? "no-store" : "default",
+          }
+        );
         if (!response.ok) throw new Error("Payment configuration unavailable");
         const local = await response.json();
         if (!cancelled) setLocalConfig(local);
@@ -306,6 +316,11 @@ export default function PricingClient() {
       cancelled = true;
     };
   }, [user]);
+
+  // Funnel step 1 of 3 (GTM): the visitor reached pricing.
+  useEffect(() => {
+    trackEvent("pricing_view", { signed_in: Boolean(user?.id) });
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) {
@@ -467,6 +482,7 @@ export default function PricingClient() {
 
   const startEasyKashPayment = async (planId = selectedPlan) => {
     if (!user) {
+      trackEvent("checkout_login_required", { plan: planId });
       router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
       return;
     }
