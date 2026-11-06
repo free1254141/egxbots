@@ -23,14 +23,8 @@ function getBackendUrl(): string {
 async function isUserPro(supabase: ReturnType<typeof getSupabaseAdminClient>, user: { id: string; email?: string | null }): Promise<boolean> {
   if (isAllowedAdminEmail(user.email)) return true;
 
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (prof?.role === "admin" || prof?.role === "pro") return true;
-
+  // `profiles` has no `role` column; selecting it raised 42703 on every call.
+  // Entitlement is derived from the subscription rows below.
   const { data: subs } = await supabase
     .from("subscriptions")
     .select("plan_id,status,current_period_end")
