@@ -86,6 +86,7 @@ export default function LandingClient() {
     const [showStickyCta, setShowStickyCta] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
     const [googleError, setGoogleError] = useState<string | null>(null);
+    const [planConfig, setPlanConfig] = useState<any>(null);
 
     const handleGoogleSignup = async () => {
         if (googleLoading) return;
@@ -187,6 +188,17 @@ export default function LandingClient() {
             .catch(() => {});
     }, []);
 
+    // Pricing teaser data. Served by the CDN-cached public config, so the
+    // section costs one cache hit and never exposes a per-user price.
+    useEffect(() => {
+        fetch("/api/payment/public-config")
+            .then(res => res.json())
+            .then(data => {
+                if (data && Array.isArray(data.plans)) setPlanConfig(data);
+            })
+            .catch(() => {});
+    }, []);
+
     // Mobile sticky CTA: appears once the hero is scrolled past.
     useEffect(() => {
         const onScroll = () => setShowStickyCta(window.scrollY > 700);
@@ -231,6 +243,30 @@ export default function LandingClient() {
         }
         return Object.values(daysMap).sort((a: any, b: any) => a.day - b.day);
     };
+
+    // Three Pro durations only — the lifetime option stays on the pricing page
+    // so this section stays short. Prices come from the public config.
+    const PRO_PLAN_META: Record<string, { labelAr: string; labelEn: string; periodAr: string; periodEn: string }> = {
+        pro: { labelAr: "شهري", labelEn: "Monthly", periodAr: "كل شهر", periodEn: "per month" },
+        pro_6m: { labelAr: "6 أشهر", labelEn: "6 months", periodAr: "كل 6 أشهر", periodEn: "every 6 months" },
+        pro_1y: { labelAr: "سنوي", labelEn: "Yearly", periodAr: "كل سنة", periodEn: "per year" },
+    };
+    const pricingPlans = planConfig?.enabled
+        ? ["pro", "pro_6m", "pro_1y"]
+            .map((id) => {
+                const plan = (planConfig.plans || []).find((p: any) => p?.id === id);
+                if (!plan) return null;
+                const meta = PRO_PLAN_META[id];
+                return {
+                    id,
+                    label: isAr ? meta.labelAr : meta.labelEn,
+                    period: isAr ? meta.periodAr : meta.periodEn,
+                    price: Number(plan.amount_egp || 0).toLocaleString("en-US"),
+                    badge: plan.discount?.active ? (isAr ? "عرض المؤسسين" : "Founders offer") : null,
+                };
+            })
+            .filter(Boolean) as Array<{ id: string; label: string; period: string; price: string; badge: string | null }>
+        : [];
 
     const scanners = [
         {
@@ -1314,6 +1350,69 @@ export default function LandingClient() {
                     </div>
                 </div>
             </section>
+
+            {/* Compact pricing teaser. Three Pro durations straight from the
+                cached public config; the full comparison stays on /pricing. */}
+            {pricingPlans.length > 0 && (
+                <section id="pricing" className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950">
+                    <div className="max-w-5xl mx-auto">
+                        <div className="text-center mb-12">
+                            <div className="inline-block border-4 border-black dark:border-white px-3 py-1.5 neobrutal-bg-orange text-black font-black text-xs uppercase tracking-widest rotate-[1deg] mb-4">
+                                {isAr ? "الاشتراك" : "PRICING"}
+                            </div>
+                            <h2 className="text-3xl sm:text-5xl font-black text-black dark:text-white tracking-tight">
+                                {isAr ? "اختار مدة الاشتراك اللي تناسبك" : "Pick the Pro duration that suits you"}
+                            </h2>
+                            <p className="mt-3 text-sm sm:text-base font-bold text-zinc-600 dark:text-zinc-400">
+                                {isAr
+                                    ? "كل باقات Pro بتفتح نفس المميزات — الفرق في المدة والسعر."
+                                    : "Every Pro plan unlocks the same features — only the duration and price differ."}
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                            {pricingPlans.map((plan) => (
+                                <div key={plan.id} className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 flex flex-col shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
+                                    <div className="text-xs font-black uppercase tracking-widest text-zinc-500">{plan.label}</div>
+                                    <div className="mt-3 flex items-baseline gap-1.5">
+                                        <span className="text-4xl font-black font-mono text-black dark:text-white">{plan.price}</span>
+                                        <span className="text-sm font-black text-zinc-500">{isAr ? "ج.م" : "EGP"}</span>
+                                    </div>
+                                    <div className="mt-1 text-xs font-bold text-zinc-500">{plan.period}</div>
+                                    {plan.badge && (
+                                        <div className="mt-3 self-start border-2 border-black dark:border-white bg-amber-300 px-2 py-0.5 text-[10px] font-black uppercase text-black">
+                                            {plan.badge}
+                                        </div>
+                                    )}
+                                    <Link
+                                        href={`/pricing?plan=${plan.id}`}
+                                        onClick={() => trackEvent("landing_pricing_click", { plan: plan.id })}
+                                        className="mt-6 h-12 border-4 border-black dark:border-white neobrutal-bg-yellow text-black font-black uppercase tracking-wider text-xs sm:text-sm flex items-center justify-center gap-2 hover:translate-x-[-2px] hover:translate-y-[-2px] transition-transform duration-100"
+                                    >
+                                        {isAr ? "اختار الباقة" : "Choose plan"}
+                                        <ArrowRight className={`w-4 h-4 ${isAr ? "rotate-180" : ""}`} />
+                                    </Link>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="mt-8 text-center space-y-3">
+                            <Link
+                                href="/pricing"
+                                onClick={() => trackEvent("landing_pricing_click", { plan: "all" })}
+                                className="inline-block text-sm font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 hover:underline"
+                            >
+                                {isAr ? "شوف المقارنة الكاملة والتفاصيل ←" : "See the full comparison →"}
+                            </Link>
+                            <p className="text-[11px] sm:text-xs font-bold text-zinc-500">
+                                {isAr
+                                    ? "فيه باقة مجانية تبدأ بيها من غير كارت. الدفع عبر EasyKash."
+                                    : "A free plan is available with no card. Payments via EasyKash."}
+                            </p>
+                        </div>
+                    </div>
+                </section>
+            )}
 
             {/* Final CTA Banner */}
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950">
