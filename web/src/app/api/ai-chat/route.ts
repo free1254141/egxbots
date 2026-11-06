@@ -27,7 +27,7 @@ import {
     personalizeCachedAnalysis,
     setVipAnalysisCache,
 } from "@/lib/ai/analysis-cache";
-import { extractVoiceAnalysisSpeech, cleanVoiceText, VOICE_NOTE_TTS } from "@/lib/voice-utils";
+import { extractVoiceAnalysisSpeech, VOICE_NOTE_TTS } from "@/lib/voice-utils";
 import { generateVoiceNoteSpokenScript } from "@/lib/ai/voice-summarizer";
 
 export const runtime = "nodejs";
@@ -44,6 +44,37 @@ const BLOCKED_INPUT_PATTERNS = [
 function filterInput(text: string): boolean {
     const lowered = text.toLowerCase();
     return !BLOCKED_INPUT_PATTERNS.some(pattern => lowered.includes(pattern));
+}
+
+const VOICE_TTS_BACKEND_URL = (
+    process.env.PYTHON_BACKEND_URL ||
+    process.env.TRADING_SIGNALS_API_URL ||
+    "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
+/**
+ * Fire-and-forget pre-warm using the exact text/voice/rate/pitch the browser
+ * will request, so the browser lands on a warm backend cache instead of
+ * synthesising the same sentence a second time.
+ *
+ * The response body MUST be consumed: abandoning the body can stall the
+ * backend stream before it finishes writing the cache entry.
+ */
+function prewarmVoiceNoteTts(spokenText: string | null | undefined): void {
+    if (!spokenText) return;
+    fetch(`${VOICE_TTS_BACKEND_URL}/api/voice/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            text: spokenText,
+            voice: VOICE_NOTE_TTS.voice,
+            rate: VOICE_NOTE_TTS.rate,
+            pitch: VOICE_NOTE_TTS.pitch,
+        }),
+        signal: AbortSignal.timeout(20_000),
+    })
+        .then((res) => res.arrayBuffer())
+        .catch(() => {});
 }
 
 function filterOutput(response: string): string {
@@ -936,14 +967,7 @@ export async function POST(req: NextRequest) {
                                 );
 
                                 const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? await generateVoiceNoteSpokenScript(personalizedReply, message, getDeepSeekApiKey()) : null);
-                                if (spokenText) {
-                                    const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-                                    fetch(`${backendUrl}/api/voice/tts`, {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
-                                    }).catch(() => {});
-                                }
+                                prewarmVoiceNoteTts(spokenText);
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -1192,17 +1216,12 @@ export async function POST(req: NextRequest) {
                                         spokenText = await generateVoiceNoteSpokenScript(replyText, message, getDeepSeekApiKey());
                                     }
 
+                                    // Pre-warm the exact TTS payload the browser will request.
+                                    prewarmVoiceNoteTts(spokenText);
+
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             if (spokenText) {
-                                                 const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-                                                 fetch(`${backendUrl}/api/voice/tts`, {
-                                                     method: "POST",
-                                                     headers: { "Content-Type": "application/json" },
-                                                     body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
-                                                 }).catch(() => {});
-                                             }
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,

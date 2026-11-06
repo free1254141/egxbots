@@ -5,6 +5,65 @@ from api.stock_ai import _init_supabase, supabase
 
 CAIRO_TZ = zoneinfo.ZoneInfo("Africa/Cairo")
 
+# Mirrors web/src/lib/ai/plan-gate.ts PRO_PLAN_IDS.
+PRO_PLAN_IDS = {"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"}
+
+
+def _active_pro_user_ids() -> set:
+    """Unique users with a live Pro entitlement (expiry-aware).
+
+    Counting raw active/trialing rows overstates Pro users because expired
+    trials keep their old status until a cleanup worker updates them, and a
+    user can have more than one subscription row. This mirrors the website's
+    entitlement rules: Pro plan + active/trialing + not past current_period_end.
+    """
+    _init_supabase()
+    if not supabase:
+        return set()
+
+    try:
+        res = (
+            supabase.table("subscriptions")
+            .select("user_id,plan_id,status,current_period_end")
+            .in_("status", ["active", "trialing"])
+            .limit(10000)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[ANALYTICS] Pro count query error: {exc}")
+        return set()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    active_user_ids = set()
+    for row in res.data or []:
+        plan = str(row.get("plan_id") or "").lower()
+        status = str(row.get("status") or "").lower()
+        if plan not in PRO_PLAN_IDS or status not in ("active", "trialing"):
+            continue
+
+        end_raw = row.get("current_period_end")
+        if end_raw:
+            try:
+                end = datetime.datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=datetime.timezone.utc)
+                if end <= now:
+                    continue
+            except ValueError:
+                # Unparseable expiry is treated as expired, matching the web gate.
+                continue
+
+        user_id = row.get("user_id")
+        if user_id:
+            active_user_ids.add(str(user_id))
+
+    return active_user_ids
+
+
+def _count_active_pro_users() -> int:
+    return len(_active_pro_user_ids())
+
+
 def _get_cairo_day_bounds():
     """Returns (today_iso, yesterday_iso, now_cairo_str) based on Africa/Cairo timezone."""
     now_cairo = datetime.datetime.now(CAIRO_TZ)
@@ -34,9 +93,8 @@ def get_registrations_summary() -> str:
         count_yesterday = p_yesterday.count or 0
         count_total = p_total.count or 0
         
-        # 2. Pro subscribers count
-        sub_res = supabase.table("subscriptions").select("id", count="exact").in_("status", ["active", "trialing"]).execute()
-        count_pro = sub_res.count or 0
+        # 2. Pro subscribers count (expiry-aware, unique users)
+        count_pro = _count_active_pro_users()
         count_free = max(0, count_total - count_pro)
         
         # 3. Fetch latest 5 registered users from auth & profiles
@@ -253,8 +311,8 @@ def get_comprehensive_report() -> str:
         p_yesterday = supabase.table("profiles").select("id", count="exact").gte("created_at", yesterday_iso).lt("created_at", today_iso).execute()
         p_total = supabase.table("profiles").select("id", count="exact").limit(1).execute()
         
-        # Pro subscriptions
-        sub_res = supabase.table("subscriptions").select("id", count="exact").in_("status", ["active", "trialing"]).execute()
+        # Pro subscriptions (expiry-aware, unique users)
+        pro_count = _count_active_pro_users()
         
         # Activity
         act_today = supabase.table("user_activity_events").select("user_id", count="exact").gte("created_at", today_iso).limit(1000).execute()
@@ -278,7 +336,7 @@ def get_comprehensive_report() -> str:
             "👥 <b>المسجلين الجدد:</b>",
             f"• اليوم: <b>{p_today.count or 0}</b> | أمس: <b>{p_yesterday.count or 0}</b>",
             f"• إجمالي قاعدة المستخدمين: <b>{p_total.count or 0}</b> مستخدم",
-            f"• باقات VIP النشطة: <b>{sub_res.count or 0}</b> مشترك",
+            f"• باقات VIP النشطة: <b>{pro_count}</b> مشترك",
             "━━━━━━━━━━━━━━━━━━━━",
             "⚡ <b>النشاط والتفاعل (Engagement):</b>",
             f"• مستخدمين نشطين اليوم (DAU): <b>{dau_today}</b>",
@@ -333,11 +391,10 @@ def get_registrations_data(date_str: Optional[str] = None) -> Dict[str, Any]:
         res = supabase.table("profiles").select("id, created_at, whatsapp_number, display_name").gte("created_at", start_iso).lt("created_at", end_iso).order("created_at", desc=True).limit(50).execute()
         rows = res.data or []
 
-        # Check active subscriptions
+        # Check active subscriptions (expiry-aware, unique users)
         sub_users = set()
         try:
-            sub_res = supabase.table("subscriptions").select("user_id").in_("status", ["active", "trialing"]).execute()
-            sub_users = set(s["user_id"] for s in (sub_res.data or []) if s.get("user_id"))
+            sub_users = _active_pro_user_ids()
         except Exception:
             pass
 
@@ -487,8 +544,7 @@ def get_platform_kpis_data() -> Dict[str, Any]:
         total_p = supabase.table("profiles").select("id", count="exact").limit(1).execute()
         total_users = total_p.count or 0
 
-        pro_sub = supabase.table("subscriptions").select("id", count="exact").in_("status", ["active", "trialing"]).execute()
-        pro_count = pro_sub.count or 0
+        pro_count = _count_active_pro_users()
 
         # Today's signups
         today_p = supabase.table("profiles").select("id", count="exact").gte("created_at", today_iso).execute()

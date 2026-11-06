@@ -52,8 +52,8 @@ export type ChatMessage = {
 
     voiceAudioUrl?: string;
 
-    voiceDuration?: number;
-
+    voiceDuration?: number;
+
     spokenText?: string;
 
 };
@@ -741,7 +741,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                 const existing = sessionMessagesCache.current[sessionId] || getStoredMessages(sessionId);
 
                 const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
-                const localVoiceMap = new Map<number, { voiceAudioUrl?: string; voiceDuration?: number; isVoice?: boolean; isVoiceNote?: boolean }>();
+                const localVoiceMap = new Map<number, { voiceAudioUrl?: string; voiceDuration?: number; spokenText?: string; isVoice?: boolean; isVoiceNote?: boolean }>();
 
                 existing.forEach((m, idx) => {
 
@@ -769,7 +769,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                             isVoice: m.isVoice,
 
-                            isVoiceNote: m.isVoiceNote
+                            isVoiceNote: m.isVoiceNote,
+
+                            spokenText: m.spokenText
 
                         });
 
@@ -804,7 +806,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                         isVoice: srvMsg.isVoice ?? localVoice?.isVoice,
 
-                        isVoiceNote: srvMsg.isVoiceNote ?? localVoice?.isVoiceNote
+                        isVoiceNote: srvMsg.isVoiceNote ?? localVoice?.isVoiceNote,
+
+                        spokenText: srvMsg.spokenText ?? localVoice?.spokenText
 
                     };
 
@@ -1706,7 +1710,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 assistantMsg.content = stripMarkdownTables(sanitizeReply(data.reply || "معذرة، لم أتمكن من معالجة هذا الطلب."));
 
-                assistantMsg.tables = Array.isArray(data.tables) ? data.tables : undefined;
+                assistantMsg.tables = Array.isArray(data.tables) ? data.tables : undefined;
+
+                if (typeof data.spoken_text === "string") assistantMsg.spokenText = data.spoken_text;
 
                 assistantMsg.suggestedButtons = Array.isArray(data.suggested_buttons) ? data.suggested_buttons.map((button: unknown) => sanitizeUiLabel(String(button))).filter(Boolean) : undefined;
 

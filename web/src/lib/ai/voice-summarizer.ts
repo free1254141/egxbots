@@ -1,5 +1,5 @@
 import { getDeepSeekApiKey } from "./server-secrets";
-import { cleanVoiceText } from "../voice-utils";
+import { extractVoiceAnalysisSpeech } from "../voice-utils";
 
 /**
  * Generates a concise, natural, human conversational spoken audio script (< 2 minutes)
@@ -25,14 +25,14 @@ export async function generateVoiceNoteSpokenScript(
 
     // If no API key is available, fallback to programmatic cleaner gracefully
     if (!apiKey) {
-        return cleanVoiceText(writtenReply, 900);
+        return extractVoiceAnalysisSpeech(writtenReply, userQuery);
     }
 
     const prompt = `أنت «أرتورو» كبير المحللين الماليين للبورصة المصرية بمنصة EGX Bots.
 المستخدم أرسل رسالة صوتية (Voice Note). المطلوب منك كتابة النص المنطوق للتسجيل الصوتي البشري (Voice Note Spoken Script) الخاص بالرد، بأسلوب خبير مالي يتحدث باللهجة المصرية الراقية والواضحة والمباشرة.
 
 قواعد صارمة جداً (عدم الالتزام بها يعتبر خطأ فادحاً):
-1. المدة الصوتية: كلام يستغرق عند القراءة دقيقة إلى دقيقة ونصف فقط (بين 90 إلى 130 كلمة كحد أقصى - والحد الأقصى المطلق دقيقتين).
+1. المدة الصوتية: كلام يستغرق عند القراءة 35 إلى 55 ثانية فقط (بين 55 إلى 85 كلمة كحد أقصى - والحد الأقصى المطلق 60 ثانية).
 2. البدء مباشرة بالخلاصة والقرار الفني للسهم دون مقدمات شكلية مطولة («أهلاً بيك...»). ابدأ فوراً باسم السهم وحالته.
 3. الممنوعات القطعية:
    - ممنوع نهائياً قراءة الجداول أو أسماء الأعمدة أو سرد أرقام صماء وراء بعضها.
@@ -51,7 +51,7 @@ ${writtenReply.slice(0, 3500)}
 
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000); // 9s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout, then fast deterministic fallback
 
         const res = await fetch("https://api.deepseek.com/chat/completions", {
             method: "POST",
@@ -64,14 +64,14 @@ ${writtenReply.slice(0, 3500)}
                 messages: [
                     {
                         role: "system",
-                        content: "أنت أرتورو كبير المحللين الماليين للبورصة المصرية. مهمتك كتابة نص التسجيل الصوتي البشري المباشر (Voice Note Script) فقط باللهجة المصرية المهذبة والمختصرة في أقل من دقيقة ونصف.",
+                        content: "أنت أرتورو كبير المحللين الماليين للبورصة المصرية. مهمتك كتابة نص التسجيل الصوتي البشري المباشر (Voice Note Script) فقط باللهجة المصرية المهذبة والمختصرة في أقل من دقيقة.",
                     },
                     {
                         role: "user",
                         content: prompt,
                     },
                 ],
-                max_tokens: 500,
+                max_tokens: 380,
                 temperature: 0.3,
             }),
             signal: controller.signal,
@@ -81,7 +81,7 @@ ${writtenReply.slice(0, 3500)}
 
         if (!res.ok) {
             console.warn(`[voice-summarizer] DeepSeek API error: ${res.status}`);
-            return cleanVoiceText(writtenReply, 900);
+            return extractVoiceAnalysisSpeech(writtenReply, userQuery);
         }
 
         const data = await res.json();
@@ -107,5 +107,5 @@ ${writtenReply.slice(0, 3500)}
     }
 
     // Graceful fallback
-    return cleanVoiceText(writtenReply, 900);
+    return extractVoiceAnalysisSpeech(writtenReply, userQuery);
 }
