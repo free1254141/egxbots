@@ -47,6 +47,26 @@ interface TrialFunnel {
     variants: { A: TrialFunnelVariant; B: TrialFunnelVariant };
 }
 
+interface MarketingTemplate {
+    label: string;
+    subject: string;
+    body: string[];
+    when: string;
+}
+
+interface MarketingMessage {
+    id: string;
+    user_id: string | null;
+    email: string;
+    message_type: string;
+    channel: string;
+    status: string;
+    sent_at: string;
+    provider_message_id?: string | null;
+    metadata?: Record<string, unknown> | null;
+    label: string;
+}
+
 function FunnelStat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
     return (
         <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-2">
@@ -112,6 +132,11 @@ export default function BillingTab() {
     const [affSaving, setAffSaving] = useState(false);
 
     const [trialFunnel, setTrialFunnel] = useState<TrialFunnel | null>(null);
+    const [marketingMessages, setMarketingMessages] = useState<MarketingMessage[]>([]);
+    const [marketingTemplates, setMarketingTemplates] = useState<Record<string, MarketingTemplate>>({});
+    const [marketingCounts, setMarketingCounts] = useState<Record<string, number>>({});
+    const [marketingFilter, setMarketingFilter] = useState<string>("all");
+    const [expandedMessage, setExpandedMessage] = useState<string | null>(null);
 
     useEffect(() => {
         let active = true;
@@ -119,6 +144,15 @@ export default function BillingTab() {
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
                 if (active && data?.funnel) setTrialFunnel(data.funnel);
+            })
+            .catch(() => {});
+        fetch("/api/admin/marketing/messages?limit=200", { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (!active || !data) return;
+                setMarketingMessages(Array.isArray(data.messages) ? data.messages : []);
+                setMarketingTemplates(data.templates || {});
+                setMarketingCounts(data.counts || {});
             })
             .catch(() => {});
         return () => { active = false; };
@@ -302,6 +336,19 @@ export default function BillingTab() {
     );
     const totalAffiliateSales = affiliates.reduce((sum, a) => sum + Number(a.total_sales_count || 0), 0);
 
+    const filteredMarketingMessages = marketingFilter === "all"
+        ? marketingMessages
+        : marketingMessages.filter((message) => message.message_type === marketingFilter);
+    const marketingFilterTypes = [
+        "all",
+        ...Object.keys(marketingCounts).sort((a, b) => (marketingCounts[b] || 0) - (marketingCounts[a] || 0)),
+    ];
+    const formatSentAt = (value: string) => {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" });
+    };
+
     return (
         <div className="min-h-[70vh] py-10 px-4" dir="rtl">
             <div className="max-w-4xl mx-auto space-y-8">
@@ -335,6 +382,87 @@ export default function BillingTab() {
                         </>
                     ) : (
                         <p className="mt-3 text-xs font-black text-zinc-400 animate-pulse">جارٍ تحميل قمع التجربة...</p>
+                    )}
+                </div>
+
+                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-black uppercase tracking-widest text-emerald-600">الرسائل التلقائية للمستخدمين</h3>
+                            <p className="text-[11px] font-bold text-zinc-500 mt-1">
+                                كل إيميل تلقائي اتبعت فعلًا، مع نص القالب. أول رسالة للمستخدم الجديد هي ترحيب التجربة عند تفعيلها.
+                            </p>
+                        </div>
+                        <span className="border-2 border-black dark:border-white px-3 py-1 text-xs font-black" dir="ltr">
+                            {marketingMessages.length} messages
+                        </span>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                        {marketingFilterTypes.map((type) => {
+                            const active = marketingFilter === type;
+                            const label = type === "all"
+                                ? "الكل"
+                                : (marketingTemplates[type]?.label || type);
+                            const count = type === "all" ? marketingMessages.length : (marketingCounts[type] || 0);
+                            return (
+                                <button
+                                    key={type}
+                                    type="button"
+                                    onClick={() => { setMarketingFilter(type); setExpandedMessage(null); }}
+                                    className={`border-2 border-black dark:border-zinc-700 px-2.5 py-1 text-[11px] font-black transition-colors cursor-pointer ${active ? "bg-emerald-500 text-white" : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30"}`}
+                                >
+                                    {label} ({count})
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="mt-4 border-2 border-black dark:border-zinc-700 divide-y divide-zinc-200 dark:divide-zinc-800">
+                        {filteredMarketingMessages.length === 0 ? (
+                            <p className="p-4 text-xs font-black text-zinc-400">لا توجد رسائل مسجّلة بعد.</p>
+                        ) : filteredMarketingMessages.slice(0, 40).map((message) => {
+                            const template = marketingTemplates[message.message_type];
+                            const expanded = expandedMessage === message.id;
+                            return (
+                                <div key={message.id}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setExpandedMessage(expanded ? null : message.id)}
+                                        className="w-full text-right px-3 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer"
+                                    >
+                                        <span className="text-[10px] font-black px-2 py-0.5 bg-amber-300 text-black border border-black">
+                                            {message.label}
+                                        </span>
+                                        <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300" dir="ltr">{message.email}</span>
+                                        <span className="text-[10px] font-bold text-zinc-400" dir="ltr">{formatSentAt(message.sent_at)}</span>
+                                        <span className={`text-[10px] font-black px-2 py-0.5 border ${message.status === "sent" ? "text-emerald-600 border-emerald-600" : "text-red-600 border-red-600"}`}>
+                                            {message.status}
+                                        </span>
+                                        <span className="text-[10px] font-black text-zinc-400 ms-auto">{expanded ? "إخفاء النص ▲" : "عرض النص ▼"}</span>
+                                    </button>
+                                    {expanded && (
+                                        <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-900/60 text-xs leading-6 text-zinc-700 dark:text-zinc-300">
+                                            <div className="font-black text-zinc-950 dark:text-white">الموضوع: {template?.subject || message.message_type}</div>
+                                            <div className="text-[10px] font-bold text-amber-600 mt-1">وقت الإرسال التلقائي: {template?.when || "—"}</div>
+                                            <div className="mt-2 space-y-1">
+                                                {(template?.body || ["نص القالب غير متوفر لهذا النوع."]).map((line, index) => (
+                                                    <p key={index}>{line}</p>
+                                                ))}
+                                            </div>
+                                            {message.provider_message_id ? (
+                                                <div className="mt-2 text-[10px] font-bold text-zinc-400" dir="ltr">Resend ID: {message.provider_message_id}</div>
+                                            ) : (
+                                                <div className="mt-2 text-[10px] font-bold text-zinc-400">بدون معرف Resend (إرسال محاكى أو غير مؤكد).</div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {filteredMarketingMessages.length > 40 && (
+                        <p className="mt-2 text-[10px] font-bold text-zinc-400">يتم عرض أحدث 40 رسالة من {filteredMarketingMessages.length}.</p>
                     )}
                 </div>
 

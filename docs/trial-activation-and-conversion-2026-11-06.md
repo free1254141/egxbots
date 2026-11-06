@@ -99,7 +99,8 @@
 | :--- | :--- |
 | `web/src/lib/trial-funnel.ts` | حساب القمع (دالة نقية قابلة للاختبار) |
 | `web/src/app/api/admin/trials/funnel/route.ts` | `GET` أدمن فقط: يجمع trials + subscriptions + رسائل + أحداث |
-| `web/src/app/admin/components/BillingTab.tsx` | كارت «قمع التجربة المجانية» داخل تبويب Billing |
+| `web/src/app/admin/components/BillingTab.tsx` | كارت «قمع التجربة المجانية» + جدول «الرسائل التلقائية» |
+| `web/src/app/api/admin/marketing/messages/route.ts` | `GET` أدمن فقط: سجل `marketing_message_log` مع نص القوالب |
 
 **مخرجات القمع:**
 
