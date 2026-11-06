@@ -17,6 +17,13 @@ import {
     executePriceTrapsTool,
     executeRebalancePortfolioTool
 } from "./feature-tools";
+import {
+    buildToolResultCacheKey,
+    getCachedToolResult,
+    isToolResultCacheEnabled,
+    isToolResultCacheable,
+    setCachedToolResult,
+} from "./tool-result-cache";
 
 const normalizeSymbol = (value: unknown) => String(value).trim().toUpperCase().replace(/\.CA$/i, "");
 const finite = (value: unknown): number | null => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -142,14 +149,32 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
                 message: "تم إيقاف وضع التوصيات الحرة المستقلة للذكاء الاصطناعي بنجاح في الواجهة والعودة للوضع القياسي."
             };
         }
-        if (toolName === "get_live_quote") return await executeLiveQuoteTool(normalized,checkedClient(executionSupabase(supabase)));
-        if (PLANNED_READ_TOOL_NAMES.has(toolName)) return await executePlannedReadTool(toolName, normalized, checkedClient(executionSupabase(supabase)), todayInCairo());
-        if (chartTool) return await executeChartStrategyTool(toolName, normalized, checkedClient(executionSupabase(supabase)), chartHistoryCache);
-        if (toolName === "get_fair_value") return await executeFairValueTool(normalized, checkedClient(executionSupabase(supabase)));
-        if (toolName === "get_sharia_cleanser") return await executeShariaCleanserTool(normalized, checkedClient(executionSupabase(supabase)));
-        if (toolName === "get_price_traps") return await executePriceTrapsTool(normalized, checkedClient(executionSupabase(supabase)), true);
-        if (toolName === "rebalance_portfolio") return await executeRebalancePortfolioTool(normalized, checkedClient(executionSupabase(supabase)), userId);
-        return await executeRawTool(toolName,normalized,checkedClient(executionSupabase(supabase)),userId);
+        // Public, read-only tools return the same value for every viewer on the
+        // same trading day, so repeated questions reuse today's computation.
+        const toolCacheKey = isToolResultCacheEnabled() && isToolResultCacheable(toolName)
+            ? buildToolResultCacheKey(toolName, normalized)
+            : null;
+        if (toolCacheKey) {
+            const cachedTool = await getCachedToolResult(toolCacheKey, executionSupabase(supabase));
+            if (cachedTool !== null) return cachedTool;
+        }
+
+        const dispatchTool = async (): Promise<any> => {
+            if (toolName === "get_live_quote") return await executeLiveQuoteTool(normalized,checkedClient(executionSupabase(supabase)));
+            if (PLANNED_READ_TOOL_NAMES.has(toolName)) return await executePlannedReadTool(toolName, normalized, checkedClient(executionSupabase(supabase)), todayInCairo());
+            if (chartTool) return await executeChartStrategyTool(toolName, normalized, checkedClient(executionSupabase(supabase)), chartHistoryCache);
+            if (toolName === "get_fair_value") return await executeFairValueTool(normalized, checkedClient(executionSupabase(supabase)));
+            if (toolName === "get_sharia_cleanser") return await executeShariaCleanserTool(normalized, checkedClient(executionSupabase(supabase)));
+            if (toolName === "get_price_traps") return await executePriceTrapsTool(normalized, checkedClient(executionSupabase(supabase)), true);
+            if (toolName === "rebalance_portfolio") return await executeRebalancePortfolioTool(normalized, checkedClient(executionSupabase(supabase)), userId);
+            return await executeRawTool(toolName,normalized,checkedClient(executionSupabase(supabase)),userId);
+        };
+
+        const toolResult = await dispatchTool();
+        if (toolCacheKey && toolResult && toolResult.status !== "error") {
+            await setCachedToolResult(toolCacheKey, toolResult, executionSupabase(supabase));
+        }
+        return toolResult;
     } catch (error:any) {
         if (toolName === "manage_portfolio") {
             return portfolioFailure(String(args?.operation || "view").toLowerCase(), "tool_execution_failed", error?.message || "تعذر تنفيذ عملية المحفظة.");
