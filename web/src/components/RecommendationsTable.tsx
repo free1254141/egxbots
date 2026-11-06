@@ -494,11 +494,11 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         return tDict[key]?.[isAr ? "ar" : "en"] || key;
     };
 
-    // Load recommendations from context. Force a refetch on mount so a newly
-    // published batch appears as soon as the user opens the recommendations tab
-    // instead of waiting for the old 24h in-memory freshness window.
+    // Load recommendations from context. Freshness is handled by the shared
+    // 5-minute window plus visibility refresh, so opening a tab does not fire a
+    // request on every switch.
     useEffect(() => {
-        loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined);
+        loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined);
     }, [loadRecommendations, isLandingPage, limit]);
 
     const refreshRecommendationData = useCallback(async () => {

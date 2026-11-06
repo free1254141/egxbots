@@ -2306,6 +2306,39 @@ def is_technical_no_buy(code) -> bool:
     return str(code or "").strip() in TECHNICAL_NO_BUY_CODES
 
 
+def _revalidate_recommendation_cache() -> bool:
+    """Invalidate the shared market query cache for published recommendations.
+
+    Scheduled runs already invalidate at the end of the daily job. Manual
+    publications bypass that path, so their rows would stay invisible behind the
+    shared Supabase query cache until the next scheduled run.
+    """
+    import urllib.request
+
+    base = (
+        os.getenv("NEXT_PUBLIC_SITE_URL")
+        or os.getenv("WEBSITE_URL")
+        or "https://egxbots.com"
+    ).rstrip("/")
+    secret = (
+        os.getenv("REVALIDATE_SECRET")
+        or os.getenv("ADMIN_SECRET_KEY")
+        or os.getenv("CRON_SECRET")
+    )
+    if not secret:
+        print("[RECOMMENDATIONS] Cache revalidation skipped: no secret configured.")
+        return False
+    url = f"{base}/api/revalidate?secret={secret}&tag=daily-recommendations"
+    try:
+        request = urllib.request.Request(url, method="POST", headers={"User-Agent": "EGX-Daily-Bot/1.0"})
+        with urllib.request.urlopen(request, timeout=45) as response:
+            print(f"[RECOMMENDATIONS] Cache revalidated with status {response.status}.")
+            return True
+    except Exception as error:
+        print(f"[RECOMMENDATIONS] Cache revalidation failed: {error}")
+        return False
+
+
 def apply_council_confirmation_boost(results, primary_model=None):
     """Treat a meta-label voter as a confirmation bonus, never as a veto.
 
@@ -2883,6 +2916,11 @@ async def generate_daily_recommendations(
     )
     audit.update(published=len(persisted_recommendations), reason_code="published" if persisted_recommendations else "publication_not_accepted")
     _mark_daily_cache_payload("recommendation_decision_audit", audit)
+
+    # A manual publication does not pass through the daily job's cache step.
+    # Without this, the website keeps serving the previous cached query result.
+    if persisted_recommendations and str((run_context or {}).get("trigger", "")).startswith("manual"):
+        _revalidate_recommendation_cache()
 
     # Notify Stocks Score subscribers with beautiful detailed summary card
     try:
