@@ -77,11 +77,10 @@ export default function LandingClient() {
     const [newsLoading, setNewsLoading] = useState(true);
     const [marketData, setMarketData] = useState<any>(null);
     const [marketLoading, setMarketLoading] = useState(true);
-    const [proof, setProof] = useState<{ recommendations: number | null; closed: number | null; win_rate: number | null; users: number | null }>({
+    const [proof, setProof] = useState<{ recommendations: number | null; closed: number | null; win_rate: number | null }>({
         recommendations: null,
         closed: null,
         win_rate: null,
-        users: null,
     });
     const [showStickyCta, setShowStickyCta] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
@@ -1201,12 +1200,11 @@ export default function LandingClient() {
                             {isAr ? "أرقام حقيقية من المنصة — مش وعود" : "Real numbers from the platform — not promises"}
                         </h2>
                     </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
                         {[
                             { label: isAr ? "توصية منشورة" : "Published picks", value: proof.recommendations != null ? proof.recommendations.toLocaleString("en-US") : "—", tone: "text-indigo-600 dark:text-indigo-400" },
                             { label: isAr ? "نتائج مغلقة" : "Closed outcomes", value: proof.closed != null ? proof.closed.toLocaleString("en-US") : "—", tone: "text-black dark:text-white" },
                             { label: isAr ? "معدل النجاح" : "Win rate", value: proof.win_rate != null ? `${proof.win_rate}%` : "—", tone: "text-emerald-600 dark:text-emerald-400" },
-                            { label: isAr ? "مستخدم مسجل" : "Registered users", value: proof.users != null ? proof.users.toLocaleString("en-US") : "—", tone: "text-amber-600 dark:text-amber-400" },
                         ].map((card) => (
                             <div key={card.label} className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950 p-5 sm:p-6 shadow-[5px_5px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_rgba(255,255,255,1)]">
                                 <div className={`text-3xl sm:text-4xl font-black font-mono ${card.tone}`}>{card.value}</div>

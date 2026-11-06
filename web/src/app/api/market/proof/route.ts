@@ -5,7 +5,7 @@ import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
 
 /**
  * Public proof numbers for the landing page (recommendation count, closed
- * outcomes, win rate, registered users).
+ * outcomes and win rate).
  *
  * Only aggregate counts are exposed — never a symbol, user id or trade level.
  * The result is cached for 24 hours and served from the Edge CDN, so the
@@ -21,17 +21,15 @@ type ProofStats = {
   recommendations: number | null;
   closed: number | null;
   win_rate: number | null;
-  users: number | null;
 };
 
 const loadProofStats = unstable_cache(
   async (): Promise<ProofStats> => {
     const db = getSupabaseServiceClient({ cacheMarketData: true });
-    const [all, wins, losses, users] = await Promise.all([
+    const [all, wins, losses] = await Promise.all([
       db.from("scan_results").select("id", { count: "exact", head: true }).eq("is_public", true),
       db.from("scan_results").select("id", { count: "exact", head: true }).eq("is_public", true).eq("status", "win"),
       db.from("scan_results").select("id", { count: "exact", head: true }).eq("is_public", true).eq("status", "loss"),
-      db.from("profiles").select("id", { count: "exact", head: true }),
     ]);
 
     const winCount = wins.count || 0;
@@ -42,7 +40,6 @@ const loadProofStats = unstable_cache(
       recommendations: all.count || 0,
       closed,
       win_rate: closed > 0 ? Math.round((winCount / closed) * 100) : null,
-      users: users.count || 0,
     };
   },
   ["market-proof-stats-v1"],
@@ -63,7 +60,7 @@ export async function GET() {
     });
   } catch {
     return NextResponse.json(
-      { recommendations: null, closed: null, win_rate: null, users: null },
+      { recommendations: null, closed: null, win_rate: null },
       { status: 200, headers: { "Cache-Control": "public, max-age=60" } }
     );
   }
