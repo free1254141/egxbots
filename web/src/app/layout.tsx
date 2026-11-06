@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     canonical: 'https://egxbots.com',
   },
   title: {
-    default: "ARTORO | شات وتحليل البورصة المصرية | EGX BOTS",
+    default: "EGX BOTS | تحليل البورصة المصرية بالذكاء الاصطناعي",
     template: "%s | EGX BOTS"
   },
   description: "EGX BOTS منصة لتحليل أسهم البورصة المصرية: تقييمات ذكاء اصطناعي يومية، ماسح فني، نتائج تاريخية، ومساعد تفاعلي عربي وإنجليزي.",

@@ -3,6 +3,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { invalidateByTag } from "@vercel/functions";
 import { DAILY_CACHE_TAG_VALUES } from "@/lib/cache/daily";
 import { refreshMarketQueries } from "@/lib/cache/market-query-cache";
+import { indexNowUrlsForTags, submitToIndexNow } from "@/lib/indexnow";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -68,6 +69,13 @@ async function handleRevalidate(req: NextRequest) {
       }
       await invalidateByTag(tags);
       cdnInvalidated.push(...tags);
+
+      // Tell IndexNow (Bing and friends) that these pages just changed, so they
+      // are recrawled instead of sitting in "discovered - not indexed".
+      const indexNowUrls = indexNowUrlsForTags(tags);
+      if (indexNowUrls.length) {
+        await submitToIndexNow(indexNowUrls);
+      }
     }
 
     if (path) {
