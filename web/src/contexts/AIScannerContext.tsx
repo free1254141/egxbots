@@ -152,7 +152,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     const recommendationsReqVersionRef = useRef(0);
     // The daily worker is the source of truth. Keep the browser snapshot for
     // one day and only refresh explicitly or after the next daily cycle.
-    const RECOMMENDATIONS_FRESH_MS = 24 * 60 * 60 * 1000;
+    const RECOMMENDATIONS_FRESH_MS = 5 * 60 * 1000;
     const [recsLoading, setRecsLoading] = useState(false);
     const [recsError, setRecsError] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
