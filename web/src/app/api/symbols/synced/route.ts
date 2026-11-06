@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
     const country = url.searchParams.get("country");
 
     if (!country) {
-      return NextResponse.json({ results: [] });
+      // Cache the empty result too: this branch is hit by clients that omit the
+      // parameter and used to fall back to Next's uncacheable default headers.
+      return NextResponse.json({ results: [] }, { headers: PUBLIC_CACHE_HEADERS });
     }
 
     const supabase = getSupabaseClient();

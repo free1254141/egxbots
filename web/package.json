@@ -82,7 +82,7 @@
     "typescript": "^5.3.3"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": "24.x"
   },
   "overrides": {
     "postcss": "$postcss"

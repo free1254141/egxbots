@@ -1,5 +1,12 @@
 import { NextRequest } from "next/server";
 
+// The route caches its public snapshot through the Next.js Data Cache, which
+// only exists inside a Next runtime. In Jest, call through directly so the
+// masking/locking behaviour below is still exercised per request.
+jest.mock("next/cache", () => ({
+  unstable_cache: (fn: (...args: any[]) => any) => (...args: any[]) => fn(...args),
+}));
+
 const calls: string[] = [];
 const FETCH_ROWS: Array<Record<string, unknown>> = [];
 

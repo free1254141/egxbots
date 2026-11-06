@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getSupabaseServiceClient, toNumber } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
@@ -8,10 +9,73 @@ import { applyRecommendationQuotes } from "@/lib/recommendation-quotes";
 const FREE_ENCRYPTED_OPEN_RETURN_PCT = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const RECOMMENDATION_FIELDS =
+  "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,entry_price,target_price,stop_loss,is_public,created_at,updated_at,exit_price,profit_loss_pct,top_reasons,rich_details";
+
 export const runtime = "nodejs";
+// Responses stay request-specific (locked vs unlocked rows depend on the viewer),
+// so the CDN must never share them. The expensive part — reading the public
+// snapshot from Supabase — is cached below in the Data Cache instead.
 export const dynamic = "force-dynamic";
-export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
+
+type RecommendationSnapshot = {
+  rows: Record<string, any>[];
+  sectors: Record<string, string>;
+};
+
+/**
+ * Public recommendation snapshot (rows + sector labels). Nothing in here is
+ * viewer-specific, so it is shared by anonymous and signed-in callers. The
+ * per-viewer masking/locking still happens on every request in `GET`.
+ */
+const loadRecommendationSnapshot = unstable_cache(
+  async (limit: number): Promise<RecommendationSnapshot> => {
+    const supabase = getSupabaseServiceClient({ cacheMarketData: true });
+    // The calendar and closed archive need every public recommendation.
+    // current_public_recommendations deduplicates by symbol and would erase
+    // historical wins/losses whenever that view exists.
+    const { data, error } = await supabase
+      .from("scan_results")
+      .select(RECOMMENDATION_FIELDS)
+      .eq("is_public", true)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+
+    let rows: Record<string, any>[] = data || [];
+    // Quote refresh is independent of trade evaluation. Never replace closed
+    // exit prices, and never infer a current quote from an old recommendation.
+    const openSymbols = [...new Set(rows.filter((row) => row.status === "open").map((row) => row.symbol))];
+    if (openSymbols.length) {
+      const since = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
+      const { data: quotes, error: quoteError } = await supabase.from("stock_prices")
+        .select("symbol,exchange,date,close,volume,updated_at")
+        .in("symbol", openSymbols).gte("date", since)
+        .order("date", { ascending: false }).limit(6000);
+      if (quoteError) throw quoteError;
+      rows = applyRecommendationQuotes(rows, quotes || []);
+    }
+
+    const symbols = Array.from(new Set(rows.map((row) => String(row.symbol || "")).filter(Boolean)));
+    const { data: fundamentals } = symbols.length
+      ? await supabase
+        .from("stock_fundamentals")
+        .select("symbol,data")
+        .in("symbol", symbols)
+      : { data: [] as Array<{ symbol: string; data?: Record<string, unknown> }> };
+
+    const sectors: Record<string, string> = {};
+    for (const row of fundamentals || []) {
+      sectors[String(row.symbol)] =
+        row.data?.sector || row.data?.Sector || row.data?.industry || "General";
+    }
+
+    return { rows, sectors };
+  },
+  ["ai-bot-recommendations-snapshot-v1"],
+  { revalidate: 900, tags: [DAILY_CACHE_TAGS.recommendations] }
+);
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -19,11 +83,8 @@ export async function GET(req: NextRequest) {
   const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
       ? Math.min(Math.floor(requestedLimit), 200)
       : 50;
-  const recommendationFields =
-    "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,entry_price,target_price,stop_loss,is_public,created_at,updated_at,exit_price,profit_loss_pct,top_reasons,rich_details";
-  
+
   try {
-    const supabase = getSupabaseServiceClient({ cacheMarketData: true });
     // Session + plan now resolve through in-memory freshness windows instead
     // of a Supabase auth round trip on every page view.
     const { authenticated, pro } = await getViewerContext(req);
@@ -33,31 +94,9 @@ export async function GET(req: NextRequest) {
     const cutoffTime = Date.now() - delayDays * 24 * 60 * 60 * 1000;
     // Round down the display cutoff; actionable-signal gating uses cutoffTime.
     const cutoff = new Date(Math.floor(cutoffTime / 86400000) * 86400000).toISOString();
-    // The calendar and closed archive need every public recommendation.
-    // current_public_recommendations deduplicates by symbol and would erase
-    // historical wins/losses whenever that view exists.
-    const recommendationsQuery = supabase
-      .from("scan_results")
-      .select(recommendationFields)
-      .eq("is_public", true);
-    const { data, error } = await recommendationsQuery
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (error) throw error;
-
-    let visibleData: any[] = data || [];
-    // Quote refresh is independent of trade evaluation. Never replace closed
-    // exit prices, and never infer a current quote from an old recommendation.
-    const openSymbols = [...new Set(visibleData.filter(row => row.status === "open").map(row => row.symbol))];
-    if (openSymbols.length) {
-      const since = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
-      const { data: quotes, error: quoteError } = await supabase.from("stock_prices")
-        .select("symbol,exchange,date,close,volume,updated_at")
-        .in("symbol", openSymbols).gte("date", since)
-        .order("date", { ascending: false }).limit(6000);
-      if (quoteError) throw quoteError;
-      visibleData = applyRecommendationQuotes(visibleData, quotes || []);
-    }
+    // Shared, viewer-independent snapshot from the Data Cache. Re-reading it per
+    // visitor used to run 3 Supabase queries on every request.
+    const { rows: visibleData, sectors } = await loadRecommendationSnapshot(limit);
     const closed = (row: Record<string, unknown>) => ["win", "loss"].includes(String(row.status || "").toLowerCase());
     const recommendationReturnPct = (row: Record<string, unknown>) => {
       if (closed(row)) return row.profit_loss_pct == null ? null : toNumber(row.profit_loss_pct, 0);
@@ -79,17 +118,7 @@ export async function GET(req: NextRequest) {
     // by `if (locked)` below (withholding symbol, name, and trade prices).
     // Settled outcomes (wins/losses) remain public for auditing.
 
-    const symbols = Array.from(new Set(visibleData.map((row: Record<string, unknown>) => String(row.symbol || "")).filter(Boolean)));
-    const { data: fundamentals } = symbols.length
-      ? await supabase
-        .from("stock_fundamentals")
-        .select("symbol,data")
-        .in("symbol", symbols)
-      : { data: [] as Array<{ symbol: string; data?: Record<string, unknown> }> };
-    const sectorMap = new Map((fundamentals || []).map((row: any) => [
-      String(row.symbol),
-      row.data?.sector || row.data?.Sector || row.data?.industry || "General",
-    ]));
+    const sectorMap = new Map(Object.entries(sectors));
 
     const results = visibleData.map((row: Record<string, unknown>) => {
       // Closed outcomes remain encrypted for Free users only during the 15-day delay window.
