@@ -127,4 +127,39 @@ def test_a_single_candidate_never_proves_dormancy():
     assert adjusted[0]["council_score"] == 30.0
 
 
+def test_confirmation_boost_never_lets_a_rejection_kill_the_score():
+    from api.daily_bot_run import apply_council_confirmation_boost
+
+    results = [
+        {"symbol": "COMI", "council_score": 30.0,
+         "detailed_votes": {"model_EGX.bin": 0.60, "KING.bin": 0.0}},
+        {"symbol": "ETEL", "council_score": 35.0,
+         "detailed_votes": {"model_EGX.bin": 0.60, "KING.bin": 0.70}},
+        {"symbol": "AMIA", "council_score": 25.0,
+         "detailed_votes": {"model_EGX.bin": 0.60, "KING.bin": 0.40}},
+    ]
+    adjusted = apply_council_confirmation_boost(results, "model_EGX.bin")
+    assert [row["council_score"] for row in adjusted] == [60.0, 65.0, 60.0]
+    assert [row["council_base_score"] for row in adjusted] == [60.0, 60.0, 60.0]
+
+
+def test_confirmation_boost_falls_back_to_the_strongest_voter():
+    from api.daily_bot_run import apply_council_confirmation_boost
+
+    results = [
+        {"symbol": "COMI", "council_score": 0.0,
+         "detailed_votes": {"KING.bin": 0.55, "model_EGX.bin": 0.62}},
+    ]
+    adjusted = apply_council_confirmation_boost(results, "unknown.bin")
+    assert adjusted[0]["council_score"] == 62.0
+
+
+def test_confirmation_boost_without_votes_is_unchanged():
+    from api.daily_bot_run import apply_council_confirmation_boost
+
+    results = [{"symbol": "COMI", "council_score": 44.0}]
+    assert apply_council_confirmation_boost(results, "model_EGX.bin") == results
+
+
+
 

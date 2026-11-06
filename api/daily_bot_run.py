@@ -2306,6 +2306,48 @@ def is_technical_no_buy(code) -> bool:
     return str(code or "").strip() in TECHNICAL_NO_BUY_CODES
 
 
+def apply_council_confirmation_boost(results, primary_model=None):
+    """Treat a meta-label voter as a confirmation bonus, never as a veto.
+
+    A meta-labeling member (e.g. KING) returns 0.0 whenever its strict meta
+    filter rejects. Averaging that zero with the base probability halves the
+    score and blocks every candidate. Here the base probability remains the
+    floor and the meta vote can only lift it, so a rejection never kills an
+    otherwise strong setup while an approval adds confidence.
+    """
+    primary_key = None
+    if primary_model:
+        for item in results:
+            votes = item.get("detailed_votes") or {}
+            if primary_model in votes:
+                primary_key = primary_model
+                break
+
+    adjusted = []
+    for item in results:
+        votes = {}
+        for name, value in (item.get("detailed_votes") or {}).items():
+            try:
+                votes[str(name)] = float(value or 0.0)
+            except (TypeError, ValueError):
+                continue
+        if not votes:
+            adjusted.append(item)
+            continue
+
+        key = primary_key or max(votes, key=votes.get)
+        base = votes.get(key, 0.0)
+        active = [value for name, value in votes.items() if name != key and value > 0]
+        score = max(base, (base + sum(active)) / (1 + len(active))) if active else base
+
+        row = dict(item)
+        row["council_score"] = round(score * 100.0, 1)
+        row["council_base_score"] = round(base * 100.0, 1)
+        row["council_mode"] = "confirmation_boost"
+        adjusted.append(row)
+    return adjusted
+
+
 def ignore_dormant_council_voters(results):
     """Recompute consensus without a council voter that is silent for every candidate.
 
@@ -2402,7 +2444,7 @@ async def generate_daily_recommendations(
         daily_count = base().gte("created_at", cairo_day.isoformat()).execute().count or 0
         rolling_count = governed().gte("created_at", (now_utc - dt.timedelta(days=30)).isoformat()).execute().count or 0
         open_count = governed().eq("status", "open").execute().count or 0
-        if daily_count >= daily_limit or rolling_count >= rolling_limit or open_count >= open_limit:
+        if not preview_only and (daily_count >= daily_limit or rolling_count >= rolling_limit or open_count >= open_limit):
             print(f"[RECOMMENDATIONS] Capacity reached: day={daily_count}/{daily_limit}, rolling={rolling_count}/{rolling_limit}, open={open_count}/{open_limit}.")
             return no_buy("capacity", f"تم بلوغ الحد المسموح للتوصيات: يومي {daily_count}/{daily_limit}، شهري {rolling_count}/{rolling_limit}، مفتوح {open_count}/{open_limit}.")
     except Exception as capacity_error:
@@ -2547,14 +2589,23 @@ async def generate_daily_recommendations(
     print(f"[RECOMMENDATIONS] ML scan found {len(results)} BUY signals.")
 
     if council_model:
-        results, dormant_voters, council_unavailable = ignore_dormant_council_voters(results)
-        if dormant_voters:
-            audit["dormant_council_voters"] = dormant_voters
+        council_mode = os.getenv("COUNCIL_AGGREGATION_MODE", "confirmation_boost").strip().lower()
+        if council_mode == "confirmation_boost":
+            results = apply_council_confirmation_boost(results, resolved_model)
+            audit["council_aggregation"] = "confirmation_boost"
             audit["candidates"] = [{**candidate_assessment(item), "council_score": item.get("council_score"),
+                                    "council_base_score": item.get("council_base_score"),
                                     "entry_liquidity": item.get("entry_liquidity")} for item in results]
-            print(f"[RECOMMENDATIONS] Ignoring dormant council voter(s) with no signal for any candidate: {', '.join(dormant_voters)}")
-        if council_unavailable:
-            return no_buy("council_unavailable", "لم يصدر أي عضو في مجلس النماذج نتيجة صالحة لأي مرشح؛ تم تأجيل الشراء احترازيًا بدل اعتبار المرشحين مرفوضين.")
+            print("[RECOMMENDATIONS] Council mode: confirmation_boost (meta vote can only lift, never veto)")
+        else:
+            results, dormant_voters, council_unavailable = ignore_dormant_council_voters(results)
+            if dormant_voters:
+                audit["dormant_council_voters"] = dormant_voters
+                audit["candidates"] = [{**candidate_assessment(item), "council_score": item.get("council_score"),
+                                        "entry_liquidity": item.get("entry_liquidity")} for item in results]
+                print(f"[RECOMMENDATIONS] Ignoring dormant council voter(s) with no signal for any candidate: {', '.join(dormant_voters)}")
+            if council_unavailable:
+                return no_buy("council_unavailable", "لم يصدر أي عضو في مجلس النماذج نتيجة صالحة لأي مرشح؛ تم تأجيل الشراء احترازيًا بدل اعتبار المرشحين مرفوضين.")
         def _normalize_percent_score(value: object, default: float = 0.0) -> float:
             try:
                 score = float(value)
