@@ -1,10 +1,12 @@
 import json
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 from api.social_facebook_publisher import (
     get_facebook_credentials,
     select_primary_daily_report,
     publish_photo_to_facebook_page,
+    publish_photo_with_retries,
     auto_publish_daily_report_to_facebook,
     is_report_publishable_with_content,
 )
@@ -72,6 +74,62 @@ def test_publish_photo_to_facebook_page_calls_graph_api():
 
     assert res["success"] is True
     assert res["post_id"] == "fb_post_789"
+
+
+def test_publish_photo_with_retries_succeeds_after_three_transient_failures(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise urllib.error.URLError("The handshake operation timed out")
+        return {"success": True, "post_id": "fb_after_retry"}
+
+    monkeypatch.setattr("api.social_facebook_publisher.publish_photo_to_facebook_page", flaky)
+    monkeypatch.setattr("api.social_facebook_publisher.time.sleep", lambda _s: None)
+
+    res = publish_photo_with_retries("https://test.com/p.png", "cap", "page", "token")
+
+    assert res["post_id"] == "fb_after_retry"
+    assert calls["n"] == 4  # first attempt + 3 retries
+
+
+def test_publish_photo_with_retries_gives_up_after_three_retries(monkeypatch):
+    calls = {"n": 0}
+
+    def always_down(**kwargs):
+        calls["n"] += 1
+        raise TimeoutError("handshake timed out")
+
+    monkeypatch.setattr("api.social_facebook_publisher.publish_photo_to_facebook_page", always_down)
+    monkeypatch.setattr("api.social_facebook_publisher.time.sleep", lambda _s: None)
+
+    try:
+        publish_photo_with_retries("https://test.com/p.png", "cap", "page", "token")
+        assert False, "expected TimeoutError"
+    except TimeoutError:
+        pass
+
+    assert calls["n"] == 4
+
+
+def test_publish_photo_with_retries_does_not_retry_graph_api_errors(monkeypatch):
+    calls = {"n": 0}
+
+    def api_error(**kwargs):
+        calls["n"] += 1
+        raise urllib.error.HTTPError("https://graph.facebook.com", 400, "Bad Request", {}, None)
+
+    monkeypatch.setattr("api.social_facebook_publisher.publish_photo_to_facebook_page", api_error)
+    monkeypatch.setattr("api.social_facebook_publisher.time.sleep", lambda _s: None)
+
+    try:
+        publish_photo_with_retries("https://test.com/p.png", "cap", "page", "token")
+        assert False, "expected HTTPError"
+    except urllib.error.HTTPError:
+        pass
+
+    assert calls["n"] == 1
 
 
 def test_is_report_publishable_with_content():

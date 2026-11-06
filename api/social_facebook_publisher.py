@@ -6,6 +6,8 @@ No groups or third-party web scraping; uses official Graph API photo endpoint.
 import json
 import logging
 import os
+import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,7 +16,20 @@ from datetime import datetime, timezone
 logger = logging.getLogger("social_facebook_publisher")
 
 DEFAULT_PAGE_ID = "egxbots"
-GRAPH_API_VERSION = "v19.0"
+GRAPH_API_VERSION = os.getenv("FACEBOOK_GRAPH_API_VERSION", "v19.0")
+
+# Retries are intentionally short: the daily pipeline must never queue behind a
+# Facebook hiccup. 3 retries after the first failure, max ~7s of backoff total.
+FACEBOOK_PUBLISH_RETRIES = int(os.getenv("FACEBOOK_PUBLISH_RETRIES", "3"))
+FACEBOOK_RETRY_BACKOFF_SECONDS = (1, 2, 4)
+FACEBOOK_HTTP_TIMEOUT_SECONDS = int(os.getenv("FACEBOOK_API_TIMEOUT_SECONDS", "20"))
+
+
+def _is_transient_publish_error(exc: BaseException) -> bool:
+    """Network/TLS/timeout errors are retryable; Graph API 4xx responses are not."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ssl.SSLError))
 
 
 def get_facebook_credentials(client=None):
@@ -134,10 +149,56 @@ def publish_photo_to_facebook_page(image_url, caption, page_id, token, opener=No
     )
 
     call_opener = opener or urllib.request.urlopen
-    with call_opener(req, timeout=30) as response:
+    with call_opener(req, timeout=FACEBOOK_HTTP_TIMEOUT_SECONDS) as response:
         data = json.loads(response.read().decode("utf-8"))
         post_id = data.get("id") or data.get("post_id")
         return {"success": True, "post_id": post_id, "raw": data}
+
+
+def publish_photo_with_retries(
+    image_url,
+    caption,
+    page_id,
+    token,
+    opener=None,
+    retries: int | None = None,
+):
+    """Publish a photo, retrying ONLY transient network/TLS/timeout failures.
+
+    The first attempt plus at most `retries` retries (default 3). Backoff is
+    deliberately tiny (1s, 2s, 4s) so nothing downstream waits on a failing
+    Facebook call. Graph API errors (HTTP 4xx) are raised immediately.
+    """
+    total_retries = FACEBOOK_PUBLISH_RETRIES if retries is None else max(0, retries)
+    max_attempts = total_retries + 1
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            res = publish_photo_to_facebook_page(
+                image_url=image_url,
+                caption=caption,
+                page_id=page_id,
+                token=token,
+                opener=opener,
+            )
+            if attempt > 1:
+                logger.info(f"[FB_PUBLISH] Succeeded on attempt {attempt}/{max_attempts}")
+            return res
+        except Exception as exc:  # noqa: BLE001 - classified below
+            last_exc = exc
+            if not _is_transient_publish_error(exc) or attempt >= max_attempts:
+                logger.error(f"[FB_PUBLISH] Failed on attempt {attempt}/{max_attempts}: {exc}")
+                raise
+            delay = FACEBOOK_RETRY_BACKOFF_SECONDS[min(attempt - 1, len(FACEBOOK_RETRY_BACKOFF_SECONDS) - 1)]
+            logger.warning(
+                f"[FB_PUBLISH] Transient error on attempt {attempt}/{max_attempts}: {exc}. Retrying in {delay}s"
+            )
+            time.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Facebook publish failed without an exception")
 
 
 def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None, opener=None):
@@ -217,7 +278,7 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
 
     # 3. Publish to Facebook Page
     try:
-        result = publish_photo_to_facebook_page(
+        result = publish_photo_with_retries(
             image_url=image_url,
             caption=caption,
             page_id=creds["page_id"],
@@ -234,6 +295,7 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
             "kind": kind,
             "state": "published",
             "post_id": post_id,
+            "error": None,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
 
@@ -244,16 +306,16 @@ def auto_publish_daily_report_to_facebook(client, session_date, job_run_id=None,
             "page_id": creds["page_id"],
         }
     except Exception as e:
-        logger.error(f"[FB_AUTO] Error publishing to Facebook Page: {e}")
+        logger.error(f"[FB_AUTO] Error publishing to Facebook Page after retries: {e}")
         try:
             client.table("daily_social_publications").upsert({
                 "session_date": session_date,
                 "platform": "facebook",
                 "kind": kind,
                 "state": "failed",
-                "error": str(e)[:250],
+                "error": f"after {FACEBOOK_PUBLISH_RETRIES + 1} attempts: {str(e)[:230]}",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
         except Exception:
             pass
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "attempts": FACEBOOK_PUBLISH_RETRIES + 1}

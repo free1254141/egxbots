@@ -102,7 +102,7 @@ def test_execute_publication_slot_successful_publish():
         _completed_slots_today.clear()
 
     with patch("api.social_scheduler.get_facebook_credentials", return_value={"token": "EAAG_TEST", "page_id": "1107903499083226"}):
-        with patch("api.social_scheduler.publish_photo_to_facebook_page", return_value={"success": True, "post_id": "fb_post_999"}):
+        with patch("api.social_scheduler.publish_photo_with_retries", return_value={"success": True, "post_id": "fb_post_999"}):
             res = execute_publication_slot(mock_client, slot, now_dt, force=True)
 
             assert res["status"] == "published"
@@ -181,7 +181,7 @@ def test_execute_publication_slot_falls_back_when_accumulation_empty():
         _completed_slots_today.clear()
 
     with patch("api.social_scheduler.get_facebook_credentials", return_value={"token": "EAAG_TEST", "page_id": "1107903499083226"}):
-        with patch("api.social_scheduler.publish_photo_to_facebook_page", return_value={"success": True, "post_id": "fb_fallback_123"}):
+        with patch("api.social_scheduler.publish_photo_with_retries", return_value={"success": True, "post_id": "fb_fallback_123"}):
             res = execute_publication_slot(mock_client, morning_slot, now_dt, force=True)
 
             assert res["status"] == "published"

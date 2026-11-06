@@ -20,8 +20,9 @@ from zoneinfo import ZoneInfo
 
 from api.social_facebook_publisher import (
     get_facebook_credentials,
-    publish_photo_to_facebook_page,
+    publish_photo_with_retries,
     is_report_publishable_with_content,
+    FACEBOOK_PUBLISH_RETRIES,
 )
 
 logger = logging.getLogger("social_scheduler")
@@ -206,9 +207,9 @@ def execute_publication_slot(
     image_url = selected_report["image_url"]
     caption = selected_report.get("social_caption") or selected_report.get("social_title") or ""
 
-    # 4. Publish via Graph API
+    # 4. Publish via Graph API (3 quick retries on transient network/TLS errors)
     try:
-        publish_res = publish_photo_to_facebook_page(
+        publish_res = publish_photo_with_retries(
             image_url=image_url,
             caption=caption,
             page_id=creds["page_id"],
@@ -227,6 +228,7 @@ def execute_publication_slot(
             "kind": selected_kind,
             "state": "published",
             "post_id": post_id,
+            "error": None,
             "publication_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
@@ -245,6 +247,18 @@ def execute_publication_slot(
         with _completed_slots_lock:
             _completed_slots_today.discard(slot_key)
         logger.error(f"[FB_SCHEDULER] Publication failed for {slot['slot_id']}: {exc}")
+        # Persist the failure so it is visible and can be picked up by a catch-up run.
+        try:
+            client.table("daily_social_publications").upsert({
+                "session_date": session_date,
+                "platform": "facebook",
+                "kind": selected_kind,
+                "state": "failed",
+                "error": f"after {FACEBOOK_PUBLISH_RETRIES + 1} attempts: {str(exc)[:230]}",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception as persist_exc:
+            logger.warning(f"[FB_SCHEDULER] Could not persist failure: {persist_exc}")
         return {"status": "failed", "error": str(exc), "slot_id": slot["slot_id"]}
 
 
