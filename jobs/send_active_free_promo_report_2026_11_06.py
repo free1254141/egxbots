@@ -240,7 +240,7 @@ def fair_value_picks(fv: dict | None, limit: int = 3) -> tuple[int, list[dict]]:
 
 def build_email_html(m: dict, fv: dict | None, user_id: str, email: str) -> str:
     unsub = generate_unsub_token(user_id, email)
-    unsub_url = f"{APP_URL}/unsubscribe?uid={user_id}&token={unsub}&email={email}"
+    unsub_url = f"{APP_URL}/api/marketing/unsubscribe?uid={user_id}&token={unsub}&email={email}"
 
     top = m["top_mover"]
     top_block = ""
