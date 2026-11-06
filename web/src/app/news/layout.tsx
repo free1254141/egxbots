@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "أخبار البورصة المصرية وتحليل المشاعر بالذكاء الاصطناعي | EGX News & Sentiment",
+  title: "أخبار وتحليل البورصة المصرية بالذكاء الاصطناعي",
   description: "تغطية مباشرة لأخبار شركات البورصة المصرية (EGX) مع تحليل المشاعر التلقائي (News Sentiment Analysis) بالذكاء الاصطناعي لتقييم أثر الأخبار على حركة الأسهم.",
   keywords: [
     "أخبار البورصة المصرية",

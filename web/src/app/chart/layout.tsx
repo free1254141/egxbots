@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "الرسم البياني والشارت المباشر للأسهم المصرية | Live EGX Charts",
+  title: "الشارت والرسم البياني للأسهم المصرية",
   description: "شارت ورسم بياني تفاعلي متقدم لأسهم البورصة المصرية (EGX) مدعوم بـ TradingView مع مؤشرات الذكاء الاصطناعي وإشارات التداول وسجل الإشارات الفنية.",
   keywords: [
     "شارت البورصة المصرية",

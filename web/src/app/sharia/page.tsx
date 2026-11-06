@@ -6,7 +6,7 @@ export const revalidate = 86400;
 export const preferredRegion = "fra1";
 
 export const metadata: Metadata = {
-  title: "حاسبة التوافق الشرعي وتطهير الكوبونات للبورصة المصرية | Sharia Cleanser",
+  title: "التوافق الشرعي وتطهير الكوبونات للأسهم",
   description:
     "قائمة الأسهم المتوافقة مع الشريعة الإسلامية في البورصة المصرية (EGX33) مع حاسبة تطهير الكوبونات والتوزيعات النقدية وحاسبة زكاة الأسهم.",
   keywords: [

@@ -6,7 +6,7 @@ export const revalidate = 86400;
 export const preferredRegion = "fra1";
 
 export const metadata: Metadata = {
-  title: "محدد السعر العادل ومؤشر الرخص للأسهم المصرية | Fair Value Screener",
+  title: "السعر العادل ومؤشر الرخص للأسهم المصرية",
   description:
     "اكتشف أرخص أسهم البورصة المصرية (EGX) يومياً ومقارنتها بالسعر العادل المحسوب بمعادلة بنجامين جراهام ومضاعفات الربحية والقيمة الدفترية والتوازن الكمي.",
   keywords: [

@@ -78,7 +78,17 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const title = displayName !== symbol
     ? `سهم ${displayName} (${symbol}) | تحليل وسعر`
     : `سهم ${symbol} | تحليل وسعر`;
-  const description = `تحليل سهم ${companyName} (${symbol}) بالإغلاقات اليومية المسجلة، تقييم AI Score، ومؤشرات التحليل الفني في البورصة المصرية. راجع تاريخ البيانات الظاهر بالصفحة.`;
+  // Lead the snippet with the closing price and date: most EGX stock
+  // queries are \"سعر سهم X\", and a generic description earns impressions
+  // without clicks.
+  const latest = (snapshot.latestPrice || null) as { close?: number | string; date?: string } | null;
+  const lastClose = Number(latest?.close ?? 0);
+  const lastDate = String(latest?.date ?? "").slice(0, 10);
+  const pricePart =
+    Number.isFinite(lastClose) && lastClose > 0
+      ? `آخر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ج.م${lastDate ? ` بتاريخ ${lastDate}` : ""}. `
+      : "";
+  const description = `${pricePart}سعر سهم ${displayName} (${symbol}) وتحليل فني: تقييم AI Score، مؤشرات RSI وMACD، ومستويات الدعم والمقاومة في البورصة المصرية.`;
 
   return {
     title,
