@@ -2288,6 +2288,79 @@ def _build_daily_recommendations_message(
     return "\n".join(msg_lines)
 
 
+# A zero published recommendation is a completed decision only when the market
+# and the candidate set were actually evaluated. Data/publication failures must
+# stay retryable instead of silently closing the session with zero output.
+TECHNICAL_NO_BUY_CODES = frozenset({
+    "capacity_check_unavailable",
+    "data_health_unavailable",
+    "sector_check_unavailable",
+    "sector_data_not_aligned",
+    "publication_not_accepted",
+    "council_unavailable",
+})
+
+
+def is_technical_no_buy(code) -> bool:
+    """Return True when zero recommendations came from an unverified/technical state."""
+    return str(code or "").strip() in TECHNICAL_NO_BUY_CODES
+
+
+def ignore_dormant_council_voters(results):
+    """Recompute consensus without a council voter that is silent for every candidate.
+
+    The council is built from the base model plus KING with equal weights, so a
+    loaded-but-dormant artifact that returns 0.0 for every stock halves the score
+    and makes the 50% gate unreachable on an otherwise healthy market day. Only a
+    voter that is zero for the entire candidate set is dropped; a genuinely
+    negative vote on particular stocks is preserved. The hard gate is unchanged.
+
+    Returns ``(results, dormant_voters, council_unavailable)``.
+    """
+    if not results or len(results) < 2:
+        # Dormancy cannot be proven from a single candidate: a lone 0.0 vote
+        # there may be a genuine rejection rather than a dead artifact.
+        return results, [], False
+    voters = set()
+    for item in results or []:
+        votes = item.get("detailed_votes")
+        if isinstance(votes, dict):
+            voters.update(name for name in votes if name)
+    if not voters:
+        return results, [], False
+
+    def _vote(item, voter):
+        try:
+            return float((item.get("detailed_votes") or {}).get(voter) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    dormant = sorted(voter for voter in voters
+                     if all(_vote(item, voter) == 0.0 for item in results))
+    if not dormant:
+        return results, [], False
+
+    adjusted = []
+    for item in results:
+        row = dict(item)
+        values = []
+        for name, value in (item.get("detailed_votes") or {}).items():
+            if name in dormant:
+                continue
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        if values:
+            # Council members share equal weight by construction; recompute the
+            # same equal-weight mean over the voters that actually produced votes.
+            row["council_score"] = round(sum(values) / len(values) * 100.0, 1)
+            row["council_recomputed"] = True
+        row["council_dormant_voters"] = dormant
+        adjusted.append(row)
+    return adjusted, dormant, not any(row.get("council_recomputed") for row in adjusted)
+
+
 async def generate_daily_recommendations(
     model_name: Optional[str] = None,
     bulk_cache_ttl_seconds: Optional[int] = None,
@@ -2301,14 +2374,15 @@ async def generate_daily_recommendations(
 
     audit = {"date": dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat(), "candidates": [], "council_rejected": []}
     def no_buy(code, reason):
-        audit.update(reason_code=code, reason=reason)
+        audit.update(reason_code=code, reason=reason, technical_block=is_technical_no_buy(code))
         if run_context is not None:
             run_context["no_buy_reason"] = reason
+            run_context["no_buy_reason_code"] = code
         _mark_daily_cache_payload("recommendation_decision_audit", audit)
         print(f"[RECOMMENDATION_DECISION] {json.dumps(audit, ensure_ascii=False)}")
         return 0
 
-    daily_limit = max(1, min(5, int(os.getenv("PUBLIC_RECOMMENDATION_DAILY_LIMIT", "1"))))
+    daily_limit = max(1, min(5, int(os.getenv("PUBLIC_RECOMMENDATION_DAILY_LIMIT", "4"))))
     rolling_limit = max(1, min(30, int(os.getenv("PUBLIC_RECOMMENDATION_ROLLING_LIMIT", "20"))))
     open_limit = max(1, min(20, int(os.getenv("PUBLIC_RECOMMENDATION_OPEN_LIMIT", "10"))))
     max_sessions = max(1, int(os.getenv("PUBLIC_RECOMMENDATION_MAX_HOLD_SESSIONS", "20")))
@@ -2471,6 +2545,14 @@ async def generate_daily_recommendations(
     print(f"[RECOMMENDATIONS] ML scan found {len(results)} BUY signals.")
 
     if council_model:
+        results, dormant_voters, council_unavailable = ignore_dormant_council_voters(results)
+        if dormant_voters:
+            audit["dormant_council_voters"] = dormant_voters
+            audit["candidates"] = [{**candidate_assessment(item), "council_score": item.get("council_score"),
+                                    "entry_liquidity": item.get("entry_liquidity")} for item in results]
+            print(f"[RECOMMENDATIONS] Ignoring dormant council voter(s) with no signal for any candidate: {', '.join(dormant_voters)}")
+        if council_unavailable:
+            return no_buy("council_unavailable", "لم يصدر أي عضو في مجلس النماذج نتيجة صالحة لأي مرشح؛ تم تأجيل الشراء احترازيًا بدل اعتبار المرشحين مرفوضين.")
         def _normalize_percent_score(value: object, default: float = 0.0) -> float:
             try:
                 score = float(value)
@@ -3561,14 +3643,26 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     bulk_cache_ttl_seconds=daily_bulk_cache_ttl,
                     run_context=market_gate_context,
                 )
+                no_buy_code = market_gate_context.get("no_buy_reason_code")
+                technical_block = bool(not generated_count and is_technical_no_buy(no_buy_code))
                 if generated_count and generated_count > 0:
                     decision_details = f"Generated {generated_count} recommendations (Adaptive Mode)"
+                elif technical_block:
+                    decision_details = f"Retryable block ({no_buy_code}) - {market_gate_context.get('no_buy_reason') or ''}"
                 elif market_gate.get("blocked") and not generated_count:
                     decision_details = f"Skipped - {market_gate.get('reason')}"
                 else:
                     decision_details = market_gate_context.get("no_buy_reason") or f"Generated {generated_count} recommendations using {model_filter or 'default'}"
-                _record_step("generate_recommendations", True, decision_details[:1000], int(generated_count or 0))
+                # A technical block must not be recorded as a successful zero: that
+                # would prevent the bounded stage recovery from retrying it after
+                # the data refresh and close the session with no output at all.
+                _record_step("generate_recommendations", not technical_block, decision_details[:1000], int(generated_count or 0))
                 if not generated_count:
+                    if technical_block:
+                        market_gate_context["no_buy_reason"] = (
+                            "تعذر تأكيد بيانات السوق أو القطاعات أو إتمام النشر الفني؛ "
+                            "لم تُنشأ توصيات على بيانات غير مؤكدة، وستُعاد المحاولة تلقائيًا بعد تحديث البيانات."
+                        )
                     market_gate_context.setdefault("no_buy_reason", "لم يجتز أي مرشح جميع ضوابط النماذج والمخاطر والسيولة اليوم.")
                     _send_market_buy_hold(
                         market_gate_context,

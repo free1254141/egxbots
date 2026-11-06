@@ -126,7 +126,11 @@ def execute_stage(name, phase, job_id, previous):
             return {'success': True, 'details': 'Skipped - '+str(gate.get('reason')), 'count': 0}
         count = asyncio.run(bot.generate_daily_recommendations(model_name=get_scheduler_state().get('model_filter', 'adaptive'),
                            bulk_cache_ttl_seconds=7200, run_context=gate))
-        return {'success': True, 'details': f'Recovered generation: {count} recommendations', 'count': count or 0}
+        # Never report a technical/data failure as a completed recovered stage;
+        # the bounded retry budget must reflect that the decision was not made.
+        technical = bool(not count and bot.is_technical_no_buy(gate.get('no_buy_reason_code')))
+        details = gate.get('no_buy_reason') or f'Recovered generation: {count} recommendations'
+        return {'success': not technical, 'details': details, 'count': count or 0}
     elif name == 'short_swings_daily':
         from api.short_swings_daily import run_daily_short_swings
         result = run_daily_short_swings(trigger='retry', phase=phase, job_run_id=job_id)
