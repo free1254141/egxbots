@@ -254,13 +254,14 @@ def run_subscription_reminders(
         # Idempotency check via durable log
         insert_res = requests.post(
             f"{rest}/telegram_subscription_reminder_log",
-            headers={**headers, "Prefer": "return=representation"},
+            headers={**headers, "Prefer": "resolution=ignore-duplicates,return=representation"},
+            params={"on_conflict": "subscription_id,period_end,reminder_days"},
             json=log_payload,
             timeout=API_TIMEOUT,
         )
 
         log_id = None
-        if insert_res.status_code == 409:
+        if insert_res.status_code == 409 or (insert_res.ok and insert_res.text.strip() in {"", "[]"}):
             # Row already exists; inspect state
             existing_res = requests.get(
                 f"{rest}/telegram_subscription_reminder_log",
