@@ -617,7 +617,7 @@ async function* runCore(input: RuntimeInput, evidence: AgenticEvidence[], accoun
                             if (typeof (timer as any)?.unref === "function") (timer as any).unref();
                         });
                         output = await Promise.race([
-                            executeRequestTool(call.function.name, args, client, input.userId, chartHistoryCache, { isPro: options.isPro === true, userRules: options.userRules }),
+                            executeRequestTool(call.function.name, args, client, input.userId, chartHistoryCache, { isPro: options.isPro === true }),
                             toolTimer
                         ]);
                     }

@@ -2,7 +2,7 @@ import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 import { isShariaCompliant } from '../shariaStocks';
-import { applyUserRulesToToolArgs, mergeUserRule } from './user-preferences';
+import { mergeUserRule, removeUserRule, replaceUserRules } from './user-preferences';
 import {
     executeFairValueTool,
     executeShariaCleanserTool,
@@ -81,28 +81,53 @@ export const REQUEST_DATA_TOOLS_SCHEMA = [
 ];
 
 export async function executeRequestTool(name: string, args: any, db: any, userId: string, cache: ChartHistoryCache,
-    access: { isPro: boolean; userRules?: string }): Promise<any> {
-    args = applyUserRulesToToolArgs(name, args || {}, access.userRules);
-    if (name === 'save_user_preference') {
-        const rule = String(args.rule || '').trim();
-        if (!rule) {
-            return { status: 'error', availability: 'error', message: 'لم أفهم القاعدة المطلوب حفظها. أعد صياغتها في جملة واحدة.' };
-        }
+    access: { isPro: boolean }): Promise<any> {
+    if (name === 'manage_user_preferences') {
         if (!userId) {
-            return { status: 'unauthenticated', availability: 'error', message: 'يجب تسجيل الدخول لحفظ قاعدة دائمة.' };
+            return { status: 'unauthenticated', availability: 'error', message: 'يجب تسجيل الدخول لحفظ أو تعديل الذاكرة الدائمة.' };
         }
+        const operation = String(args.operation || '').trim().toLowerCase();
         try {
             const { data } = await db.from('profiles').select('custom_ai_rules').eq('id', userId).maybeSingle();
             const existing = String(data?.custom_ai_rules || '').trim();
-            const next = mergeUserRule(existing, rule);
-            if (next === existing) {
-                return { status: 'success', availability: 'available', saved: false, rules: existing, message: 'القاعدة دي محفوظة بالفعل وهطبقها في كل المحادثات الجاية.' };
+            let next = existing;
+
+            if (operation === 'add') {
+                const rule = String(args.rule || '').trim();
+                if (!rule) return { status: 'error', availability: 'error', message: 'لم أفهم القاعدة المطلوب حفظها. أعد صياغتها في جملة واحدة.' };
+                next = mergeUserRule(existing, rule);
+            } else if (operation === 'delete') {
+                const match = String(args.rule || '').trim();
+                if (!match) return { status: 'error', availability: 'error', message: 'حدد القاعدة المطلوب حذفها.' };
+                const result = removeUserRule(existing, match);
+                next = result.rules;
+                if (!result.removed) {
+                    return { status: 'success', availability: 'available', saved: false, rules: existing, message: 'مفيش قاعدة محفوظة مطابقة للنص ده.' };
+                }
+            } else if (operation === 'replace') {
+                const rules = Array.isArray(args.rules) ? args.rules.filter((rule: unknown) => typeof rule === 'string') : [];
+                if (!rules.length) return { status: 'error', availability: 'error', message: 'القائمة الجديدة فاضية؛ لو عايز تمسح كل الذاكرة استخدم delete لكل قاعدة.' };
+                next = replaceUserRules(rules as string[]);
+            } else {
+                return { status: 'error', availability: 'error', message: 'عملية غير معروفة: استخدم add أو delete أو replace.' };
             }
-            const { error } = await db.from('profiles').update({ custom_ai_rules: next }).eq('id', userId);
+
+            if (next === existing) {
+                return { status: 'success', availability: 'available', saved: false, rules: existing, message: 'الذاكرة محدّثة بالفعل ومفيش تغيير مطلوب.' };
+            }
+            const { error } = await db.from('profiles').update({ custom_ai_rules: next || null }).eq('id', userId);
             if (error) throw error;
-            return { status: 'success', availability: 'available', saved: true, rules: next, message: `تم حفظ القاعدة الدائمة: «${rule}». هطبقها تلقائياً في كل المحادثات الجاية.` };
+            return {
+                status: 'success',
+                availability: 'available',
+                saved: true,
+                rules: next,
+                message: operation === 'delete'
+                    ? 'تم حذف القاعدة من الذاكرة الدائمة.'
+                    : 'تم تحديث الذاكرة الدائمة، وهطبقها في كل المحادثات الجاية.',
+            };
         } catch (error: any) {
-            return { status: 'error', availability: 'error', message: `تعذر حفظ القاعدة: ${error?.message || 'خطأ غير معروف'}` };
+            return { status: 'error', availability: 'error', message: `تعذر تحديث الذاكرة: ${error?.message || 'خطأ غير معروف'}` };
         }
     }
     if (name === 'get_fair_value') {

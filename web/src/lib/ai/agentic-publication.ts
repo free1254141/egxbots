@@ -110,6 +110,7 @@ export function toAgenticEvidence(tool: string, args: any, data: any): AgenticEv
         screen_stocks: "stock_technical_indicators+stock_prices", analyze_portfolio_risk: "positions+stock_fundamentals+scenario-calculation",
         enable_autonomous_recommendations: "user_consent+client_action",
         disable_autonomous_recommendations: "user_consent+client_action",
+        manage_user_preferences: "user_consent+client_action",
         get_fair_value: "stock_fundamentals+stock_technical_indicators+fair-value-engine",
         get_sharia_cleanser: "sharia_stocks+corporate_actions",
         get_price_traps: "stock_prices+trap_detector",
@@ -818,7 +819,7 @@ export function checkAgenticDraft(reply: string, evidence: AgenticEvidence[], re
     if (corporateReadClaim && !(currentEvidence || evidence).some(e => e.tool === "get_corporate_actions" && e.availability !== "error"))
         reasons.push("corporate_action_read_claim_without_tool");
     if (!reply.trim()) reasons.push("empty_response");
-    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|enable_autonomous_recommendations|disable_autonomous_recommendations|get_fair_value|get_sharia_cleanser|get_price_traps|rebalance_portfolio|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
+    if (/\b(?:get_corporate_actions|get_live_quote|get_fundamentals|get_sector_peers|get_market_breadth|get_stock(?:_levels)?|get_market|get_comparison|get_news|get_recommendations|get_technical_scan|get_accumulation_stocks|calculate_position|manage_portfolio|screen_stocks|analyze_portfolio_risk|list_chart_strategies|apply_chart_strategy|compare_strategies_history|enable_autonomous_recommendations|disable_autonomous_recommendations|manage_user_preferences|get_fair_value|get_sharia_cleanser|get_price_traps|rebalance_portfolio|stock_prices|stock_technical_indicators|stock_scans_summary|ai_chat_sessions|ai_chat_messages|resistance_relation|date_kind|event_date|record_date|final_close_confirmed|session_complete|price_type|live_quote_available|corporate_actions_adjusted)\b/.test(reply)) reasons.push("internal_implementation_names_in_response");
     const substantive = reply.replace(/\[[^\]]*\]\(https?:\/\/[^)]*\)/g, "").replace(/https?:\/\/\S+/g, "")
         .replace(/✅ تحليل EGX Bots[^\n]*/g, "").replace(/📢[^\n]*/g, "");
     if (!/[\p{L}]{2}/u.test(substantive)) reasons.push("response_has_no_substantive_answer");
