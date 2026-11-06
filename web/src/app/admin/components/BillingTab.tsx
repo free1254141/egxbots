@@ -28,6 +28,35 @@ interface PlanLimits {
     pro?: { chat_messages_per_month: number; portfolio_stocks: number };
 }
 
+interface TrialFunnelVariant {
+    started: number;
+    activated: number;
+    converted: number;
+}
+
+interface TrialFunnel {
+    total: number;
+    active: number;
+    finished: number;
+    activated: number;
+    activatedFinished: number;
+    converted: number;
+    convertedFinished: number;
+    conversionRateFinished: number;
+    activationRateFinished: number;
+    variants: { A: TrialFunnelVariant; B: TrialFunnelVariant };
+}
+
+function FunnelStat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+    return (
+        <div className="border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-2">
+            <div className="text-[10px] font-black uppercase tracking-wide text-zinc-500">{label}</div>
+            <div className="text-xl font-black text-zinc-950 dark:text-white" dir="ltr">{value}</div>
+            {hint ? <div className="text-[10px] font-bold text-zinc-400">{hint}</div> : null}
+        </div>
+    );
+}
+
 interface AffiliateRow {
     id: string;
     code: string;
@@ -81,6 +110,19 @@ export default function BillingTab() {
     const [affDiscount, setAffDiscount] = useState("15");
     const [affCommission, setAffCommission] = useState("25");
     const [affSaving, setAffSaving] = useState(false);
+
+    const [trialFunnel, setTrialFunnel] = useState<TrialFunnel | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        fetch("/api/admin/trials/funnel", { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (active && data?.funnel) setTrialFunnel(data.funnel);
+            })
+            .catch(() => {});
+        return () => { active = false; };
+    }, []);
 
     const loadAffiliates = useCallback(async () => {
         try {
@@ -268,6 +310,32 @@ export default function BillingTab() {
                     <p className="text-xs font-bold text-zinc-500 mt-1">
                         التغييرات تُحفظ في قاعدة البيانات ويستهلكها الباك-إند والفرونت-إند تلقائياً خلال ثوانٍ. اترك أي حقل فارغ لاستخدام السعر الافتراضي من البيئة.
                     </p>
+                </div>
+
+                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-emerald-600">قمع التجربة المجانية</h3>
+                    <p className="text-[11px] font-bold text-zinc-500 mt-1">
+                        التفعيل = أول رسالة شات داخل التجربة (أقوى مؤشر على الاشتراك).
+                    </p>
+                    {trialFunnel ? (
+                        <>
+                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                                <FunnelStat label="تجارب" value={trialFunnel.total} />
+                                <FunnelStat label="نشطة" value={trialFunnel.active} />
+                                <FunnelStat label="خلصت" value={trialFunnel.finished} />
+                                <FunnelStat label="فعّلت الشات" value={trialFunnel.activated} hint={`${trialFunnel.activationRateFinished}% من اللي خلصت`} />
+                                <FunnelStat label="اشتركت" value={trialFunnel.converted} />
+                                <FunnelStat label="تحويل" value={`${trialFunnel.conversionRateFinished}%`} hint="من اللي خلصت التجربة" />
+                            </div>
+                            <div className="mt-3 text-[11px] font-bold text-zinc-600 dark:text-zinc-400" dir="ltr">
+                                A/B — A: {trialFunnel.variants.A.started} started / {trialFunnel.variants.A.activated} activated / {trialFunnel.variants.A.converted} paid
+                                &nbsp;•&nbsp;
+                                B: {trialFunnel.variants.B.started} started / {trialFunnel.variants.B.activated} activated / {trialFunnel.variants.B.converted} paid
+                            </div>
+                        </>
+                    ) : (
+                        <p className="mt-3 text-xs font-black text-zinc-400 animate-pulse">جارٍ تحميل قمع التجربة...</p>
+                    )}
                 </div>
 
                 {loading ? (

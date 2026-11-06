@@ -82,7 +82,7 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createSupabaseServerClient();
     const {
@@ -126,6 +126,22 @@ export async function POST() {
       invalidateViewerPlanCache(user.id);
     } catch {
       // ignore
+    }
+
+    // Activation telemetry powers the trial funnel (started -> chat -> paid).
+    // It is inserted server-side so a closed tab or a blocked analytics call
+    // cannot hide the activation.
+    try {
+      const body = await request.json().catch(() => ({}));
+      const variant = body?.variant === "B" ? "B" : "A";
+      await client.from("user_activity_events").insert({
+        user_id: user.id,
+        event_name: "trial_started",
+        path: "/pricing",
+        metadata: { variant, source: "trial_activation" },
+      });
+    } catch (logError) {
+      console.warn("[api/subscription/trial] trial_started log skipped:", logError);
     }
 
     return NextResponse.json({

@@ -812,6 +812,32 @@ export async function POST(req: NextRequest) {
             const msgsCount = new Set((monthRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
             monthlyUsed = Math.max(limitsSum, msgsCount);
 
+            // Activation telemetry: the first message inside an active trial is the
+            // step that actually predicts conversion, so record it once. The
+            // monthly window starts at the subscription/trial start, making
+            // monthlyUsed === 0 a cheap "first message of this trial" signal.
+            if (quotaWin?.activeSub?.status === "trialing" && monthlyUsed === 0 && userId) {
+                try {
+                    const { data: existing } = await supabase
+                        .from("user_activity_events")
+                        .select("id")
+                        .eq("user_id", userId)
+                        .eq("event_name", "trial_first_message")
+                        .limit(1)
+                        .maybeSingle();
+                    if (!existing) {
+                        await supabase.from("user_activity_events").insert({
+                            user_id: userId,
+                            event_name: "trial_first_message",
+                            path: "/chat",
+                            metadata: { source: "chat" },
+                        });
+                    }
+                } catch (logError) {
+                    console.warn("[ai-chat] trial_first_message log skipped:", logError);
+                }
+            }
+
             if (monthlyUsed >= userMonthlyCap) {
                 if (!userIsPro) {
                     const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });

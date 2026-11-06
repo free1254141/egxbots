@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import {
   Loader2,
   Rocket,
@@ -98,7 +99,12 @@ export default function PricingClient() {
     }
     setTrialLoading(true);
     try {
-      const res = await fetch("/api/subscription/trial", { method: "POST" });
+      const variant = prepareTrialAutostart();
+      const res = await fetch("/api/subscription/trial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variant }),
+      });
       const data = await res.json();
       if (res.ok && data?.success) {
         toast.success(isAr ? "تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!" : "Pro 3-day trial activated successfully!");
@@ -106,10 +112,15 @@ export default function PricingClient() {
         broadcastEntitlements(true);
         setTrialEligible(false);
         setTrialExpiresAt(data.expires_at || null);
+        // Open the assistant and ask the first question instead of leaving the
+        // new subscriber on the pricing page with an unused trial.
+        window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
       } else {
+        clearTrialAutostart();
         toast.error(data?.message || (isAr ? "تعذر تفعيل التجربة" : "Could not activate trial"));
       }
     } catch {
+      clearTrialAutostart();
       toast.error(isAr ? "حدث خطأ في الاتصال" : "Network error");
     } finally {
       setTrialLoading(false);

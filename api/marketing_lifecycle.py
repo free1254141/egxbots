@@ -4,7 +4,8 @@ marketing_lifecycle.py — Resend Email Lifecycle & Recovery Automation for EGX 
 Handles:
 1. Abandoned checkout & pricing recovery (2h to 72h).
 2. Dormant user win-back (users inactive for 21-30+ days).
-3. Trial expiring alerts (<24h remaining on 3-day Pro trial).
+3. Trial activation: day-0 welcome (ask the first question), day-1 nudge.
+4. Trial expiring alerts (<24h remaining on 3-day Pro trial).
 
 Features:
 - Resend API integration (plain HTTPS requests; safe no-op if RESEND_API_KEY is not set).
@@ -489,6 +490,173 @@ def process_trial_expiring() -> int:
     return sent_count
 
 
+def _trial_recipient(uid: str):
+    """Return (display_name, email) for a trial user, or (None, None)."""
+    try:
+        user_res = (
+            supabase.table("profiles")
+            .select("display_name, username")
+            .eq("id", uid)
+            .maybe_single()
+            .execute()
+        )
+        profile = user_res.data or {}
+    except Exception:
+        profile = {}
+    display_name = profile.get("display_name") or profile.get("username") or "صديقنا العزيز"
+    return display_name, get_user_email(uid)
+
+
+def _trial_already_paid(uid: str) -> bool:
+    try:
+        sub_res = (
+            supabase.table("subscriptions")
+            .select("id")
+            .eq("user_id", uid)
+            .eq("status", "active")
+            .in_("plan_id", ["pro", "lifetime", "pro_lifetime"])
+            .limit(1)
+            .execute()
+        )
+        return bool(sub_res.data)
+    except Exception:
+        return False
+
+
+def process_trial_welcome() -> int:
+    """Day-0 activation email: the trial started but the first question did not.
+
+    A trial that never opens the assistant converts at 0%, so this email hands
+    the user the exact first question instead of another price reminder.
+    """
+    if not supabase:
+        return 0
+
+    sent_count = 0
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=24)).isoformat()
+    window_end = (now - timedelta(minutes=5)).isoformat()
+
+    try:
+        res = (
+            supabase.table("subscription_trials")
+            .select("user_id, started_at, expires_at")
+            .gte("started_at", window_start)
+            .lte("started_at", window_end)
+            .limit(20)
+            .execute()
+        )
+        trials = res.data or []
+
+        for trial in trials:
+            try:
+                uid = trial.get("user_id")
+                if not uid:
+                    continue
+                if _trial_already_paid(uid):
+                    continue
+                if has_recent_message(uid, "trial_welcome", 30):
+                    continue
+
+                display_name, user_email = _trial_recipient(uid)
+                if not user_email or "@" not in user_email:
+                    continue
+                if is_user_unsubscribed(uid, user_email):
+                    continue
+
+                subject = "⚡ تجربتك في EGX BOTS Pro بدأت — اسأل أول سؤال دلوقتي"
+                greeting = f"أهلاً {display_name} 🚀"
+                paragraphs = [
+                    "تم تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> على حسابك، وكل مزايا VIP مفتوحة الآن.",
+                    "أسرع طريقة تشوف القيمة: افتح شات الذكاء الاصطناعي واسأل سؤال مباشر، مثل <strong>«رشّح لي 3 أسهم عليها فرصة النهارده»</strong> أو <strong>«حلّل سهم COMI وقولّي مناطق الدخول والخروج»</strong>.",
+                    "كل تحليل بيرجعلك بمستويات دخول ووقف خسارة وأهداف، بالإضافة إلى التوصيات المفتوحة ومتابعة المحفظة — استخدم التجربة قبل ما تنتهي.",
+                    "ولو ربطت حسابك بتيليجرام، هتاخد <strong>10 رسائل إضافية مجاناً</strong> وتقدر تتابع من الموبايل.",
+                ]
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(
+                    subject, greeting, paragraphs,
+                    "افتح الشات واسأل أول سؤال",
+                    f"{APP_URL}/?chat=open&from=trial_welcome",
+                    uid, user_email, "trial_welcome", message_id,
+                )
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(uid, user_email, "trial_welcome", {"expires_at": trial.get("expires_at")}, message_id, send_info.get("provider_message_id"))
+                    sent_count += 1
+            except Exception as trial_err:
+                print(f"[MARKETING] Error sending trial welcome for {trial.get('user_id')}: {trial_err}")
+                continue
+    except Exception as e:
+        print(f"[MARKETING] Error in process_trial_welcome: {e}")
+
+    return sent_count
+
+
+def process_trial_day1() -> int:
+    """Day-1 nudge for trials that are still running and not converted yet."""
+    if not supabase:
+        return 0
+
+    sent_count = 0
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=48)).isoformat()
+    window_end = (now - timedelta(hours=20)).isoformat()
+
+    try:
+        res = (
+            supabase.table("subscription_trials")
+            .select("user_id, started_at, expires_at")
+            .gte("started_at", window_start)
+            .lte("started_at", window_end)
+            .gte("expires_at", now.isoformat())
+            .limit(20)
+            .execute()
+        )
+        trials = res.data or []
+
+        for trial in trials:
+            try:
+                uid = trial.get("user_id")
+                if not uid:
+                    continue
+                if _trial_already_paid(uid):
+                    continue
+                if has_recent_message(uid, "trial_day1", 30):
+                    continue
+
+                display_name, user_email = _trial_recipient(uid)
+                if not user_email or "@" not in user_email:
+                    continue
+                if is_user_unsubscribed(uid, user_email):
+                    continue
+
+                subject = "3 أسئلة تفتح لك قيمة Pro قبل نهاية تجربتك"
+                greeting = f"كيف حالك {display_name}؟"
+                paragraphs = [
+                    "فاضل أقل من يومين على نهاية تجربتك، وأفضل استغلال ليها هو أسئلة مباشرة على أسهمك.",
+                    "<strong>جرّب واحد من دول الآن:</strong><br>• «رشّح لي 3 أسهم عليها فرصة شراء النهارده»<br>• «حلّل سهم في محفظتي وقولّي مناطق الدخول والخروج»<br>• «إيه أقوى القطاعات سيولة هذا الأسبوع؟»",
+                    "كل إجابة بتوصلك بمستويات تنفيذ واضحة، ومقدرة تتابع توصياتك ومحفظتك من نفس المكان.",
+                ]
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(
+                    subject, greeting, paragraphs,
+                    "افتح الشات دلوقتي",
+                    f"{APP_URL}/?chat=open&from=trial_day1",
+                    uid, user_email, "trial_day1", message_id,
+                )
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(uid, user_email, "trial_day1", {"expires_at": trial.get("expires_at")}, message_id, send_info.get("provider_message_id"))
+                    sent_count += 1
+            except Exception as trial_err:
+                print(f"[MARKETING] Error sending trial day1 for {trial.get('user_id')}: {trial_err}")
+                continue
+    except Exception as e:
+        print(f"[MARKETING] Error in process_trial_day1: {e}")
+
+    return sent_count
+
+
 def run_marketing_lifecycle() -> Dict[str, Any]:
     """
     Main entry point for automated marketing lifecycle runs.
@@ -501,13 +669,18 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
 
     print(f"[MARKETING] Starting marketing lifecycle run. (Sent today: {daily_count}/{MARKETING_DAILY_EMAIL_CAP})")
     abandoned = process_abandoned_checkouts()
+    welcome = process_trial_welcome()
+    day1 = process_trial_day1()
     trials = process_trial_expiring()
 
-    total_sent = abandoned + trials
-    print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} (Abandoned: {abandoned}, Trials: {trials})")
+    total_sent = abandoned + welcome + day1 + trials
+    print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} "
+          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Trials expiring: {trials})")
     return {
         "status": "ok",
         "abandoned_sent": abandoned,
+        "trial_welcome_sent": welcome,
+        "trial_day1_sent": day1,
         "trials_sent": trials,
         "total_sent": total_sent,
         "sent_today": daily_count + total_sent,
@@ -519,5 +692,7 @@ class MarketingLifecycleEngine:
     run = staticmethod(run_marketing_lifecycle)
     send_email = staticmethod(send_resend_email)
     process_abandoned = staticmethod(process_abandoned_checkouts)
+    process_trial_welcome = staticmethod(process_trial_welcome)
+    process_trial_day1 = staticmethod(process_trial_day1)
     process_trials = staticmethod(process_trial_expiring)
 

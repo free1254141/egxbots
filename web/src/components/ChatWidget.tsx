@@ -20,6 +20,7 @@ import { getSavedWallpaperConfig, CHAT_WALLPAPERS, DEFAULT_WALLPAPER_ID, DEFAULT
 import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
+import { consumeTrialAutostart, prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 
 function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
     return (
@@ -230,16 +231,24 @@ export default function ChatWidget() {
     const handleActivateTrialFromModal = async () => {
         setTrialStartingModal(true);
         try {
-            const res = await fetch("/api/subscription/trial", { method: "POST" });
+            const variant = prepareTrialAutostart();
+            const res = await fetch("/api/subscription/trial", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ variant }),
+            });
             const data = await res.json();
             if (res.ok && data?.success) {
                 toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
                 setShowUpgradeModal(false);
                 broadcastEntitlements(true);
+                window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
             } else {
+                clearTrialAutostart();
                 toast.error(data?.message || "تعذر تفعيل التجربة");
             }
         } catch {
+            clearTrialAutostart();
             toast.error("حدث خطأ في الاتصال");
         } finally {
             setTrialStartingModal(false);
@@ -410,6 +419,29 @@ export default function ChatWidget() {
             }
         }
     }, [setIsOpen]);
+
+    // After a trial is activated, open the assistant and ask the first question
+    // once. This is the activation step: the trial converts only when the user
+    // has actually seen one real answer.
+    const trialAutostartDone = useRef(false);
+    useEffect(() => {
+        if (!user || trialAutostartDone.current) return;
+        const runTrialAutostart = () => {
+            if (trialAutostartDone.current) return;
+            const pending = consumeTrialAutostart();
+            if (!pending) return;
+            trialAutostartDone.current = true;
+            setIsOpen(true);
+            window.setTimeout(() => { void sendMessage(pending.prompt); }, 0);
+        };
+        window.addEventListener(TRIAL_AUTOSTART_EVENT, runTrialAutostart);
+        // Covers a reload right after activation, when the event already fired.
+        const fallback = window.setTimeout(runTrialAutostart, 1500);
+        return () => {
+            window.removeEventListener(TRIAL_AUTOSTART_EVENT, runTrialAutostart);
+            window.clearTimeout(fallback);
+        };
+    }, [sendMessage, setIsOpen, user]);
     
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
