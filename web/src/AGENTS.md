@@ -36,6 +36,7 @@ These files are high-churn and central to the AI chat pipeline:
 - `src/contexts/ChatContext.tsx` — Chat state management
 - `src/components/ChatWidget.tsx` — Chat UI component
 - `src/app/api/ai-chat/route.ts` — Chat API route handler
+- `src/lib/ai/tool-result-cache.ts` — Cairo-day cache for public read-only tool results (never add userId-dependent or live tools to its allowlist)
 
 ## Commands
 

@@ -51,6 +51,7 @@ These instructions apply to the entire repository, including AI assistants, revi
 - DeepSeek-V3 determines user intent and selects from the 9 available tools in parallel (`get_stock`, `get_stock_levels`, `manage_portfolio`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_accumulation_stocks`, `get_news`, `get_comparison`).
 - Do NOT re-introduce brittle regex intent routers, rigid keyword blocklists, or mechanical symbol substitutions (e.g., swapping `ADRI` for `ADCI`) that break Egyptian dialect, Nile market stocks, or multi-turn queries.
 - Tool executions must always query Supabase directly with explicit column projections and strict `limit()` clauses.
+- Public read-only tool results (`get_stock`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_news`, `get_fair_value`, `get_sharia_cleanser`, ...) are cached per Cairo trading day in `web/src/lib/ai/tool-result-cache.ts`. Never add portfolio, alert, automation or live-quote tools to that allowlist: they read `userId` or must stay intraday. Disable the cache with `TOOL_RESULT_CACHE=off` if it ever misbehaves.
 - Detailed architecture and historical reviews are in `docs/chatbot-current-architecture.md` and `docs/chatbot-agentic-architecture-2026-10-08.md`.
 
 The current resource review and prioritized implementation candidates are in `docs/resource-usage-review-2026-10-05.md`.
