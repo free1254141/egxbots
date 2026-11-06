@@ -62,21 +62,32 @@ export async function submitToIndexNow(
   const urlList = normalizeIndexNowUrls(inputs);
   if (!urlList.length) return { submitted: 0, ok: false };
 
-  try {
-    const response = await fetch(INDEXNOW_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({
-        host: SITE_HOST,
-        key: INDEXNOW_KEY,
-        keyLocation: `${SITE_ORIGIN}/${INDEXNOW_KEY}.txt`,
-        urlList,
-      }),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 8000),
-    });
-    return { submitted: urlList.length, ok: response.ok, status: response.status };
-  } catch (error) {
-    console.warn("[indexnow] submission failed:", error);
-    return { submitted: urlList.length, ok: false };
+  const body = JSON.stringify({
+    host: SITE_HOST,
+    key: INDEXNOW_KEY,
+    keyLocation: `${SITE_ORIGIN}/${INDEXNOW_KEY}.txt`,
+    urlList,
+  });
+
+  // IndexNow answers 403 while a freshly deployed key file is still propagating
+  // across edge locations, so one short retry is worth it.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(INDEXNOW_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body,
+        signal: AbortSignal.timeout(options.timeoutMs ?? 8000),
+      });
+      if (response.ok || response.status !== 403) {
+        return { submitted: urlList.length, ok: response.ok, status: response.status };
+      }
+    } catch (error) {
+      console.warn("[indexnow] submission failed:", error);
+      return { submitted: urlList.length, ok: false };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
+
+  return { submitted: urlList.length, ok: false, status: 403 };
 }
