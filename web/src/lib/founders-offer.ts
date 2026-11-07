@@ -20,11 +20,32 @@ export function foundersOfferSecondsRemaining(endsAt: string | null): number | n
 
 export function applyFoundersOffer(config: any, offer: Offer | null) {
   if (!offer?.enabled) return config;
-  const isGrandfathered = Boolean(config.plans?.find((p: any) => p.id === "pro")?.is_grandfathered_renewal);
-  const effectivePrice = isGrandfathered ? 50 : Number(offer.price_egp);
+  const proPlan = config.plans?.find((p: any) => p.id === "pro");
+  const isGrandfathered50 = Boolean(proPlan?.is_grandfathered_renewal);
+  const isGrandfathered100 = Boolean(proPlan?.is_grandfathered_100);
 
   // Compute offer ends_at from backend (passed via payment_config -> founders.ends_at) or env fallback
-  const configEndsAt = config.founders?.ends_at || offer.ends_at || process.env.FOUNDERS_OFFER_ENDS_AT || process.env.NEXT_PUBLIC_FOUNDERS_OFFER_ENDS_AT || "2026-11-14T01:00:00Z";
+  const configEndsAt =
+    config.founders?.ends_at ||
+    offer.ends_at ||
+    process.env.FOUNDERS_OFFER_ENDS_AT ||
+    process.env.NEXT_PUBLIC_FOUNDERS_OFFER_ENDS_AT ||
+    "2026-11-14T01:00:00Z";
+
+  const notExpired = !configEndsAt || new Date(configEndsAt).getTime() > Date.now();
+  const isOpen = Boolean(offer.is_open && notExpired);
+  const regularPrice = Number(offer.regular_price_egp || 200);
+  const foundersPrice = Number(offer.price_egp || 100);
+
+  const effectivePrice = isGrandfathered50
+    ? 50
+    : isGrandfathered100
+    ? 100
+    : isOpen
+    ? foundersPrice
+    : regularPrice;
+
+  const hasSpecialRate = isGrandfathered50 || isGrandfathered100 || isOpen;
 
   return {
     ...config,
@@ -33,9 +54,11 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       limit: null,
       count: null,
       remaining: null,
+      is_open: isOpen,
       ends_at: configEndsAt,
       price_egp: effectivePrice,
-      is_grandfathered: isGrandfathered,
+      is_grandfathered: isGrandfathered50,
+      is_grandfathered_100: isGrandfathered100,
     },
     plans: (config.plans || []).map((plan: any) =>
       plan.id !== "pro"
@@ -43,19 +66,24 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
         : {
             ...plan,
             amount_egp: effectivePrice,
-            is_grandfathered_renewal: isGrandfathered,
-            discount: offer.is_open
+            is_grandfathered_renewal: isGrandfathered50,
+            is_grandfathered_100: isGrandfathered100,
+            discount: hasSpecialRate
               ? {
                   active: true,
                   kind: "founders",
-                  label_ar: isGrandfathered
+                  label_ar: isGrandfathered50
                     ? "سعر المؤسسين المستمر (50 ج.م مدى الحياة) ⚡"
+                    : isGrandfathered100 && !isOpen
+                    ? "سعر المؤسسين المثبت لحسابك (100 ج.م مدى الحياة) ⚡"
                     : "عرض المؤسسين (100 ج.م شهرياً مدى الحياة - 15 يوم فقط 🔥)",
-                  label_en: isGrandfathered
+                  label_en: isGrandfathered50
                     ? "Grandfathered Founders rate (50 EGP for life) ⚡"
+                    : isGrandfathered100 && !isOpen
+                    ? "Locked Founders rate (100 EGP/mo for life) ⚡"
                     : "Founders Offer - 100 EGP/mo for Life (15 Days Only 🔥)",
-                  original_amount_egp: Number(offer.regular_price_egp || 200),
-                  ends_at: configEndsAt,
+                  original_amount_egp: regularPrice,
+                  ends_at: isOpen ? configEndsAt : null,
                 }
               : null,
           }

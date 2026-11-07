@@ -673,15 +673,26 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
     day1 = process_trial_day1()
     trials = process_trial_expiring()
 
-    total_sent = abandoned + welcome + day1 + trials
+    final_48h_sent = 0
+    try:
+        from jobs.send_founders_final_48h_emails import dispatch_final_48h_campaign, is_within_final_48h_window
+        if is_within_final_48h_window():
+            f48_res = dispatch_final_48h_campaign(max_emails=25, dry_run=False, force=False)
+            final_48h_sent = int(f48_res.get("total_sent") or 0)
+    except Exception as f48_err:
+        print(f"[MARKETING] Error in final_48h campaign check: {f48_err}")
+
+    total_sent = abandoned + welcome + day1 + trials + final_48h_sent
     print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} "
-          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Trials expiring: {trials})")
+          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, "
+          f"Trials expiring: {trials}, Final 48h: {final_48h_sent})")
     return {
         "status": "ok",
         "abandoned_sent": abandoned,
         "trial_welcome_sent": welcome,
         "trial_day1_sent": day1,
         "trials_sent": trials,
+        "final_48h_sent": final_48h_sent,
         "total_sent": total_sent,
         "sent_today": daily_count + total_sent,
     }

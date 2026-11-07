@@ -116,16 +116,33 @@ def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
     2. User is currently active, OR expired within the 3-day grace period (72 hours).
     3. If expired > 3 days ago without renewing, or new user, eligibility is forfeited (price becomes 100 EGP).
     """
-    if not user_id:
+    if not user_id or user_id == "ba9c27e8-f62d-452f-8a29-dc77fd092207":
         return False
     try:
         _init_supabase()
         if not supabase:
             return False
 
-        # 1. Did the user join under founders offer or pay 50 EGP previously?
-        in_members = supabase.table("founders_offer_members").select("user_id").eq("user_id", user_id).limit(1).execute().data
-        had_50_order = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("amount_egp", 50.0).limit(1).execute().data
+        # 1. Did the user join under the 50 EGP founders era (before Nov 1, 2026) or have an approved 50 EGP order?
+        in_members = (
+            supabase.table("founders_offer_members")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .lt("joined_at", "2026-11-01T00:00:00Z")
+            .limit(1)
+            .execute()
+            .data
+        )
+        had_50_order = (
+            supabase.table("local_payment_orders")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("amount_egp", 50.0)
+            .eq("status", "approved")
+            .limit(1)
+            .execute()
+            .data
+        )
         if not in_members and not had_50_order:
             return False
 
@@ -165,7 +182,7 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
     2. User is currently active, OR expired within the 3-day grace period (72 hours).
     3. If expired > 3 days ago without renewing, eligibility is forfeited (reverts to regular 200 EGP once offer ends).
     """
-    if not user_id:
+    if not user_id or user_id == "ba9c27e8-f62d-452f-8a29-dc77fd092207":
         return False
     try:
         _init_supabase()
@@ -176,9 +193,9 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
         if is_user_eligible_for_50_egp_renewal(user_id):
             return False
 
-        # Did the user join under founders offer or pay 100 EGP previously?
+        # Did the user join under founders offer or pay <= 100 EGP previously?
         in_members = supabase.table("founders_offer_members").select("user_id").eq("user_id", user_id).limit(1).execute().data
-        had_100_order = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).eq("status", "approved").limit(1).execute().data
+        had_100_order = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).lte("amount_egp", 100.0).eq("status", "approved").limit(1).execute().data
         if not in_members and not had_100_order:
             return False
 
@@ -224,6 +241,10 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
         if discount["active"]:
             return float(discount["price_egp"])
         settings = billing_settings()
+        if settings.get("founders_offer_enabled"):
+            if founders_offer_is_open():
+                return float(settings.get("founders_price_egp") or settings.get("pro_price_egp") or 100.0)
+            return float(settings.get("founders_regular_price_egp") or 200.0)
         if settings.get("pro_price_egp") is not None:
             return float(settings["pro_price_egp"])
         return _env_price("PRO_PRICE_EGP", 200.0)
