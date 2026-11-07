@@ -75,7 +75,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   // Short Arabic display name for title (e.g., "العربية للألومنيوم", "أبو قير للأسمدة", "إم بي للهندسة")
   const shortAr = nameAr
-    .replace(/^(?:شركة|مجموعة|بنك)\s+/g, (m) => (m.includes("بنك") ? "بنك " : ""))
+    .replace(/^(?:شركة|مجموعة|بنك)\s+/g, (m: string) => (m.includes("بنك") ? "بنك " : ""))
     .trim();
 
   const title = shortAr && shortAr !== symbol

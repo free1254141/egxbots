@@ -374,15 +374,19 @@ def process_abandoned_checkouts() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "🔥 تذكير: احجز عرض المؤسسين (100 ج.م شهرياً مدى الحياة) | EGX BOTS"
+                subject = "🔥 تذكير: احجز عرض المؤسسين (خصم 50% وتثبيت السعر مدى الحياة) | EGX BOTS"
                 greeting = f"أهلاً {display_name} 👋"
                 paragraphs = [
-                    "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة Pro للمؤسسين</strong> ولم تستكمل عملية الدفع بعد.",
-                    "نود تذكيرك أن <strong>عرض المؤسسين متاح لفترة محدودة (15 يوماً فقط) بسعر 100 ج.م شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — يثبت هذا السعر لحسابك دائماً طالما تجدد مع مهلة 72 ساعة لتثبيت السعر عند كل تجديد.",
-                    "باشتراكك في Pro، ستحصل فوراً على: <strong>شات بوت الذكاء الاصطناعي (AI Chatbot) للتحليل الفني اللحظي، إشارات ونماذج السوينج الفنية المؤتمتة، نقاط المراقبة والأهداف الاسترشادية ووقف الخسارة، وقناة تنبيهات VIP الخاصة على تليجرام</strong>.",
-                    "إذا كنت ترغب في تجربة المنصة أولاً دون أي التزام، يمكنك تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> بضغطة زر واحدة من صفحة الباقات!",
+                    "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة EGX BOTS Pro للمؤسسين</strong> ولم تستكمل عملية الدفع بعد.",
+                    "نود تذكيرك أن <strong>عرض المؤسسين بخصم 50% متاح لفترة محدودة</strong> قبل عودة الأسعار لطبيعتها (200 ج.م/شهر) مع انتهاء العداد التنازلي يوم 14 نوفمبر:<br>"
+                    "• <strong>شهر واحد:</strong> 100 ج.م بدلاً من 200 ج.م<br>"
+                    "• <strong>6 شهور (الأكثر طلباً):</strong> 500 ج.م فقط (83 ج.م/شهر)<br>"
+                    "• <strong>سنة كاملة (أكبر توفير):</strong> 900 ج.م فقط (75 ج.م/شهر)<br>"
+                    "<em>جميع الباقات تثبّت حسابك كمؤسس بسعر 100 ج.م/شهر مدى الحياة طالما بتجدد!</em>",
+                    "باشتراكك ستحصل فوراً على: <strong>شات بوت الذكاء الاصطناعي ARTORO بدون قيود، الصفقات القصيرة ⚡ PRO ومتابعة الأرباح بدون تشفير، رادار السيولة وكاشف المصائد، وقناة VIP الفورية على تليجرام</strong>.",
+                    "وإذا كنت ترغب في تجربة المنصة أولاً، يمكنك تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> بضغطة زر واحدة من صفحة الباقات!",
                 ]
-                cta_text = "استكمال الاشتراك وتثبيت السعر مدى الحياة (100 ج.م)"
+                cta_text = "استكمال الاشتراك وتثبيت السعر مدى الحياة"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
                 message_id = str(uuid.uuid4())
@@ -464,14 +468,18 @@ def process_trial_expiring() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "⏳ فترتك التجريبية في EGX BOTS Pro تنتهي قريباً — اشترك في عرض المؤسسين وثبّت 100 ج.م مدى الحياة"
+                subject = "⏳ فترتك التجريبية في EGX BOTS Pro تنتهي قريباً — ثبّت عرض المؤسسين (خصم 50% مدى الحياة)"
                 greeting = f"أهلاً {display_name} ⚡"
                 paragraphs = [
                     "نود إعلامك أن <strong>تجربتك المجانية لباقة Pro ستنتهي خلال الساعات القادمة</strong>.",
-                    "نتمنى أن تكون قد استفدت من شات بوت الذكاء الاصطناعي ونماذج وإشارات السوينج الفنية خلال الأيام الماضية.",
-                    "لتستمر في استخدام الشات بوت واستلام إشعارات النماذج الفنية دون انقطاع، اشترك الآن في <strong>عرض المؤسسين بـ 100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) والمتاح لفترة محدودة (15 يوماً فقط) وثبّت سعرك دائماً طالما تجدد مع مهلة 72 ساعة عند التجديد.",
+                    "نتمنى أن تكون قد استفدت من شات بوت الذكاء الاصطناعي ARTORO وصفقات الزخم والإشارات الفورية خلال الأيام الماضية.",
+                    "لتستمر في استخدام الشات بوت واستلام إشعارات النماذج الفنية بدون انقطاع، اشترك الآن في <strong>عرض المؤسسين بخصم 50%</strong> المتاح حتى 14 نوفمبر وثبّت سعرك دائماً طالما تجدد:<br>"
+                    "• <strong>شهر واحد:</strong> 100 ج.م شهرياً (بدلاً من 200 ج.م)<br>"
+                    "• <strong>6 شهور:</strong> 500 ج.م (ما يعادل 83 ج.م/شهر)<br>"
+                    "• <strong>سنة كاملة:</strong> 900 ج.م (ما يعادل 75 ج.م/شهر)<br>"
+                    "<em>اشتراكك في أي باقة يثبت عضويتك كمؤسس مدى الحياة بسعر الـ 100 ج.م عند أي تجديد قادم!</em>",
                 ]
-                cta_text = "تثبيت اشتراك Pro بـ 100 ج.م شهرياً مدى الحياة"
+                cta_text = "تثبيت اشتراك Pro بخصم 50% مدى الحياة"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
                 message_id = str(uuid.uuid4())
@@ -657,6 +665,79 @@ def process_trial_day1() -> int:
     return sent_count
 
 
+
+
+def process_trial_day2() -> int:
+    """Day-2 momentum case study & proof for trials nearing their final day."""
+    if not supabase:
+        return 0
+
+    sent_count = 0
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(hours=60)).isoformat()
+    window_end = (now - timedelta(hours=36)).isoformat()
+
+    try:
+        res = (
+            supabase.table("subscription_trials")
+            .select("user_id, started_at, expires_at")
+            .gte("started_at", window_start)
+            .lte("started_at", window_end)
+            .gte("expires_at", now.isoformat())
+            .limit(20)
+            .execute()
+        )
+        trials = res.data or []
+
+        for trial in trials:
+            try:
+                uid = trial.get("user_id")
+                if not uid:
+                    continue
+                if _trial_already_paid(uid):
+                    continue
+                if has_recent_message(uid, "trial_day2", 30):
+                    continue
+
+                display_name, user_email = _trial_recipient(uid)
+                if not user_email or "@" not in user_email:
+                    continue
+                if is_user_unsubscribed(uid, user_email):
+                    continue
+
+                subject = "📊 دراسة حالة سريعة: إزاي الإسكانر بيلتقط صفقات الزخم قبل ما تتحرك؟ | EGX BOTS"
+                greeting = f"أهلاً {display_name} 🎯"
+                paragraphs = [
+                    "تجربتك في <strong>EGX BOTS Pro</strong> قربت على الانتهاء (أقل من 24 ساعة متبقية)، وحبينا نشاركك كيف تستفيد عملياً من ميزات Pro.",
+                    "<strong>إزاي بتشتغل الصفقات القصيرة ⚡ PRO؟</strong><br>"
+                    "1️⃣ <strong>رادار السيولة الذكية:</strong> بيفحص تدفقات السيولة غير الطبيعية والاختراقات الفنية اللحظية مع افتتاح الجلسة.<br>"
+                    "2️⃣ <strong>إدارة مخاطر صارمة:</strong> كل صفقة بتدخل بوقف خسارة صارم 4% لحماية رأس المال، وتتبع أرباح آلي عبر متوسط EMA10 لركوب الاتجاه الصاعد لأقصى مدى.<br>"
+                    "3️⃣ <strong>مساعدك الذكي ARTORO:</strong> بيوضحلك فوراً مناطق التجميع والتصريف ومصائد السيولة (Spring & Upthrust) لأي سهم تطلبه.",
+                    "<strong>عرض المؤسسين متاح الآن بخصم 50% وتثبيت السعر مدى الحياة:</strong><br>"
+                    "• شهر واحد بـ <strong>100 ج.م</strong> (بدلاً من 200)<br>"
+                    "• 6 شهور بـ <strong>500 ج.م</strong> (ما يعادل 83 ج.م/شهر)<br>"
+                    "• سنة كاملة بـ <strong>900 ج.م</strong> (ما يعادل 75 ج.م/شهر)<br>"
+                    "<em>أي باقة تختارها تثبّت عضويتك كمؤسس بسعر 100 ج.م/شهر مدى الحياة طالما بتجدد!</em>",
+                ]
+                message_id = str(uuid.uuid4())
+                html = _build_email_html(
+                    subject, greeting, paragraphs,
+                    "استغل آخر ساعات تجربتك وثبّت سعرك",
+                    f"{APP_URL}/pricing?plan=pro",
+                    uid, user_email, "trial_day2", message_id,
+                )
+                send_info: dict = {}
+                if send_resend_email(user_email, subject, html, send_info):
+                    record_marketing_message(uid, user_email, "trial_day2", {"expires_at": trial.get("expires_at")}, message_id, send_info.get("provider_message_id"))
+                    sent_count += 1
+            except Exception as trial_err:
+                print(f"[MARKETING] Error sending trial day2 for {trial.get('user_id')}: {trial_err}")
+                continue
+    except Exception as e:
+        print(f"[MARKETING] Error in process_trial_day2: {e}")
+
+    return sent_count
+
 def run_marketing_lifecycle() -> Dict[str, Any]:
     """
     Main entry point for automated marketing lifecycle runs.
@@ -671,6 +752,7 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
     abandoned = process_abandoned_checkouts()
     welcome = process_trial_welcome()
     day1 = process_trial_day1()
+    day2 = process_trial_day2()
     trials = process_trial_expiring()
 
     final_48h_sent = 0
@@ -682,15 +764,16 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
     except Exception as f48_err:
         print(f"[MARKETING] Error in final_48h campaign check: {f48_err}")
 
-    total_sent = abandoned + welcome + day1 + trials + final_48h_sent
+    total_sent = abandoned + welcome + day1 + day2 + trials + final_48h_sent
     print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} "
-          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, "
+          f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Day2: {day2}, "
           f"Trials expiring: {trials}, Final 48h: {final_48h_sent})")
     return {
         "status": "ok",
         "abandoned_sent": abandoned,
         "trial_welcome_sent": welcome,
         "trial_day1_sent": day1,
+        "trial_day2_sent": day2,
         "trials_sent": trials,
         "final_48h_sent": final_48h_sent,
         "total_sent": total_sent,
@@ -705,5 +788,6 @@ class MarketingLifecycleEngine:
     process_abandoned = staticmethod(process_abandoned_checkouts)
     process_trial_welcome = staticmethod(process_trial_welcome)
     process_trial_day1 = staticmethod(process_trial_day1)
+    process_trial_day2 = staticmethod(process_trial_day2)
     process_trials = staticmethod(process_trial_expiring)
 
