@@ -2,6 +2,9 @@ import TechnicalScannerLoader from "./TechnicalScannerLoader";
 import TechnicalScannerGuide from "./TechnicalScannerGuide";
 import { Metadata } from "next";
 
+export const dynamic = "force-static";
+export const revalidate = 86400;
+
 export const metadata: Metadata = {
   title: "الماسح الفني للأسهم المصرية | Technical Stock Screener",
   description: "فحص أسهم البورصة المصرية بمؤشرات RSI وMACD والمتوسطات المتحركة والحجم، وفق البيانات المحفوظة وتاريخ تحديثها، مع فلاتر قابلة للتخصيص.",

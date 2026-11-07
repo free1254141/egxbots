@@ -1,5 +1,8 @@
 import PricingClient from "./PricingClient";
 
+export const dynamic = "force-static";
+export const revalidate = 86400;
+
 export const metadata = {
   title: "خطط الأسعار والاشتراكات الشهرية والسنوية",
   description:

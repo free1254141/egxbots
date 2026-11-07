@@ -51,3 +51,9 @@ All agents (Planners, Developers, QA Reviewers, Subagents, and AI tools) must st
 6. **Hugging Face Deployment Rule (Python Backend Only)**:
    - When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).
    - **NEVER** push frontend Next.js files (`web/`), UI components, static images, icons, Android APKs, docs, or non-Python packages to Hugging Face. The Space only runs the Python bot/FastAPI backend.
+
+7. **DNS & Vercel Direct Resolution Guard**:
+   - The authoritative nameservers for `egxbots.com` are kept directly on Vercel (`ns1.vercel-dns.com`, `ns2.vercel-dns.com`).
+   - **CRITICAL Egyptian ISP Guard:** Never proxy `egxbots.com` through Cloudflare's shared free proxy IP pools (`104.21.x.x` / `172.67.x.x`). Egyptian telecommunications providers (WE / Telecom Egypt, Vodafone) drop traffic to these Cloudflare free ranges at the DPI level, causing `ERR_CONNECTION_TIMED_OUT` for Egyptian visitors.
+   - Traffic routes directly to Vercel's Anycast nodes (`76.76.21.21`, `216.198.79.1`).
+   - Caching protection relies on Vercel Edge ISR (`Cache-Control: public, max-age=14400`) and SWR.

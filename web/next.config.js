@@ -137,6 +137,59 @@ const nextConfig = {
       },
     ];
   },
+  compress: true,
+  poweredByHeader: false,
+
+  async headers() {
+    return [
+      {
+        // Cache public stock pages across Vercel Edge CDN for 24h with stale-while-revalidate
+        source: '/stocks/:symbol*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      {
+        // Static pricing page
+        source: '/pricing',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      {
+        // Public market overview and directories
+        source: '/(fair-value|sharia|scanner/technical)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;

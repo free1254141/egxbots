@@ -30,6 +30,18 @@ These instructions apply to the entire repository, including AI assistants, revi
 - Coordinate delegated work so agents do not independently repeat the same remote query, live test or generation. Share compact findings rather than large logs.
 - Before an external call, determine the question it answers, the smallest scope and whether an existing result already answers it. Report measured savings separately from estimates; never promise a percentage without measurements.
 
+## 🛡️ DNS & Infrastructure Configuration (Vercel Origin Direct)
+
+- **Domain & Nameservers:**
+  * Authoritative Nameservers are managed directly on Vercel: `ns1.vercel-dns.com` and `ns2.vercel-dns.com`.
+  * **CRITICAL Egyptian ISP Guard:** Never proxy `egxbots.com` through Cloudflare's shared free IP pools (`104.21.x.x` / `172.67.x.x`). Egyptian telecommunications providers (WE / Telecom Egypt, Vodafone) filter and drop traffic to these Cloudflare free ranges at the DPI level, causing fatal `ERR_CONNECTION_TIMED_OUT` for Egyptian visitors.
+  * DNS resolves directly to Vercel Anycast edge IPs (`76.76.21.21`, `216.198.79.1`).
+  * Cache and quota protection rely on Next.js 15 Incremental Static Regeneration (ISR) and Vercel Data Cache (`Cache-Control: public, max-age=14400`), which serve public stock pages directly from Vercel's global edge without invoking backend functions on cache hits.
+- **Backend & ML Services (Hugging Face):** Python FastAPI backend (`weeasdwee/AI_BOT`) executes heavy market jobs and Telegram bots.
+- **Database & Auth (Supabase):** PostgreSQL with Row-Level Security, persistent storage, and authentication.
+- **Email Services (Resend & ImprovMX):** Outbound emails via Resend (DKIM `resend._domainkey`), inbound via ImprovMX MX.
+- Full architectural reference is documented in `docs/SYSTEM_ARCHITECTURE_AND_CDN_EDGE.md`.
+
 ## Email Campaign Reporting Rule
 
 - Whenever an email batch or campaign is dispatched, ALWAYS automatically report the complete live analytics breakdown immediately after dispatch without waiting for the user to request it:

@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     }));
     const cacheHeader = unrestricted
       ? "private, max-age=60, stale-while-revalidate=120"
-      : "public, max-age=120, s-maxage=300, stale-while-revalidate=600";
+      : "public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400";
     return NextResponse.json({ markers, recommendations }, { headers: { "Cache-Control": cacheHeader } });
   } catch (error) {
     console.error("[CHART_MARKERS]", error);

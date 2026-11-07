@@ -39,12 +39,14 @@ Advanced AI-driven stock analysis platform. Combining RandomForest models with m
 - **Track Positions**: Save interesting stocks to your watchlist.
 - **Performance Tracking**: Monitor the "AI Signal" vs "Actual Price" for your saved symbols.
 
-## 🛠️ Technology Stack
+## 🛠️ Technology Stack & Multi-Tier Architecture
 
-- **Frontend**: Next.js 14 (App Router), React, TailwindCSS, Lucide Icons.
-- **Backend API**: Python (FastAPI), Pandas, Scikit-Learn.
-- **Database**: Supabase (PostgreSQL).
-- **Data Source**: EODHD API / TradingView (via custom scrapers).
+- **Edge Shield & CDN**: Cloudflare (Global Anycast DNS, Edge Caching, Universal SSL, WAF & DDoS Shield).
+- **Frontend & App Origin**: Next.js 15 (App Router, React Server Components, Server Actions) deployed on Vercel.
+- **Backend & ML Engine**: Python 3.12 (FastAPI), Pandas, Scikit-Learn deployed on Hugging Face Spaces (weeasdwee/AI_BOT).
+- **Database & Storage**: Supabase (PostgreSQL with Row Level Security, pgvector, Edge Auth).
+- **Communications**: Resend (Transactional & Marketing Emails with DKIM) + ImprovMX (Domain Email Forwarding).
+- **Architecture Reference**: Detailed multi-tier lifecycle is documented in [docs/SYSTEM_ARCHITECTURE_AND_CDN_EDGE.md](docs/SYSTEM_ARCHITECTURE_AND_CDN_EDGE.md).
 
 ### Price-history archive and egress control
 
