@@ -131,3 +131,8 @@ web/planner_compare_report.md
 *credentials*.json
 scripts/*.json
 !scripts/package*.json
+
+# Google Service Account Keys
+*neon-dryad*.json
+service_account*.json
+*credentials*.json

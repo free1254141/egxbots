@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useLanguage } from "@/contexts/LanguageContext";
 import {
@@ -857,6 +858,143 @@ export default function BlogsPage() {
         </div>
       </section>
 
+      {/* Featured Pillar Guides */}
+      <div className="mb-12">
+        <div className="flex items-center gap-2 mb-6">
+          <Sparkles className="w-5 h-5 text-amber-500" />
+          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white">
+            {isAr ? "أدلة التداول والذكاء الاصطناعي الأكثر قراءة" : "Featured Trading & AI Guides"}
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Link
+            href="/blogs/best-egx-stock-analysis-software"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-amber-300 text-black text-xs font-black mb-3">
+                {isAr ? "دليل البرامج 2026" : "Software Guide"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "أفضل برنامج تحليل الأسهم المصرية لعام 2026: مقارنة شاملة" : "Best EGX Stock Analysis Software 2026"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "مقارنة عملية بين برامج الشارت اليدوي ورادار الذكاء الاصطناعي وكشف السيولة اللحظية." : "Comparing manual charting platforms with AI scanners and real-time liquidity detection."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
+          <Link
+            href="/blogs/ai-egyptian-stock-market-analysis"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-emerald-300 text-black text-xs font-black mb-3">
+                {isAr ? "خوارزميات AI" : "Machine Learning"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "تحليل الأسهم المصرية بالذكاء الاصطناعي: الرصد الكمي للسيولة" : "AI Egyptian Stock Market Analysis"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "كيف تعمل نماذج التعلم الآلي على قياس AI Score ورصد مؤشرات التجميع في EGX30 و EGX70." : "How machine learning models compute AI Score and detect accumulation indicators in EGX."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
+          <Link
+            href="/blogs/egx-telegram-stock-recommendations"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-cyan-300 text-black text-xs font-black mb-3">
+                {isAr ? "تنبيهات تليجرام" : "Telegram Alerts"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "قنوات البورصة المصرية على تليجرام: مقارنة التحليل الآلي" : "EGX Telegram Market Alerts & Quantitative Analysis"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "كيف تتجنب القنوات العشوائية وتعتمد على مؤشرات فنية آلية منضبطة بمستويات الدعم والمقاومة." : "Avoid speculative channels and rely on systematic technical indicators and support/resistance levels."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-blue-700 dark:text-blue-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
+          <Link
+            href="/blogs/how-to-invest-in-egyptian-stock-market-beginners"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-purple-300 text-black text-xs font-black mb-3">
+                {isAr ? "دليل المبتدئين" : "Beginner Guide"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "كيفية الاستثمار في البورصة المصرية للمبتدئين 2026: خطوة بخطوة" : "How to Invest in the Egyptian Stock Market (EGX) for Beginners"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "من التكويد وفتح الحساب لدى شركة سمسرة مرخصة حتى فهم مؤشرات EGX30 و EGX70 وقراءة الدعوم." : "From opening an FRA-licensed brokerage account to understanding EGX30, EGX70, and technical indicators."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-purple-700 dark:text-purple-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
+          <Link
+            href="/blogs/egx33-sharia-compliant-stocks-egypt-guide"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-lime-300 text-black text-xs font-black mb-3">
+                {isAr ? "مؤشر الشريعة EGX33" : "EGX33 Shariah"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "دليل الأسهم المتوافقة مع الشريعة في البورصة المصرية وتطهير الكوبونات" : "EGX33 Sharia-Compliant Stocks & Dividend Purification Guide"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "معايير مؤشر الشريعة EGX33، الضوابط المالية، وكيفية حساب تطهير التوزيعات وزكاة الأسهم آلياً." : "EGX33 Shariah screening rules, financial thresholds, and automated dividend purification & Zakat calculation."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
+          <Link
+            href="/blogs/undervalued-egx-stocks-fair-value-calculation"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-orange-300 text-black text-xs font-black mb-3">
+                {isAr ? "السعر العادل" : "Fair Value"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة (معادلة جراهام)" : "Fair Value of Egyptian Stocks: Undervalued Screener & Graham Formula"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "كيف تكتشف الأسهم التي تتداول بأقل من قيمتها الدفترية ومضاعف ربحيتها العادل مع تجنب فخاخ القيمة." : "Discover stocks trading below intrinsic value using Benjamin Graham's formula and sector P/E multiples."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-orange-700 dark:text-orange-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+        </div>
+      </div>
+
       {/* Blogs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {dbLoading && dbPosts.length === 0 && (
@@ -986,11 +1124,12 @@ export default function BlogsPage() {
         </div>
 
         <h2 className="text-3xl font-black text-black uppercase tracking-tight">
-          Stay Updated
+          {isAr ? "ابقَ على اطلاع دائم" : "Stay Updated"}
         </h2>
         <p className="text-black max-w-lg mx-auto text-sm sm:text-base font-extrabold leading-relaxed">
-          Subscribe to our newsletter to receive the latest market insights and
-          algorithmic predictions directly in your inbox.
+          {isAr
+            ? "اشترك في النشرة البريدية للحصول على أحدث قراءات السوق والمؤشرات الكمية مباشرة في بريدك الإلكتروني."
+            : "Subscribe to our newsletter to receive the latest market insights and quantitative indicators directly in your inbox."}
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto pt-2">
@@ -1000,7 +1139,7 @@ export default function BlogsPage() {
             className="flex-1 h-14 border-4 border-black bg-white px-5 text-base font-bold text-black outline-none shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] focus:bg-yellow-50 transition-all placeholder:text-zinc-400"
           />
           <button className="h-14 px-8 border-4 border-black bg-black text-white text-xs font-black uppercase tracking-widest hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-100 cursor-pointer flex items-center justify-center">
-            Subscribe
+            {isAr ? "اشتراك" : "Subscribe"}
           </button>
         </div>
       </section>

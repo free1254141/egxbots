@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 86400; // 24h ISR: caches on Edge CDN, zero Vercel Lambda CPU and zero Supabase reads
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
     const slug = (await params).slug;
@@ -69,27 +69,27 @@ export default async function SharedChatPage({ params }: { params: Promise<{ slu
     };
 
     return (
-        <main dir="rtl" className="min-h-screen bg-[#FFE600] px-4 py-10 text-black">
+        <main dir="rtl" className="min-h-screen bg-[#FFE600] dark:bg-zinc-950 px-4 py-10 text-black dark:text-zinc-100">
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }}
             />
-            <article className="mx-auto max-w-4xl border-4 border-black bg-white p-6 shadow-[8px_8px_0_0_#000] sm:p-10">
-                <div className="mb-8 border-b-4 border-black pb-5">
-                    <p className="mb-3 font-mono text-xs font-black uppercase tracking-widest">EGX Bots Blog</p>
-                    <h1 className="text-2xl font-black sm:text-4xl">{post.title}</h1>
-                    <p className="mt-3 text-sm text-zinc-600">{new Date(post.created_at).toLocaleDateString("ar-EG")}</p>
+            <article className="mx-auto max-w-4xl border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 shadow-[8px_8px_0_0_#000] dark:shadow-[8px_8px_0_0_#fff] sm:p-10">
+                <div className="mb-8 border-b-4 border-black dark:border-white pb-5">
+                    <p className="mb-3 font-mono text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">EGX Bots Blog</p>
+                    <h1 className="text-2xl font-black text-black dark:text-white sm:text-4xl">{post.title}</h1>
+                    <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">{new Date(post.created_at).toLocaleDateString("ar-EG")}</p>
                 </div>
-                <section className="mb-8 border-2 border-black bg-cyan-100 p-4">
+                <section className="mb-8 border-2 border-black dark:border-cyan-500/60 bg-cyan-100 dark:bg-cyan-950/40 p-4 text-black dark:text-zinc-100">
                     <h2 className="mb-2 font-black">السؤال</h2>
                     <p className="whitespace-pre-wrap leading-8">{post.question}</p>
                 </section>
                 <section>
-                    <h2 className="mb-3 text-xl font-black">الإجابة</h2>
-                    <div className="whitespace-pre-wrap leading-8">{post.answer}</div>
+                    <h2 className="mb-3 text-xl font-black text-black dark:text-white">الإجابة</h2>
+                    <div className="whitespace-pre-wrap leading-8 text-zinc-800 dark:text-zinc-200">{post.answer}</div>
                 </section>
-                <footer className="mt-10 border-t-4 border-black pt-4 text-xs text-zinc-600">
-                    تحليل آلي مبني على البيانات المتاحة من EGX Bots، وليس توصية استثمارية.
+                <footer className="mt-10 border-t-4 border-black dark:border-white pt-4 text-xs text-zinc-600 dark:text-zinc-400">
+                    تحليل آلي إحصائي مبني على البيانات المتاحة من EGX Bots لأغراض الدراسة والبحث فقط، وليس توصية استثمارية أو دعوة للشراء أو البيع.
                 </footer>
             </article>
         </main>

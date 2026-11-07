@@ -348,6 +348,96 @@ export default function Footer() {
           </div>
         </div>
 
+        {/* ── SEO Internal Linking Hub: Top EGX Stocks & Pillar Guides (Light/Dark + AR/EN) ── */}
+        <div className="border-2 border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/50 p-5 sm:p-6 mb-8 shadow-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
+                {isAr ? "📊 أبرز أسهم البورصة المصرية (تحليل فني و AI)" : "📊 Most Searched EGX Stocks (AI & Technical Analysis)"}
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { sym: "comi", ar: "البنك التجاري الدولي COMI", en: "CIB Bank (COMI)" },
+                  { sym: "fwry", ar: "فوري FWRY", en: "Fawry (FWRY)" },
+                  { sym: "tmgh", ar: "طلعت مصطفى TMGH", en: "Talaat Moustafa (TMGH)" },
+                  { sym: "abuk", ar: "أبو قير للأسمدة ABUK", en: "Abu Qir Fertilizers (ABUK)" },
+                  { sym: "esrs", ar: "حديد عز ESRS", en: "Ezz Steel (ESRS)" },
+                  { sym: "etel", ar: "المصرية للاتصالات ETEL", en: "Telecom Egypt (ETEL)" },
+                  { sym: "swdy", ar: "السويدي إليكتريك SWDY", en: "Elsewedy Electric (SWDY)" },
+                  { sym: "hrho", ar: "إي إف جي القابضة HRHO", en: "EFG Holding (HRHO)" },
+                  { sym: "amoc", ar: "أموك AMOC", en: "AMOC" },
+                  { sym: "btfh", ar: "بلتون القابضة BTFH", en: "Beltone (BTFH)" },
+                ].map((s) => (
+                  <Link
+                    key={s.sym}
+                    href={`/stocks/${s.sym}`}
+                    prefetch={false}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-zinc-100 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-800 hover:border-amber-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  >
+                    {isAr ? s.ar : s.en}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
+                {isAr ? "📚 الأدلة المرجعية لتحليل السوق المصري" : "📚 Comprehensive EGX Quantitative Guides"}
+              </h4>
+              <ul className="space-y-2 text-xs font-bold">
+                <li>
+                  <Link
+                    href="/blogs/best-egx-stock-analysis-software"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "أفضل برنامج تحليل الأسهم المصرية لعام 2026: مقارنة شاملة" : "Best EGX Stock Analysis Software (2026 Comparison Guide)"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/ai-egyptian-stock-market-analysis"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "تحليل الأسهم المصرية بالذكاء الاصطناعي: الرصد الكمي للسيولة" : "AI Egyptian Stock Market Analysis & Liquidity Detection"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/egx-telegram-stock-recommendations"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "قنوات البورصة المصرية على تليجرام: مقارنة التحليل الآلي" : "EGX Telegram Technical Alerts & Quantitative Scanners"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/how-to-invest-in-egyptian-stock-market-beginners"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "كيفية الاستثمار في البورصة المصرية للمبتدئين 2026" : "How to Invest in the Egyptian Stock Market (EGX) for Beginners"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/egx33-sharia-compliant-stocks-egypt-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "دليل الأسهم المتوافقة مع الشريعة (مؤشر EGX33) وتطهير الكوبونات" : "EGX33 Sharia-Compliant Stocks & Dividend Purification Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/undervalued-egx-stocks-fair-value-calculation"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-purple-600 dark:hover:text-purple-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة" : "Fair Value of Egyptian Stocks & Undervalued Screener"}
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {/* ── Official EasyKash Payment Gateway Integration ── */}
         <div className="border-2 border-black/10 dark:border-white/10 bg-zinc-50/80 dark:bg-zinc-900/60 p-5 sm:p-6 mb-10 shadow-sm transition-all hover:border-emerald-500/40">
           <div className="flex flex-col lg:flex-row items-center justify-between gap-6">

@@ -31,6 +31,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.90,
     },
     {
+      url: `${baseUrl}/fair-value`,
+      changeFrequency: 'daily',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/sharia`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
       url: `${baseUrl}/scanner/technical`,
       changeFrequency: 'daily',
       priority: 0.85,
@@ -48,11 +58,46 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     {
       url: `${baseUrl}/blogs`,
       changeFrequency: 'daily',
-      priority: 0.8,
+      priority: 0.85,
+    },
+    {
+      url: `${baseUrl}/blogs/best-egx-stock-analysis-software`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/ai-egyptian-stock-market-analysis`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/egx-telegram-stock-recommendations`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/how-to-invest-in-egyptian-stock-market-beginners`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/egx33-sharia-compliant-stocks-egypt-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/undervalued-egx-stocks-fair-value-calculation`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
     },
     {
       url: `${baseUrl}/news`,
       changeFrequency: 'hourly',
+      priority: 0.8,
+    },
+    {
+      url: `${baseUrl}/pricing`,
+      changeFrequency: 'weekly',
       priority: 0.8,
     },
     {
@@ -64,6 +109,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${baseUrl}/faq`,
       changeFrequency: 'weekly',
       priority: 0.75,
+    },
+    {
+      url: `${baseUrl}/legal-status`,
+      changeFrequency: 'monthly',
+      priority: 0.5,
     },
     {
       url: `${baseUrl}/disclaimer`,

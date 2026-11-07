@@ -21,6 +21,28 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://egxbots.com/fair-value",
   },
+  openGraph: {
+    title: "السعر العادل ومؤشر الرخص للأسهم المصرية | EGX BOTS",
+    description:
+      "فحص السعر العادل ومضاعفات الربحية والقيمة الدفترية لأسهم البورصة المصرية باستخدام النماذج الكمية.",
+    url: "https://egxbots.com/fair-value",
+    type: "website",
+    images: [
+      {
+        url: "https://egxbots.com/opengraph-image.png",
+        width: 1200,
+        height: 630,
+        alt: "السعر العادل للأسهم المصرية - EGX BOTS",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "السعر العادل ومؤشر الرخص للأسهم المصرية | EGX BOTS",
+    description:
+      "فحص السعر العادل ومضاعفات الربحية والقيمة الدفترية لأسهم البورصة المصرية.",
+    images: ["https://egxbots.com/opengraph-image.png"],
+  },
 };
 
 export default async function FairValuePage() {

@@ -28,6 +28,7 @@ import {
 import Link from "next/link";
 import { formatMarketUpdate } from "@/lib/market-update-time";
 import { computeSingleStockFairValue } from "@/lib/market/fair-value";
+import { getCanonicalStockName } from "@/lib/ai/stock-names";
 
 interface HistoricalPrice {
   date: string;
@@ -217,8 +218,18 @@ export default function StockDetailClient({
       latestTech,
     });
   }, [symbol, latestPrice, latestTech, fundData]);
-  const companyName = fundData.name || fundData.Name || symbol;
-  const sector = fundData.sector || fundData.Sector || null;
+  const canonicalInfo = useMemo(() => getCanonicalStockName(symbol), [symbol]);
+  const nameAr = canonicalInfo.name_ar && canonicalInfo.name_ar !== symbol
+    ? canonicalInfo.name_ar
+    : (fundData.name || fundData.Name || symbol);
+  const nameEn = canonicalInfo.name_en && canonicalInfo.name_en !== symbol
+    ? canonicalInfo.name_en
+    : (fundData.name || fundData.Name || symbol);
+  const companyName = language === "ar" ? nameAr : nameEn;
+  const secondaryCompanyName = language === "ar" ? nameEn : nameAr;
+  const sector = language === "ar"
+    ? (canonicalInfo.sector || fundData.sector || fundData.Sector || null)
+    : (fundData.sector || fundData.Sector || canonicalInfo.sector || null);
   const country = fundData.country || fundData.CountryName || (exchange === "EGX" ? "Egypt" : "US");
   const currency = fundData.currency || fundData.CurrencyCode || (exchange === "EGX" ? "EGP" : "USD");
 
@@ -526,11 +537,11 @@ export default function StockDetailClient({
                 </span>
               )}
             </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[var(--app-text)] font-mono">
-              {symbol}
+            <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-[var(--app-text)]">
+              {language === "ar" ? `سهم ${nameAr} (${symbol})` : `${nameEn} (${symbol})`}
             </h1>
-            <p className="text-lg text-[var(--app-text-muted)] font-medium">
-              {companyName}
+            <p className="text-base sm:text-lg text-[var(--app-text-muted)] font-bold">
+              {secondaryCompanyName}
             </p>
           </div>
 
@@ -1106,39 +1117,39 @@ export default function StockDetailClient({
             <div className="space-y-4">
               <div className="space-y-2 font-mono text-sm">
                 {/* R3 */}
-                <div className="flex items-center justify-between p-2.5 bg-red-500/10 border-l-4 border-red-500 text-red-400">
+                <div className="flex items-center justify-between p-2.5 bg-red-500/15 dark:bg-red-500/10 border-l-4 border-red-600 dark:border-red-500 text-red-800 dark:text-red-400">
                   <span className="font-extrabold">{t.resistance} 3 (R3)</span>
                   <span className="font-black">{pivotPoints.R3.toFixed(2)}</span>
                 </div>
                 {/* R2 */}
-                <div className="flex items-center justify-between p-2.5 bg-red-500/5 border-l-4 border-red-400 text-red-300">
+                <div className="flex items-center justify-between p-2.5 bg-red-500/10 dark:bg-red-500/5 border-l-4 border-red-500 dark:border-red-400 text-red-700 dark:text-red-300">
                   <span className="font-extrabold">{t.resistance} 2 (R2)</span>
                   <span className="font-black">{pivotPoints.R2.toFixed(2)}</span>
                 </div>
                 {/* R1 */}
-                <div className="flex items-center justify-between p-2.5 bg-red-500/5 border-l-4 border-red-300 text-red-200">
+                <div className="flex items-center justify-between p-2.5 bg-red-500/10 dark:bg-red-500/5 border-l-4 border-red-400 dark:border-red-300 text-red-700 dark:text-red-200">
                   <span className="font-extrabold">{t.resistance} 1 (R1)</span>
                   <span className="font-black">{pivotPoints.R1.toFixed(2)}</span>
                 </div>
 
                 {/* Pivot (P) */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-900 border-l-4 border-blue-500 text-blue-400 my-4 text-base font-black">
+                <div className="flex items-center justify-between p-3.5 bg-blue-50 dark:bg-slate-900 border-l-4 border-blue-600 dark:border-blue-500 text-blue-800 dark:text-blue-400 my-4 text-base font-black">
                   <span>{t.pivotPoint}</span>
                   <span>{pivotPoints.P.toFixed(2)}</span>
                 </div>
 
                 {/* S1 */}
-                <div className="flex items-center justify-between p-2.5 bg-green-500/5 border-l-4 border-green-300 text-green-200">
+                <div className="flex items-center justify-between p-2.5 bg-emerald-500/10 dark:bg-green-500/5 border-l-4 border-emerald-500 dark:border-green-300 text-emerald-800 dark:text-green-200">
                   <span className="font-extrabold">{t.support} 1 (S1)</span>
                   <span className="font-black">{pivotPoints.S1.toFixed(2)}</span>
                 </div>
                 {/* S2 */}
-                <div className="flex items-center justify-between p-2.5 bg-green-500/5 border-l-4 border-green-400 text-green-300">
+                <div className="flex items-center justify-between p-2.5 bg-emerald-500/10 dark:bg-green-500/5 border-l-4 border-emerald-600 dark:border-green-400 text-emerald-800 dark:text-green-300">
                   <span className="font-extrabold">{t.support} 2 (S2)</span>
                   <span className="font-black">{pivotPoints.S2.toFixed(2)}</span>
                 </div>
                 {/* S3 */}
-                <div className="flex items-center justify-between p-2.5 bg-green-500/10 border-l-4 border-green-500 text-green-400">
+                <div className="flex items-center justify-between p-2.5 bg-emerald-500/15 dark:bg-green-500/10 border-l-4 border-emerald-700 dark:border-green-500 text-emerald-900 dark:text-green-400">
                   <span className="font-extrabold">{t.support} 3 (S3)</span>
                   <span className="font-black">{pivotPoints.S3.toFixed(2)}</span>
                 </div>
@@ -1182,13 +1193,82 @@ export default function StockDetailClient({
                 className="p-3 border-2 border-black bg-[var(--app-surface-strong)] hover:bg-yellow-400 dark:hover:bg-yellow-500 hover:text-black font-mono transition-all text-center flex flex-col justify-center items-center gap-1 cursor-pointer active:translate-x-[2px] active:translate-y-[2px]"
               >
                 <span className="font-extrabold text-base tracking-wide">{stock.symbol}</span>
-                <span className="text-[10px] text-zinc-500 font-sans truncate w-full">
-                  {stock.name}
+                <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-sans font-bold truncate w-full">
+                  {language === "ar" ? getCanonicalStockName(stock.symbol).name_ar : (getCanonicalStockName(stock.symbol).name_en || stock.name)}
                 </span>
               </Link>
             );
           })}
         </div>
+      </div>
+
+      {/* SEO & Quantitative FAQ Summary (Responds to Light/Dark Mode & AR/EN) */}
+      <div dir={language === "ar" ? "rtl" : "ltr"} className="app-panel p-6 sm:p-8 bg-white dark:bg-zinc-900 rounded-none border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_#000] dark:shadow-[4px_4px_0px_0px_#fff]">
+        <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white mb-6">
+          {language === "ar"
+            ? `أسئلة شائعة وتحليل سهم ${nameAr} (${symbol}) في البورصة المصرية`
+            : `Frequently Asked Questions: ${nameEn} (${symbol}) Stock Analysis`}
+        </h2>
+
+        <div className="space-y-4">
+          <div className="p-4 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
+            <h3 className="font-black text-sm sm:text-base text-zinc-950 dark:text-white">
+              {language === "ar"
+                ? `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في البورصة المصرية؟`
+                : `What is the latest closing price of ${nameEn} (${symbol}) on EGX?`}
+            </h3>
+            <p className="mt-2 text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {language === "ar"
+                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol} - ${nameEn}) في البورصة المصرية نحو ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} ج.م${latestPrice?.date ? ` بتاريخ ${String(latestPrice.date).slice(0, 10)}` : ""}. يتم تحديث بيانات الإغلاق والمؤشرات الفنية يومياً بعد انتهاء جلسة التداول.`
+                : `The latest recorded closing price for ${nameEn} (${symbol} - ${nameAr}) on the Egyptian Exchange (EGX) is ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} EGP${latestPrice?.date ? ` as of ${String(latestPrice.date).slice(0, 10)}` : ""}. Closing data and technical indicators are updated daily after the trading session.`}
+            </p>
+          </div>
+
+          <div className="p-4 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
+            <h3 className="font-black text-sm sm:text-base text-zinc-950 dark:text-white">
+              {language === "ar"
+                ? `ما هي نقاط الدعم والمقاومة المحسوبة لسهم ${nameAr} (${symbol})؟`
+                : `What are the calculated support and resistance levels for ${nameEn} (${symbol})?`}
+            </h3>
+            <p className="mt-2 text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              {pivotPoints
+                ? language === "ar"
+                  ? `وفقاً لمعادلات نقاط الارتكاز الكلاسيكية (Pivot Points) لسهم ${nameAr} (${symbol})، تقع نقطة الارتكاز المحورية عند ${pivotPoints.P.toFixed(2)} ج.م، بينما تقع مستويات الدعم الفنية عند ${pivotPoints.S1.toFixed(2)} ج.م (دعم أول S1) و ${pivotPoints.S2.toFixed(2)} ج.م (دعم ثانٍ S2)، ومستويات المقاومة عند ${pivotPoints.R1.toFixed(2)} ج.م (مقاومة أولى R1) و ${pivotPoints.R2.toFixed(2)} ج.م (مقاومة ثانية R2).`
+                  : `Based on classic Pivot Point calculations for ${nameEn} (${symbol}), the central pivot point stands at ${pivotPoints.P.toFixed(2)} EGP, with primary support levels at ${pivotPoints.S1.toFixed(2)} EGP (S1) and ${pivotPoints.S2.toFixed(2)} EGP (S2), and overhead resistance levels at ${pivotPoints.R1.toFixed(2)} EGP (R1) and ${pivotPoints.R2.toFixed(2)} EGP (R2).`
+                : language === "ar"
+                  ? `يتم حساب مستويات الدعم والمقاومة لسهم ${nameAr} (${symbol}) آلياً بناءً على أعلى وأدنى سعر وسعر الإغلاق اليومي.`
+                  : `Support and resistance levels for ${nameEn} (${symbol}) are automatically computed from daily high, low, and close prices.`}
+            </p>
+          </div>
+
+          <div className="p-4 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
+            <h3 className="font-black text-sm sm:text-base text-zinc-950 dark:text-white">
+              {language === "ar"
+                ? `أدوات إضافية لتحليل سهم ${nameAr} (${symbol}) ومقارنته بالسوق`
+                : `Additional Quantitative Tools for ${nameEn} (${symbol})`}
+            </h3>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-black">
+              <Link href="/scanner/ai" className="px-3 py-1.5 border-2 border-black bg-[#FFE600] text-black hover:underline">
+                {language === "ar" ? "محلل الأسهم بالذكاء الاصطناعي" : "EGX AI Stock Analyzer"}
+              </Link>
+              <Link href="/fair-value" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                {language === "ar" ? "حاسبة السعر العادل ومؤشر الرخص" : "EGX Fair Value Screener"}
+              </Link>
+              <Link href="/sharia" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                {language === "ar" ? "فحص التوافق الشرعي EGX33" : "EGX33 Sharia Compliance"}
+              </Link>
+              <Link href="/blogs/best-egx-stock-analysis-software" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                {language === "ar" ? "دليل أفضل برامج تحليل البورصة المصرية" : "Best EGX Analysis Software Guide"}
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-6 pt-4 border-t border-zinc-300 dark:border-zinc-700 text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 text-center">
+          {language === "ar"
+            ? "⚠️ تنويه قانوني: البيانات والمؤشرات الفنية المعروضة لسهم " + nameAr + " (" + symbol + ") هي قراءات إحصائية آلية لأغراض الدراسة والبحث فقط، ولا تعد توصية استثمارية أو دعوة للشراء أو البيع."
+            : "⚠️ Legal Notice: All technical indicators and data displayed for " + nameEn + " (" + symbol + ") are automated statistical readings for educational and research purposes only, and do not constitute investment advice or a solicitation to buy or sell."}
+        </p>
       </div>
 
     </div>

@@ -1,9 +1,8 @@
 import { Metadata } from "next";
 import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
 import StocksClient from "./StocksClient";
-import BrandedPageHeader from "@/components/BrandedPageHeader";
 
-export const revalidate = 3600; // Cache for 1 hour
+export const revalidate = 86400; // Cache for 24 hours (daily market job cadence)
 
 export const metadata: Metadata = {
   title: "دليل أسهم البورصة المصرية وتحليل الشركات",
@@ -95,11 +94,6 @@ export default async function StocksPage() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
-      />
-      <BrandedPageHeader
-        eyebrow="دليل السوق والشركات | EGX DIRECTORY"
-        title="دليل أسهم البورصة المصرية بالذكاء الاصطناعي"
-        description="تصفح جميع الشركات والأسهم المقيدة في البورصة المصرية، واكتشف التقييمات الفنية ونماذج تعلم الآلة ومستويات السيولة لكل سهم."
       />
       <StocksClient initialStocks={stocks} />
     </div>

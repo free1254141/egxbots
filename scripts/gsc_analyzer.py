@@ -21,7 +21,12 @@ except ImportError:
     print("Run: pip install google-api-python-client google-auth")
     sys.exit(1)
 
-SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly']
+SCOPES = [
+    'https://www.googleapis.com/auth/webmasters.readonly',
+    'https://www.googleapis.com/auth/webmasters',
+]
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MAIN_REPO_ROOT = Path(r"C:\Users\MR__CODER__\Desktop\stokscan_AI")
 DEFAULT_CREDENTIALS_FILES = [
     'scripts/gsc_service_account.json',
     'gsc_service_account.json',
@@ -32,13 +37,34 @@ DEFAULT_CREDENTIALS_FILES = [
 
 
 def find_credentials():
+    # 1. Check environment variable
     env_path = os.getenv('GSC_CREDENTIALS_PATH')
     if env_path and os.path.exists(env_path):
         return env_path
-    
-    for f in DEFAULT_CREDENTIALS_FILES:
-        if os.path.exists(f):
-            return f
+
+    # 2. Check .env files in current repo root and main repo root
+    for root in (Path.cwd(), REPO_ROOT, MAIN_REPO_ROOT):
+        env_file = root / '.env'
+        if env_file.exists():
+            try:
+                for line in env_file.read_text(encoding='utf-8', errors='ignore').splitlines():
+                    if line.strip().startswith('GSC_CREDENTIALS_PATH='):
+                        val = line.split('=', 1)[1].strip().strip('"').strip("'")
+                        if val and os.path.exists(val):
+                            return val
+            except Exception:
+                pass
+
+    # 3. Check standard relative and absolute paths across worktrees and main repo
+    for root in (Path.cwd(), REPO_ROOT, MAIN_REPO_ROOT):
+        for f in DEFAULT_CREDENTIALS_FILES:
+            candidate = root / f
+            if candidate.exists():
+                return str(candidate)
+        for match in root.glob('*neon-dryad*.json'):
+            if match.is_file():
+                return str(match)
+
     return None
 
 
@@ -48,24 +74,21 @@ def get_service(creds_path):
 
 
 def resolve_site_url(service, site_arg=None):
-    if site_arg:
-        return site_arg
-    
-    # Try listing properties accessible to this service account
+    # Query accessible properties on this Service Account first so sc-domain vs https:// never fails
     try:
         sites_list = service.sites().list().execute()
-        entries = sites_list.get('siteEntry', [])
+        entries = [s.get('siteUrl', '') for s in sites_list.get('siteEntry', []) if s.get('siteUrl')]
+        if site_arg and site_arg in entries:
+            return site_arg
+        for url in entries:
+            if 'egxbots.com' in url:
+                return url
         if entries:
-            # Prefer domain property or https://egxbots.com/
-            for s in entries:
-                url = s.get('siteUrl', '')
-                if 'egxbots.com' in url:
-                    return url
-            return entries[0].get('siteUrl')
-    except Exception as e:
+            return entries[0]
+    except Exception:
         pass
-    
-    return 'sc-domain:egxbots.com'
+
+    return site_arg or 'https://egxbots.com/'
 
 
 def query_search_analytics(service, site_url, start_date, end_date, dimensions=None, row_limit=100, dimension_filter_groups=None):

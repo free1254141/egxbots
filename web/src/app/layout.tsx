@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     "ذكاء اصطناعي",
     "تحليل أسهم",
     "ماسح البورصة المصرية",
-    "توصيات البورصة المصرية",
+    "مؤشرات البورصة المصرية",
     "تداول آلي",
     "إشارات تداول",
     "شات بوت ذكي",
@@ -56,17 +56,17 @@ export const metadata: Metadata = {
     type: "website",
     locale: "ar_EG",
     url: "https://egxbots.com",
-    title: "ARTORO | شات وتحليل البورصة المصرية | EGX BOTS",
-    description: "منصة EGX BOTS (egxbots) لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي (EGX AI Analyzer)، الماسح الفني، المحاكاة التاريخية، ومساعد ذكي تفاعلي للسوق.",
+    title: "EGX BOTS | منصة تحليل البورصة المصرية بالذكاء الاصطناعي",
+    description: "منصة EGX BOTS لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي: رادار الصفقات اللحظية، تقييمات AI Score، المحاكاة التاريخية، ومستويات الدعم والمقاومة اليومية.",
     siteName: "EGX BOTS",
     images: [
       {
-        url: "https://egxbots.com/icon-512.png",
-        secureUrl: "https://egxbots.com/icon-512.png",
-        width: 512,
-        height: 512,
+        url: "https://egxbots.com/opengraph-image.png",
+        secureUrl: "https://egxbots.com/opengraph-image.png",
+        width: 1200,
+        height: 630,
         type: "image/png",
-        alt: "EGX BOTS Logo",
+        alt: "EGX BOTS - منصة تحليل البورصة المصرية بالذكاء الاصطناعي",
       },
     ],
   },
@@ -142,7 +142,12 @@ export default function RootLayout({
                   "alternateName": ["ARTORO", "ARTORO AI", "EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية بالذكاء الاصطناعي"],
                   "description": "منصة تحليل الأسهم المصرية بتقييمات يومية، ماسح فني، ونتائج تاريخية.",
                   "inLanguage": "ar-EG",
-                  "publisher": { "@id": "https://egxbots.com/#organization" }
+                  "publisher": { "@id": "https://egxbots.com/#organization" },
+                  "potentialAction": {
+                    "@type": "SearchAction",
+                    "target": "https://egxbots.com/stocks?q={search_term_string}",
+                    "query-input": "required name=search_term_string"
+                  }
                 },
                 {
                   "@type": "Organization",
@@ -153,7 +158,8 @@ export default function RootLayout({
                   "image": "https://egxbots.com/dashboard_preview.png",
                   "description": "منصة لتحليل بيانات البورصة المصرية باستخدام نماذج كمية وماسح فني ونتائج تاريخية.",
                   "sameAs": [
-                    "https://t.me/egxbots"
+                    "https://t.me/egxbots",
+                    "https://www.facebook.com/egxbots"
                   ],
                   "address": {
                     "@type": "PostalAddress",

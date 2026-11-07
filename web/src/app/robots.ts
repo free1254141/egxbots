@@ -23,6 +23,8 @@ export default function robots(): MetadataRoute.Robots {
           '/',
           '/stocks',
           '/stocks/*',
+          '/fair-value',
+          '/sharia',
           '/scanner/ai',
           '/scanner/technical',
           '/scanner/market',
@@ -30,6 +32,9 @@ export default function robots(): MetadataRoute.Robots {
           '/faq',
           '/news',
           '/blogs',
+          '/blogs/*',
+          '/reports',
+          '/reports/*',
           '/llms.txt',
           '/llms-full.txt'
         ],

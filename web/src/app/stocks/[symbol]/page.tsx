@@ -4,6 +4,7 @@ import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
 import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
 import { selectStockLinks } from "@/lib/seo/sitemap-entries";
+import { getCanonicalStockName } from "@/lib/ai/stock-names";
 
 // Pin to Frankfurt so every ISR render shares the same market-query-cache
 // KV namespace. Without this, Vercel routes /stocks/* to the edge region
@@ -64,42 +65,46 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
   const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
-  const companyName = fund.name || fund.Name || symbol;
-  const sector = fund.sector || fund.Sector || "";
 
-  // Generate short, high-relevance title so final title + " | EGX BOTS" is strictly < 60 chars (well under Bing's 70-char limit)
-  const cleanName = String(companyName || "")
-    .split(/[-—–(]/)[0]
-    .replace(/(?:شركة|ش\.م\.م|القابضة|للاستثمار)\b/g, "")
+  // Always resolve official Arabic and English company names for high-CTR Egyptian Google searches
+  const canonical = getCanonicalStockName(symbol);
+  const nameAr = canonical.name_ar || fund.name || fund.Name || symbol;
+  const nameEn = canonical.name_en && canonical.name_en !== symbol
+    ? canonical.name_en
+    : String(fund.name || fund.Name || symbol);
+
+  // Short Arabic display name for title (e.g., "العربية للألومنيوم", "أبو قير للأسمدة", "إم بي للهندسة")
+  const shortAr = nameAr
+    .replace(/^(?:شركة|مجموعة|بنك)\s+/g, (m) => (m.includes("بنك") ? "بنك " : ""))
     .trim();
-  const displayName = cleanName && cleanName.toLowerCase() !== symbol.toLowerCase() && cleanName.length <= 22
-    ? cleanName
-    : symbol;
-  const title = displayName !== symbol
-    ? `سهم ${displayName} (${symbol}) | تحليل وسعر`
-    : `سهم ${symbol} | تحليل وسعر`;
-  // Lead the snippet with the closing price and date: most EGX stock
-  // queries are \"سعر سهم X\", and a generic description earns impressions
-  // without clicks.
+
+  const title = shortAr && shortAr !== symbol
+    ? `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`
+    : `سعر وتحليل سهم ${symbol} اليوم | نقاط الدعم والمقاومة`;
+
   const latest = (snapshot.latestPrice || null) as { close?: number | string; date?: string } | null;
   const lastClose = Number(latest?.close ?? 0);
   const lastDate = String(latest?.date ?? "").slice(0, 10);
   const pricePart =
     Number.isFinite(lastClose) && lastClose > 0
-      ? `آخر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ج.م${lastDate ? ` بتاريخ ${lastDate}` : ""}. `
+      ? `آخر سعر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ج.م${lastDate ? ` (${lastDate})` : ""}. `
       : "";
-  const description = `${pricePart}سعر سهم ${displayName} (${symbol}) وتحليل فني: تقييم AI Score، مؤشرات RSI وMACD، ومستويات الدعم والمقاومة في البورصة المصرية.`;
+  const description = `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في البورصة المصرية: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
 
   return {
     title,
     description,
     keywords: [
       symbol,
-      companyName,
-      `تحليل سهم ${companyName}`,
-      `سعر سهم ${companyName}`,
+      nameAr,
+      nameEn,
+      `سعر سهم ${nameAr}`,
+      `سهم ${nameAr}`,
+      `تحليل سهم ${nameAr}`,
+      `توقعات سهم ${nameAr}`,
+      `سعر سهم ${symbol}`,
       `تحليل سهم ${symbol}`,
-      `توقعات سهم ${symbol}`,
+      `${symbol} stock price`,
       "تحليل الأسهم المصرية بالذكاء الاصطناعي",
       "EGX BOTS",
       "egxbots",
@@ -114,11 +119,20 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description,
       type: "website",
       url: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
+      images: [
+        {
+          url: "https://egxbots.com/opengraph-image.png",
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: ["https://egxbots.com/opengraph-image.png"],
     },
   };
 }
@@ -137,11 +151,18 @@ export default async function StockDetailPage({ params }: PageProps) {
   const exchange = 'EGX';
 
   const fund = fundRow?.data || {};
-  const companyName = fund.name || fund.Name || symbol;
-  const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || ""));
+  const canonical = getCanonicalStockName(symbol);
+  const nameAr = canonical.name_ar || fund.name || fund.Name || symbol;
+  const nameEn = canonical.name_en && canonical.name_en !== symbol
+    ? canonical.name_en
+    : String(fund.name || fund.Name || symbol);
+
+  const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || canonical.sector || ""));
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
 
-  // Complete Schema.org Breadcrumbs + WebPage structure for Google Search Console
+  const lastPriceVal = Number((latestPrice as any)?.close ?? 0);
+
+  // Complete Schema.org Breadcrumbs + WebPage + FinancialProduct + FAQPage for Google & AI Engines (GEO)
   const structuredDataGraph = {
     "@context": "https://schema.org",
     "@graph": [
@@ -149,17 +170,64 @@ export default async function StockDetailPage({ params }: PageProps) {
         "@type": "BreadcrumbList",
         "itemListElement": [
           { "@type": "ListItem", "position": 1, "name": "الرئيسية", "item": "https://egxbots.com" },
-          { "@type": "ListItem", "position": 2, "name": "الأسهم", "item": "https://egxbots.com/stocks" },
-          { "@type": "ListItem", "position": 3, "name": companyName, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
+          { "@type": "ListItem", "position": 2, "name": "دليل الأسهم المصرية", "item": "https://egxbots.com/stocks" },
+          { "@type": "ListItem", "position": 3, "name": `سهم ${nameAr} (${symbol})`, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
         ]
       },
       {
         "@type": "WebPage",
-        "name": `بيانات وتحليل سهم ${companyName} (${symbol})`,
+        "name": `سعر وتحليل سهم ${nameAr} (${symbol}) في البورصة المصرية`,
+        "alternateName": `${nameEn} (${symbol}) Stock Analysis`,
         "url": `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
         ...(priceDate ? { dateModified: priceDate } : {}),
-        "description": "إغلاقات ومؤشرات يومية محفوظة؛ بيانات تعليمية وليست أسعارًا لحظية.",
-        "publisher": { "@type": "Organization", "name": "EGX BOTS" }
+        "description": `بيانات فنية وسعر إغلاق سهم ${nameAr} (${symbol} - ${nameEn}) بالبورصة المصرية مع تقييمات الذكاء الاصطناعي ومستويات الدعم والمقاومة.`,
+        "publisher": { "@type": "Organization", "name": "EGX BOTS", "url": "https://egxbots.com" }
+      },
+      ...(Number.isFinite(lastPriceVal) && lastPriceVal > 0 ? [{
+        "@type": "FinancialProduct",
+        "name": `سهم ${nameAr} (${symbol})`,
+        "alternateName": `${nameEn} (${symbol})`,
+        "tickerSymbol": symbol,
+        "exchange": "EGX",
+        "currency": "EGP",
+        "description": `سهم ${nameAr} (${nameEn}) المتداول في البورصة المصرية تحت رمز ${symbol}.`,
+        "offers": {
+          "@type": "Offer",
+          "price": lastPriceVal,
+          "priceCurrency": "EGP",
+          ...(priceDate ? { "priceValidUntil": priceDate } : {})
+        }
+      }] : []),
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في البورصة المصرية؟`,
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": Number.isFinite(lastPriceVal) && lastPriceVal > 0
+                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol}) ما قيمته ${lastPriceVal} جنيه مصري ${priceDate ? `بتاريخ ${priceDate}` : ''}.`
+                : `يمكنك الاطلاع على أحدث سعر إغلاق وبيانات التداول لسهم ${nameAr} (${symbol}) مباشرة عبر منصة EGX BOTS.`
+            }
+          },
+          {
+            "@type": "Question",
+            "name": `ما هي مستويات الدعم والمقاومة لسهم ${nameAr} (${symbol})؟`,
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": `تعتمد منصة EGX BOTS على خوارزميات التحليل الفني الكمي لحساب مستويات الدعم والمقاومة المحورية (Pivot Points S1, S2, R1, R2) ومؤشرات الزخم RSI و MACD لسهم ${nameAr} (${symbol}) بشكل يومي بعد إغلاق الجلسة.`
+            }
+          },
+          {
+            "@type": "Question",
+            "name": `كيف يتم حساب السعر العادل وتقييم الذكاء الاصطناعي لسهم ${nameAr} (${symbol})؟`,
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": `يتم حساب التقييم الكمي AI Score ومؤشر السعر العادل لسهم ${nameAr} (${symbol}) عبر دمج مضاعفات الربحية والقيمة الدفترية مع مؤشرات السيولة التاريخية دون أي تحيز بشري، لأغراض البحث والدراسة الإحصائية.`
+            }
+          }
+        ]
       }
     ]
   };

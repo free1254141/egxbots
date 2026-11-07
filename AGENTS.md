@@ -54,4 +54,14 @@ These instructions apply to the entire repository, including AI assistants, revi
 - Public read-only tool results (`get_stock`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_news`, `get_fair_value`, `get_sharia_cleanser`, ...) are cached per Cairo trading day in `web/src/lib/ai/tool-result-cache.ts`. Never add portfolio, alert, automation or live-quote tools to that allowlist: they read `userId` or must stay intraday. Disable the cache with `TOOL_RESULT_CACHE=off` if it ever misbehaves.
 - Detailed architecture and historical reviews are in `docs/chatbot-current-architecture.md` and `docs/chatbot-agentic-architecture-2026-10-08.md`.
 
+## Google Search Console & SEO / GEO Intelligence
+
+- Official API integration via Service Account (`egxbots-seo@neon-dryad-454519-r2.iam.gserviceaccount.com`).
+- Full documentation and usage guide: `docs/GOOGLE_SEARCH_CONSOLE_INTEGRATION.md`.
+- Tool for immediate query, ranking, and opportunity auditing:
+  ```bash
+  python scripts/seo/gsc_audit.py --action wins
+  ```
+- Before creating or modifying public SEO/GEO routes, consult `gsc_audit.py` to identify high-impression / low-CTR pages (e.g., stock symbols with thousands of impressions on Google page 1).
+
 The current resource review and prioritized implementation candidates are in `docs/resource-usage-review-2026-10-05.md`.

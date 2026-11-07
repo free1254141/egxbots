@@ -27,17 +27,22 @@ Use the report URL and session date when citing an observation.
 - ARTORO AI chatbot: https://egxbots.com/ (the assistant is available in the web app)
 - Portfolio assistant (authenticated users): records, updates and reviews user positions;
   it must confirm a successful save and must not invent holdings.
-- Stocks: https://egxbots.com/stocks
-- Individual stock: https://egxbots.com/stocks/{symbol}
+- Stocks directory: https://egxbots.com/stocks
+- Individual stock analysis: https://egxbots.com/stocks/{symbol}
+- Fair Value & Undervalued EGX Screener (Graham & Multiples): https://egxbots.com/fair-value
+- Sharia-Compliant EGX33 Stocks & Dividend Purification Calculator: https://egxbots.com/sharia
 - AI scanner: https://egxbots.com/scanner/ai
 - Technical scanner: https://egxbots.com/scanner/technical
-- Market: https://egxbots.com/scanner/market
-- Backtests: https://egxbots.com/scanner/backtests
+- Market breadth & overview: https://egxbots.com/scanner/market
+- Quantitative Backtests: https://egxbots.com/scanner/backtests
 - Historical price data and support/resistance levels: available through stock pages and ARTORO.
 - Stock comparison, sector/industry context, fundamentals, market breadth and liquidity: available
   when the corresponding EGX records pass the tool's data-quality checks.
 - News: https://egxbots.com/news
 - Research articles: https://egxbots.com/blogs
+- Guide — Best EGX Stock Analysis Software (2026): https://egxbots.com/blogs/best-egx-stock-analysis-software
+- Guide — AI Egyptian Stock Market Analysis: https://egxbots.com/blogs/ai-egyptian-stock-market-analysis
+- Guide — EGX Telegram Technical Alerts & Quantitative Scanners: https://egxbots.com/blogs/egx-telegram-stock-recommendations
 - FAQ: https://egxbots.com/faq
 - Pricing: https://egxbots.com/pricing
 
