@@ -58,6 +58,7 @@ interface UserRow {
     created_at: string;
     updated_at: string | null;
     subscription: { plan_id: string; status: string; current_period_end: string | null } | null;
+    trial?: { started_at: string; expires_at: string } | null;
     payment_review_status?: "pending_review" | "reviewed" | "rejected" | null;
     bot_subscriptions: { service_type: string; notifications_enabled: boolean }[];
     bot_count: number;
@@ -111,6 +112,10 @@ interface UserStats {
     totalRecommendations?: number;
     currentEgx30?: number | null;
     activeProUsers: number;
+    activeTrialUsers?: number;
+    totalTrialUsers?: number;
+    convertedTrialUsers?: number;
+    expiredTrialUsers?: number;
     activeUsers30Days: number;
     activeUsers7Days: number;
     activeUsers30DaysRate: number;
@@ -412,7 +417,7 @@ export default function UsersTab() {
                     </div>
                 ) : <>
                 {/* KPI Cards — Revenue · Pro · MAU · Growth */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
                     <div 
                         onClick={() => setShowRevenueModal(true)}
                         className="border-4 border-black dark:border-white bg-emerald-50 dark:bg-emerald-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] cursor-pointer hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-1 active:translate-y-1 transition-all group"
@@ -445,6 +450,30 @@ export default function UsersTab() {
                         </div>
                         <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-1">
                             {stats?.paidConversionRate || 0}% {isAr ? "نسبة التحويل" : "conversion rate"}
+                        </div>
+                    </div>
+
+                    <div
+                        onClick={() => { setPlanFilter("TRIAL"); setPage(0); }}
+                        className="border-4 border-black dark:border-white bg-amber-50 dark:bg-amber-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] cursor-pointer hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-1 active:translate-y-1 transition-all group"
+                        title={isAr ? "اضغط لعرض المستخدمين التجريبيين النشطين حالياً" : "Click to filter active trial users"}
+                    >
+                        <div className="flex items-center justify-between text-zinc-500 mb-1">
+                            <span className="font-black text-[10px] uppercase tracking-wider">{isAr ? "تجريبي نشط الآن (Trial)" : "Active Trials"}</span>
+                            <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <div className="text-3xl font-black text-black dark:text-white font-mono">
+                            {statsLoading ? "..." : stats?.activeTrialUsers || 0}
+                        </div>
+                        <div className="text-[10px] font-bold text-amber-700 dark:text-amber-400 mt-1 flex items-center justify-between">
+                            <span>
+                                {isAr
+                                    ? `إجمالي: ${stats?.totalTrialUsers || 0} · اشترك: ${stats?.convertedTrialUsers || 0}`
+                                    : `Total: ${stats?.totalTrialUsers || 0} · Paid: ${stats?.convertedTrialUsers || 0}`}
+                            </span>
+                            <span className="underline font-black text-[9px] bg-amber-200 dark:bg-amber-900 px-1 py-0.5 border border-black dark:border-white">
+                                {isAr ? "فلترة 🔍" : "Filter 🔍"}
+                            </span>
                         </div>
                     </div>
 
@@ -891,13 +920,13 @@ export default function UsersTab() {
                         {/* Filter Pill Dropdown */}
                          <div className="relative flex items-center border-4 border-black dark:border-white bg-white dark:bg-zinc-900">
                              <SlidersHorizontal className="w-4 h-4 ml-2 text-zinc-400" />
-                             <button type="button" onClick={() => setPlanMenuOpen((open) => !open)} className="h-9 min-w-[155px] px-3 flex items-center justify-between gap-3 text-start text-black dark:text-white font-black text-xs uppercase tracking-wider focus:outline-none">
-                                 <span>{(isAr ? { ALL: "كل المستخدمين", PRO: "مشتركو برو", FREE: "الخطة المجانية", TELEGRAM: "مرتبطون بتليجرام" } : { ALL: "All Users", PRO: "PRO Plan Only", FREE: "Free Plan Only", TELEGRAM: "Telegram Linked" })[planFilter]}</span>
+                             <button type="button" onClick={() => setPlanMenuOpen((open) => !open)} className="h-9 min-w-[175px] px-3 flex items-center justify-between gap-3 text-start text-black dark:text-white font-black text-xs uppercase tracking-wider focus:outline-none">
+                                 <span>{(isAr ? { ALL: "كل المستخدمين", PRO: "مشتركو برو", TRIAL: "تجريبي نشط الآن", TRIAL_ALL: "كل التجريبي (نشط + منتهي)", FREE: "الخطة المجانية", TELEGRAM: "مرتبطون بتليجرام" } : { ALL: "All Users", PRO: "PRO Plan Only", TRIAL: "Active Trial Now", TRIAL_ALL: "All Trials (Active + Past)", FREE: "Free Plan Only", TELEGRAM: "Telegram Linked" })[planFilter]}</span>
                                  <span className="text-zinc-400">▾</span>
                              </button>
                              {planMenuOpen && <div className="absolute z-50 top-full inset-x-0 mt-1 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-                                 {["ALL", "PRO", "FREE", "TELEGRAM"].map((value) => {
-                                     const labels: Record<string, string> = isAr ? { ALL: "كل المستخدمين", PRO: "مشتركو برو", FREE: "الخطة المجانية", TELEGRAM: "مرتبطون بتليجرام" } : { ALL: "All Users", PRO: "PRO Plan Only", FREE: "Free Plan Only", TELEGRAM: "Telegram Linked" };
+                                 {["ALL", "PRO", "TRIAL", "TRIAL_ALL", "FREE", "TELEGRAM"].map((value) => {
+                                     const labels: Record<string, string> = isAr ? { ALL: "كل المستخدمين", PRO: "مشتركو برو", TRIAL: "تجريبي نشط الآن", TRIAL_ALL: "كل التجريبي (نشط + منتهي)", FREE: "الخطة المجانية", TELEGRAM: "مرتبطون بتليجرام" } : { ALL: "All Users", PRO: "PRO Plan Only", TRIAL: "Active Trial Now", TRIAL_ALL: "All Trials (Active + Past)", FREE: "Free Plan Only", TELEGRAM: "Telegram Linked" };
                                      return <button key={value} type="button" onClick={() => { setPlanFilter(value); setPage(0); setPlanMenuOpen(false); }} className={`block w-full px-3 py-2 text-start text-xs font-black uppercase tracking-wider ${planFilter === value ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-950 text-black dark:text-white hover:bg-blue-100 dark:hover:bg-blue-950"}`}>{labels[value]}</button>;
                                  })}
                              </div>}
@@ -944,7 +973,11 @@ export default function UsersTab() {
                                 {filteredUsers.map((u) => {
                                     const isUserPro = ["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(u.subscription?.plan_id || "") && u.subscription?.status === "active";
                                     const isLifetime = u.subscription?.plan_id === "lifetime" || u.subscription?.plan_id === "pro_lifetime";
-                                    const subEnd = u.subscription?.current_period_end;
+                                    const trialEnd = u.trial?.expires_at || (u.subscription?.status === "trialing" ? u.subscription?.current_period_end : null);
+                                    const hasUsedTrial = Boolean(u.trial || u.subscription?.status === "trialing");
+                                    const isTrialActive = !isUserPro && Boolean(trialEnd && new Date(trialEnd).getTime() > Date.now());
+                                    const isTrialExpired = !isUserPro && hasUsedTrial && !isTrialActive;
+                                    const subEnd = isUserPro ? u.subscription?.current_period_end : trialEnd;
                                     return (
                                         <tr
                                             key={u.id}
@@ -1000,6 +1033,20 @@ export default function UsersTab() {
                                                             >
                                                                 {isAr ? "إلغاء برو" : "Cancel Pro"}
                                                             </button>
+                                                        </div>
+                                                    ) : isTrialActive ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 border-2 border-black dark:border-white font-black text-[10px] uppercase tracking-wider bg-amber-300 text-black shadow-[2px_2px_0px_#000]">
+                                                            <Clock className="w-3 h-3 text-black" />
+                                                            {isAr ? "تجريبي نشط (TRIAL)" : "TRIAL (ACTIVE)"}
+                                                        </span>
+                                                    ) : isTrialExpired ? (
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-zinc-300 dark:border-zinc-700 font-bold text-[10px] text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
+                                                                {isAr ? "مجاني" : "Free"}
+                                                            </span>
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-amber-500/60 bg-amber-50 dark:bg-amber-950/30 font-black text-[9px] text-amber-700 dark:text-amber-300">
+                                                                {isAr ? "انتهت التجربة" : "Trial Ended"}
+                                                            </span>
                                                         </div>
                                                     ) : (
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-zinc-300 dark:border-zinc-700 font-bold text-[10px] text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
@@ -1069,6 +1116,24 @@ export default function UsersTab() {
                                                                 const diffDays = Math.ceil((new Date(subEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
                                                                 if (diffDays > 0) return isAr ? `متبقي ${diffDays} يوم` : `${diffDays} days left`;
                                                                 return isAr ? "منتهي" : "Expired";
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                ) : (isTrialActive || isTrialExpired) && subEnd ? (
+                                                    <div>
+                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 border font-bold text-[11px] ${isTrialActive ? "border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300" : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-500"}`}>
+                                                            <Clock className="w-3 h-3 shrink-0" />
+                                                            {new Date(subEnd).toLocaleDateString(isAr ? "ar-EG" : "en-US")}
+                                                        </span>
+                                                        <div className={`text-[10px] mt-0.5 font-bold ${isTrialActive ? "text-amber-600 dark:text-amber-400" : "text-zinc-400"}`}>
+                                                            {(() => {
+                                                                const diffHours = Math.ceil((new Date(subEnd).getTime() - Date.now()) / (1000 * 60 * 60));
+                                                                if (diffHours > 24) {
+                                                                    const diffDays = Math.ceil(diffHours / 24);
+                                                                    return isAr ? `متبقي ${diffDays} يوم تجريبي` : `${diffDays}d trial left`;
+                                                                }
+                                                                if (diffHours > 0) return isAr ? `متبقي ${diffHours} ساعة` : `${diffHours}h left`;
+                                                                return isAr ? "انتهت التجربة" : "Trial expired";
                                                             })()}
                                                         </div>
                                                     </div>

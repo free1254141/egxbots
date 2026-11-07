@@ -5,6 +5,7 @@ import {
   replaceUserRules,
   userRulesList,
 } from "../user-preferences";
+import { buildAnalysisCacheKey } from "../analysis-cache";
 
 describe("user standing preferences memory", () => {
   it("parses stored rules into a list", () => {
@@ -39,5 +40,16 @@ describe("user standing preferences memory", () => {
     expect(prompt).toContain("التوصيات شرعية فقط");
     expect(prompt).toContain("تعارضت");
     expect(prompt).toContain("manage_user_preferences");
+  });
+
+  it("scopes analysis cache keys by standing user rules without disabling caching", () => {
+    const publicKey = buildAnalysisCacheKey("تحليل سهم COMI", ["COMI"], false, null);
+    const rulesKeyA = buildAnalysisCacheKey("تحليل سهم COMI", ["COMI"], false, "- التوصيات شرعية فقط");
+    const rulesKeyB = buildAnalysisCacheKey("تحليل سهم COMI", ["COMI"], false, "- الإجابات مختصرة");
+    expect(publicKey).toBe("vip_stock_COMI");
+    expect(rulesKeyA).toMatch(/^vip_stock_COMI_rules_[0-9a-f]{12}$/);
+    expect(rulesKeyB).toMatch(/^vip_stock_COMI_rules_[0-9a-f]{12}$/);
+    expect(rulesKeyA).not.toBe(publicKey);
+    expect(rulesKeyA).not.toBe(rulesKeyB);
   });
 });

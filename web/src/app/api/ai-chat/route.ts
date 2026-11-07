@@ -35,6 +35,30 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 export const preferredRegion = "fra1"; // Pin to Frankfurt to avoid cold starts across regions
 
+const VOICE_TTS_BACKEND_URL = (
+    process.env.PYTHON_BACKEND_URL ||
+    process.env.TRADING_SIGNALS_API_URL ||
+    "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
+function prewarmVoiceNoteTts(spokenText: string | null | undefined): void {
+    const clean = (spokenText || "").trim();
+    if (!clean) return;
+    fetch(`${VOICE_TTS_BACKEND_URL}/api/voice/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            text: clean,
+            voice: VOICE_NOTE_TTS.voice,
+            rate: VOICE_NOTE_TTS.rate,
+            pitch: VOICE_NOTE_TTS.pitch,
+        }),
+        signal: AbortSignal.timeout(20_000),
+    })
+        .then((res) => res.arrayBuffer())
+        .catch(() => {});
+}
+
 const BLOCKED_INPUT_PATTERNS = [
     "system prompt", "ignore previous instructions", "ignore all previous",
     "developer mode", "jailbreak", "admin_secret_key", "service_role_key",
@@ -946,8 +970,8 @@ export async function POST(req: NextRequest) {
                         }
 
                         const isPortfolio = Boolean(detectPortfolioIntent(message || ""));
-                        const cacheKey = !hasImages && !chartContext && !userRules
-                            ? buildAnalysisCacheKey(message || "", explicitSymbols, isPortfolio)
+                        const cacheKey = !hasImages && !chartContext
+                            ? buildAnalysisCacheKey(message || "", explicitSymbols, isPortfolio, userRules)
                             : null;
 
                         if (cacheKey) {
@@ -973,14 +997,7 @@ export async function POST(req: NextRequest) {
                                 );
 
                                 const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? await generateVoiceNoteSpokenScript(personalizedReply, message, getDeepSeekApiKey()) : null);
-                                if (spokenText) {
-                                    const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-                                    fetch(`${backendUrl}/api/voice/tts`, {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
-                                    }).catch(() => {});
-                                }
+                                prewarmVoiceNoteTts(spokenText);
                                 const provenance = {
                                     ...(cached.extra?.provenance || {}),
                                     correlation_id: correlationId,
@@ -1234,14 +1251,7 @@ export async function POST(req: NextRequest) {
                                     // Save messages to DB
                                     try {
                                         if (activeSessionId) {
-                                             if (spokenText) {
-                                                 const backendUrl = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-                                                 fetch(`${backendUrl}/api/voice/tts`, {
-                                                     method: "POST",
-                                                     headers: { "Content-Type": "application/json" },
-                                                     body: JSON.stringify({ text: spokenText, voice: VOICE_NOTE_TTS.voice, rate: VOICE_NOTE_TTS.rate, pitch: VOICE_NOTE_TTS.pitch })
-                                                 }).catch(() => {});
-                                             }
+                                             prewarmVoiceNoteTts(spokenText);
                                              const provenance = {
                                                 ...responseMetadata,
                                                 is_voice: isVoice,

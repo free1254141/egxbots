@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalizeArabicIntent } from "./intent-policy";
 
 /**
@@ -369,7 +370,7 @@ const SECTOR_NAMES_REGEX =
  * `null` when the question is personal, conversational ("حوارات"), or custom so
  * it passes straight through to the 9 Agentic Tools.
  */
-export function buildAnalysisCacheKey(
+function buildBaseAnalysisCacheKey(
     rawMessage: string,
     explicitSymbols: string[],
     isPortfolioIntent: boolean
@@ -445,6 +446,20 @@ export function buildAnalysisCacheKey(
     // Anything else (general chat, open-ended questions, custom screener criteria, macro discussions)
     // returns null so the pipeline invokes the 9 Agentic Tools directly.
     return null;
+}
+
+export function buildAnalysisCacheKey(
+    rawMessage: string,
+    explicitSymbols: string[],
+    isPortfolioIntent: boolean,
+    userRules?: string | null
+): string | null {
+    const baseKey = buildBaseAnalysisCacheKey(rawMessage, explicitSymbols, isPortfolioIntent);
+    if (!baseKey) return null;
+    const normalizedRules = (userRules || "").trim().replace(/\s+/g, " ");
+    if (!normalizedRules) return baseKey;
+    const rulesDigest = createHash("sha256").update(normalizedRules).digest("hex").slice(0, 12);
+    return `${baseKey}_rules_${rulesDigest}`;
 }
 
 // ---------------------------------------------------------------------------

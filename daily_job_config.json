@@ -9,5 +9,6 @@
     3,
     6
   ],
-  "model_filter": "adaptive"
+  "model_filter": "adaptive",
+  "auto_dispatch_daily_reports": true
 }

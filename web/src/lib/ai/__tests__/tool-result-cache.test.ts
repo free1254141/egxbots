@@ -4,6 +4,7 @@ import {
   clearToolResultMemoryCache,
   getCachedToolResult,
   isToolResultCacheable,
+  isToolResultPayloadCacheable,
   setCachedToolResult,
   stableStringify,
 } from "../tool-result-cache";
@@ -67,5 +68,16 @@ describe("tool result cache", () => {
     expect(await getCachedToolResult(key, null)).toBeNull();
     await setCachedToolResult(key, { status: "success", price: 100 }, null);
     expect(await getCachedToolResult(key, null)).toEqual({ status: "success", price: 100 });
+  });
+
+  it("refuses to cache error or unavailable tool payloads", async () => {
+    expect(isToolResultPayloadCacheable({ status: "error" })).toBe(false);
+    expect(isToolResultPayloadCacheable({ status: "unavailable" })).toBe(false);
+    expect(isToolResultPayloadCacheable({ status: "success", availability: "unavailable" })).toBe(false);
+    expect(isToolResultPayloadCacheable({ status: "success", availability: "available" })).toBe(true);
+
+    const key = buildToolResultCacheKey("get_stock", { symbols: ["COMI"] });
+    await setCachedToolResult(key, { status: "unavailable", availability: "unavailable" }, null);
+    expect(await getCachedToolResult(key, null)).toBeNull();
   });
 });

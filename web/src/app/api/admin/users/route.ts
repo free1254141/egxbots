@@ -10,9 +10,14 @@ const PRO_PLANS = new Set(["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"
 
 function preferredSubscription(rows: any[]): any | null {
   return [...rows].sort((a, b) => {
-    const active = (value: any) => String(value?.status || "").toLowerCase() === "active" ? 1 : 0;
+    const rank = (value: any) => {
+      const s = String(value?.status || "").toLowerCase();
+      if (s === "active") return 2;
+      if (s === "trialing") return 1;
+      return 0;
+    };
     const lifetime = (value: any) => ["lifetime", "pro_lifetime"].includes(String(value?.plan_id || "").toLowerCase()) ? 1 : 0;
-    return active(b) - active(a) || lifetime(b) - lifetime(a) || new Date(b.current_period_end || b.created_at || 0).getTime() - new Date(a.current_period_end || a.created_at || 0).getTime();
+    return rank(b) - rank(a) || lifetime(b) - lifetime(a) || new Date(b.current_period_end || b.created_at || 0).getTime() - new Date(a.current_period_end || a.created_at || 0).getTime();
   })[0] || null;
 }
 
@@ -31,10 +36,15 @@ export async function GET(req: NextRequest) {
     // profiles and subscriptions. Resolve cohorts explicitly instead of using
     // a nested PostgREST join that silently falls back to incomplete data.
     let cohortUserIds: string[] | null = null;
-    if (plan === "PRO" || plan === "FREE") {
-      const { data: subscriptionRows } = await supabase
-        .from("subscriptions")
-        .select("user_id,plan_id,status,current_period_end,created_at");
+    if (plan === "PRO" || plan === "FREE" || plan === "TRIAL" || plan === "TRIAL_ALL") {
+      const [{ data: subscriptionRows }, { data: trialRows }] = await Promise.all([
+        supabase
+          .from("subscriptions")
+          .select("user_id,plan_id,status,current_period_end,created_at"),
+        supabase
+          .from("subscription_trials")
+          .select("user_id,started_at,expires_at"),
+      ]);
       const nowMs = Date.now();
       const activePro = new Set((subscriptionRows || [])
         .filter((row: any) => {
@@ -45,10 +55,38 @@ export async function GET(req: NextRequest) {
           return Number.isFinite(end) && end > nowMs;
         })
         .map((row: any) => String(row.user_id)));
+
+      const activeTrial = new Set<string>();
+      const allTrial = new Set<string>();
+      for (const row of trialRows || []) {
+        const uid = String(row.user_id || "");
+        if (!uid) continue;
+        allTrial.add(uid);
+        const exp = row.expires_at ? new Date(String(row.expires_at)).getTime() : 0;
+        if (Number.isFinite(exp) && exp > nowMs && !activePro.has(uid)) {
+          activeTrial.add(uid);
+        }
+      }
+      for (const row of subscriptionRows || []) {
+        const uid = String(row.user_id || "");
+        if (!uid) continue;
+        if (String(row.status || "").toLowerCase() === "trialing") {
+          allTrial.add(uid);
+          const end = row.current_period_end ? new Date(String(row.current_period_end)).getTime() : 0;
+          if (Number.isFinite(end) && end > nowMs && !activePro.has(uid)) {
+            activeTrial.add(uid);
+          }
+        }
+      }
+
       if (plan === "PRO") cohortUserIds = Array.from(activePro) as string[];
+      else if (plan === "TRIAL") cohortUserIds = Array.from(activeTrial) as string[];
+      else if (plan === "TRIAL_ALL") cohortUserIds = Array.from(allTrial) as string[];
       else {
         const { data: profilesForFree } = await supabase.from("profiles").select("id");
-        cohortUserIds = (profilesForFree || []).map((row: any) => String(row.id)).filter((id: string) => !activePro.has(id));
+        cohortUserIds = (profilesForFree || [])
+          .map((row: any) => String(row.id))
+          .filter((id: string) => !activePro.has(id) && !activeTrial.has(id));
       }
       if (!cohortUserIds || !cohortUserIds.length) return NextResponse.json({ users: [], total: 0 });
     } else if (plan === "TELEGRAM") {
@@ -130,15 +168,21 @@ export async function GET(req: NextRequest) {
     const pageProfiles = matchingProfiles.slice(page * pageSize, page * pageSize + pageSize);
     const pageIds = pageProfiles.map((profile: any) => String(profile.id));
 
-    const [{ data: subscriptionRows }, { data: botRows }, { data: localPaymentRows }] = await Promise.all([
+    const [{ data: subscriptionRows }, { data: botRows }, { data: localPaymentRows }, { data: pageTrialRows }] = await Promise.all([
       pageIds.length ? supabase.from("subscriptions").select("user_id,plan_id,status,current_period_end,created_at").in("user_id", pageIds) : Promise.resolve({ data: [] }),
       pageIds.length ? supabase.from("bot_subscriptions").select("user_id,service_type,notifications_enabled").in("user_id", pageIds) : Promise.resolve({ data: [] }),
       pageIds.length ? supabase.from("local_payment_orders").select("user_id,status,payment_review_status,created_at").in("user_id", pageIds).eq("status", "approved").order("created_at", { ascending: false }) : Promise.resolve({ data: [] }),
+      pageIds.length ? supabase.from("subscription_trials").select("user_id,started_at,expires_at").in("user_id", pageIds) : Promise.resolve({ data: [] }),
     ]);
     const subscriptionsByUser = new Map<string, any[]>();
     for (const row of subscriptionRows || []) {
       const id = String(row.user_id);
       subscriptionsByUser.set(id, [...(subscriptionsByUser.get(id) || []), row]);
+    }
+    const trialByUser = new Map<string, { started_at: string; expires_at: string }>();
+    for (const row of pageTrialRows || []) {
+      const id = String(row.user_id);
+      trialByUser.set(id, { started_at: row.started_at, expires_at: row.expires_at });
     }
     const botsByUser = new Map<string, any[]>();
     for (const row of botRows || []) {
@@ -158,6 +202,7 @@ export async function GET(req: NextRequest) {
         email: emailById.get(String(profile.id)) || null,
         full_name: nameById.get(String(profile.id)) || profile.display_name || null,
         subscription: preferredSubscription(subscriptionsByUser.get(String(profile.id)) || []),
+        trial: trialByUser.get(String(profile.id)) || null,
         bot_subscriptions: bots,
         bot_count: bots.filter((bot: any) => bot.notifications_enabled).length,
         payment_review_status: paymentReviewByUser.get(String(profile.id)) || null,

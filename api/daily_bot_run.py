@@ -2372,10 +2372,14 @@ def apply_council_confirmation_boost(results, primary_model=None):
         base = votes.get(key, 0.0)
         active = [value for name, value in votes.items() if name != key and value > 0]
         score = max(base, (base + sum(active)) / (1 + len(active))) if active else base
+        avg_active = (sum(active) / len(active)) if active else 0.0
+        confirmation_mult = round(1.0 + min(0.15, avg_active * 0.15), 4) if active else 1.0
 
         row = dict(item)
         row["council_score"] = round(score * 100.0, 1)
         row["council_base_score"] = round(base * 100.0, 1)
+        row["council_confirmed"] = bool(active)
+        row["council_confirmation_mult"] = confirmation_mult
         row["council_mode"] = "confirmation_boost"
         adjusted.append(row)
     return adjusted
@@ -2622,23 +2626,26 @@ async def generate_daily_recommendations(
     print(f"[RECOMMENDATIONS] ML scan found {len(results)} BUY signals.")
 
     if council_model:
+        consensus_results, dormant_voters, council_unavailable = ignore_dormant_council_voters(results)
+        if dormant_voters:
+            audit["dormant_council_voters"] = dormant_voters
+            print(f"[RECOMMENDATIONS] Council voter(s) with no signal for any candidate: {', '.join(dormant_voters)}")
+        if council_unavailable:
+            return no_buy("council_unavailable", "لم يصدر أي عضو في مجلس النماذج نتيجة صالحة لأي مرشح؛ تم تأجيل الشراء احترازيًا بدل اعتبار المرشحين مرفوضين.")
         council_mode = os.getenv("COUNCIL_AGGREGATION_MODE", "confirmation_boost").strip().lower()
         if council_mode == "confirmation_boost":
             results = apply_council_confirmation_boost(results, resolved_model)
             audit["council_aggregation"] = "confirmation_boost"
             audit["candidates"] = [{**candidate_assessment(item), "council_score": item.get("council_score"),
                                     "council_base_score": item.get("council_base_score"),
+                                    "council_confirmed": item.get("council_confirmed"),
                                     "entry_liquidity": item.get("entry_liquidity")} for item in results]
             print("[RECOMMENDATIONS] Council mode: confirmation_boost (meta vote can only lift, never veto)")
         else:
-            results, dormant_voters, council_unavailable = ignore_dormant_council_voters(results)
+            results = consensus_results
             if dormant_voters:
-                audit["dormant_council_voters"] = dormant_voters
                 audit["candidates"] = [{**candidate_assessment(item), "council_score": item.get("council_score"),
                                         "entry_liquidity": item.get("entry_liquidity")} for item in results]
-                print(f"[RECOMMENDATIONS] Ignoring dormant council voter(s) with no signal for any candidate: {', '.join(dormant_voters)}")
-            if council_unavailable:
-                return no_buy("council_unavailable", "لم يصدر أي عضو في مجلس النماذج نتيجة صالحة لأي مرشح؛ تم تأجيل الشراء احترازيًا بدل اعتبار المرشحين مرفوضين.")
         def _normalize_percent_score(value: object, default: float = 0.0) -> float:
             try:
                 score = float(value)
@@ -2774,7 +2781,7 @@ async def generate_daily_recommendations(
         except Exception as se_err:
             print(f"DEBUG: Error checking sentiment for rank adjustment of {item.get('symbol')}: {se_err}")
             
-        adjusted_return = raw_rar * sentiment_mult * float(item.get("sector_rank_multiplier", 1.0))
+        adjusted_return = raw_rar * sentiment_mult * float(item.get("sector_rank_multiplier", 1.0)) * float(item.get("council_confirmation_mult", 1.0))
         item["risk_adjusted_return"] = adjusted_return if math.isfinite(adjusted_return) else 0.0
 
     # Sort by risk_adjusted_return descending to prioritize safer risk-reward profiles
@@ -4020,6 +4027,19 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as reminder_error:
                 _record_step("telegram_subscription_reminders", False, str(reminder_error)[:500], 0)
                 print(f"[SUBSCRIPTION_REMINDERS] Failed: {reminder_error}")
+        # Automated VIP / free Telegram / active-free email report dispatch.
+        # Isolated: a delivery failure never affects the market-data job result.
+        if trigger == "scheduled" and phase == "close" and not dry_run and _stage_needed('daily_report_dispatch'):
+            _start_step('daily_report_dispatch', 'Send daily VIP Telegram, free Telegram and active-free promo email')
+            try:
+                from api.daily_report_dispatch import run_daily_report_dispatch
+                dispatch_res = await asyncio.to_thread(run_daily_report_dispatch, supabase)
+                _record_step('daily_report_dispatch', dispatch_res.get('status') in ('completed', 'skipped'),
+                             json.dumps(dispatch_res, ensure_ascii=False)[:500], 0)
+                print(f"[REPORT_DISPATCH] {dispatch_res}")
+            except Exception as dispatch_error:
+                _record_step('daily_report_dispatch', False, str(dispatch_error)[:500], 0)
+                print(f"[REPORT_DISPATCH] Failed: {dispatch_error}")
         print(f"\n--- Daily Bot Run Job Completed: {dt.datetime.now()} ---")
         return {"status": "completed", "job_run_id": job_run_id, **summarise_daily_steps(steps_log)}
 

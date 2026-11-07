@@ -141,6 +141,9 @@ def test_confirmation_boost_never_lets_a_rejection_kill_the_score():
     adjusted = apply_council_confirmation_boost(results, "model_EGX.bin")
     assert [row["council_score"] for row in adjusted] == [60.0, 65.0, 60.0]
     assert [row["council_base_score"] for row in adjusted] == [60.0, 60.0, 60.0]
+    assert [row["council_confirmed"] for row in adjusted] == [False, True, True]
+    assert adjusted[0]["council_confirmation_mult"] == 1.0
+    assert adjusted[1]["council_confirmation_mult"] > adjusted[2]["council_confirmation_mult"] > 1.0
 
 
 def test_confirmation_boost_falls_back_to_the_strongest_voter():

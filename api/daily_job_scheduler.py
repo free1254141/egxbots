@@ -71,6 +71,7 @@ def _save_config():
                 "midday_run_time": _scheduler_state["midday_run_time"],
                 "active_days": _scheduler_state["active_days"],
                 "model_filter": _scheduler_state.get("model_filter", "adaptive"),
+                "auto_dispatch_daily_reports": bool(_scheduler_state.get("auto_dispatch_daily_reports", True)),
             }, f, indent=2)
     except Exception:
         pass

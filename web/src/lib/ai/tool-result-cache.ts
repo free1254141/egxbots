@@ -34,7 +34,18 @@ const ENABLED =
   process.env.NODE_ENV !== "test" && process.env.TOOL_RESULT_CACHE !== "off";
 
 const MAX_MEMORY_ENTRIES = 400;
+const STALE_TOOL_CACHE_MS = 36 * 60 * 60 * 1000; // prune tool_% rows older than 36h
 const memoryCache = new Map<string, { payload: any; computed_at_ms: number }>();
+let lastPrunedCairoDay = "";
+
+export function isToolResultPayloadCacheable(result: any): boolean {
+  if (!result || typeof result !== "object") return false;
+  const status = String(result.status || "").toLowerCase();
+  const availability = String(result.availability || "").toLowerCase();
+  if (status === "error" || status === "unavailable") return false;
+  if (availability === "error" || availability === "unavailable") return false;
+  return true;
+}
 
 function pruneMemory(): void {
   if (memoryCache.size <= MAX_MEMORY_ENTRIES) return;
@@ -89,6 +100,7 @@ export function buildToolResultCacheKey(
 
 export function clearToolResultMemoryCache(): void {
   memoryCache.clear();
+  lastPrunedCairoDay = "";
 }
 
 export async function getCachedToolResult(
@@ -131,7 +143,7 @@ export async function setCachedToolResult(
   result: any,
   supabase: any
 ): Promise<void> {
-  if (result == null) return;
+  if (!isToolResultPayloadCacheable(result)) return;
   const now = Date.now();
   memoryCache.set(cacheKey, { payload: result, computed_at_ms: now });
   pruneMemory();
@@ -144,6 +156,19 @@ export async function setCachedToolResult(
       payload: { result },
       computed_at: new Date(now).toISOString(),
     });
+
+    const todayKey = cairoDateKey(new Date(now));
+    if (todayKey !== lastPrunedCairoDay) {
+      lastPrunedCairoDay = todayKey;
+      const cutoffIso = new Date(now - STALE_TOOL_CACHE_MS).toISOString();
+      Promise.resolve(
+        supabase
+          .from("market_cache")
+          .delete()
+          .like("cache_key", "tool_%")
+          .lt("computed_at", cutoffIso)
+      ).catch(() => {});
+    }
   } catch {
     // Caching must never break a tool call.
   }

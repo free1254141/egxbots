@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
       positionsRes,
       egx30Res,
       scanResultsRes,
+      trialsRes,
     ] = await Promise.all([
       supabase.from("profiles").select("id,language,telegram_chat_id,notification_channel,created_at", { count: "exact" }).range(0, 999),
       supabase.from("subscriptions").select("user_id,plan_id,status,current_period_end,created_at"),
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest) {
       supabase.from("positions").select("user_id,symbol,status").eq("status", "open").limit(10000),
       supabase.from("stock_prices").select("date,close").eq("symbol", "EGX30").order("date", { ascending: true }).limit(1000),
       supabase.from("scan_results").select("id,created_at").limit(50000),
+      supabase.from("subscription_trials").select("user_id,started_at,expires_at").limit(5000),
     ]);
 
     if (profilesRes.error) return NextResponse.json({ detail: profilesRes.error.message }, { status: 500 });
@@ -97,6 +99,7 @@ export async function GET(req: NextRequest) {
     const paymentOrders = paymentsRes.error ? [] : (paymentsRes.data || []);
     const kashierPayments = kashierRes.error ? [] : (kashierRes.data || []);
     const positions = positionsRes.error ? [] : (positionsRes.data || []);
+    const trialRows = trialsRes.error ? [] : (trialsRes.data || []);
 
     let emailDomains: Record<string, number> = {};
     const adminUserIds = new Set<string>();
@@ -158,6 +161,56 @@ export async function GET(req: NextRequest) {
       excludeUserIds: adminUserIds,
       now,
     });
+
+    // Compute trial metrics (excluding admins)
+    const nowMs = now.getTime();
+    const activeProSet = new Set<string>();
+    subscriptions.forEach((sub: any) => {
+      const uid = String(sub.user_id || "");
+      if (!uid || adminUserIds.has(uid)) return;
+      if (!["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub.plan_id || "").toLowerCase())) return;
+      if (String(sub.status || "").toLowerCase() !== "active") return;
+      if (sub.current_period_end) {
+        const end = new Date(String(sub.current_period_end)).getTime();
+        if (Number.isFinite(end) && end <= nowMs) return;
+      }
+      activeProSet.add(uid);
+    });
+
+    const allTrialUids = new Set<string>();
+    const activeTrialUids = new Set<string>();
+    const convertedTrialUids = new Set<string>();
+
+    trialRows.forEach((row: any) => {
+      const uid = String(row.user_id || "");
+      if (!uid || adminUserIds.has(uid)) return;
+      allTrialUids.add(uid);
+      const exp = row.expires_at ? new Date(String(row.expires_at)).getTime() : 0;
+      if (activeProSet.has(uid)) {
+        convertedTrialUids.add(uid);
+      } else if (Number.isFinite(exp) && exp > nowMs) {
+        activeTrialUids.add(uid);
+      }
+    });
+
+    subscriptions.forEach((sub: any) => {
+      const uid = String(sub.user_id || "");
+      if (!uid || adminUserIds.has(uid)) return;
+      if (String(sub.status || "").toLowerCase() === "trialing") {
+        allTrialUids.add(uid);
+        const end = sub.current_period_end ? new Date(String(sub.current_period_end)).getTime() : 0;
+        if (activeProSet.has(uid)) {
+          convertedTrialUids.add(uid);
+        } else if (Number.isFinite(end) && end > nowMs) {
+          activeTrialUids.add(uid);
+        }
+      }
+    });
+
+    const activeTrialUsers = activeTrialUids.size;
+    const totalTrialUsers = allTrialUids.size;
+    const convertedTrialUsers = convertedTrialUids.size;
+    const expiredTrialUsers = Math.max(0, totalTrialUsers - activeTrialUsers - convertedTrialUsers);
 
     const nonAdminProfiles = allProfiles.filter((p: any) => !adminUserIds.has(String(p.id)));
     const newUsers30Days = nonAdminProfiles.filter((profile: any) => new Date(profile.created_at).getTime() >= now.getTime() - 30 * 24 * 60 * 60 * 1000).length;
@@ -335,6 +388,10 @@ export async function GET(req: NextRequest) {
       signupGrowth: growthTimeline,
       dailyActiveUsage: analytics.dailyActiveUsage,
       activeProUsers: analytics.activeProUsers,
+      activeTrialUsers,
+      totalTrialUsers,
+      convertedTrialUsers,
+      expiredTrialUsers,
       activeUsers30Days: analytics.activeUsers30Days,
       activeUsers7Days: analytics.activeUsers7Days,
       activeUsers30DaysRate: analytics.activeUsers30DaysRate,

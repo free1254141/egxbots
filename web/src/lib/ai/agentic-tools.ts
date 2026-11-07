@@ -22,6 +22,7 @@ import {
     getCachedToolResult,
     isToolResultCacheEnabled,
     isToolResultCacheable,
+    isToolResultPayloadCacheable,
     setCachedToolResult,
 } from "./tool-result-cache";
 
@@ -171,7 +172,7 @@ export async function executeAgenticTool(toolName:string,args:Record<string,any>
         };
 
         const toolResult = await dispatchTool();
-        if (toolCacheKey && toolResult && toolResult.status !== "error") {
+        if (toolCacheKey && isToolResultPayloadCacheable(toolResult)) {
             await setCachedToolResult(toolCacheKey, toolResult, executionSupabase(supabase));
         }
         return toolResult;
