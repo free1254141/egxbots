@@ -113,10 +113,36 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
             "original_amount_egp": int(pro_regular_amount_egp()),
             "ends_at": discount["ends_at"],
         }
+    # Founders offer - time-limited (15 days): strictly time-limited
+    from api.payment_common import founders_offer_ends_at, founders_offer_is_open
+    _founders_ends_at = founders_offer_ends_at()
+    _founders_is_open = founders_offer_is_open()
+    _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else "2026-11-14T01:00:00Z"
+
+    plan_6m: Dict[str, Any] = {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m")), "days": 180}
+    plan_1y: Dict[str, Any] = {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y")), "days": 365}
+    if _founders_is_open:
+        plan_6m["discount"] = {
+            "active": True,
+            "kind": "founders",
+            "label_ar": "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م) 🔥",
+            "label_en": "Founders Offer 50% OFF (500 instead of 1,000 EGP) 🔥",
+            "original_amount_egp": 1000,
+            "ends_at": _founders_ends_at_str,
+        }
+        plan_1y["discount"] = {
+            "active": True,
+            "kind": "founders",
+            "label_ar": "عرض المؤسسين خصم 50% (900 بدل 1,800 ج.م) 🔥",
+            "label_en": "Founders Offer 50% OFF (900 instead of 1,800 EGP) 🔥",
+            "original_amount_egp": 1800,
+            "ends_at": _founders_ends_at_str,
+        }
+
     plans = [
         monthly,
-        {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m")), "days": 180},
-        {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y")), "days": 365},
+        plan_6m,
+        plan_1y,
         {
             "id": "lifetime",
             "name_ar": "مدى الحياة (Lifetime)",
@@ -126,11 +152,6 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
             "badge": "حصري لـ 20 مقعداً 🔥",
         },
     ]
-    # Founders offer - time-limited (15 days): strictly time-limited
-    from api.payment_common import founders_offer_ends_at, founders_offer_is_open
-    _founders_ends_at = founders_offer_ends_at()
-    _founders_is_open = founders_offer_is_open()
-    _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else "2026-11-14T01:00:00Z"
 
     # Lifetime spots counter: strictly limited to 20 users only
     lifetime_limit = int(settings.get("lifetime_limit") or os.getenv("LIFETIME_LIMIT", "20"))

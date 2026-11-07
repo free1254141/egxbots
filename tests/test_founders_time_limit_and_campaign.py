@@ -37,17 +37,23 @@ def test_plan_amount_egp_with_founders_offer_open_vs_expired():
         "pro_price_egp": 100.0,
     }
 
-    # Open offer: returns 100.0
+    # Open offer: returns 100.0 for pro, 500.0 for pro_6m, 900.0 for pro_1y, and 2250.0 for lifetime
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.founders_offer_is_open", return_value=True), \
          patch("api.payment_common.pro_discount", return_value={"active": False}):
         assert plan_amount_egp("pro", user_id=None) == 100.0
+        assert plan_amount_egp("pro_6m", user_id=None) == 500.0
+        assert plan_amount_egp("pro_1y", user_id=None) == 900.0
+        assert plan_amount_egp("lifetime", user_id=None) == 2250.0
 
-    # Expired offer: returns 200.0
+    # Expired offer: returns 200.0 for pro, 1000.0 for pro_6m, 1800.0 for pro_1y, and 2250.0 for lifetime
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.founders_offer_is_open", return_value=False), \
          patch("api.payment_common.pro_discount", return_value={"active": False}):
         assert plan_amount_egp("pro", user_id=None) == 200.0
+        assert plan_amount_egp("pro_6m", user_id=None) == 1000.0
+        assert plan_amount_egp("pro_1y", user_id=None) == 1800.0
+        assert plan_amount_egp("lifetime", user_id=None) == 2250.0
 
 
 def test_plan_amount_egp_grandfathering_precedence():

@@ -250,14 +250,16 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
         return _env_price("PRO_PRICE_EGP", 200.0)
     if plan == "pro_6m":
         settings = billing_settings()
-        if settings.get("pro_6m_price_egp") is not None:
-            return float(settings["pro_6m_price_egp"])
-        return _env_price("PRO_6M_PRICE_EGP", 1000)
+        base_6m = float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else _env_price("PRO_6M_PRICE_EGP", 1000)
+        if settings.get("founders_offer_enabled") and founders_offer_is_open():
+            return float(round(base_6m * 0.5))
+        return base_6m
     if plan == "pro_1y":
         settings = billing_settings()
-        if settings.get("pro_1y_price_egp") is not None:
-            return float(settings["pro_1y_price_egp"])
-        return _env_price("PRO_1Y_PRICE_EGP", 1800)
+        base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1800)
+        if settings.get("founders_offer_enabled") and founders_offer_is_open():
+            return float(round(base_1y * 0.5))
+        return base_1y
     if plan in ("lifetime", "pro_lifetime"):
         settings = billing_settings()
         if settings.get("lifetime_price_egp") is not None:
@@ -299,7 +301,7 @@ def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash"
         "p_price_monthly_cents": int(round(plan_amount_egp(requested_plan, user_id=user_id) * 100)),
     }).execute()
     # Enroll user in founders_offer_members so they lock in founders rates for life
-    if requested_plan in {"pro", "pro_renewal"} and founders_offer_is_open():
+    if requested_plan in {"pro", "pro_renewal", "pro_6m", "pro_1y"} and founders_offer_is_open():
         try:
             supabase.table("founders_offer_members").upsert({"user_id": user_id}).execute()
         except Exception as _fe:

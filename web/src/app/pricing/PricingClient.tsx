@@ -635,26 +635,46 @@ export default function PricingClient() {
   ].map((plan) => {
     const configured = localConfig?.plans?.find((item: any) => item.id === plan.id);
     let amount = Number(configured?.amount_egp ?? plan.amount_egp);
+    let originalAmount: number | null = configured?.discount?.original_amount_egp
+      ? Number(configured.discount.original_amount_egp)
+      : null;
     if (plan.id === "pro") {
       if (isGrandfathered) {
         amount = 50;
+        originalAmount = monthlyPrice || 200;
       } else if (isGrandfathered100) {
         amount = 100;
+        originalAmount = monthlyPrice || 200;
       } else if (!foundersIsOpen) {
         amount = monthlyPrice || 200;
+        originalAmount = null;
+      } else {
+        amount = 100;
+        originalAmount = monthlyPrice || 200;
       }
+    } else if (plan.id === "pro_6m") {
+      amount = foundersIsOpen ? 500 : 1000;
+      originalAmount = foundersIsOpen ? 1000 : null;
+    } else if (plan.id === "pro_1y") {
+      amount = foundersIsOpen ? 900 : 1800;
+      originalAmount = foundersIsOpen ? 1800 : null;
     }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
+    const effectiveMonthlyBase = foundersIsOpen ? 100 : (monthlyPrice || 200);
     return {
       ...plan,
       amount_egp: amount,
+      original_amount_egp: originalAmount,
+      discount: configured?.discount || (originalAmount ? { active: true, original_amount_egp: originalAmount } : null),
       days,
       monthlyEquivalent,
       savingsPct: plan.isLifetime
         ? 95
-        : monthlyPrice > 0 && monthlyEquivalent
-        ? Math.max(0, Math.round((1 - monthlyEquivalent / monthlyPrice) * 100))
+        : plan.id === "pro"
+        ? (originalAmount && originalAmount > amount ? Math.round((1 - amount / originalAmount) * 100) : 0)
+        : effectiveMonthlyBase > 0 && monthlyEquivalent
+        ? Math.max(0, Math.round((1 - monthlyEquivalent / effectiveMonthlyBase) * 100))
         : 0,
     };
   });
@@ -1416,16 +1436,16 @@ export default function PricingClient() {
                   id: "pro_6m" as const,
                   name_ar: "6 شهور",
                   name_en: "6 Months",
-                  badge_ar: "الأكثر طلباً ⭐",
-                  badge_en: "Most Popular ⭐",
+                  badge_ar: foundersIsOpen ? "500 بدل 1,000 ج.م ⭐" : "الأكثر طلباً ⭐",
+                  badge_en: foundersIsOpen ? "500 EGP (50% OFF) ⭐" : "Most Popular ⭐",
                   badgeBg: "bg-emerald-400 text-black",
                 },
                 {
                   id: "pro_1y" as const,
                   name_ar: "سنة كاملة",
                   name_en: "1 Year",
-                  badge_ar: "أكبر توفير 💎",
-                  badge_en: "Save 25% 💎",
+                  badge_ar: foundersIsOpen ? "900 بدل 1,800 ج.م 💎" : "أكبر توفير 💎",
+                  badge_en: foundersIsOpen ? "900 EGP (50% OFF) 💎" : "Save 25% 💎",
                   badgeBg: "bg-sky-400 text-black",
                 },
               ].map((tab) => {
@@ -1543,6 +1563,14 @@ export default function PricingClient() {
             const planDiscount =
               isMonthly && monthlyDiscount?.active && (foundersIsOpen || isGrandfathered || isGrandfathered100)
                 ? monthlyDiscount
+                : (!isMonthly && foundersIsOpen && activeProDetails.original_amount_egp)
+                ? {
+                    active: true,
+                    original_amount_egp: activeProDetails.original_amount_egp,
+                    label_ar: isFeatured
+                      ? "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م) ⭐"
+                      : "عرض المؤسسين خصم 50% (900 بدل 1,800 ج.م) 💎",
+                  }
                 : null;
 
             return (
@@ -1573,9 +1601,13 @@ export default function PricingClient() {
                     ) : isMonthly ? (
                       isAr ? "⚡ باقة التداول الشهري" : "⚡ Monthly Pro Plan"
                     ) : isFeatured ? (
-                      isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular"
+                      foundersIsOpen
+                        ? (isAr ? "⭐ الأكثر طلباً · خصم المؤسسين 50% (500 بدل 1,000 ج.م)" : "⭐ Most Popular · 50% OFF (500 EGP)")
+                        : (isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular")
                     ) : (
-                      isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value"
+                      foundersIsOpen
+                        ? (isAr ? "💎 أكبر توفير · خصم المؤسسين 50% (900 بدل 1,800 ج.م)" : "💎 Max Value · 50% OFF (900 EGP)")
+                        : (isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value")
                     )}
                   </span>
                 </div>
@@ -1647,8 +1679,8 @@ export default function PricingClient() {
                     </div>
                   </div>
 
-                  {/* Founding perk callout if monthly */}
-                  {isMonthly && (foundersIsOpen || isGrandfathered || isGrandfathered100) && (
+                  {/* Founding perk callout */}
+                  {(foundersIsOpen || (isMonthly && (isGrandfathered || isGrandfathered100))) && (
                     <div className="bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 p-3 space-y-1 text-black dark:text-amber-200">
                       <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 dark:text-amber-300">
                         <Clock className="w-3.5 h-3.5" />

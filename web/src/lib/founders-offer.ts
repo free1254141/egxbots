@@ -60,34 +60,67 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       is_grandfathered: isGrandfathered50,
       is_grandfathered_100: isGrandfathered100,
     },
-    plans: (config.plans || []).map((plan: any) =>
-      plan.id !== "pro"
-        ? plan
-        : {
-            ...plan,
-            amount_egp: effectivePrice,
-            is_grandfathered_renewal: isGrandfathered50,
-            is_grandfathered_100: isGrandfathered100,
-            discount: hasSpecialRate
-              ? {
-                  active: true,
-                  kind: "founders",
-                  label_ar: isGrandfathered50
-                    ? "سعر المؤسسين المستمر (50 ج.م مدى الحياة) ⚡"
-                    : isGrandfathered100 && !isOpen
-                    ? "سعر المؤسسين المثبت لحسابك (100 ج.م مدى الحياة) ⚡"
-                    : "عرض المؤسسين (100 ج.م شهرياً مدى الحياة - 15 يوم فقط 🔥)",
-                  label_en: isGrandfathered50
-                    ? "Grandfathered Founders rate (50 EGP for life) ⚡"
-                    : isGrandfathered100 && !isOpen
-                    ? "Locked Founders rate (100 EGP/mo for life) ⚡"
-                    : "Founders Offer - 100 EGP/mo for Life (15 Days Only 🔥)",
-                  original_amount_egp: regularPrice,
-                  ends_at: isOpen ? configEndsAt : null,
-                }
-              : null,
-          }
-    ),
+    plans: (config.plans || []).map((plan: any) => {
+      if (plan.id === "pro") {
+        return {
+          ...plan,
+          amount_egp: effectivePrice,
+          is_grandfathered_renewal: isGrandfathered50,
+          is_grandfathered_100: isGrandfathered100,
+          discount: hasSpecialRate
+            ? {
+                active: true,
+                kind: "founders",
+                label_ar: isGrandfathered50
+                  ? "سعر المؤسسين المستمر (50 ج.م مدى الحياة) ⚡"
+                  : isGrandfathered100 && !isOpen
+                  ? "سعر المؤسسين المثبت لحسابك (100 ج.م مدى الحياة) ⚡"
+                  : "عرض المؤسسين (100 ج.م شهرياً مدى الحياة - 15 يوم فقط 🔥)",
+                label_en: isGrandfathered50
+                  ? "Grandfathered Founders rate (50 EGP for life) ⚡"
+                  : isGrandfathered100 && !isOpen
+                  ? "Locked Founders rate (100 EGP/mo for life) ⚡"
+                  : "Founders Offer - 100 EGP/mo for Life (15 Days Only 🔥)",
+                original_amount_egp: regularPrice,
+                ends_at: isOpen ? configEndsAt : null,
+              }
+            : null,
+        };
+      }
+      if (plan.id === "pro_6m") {
+        return {
+          ...plan,
+          amount_egp: isOpen ? 500 : 1000,
+          discount: isOpen
+            ? {
+                active: true,
+                kind: "founders",
+                label_ar: "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م) 🔥",
+                label_en: "Founders Offer 50% OFF (500 instead of 1,000 EGP) 🔥",
+                original_amount_egp: 1000,
+                ends_at: configEndsAt,
+              }
+            : null,
+        };
+      }
+      if (plan.id === "pro_1y") {
+        return {
+          ...plan,
+          amount_egp: isOpen ? 900 : 1800,
+          discount: isOpen
+            ? {
+                active: true,
+                kind: "founders",
+                label_ar: "عرض المؤسسين خصم 50% (900 بدل 1,800 ج.م) 🔥",
+                label_en: "Founders Offer 50% OFF (900 instead of 1,800 EGP) 🔥",
+                original_amount_egp: 1800,
+                ends_at: configEndsAt,
+              }
+            : null,
+        };
+      }
+      return plan;
+    }),
   };
 }
 
