@@ -8,6 +8,7 @@ import { runAnswerGate } from "../answer-gate";
 import { analyzeImage } from "../vision";
 import { advisoryFactRelations } from "../fact-relations";
 import { advisoryMarketMeaning } from "../market-meaning-advisory";
+import { knownSymbolHints } from "../request-data-tools";
 jest.mock("../server-secrets", () => ({ getDeepSeekApiKey: () => "offline-fake-key" }));
 jest.mock("../vision", () => ({ analyzeImage: jest.fn(), reconcileVisionWithMarket: jest.fn() }));
 jest.mock("../live-stock-updater", () => ({ fetchLiveStockIndicators: jest.fn().mockResolvedValue({ success: false, error: "offline_test" }), isEgxSessionOpen: jest.fn().mockReturnValue(false) }));
@@ -2842,5 +2843,87 @@ describe("Agentic tool correctness and failure boundaries", () => {
         expect(fwryRec.current_price).toBe(16.12);
         expect(fwryRec.entry_price).toBe(15.88);
         expect(fwryRec.unrealized_return_pct).toBe(1.51);
+    });
+
+    test("knownSymbolHints resolves Latin tickers case-insensitively and suggests 1-edit typo tickers", () => {
+        expect(knownSymbolHints("Maal")).toContainEqual({ name: "مرسيليا المصرية الخليجية للاستثمار العقاري (MAAL)", symbols: ["MAAL"] });
+        expect(knownSymbolHints("maal")).toContainEqual({ name: "مرسيليا المصرية الخليجية للاستثمار العقاري (MAAL)", symbols: ["MAAL"] });
+        expect(knownSymbolHints("Mall").some(h => h.symbols.includes("MAAL") && h.name.includes("مرسيليا"))).toBe(true);
+    });
+
+    test("checkAgenticDraft grounds KING AI and EGX AI percentage forms and ignores time-window durations like آخر 7 أيام in tables", () => {
+        const maalStockEv = toAgenticEvidence(
+            "get_stock",
+            { symbols: ["MAAL"] },
+            {
+                status: "success",
+                stocks: [
+                    {
+                        symbol: "MAAL",
+                        name_ar: "مرسيليا المصرية الخليجية للاستثمار العقاري",
+                        close: 6.9,
+                        change_pct: -0.86,
+                        date: "2026-11-05",
+                        rsi_14: 44.8,
+                        macd: -0.7186,
+                        macd_signal: -0.7632,
+                        macd_hist: 0.0446,
+                        ema_50: 8.17,
+                        ema_200: 6.95,
+                        r_vol: 0.5,
+                        wyckoff_phase: "Neutral",
+                        accumulation_days: 0,
+                        king_ai_score: 0.5905,
+                        egx_ai_score: 0.4541,
+                        fair_value: 3.45,
+                        valuation_status_ar: "متضخم 🔴",
+                        fair_value_gap_pct: -50,
+                        fair_value_substitution_ar: "1.49 × 1.75 = 3.45 ج.م",
+                        composite_score: 49,
+                        composite_grade: "C"
+                    }
+                ]
+            }
+        );
+        const maalLevelsEv = toAgenticEvidence(
+            "get_stock_levels",
+            { symbols: ["MAAL"] },
+            {
+                status: "success",
+                levels: [
+                    {
+                        symbol: "MAAL",
+                        close: 6.9,
+                        date: "2026-11-05",
+                        support_1: 4.88,
+                        support_2: 4.68,
+                        resistance_1: 10.9,
+                        resistance_2: 12.25,
+                        distance_to_support_1_pct: -29.28,
+                        distance_to_resistance_1_pct: 57.97
+                    }
+                ]
+            }
+        );
+
+        const draft = `## 📊 تحليل سهم مرسيليا المصرية الخليجية للاستثمار العقاري (MAAL)
+آخر إغلاق متاح: 6.90 ج.م (جلسة 05-11-2026، −0.86%) | التقييم الفني العام: 🔴 سلبي / أداء فني ضعيف (سكور 49/100 — C)
+
+| المؤشر | القيمة | القراءة |
+|---|---|---|
+| RSI (14) | 44.80 | حيادي |
+| MACD | −0.7186 | سالب |
+| إشارة MACD | −0.7632 | ضئيل |
+| الهيستوجرام | +0.0446 | موجب |
+| EMA 50 | 8.17 | مقاومة |
+| EMA 200 | 6.95 | دعم |
+| الحجم النسبي | 0.50 | ضعيف |
+| KING AI | 59.05% | حيادي (أقل من 60%) |
+| EGX AI | 45.41% | ضعيف |
+| السعر العادل | 3.45 ج.م | متضخم 🔴 (−50% عن السعر) |
+| نموذج التقييم | مضاعف القيمة الدفترية | 1.49 × 1.75 = 3.45 ج.م |
+| الأخبار والإفصاحات | لا عناوين موثقة خلال آخر 7 أيام | — |`;
+
+        expect(checkAgenticDraft(draft, [maalStockEv, maalLevelsEv], "مرسيليا المصرية الخليجية")).toEqual([]);
     });
 });

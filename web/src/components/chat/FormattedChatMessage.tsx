@@ -120,6 +120,8 @@ function parseNum(val: string | undefined): number | undefined {
     str = str.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
     // Normalize Arabic decimal separator (٫ or ،) to . if followed by digits
     str = str.replace(/[٫،](?=\d)/g, ".");
+    // Normalize Unicode minus (U+2212) and en-dash (U+2013) to ASCII minus
+    str = str.replace(/[−–]/g, "-");
     const cleaned = str.replace(/[^\d.-]/g, "");
     if (!cleaned) return undefined;
     const n = parseFloat(cleaned);
@@ -338,10 +340,14 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         }
     }
 
+    const hasLevels = hasSupport || hasResistance;
     const matchCount = (hasClose ? 1 : 0) + (hasSupport ? 1 : 0) + (hasResistance ? 1 : 0) + (hasRsi ? 1 : 0) + (hasEma ? 1 : 0);
     if (matchCount < 1 && !rsi) {
         return null;
     }
+    // If a table has only technical indicators (RSI/EMA/MACD) and neither price nor support/resistance levels,
+    // require at least 2 indicator rows only when used standalone, or allow enrichment to extract it:
+    const isIndicatorsOnlyTable = !hasClose && !hasLevels && (hasRsi || hasEma || Boolean(macdVal));
 
     let symbol = "";
     let name = "";
@@ -352,14 +358,15 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     const cleanRecent = recentText.replace(/\*/g, "");
 
     // Extract symbol and name from recent preceding text
-    const symbolMatch = cleanRecent.match(/(?:تحليل سهم|سهم|شركة)?\s*([^\(\n\r#\|]{2,40}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
-                     || cleanRecent.match(/###\s*📊?\s*(?:تحليل سهم|سهم)?\s*([^\(\n\r#\|]+?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
+    const symbolMatch = cleanRecent.match(/(?:^|\n)\s*#{1,4}\s*📊?\s*(?:تحليل\s+سهم|سهم|شركة)?\s*([^\(\n\r#\|]{2,100}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
+                     || cleanRecent.match(/(?:تحليل\s+سهم|سهم|شركة)\s+([^\(\n\r#\|]{2,100}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
+                     || cleanRecent.match(/([^\(\n\r#\|]{2,80}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/i)
                      || cleanRecent.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i)
                      || cleanRecent.match(/[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/);
 
     if (symbolMatch) {
         if (symbolMatch[2]) {
-            name = symbolMatch[1].replace(/###|📊/g, "").trim();
+            name = symbolMatch[1].replace(/#{1,6}|📊/g, "").replace(/^(?:تحليل\s+سهم|سهم|شركة)\s+/i, "").trim();
             name = name.replace(/^[0-9\s\u0030-\u0039\uFE0F\u20E3\u2700-\u27BF\.\-—–]+/u, "").trim();
             symbol = symbolMatch[2].trim().toUpperCase();
         } else {
@@ -384,31 +391,43 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC)
     if (!price || price === 0) {
         const textPriceMatch = cleanRecent.match(/[\—\–\-]\s*([\d\.]+)\s*ج\.م/i)
-                            || cleanRecent.match(/([\d\.]+)\s*ج\.م\s*\([+-]?[\d\.]+%?\)/i)
-                            || cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+-]?[\d\.]+)/i)
-                            || cleanRecent.match(/([+-]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
-                            || cleanRecent.match(/(?:سعر السهم|سعر|الإغلاق)\s*[:=]?\s*([+-]?[\d\.]+)\s*ج\.م/i);
+                            || cleanRecent.match(/([\d\.]+)\s*ج\.م\s*\([+\-−–]?[\d\.]+%?\)/i)
+                            || cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+\-−–]?[\d\.]+)/i)
+                            || cleanRecent.match(/([+\-−–]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
+                            || cleanRecent.match(/(?:سعر السهم|سعر|الإغلاق)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
         if (textPriceMatch) {
             price = parseNum(textPriceMatch[1]);
         }
     }
 
-    // Price change percentage from text
+    // Price change percentage from text (supporting ASCII and Unicode minus)
     if (changePct === undefined) {
-        const changeMatch = cleanRecent.match(/\(([+-]?[\d\.]+)%\)/i)
-                         || cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+-]?[\d\.]+)\s*%/i)
-                         || cleanRecent.match(/([+-]?[\d\.]+)\s*%\s*بتاريخ/i)
-                         || cleanRecent.match(/،\s*([+-]?[\d\.]+)\s*%\s*\)/i)
-                         || cleanRecent.match(/\(\s*([+-]?[\d\.]+)\s*%\s*\)/i);
+        const changeMatch = cleanRecent.match(/\(([+\-−–]?[\d\.]+)%\)/i)
+                         || cleanRecent.match(/(?:تغير الجلسة|التغير):\s*([+\-−–]?[\d\.]+)\s*%/i)
+                         || cleanRecent.match(/([+\-−–]?[\d\.]+)\s*%\s*بتاريخ/i)
+                         || cleanRecent.match(/[،,]\s*([+\-−–]?[\d\.]+)\s*%\s*\)/i)
+                         || cleanRecent.match(/\(\s*([+\-−–]?[\d\.]+)\s*%\s*\)/i);
         if (changeMatch) {
-            changePct = parseFloat(changeMatch[1]);
+            changePct = parseNum(changeMatch[1]);
         }
     }
 
     // Evaluation / Recommendation
     const evalMatch = cleanRecent.match(/التقييم الفني العام:\s*([^\n\r\|]+)/i);
     if (evalMatch) {
-        recommendation = evalMatch[1].trim();
+        const rawEval = evalMatch[1].trim();
+        const inlineScoreMatch = rawEval.match(/[\(\[]?\s*سكور\s*:?\s*(\d{1,3})\s*\/\s*100(?:\s*[—–\-]\s*(A\+|A|B|C|D))?\s*[\)\]]?/i);
+        if (inlineScoreMatch) {
+            if (compositeScore === undefined) {
+                compositeScore = Number(inlineScoreMatch[1]);
+            }
+            if (!compositeGrade && inlineScoreMatch[2]) {
+                compositeGrade = inlineScoreMatch[2].toUpperCase();
+            }
+        }
+        recommendation = rawEval
+            .replace(/\s*[\(\[]\s*سكور\s*:?\s*\d{1,3}\s*\/\s*100[^\)\]]*[\)\]]/gi, "")
+            .trim();
     }
 
     // Shariah check
@@ -444,10 +463,13 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         sector: canonical.sector || "سوق الأسهم المصرية",
         isShariah: isShariaCompliant(symbol)
     };
+    const verifiedName = (canonical.name_ar && canonical.name_ar !== symbol)
+        ? canonical.name_ar
+        : (name || meta?.name || symbol);
 
     return {
         symbol,
-        name: name || meta?.name || symbol,
+        name: verifiedName,
         sector: meta?.sector,
         price: price || 0,
         changePercent: changePct !== undefined ? changePct : 0,
@@ -709,9 +731,10 @@ function parseContentBlocks(content: string): ContentBlock[] {
                         return;
                     }
 
-                    // 2. Try single/comparative stock analysis table
+                    // 2. Try single/comparative stock analysis table (avoid creating a second stock_card if one already exists in this message)
+                    const alreadyHasStockCard = blocks.some(b => b.type === "stock_card" || b.type === "stock_cards");
                     const recentText = currentTextLines.join("\n") + "\n" + (blocks.length > 0 && blocks[blocks.length - 1].type === "text" ? (blocks[blocks.length - 1] as any).content : "");
-                    const analyzedStock = tryParseAnalysisTable(headers, rows, recentText);
+                    const analyzedStock = !alreadyHasStockCard ? tryParseAnalysisTable(headers, rows, recentText) : null;
                     if (analyzedStock) {
                         flushText();
                         blocks.push({ 
@@ -871,6 +894,27 @@ function parseContentBlocks(content: string): ContentBlock[] {
             }
         } else {
             finalBlocks.push(b);
+        }
+    }
+
+    // Enrich a single-stock analysis card when indicators (RSI, MACD, EMA, KING/EGX AI) appear in a second table below the levels table
+    const singleStockCardBlocks = finalBlocks.filter((b): b is Extract<ContentBlock, { type: "stock_card" }> => b.type === "stock_card");
+    if (singleStockCardBlocks.length === 1) {
+        const cardStock = singleStockCardBlocks[0].stock;
+        for (const b of finalBlocks) {
+            if (b.type === "table") {
+                const extra = tryParseAnalysisTable(b.headers, b.rows, `${cardStock.name || ""} (${cardStock.symbol})`);
+                if (extra) {
+                    if (cardStock.rsi === undefined && extra.rsi !== undefined) cardStock.rsi = extra.rsi;
+                    if (!cardStock.macdSignal && extra.macdSignal) cardStock.macdSignal = extra.macdSignal;
+                    if (cardStock.ema50 === undefined && extra.ema50 !== undefined) cardStock.ema50 = extra.ema50;
+                    if (cardStock.ema200 === undefined && extra.ema200 !== undefined) cardStock.ema200 = extra.ema200;
+                    if (cardStock.rVol === undefined && extra.rVol !== undefined) { cardStock.rVol = extra.rVol; cardStock.volumeRatio = extra.rVol; }
+                    if (!cardStock.wyckoffPhase && extra.wyckoffPhase) cardStock.wyckoffPhase = extra.wyckoffPhase;
+                    if (cardStock.king_ai_score === undefined && extra.king_ai_score !== undefined) { cardStock.king_ai_score = extra.king_ai_score; cardStock.kingScore = extra.king_ai_score; }
+                    if (cardStock.egx_ai_score === undefined && extra.egx_ai_score !== undefined) { cardStock.egx_ai_score = extra.egx_ai_score; cardStock.egxScore = extra.egx_ai_score; }
+                }
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
+import { CANONICAL_STOCK_NAMES } from './stock-names';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 import { isShariaCompliant } from '../shariaStocks';
@@ -15,6 +16,34 @@ export function requestToolCost(name: string, args: any): number {
     return readBatches.has(name) && Array.isArray(args?.symbols) ? Math.max(1, Math.ceil(args.symbols.length / 10)) : 1;
 }
 const normalizeArabic = (s: string) => s.replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\u0640\u064B-\u065F]/g, '').toLowerCase();
+const LATIN_STOPWORDS = new Set([
+    'in', 'on', 'to', 'is', 'it', 'or', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'hi', 'if', 'me', 'my', 'no', 'of', 'ok', 'so', 'up', 'us', 'we',
+    'all', 'and', 'any', 'are', 'but', 'can', 'day', 'for', 'get', 'has', 'had', 'her', 'him', 'his', 'how', 'its', 'let', 'may', 'new', 'not', 'now', 'off',
+    'old', 'one', 'our', 'out', 'own', 'put', 'run', 'saw', 'say', 'see', 'she', 'the', 'too', 'top', 'try', 'two', 'use', 'way', 'who', 'why', 'win', 'yes',
+    'yet', 'you', 'buy', 'low', 'max', 'min', 'net', 'pro', 'vip', 'rsi', 'ema', 'sma', 'eps', 'egx', 'usd', 'egp', 'macd', 'vwap', 'atr', 'adx', 'cmf',
+    'start', 'menu', 'panel', 'help', 'chat', 'stock', 'stocks', 'price', 'chart', 'news', 'open', 'close', 'high', 'test', 'from', 'with', 'this', 'that'
+]);
+
+function isOneEditDistance(a: string, b: string): boolean {
+    if (a === b) return false;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    if (a.length === b.length) {
+        let diffs = 0;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i] && ++diffs > 1) return false;
+        }
+        return diffs === 1;
+    }
+    const shorter = a.length < b.length ? a : b;
+    const longer = a.length < b.length ? b : a;
+    let i = 0, j = 0, diffs = 0;
+    while (i < shorter.length && j < longer.length) {
+        if (shorter[i] === longer[j]) { i++; j++; }
+        else { if (++diffs > 1) return false; j++; }
+    }
+    return true;
+}
+
 /** Name evidence for the LLM; never replace an explicit ticker or route intent. */
 export function knownSymbolHints(message: string): Array<{ name: string; symbols: string[] }> {
     const text = normalizeArabic(message);
@@ -30,7 +59,7 @@ export function knownSymbolHints(message: string): Array<{ name: string; symbols
         }
         return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:و|ف|ب|ل|ك|ال)?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'u');
     };
-    return Object.entries(ARABIC_STOCK_MAPPINGS).filter(([name]) => /[\u0600-\u06FF]/.test(name))
+    const arabicMatches = Object.entries(ARABIC_STOCK_MAPPINGS).filter(([name]) => /[\u0600-\u06FF]/.test(name))
         .sort(([a], [b]) => b.length - a.length).filter(([name]) => {
             const normAlias = normalizeArabic(name);
             const re = buildAliasRegex(normAlias);
@@ -48,7 +77,40 @@ export function knownSymbolHints(message: string): Array<{ name: string; symbols
             }
             matchedNorms.push(normAlias);
             return true;
-        }).slice(0, 30).map(([name, value]) => ({ name, symbols: Array.isArray(value) ? value : [value] }));
+        }).slice(0, 25).map(([name, value]) => ({ name, symbols: Array.isArray(value) ? value : [value] }));
+
+    const seenSymbols = new Set(arabicMatches.flatMap(m => m.symbols));
+    const latinHints: Array<{ name: string; symbols: string[] }> = [];
+    const latinTokens = (message || '').match(/\b[A-Za-z]{3,12}\b/g) || [];
+    for (const rawToken of latinTokens) {
+        const lower = rawToken.toLowerCase();
+        if (LATIN_STOPWORDS.has(lower)) continue;
+        const upper = rawToken.toUpperCase();
+        if (CANONICAL_STOCK_NAMES[upper] && !seenSymbols.has(upper)) {
+            seenSymbols.add(upper);
+            latinHints.push({ name: `${CANONICAL_STOCK_NAMES[upper].name_ar} (${upper})`, symbols: [upper] });
+            continue;
+        }
+        const mapped = ARABIC_STOCK_MAPPINGS[lower];
+        if (mapped) {
+            const syms = (Array.isArray(mapped) ? mapped : [mapped]).filter(s => !seenSymbols.has(s));
+            if (syms.length > 0) {
+                syms.forEach(s => seenSymbols.add(s));
+                const info = CANONICAL_STOCK_NAMES[syms[0]];
+                latinHints.push({ name: info ? `${info.name_ar} (${syms[0]})` : rawToken, symbols: syms });
+                continue;
+            }
+        }
+        if (upper.length === 4 && latinTokens.length <= 3) {
+            const closeTickers = Object.keys(CANONICAL_STOCK_NAMES).filter(k => k.length === 4 && k[0] === upper[0] && isOneEditDistance(upper, k));
+            if (closeTickers.length === 1 && !seenSymbols.has(closeTickers[0])) {
+                const sym = closeTickers[0];
+                seenSymbols.add(sym);
+                latinHints.push({ name: `${CANONICAL_STOCK_NAMES[sym].name_ar} (${sym} — أقرب رمز مطابق في البورصة لـ ${upper})`, symbols: [sym] });
+            }
+        }
+    }
+    return [...arabicMatches, ...latinHints].slice(0, 30);
 }
 
 export const REQUEST_DATA_TOOLS_SCHEMA = [

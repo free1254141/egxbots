@@ -225,7 +225,10 @@ export function StockCard({
     const compositeGrade = stockData.composite_grade ?? stockData.compositeGrade;
     const compositeVerdict = stockData.composite_verdict ?? stockData.compositeVerdict;
 
-    const signalType = stockData.signalType || stockData.signal_type || stockData.recommendation || "فرصة رصد فني";
+    const rawSignalType = stockData.signalType || stockData.signal_type || stockData.recommendation || "فرصة رصد فني";
+    const signalType = (compositeScoreVal !== undefined && !isNaN(compositeScoreVal))
+        ? rawSignalType.replace(/\s*[\(\[]\s*سكور\s*:?\s*\d{1,3}\s*\/\s*100[^\)\]]*[\)\]]/gi, "").trim() || rawSignalType
+        : rawSignalType;
 
     const handleCopySignal = (e: React.MouseEvent) => {
         e.stopPropagation();

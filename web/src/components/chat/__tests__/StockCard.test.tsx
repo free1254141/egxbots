@@ -290,4 +290,37 @@ describe("StockCard Component", () => {
         expect(screen.getAllByText("376.05").length).toBeGreaterThan(0);
         expect(screen.getByText("392.97 ج.م")).toBeTruthy();
     });
+
+    test("FormattedChatMessage parses MAAL with full Arabic name, Unicode minus changePct, and enriches RSI from second table", () => {
+        const maalMarkdown = `## 📊 تحليل سهم مرسيليا المصرية الخليجية للاستثمار العقاري (MAAL)
+آخر إغلاق متاح: 6.90 ج.م (جلسة 05-11-2026، −0.86%) | التقييم الفني العام: 🔴 سلبي / أداء فني ضعيف (سكور 49/100 — C)
+
+### المستويات الفنية
+| المستوى | السعر (ج.م) | المسافة من الإغلاق | الدلالة |
+|---|---|---|---|
+| الإغلاق الحالي | 6.90 | — | جلسة 05-11-2026 |
+| الدعم الأول | 4.88 | −29.28% | قاع 20 جلسة |
+| الدعم الثاني | 4.68 | −32.17% | دعم تالي |
+| المقاومة الأولى | 10.90 | +57.97% | قمة 20 جلسة |
+| المقاومة الثانية | 12.25 | +77.54% | قمة أبعد |
+
+### المؤشرات الفنية والبيانات الأساسية
+| المؤشر | القيمة | القراءة |
+|---|---|---|
+| RSI (14) | 44.80 | حيادي |
+| EMA 50 | 8.17 | السعر أسفله |
+| EMA 200 | 6.95 | السعر أسفله |
+| الحجم النسبي | 0.50 | نشاط ضعيف |
+| KING AI | 59.05% | حيادي |
+| EGX AI | 45.41% | ضعيف |`;
+
+        render(<FormattedChatMessage role="assistant" content={maalMarkdown} />);
+
+        expect(screen.getByText("#MAAL")).toBeTruthy();
+        expect(screen.getByText("مرسيليا المصرية الخليجية للاستثمار العقاري")).toBeTruthy();
+        expect(screen.getByText("-0.86%")).toBeTruthy();
+        expect(screen.getByText("44.8")).toBeTruthy();
+        expect(screen.getByText(/سكور: 49\/100/)).toBeTruthy();
+        expect(screen.getByText("🔴 سلبي / أداء فني ضعيف")).toBeTruthy();
+    });
 });

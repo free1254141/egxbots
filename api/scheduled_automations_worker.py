@@ -139,8 +139,34 @@ def _strip_markdown_formatting(text: str) -> str:
     return text.replace("**", "").replace("__", "").replace("`", "")
 
 
+def _split_telegram_message(text: str, max_length: int = 3900) -> List[str]:
+    """Splits a long message into natural chunks on paragraph or line boundaries without truncation."""
+    if len(text) <= max_length:
+        return [text]
+    chunks: List[str] = []
+    remaining = text
+    while len(remaining) > max_length:
+        # Prefer splitting at a blank line / section break
+        cut = remaining.rfind("\n\n", 0, max_length)
+        if cut < 1000:
+            # Fallback to single newline
+            cut = remaining.rfind("\n", 0, max_length)
+        if cut < 1000:
+            # Fallback to whitespace
+            cut = remaining.rfind(" ", 0, max_length)
+        if cut < 1000:
+            cut = max_length
+        chunk = remaining[:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 def send_telegram_direct(chat_id: str | int, text: str) -> bool:
-    """Delivers message directly to user's Telegram chat or channel with relay & plain-text fallback."""
+    """Delivers message directly to user's Telegram chat or channel with auto-chunking & plain-text fallback."""
     token = get_telegram_bot_token()
     if not token or not chat_id:
         logger.warning("[AUTOMATIONS_WORKER] Missing Telegram Bot Token or chat_id")
@@ -159,54 +185,63 @@ def send_telegram_direct(chat_id: str | int, text: str) -> bool:
     if isinstance(target_chat_id, str) and target_chat_id.lstrip("-").isdigit():
         target_chat_id = int(target_chat_id)
 
-    # Guard against Telegram 4096-character message limit
-    safe_text = text if len(text) <= 4000 else (text[:3950] + "\n...\n🔗 للتفاصيل الكاملة: https://egxbots.com")
+    # Deliver all chunks completely without cutting off content
+    chunks = _split_telegram_message(text)
 
     bases = [TELEGRAM_RELAY_BASE]
     if "https://api.telegram.org" not in bases:
         bases.append("https://api.telegram.org")
 
-    for base in bases:
-        url = f"{base}/bot{token}/sendMessage"
-        # Attempt 1: Markdown parse_mode, Attempt 2: Plain text fallback if Markdown entities fail
-        for mode in ("Markdown", None):
-            payload: Dict[str, Any] = {
-                "chat_id": target_chat_id,
-                "text": safe_text if mode else _strip_markdown_formatting(safe_text),
-                "disable_web_page_preview": True,
-            }
-            if mode:
-                payload["parse_mode"] = mode
-            if thread_id is not None:
-                payload["message_thread_id"] = thread_id
+    all_delivered = True
+    for chunk in chunks:
+        chunk_delivered = False
+        for base in bases:
+            if chunk_delivered:
+                break
+            url = f"{base}/bot{token}/sendMessage"
+            # Attempt 1: Markdown parse_mode, Attempt 2: Plain text fallback if Markdown entities fail
+            for mode in ("Markdown", None):
+                payload: Dict[str, Any] = {
+                    "chat_id": target_chat_id,
+                    "text": chunk if mode else _strip_markdown_formatting(chunk),
+                    "disable_web_page_preview": True,
+                }
+                if mode:
+                    payload["parse_mode"] = mode
+                if thread_id is not None:
+                    payload["message_thread_id"] = thread_id
 
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    res_json = json.loads(resp.read().decode("utf-8"))
-                    if res_json.get("ok"):
-                        return True
-            except urllib.error.HTTPError as he:
-                err_body = ""
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
                 try:
-                    err_body = he.read().decode("utf-8", errors="ignore")
-                except Exception:
-                    pass
-                if he.code == 400 and mode == "Markdown":
-                    logger.info(f"[AUTOMATIONS_WORKER] Markdown parse error for {chat_id}, retrying plain text...")
-                    continue
-                logger.warning(f"[AUTOMATIONS_WORKER] Telegram HTTP {he.code} to {chat_id} via {base}: {err_body[:200]}")
-                break
-            except Exception as e:
-                logger.warning(f"[AUTOMATIONS_WORKER] Telegram send to {chat_id} via {base} failed: {e}")
-                break
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        res_json = json.loads(resp.read().decode("utf-8"))
+                        if res_json.get("ok"):
+                            chunk_delivered = True
+                            break
+                except urllib.error.HTTPError as he:
+                    err_body = ""
+                    try:
+                        err_body = he.read().decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                    if he.code == 400 and mode == "Markdown":
+                        logger.info(f"[AUTOMATIONS_WORKER] Markdown parse error for {chat_id}, retrying plain text...")
+                        continue
+                    logger.warning(f"[AUTOMATIONS_WORKER] Telegram HTTP {he.code} to {chat_id} via {base}: {err_body[:200]}")
+                    break
+                except Exception as e:
+                    logger.warning(f"[AUTOMATIONS_WORKER] Telegram send to {chat_id} via {base} failed: {e}")
+                    break
 
-    return False
+        if not chunk_delivered:
+            all_delivered = False
+
+    return all_delivered
 
 
 ADMIN_USER_IDS = {"ba9c27e8-f62d-452f-8a29-dc77fd092207", "c4b3a6d0-61c5-4f75-97bc-24f486666da0"}
@@ -517,8 +552,9 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
         "2. قدّم تحليلاً فنياً واقعياً ومحترفاً ومباشراً مقسماً بوضوح حسب نقاط سؤال المشترك بدون حشو.\n"
         "3. ركز على مستويات الدعم، المقاومة، اتجاه السيولة، وحجم التداول.\n"
         "4. إذا كان توقيت الاستشارة خارج ساعات التداول الرسمية بالبورصة أو في عطلة نهاية الأسبوع، اعتمد على أحدث بيانات إغلاق مسجلة وقدّم رؤية استباقية واستعداداً للجلسة القادمة.\n"
-        "5. اختم دائماً بنصيحة إدارة مخاطر ذكية ومستوى وقف خسارة محدد (2.5% إلى 3.5%).\n"
-        "6. التزم باللغة العربية الواضحة وتنسيق تليجرام أنيق ومرتب مع الإيموجي المناسب للقراءة السريعة."
+        "5. اختم دائماً بنصيحة إدارة مخاطر ذكية ومستوى وقف خسارة محدد (2.5% إلى 3.5%) وخاتمة فنية متكاملة.\n"
+        "6. التزم باللغة العربية الواضحة وتنسيق تليجرام أنيق ومرتب مع الإيموجي المناسب للقراءة السريعة.\n"
+        "7. احرص على إكمال كل فكرة وجملة بدقة، ولا تترك أي فقرة أو نقطة مقطوعة أو غير مكتملة أبداً."
     )
 
     user_content = f"طلب الاستشارة المجدولة من المشترك ({user_name}):\n{prompt}"
@@ -532,7 +568,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.3,
-        "max_tokens": 950,
+        "max_tokens": 3500,
     }
 
     # 1. Primary engine: DeepSeek Chat with browser-standard User-Agent
@@ -584,7 +620,7 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
                     {"role": "user", "content": user_content},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 950,
+                "max_tokens": 3200,
             }
             if requests is not None:
                 nv_resp = requests.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=nv_headers, json=nv_payload, timeout=30)

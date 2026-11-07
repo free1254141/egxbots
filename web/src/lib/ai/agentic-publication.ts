@@ -144,6 +144,31 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
     const facts = buildFactRecords(adapted);
     for (const e of evidence) {
         for (const row of evidenceRows(e.data)) {
+            if (row.symbol) {
+                const aiScores: Array<[string, "king_ai_score" | "egx_ai_score"]> = [
+                    ["king_ai_score", "king_ai_score"],
+                    ["king_ai", "king_ai_score"],
+                    ["egx_ai_score", "egx_ai_score"],
+                    ["egx_ai", "egx_ai_score"],
+                ];
+                for (const [rawKey, factField] of aiScores) {
+                    const val = row[rawKey];
+                    if (typeof val === "number" && Number.isFinite(val) && val > 0 && val <= 1) {
+                        facts.push({ id: `${row.symbol}:${rawKey}:pct`, symbol: row.symbol, field: factField, value: Number((val * 100).toFixed(2)), unit: "percent", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                    }
+                }
+                if (typeof row.composite_score === "number" && Number.isFinite(row.composite_score)) {
+                    facts.push({ id: `${row.symbol}:composite_score`, symbol: row.symbol, field: "acc_score", value: row.composite_score, unit: "points", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                }
+                if (typeof row.fair_value_substitution_ar === "string") {
+                    for (const numMatch of row.fair_value_substitution_ar.match(/[-+]?\d+(?:\.\d+)?/g) || []) {
+                        const numVal = Number(numMatch);
+                        if (Number.isFinite(numVal)) {
+                            facts.push({ id: `${row.symbol}:fv_sub:${numMatch}`, symbol: row.symbol, field: "fair_value", value: numVal, unit: "egp", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
+                        }
+                    }
+                }
+            }
             for (const [key, field] of [["total", "chart_signal_count"], ["buy_count", "chart_buy_signal_count"], ["sell_count", "chart_sell_signal_count"]] as const) {
                 const value = row.signal_summary?.[key];
                 if (typeof value === "number" && Number.isFinite(value)) facts.push({ id: `${row.symbol}:${row.analysis?.strategyId}:${key}`, symbol: row.symbol, field, value, unit: "count", as_of: row.date ?? null, source: e.source, tool: e.tool, fetched_at: new Date().toISOString() });
@@ -364,6 +389,7 @@ function cleanCellText(text: string): string {
         // 5. Strip session count and top-N group descriptions (e.g. "آخر 20 جلسة", "أعلى 5 أسهم", "أعلى 10 أسهم")
         .replace(/(?:(?:ال)?أعلى|(?:ال)?أكبر|(?:ال)?أول|(?:ال)?أهم|top)\s*\d+\s*(?:أسهم|اسهم|قطاعات|شركات|stocks?|sectors?)?/gi, " ")
         .replace(/(?:ل?آخر|ل?مدى|خلال|في|لـ?)?\s*\d+\s*جلس(?:[ةه]|ات)(?:\s+تداول)?/gi, " ")
+        .replace(/(?:ل?آخر|ل?مدى|خلال|في|لـ?)?(?:\s+آخر)?\s*\d+\s*(?:أيام|ايام|يوم|يوماً|أسابيع|اسابيع|أسبوع|اسبوع|أشهر|اشهر|شهور|شهر)(?![\u0600-\u06FF])/gi, " ")
         .replace(/\b\d+\s*(?:sessions?|trading\s*days?)\b/gi, " ");
 }
 

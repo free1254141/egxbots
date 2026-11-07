@@ -181,6 +181,18 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
         self.assertNotIn(5, trading_days_allowed)
         self.assertIn(6, trading_days_allowed)
 
+    def test_split_telegram_message_no_cutoff(self):
+        short_msg = "تقرير مختصر للسوق"
+        chunks = worker._split_telegram_message(short_msg, max_length=100)
+        self.assertEqual(chunks, [short_msg])
+
+        long_msg = "فقرة أولى عن الأسهم القيادية.\n\n" * 10
+        chunks = worker._split_telegram_message(long_msg, max_length=120)
+        self.assertTrue(len(chunks) > 1)
+        # Verify no content lost
+        recombined = "\n\n".join(chunks)
+        self.assertIn("فقرة أولى", recombined)
+
 
 if __name__ == "__main__":
     unittest.main()
