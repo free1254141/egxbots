@@ -37,11 +37,12 @@ This repository is integrated with **Google Search Console** to enable continuou
 * **Project ID (Google Cloud):** `neon-dryad-454519-r2`
 
 ### B. Credentials File Location
-The private credentials JSON key is stored in the repository root:
+The private credentials JSON key is stored in the repository root and scripts directory:
 ```
 C:\Users\MR__CODER__\Desktop\stokscan_AI\neon-dryad-454519-r2-03a9cbb96d36.json
+C:\Users\MR__CODER__\Desktop\stokscan_AI\scripts\gsc_service_account.json
 ```
-*(Alternative: You can set the path via the `GSC_CREDENTIALS_PATH` environment variable).*
+*(Also configured system-wide via the `GSC_CREDENTIALS_PATH` environment variable).*
 
 ### C. Git Protection
 To prevent credential leaks, the root `.gitignore` explicitly blocks all key variants:
@@ -57,7 +58,7 @@ service_account*.json
 
 ## 3. SEO & GEO Intelligence Tool (`gsc_audit.py`)
 
-A centralized Python CLI tool is available at `scripts/seo/gsc_audit.py`. Any agent or human developer can execute it from the terminal in any IDE.
+A centralized Python CLI tool is available at `scripts/seo/gsc_audit.py` and `scripts/gsc_analyzer.py`. Any agent or human developer can execute it from the terminal in any IDE.
 
 ### Available Commands:
 
@@ -84,9 +85,10 @@ python scripts/seo/gsc_audit.py --action queries --limit 50 --days 30
 python scripts/seo/gsc_audit.py --action pages --limit 30
 ```
 
-#### 5. Sitemaps Verification
+#### 5. Sitemaps Verification & Submission
 ```bash
 python scripts/seo/gsc_audit.py --action sitemaps
+python scripts/seo/gsc_audit.py --action submit-sitemap
 ```
 
 #### 6. Programmatic JSON Output (For Agent Automation)
@@ -96,54 +98,54 @@ python scripts/seo/gsc_audit.py --action wins --json
 
 ---
 
-## 4. Programmatic Python API for AI Agents
+## 4. Benchmark & Current Status Baseline (Snapshot: November 7, 2026)
 
-Any agent or background script can import the helper functions directly:
+This baseline establishes the exact metrics recorded before deploying the full-coverage Arabic stock names overhaul and 6 Pillar Guides. Use this section to compare progress during upcoming reviews.
 
-```python
-from scripts.seo.gsc_audit import get_gsc_service, fetch_search_analytics, fetch_sitemaps
+### A. Performance Baseline (Last 28 Days: Oct 8 – Nov 5, 2026)
+| Metric | Value | Previous Period | Growth |
+| :--- | :--- | :--- | :--- |
+| **Total Clicks** | **263** | 287 | -8.4% |
+| **Total Impressions** | **7,953** | 2,157 | **+268.7% 🟢** |
+| **Average CTR** | **3.31%** | 13.31% | *(Diluted due to massive surge in un-clicked stock impressions)* |
+| **Average SERP Position** | **7.8** | 4.5 | -3.3 |
 
-service, cred_path = get_gsc_service()
+### B. Indexing & Coverage Audit (Why Only ~104 Pages Appeared in SERP)
+* **Total URLs in `sitemap.xml`:** 372 active URLs (306 stocks, 11 guides/blogs, 55 daily reports & core tools).
+* **Pages with Recorded Impressions in Google:** **103 pages** (87 stock pages + 16 core pages).
+* **Root Causes Identified via GSC URL Inspection API:**
+  1. **Discovered – currently not indexed:** Google crawler discovered stock URLs via sitemap but queued them slowly due to a lack of permanent internal links from high-authority pages.
+  2. **URL is unknown to Google:** Ticker pages with zero links in navigation were not discovered until crawled via deep sitemap feeds.
+  3. **English Ticker Disconnect (CTR Killer):** Egyptian investors searched in Arabic (e.g. `"سعر سهم العربية للالومنيوم"` - 595 imp, `"سعر سهم ام بي الهندسيه"` - 269 imp, `"سعر سهم كوبر"` - 226 imp), but our stock pages displayed only raw English tickers (`ALUM`, `MBEG`, `COPR`) without Arabic names in `<title>` or `<h1>`, resulting in **0.0% to 1.0% CTR**.
 
-# Fetch top 20 queries for the last 14 days
-rows, start_date, end_date = fetch_search_analytics(
-    service, 
-    site_url="https://egxbots.com/", 
-    days=14, 
-    dimensions=["query"], 
-    row_limit=20
-)
-
-for r in rows:
-    query = r["keys"][0]
-    clicks = r["clicks"]
-    impressions = r["impressions"]
-    position = r["position"]
-    print(f"{query}: {clicks} clicks, rank {position:.1f}")
-```
+### C. Remediation Actions Deployed (Commit `c0837464`):
+1. **100% Arabic & English Stock Name Coverage:** All 278 EGX symbols mapped to verified canonical Arabic company names in `web/src/lib/ai/stock-names.ts`.
+2. **High-CTR Dynamic Titles & Metadata:** Pattern: `سعر سهم [اسم الشركة العربي] ([الرمز]) اليوم | تحليل فني ودعم ومقاومة | EGX BOTS`.
+3. **Sitewide Internal Linking Hub:** Added a permanent footer block linking to top 10 traded EGX stocks and all 6 Pillar Guides on every page.
+4. **6 High-Volume Educational Pillar Guides (`/blogs/*`):**
+   - `/blogs/best-egx-stock-analysis-software`
+   - `/blogs/ai-egyptian-stock-market-analysis`
+   - `/blogs/egx-telegram-stock-recommendations`
+   - `/blogs/how-to-invest-in-egyptian-stock-market-beginners`
+   - `/blogs/egx33-sharia-compliant-stocks-egypt-guide`
+   - `/blogs/undervalued-egx-stocks-fair-value-calculation`
+5. **Instant Indexing Push:** Submitted sitemap to Google Search Console API and pushed key URLs to Bing/Yandex/ChatGPT Search via IndexNow protocol.
 
 ---
 
-## 5. SEO & GEO Implementation in Frontend (`web/`)
+## 5. Review & Measurement Schedule
 
-### A. GEO & AI Crawlers Policy (`web/src/app/robots.ts`)
-The `robots.ts` file explicitly permits leading generative AI crawlers to index stock data, technical scanner pages, market analyses, and LLM feeds:
-* Allowed AI Crawlers: `GPTBot`, `ChatGPT-User`, `PerplexityBot`, `ClaudeBot`, `Google-Extended`, `Applebot-Extended`, `OAI-SearchBot`, `cohere-ai`.
-* Specialized Feeds Allowed: `/llms.txt`, `/llms-full.txt`, `/stocks/*`, `/scanner/*`.
+Google Search Console data has an inherent 2–3 day latency. Follow this inspection timeline:
 
-### B. Dynamic High-CTR Metadata (`web/src/app/stocks/[symbol]/page.tsx`)
-Titles and descriptions are dynamically generated using high-intent Arabic search queries matching real user search behavior in GSC:
-* **Title Pattern:** `سعر وتحليل سهم [الاسم] ([الرمز]) وتوقعات الدعم والمقاومة | EGX BOTS`
-* **Description Pattern:** Lead with exact closing price + EGP + date + RSI/MACD and support/resistance summary.
-
-### C. Rich Structured Data Schema (JSON-LD)
-Stock pages render an interconnected Schema.org graph:
-1. **`BreadcrumbList`:** For structured Google navigation hierarchy.
-2. **`WebPage`:** With author, publisher, and modification timestamps.
-3. **`FinancialProduct`:** Exposes ticker symbol, exchange (`EGX`), currency (`EGP`), and latest closing price for Google Finance / Knowledge Graph.
-4. **`FAQPage`:** Provides Google SERP Accordion / Rich Snippets answering:
-   - *ما هو سعر سهم [الاسم] في البورصة المصرية اليوم؟*
-   - *كيف يتم تحديد مستويات الدعم والمقاومة لسهم [الرمز]؟*
+1. **Tuesday, Nov 10, 2026 (72 Hours Post-Deploy):**
+   - Check Googlebot sitemap ingestion and initial crawl timestamps:
+     `python scripts/seo/gsc_audit.py --action sitemaps`
+2. **Saturday, Nov 14, 2026 (1 Week Review):**
+   - Check CTR rebound on high-impression stocks (`ALUM`, `MBEG`, `COPR`, `ABUK`):
+     `python scripts/seo/gsc_audit.py --action queries --limit 30`
+   - Verify indexing expansion beyond the 104-page mark.
+3. **End of November (Nov 21–28, 2026):**
+   - Full evaluation toward the goal of multiplying organic monthly traffic and scaling impression volume.
 
 ---
 
