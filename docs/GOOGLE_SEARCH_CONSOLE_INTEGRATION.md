@@ -1,158 +1,168 @@
-# Google Search Console (GSC) & SEO/GEO Integration Guide
+# دليل وتقرير تكامل جوجل سيرش كونسول (Google Search Console) وخطة نمو الترافيك
 
-> **Target Site:** `https://egxbots.com/`  
-> **Status:** Active & Connected via Official Google Search Console API  
-> **Primary Audience:** Developers, Technical Marketers, and AI Coding Agents (Antigravity, Cursor, Claude Code, GitHub Copilot).
-
----
-
-## 1. Overview & Architecture
-
-This repository is integrated with **Google Search Console** to enable continuous programmatic monitoring of organic search traffic, keyword rankings, indexing coverage, and Generative Engine Optimization (GEO) for AI search engines (ChatGPT Search, Perplexity, Google Gemini / AI Overviews).
-
-```
-   Google Search Console (egxbots.com)
-                 │
-                 ▼ (REST API v1 / Webmasters)
-     Service Account Auth (JSON Key)
-                 │
-                 ▼
-   scripts/seo/gsc_audit.py ─────────► AI Agents & Developers
-                 │
-                 ▼
-     Actionable SEO/GEO Insights:
-     - Real-time Queries & Positions
-     - High-Impression / Low-CTR Quick Wins
-     - Sitemap Indexing Status
-     - Rich Snippets / Schema Enhancements
-```
+> **الموقع المستهدف:** `https://egxbots.com/`  
+> **الحالة:** نشط ومتصل رسمياً عبر Google Search Console API  
+> **تاريخ توثيق نقطة البداية (Baseline Snapshot):** 7 نوفمبر 2026  
+> **الهدف:** مضاعفة الترافيك والظهور المجاني من محركات البحث والذكاء الاصطناعي (GEO / SEO).
 
 ---
 
-## 2. Credentials & Security Configuration
+## 1. ملخص البنية والربط البرمجي
 
-### A. Service Account Identity
-* **Service Account Email:** `egxbots-seo@neon-dryad-454519-r2.iam.gserviceaccount.com`
-* **GSC Role:** `siteFullUser` (Owner permissions on `https://egxbots.com/`)
-* **Project ID (Google Cloud):** `neon-dryad-454519-r2`
+تم ربط مستودع المشروع برمجياً مع **Google Search Console** لمراقبة الترافيك اليومي، كلمات البحث، ترتيب الصفحات، ونسبة الأرشفة بشكل آلي لأي مطور أو مساعد ذكاء اصطناعي (AI Agent):
 
-### B. Credentials File Location
-The private credentials JSON key is stored in the repository root and scripts directory:
+```
+         Google Search Console (egxbots.com)
+                          │
+                          ▼ (Google API v1 / Webmasters)
+       حساب الخدمة المعتمد (Service Account JSON Key)
+                          │
+                          ▼
+        scripts/seo/gsc_audit.py ─────────► المطورون ونماذج الذكاء الاصطناعي
+                          │
+                          ▼
+            مخرجات التحليل الفوري:
+            - الكلمات الأكثر بحثاً وترتيبها
+            - الفرص الذهبية (ظهور مرتفع ونقرات منخفضة)
+            - فحص وتسليم خرائط الموقع (Sitemaps)
+            - تحسين ظهور النتائج في جوجل (Rich Snippets)
+```
+
+---
+
+## 2. بيانات وبيئة الاعتماد والأمان (Security & Credentials)
+
+### أ. حساب الخدمة الرسمي (Service Account)
+* **إيميل الحساب:** `egxbots-seo@neon-dryad-454519-r2.iam.gserviceaccount.com`
+* **صلاحية الحساب في كونسول:** `siteFullUser` (كامل صلاحيات القراءة والتسليم لموقع `https://egxbots.com/`)
+* **معرف المشروع السحابي:** `neon-dryad-454519-r2`
+
+### ب. مسار ملف المفتاح السري (JSON Key)
+الملف محفوظ محلياً ومسجل في بيئة النظام ومتغيرات البيئة `.env`:
 ```
 C:\Users\MR__CODER__\Desktop\stokscan_AI\neon-dryad-454519-r2-03a9cbb96d36.json
 C:\Users\MR__CODER__\Desktop\stokscan_AI\scripts\gsc_service_account.json
 ```
-*(Also configured system-wide via the `GSC_CREDENTIALS_PATH` environment variable).*
+*(متغير النظام: `GSC_CREDENTIALS_PATH`)*.
 
-### C. Git Protection
-To prevent credential leaks, the root `.gitignore` explicitly blocks all key variants:
+### ج. حماية المفاتيح من الرفع (Git Protection)
+الملف محمي بالكامل داخل `.gitignore` لمنع تسريبه نهائياً:
 ```gitignore
 # Google Service Account Keys
 *neon-dryad*.json
 service_account*.json
 *credentials*.json
 ```
-> **Warning for AI Agents:** NEVER commit or push `.json` key files to GitHub or remote repositories.
+> **تنبيه هام لأي وكيل ذكي (AI Agent):** يُمنع منعاً باتاً رفع أو عمل `commit` لأي ملف بصيغة `.json` يحتوي على مفاتيح سرية.
 
 ---
 
-## 3. SEO & GEO Intelligence Tool (`gsc_audit.py`)
+## 3. أدوات التشخيص والتحليل المتاحة في المشروع
 
-A centralized Python CLI tool is available at `scripts/seo/gsc_audit.py` and `scripts/gsc_analyzer.py`. Any agent or human developer can execute it from the terminal in any IDE.
+تم تجهيز أدوات بايثون مركزية في `scripts/seo/gsc_audit.py` و `scripts/gsc_analyzer.py` للتشغيل المباشر من التيرمينال:
 
-### Available Commands:
+### أهم الأوامر المتاحة:
 
-#### 1. Executive Summary (Last 28 Days)
+#### 1. تقرير الأداء الشامل (آخر 28 يوماً):
 ```bash
 python scripts/seo/gsc_audit.py
 ```
-*Outputs: Sitemaps status, total clicks, total impressions, top 5 keywords, and top 5 landing pages.*
 
-#### 2. Quick-Win Opportunities (High Impressions, Low CTR)
+#### 2. استخراج الفرص الذهبية (ظهور عالي ونقرات منخفضة):
 ```bash
 python scripts/seo/gsc_audit.py --action wins
 ```
-*Discovers pages and search queries already ranking on Google page 1-2 with high impression counts but suffering from low click-through rates (CTR). These represent the fastest way to 5x-10x traffic with simple copy/schema adjustments.*
 
-#### 3. Top Keywords & Ranking Positions
+#### 3. الكلمات الأكثر بحثاً وترتيبها الحقيقي:
 ```bash
 python scripts/seo/gsc_audit.py --action queries --limit 50 --days 30
 ```
-*Lists all search queries, impressions, clicks, CTR, and average SERP position.*
 
-#### 4. Top Landing Pages
+#### 4. الصفحات الأكثر استقبالاً للزيارات:
 ```bash
 python scripts/seo/gsc_audit.py --action pages --limit 30
 ```
 
-#### 5. Sitemaps Verification & Submission
+#### 5. فحص وتسليم خريطة الموقع (Sitemaps):
 ```bash
 python scripts/seo/gsc_audit.py --action sitemaps
 python scripts/seo/gsc_audit.py --action submit-sitemap
 ```
 
-#### 6. Programmatic JSON Output (For Agent Automation)
+#### 6. إخراج البيانات بصيغة JSON برمجية للأتمتة:
 ```bash
 python scripts/seo/gsc_audit.py --action wins --json
 ```
 
 ---
 
-## 4. Benchmark & Current Status Baseline (Snapshot: November 7, 2026)
+## 4. وثيقة نقطة البداية (Baseline Snapshot - 7 نوفمبر 2026)
 
-This baseline establishes the exact metrics recorded before deploying the full-coverage Arabic stock names overhaul and 6 Pillar Guides. Use this section to compare progress during upcoming reviews.
+هذه الأرقام تمثل الوضع الفعلي للموقع قبل تفعيل خطة التحسينات الشاملة، ويُرجع إليها للمقارنة وقياس النمو:
 
-### A. Performance Baseline (Last 28 Days: Oct 8 – Nov 5, 2026)
-| Metric | Value | Previous Period | Growth |
+### أ. الأداء العام خلال 28 يوماً (8 أكتوبر إلى 5 نوفمبر 2026):
+| المؤشر | القيمة المسجلة | الفترة السابقة | معدل التغير |
 | :--- | :--- | :--- | :--- |
-| **Total Clicks** | **263** | 287 | -8.4% |
-| **Total Impressions** | **7,953** | 2,157 | **+268.7% 🟢** |
-| **Average CTR** | **3.31%** | 13.31% | *(Diluted due to massive surge in un-clicked stock impressions)* |
-| **Average SERP Position** | **7.8** | 4.5 | -3.3 |
+| **إجمالي النقرات (Clicks)** | **263** | 287 | -8.4% |
+| **مرات الظهور (Impressions)** | **7,953** | 2,157 | **+268.7% 🟢** (قفزة كبرى) |
+| **نسبة النقر إلى الظهور (CTR)** | **3.31%** | 13.31% | *(انخفضت نتيجة الزيادة الضخمة في ظهور أسهم لم تكن متوافقة بالعربي)* |
+| **متوسط الترتيب في جوجل** | **7.8** | 4.5 | -3.3 |
 
-### B. Indexing & Coverage Audit (Why Only ~104 Pages Appeared in SERP)
-* **Total URLs in `sitemap.xml`:** 372 active URLs (306 stocks, 11 guides/blogs, 55 daily reports & core tools).
-* **Pages with Recorded Impressions in Google:** **103 pages** (87 stock pages + 16 core pages).
-* **Root Causes Identified via GSC URL Inspection API:**
-  1. **Discovered – currently not indexed:** Google crawler discovered stock URLs via sitemap but queued them slowly due to a lack of permanent internal links from high-authority pages.
-  2. **URL is unknown to Google:** Ticker pages with zero links in navigation were not discovered until crawled via deep sitemap feeds.
-  3. **English Ticker Disconnect (CTR Killer):** Egyptian investors searched in Arabic (e.g. `"سعر سهم العربية للالومنيوم"` - 595 imp, `"سعر سهم ام بي الهندسيه"` - 269 imp, `"سعر سهم كوبر"` - 226 imp), but our stock pages displayed only raw English tickers (`ALUM`, `MBEG`, `COPR`) without Arabic names in `<title>` or `<h1>`, resulting in **0.0% to 1.0% CTR**.
-
-### C. Remediation Actions Deployed (Commit `c0837464`):
-1. **100% Arabic & English Stock Name Coverage:** All 278 EGX symbols mapped to verified canonical Arabic company names in `web/src/lib/ai/stock-names.ts`.
-2. **High-CTR Dynamic Titles & Metadata:** Pattern: `سعر سهم [اسم الشركة العربي] ([الرمز]) اليوم | تحليل فني ودعم ومقاومة | EGX BOTS`.
-3. **Sitewide Internal Linking Hub:** Added a permanent footer block linking to top 10 traded EGX stocks and all 6 Pillar Guides on every page.
-4. **6 High-Volume Educational Pillar Guides (`/blogs/*`):**
-   - `/blogs/best-egx-stock-analysis-software`
-   - `/blogs/ai-egyptian-stock-market-analysis`
-   - `/blogs/egx-telegram-stock-recommendations`
-   - `/blogs/how-to-invest-in-egyptian-stock-market-beginners`
-   - `/blogs/egx33-sharia-compliant-stocks-egypt-guide`
-   - `/blogs/undervalued-egx-stocks-fair-value-calculation`
-5. **Instant Indexing Push:** Submitted sitemap to Google Search Console API and pushed key URLs to Bing/Yandex/ChatGPT Search via IndexNow protocol.
+### ب. تشخيص الأرشفة: لماذا كانت تظهر ~104 صفحة فقط في نتائج البحث؟
+* **إجمالي الروابط في السايت ماب (`sitemap.xml`):** **372 رابطاً** (306 صفحة أسهم، 11 مقال ودليل، 55 تقرير يومي وأدوات).
+* **عدد الصفحات التي سجلت ظهوراً فعلياً في جوجل:** **103 صفحات فقط** (87 سهم + 16 صفحة عامة).
+* **الأسباب الجذرية التي تم كشفها عبر فحص الـ API:**
+  1. **حالة `Discovered - currently not indexed` (تم اكتشافها ولم تُفهرس):** محرك جوجل وضع الصفحات في قائمة انتظار الزحف، وكان يزحف ببطء لعدم وجود شبكة روابط داخلية دائمة تربط بين صفحات الأسهم والصفحات الرئيسية.
+  2. **حالة `URL is unknown to Google`:** بعض رموز الأسهم لم تكن تمتلك روابط مباشرة في الفوتر أو القوائم، فكان الاعتماد فقط على ملف الـ Sitemap.
+  3. **عائق اللغة والعناوين غير المعربة (السبب الأكبر لضياع النقرات):**
+     * المستثمر المصري يبحث بالعربية: `"سعر سهم العربية للالومنيوم"` (595 ظهور)، `"سعر سهم ام بي الهندسيه"` (269 ظهور)، `"سعر سهم كوبر"` (226 ظهور).
+     * كانت صفحات الموقع تعرض الرمز الإنجليزي فقط (`ALUM`، `MBEG`، `COPR`) في عنوان الصفحة `<title>` وفي الهيدر `<h1>`، مما جعل نسبة النقر تتراوح بين **0.0% إلى 1.0% فقط** ويحرم الموقع من آلاف الزيارات.
 
 ---
 
-## 5. Review & Measurement Schedule
+## 5. خطة التحسينات الشاملة المنفذة والمرفوعة (Commit `c0837464` & `23bc658e`)
 
-Google Search Console data has an inherent 2–3 day latency. Follow this inspection timeline:
+1. **تغطية الأسماء العربية بنسبة 100% لجميع الـ 278 سهماً في البورصة المصرية:**
+   * تم بناء وتدقيق قاموس الأسماء العربية والإنجليزية في `web/src/lib/ai/stock-names.ts` (0 أسهم مجهولة).
+2. **صياغة عناوين جذابة عالية النقر (High-CTR SEO Titles):**
+   * النمط المعتمد: `سعر سهم [اسم الشركة العربي] ([الرمز]) اليوم | تحليل فني ودعم ومقاومة | EGX BOTS`.
+   * إضافة اسم الشركة العربي بالكامل في العنوان الرئيسي `<h1>` لكل صفحة سهم.
+3. **إضافة قسم الأسئلة الشائعة والتحليل الفني أسفل كل سهم (SEO FAQ Block):**
+   * قسم تفاعلي يستجيب للـ Light/Dark Mode وللغتين العربية والإنجليزية، يذكر سعر الإغلاق ومستويات الدعم والمقاومة المحسوبة (`S1, S2, R1, R2`) لدعم الـ Rich Snippets في جوجل.
+4. **بناء شبكة الروابط الداخلية المتبادلة (Sitewide Internal Linking Hub):**
+   * إضافة بلوك دائم في فوتر الموقع (`Footer.tsx`) يربط بين أشهر 10 أسهم بحثاً وأدلة التداول الـ 6 لرفع كفاءة زحف جوجل لجميع الصفحات.
+5. **إطلاق 6 أدلة مرجعية كبرى عالية البحث (Pillar Articles):**
+   - `/blogs/best-egx-stock-analysis-software` (دليل برامج البورصة المصرية).
+   - `/blogs/ai-egyptian-stock-market-analysis` (تحليل الأسهم بالذكاء الاصطناعي).
+   - `/blogs/egx-telegram-stock-recommendations` (قنوات وتنبيهات تليجرام).
+   - `/blogs/how-to-invest-in-egyptian-stock-market-beginners` (كيفية الاستثمار للمبتدئين 2026).
+   - `/blogs/egx33-sharia-compliant-stocks-egypt-guide` (دليل الأسهم المتوافقة مع الشريعة EGX33).
+   - `/blogs/undervalued-egx-stocks-fair-value-calculation` (حساب السعر العادل وأرخص الأسهم).
+6. **التسليم الفوري لمحركات البحث (Indexing Push):**
+   * تسليم السايت ماب مباشرة إلى Google Search Console API.
+   * إرسال الروابط فورياً إلى محركات Bing و Yandex و ChatGPT Search عبر بروتوكول **IndexNow**.
 
-1. **Tuesday, Nov 10, 2026 (72 Hours Post-Deploy):**
-   - Check Googlebot sitemap ingestion and initial crawl timestamps:
+---
+
+## 6. جدول المتابعة والقياس المستقبلي
+
+نظراً لأن بيانات Google Search Console تتأخر بمقدار **يومين إلى 3 أيام** عن التحديث الحي، تم اعتماد جدول المتابعة التالي:
+
+1. **المراجعة الأولى: الثلاثاء 10 نوفمبر 2026 (بعد 72 ساعة):**
+   * التأكد من قراءة جوجل لملف الـ `sitemap.xml` الجديد ورصد أولى عمليات الزحف لعناوين الأسهم المعربة:
      `python scripts/seo/gsc_audit.py --action sitemaps`
-2. **Saturday, Nov 14, 2026 (1 Week Review):**
-   - Check CTR rebound on high-impression stocks (`ALUM`, `MBEG`, `COPR`, `ABUK`):
-     `python scripts/seo/gsc_audit.py --action queries --limit 30`
-   - Verify indexing expansion beyond the 104-page mark.
-3. **End of November (Nov 21–28, 2026):**
-   - Full evaluation toward the goal of multiplying organic monthly traffic and scaling impression volume.
+2. **المراجعة الثانية: السبت 14 نوفمبر 2026 (بعد أسبوع):**
+   * قياس ارتداد نسبة النقر (CTR) في الأسهم ذات الظهور العالي (`ALUM`, `MBEG`, `COPR`, `ABUK`, `GBCO`).
+   * التحقق من بدء تخطي حاجز الـ 104 صفحات في فهرس جوجل.
+3. **المراجعة الشاملة: نهاية شهر نوفمبر (21 إلى 28 نوفمبر 2026):**
+   * تقييم القفزة الإجمالية في الترافيك العضوي ومرات الظهور والانطلاق نحو هدف الـ 100 ألف زيارة.
 
 ---
 
-## 6. Guidelines for Future AI Agents
+## 7. إرشادات دائمة لوكلاء الذكاء الاصطناعي (AI Agent Guidelines)
 
-When tasked with SEO or GEO work on this repository:
-1. **Always run `python scripts/seo/gsc_audit.py --action wins` first** to ground recommendations in real search data rather than guesswork.
-2. **Prioritize high-impression pages (e.g. `ALUM`, `COPR`, `KORA`, `MBEG`)** where improving CTR yields immediate traffic gains.
-3. **Preserve JSON-LD Schema integrity** whenever updating page components.
-4. **Follow `<RULE[user_global]>`:** If any rebuild or dev server restart is needed, ensure both port 8000 (FastAPI) and port 3000 (Next.js) remain operational.
+عند تكليفك بأي مهمة تخص الـ SEO أو الترافيك في هذا المشروع:
+1. **ابدأ دائماً بتشغيل أداة الأداء:** `python scripts/seo/gsc_audit.py --action wins` للاطلاع على الأرقام الحقيقية.
+2. **ركّز على تحسين نسبة النقر (CTR)** للصفحات التي تحصد ظهوراً مرتفعاً في جوجل.
+3. **حافظ على سلامة أكواد `Schema.org JSON-LD`** في الصفحات.
+4. **الالتزام بالقاعدة الإجبارية `<RULE[user_global]>`:** التأكد دائماً من استمرار عمل خوادم التطوير المحلي (FastAPI على المنفذ 8000 و Next.js على المنفذ 3000).
