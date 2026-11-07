@@ -193,10 +193,12 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
         if is_user_eligible_for_50_egp_renewal(user_id):
             return False
 
-        # Did the user join under founders offer or pay <= 100 EGP previously?
+        # Did the user join under founders offer (monthly <= 100, 6m <= 500, or 1y <= 900)?
         in_members = supabase.table("founders_offer_members").select("user_id").eq("user_id", user_id).limit(1).execute().data
         had_100_order = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).lte("amount_egp", 100.0).eq("status", "approved").limit(1).execute().data
-        if not in_members and not had_100_order:
+        had_founders_6m = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_6m").lte("amount_egp", 500.0).eq("status", "approved").limit(1).execute().data
+        had_founders_1y = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_1y").lte("amount_egp", 900.0).eq("status", "approved").limit(1).execute().data
+        if not in_members and not had_100_order and not had_founders_6m and not had_founders_1y:
             return False
 
         # Check current subscription status & grace period (use order/limit to avoid PGRST116)
@@ -251,13 +253,15 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
     if plan == "pro_6m":
         settings = billing_settings()
         base_6m = float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else _env_price("PRO_6M_PRICE_EGP", 1000)
-        if settings.get("founders_offer_enabled") and founders_offer_is_open():
+        is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
+        if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
             return float(round(base_6m * 0.5))
         return base_6m
     if plan == "pro_1y":
         settings = billing_settings()
         base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1800)
-        if settings.get("founders_offer_enabled") and founders_offer_is_open():
+        is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
+        if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
             return float(round(base_1y * 0.5))
         return base_1y
     if plan in ("lifetime", "pro_lifetime"):

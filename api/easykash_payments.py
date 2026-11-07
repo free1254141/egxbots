@@ -119,9 +119,9 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
     _founders_is_open = founders_offer_is_open()
     _founders_ends_at_str = _founders_ends_at.isoformat().replace("+00:00", "Z") if _founders_ends_at else "2026-11-14T01:00:00Z"
 
-    plan_6m: Dict[str, Any] = {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m")), "days": 180}
-    plan_1y: Dict[str, Any] = {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y")), "days": 365}
-    if _founders_is_open:
+    plan_6m: Dict[str, Any] = {"id": "pro_6m", "name_ar": "6 شهور", "name_en": "6 Months", "amount_egp": int(plan_amount_egp("pro_6m", user_id=user_id)), "days": 180, "founders_lock_rate": 100 if (_founders_is_open or is_eligible_50 or is_eligible_100) else None}
+    plan_1y: Dict[str, Any] = {"id": "pro_1y", "name_ar": "سنة", "name_en": "1 Year", "amount_egp": int(plan_amount_egp("pro_1y", user_id=user_id)), "days": 365, "founders_lock_rate": 100 if (_founders_is_open or is_eligible_50 or is_eligible_100) else None}
+    if _founders_is_open or is_eligible_50 or is_eligible_100:
         plan_6m["discount"] = {
             "active": True,
             "kind": "founders",

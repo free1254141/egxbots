@@ -69,12 +69,14 @@ def test_plan_amount_egp_grandfathering_precedence():
          patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=False):
         assert plan_amount_egp("pro", user_id="u_50") == 50.0
 
-    # User grandfathered at 100 EGP gets 100 even when offer is expired
+    # User grandfathered at 100 EGP (from monthly, 6m, or 1y) gets 100/500/900 even when offer is expired
     with patch("api.payment_common.billing_settings", return_value=settings), \
          patch("api.payment_common.is_user_eligible_for_50_egp_renewal", return_value=False), \
          patch("api.payment_common.is_user_eligible_for_100_egp_renewal", return_value=True), \
          patch("api.payment_common.founders_offer_is_open", return_value=False):
         assert plan_amount_egp("pro", user_id="u_100") == 100.0
+        assert plan_amount_egp("pro_6m", user_id="u_100") == 500.0
+        assert plan_amount_egp("pro_1y", user_id="u_100") == 900.0
 
 
 def test_final_48h_window_guard():

@@ -653,11 +653,13 @@ export default function PricingClient() {
         originalAmount = monthlyPrice || 200;
       }
     } else if (plan.id === "pro_6m") {
-      amount = foundersIsOpen ? 500 : 1000;
-      originalAmount = foundersIsOpen ? 1000 : null;
+      const hasFounder6m = foundersIsOpen || isGrandfathered || isGrandfathered100;
+      amount = hasFounder6m ? 500 : 1000;
+      originalAmount = hasFounder6m ? 1000 : null;
     } else if (plan.id === "pro_1y") {
-      amount = foundersIsOpen ? 900 : 1800;
-      originalAmount = foundersIsOpen ? 1800 : null;
+      const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
+      amount = hasFounder1y ? 900 : 1800;
+      originalAmount = hasFounder1y ? 1800 : null;
     }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
@@ -1436,16 +1438,16 @@ export default function PricingClient() {
                   id: "pro_6m" as const,
                   name_ar: "6 شهور",
                   name_en: "6 Months",
-                  badge_ar: foundersIsOpen ? "500 بدل 1,000 ج.م ⭐" : "الأكثر طلباً ⭐",
-                  badge_en: foundersIsOpen ? "500 EGP (50% OFF) ⭐" : "Most Popular ⭐",
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "500 بدل 1,000 ج.م ⭐ (تثبيت مدى الحياة)" : "الأكثر طلباً ⭐",
+                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "500 EGP (Locked for life) ⭐" : "Most Popular ⭐",
                   badgeBg: "bg-emerald-400 text-black",
                 },
                 {
                   id: "pro_1y" as const,
                   name_ar: "سنة كاملة",
                   name_en: "1 Year",
-                  badge_ar: foundersIsOpen ? "900 بدل 1,800 ج.م 💎" : "أكبر توفير 💎",
-                  badge_en: foundersIsOpen ? "900 EGP (50% OFF) 💎" : "Save 25% 💎",
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "900 بدل 1,800 ج.م 💎 (تثبيت مدى الحياة)" : "أكبر توفير 💎",
+                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "900 EGP (Locked for life) 💎" : "Save 25% 💎",
                   badgeBg: "bg-sky-400 text-black",
                 },
               ].map((tab) => {
@@ -1679,15 +1681,23 @@ export default function PricingClient() {
                     </div>
                   </div>
 
-                  {/* Founding perk callout */}
-                  {(foundersIsOpen || (isMonthly && (isGrandfathered || isGrandfathered100))) && (
+                  {/* Founding perk callout across all Pro durations */}
+                  {(foundersIsOpen || isGrandfathered || isGrandfathered100) && (
                     <div className="bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 p-3 space-y-1 text-black dark:text-amber-200">
                       <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 dark:text-amber-300">
                         <Clock className="w-3.5 h-3.5" />
-                        <span>{isAr ? "عرض المؤسسين الأوائل:" : "Founding Member Perk:"}</span>
+                        <span>{isAr ? "🔒 ميزة المؤسسين الأوائل (تثبيت السعر مدى الحياة):" : "🔒 Founding Member Lifetime Price Lock:"}</span>
                       </div>
                       <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-200">
-                        {isGrandfathered
+                        {isFeatured
+                          ? (isAr
+                            ? "باشتراكك في باقة الـ 6 شهور (500 ج.م بدلاً من 1,000 ج.م — أي 83 ج.م/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر 100 ج.م (أو 500 ج.م للـ 6 شهور) للأبد حتى بعد عودة السعر الأساسي إلى 200 ج.م."
+                            : "Subscribing to the 6-Month plan (500 EGP instead of 1,000 EGP — 83 EGP/mo) locks your Founding Member status for life at the 100 EGP/mo (or 500 EGP/6m) rate upon renewal!")
+                          : isAnnual
+                          ? (isAr
+                            ? "باشتراكك في باقة السنة الكاملة (900 ج.م بدلاً من 1,800 ج.م — أي 75 ج.م/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر 100 ج.م (أو 900 ج.م للسنة) للأبد حتى بعد عودة السعر الأساسي إلى 200 ج.م."
+                            : "Subscribing to the 1-Year plan (900 EGP instead of 1,800 EGP — 75 EGP/mo) locks your Founding Member status for life at the 100 EGP/mo (or 900 EGP/yr) rate upon renewal!")
+                          : isGrandfathered
                           ? (isAr
                             ? "50 ج.م شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة)."
                             : "50 EGP/mo grandfathered founders rate active for your account as long as renewed.")
@@ -1696,8 +1706,8 @@ export default function PricingClient() {
                             ? "100 ج.م شهرياً (سعر المؤسسين المثبت لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة)."
                             : "100 EGP/mo grandfathered founders rate active for your account as long as renewed.")
                           : (isAr
-                            ? "100 ج.م شهرياً عرض باقة المؤسسين (بدلاً من 200 ج.م) متاح لمدة 15 يوماً فقط — يثبت سعرك بـ 100 ج.م مدى الحياة طول ما بتجدد، مع مهلة سماح 72 ساعة (3 أيام) لتثبيت السعر عند كل تجديد."
-                            : "100 EGP/mo limited 15-day founders offer (instead of 200 EGP) — locks your 100 EGP/mo rate for life as long as renewed, with 72h renewal grace period.")}
+                            ? "100 ج.م شهرياً عرض باقة المؤسسين (بدلاً من 200 ج.م) — يثبّت سعرك بـ 100 ج.م مدى الحياة طول ما بتجدد (أو 500 ج.م للـ 6 شهور / 900 ج.م للسنة)، مع مهلة سماح 72 ساعة عند كل تجديد."
+                            : "100 EGP/mo limited founders offer (instead of 200 EGP) — locks your 100 EGP/mo rate for life as long as renewed, with 72h renewal grace period.")}
                       </p>
                     </div>
                   )}
