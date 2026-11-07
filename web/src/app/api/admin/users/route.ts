@@ -168,11 +168,26 @@ export async function GET(req: NextRequest) {
     const pageProfiles = matchingProfiles.slice(page * pageSize, page * pageSize + pageSize);
     const pageIds = pageProfiles.map((profile: any) => String(profile.id));
 
-    const [{ data: subscriptionRows }, { data: botRows }, { data: localPaymentRows }, { data: pageTrialRows }] = await Promise.all([
-      pageIds.length ? supabase.from("subscriptions").select("user_id,plan_id,status,current_period_end,created_at").in("user_id", pageIds) : Promise.resolve({ data: [] }),
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000);
+    const sixtyDaysAgoStr = sixtyDaysAgo.toISOString().slice(0, 10);
+    const sixtyDaysAgoIso = sixtyDaysAgo.toISOString();
+
+    const [
+      { data: subscriptionRows },
+      { data: botRows },
+      { data: localPaymentRows },
+      { data: pageTrialRows },
+      { data: limitRows },
+      { data: msgRows },
+      { data: bonusRows },
+    ] = await Promise.all([
+      pageIds.length ? supabase.from("subscriptions").select("user_id,plan_id,status,current_period_start,current_period_end,created_at").in("user_id", pageIds) : Promise.resolve({ data: [] }),
       pageIds.length ? supabase.from("bot_subscriptions").select("user_id,service_type,notifications_enabled").in("user_id", pageIds) : Promise.resolve({ data: [] }),
       pageIds.length ? supabase.from("local_payment_orders").select("user_id,status,payment_review_status,created_at").in("user_id", pageIds).eq("status", "approved").order("created_at", { ascending: false }) : Promise.resolve({ data: [] }),
       pageIds.length ? supabase.from("subscription_trials").select("user_id,started_at,expires_at").in("user_id", pageIds) : Promise.resolve({ data: [] }),
+      pageIds.length ? supabase.from("ai_chatbot_limits").select("user_id,date,chat_count").in("user_id", pageIds).gte("date", sixtyDaysAgoStr) : Promise.resolve({ data: [] }),
+      pageIds.length ? supabase.from("ai_chat_messages").select("user_id,created_at").in("user_id", pageIds).eq("role", "user").gte("created_at", sixtyDaysAgoIso) : Promise.resolve({ data: [] }),
+      pageIds.length ? supabase.from("chat_bonus_credits").select("user_id,credits_granted,credits_used").in("user_id", pageIds) : Promise.resolve({ data: [] }),
     ]);
     const subscriptionsByUser = new Map<string, any[]>();
     for (const row of subscriptionRows || []) {
@@ -194,18 +209,92 @@ export async function GET(req: NextRequest) {
       const id = String(row.user_id);
       if (!paymentReviewByUser.has(id)) paymentReviewByUser.set(id, String(row.payment_review_status || "pending_review"));
     }
+    const limitsByUser = new Map<string, any[]>();
+    for (const row of limitRows || []) {
+      const id = String(row.user_id);
+      limitsByUser.set(id, [...(limitsByUser.get(id) || []), row]);
+    }
+    const msgsByUser = new Map<string, any[]>();
+    for (const row of msgRows || []) {
+      const id = String(row.user_id);
+      msgsByUser.set(id, [...(msgsByUser.get(id) || []), row]);
+    }
+    const bonusByUser = new Map<string, any[]>();
+    for (const row of bonusRows || []) {
+      const id = String(row.user_id);
+      bonusByUser.set(id, [...(bonusByUser.get(id) || []), row]);
+    }
 
     const formattedUsers = pageProfiles.map((profile: any) => {
       const bots = botsByUser.get(String(profile.id)) || [];
+      const sub = preferredSubscription(subscriptionsByUser.get(String(profile.id)) || []);
+      const trial = trialByUser.get(String(profile.id)) || null;
+      const isUserPro = ["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub?.plan_id || "").toLowerCase()) && String(sub?.status || "").toLowerCase() === "active";
+      const trialEnd = trial?.expires_at || (String(sub?.status || "").toLowerCase() === "trialing" ? sub?.current_period_end : null);
+      const isTrialActive = !isUserPro && Boolean(trialEnd && new Date(trialEnd).getTime() > Date.now());
+      const isTrialExpired = !isUserPro && Boolean(trial || String(sub?.status || "").toLowerCase() === "trialing") && !isTrialActive;
+
+      let planType: "pro" | "trial" | "free" = "free";
+      let windowStartDate: Date;
+      let windowStartDateStr: string;
+
+      if (isUserPro) {
+        planType = "pro";
+        const startStr = sub?.current_period_start || sub?.created_at;
+        windowStartDate = startStr ? new Date(startStr) : new Date(Date.now() - 30 * 86400000);
+        windowStartDateStr = windowStartDate.toISOString().slice(0, 10);
+      } else if (isTrialActive || isTrialExpired) {
+        planType = "trial";
+        const startStr = trial?.started_at || sub?.created_at || (trialEnd ? new Date(new Date(trialEnd).getTime() - 3 * 86400000).toISOString() : null);
+        windowStartDate = startStr ? new Date(startStr) : new Date(Date.now() - 3 * 86400000);
+        windowStartDateStr = windowStartDate.toISOString().slice(0, 10);
+      } else {
+        planType = "free";
+        const now = new Date();
+        windowStartDateStr = `${now.toISOString().slice(0, 7)}-01`;
+        windowStartDate = new Date(`${windowStartDateStr}T00:00:00.000Z`);
+      }
+
+      const uLimits = (limitsByUser.get(String(profile.id)) || []).filter((r: any) => String(r.date || "") >= windowStartDateStr);
+      const limitsSum = uLimits.reduce((acc: number, r: any) => acc + (Number(r.chat_count) || 0), 0);
+
+      const uMsgs = (msgsByUser.get(String(profile.id)) || []).filter((r: any) => new Date(r.created_at).getTime() >= windowStartDate.getTime());
+      const msgsCount = uMsgs.length;
+
+      const used = Math.max(limitsSum, msgsCount);
+
+      const hasTelegram = Boolean(profile.telegram_chat_id || bots.some((b: any) => b.notifications_enabled));
+      const uBonus = bonusByUser.get(String(profile.id)) || [];
+      const bonusGranted = uBonus.reduce((acc: number, b: any) => acc + (Number(b.credits_granted) || 0), 0);
+      const hasBonus = hasTelegram || bonusGranted > 0;
+
+      let limit = 10;
+      if (planType === "pro" || planType === "trial") {
+        limit = 350;
+      } else {
+        limit = hasBonus ? 20 : 10;
+      }
+
+      const remaining = Math.max(0, limit - used);
+
       return {
         ...profile,
         email: emailById.get(String(profile.id)) || null,
         full_name: nameById.get(String(profile.id)) || profile.display_name || null,
-        subscription: preferredSubscription(subscriptionsByUser.get(String(profile.id)) || []),
-        trial: trialByUser.get(String(profile.id)) || null,
+        subscription: sub,
+        trial,
         bot_subscriptions: bots,
         bot_count: bots.filter((bot: any) => bot.notifications_enabled).length,
         payment_review_status: paymentReviewByUser.get(String(profile.id)) || null,
+        chat_quota: {
+          plan_type: planType,
+          used,
+          limit,
+          remaining,
+          window_start: windowStartDateStr,
+          has_telegram: hasTelegram,
+          has_bonus: hasBonus,
+        },
       };
     });
     return NextResponse.json({ users: formattedUsers, total });

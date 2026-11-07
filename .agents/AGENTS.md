@@ -47,3 +47,7 @@ All agents (Planners, Developers, QA Reviewers, Subagents, and AI tools) must st
    - NEVER re-introduce brittle regex intent routers, rigid keyword blocklists, or mechanical symbol substitutions (e.g. swapping `ADRI` for `ADCI`) that break Egyptian dialect, Nile market stocks, or multi-turn queries.
    - All tool executions against Supabase must specify explicit column projections and strict `limit()` clauses.
    - Reference documentation is maintained in `docs/chatbot-current-architecture.md` and `docs/chatbot-agentic-architecture-2026-10-08.md`.
+
+6. **Hugging Face Deployment Rule (Python Backend Only)**:
+   - When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).
+   - **NEVER** push frontend Next.js files (`web/`), UI components, static images, icons, Android APKs, docs, or non-Python packages to Hugging Face. The Space only runs the Python bot/FastAPI backend.

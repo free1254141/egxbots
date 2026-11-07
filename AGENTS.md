@@ -45,6 +45,11 @@ These instructions apply to the entire repository, including AI assistants, revi
 - You must ALWAYS wait for the user to explicitly request or approve pushing to Git (e.g., "ارفع", "ادفع لجيت", "git push").
 - All local edits, commits, and builds remain strictly local until explicit user authorization to push.
 
+## 🚀 Hugging Face Deployment Rule (Python Backend Only)
+
+- When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).
+- **NEVER** push frontend Next.js files (`web/`), UI assets/images, Android APKs, docs, or non-Python packages to Hugging Face. The HF Space runs the Python backend & bots only.
+
 ## AI Chat Architecture (Agentic Function Calling)
 
 - All user chat queries are routed through the pure LLM-driven Agentic architecture in `web/src/lib/ai/agentic-pipeline.ts` (delegated from `web/src/lib/ai/pipeline.ts`).

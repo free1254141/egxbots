@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const { data: aff, error } = await supabase
       .from("affiliates")
-      .select("id,user_id,code,name,discount_percent,is_active,clicks_count")
+      .select("id,user_id,code,name,discount_percent,commission_percent,is_active,clicks_count,notes")
       .eq("code", rawCode)
       .eq("is_active", true)
       .maybeSingle();
@@ -35,11 +35,43 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Prevent self-referral in UI so it matches backend checkout validation
+    // Check expiration date in notes if configured
+    if (aff.notes) {
+      try {
+        const notesObj = typeof aff.notes === "string" ? JSON.parse(aff.notes) : aff.notes;
+        if (notesObj?.expires_at) {
+          const expTime = new Date(notesObj.expires_at).getTime();
+          if (!isNaN(expTime) && Date.now() > expTime) {
+            // Auto deactivate in database
+            await supabase
+              .from("affiliates")
+              .update({
+                is_active: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", aff.id);
+
+            return NextResponse.json({
+              valid: false,
+              error: "عذراً، هذا الكود الترويجي انتهت صلاحيته",
+            });
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    // Prevent self-referral for commission-earning affiliates
     try {
       const auth = await createSupabaseServerClient(req);
       const { data: { user } } = await auth.auth.getUser();
-      if (user?.id && aff.user_id && String(aff.user_id) === String(user.id)) {
+      if (
+        user?.id &&
+        aff.user_id &&
+        String(aff.user_id) === String(user.id) &&
+        Number(aff.commission_percent || 0) > 0
+      ) {
         return NextResponse.json({
           valid: false,
           self_referral: true,

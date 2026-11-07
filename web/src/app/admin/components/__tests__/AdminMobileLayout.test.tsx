@@ -57,7 +57,7 @@ it("keeps directory cell labels and edit/search/pagination actions on the mobile
     render(<UsersTab />);
     const row = (await screen.findByText("long-address@example.test")).closest("tr")!;
     expect(Array.from(row.querySelectorAll("td")).map((td) => td.dataset.label)).toEqual([
-        "المستخدم", "خطة الاشتراك", "البوتات", "اللغة", "التسجيل", "نهاية الاشتراك", "إجراءات",
+        "المستخدم", "خطة الاشتراك", "رسائل الشات", "اللغة", "التسجيل", "نهاية الاشتراك", "إجراءات",
     ]);
     fireEvent.click(within(row).getByTitle("تعديل المستخدم"));
     expect(screen.getByDisplayValue("عميل الاختبار")).toBeTruthy();

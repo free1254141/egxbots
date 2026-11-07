@@ -39,6 +39,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
 import RevenueDetailsModal from "./RevenueDetailsModal";
+import TrialUsersModal, { type TrialUserItem } from "./TrialUsersModal";
 import { withDailyActiveUsers } from "./user-chart-data";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
@@ -62,6 +63,15 @@ interface UserRow {
     payment_review_status?: "pending_review" | "reviewed" | "rejected" | null;
     bot_subscriptions: { service_type: string; notifications_enabled: boolean }[];
     bot_count: number;
+    chat_quota?: {
+        plan_type: "pro" | "trial" | "free";
+        used: number;
+        limit: number;
+        remaining: number;
+        window_start?: string;
+        has_telegram?: boolean;
+        has_bonus?: boolean;
+    } | null;
 }
 
 interface UserDetail {
@@ -143,6 +153,7 @@ interface UserStats {
     avgOrderValue: number;
     recentOrders: { user_id: string; amount_egp: number; status: string; provider: string; payment_review_status: string | null; created_at: string }[];
     approvedOrders?: any[];
+    trialUsers?: TrialUserItem[];
     portfolioUsers: number;
     totalOpenPositions: number;
     topStocks: { symbol: string; count: number }[];
@@ -209,6 +220,7 @@ export default function UsersTab() {
     const [showPro, setShowPro] = useState(true);
     const [showEgx30, setShowEgx30] = useState(true);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
+    const [showTrialModal, setShowTrialModal] = useState(false);
     const [showRecommendations, setShowRecommendations] = useState(true);
 
     // Modal States
@@ -454,9 +466,9 @@ export default function UsersTab() {
                     </div>
 
                     <div
-                        onClick={() => { setPlanFilter("TRIAL"); setPage(0); }}
+                        onClick={() => setShowTrialModal(true)}
                         className="border-4 border-black dark:border-white bg-amber-50 dark:bg-amber-950/40 p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] cursor-pointer hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-1 active:translate-y-1 transition-all group"
-                        title={isAr ? "اضغط لعرض المستخدمين التجريبيين النشطين حالياً" : "Click to filter active trial users"}
+                        title={isAr ? "اضغط لعرض المستخدمين التجريبيين وتفاصيلهم في نافذة منبثقة" : "Click to view trial users details in modal"}
                     >
                         <div className="flex items-center justify-between text-zinc-500 mb-1">
                             <span className="font-black text-[10px] uppercase tracking-wider">{isAr ? "تجريبي نشط الآن (Trial)" : "Active Trials"}</span>
@@ -472,7 +484,7 @@ export default function UsersTab() {
                                     : `Total: ${stats?.totalTrialUsers || 0} · Paid: ${stats?.convertedTrialUsers || 0}`}
                             </span>
                             <span className="underline font-black text-[9px] bg-amber-200 dark:bg-amber-900 px-1 py-0.5 border border-black dark:border-white">
-                                {isAr ? "فلترة 🔍" : "Filter 🔍"}
+                                {isAr ? "عرض التفاصيل 🔍" : "View Details 🔍"}
                             </span>
                         </div>
                     </div>
@@ -962,8 +974,8 @@ export default function UsersTab() {
                                 <tr className="border-b-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
                                     <th className="px-4 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "المستخدم" : "User"}</th>
                                     <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "خطة الاشتراك" : "Subscription"}</th>
-                                    <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "البوتات" : "Bots"}</th>
-                                    <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "اللغة" : "Language"}</th>
+                                    <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "رسائل الشات" : "Chat Quota"}</th>
+                                                                        <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "اللغة" : "Language"}</th>
                                     <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "تاريخ التسجيل" : "Joined"}</th>
                                     <th className="px-3 py-3.5 text-start uppercase tracking-widest font-black">{isAr ? "نهاية الاشتراك" : "Sub Expiry"}</th>
                                     <th className="px-3 py-3.5 text-center uppercase tracking-widest font-black">{isAr ? "إجراءات" : "Actions"}</th>
@@ -1035,10 +1047,20 @@ export default function UsersTab() {
                                                             </button>
                                                         </div>
                                                     ) : isTrialActive ? (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 border-2 border-black dark:border-white font-black text-[10px] uppercase tracking-wider bg-amber-300 text-black shadow-[2px_2px_0px_#000]">
-                                                            <Clock className="w-3 h-3 text-black" />
-                                                            {isAr ? "تجريبي نشط (TRIAL)" : "TRIAL (ACTIVE)"}
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 border-2 border-black dark:border-white font-black text-[10px] uppercase tracking-wider bg-amber-300 text-black shadow-[2px_2px_0px_#000]">
+                                                                <Clock className="w-3 h-3 text-black" />
+                                                                {isAr ? "تجريبي نشط (TRIAL)" : "TRIAL (ACTIVE)"}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => runSubscriptionAction(u.id, "cancel_subscription")}
+                                                                disabled={subscriptionActionLoading}
+                                                                className="border-2 border-red-500 bg-red-50 hover:bg-red-500 hover:text-white px-2 py-0.5 text-[10px] font-black text-red-700 transition-colors disabled:opacity-50 dark:bg-red-950/30 dark:text-red-300"
+                                                                title={isAr ? "إلغاء الفترة التجريبية فوراً وإعادة المستخدم للمجاني" : "Cancel trial and revert to free"}
+                                                            >
+                                                                {isAr ? "إلغاء التجربة" : "Cancel Trial"}
+                                                            </button>
+                                                        </div>
                                                     ) : isTrialExpired ? (
                                                         <div className="flex flex-wrap items-center gap-1.5">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-zinc-300 dark:border-zinc-700 font-bold text-[10px] text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
@@ -1061,20 +1083,81 @@ export default function UsersTab() {
                                                 </div>
                                             </td>
 
-                                            {/* Bots Count */}
-                                            <td data-label={isAr ? "البوتات" : "Bots"} className="px-3 py-3">
-                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <Bot className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                                    <span className="font-black text-zinc-900 dark:text-zinc-100">{u.bot_count || (u.bot_subscriptions || []).length}</span>
-                                                    {(u.bot_subscriptions || []).slice(0, 2).map((b, i) => (
-                                                        <span key={i} className="text-[9px] font-bold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 border border-zinc-300 dark:border-zinc-700">
-                                                            {(isAr ? SERVICE_LABELS_AR[b.service_type] : SERVICE_LABELS[b.service_type]) || b.service_type}
-                                                        </span>
-                                                    ))}
-                                                </div>
+                                            {/* Chat Quota / Messages */}
+                                            <td data-label={isAr ? "رسائل الشات" : "Chat Quota"} className="px-3 py-3 whitespace-nowrap">
+                                                {(() => {
+                                                    const q = u.chat_quota;
+                                                    if (!q) {
+                                                        return <span className="text-zinc-400 font-bold text-xs">—</span>;
+                                                    }
+
+                                                    if (q.plan_type === "pro") {
+                                                        return (
+                                                            <div className="flex flex-col gap-0.5 items-start">
+                                                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 border border-purple-500/80 bg-purple-50 dark:bg-purple-950/40 text-purple-950 dark:text-purple-200 font-black text-[11px] shadow-sm">
+                                                                    <MessageSquare className="w-3 h-3 text-purple-600 dark:text-purple-400 shrink-0" />
+                                                                    <span>{isAr ? `${q.used} رسالة` : `${q.used} msgs`}</span>
+                                                                </span>
+                                                                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">
+                                                                    {isAr ? "منذ آخر تجديد" : "since renewal"}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    if (q.plan_type === "trial") {
+                                                        return (
+                                                            <div className="flex flex-col gap-0.5 items-start">
+                                                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border font-black text-[11px] shadow-sm ${
+                                                                    isTrialActive 
+                                                                        ? "border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200" 
+                                                                        : "border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+                                                                }`}>
+                                                                    <MessageSquare className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                                                                    <span>
+                                                                        {isAr ? `${q.used} رسالة (تجريبي)` : `${q.used} msgs (trial)`}
+                                                                    </span>
+                                                                </span>
+                                                                <span className="text-[10px] text-amber-700 dark:text-amber-300 font-bold">
+                                                                    {isAr ? `فاضل ${q.remaining} من ${q.limit}` : `${q.remaining} of ${q.limit} left`}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    // Free user
+                                                    const isDepleted = q.remaining === 0;
+                                                    const isLow = q.remaining > 0 && q.remaining <= 3;
+                                                    const badgeColor = isDepleted
+                                                        ? "border-red-400 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300"
+                                                        : isLow
+                                                        ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
+                                                        : "border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200";
+
+                                                    return (
+                                                        <div className="flex flex-col gap-0.5 items-start">
+                                                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border font-black text-[11px] shadow-sm ${badgeColor}`}>
+                                                                <MessageSquare className="w-3 h-3 shrink-0" />
+                                                                <span>
+                                                                    {isAr ? `فاضل ${q.remaining} من ${q.limit}` : `${q.remaining} of ${q.limit} left`}
+                                                                </span>
+                                                            </span>
+                                                            <div className="flex items-center gap-1 text-[10px] font-bold">
+                                                                {q.limit === 20 ? (
+                                                                    <span className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400" title={isAr ? "مفعل البوت وحصل على 10 رسائل إضافية كبونص" : "Bot linked (+10 bonus messages)"}>
+                                                                        <Bot className="w-2.5 h-2.5" />
+                                                                        {isAr ? "بوت مفعل (20)" : "Bot linked (20)"}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-zinc-500 dark:text-zinc-400">{isAr ? `استهلك ${q.used}` : `used ${q.used}`}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
 
-                                            {/* Language */}
+                                                                                        {/* Language */}
                                             <td data-label={isAr ? "اللغة" : "Language"} className="px-3 py-3">
                                                 <span className="inline-flex items-center gap-1 font-bold text-zinc-600 dark:text-zinc-300">
                                                     <Globe className="w-3 h-3 text-zinc-400 shrink-0" />
@@ -1374,7 +1457,7 @@ export default function UsersTab() {
                                             </div>
                                             <div className="mt-3 flex flex-wrap gap-2">
                                                 {(selectedUser.payments?.recent || []).some((payment: any) => payment.payment_review_status === "pending_review") && <button onClick={() => runSubscriptionAction(selectedUser.profile.id, "mark_payment_reviewed")} disabled={subscriptionActionLoading} className="inline-flex items-center gap-1 border-2 border-emerald-600 bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-700 hover:bg-emerald-600 hover:text-white disabled:opacity-50 dark:bg-emerald-950/30 dark:text-emerald-300"><CheckCircle2 className="w-3 h-3" /> تمّت مراجعة الدفع</button>}
-                                                {selectedUser.subscription.status === "active" && <button onClick={() => runSubscriptionAction(selectedUser.profile.id, "cancel_subscription")} disabled={subscriptionActionLoading} className="inline-flex items-center gap-1 border-2 border-red-500 bg-red-50 px-2 py-1 text-[10px] font-black text-red-700 hover:bg-red-500 hover:text-white disabled:opacity-50 dark:bg-red-950/30 dark:text-red-300"><X className="w-3 h-3" /> {isAr ? "إلغاء برو وسحب VIP" : "Cancel Pro and revoke VIP"}</button>}
+                                                {(selectedUser.subscription.status === "active" || selectedUser.subscription.status === "trialing") && <button onClick={() => runSubscriptionAction(selectedUser.profile.id, "cancel_subscription")} disabled={subscriptionActionLoading} className="inline-flex items-center gap-1 border-2 border-red-500 bg-red-50 px-2 py-1 text-[10px] font-black text-red-700 hover:bg-red-500 hover:text-white disabled:opacity-50 dark:bg-red-950/30 dark:text-red-300"><X className="w-3 h-3" /> {isAr ? "إلغاء برو وسحب VIP" : "Cancel Pro and revoke VIP"}</button>}
                                             </div>
                                         </>
                                     ) : (
@@ -1457,6 +1540,28 @@ export default function UsersTab() {
                 orders={stats?.approvedOrders || []}
                 totalRevenue={stats?.totalRevenue || 0}
                 totalPaidOrders={stats?.totalPaidOrders || 0}
+                isAr={isAr}
+            />
+
+            {/* Trial Users Details Modal */}
+            <TrialUsersModal
+                isOpen={showTrialModal}
+                onClose={() => setShowTrialModal(false)}
+                trials={stats?.trialUsers || []}
+                activeTrialCount={stats?.activeTrialUsers || 0}
+                totalTrialCount={stats?.totalTrialUsers || 0}
+                convertedTrialCount={stats?.convertedTrialUsers || 0}
+                expiredTrialCount={stats?.expiredTrialUsers || 0}
+                onFilterMainTable={(specificUserSearch) => {
+                    if (specificUserSearch) {
+                        setSearch(specificUserSearch);
+                        setPlanFilter("ALL");
+                    } else {
+                        setPlanFilter("TRIAL");
+                    }
+                    setPage(0);
+                    setShowTrialModal(false);
+                }}
                 isAr={isAr}
             />
         </div>

@@ -62,6 +62,7 @@ export default function AIChatbotTab() {
     const [readSessionTimestamps, setReadSessionTimestamps] = useState<Record<string, number>>({});
 
     const [proOnly, setProOnly] = useState(false);
+    const [trialOnly, setTrialOnly] = useState(false);
 
 
 
@@ -377,6 +378,7 @@ export default function AIChatbotTab() {
             logs: any[];
 
             is_pro: boolean;
+            is_trial: boolean;
 
             sessionsMap: Record<string, {
 
@@ -398,7 +400,11 @@ export default function AIChatbotTab() {
 
 
 
-        const visibleLogs = proOnly ? logs.filter((log) => log.is_pro === true) : logs;
+        const visibleLogs = proOnly
+            ? logs.filter((log) => log.is_pro === true)
+            : trialOnly
+                ? logs.filter((log) => log.is_trial === true)
+                : logs;
 
         visibleLogs.forEach((log) => {
 
@@ -419,6 +425,7 @@ export default function AIChatbotTab() {
                     logs: [],
 
                     is_pro: log.is_pro === true,
+                    is_trial: log.is_trial === true,
 
                     sessionsMap: {},
 
@@ -427,6 +434,7 @@ export default function AIChatbotTab() {
             }
 
             map[id].is_pro = map[id].is_pro || log.is_pro === true;
+            map[id].is_trial = map[id].is_trial || log.is_trial === true;
 
             map[id].logs.push(log);
 
@@ -492,7 +500,7 @@ export default function AIChatbotTab() {
 
         }).sort((a, b) => new Date(b.last_date).getTime() - new Date(a.last_date).getTime());
 
-    }, [logs, proOnly]);
+    }, [logs, proOnly, trialOnly]);
 
 
 
@@ -876,9 +884,12 @@ export default function AIChatbotTab() {
 
                                 <button
 
-                                    onClick={() => setProOnly((value) => !value)}
+                                    onClick={() => {
+                                        setProOnly((value) => !value);
+                                        if (!proOnly) setTrialOnly(false);
+                                    }}
 
-                                    className={`flex items-center gap-1.5 min-h-10 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${proOnly ? "border-amber-500 bg-amber-500 text-black" : "border-zinc-300 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"}`}
+                                    className={`flex items-center gap-1.5 min-h-10 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${proOnly ? "border-amber-500 bg-amber-500 text-black shadow-sm" : "border-zinc-300 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"}`}
 
                                     title="تصفية المحادثات للمستخدمين المشتركين في Pro"
 
@@ -886,7 +897,26 @@ export default function AIChatbotTab() {
 
                                     <Crown className="w-3.5 h-3.5" />
 
-                                    {proOnly ? "PRO فقط" : "كل المستخدمين"}
+                                    {proOnly ? "PRO فقط" : "PRO"}
+
+                                </button>
+
+                                <button
+
+                                    onClick={() => {
+                                        setTrialOnly((value) => !value);
+                                        if (!trialOnly) setProOnly(false);
+                                    }}
+
+                                    className={`flex items-center gap-1.5 min-h-10 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-colors ${trialOnly ? "border-purple-500 bg-purple-500 text-white shadow-sm" : "border-zinc-300 text-zinc-500 hover:bg-zinc-200 dark:border-zinc-700 dark:hover:bg-zinc-800"}`}
+
+                                    title="تصفية المحادثات للمستخدمين في الفترة التجريبية (Trial)"
+
+                                >
+
+                                    <Sparkles className="w-3.5 h-3.5" />
+
+                                    {trialOnly ? "تجريبي فقط" : "تجريبي"}
 
                                 </button>
 
@@ -1108,6 +1138,17 @@ export default function AIChatbotTab() {
 
                                                                 {group.is_pro && <span title="مستخدم Pro" aria-label="Pro user"><Crown className="w-3.5 h-3.5 shrink-0 text-amber-500" /></span>}
 
+                                                                {group.is_trial && (
+                                                                    <span
+                                                                        title="مستخدم في الفترة التجريبية (Trial)"
+                                                                        aria-label="Trial user"
+                                                                        className="inline-flex items-center gap-0.5 rounded-full border border-purple-500/30 bg-purple-500/15 px-1.5 py-0.5 text-[9px] font-bold text-purple-600 dark:text-purple-300 shrink-0"
+                                                                    >
+                                                                        <Sparkles className="w-2.5 h-2.5 text-purple-500" />
+                                                                        تجريبي
+                                                                    </span>
+                                                                )}
+
                                                                 {isUnread && (
 
                                                                     <span className="shrink-0 text-[9px] bg-blue-500 text-white px-1.5 py-0.2 rounded-full font-bold">
@@ -1201,6 +1242,12 @@ export default function AIChatbotTab() {
                                                             <span className="min-w-0 [overflow-wrap:anywhere]">{selectedGroup.user_name}</span>
 
                                                             {selectedGroup.is_pro && <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400"><Crown className="w-3 h-3" /> PRO</span>}
+
+                                                            {selectedGroup.is_trial && (
+                                                                <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/15 px-2 py-0.5 text-[10px] font-bold text-purple-600 dark:text-purple-300">
+                                                                    <Sparkles className="w-3 h-3 text-purple-500" /> تجريبي (Trial)
+                                                                </span>
+                                                            )}
 
                                                             {selectedGroup.telegram_chat_id && (
 

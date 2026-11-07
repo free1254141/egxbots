@@ -385,7 +385,6 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     const [selectedSector, setSelectedSector] = useState("");
     const [selectedSignal, setSelectedSignal] = useState("");
     const [mainTab, setMainTab] = useState<"medium_swings" | "short_swings" | "fast_scanner" | "comparison">(() => {
-        if (tabParam === "short_swings") return "short_swings";
         if (tabParam === "fast_scanner" || tabParam === "scanner" || tabParam === "scanner_signals") return "fast_scanner";
         if (tabParam === "comparison") return "comparison";
         return "medium_swings";
@@ -395,7 +394,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     );
     useEffect(() => {
         if (tabParam === "short_swings") {
-            setMainTab("short_swings");
+            setMainTab("medium_swings");
         } else if (tabParam === "fast_scanner" || tabParam === "scanner" || tabParam === "scanner_signals") {
             setMainTab("fast_scanner");
         } else if (tabParam === "comparison") {
@@ -2173,7 +2172,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             {/* ── Top-Level Systems Navigation Bar (4 Unified Systems Tabs) ────────────────────────── */}
             {limit === Infinity && (!isLandingPage || user) && (
                 <div className="sticky top-[var(--header-offset,68px)] z-40 mb-4 sm:mb-6 px-1 sm:px-2 md:px-4 lg:px-6">
-                    <div className="grid grid-cols-2 lg:grid-cols-4 border-2 sm:border-4 border-black dark:border-white bg-zinc-100/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] dark:sm:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 sm:p-2 md:p-2.5 gap-1.5 sm:gap-2 select-none">
+                    <div className="grid grid-cols-1 md:grid-cols-3 border-2 sm:border-4 border-black dark:border-white bg-zinc-100/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-[3px_3px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)] dark:sm:shadow-[4px_4px_0px_rgba(255,255,255,1)] p-1.5 sm:p-2 md:p-2.5 gap-1.5 sm:gap-2 select-none">
                         {[
                             {
                                 id: "medium_swings",
@@ -2181,15 +2180,6 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                 label: isAr ? "إشارات المدى المتوسط 📈" : "Medium-Term Signals 📈",
                                 subtitle: isAr ? "تحليل الاتجاه الفني (2 إلى 6 أسابيع)" : "Trend Technical Analysis (2–6 Weeks)",
                                 icon: Layers,
-                            },
-                            {
-                                id: "short_swings",
-                                shortLabel: isAr ? "إشارات المدى القصير ⚡" : "Short Signals ⚡",
-                                label: isAr ? "إشارات المدى القصير ⚡" : "Short-Term Signals ⚡",
-                                subtitle: isAr ? "رصد الزخم الفني (3 إلى 10 جلسات)" : "Momentum Technical Scan (3–10 Sessions)",
-                                icon: Zap,
-                                isSpecial: true,
-                                isShortSwings: true,
                             },
                             {
                                 id: "fast_scanner",
@@ -2219,7 +2209,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         setCurrentPage(1);
                                         if (typeof window !== "undefined" && window.history?.replaceState) {
                                             const url = new URL(window.location.href);
-                                            if (tab.id === "short_swings" || tab.id === "fast_scanner" || tab.id === "comparison") {
+                                            if (tab.id === "fast_scanner" || tab.id === "comparison") {
                                                 url.searchParams.set("tab", tab.id);
                                             } else {
                                                 if (activeTab === "analytics") {

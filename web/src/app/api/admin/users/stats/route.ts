@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       scanResultsRes,
       trialsRes,
     ] = await Promise.all([
-      supabase.from("profiles").select("id,language,telegram_chat_id,notification_channel,created_at", { count: "exact" }).range(0, 999),
+      supabase.from("profiles").select("id,language,telegram_chat_id,whatsapp_number,notification_channel,display_name,username,created_at", { count: "exact" }).range(0, 999),
       supabase.from("subscriptions").select("user_id,plan_id,status,current_period_end,created_at"),
       supabase.from("bot_subscriptions").select("service_type,notifications_enabled"),
       supabase.from("user_activity_events").select("id,user_id,event_name,path,created_at", { count: "exact" }).gte("created_at", ninetyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     for (let offset = allProfiles.length; offset < totalProfileCount; offset += 1000) {
       const pageRes = await supabase
         .from("profiles")
-        .select("id,language,telegram_chat_id,notification_channel,created_at")
+        .select("id,language,telegram_chat_id,whatsapp_number,notification_channel,display_name,username,created_at")
         .range(offset, Math.min(offset + 999, totalProfileCount - 1));
       if (pageRes.error) return NextResponse.json({ detail: pageRes.error.message }, { status: 500 });
       allProfiles.push(...(pageRes.data || []));
@@ -180,17 +180,39 @@ export async function GET(req: NextRequest) {
     const allTrialUids = new Set<string>();
     const activeTrialUids = new Set<string>();
     const convertedTrialUids = new Set<string>();
+    const trialUsersMap = new Map<string, any>();
+
+    const profileMap = new Map<string, any>();
+    allProfiles.forEach((p: any) => profileMap.set(String(p.id), p));
+
+    const chatCountByUser = new Map<string, number>();
+    (chatMessages || []).forEach((m: any) => {
+      if (m.role === "user" && m.user_id) {
+        const uid = String(m.user_id);
+        chatCountByUser.set(uid, (chatCountByUser.get(uid) || 0) + 1);
+      }
+    });
 
     trialRows.forEach((row: any) => {
       const uid = String(row.user_id || "");
       if (!uid || adminUserIds.has(uid)) return;
       allTrialUids.add(uid);
       const exp = row.expires_at ? new Date(String(row.expires_at)).getTime() : 0;
-      if (activeProSet.has(uid)) {
+      const isConverted = activeProSet.has(uid);
+      const isActive = !isConverted && Number.isFinite(exp) && exp > nowMs;
+      if (isConverted) {
         convertedTrialUids.add(uid);
-      } else if (Number.isFinite(exp) && exp > nowMs) {
+      } else if (isActive) {
         activeTrialUids.add(uid);
       }
+
+      trialUsersMap.set(uid, {
+        user_id: uid,
+        started_at: row.started_at,
+        expires_at: row.expires_at,
+        status: isConverted ? "converted" : isActive ? "active" : "expired",
+        time_left_ms: Math.max(0, exp - nowMs),
+      });
     });
 
     subscriptions.forEach((sub: any) => {
@@ -199,12 +221,45 @@ export async function GET(req: NextRequest) {
       if (String(sub.status || "").toLowerCase() === "trialing") {
         allTrialUids.add(uid);
         const end = sub.current_period_end ? new Date(String(sub.current_period_end)).getTime() : 0;
-        if (activeProSet.has(uid)) {
+        const isConverted = activeProSet.has(uid);
+        const isActive = !isConverted && Number.isFinite(end) && end > nowMs;
+        if (isConverted) {
           convertedTrialUids.add(uid);
-        } else if (Number.isFinite(end) && end > nowMs) {
+        } else if (isActive) {
           activeTrialUids.add(uid);
         }
+
+        const existing = trialUsersMap.get(uid);
+        const existingExp = existing?.expires_at ? new Date(existing.expires_at).getTime() : 0;
+        if (!existing || end > existingExp) {
+          trialUsersMap.set(uid, {
+            user_id: uid,
+            started_at: sub.current_period_start || sub.created_at || existing?.started_at,
+            expires_at: sub.current_period_end || existing?.expires_at,
+            status: isConverted ? "converted" : isActive ? "active" : "expired",
+            time_left_ms: Math.max(0, end - nowMs),
+          });
+        }
       }
+    });
+
+    const trialUsersList = Array.from(trialUsersMap.values()).map((t) => {
+      const p = profileMap.get(t.user_id) || {};
+      return {
+        ...t,
+        email: userEmailMap.get(t.user_id) || null,
+        display_name: userNameMap.get(t.user_id) || p.display_name || null,
+        username: p.username || null,
+        telegram_chat_id: p.telegram_chat_id || null,
+        whatsapp_number: p.whatsapp_number || null,
+        notification_channel: p.notification_channel || null,
+        created_at: p.created_at || t.started_at,
+        chat_count: chatCountByUser.get(t.user_id) || 0,
+      };
+    }).sort((a, b) => {
+      if (a.status === "active" && b.status !== "active") return -1;
+      if (a.status !== "active" && b.status === "active") return 1;
+      return new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime();
     });
 
     const activeTrialUsers = activeTrialUids.size;
@@ -392,6 +447,7 @@ export async function GET(req: NextRequest) {
       totalTrialUsers,
       convertedTrialUsers,
       expiredTrialUsers,
+      trialUsers: trialUsersList,
       activeUsers30Days: analytics.activeUsers30Days,
       activeUsers7Days: analytics.activeUsers7Days,
       activeUsers30DaysRate: analytics.activeUsers30DaysRate,

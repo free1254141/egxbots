@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
             supabase.from("subscriptions")
                 .select("user_id, plan_id, status, current_period_end")
                 .eq("plan_id", "pro")
-                .eq("status", "active"),
+                .in("status", ["active", "trialing"]),
             // 6. Fetch all session metadata (including soft deleted flag and titles)
             supabase.from("ai_chat_sessions")
                 .select("id, user_id, title, is_deleted_by_user, deleted_at, created_at, updated_at")
@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
         };
 
         const activeProUserIds = new Set<string>();
+        const activeTrialUserIds = new Set<string>();
         if (subscriptionsRes.status === "fulfilled" && (subscriptionsRes.value as any)?.data) {
             const now = Date.now();
             (subscriptionsRes.value as any).data.forEach((subscription: any) => {
@@ -126,10 +127,16 @@ export async function GET(req: NextRequest) {
                     const end = new Date(subscription.current_period_end).getTime();
                     if (Number.isFinite(end) && end <= now) return;
                 }
-                activeProUserIds.add(String(subscription.user_id));
+                const st = String(subscription.status || "").toLowerCase();
+                if (st === "active") {
+                    activeProUserIds.add(String(subscription.user_id));
+                } else if (st === "trialing") {
+                    activeTrialUserIds.add(String(subscription.user_id));
+                }
             });
         }
         const isProUser = (userId?: string | null) => Boolean(userId && activeProUserIds.has(String(userId)));
+        const isTrialUser = (userId?: string | null) => Boolean(userId && activeTrialUserIds.has(String(userId)));
 
         const logsMap = new Map<string, any>();
 
@@ -162,6 +169,7 @@ export async function GET(req: NextRequest) {
                     created_at: log.created_at,
                     data_source: dataSource,
                     is_pro: isProUser(log.user_id),
+                    is_trial: isTrialUser(log.user_id),
                 });
             });
         }
@@ -283,6 +291,7 @@ export async function GET(req: NextRequest) {
                             voice_audio_url: userMeta?.voice_audio_url || meta?.voice_audio_url || null,
                             spoken_text: meta?.spoken_text || null,
                             is_pro: isProUser(msg.user_id),
+                            is_trial: isTrialUser(msg.user_id),
                         });
                     }
                 }
@@ -337,6 +346,7 @@ export async function GET(req: NextRequest) {
                             voice_audio_url: meta?.voice_audio_url || null,
                             spoken_text: meta?.spoken_text || null,
                             is_pro: isProUser(msg.user_id),
+                            is_trial: isTrialUser(msg.user_id),
                         });
                     }
                 }

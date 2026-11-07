@@ -57,13 +57,20 @@ export async function POST(req: NextRequest, context: { params: Promise<{ userId
     ]);
     if (profileRes.error || inviteRes.error || orderRes.error) throw profileRes.error || inviteRes.error || orderRes.error;
 
+    // Cancel any active or trialing subscriptions (pro, lifetime, pro_6m, etc.)
     const { error: subscriptionError } = await service
       .from("subscriptions")
       .update({ status: "canceled", current_period_end: now, updated_at: now })
       .eq("user_id", userId)
-      .eq("plan_id", "pro")
-      .eq("status", "active");
+      .in("status", ["active", "trialing"]);
     if (subscriptionError) throw subscriptionError;
+
+    // Also expire active trial in subscription_trials if present
+    await service
+      .from("subscription_trials")
+      .update({ expires_at: now })
+      .eq("user_id", userId)
+      .gt("expires_at", now);
 
     const inviteLink = inviteRes.data?.invite_link || orderRes.data?.telegram_invite_link || "";
     const telegramUserId = inviteRes.data?.vip_telegram_user_id || profileRes.data?.telegram_chat_id || null;
