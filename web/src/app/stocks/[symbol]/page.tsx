@@ -46,7 +46,6 @@ export async function generateStaticParams() {
   const params: Array<{ symbol: string }> = [];
   for (const sym of symbolSet) {
     params.push({ symbol: sym.toLowerCase() });
-    params.push({ symbol: sym.toUpperCase() });
   }
   return params;
 }

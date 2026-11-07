@@ -17,6 +17,7 @@ venv/
 .next/
 out/
 build/
+tmp/
 
 # Application Data & Cache (Local only)
 .cache/
@@ -78,7 +79,16 @@ api/intraday_sync_state.json
 .kiro/
 .qoder/
 web/public/*.png
+!web/public/icon-192.png
+!web/public/icon-512.png
+!web/public/apple-touch-icon.png
+!web/public/apple-touch-icon-precomposed.png
+!web/public/dashboard_preview.png
+!web/public/egxbots-login-hero.png
+!web/public/opengraph-image.png
+!web/public/social-card-1200x630.png
 web/public/favicon_io/*.png
+!web/public/favicon_io/*.png
 
 # Models and scratch
 api/models/*.pkl
