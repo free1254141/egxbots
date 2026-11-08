@@ -109,5 +109,53 @@ describe("get_disclosures agentic tool", () => {
     const out = await executeStructuredTools(mockSupabase, plan, [], "user-1", "session-1", "إفصاحات فوري");
     expect(out.results.some(r => r.tool === "get_disclosures")).toBe(true);
     expect(out.formattedText).toContain("إفصاحات وتعاملات الداخليين");
+    expect(out.formattedText).toContain("/api/disclosures/image/test-id-3");
+  });
+
+  it("should fetch a specific disclosure by disclosure_id and return image_url", async () => {
+    const mockData = [
+      {
+        id: "123e4567-e89b-12d3-a456-426614174000",
+        symbol: "PRDC",
+        company_name: "بايونيرز بروبرتيز للتنمية العمرانية",
+        disclosure_type: "insider_trading",
+        disclosure_date: "2026-11-08",
+        title: "شراء داخليين في بايونيرز بروبرتيز",
+        raw_content: "نص الإفصاح الكامل...",
+        ai_summary: "شراء داعم للسهم",
+        sentiment: "bullish",
+        action_type: "buy",
+        shares_count: 250000,
+        party_name: "مجلس الإدارة",
+        party_role: "داخلي",
+        source_url: "https://example.com/prdc.pdf",
+        metadata: { key_takeaway: "إشارة تجميع" }
+      }
+    ];
+
+    const eqMock = jest.fn().mockReturnThis();
+    const mockSupabase = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        eq: eqMock,
+        or: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue({ data: mockData, error: null })
+      })
+    };
+
+    const res = await executeAgenticTool(
+      "get_disclosures",
+      { disclosure_id: "123e4567-e89b-12d3-a456-426614174000" },
+      mockSupabase,
+      "test-user"
+    );
+
+    expect(eqMock).toHaveBeenCalledWith("id", "123e4567-e89b-12d3-a456-426614174000");
+    expect(res.status).toBe("success");
+    expect(res.disclosures[0].id).toBe("123e4567-e89b-12d3-a456-426614174000");
+    expect(res.disclosures[0].raw_content).toBe("نص الإفصاح الكامل...");
+    expect(res.disclosures[0].image_url).toBe("/api/disclosures/image/123e4567-e89b-12d3-a456-426614174000");
+    expect(res.disclosures[0].markdown_image).toContain("/api/disclosures/image/123e4567-e89b-12d3-a456-426614174000");
   });
 });

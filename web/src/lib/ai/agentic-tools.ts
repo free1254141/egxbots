@@ -1950,6 +1950,46 @@ async function executeRawTool(
         }
 
         if (toolName === "get_disclosures") {
+            const discId = typeof args.disclosure_id === "string" ? args.disclosure_id.trim() : null;
+            const searchQ = typeof args.query === "string" ? args.query.trim().replace(/[%_]/g, "") : null;
+            if (discId) {
+                const { data: singleData, error: singleErr } = await supabase
+                    .from("egx_disclosures")
+                    .select("id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata")
+                    .eq("id", discId)
+                    .limit(1);
+                if (!singleErr && singleData && singleData.length > 0) {
+                    const d = singleData[0];
+                    return {
+                        status: "success",
+                        availability: "available",
+                        count: 1,
+                        symbol: d.symbol || "EGX",
+                        disclosures: [{
+                            id: d.id,
+                            symbol: d.symbol,
+                            company_name: d.company_name,
+                            date: d.disclosure_date,
+                            type: d.disclosure_type,
+                            title: d.title,
+                            raw_content: d.raw_content,
+                            action: d.action_type,
+                            shares: d.shares_count,
+                            stake_before: d.stake_before,
+                            stake_after: d.stake_after,
+                            party: d.party_name,
+                            role: d.party_role,
+                            ai_summary: d.ai_summary,
+                            sentiment: d.sentiment,
+                            key_takeaway: d.metadata?.key_takeaway || null,
+                            image_url: `/api/disclosures/image/${d.id}`,
+                            markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
+                            source_url: d.source_url
+                        }],
+                        note: `تم جلب تفاصيل الإفصاح المطلوب رقم ${d.id} بالكامل مع رابط صورته الرسمية /api/disclosures/image/${d.id}. إذا طلب المستخدم عرض صورة الإفصاح استخدم markdown_image.`
+                    };
+                }
+            }
             const sym = args.symbol ? normalizeSymbol(args.symbol) : null;
             let query = supabase.from("egx_disclosures")
                 .select("id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, party_name, party_role, source_url, metadata")
@@ -1960,6 +2000,9 @@ async function executeRawTool(
             }
             if (args.disclosure_type && args.disclosure_type !== "all") {
                 query = query.eq("disclosure_type", args.disclosure_type);
+            }
+            if (searchQ) {
+                query = query.or(`title.ilike.%${searchQ}%,company_name.ilike.%${searchQ}%`);
             }
             const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
             query = query.limit(limit);
@@ -1986,7 +2029,10 @@ async function executeRawTool(
                     role: d.party_role,
                     ai_summary: d.ai_summary,
                     sentiment: d.sentiment,
+                    raw_content: d.raw_content,
                     key_takeaway: d.metadata?.key_takeaway || null,
+                    image_url: `/api/disclosures/image/${d.id}`,
+                    markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
                     source_url: d.source_url
                 })),
                 note: sym

@@ -469,35 +469,46 @@ export default function Header() {
                         </button>
                     </div>
 
-                {/* Mobile search row */}
-                {mobileSearchOpen && (
-                    <div className="md:hidden rounded-none border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-2 shadow-[6px_6px_0px_0px_#FFE600] animate-in slide-in-from-top-1 duration-200">
-                        <div id="header-search-container-mobile" className="relative">
-                            <div className="relative flex items-center">
-                                <Search className="absolute left-3 w-4 h-4 text-zinc-500" />
-                                <input
-                                    id="header-search-input-mobile"
-                                    type="text"
-                                    placeholder={language === "ar" ? "ابحث عن سهم مصري..." : "Search EGX symbol..."}
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onFocus={() => setSearchFocused(true)}
-                                    className="h-10 w-full rounded-none pl-9 pr-3 text-sm font-black outline-none border-3 border-black bg-white text-black dark:bg-zinc-900 dark:text-white dark:border-white focus:bg-[#FFE600] focus:text-black transition-none"
-                                    autoFocus
-                                />
-                            </div>
-                            <div className="mt-2 max-h-60 overflow-y-auto custom-scrollbar">
-                                <SearchDropdown
-                                    language={language}
-                                    searchQuery={searchQuery}
-                                    searching={searching}
-                                    searchResults={searchResults}
-                                    onSelect={handleSymbolSelect}
-                                />
-                            </div>
+            </div>
+
+            {/* Mobile search dropdown bar */}
+            {mobileSearchOpen && (
+                <div id="header-mobile-search-panel" className="md:hidden w-full border-t-2 border-black dark:border-white bg-white dark:bg-zinc-950 px-4 py-2.5 shadow-[0_6px_0px_0px_#FFE600] animate-in slide-in-from-top-1 duration-200" dir={language === "ar" ? "rtl" : "ltr"}>
+                    <div id="header-search-container-mobile" className="relative max-w-xl mx-auto">
+                        <div className="relative flex items-center">
+                            <Search className={`absolute ${language === "ar" ? "right-3" : "left-3"} w-4 h-4 text-zinc-500`} />
+                            <input
+                                id="header-search-input-mobile"
+                                type="text"
+                                placeholder={language === "ar" ? "ابحث عن سهم مصري..." : "Search EGX symbol..."}
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onFocus={() => setSearchFocused(true)}
+                                className={`h-11 w-full rounded-none ${language === "ar" ? "pr-9 pl-9" : "pl-9 pr-9"} text-sm font-black outline-none border-3 border-black bg-white text-black dark:bg-zinc-900 dark:text-white dark:border-white focus:bg-[#FFE600] focus:text-black transition-none`}
+                                autoFocus
+                            />
+                            {searchQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearchQuery("")}
+                                    className={`absolute ${language === "ar" ? "left-3" : "right-3"} p-1 text-zinc-500 hover:text-black dark:hover:text-white`}
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            )}
+                        </div>
+                        <div className="mt-2 max-h-72 overflow-y-auto custom-scrollbar">
+                            <SearchDropdown
+                                language={language}
+                                searchQuery={searchQuery}
+                                searching={searching}
+                                searchResults={searchResults}
+                                onSelect={handleSymbolSelect}
+                            />
                         </div>
                     </div>
-                )}
+                </div>
+            )}
 
                 {/* Mobile menu */}
                 {mobileMenuOpen && (
@@ -582,7 +593,6 @@ export default function Header() {
                         </div>
                     </>
                 )}
-            </div>
         </header>
     );
 }

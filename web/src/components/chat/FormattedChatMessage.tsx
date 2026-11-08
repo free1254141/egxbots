@@ -1300,11 +1300,31 @@ export function FormattedChatMessage({
             }
 
             const parseTextSpans = (textStr: string) => {
-                const linkRegex = /(\[[^\]]+\]\(https?:\/\/[^\s\)]+\)|https?:\/\/[^\s<>]+)/g;
+                const linkRegex = /(!\[[^\]]*\]\((?:https?:\/\/|\/api\/disclosures\/image\/)[^\s\)]+\)|\[[^\]]+\]\((?:https?:\/\/|\/api\/disclosures\/image\/|\/disclosures)[^\s\)]+\)|https?:\/\/[^\s<>]+)/g;
                 const linkParts = textStr.split(linkRegex);
                 return linkParts.map((linkPart, linkIdx) => {
                     if (!linkPart) return null;
-                    const mdMatch = linkPart.match(/^\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)$/);
+                    const imgMatch = linkPart.match(/^!\[([^\]]*)\]\(((?:https?:\/\/|\/api\/disclosures\/image\/)[^\s\)]+)\)$/);
+                    if (imgMatch) {
+                        const [, altText, imgSrc] = imgMatch;
+                        return (
+                            <div key={`img-${linkIdx}`} className="my-3 overflow-hidden border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#FFE600]">
+                                <a href={imgSrc} target="_blank" rel="noopener noreferrer" className="block">
+                                    <img
+                                        src={imgSrc}
+                                        alt={altText || "صورة الإفصاح الرسمي"}
+                                        loading="lazy"
+                                        className="w-full h-auto max-h-[520px] object-contain bg-white"
+                                    />
+                                </a>
+                                <div className="px-3 py-1.5 border-t-2 border-black dark:border-white bg-[#FFE600] text-black text-[11px] font-black flex items-center justify-between">
+                                    <span>📄 {altText || "صورة مستند الإفصاح الرسمي"}</span>
+                                    <a href={imgSrc} target="_blank" rel="noopener noreferrer" className="underline">فتح بالحجم الكامل ↗</a>
+                                </div>
+                            </div>
+                        );
+                    }
+                    const mdMatch = linkPart.match(/^\[([^\]]+)\]\(((?:https?:\/\/|\/api\/disclosures\/image\/|\/disclosures)[^\s\)]+)\)$/);
                     if (mdMatch) {
                         const [, label, href] = mdMatch;
                         return (

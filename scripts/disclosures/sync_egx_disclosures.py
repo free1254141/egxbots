@@ -90,8 +90,92 @@ STOCK_MAP = {
     'بالم هيلز': ('PHDC', 'بالم هيلز للتعمير'),
     'سامكريت': ('SMCR', 'سامكريت مصر مهندسون ومقاولون'),
     'جلاكسو': ('BIOC', 'جلاكسو سميثكلاين - مصر'),
-    'أمون': ('AMUN', 'أمون للأدوية')
+    'أمون': ('AMUN', 'أمون للأدوية'),
+    'بايونيرز بروبرتيز': ('PRDC', 'بايونيرز بروبرتيز للتنمية العمرانية'),
+    'كرستمارك': ('CRST', 'كرستمارك للمقاولات والتطوير العقاري'),
+    'بنيان للتنمية': ('BONY', 'بنيان للتنمية والتجارة'),
+    'إي فاينانس': ('EFIH', 'إي فاينانس للاستثمارات المالية والرقمية'),
+    'اي فاينانس': ('EFIH', 'إي فاينانس للاستثمارات المالية والرقمية'),
+    'مصر الجديدة': ('HELI', 'مصر الجديدة للإسكان والتعمير'),
+    'الشرقية للدخان': ('EAST', 'الشرقية - إيسترن كومباني'),
+    'إيسترن كومباني': ('EAST', 'الشرقية - إيسترن كومباني'),
+    'أوراسكوم للتنمية': ('ORHD', 'أوراسكوم للتنمية مصر'),
+    'أوراسكوم كونستراكشون': ('ORAS', 'أوراسكوم كونستراكشون بي إل سي'),
+    'أوراسكوم للاستثمار': ('OIH', 'أوراسكوم للاستثمار القابضة'),
+    'أوراسكوم المالية': ('OFH', 'أوراسكوم المالية القابضة'),
+    'راميدا': ('RMDA', 'العاشر من رمضان للصناعات الدوائية - راميدا'),
+    'جهينة': ('JUFO', 'جهينة للصناعات الغذائية'),
+    'عبور لاند': ('OLFI', 'عبور لاند للصناعات الغذائية'),
+    'إيديتا': ('EFID', 'إيديتا للصناعات الغذائية'),
+    'دومتي': ('DOMT', 'الصناعات الغذائية العربية - دومتي'),
+    'الإسكندرية للحاويات': ('ALCN', 'الإسكندرية لتداول الحاويات والبضائع'),
+    'القابضة المصرية الكويتية': ('EKHO', 'القابضة المصرية الكويتية'),
+    'كريدي أجريكول': ('CIEB', 'بنك كريدي أجريكول مصر'),
+    'أبوظبي الإسلامي': ('ADIB', 'مصرف أبوظبي الإسلامي - مصر'),
+    'التعمير والإسكان': ('HDBK', 'بنك التعمير والإسكان'),
+    'بنك قناة السويس': ('CANA', 'بنك قناة السويس'),
+    'بنك البركة': ('SAUD', 'بنك البركة مصر'),
+    'بنك فيصل': ('FAIT', 'بنك فيصل الإسلامي المصري'),
+    'ليسيكو': ('LCSW', 'ليسيكو مصر'),
+    'دايس': ('DSCW', 'دايس للملابس الجاهزة'),
+    'كابو': ('KABO', 'النصر للملابس والمنسوجات - كابو'),
+    'سبيد ميديكال': ('SPMD', 'سبيد ميديكال'),
+    'كليوباترا': ('CLHO', 'مستشفيات كليوباترا'),
+    'ماكرو جروب': ('MCRO', 'ماكرو جروب للمستحضرات الطبية'),
+    'تعليم': ('TALM', 'تعليم لخدمات الإدارة'),
+    'سيرا': ('CIRA', 'القاهرة للاستثمار والتنمية العقارية - سيرا'),
+    'كونتكت': ('CNFN', 'كونتكت المالية القابضة'),
+    'راية القابضة': ('RAYA', 'راية القابضة للاستثمارات المالية'),
+    'راية لخدمات': ('RACC', 'راية لخدمات مراكز الاتصالات'),
+    'ام ام جروب': ('MTIE', 'ام ام جروب للصناعة والتجارة العالمية'),
+    'بي انفستمنتس': ('BINV', 'بي انفستمنتس القابضة'),
+    'أكت فاينانشال': ('ACTF', 'أكت فاينانشال للاستشارات'),
+    'مصر للأسمنت قنا': ('MCQE', 'مصر للأسمنت - قنا'),
+    'أسمنت سيناء': ('SCEM', 'أسمنت سيناء'),
+    'العربية للأسمنت': ('ARCC', 'العربية للأسمنت'),
+    'جنوب الوادي': ('SVCE', 'جنوب الوادي للأسمنت'),
+    'زهراء المعادي': ('ZMID', 'زهراء المعادي للاستثمار والتعمير'),
+    'الشمس للإسكان': ('ELSH', 'الشمس للإسكان والتعمير'),
+    'المتحدة للإسكان': ('UNIT', 'المتحدة للإسكان والتعمير'),
+    'القاهرة للإسكان': ('ELKA', 'القاهرة للإسكان والتعمير'),
+    'الجيزة العامة للمقاولات': ('GGCC', 'الجيزة العامة للمقاولات والاستثمار العقاري'),
+    'المقاولات المصرية': ('MOIN', 'المقاولات المصرية - مختار ابراهيم'),
+    'النصر للأعمال المدنية': ('NCCW', 'النصر للأعمال المدنية'),
+    'المشروعات الصناعية': ('IEEC', 'المشروعات الصناعية والهندسية'),
+    'عتاقة': ('ATQA', 'مصر الوطنية للصلب - عتاقة'),
+    'أسكوم': ('ASCM', 'أسيك للتعدين - أسكوم'),
+    'أجواء': ('AJWA', 'أجواء للصناعات الغذائية'),
+    'المنصورة للدواجن': ('MPCO', 'المنصورة للدواجن'),
+    'الإسماعيلية مصر للدواجن': ('ISMA', 'الإسماعيلية مصر للدواجن'),
+    'شارم دريمز': ('SDTI', 'شارم دريمز للاستثمار السياحي'),
+    'رمكو': ('RTVC', 'رمكو لإنشاء القرى السياحية'),
+    'المصرية للمنتجعات': ('EGTS', 'المصرية للمنتجعات السياحية'),
 }
+
+GULF_EXCLUDE_KEYWORDS = [
+    'ريال', 'دينار', 'درهم', 'تاسي', 'بورصة الكويت', 'بورصة مسقط',
+    'سوق دبي', 'أبوظبي للأوراق', 'مسقط للغازات', 'صافولا', 'ريدان',
+    'أمانة للتأمين', 'تداول السعودية', 'سوق الأسهم السعودية'
+]
+
+def _norm_ar(s: str) -> str:
+    if not s:
+        return ""
+    s = re.sub(r'[أإآ]', 'ا', s)
+    s = s.replace('ة', 'ه').replace('ى', 'ي').replace('ـ', '')
+    return s
+
+# Dynamically load 280+ canonical EGX stocks from web/src/lib/ai/stock-names.ts if available
+try:
+    _names_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'web', 'src', 'lib', 'ai', 'stock-names.ts')
+    if os.path.exists(_names_path):
+        _content = open(_names_path, encoding='utf-8').read()
+        for _sym, _nar in re.findall(r'([A-Z0-9]+):\s*\{\s*name_ar:\s*"([^"]+)"', _content):
+            _short = _nar.split(' - ')[0].strip()
+            if len(_short) >= 5 and _short not in STOCK_MAP:
+                STOCK_MAP[_short] = (_sym, _nar)
+except Exception:
+    pass
 
 def parse_date(date_str):
     """Normalize date string to YYYY-MM-DD."""
@@ -113,20 +197,43 @@ def parse_date(date_str):
 
 def match_stock(title_or_text):
     """Match stock symbol and official name from text."""
+    if not title_or_text:
+        return None, None
     # Check explicit ticker in parentheses e.g. (FWRY.CA) or (COMI)
-    m = re.search(r'\(([A-Z]{3,5})(?:\.CA)?\)', title_or_text)
+    m = re.search(r'\(([A-Z0-9]{3,6})(?:\.CA)?\)', title_or_text)
     if m:
         sym = m.group(1)
         for kw, (s, name) in STOCK_MAP.items():
             if s == sym:
                 return sym, name
         return sym, sym
-    
-    # Check keyword
-    for kw, (sym, name) in STOCK_MAP.items():
-        if kw in title_or_text:
+
+    norm_text = _norm_ar(title_or_text)
+    # Check keyword (longest match first)
+    for kw, (sym, name) in sorted(STOCK_MAP.items(), key=lambda x: len(x[0]), reverse=True):
+        if kw in title_or_text or _norm_ar(kw) in norm_text:
             return sym, name
     return None, None
+
+def clean_and_enrich_existing_db():
+    """Remove non-EGX Gulf items and backfill stock symbols in egx_disclosures."""
+    res = sb.table('egx_disclosures').select('id, symbol, company_name, title, raw_content').limit(300).execute()
+    deleted = 0
+    updated = 0
+    for r in (res.data or []):
+        full_text = f"{r.get('title') or ''} {r.get('company_name') or ''} {r.get('raw_content') or ''}"
+        if any(g in full_text for g in GULF_EXCLUDE_KEYWORDS) and '.CA' not in full_text:
+            sb.table('egx_disclosures').delete().eq('id', r['id']).execute()
+            deleted += 1
+            continue
+        sym, cname = match_stock(full_text)
+        if sym and (not r.get('symbol') or r.get('company_name') == 'البورصة المصرية'):
+            upd = {'symbol': sym}
+            if cname and (not r.get('company_name') or r.get('company_name') == 'البورصة المصرية'):
+                upd['company_name'] = cname
+            sb.table('egx_disclosures').update(upd).eq('id', r['id']).execute()
+            updated += 1
+    print(f"Cleaned {deleted} non-EGX items, enriched {updated} symbols.")
 
 def analyze_batch_with_ai(items_batch):
     """

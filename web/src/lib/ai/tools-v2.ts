@@ -1976,9 +1976,18 @@ export async function executeStructuredTools(
             if (symbols.length > 0) {
                 query = query.in("symbol", symbols);
             }
+            const uuidMatch = userMessage.match(/\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i);
+            if (uuidMatch && typeof (query as any).eq === "function") {
+                query = (query as any).eq("id", uuidMatch[1]);
+            }
             query = query.limit(10);
             const { data: disclosures, error } = await query;
             if (!error && disclosures && disclosures.length > 0) {
+                const enriched = disclosures.map((d: any) => ({
+                    ...d,
+                    image_url: `/api/disclosures/image/${d.id}`,
+                    markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
+                }));
                 results.push({
                     tool: "get_disclosures",
                     source: "database",
@@ -1986,10 +1995,10 @@ export async function executeStructuredTools(
                     symbols,
                     data_type: "cached",
                     availability: "available",
-                    data: disclosures,
+                    data: enriched,
                 });
-                textParts.push(`\n [إفصاحات وتعاملات الداخليين]: تم العثور على ${disclosures.length} إفصاح حديث:\n` +
-                    disclosures.map((d: any) => `- ${d.disclosure_date} [${d.symbol || "عام"}]: ${d.title} (تحليل الذكاء الاصطناعي: ${d.ai_summary})`).join("\n") + "\n");
+                textParts.push(`\n [إفصاحات وتعاملات الداخليين]: تم العثور على ${enriched.length} إفصاح حديث:\n` +
+                    enriched.map((d: any) => `- [ID: ${d.id}] ${d.disclosure_date} [${d.symbol || "عام"}]: ${d.title} (تحليل الذكاء الاصطناعي: ${d.ai_summary}) | صورة المستند: ![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`).join("\n") + "\n");
             }
         } catch (e) {
             console.warn("Error fetching disclosures in tools-v2:", e);
