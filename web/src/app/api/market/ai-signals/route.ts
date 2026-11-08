@@ -65,23 +65,20 @@ export async function GET(req: NextRequest) {
       }, { headers: responseHeaders });
     }
 
-    // Visibility gate: free (non-subscriber) users only see recommendations
-    // older than the signal-delay window when payments are enabled.
-    const limits = planLimits(userPlan);
-    const visible = userIsPro
-      ? recommendations
-      : filterByDelay(recommendations, limits.signal_delay_days);
-
-    if (visible.length === 0) {
+    // Visibility gate: Active open AI recommendations are strictly exclusive to PRO subscribers.
+    if (!userIsPro) {
       return NextResponse.json({
         signals: [],
-        total_open: 0,
-        buy_count: 0,
-        sell_count: 0,
-        delayed: limits.signal_delay_days,
-        gated: !userIsPro,
+        total_open: recommendations.length,
+        buy_count: recommendations.filter((r: any) => r.signal === "BUY").length,
+        sell_count: recommendations.filter((r: any) => r.signal === "SELL").length,
+        gated: true,
+        is_pro: false,
+        signal_delay_days: planLimits(userPlan).signal_delay_days,
       }, { headers: responseHeaders });
     }
+
+    const visible = recommendations;
 
     const symbols = visible.map((r: any) => r.symbol);
 
@@ -185,11 +182,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       signals,
-      total_open: signals.length,
+      total_open: recommendations.length,
       buy_count: buyCount,
       sell_count: sellCount,
-      gated: !userIsPro,
-      signal_delay_days: userIsPro ? 0 : planLimits(userPlan).signal_delay_days,
+      gated: false,
+      is_pro: true,
+      signal_delay_days: 0,
     }, { headers: responseHeaders });
   } catch (error) {
     console.error("AI Signals API error:", error);
