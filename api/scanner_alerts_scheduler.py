@@ -2,6 +2,7 @@
 Scanner Alerts Scheduler — background thread in FastAPI.
 Monitors EGX market hours (Sun-Thu 10:00 - 14:35 Cairo time)
 and triggers the scanner alerts pipeline at the configured interval (e.g. every 15 minutes).
+Features thread-level concurrency locks and cooldown guards to prevent duplicate execution.
 """
 import os
 import time
@@ -15,6 +16,7 @@ from typing import Optional, Dict, Any
 _scheduler_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 _last_run_timestamp: float = 0.0
+_scan_lock = threading.Lock()
 
 def _get_cairo_time() -> dt.datetime:
     try:
@@ -35,49 +37,62 @@ def _is_market_session(cairo_dt: dt.datetime) -> bool:
 
 def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     global _last_run_timestamp
-    # Update timestamp immediately to prevent 30s tight-looping if skipped or on transient error
-    _last_run_timestamp = time.time()
-    # Execute scanner natively inside Python on Hugging Face Spaces to avoid
-    # waking Vercel Serverless Functions or consuming Vercel CPU quotas.
+    if not _scan_lock.acquire(blocking=False):
+        print("[SCANNER_SCHEDULER] Concurrency lock active: another scan is currently executing. Skipping.")
+        return {"ok": False, "skipped": True, "reason": "concurrency_lock_active"}
+
     try:
-        from api.scanner_alerts_engine import execute_scanner_alerts_native
-        res = execute_scanner_alerts_native(force=force, force_dispatch=force_dispatch)
-        if res.get("ok"):
-            dispatched = res.get("alerts_dispatched", 0)
-            matches = res.get("matches", {})
-            print(f"[SCANNER_SCHEDULER] Native Python scan executed! Dispatched: {dispatched} alerts to Telegram. Matches: {matches}")
-            return {"ok": True, "data": res}
-        elif res.get("skipped"):
-            return res
-    except Exception as e:
-        print(f"[SCANNER_SCHEDULER] Native Python scanner error: {e}")
+        now = time.time()
+        # Cooldown: Minimum 10 minutes (600s) between successive scans unless force_dispatch is explicitly requested
+        if not force_dispatch and (now - _last_run_timestamp < 600):
+            print(f"[SCANNER_SCHEDULER] Cooldown active (elapsed: {int(now - _last_run_timestamp)}s < 600s). Skipping.")
+            return {"ok": True, "skipped": True, "reason": "cooldown_active"}
 
-    # Fallback to local dev endpoint only if running in local development
-    admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
-    for url in ["http://localhost:3000/api/cron/scanner-alerts", "http://127.0.0.1:3000/api/cron/scanner-alerts"]:
+        _last_run_timestamp = now
+
+        # Execute scanner natively inside Python on Hugging Face Spaces to avoid
+        # waking Vercel Serverless Functions or consuming Vercel CPU quotas.
         try:
-            req = urllib.request.Request(
-                url,
-                method="POST",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-admin-key": admin_key,
-                },
-                data=json.dumps({
-                    "trigger": "Python Manual Trigger" if force else "Python Background Scheduler",
-                    "force": force,
-                    "force_dispatch": force_dispatch,
-                }).encode("utf-8")
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if resp.status == 200:
-                    _last_run_timestamp = time.time()
-                    return {"ok": True, "data": data}
-        except Exception:
-            continue
+            from api.scanner_alerts_engine import execute_scanner_alerts_native
+            res = execute_scanner_alerts_native(force=force, force_dispatch=force_dispatch)
+            if res.get("ok"):
+                dispatched = res.get("alerts_dispatched", 0)
+                matches = res.get("matches", {})
+                print(f"[SCANNER_SCHEDULER] Native Python scan executed! Dispatched: {dispatched} alerts to Telegram. Matches: {matches}")
+                return {"ok": True, "data": res}
+            elif res.get("skipped"):
+                return res
+        except Exception as e:
+            print(f"[SCANNER_SCHEDULER] Native Python scanner error: {e}")
 
-    return {"ok": False, "error": "Native scan skipped or inactive"}
+        # Fallback to local dev endpoint only if running in local development
+        admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
+        for url in ["http://localhost:3000/api/cron/scanner-alerts", "http://127.0.0.1:3000/api/cron/scanner-alerts"]:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-admin-key": admin_key,
+                    },
+                    data=json.dumps({
+                        "trigger": "Python Manual Trigger" if force else "Python Background Scheduler",
+                        "force": force,
+                        "force_dispatch": force_dispatch,
+                    }).encode("utf-8")
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if resp.status == 200:
+                        _last_run_timestamp = time.time()
+                        return {"ok": True, "data": data}
+            except Exception:
+                continue
+
+        return {"ok": False, "error": "Native scan skipped or inactive"}
+    finally:
+        _scan_lock.release()
 
 def trigger_scanner_job_now(force: bool = True, force_dispatch: bool = True) -> Dict[str, Any]:
     return _trigger_scanner_job(force=force, force_dispatch=force_dispatch)

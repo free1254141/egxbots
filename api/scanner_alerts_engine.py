@@ -14,10 +14,20 @@ import requests
 import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple, Set
+import hashlib
 
 logger = logging.getLogger("scanner_alerts_engine")
 logger.setLevel(logging.INFO)
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    base_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+    if os.path.exists(base_env):
+        load_dotenv(base_env)
+except Exception:
+    pass
 
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
 BOT_STATE_KEY = "scanner_alerts"
@@ -118,6 +128,93 @@ def supabase_upsert(table: str, payload: Dict[str, Any], on_conflict: str = "bot
         logger.warning(f"[SCANNER_PY] UPSERT {table} failed: {e}")
         return False
 
+def supabase_rpc(func_name: str, payload: Dict[str, Any], timeout: int = 15) -> Optional[Any]:
+    url, key = get_supabase_config()
+    if not url or not key:
+        return None
+    full_url = f"{url}/rest/v1/rpc/{func_name}"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        full_url,
+        data=data,
+        method="POST",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read().decode("utf-8")
+            return json.loads(content) if content else {}
+    except Exception as e:
+        logger.warning(f"[SCANNER_PY] RPC {func_name} failed: {e}")
+        return None
+
+
+def acquire_dispatch_slot(
+    chat_id: str,
+    date_str: str,
+    symbols: List[str],
+    category: str = "intraday_scan",
+    cooldown_seconds: int = 300,
+    force_bypass: bool = False
+) -> Tuple[bool, Optional[str]]:
+    """
+    Guarantees idempotency and prevents duplicate alerts at database level.
+    Rejects duplicate batch hashes and enforces a 5-minute cooldown.
+    """
+    if force_bypass:
+        return True, None
+    try:
+        clean_chat = str(chat_id).strip().split("_")[0]
+        sorted_syms = sorted(list(set([str(s).upper() for s in symbols])))
+        batch_raw = f"{clean_chat}_{date_str}_{category}_{','.join(sorted_syms)}"
+        batch_hash = hashlib.sha256(batch_raw.encode("utf-8")).hexdigest()[:16]
+        res = supabase_rpc("acquire_scanner_dispatch_lock", {
+            "p_chat_id": clean_chat,
+            "p_date": date_str,
+            "p_batch_hash": batch_hash,
+            "p_symbols": sorted_syms,
+            "p_category": category,
+            "p_worker": "huggingface",
+            "p_cooldown_seconds": cooldown_seconds,
+        })
+        if res and isinstance(res, dict):
+            if res.get("allowed") is True:
+                return True, res.get("dispatch_id")
+            else:
+                logger.info(f"[SCANNER_LOCK] Blocked duplicate dispatch: {res.get('reason')} (cat={category}, syms={sorted_syms})")
+                return False, None
+    except Exception as e:
+        logger.warning(f"[SCANNER_LOCK] acquire_dispatch_slot error: {e}")
+    return True, None
+
+
+def confirm_dispatch_slot(dispatch_id: Optional[str], message_id: Optional[int]):
+    if not dispatch_id:
+        return
+    try:
+        supabase_rpc("confirm_scanner_dispatch", {
+            "p_dispatch_id": dispatch_id,
+            "p_message_id": message_id,
+        })
+    except Exception as e:
+        logger.warning(f"[SCANNER_LOCK] confirm_dispatch_slot error: {e}")
+
+
+def release_dispatch_slot(dispatch_id: Optional[str]):
+    if not dispatch_id:
+        return
+    try:
+        supabase_rpc("delete_pending_dispatch", {
+            "p_dispatch_id": dispatch_id,
+        })
+    except Exception as e:
+        logger.warning(f"[SCANNER_LOCK] release_dispatch_slot error: {e}")
+
+
 def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
     if not chat_id:
         return False
@@ -183,7 +280,8 @@ def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
                 res_json = {}
 
             if resp.status_code == 200 and res_json.get("ok"):
-                return True
+                msg_id = res_json.get("result", {}).get("message_id")
+                return msg_id if msg_id else True
 
             # If HTML parse error or rejected, retry without parse_mode
             desc = str(res_json.get("description", "")).lower()
@@ -193,7 +291,8 @@ def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
                 plain_payload["text"] = re.sub(r"<[^>]+>", "", text)
                 resp2 = requests.post(url, json=plain_payload, timeout=timeout)
                 if resp2.status_code == 200 and resp2.json().get("ok"):
-                    return True
+                    msg_id = resp2.json().get("result", {}).get("message_id")
+                    return msg_id if msg_id else True
         except Exception as e:
             logger.warning(f"[SCANNER_PY] Telegram send failed from {base}: {e}")
             if base == relay_url:
@@ -605,36 +704,64 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
             })
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)
-    dedup_hits = list({s["symbol"]: s for s in hit_target_signals}.values())
-    dedup_stops = list({s["symbol"]: s for s in stopped_out_signals}.values())
+    # Strictly filter hits so we ONLY alert if:
+    # 1. Signal exited TODAY (exit_date == cairo["date_str"])
+    # 2. Signal was opened within the valid swing lifecycle (<= 5 sessions)
+    recent_hits = [
+        s for s in hit_target_signals
+        if s.get("exit_date") == cairo["date_str"] and count_elapsed_sessions(s.get("entry_date", cairo["date_str"]), cairo["date_str"]) <= 5
+    ]
+    recent_stops = [
+        s for s in stopped_out_signals
+        if s.get("exit_date") == cairo["date_str"] and count_elapsed_sessions(s.get("entry_date", cairo["date_str"]), cairo["date_str"]) <= 5
+    ]
+
+    dedup_hits = list({s["symbol"]: s for s in recent_hits}.values())
+    dedup_stops = list({s["symbol"]: s for s in recent_stops}.values())
 
     if dedup_hits:
-        hit_lines = [
-            "🎯 <b>حصاد أهداف رادار التدفقات اللحظي — EGX BOTS VIP</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-        ]
-        for s in dedup_hits:
-            is_be = abs(float(s.get("return_pct", 0.0))) < 0.2
-            ret_str = f"+{s['return_pct']:.1f}%" if s['return_pct'] >= 0 else f"{s['return_pct']:.1f}%"
-            exit_price = float(s.get("exit_price") or s.get("target_1", 0.0))
-            entry_price = float(s.get("entry_price", 0.0))
-            peak_str = f"+{s.get('max_gain_pct', 0.0):.1f}%"
-            if is_be:
-                hit_lines.append(
-                    f"🛡️ <b>#{s['symbol']}</b> — <b>خروج آمن بتفعيل وقف التعادل (0.0%)</b>\n"
-                    f"   • سعر الدخول والخروج: <b>{entry_price:.2f} ج.م</b>\n"
-                    f"   • أعلى قمة وصلها السهم: <b>{peak_str}</b> (تم تأمين رأس المال بالكامل)"
-                )
+        hit_symbols = [s["symbol"] for s in dedup_hits]
+        allowed_hits, lock_hits_id = acquire_dispatch_slot(
+            chat_id=vip_channel,
+            date_str=cairo["date_str"],
+            symbols=hit_symbols,
+            category="target_hit",
+            cooldown_seconds=300,
+            force_bypass=force_dispatch
+        )
+        if allowed_hits:
+            hit_lines = [
+                "🎯 <b>حصاد أهداف رادار التدفقات اللحظي — EGX BOTS VIP</b>",
+                "━━━━━━━━━━━━━━━━━━━━",
+            ]
+            for s in dedup_hits:
+                is_be = abs(float(s.get("return_pct", 0.0))) < 0.2
+                ret_str = f"+{s['return_pct']:.1f}%" if s['return_pct'] >= 0 else f"{s['return_pct']:.1f}%"
+                exit_price = float(s.get("exit_price") or s.get("target_1", 0.0))
+                entry_price = float(s.get("entry_price", 0.0))
+                peak_str = f"+{s.get('max_gain_pct', 0.0):.1f}%"
+                if is_be:
+                    hit_lines.append(
+                        f"🛡️ <b>#{s['symbol']}</b> — <b>خروج آمن بتفعيل وقف التعادل (0.0%)</b>\n"
+                        f"   • سعر الدخول والخروج: <b>{entry_price:.2f} ج.م</b>\n"
+                        f"   • أعلى قمة وصلها السهم: <b>{peak_str}</b> (تم تأمين رأس المال بالكامل)"
+                    )
+                else:
+                    hit_lines.append(
+                        f"✅ <b>#{s['symbol']}</b> — <b>تحقق الهدف الأول بنجاح! 🎉</b>\n"
+                        f"   • سعر الدخول: <b>{entry_price:.2f} ج.م</b>  ←  الإغلاق: <b>{exit_price:.2f} ج.م</b>\n"
+                        f"   • العائد المحقق: <b>{ret_str}</b>  (أعلى قمة: <b>{peak_str}</b>)"
+                    )
+            hit_lines.append("━━━━━━━━━━━━━━━━━━━━")
+            hit_lines.append("💡 <i>إدارة المحفظة: متابعة المستهدفات الفنية وتأمين نقطة الدخول سر استدامة النمو.</i>")
+            hit_lines.append("📲 <a href=\"https://egxbots.com/scanner/backtests?tab=fast_scanner\">عرض الشارت التفاعلي للإشارات المغلقة بلوحة الرصد اللحظي</a>")
+            sent_hits_res = send_telegram_alert(vip_channel, "\n".join(hit_lines))
+            if sent_hits_res:
+                confirm_dispatch_slot(lock_hits_id, sent_hits_res if isinstance(sent_hits_res, int) else None)
             else:
-                hit_lines.append(
-                    f"✅ <b>#{s['symbol']}</b> — <b>تحقق الهدف الأول بنجاح! 🎉</b>\n"
-                    f"   • سعر الدخول: <b>{entry_price:.2f} ج.م</b>  ←  الإغلاق: <b>{exit_price:.2f} ج.م</b>\n"
-                    f"   • العائد المحقق: <b>{ret_str}</b>  (أعلى قمة: <b>{peak_str}</b>)"
-                )
-        hit_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        hit_lines.append("💡 <i>إدارة المحفظة: متابعة المستهدفات الفنية وتأمين نقطة الدخول سر استدامة النمو.</i>")
-        hit_lines.append("📲 <a href=\"https://egxbots.com/scanner/backtests?tab=fast_scanner\">عرض الشارت التفاعلي للإشارات المغلقة بلوحة الرصد اللحظي</a>")
-        send_telegram_alert(vip_channel, "\n".join(hit_lines))
+                release_dispatch_slot(lock_hits_id)
+        else:
+            logger.info(f"[SCANNER_PY] Target hit Telegram dispatch skipped by Supabase lock (symbols={hit_symbols})")
 
         # Social Proof for Free Channel
         winning_hits = [s for s in dedup_hits if float(s.get("return_pct", 0.0)) > 0]
@@ -661,23 +788,39 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
             send_telegram_alert(free_channel, "\n".join(free_lines))
 
     if dedup_stops:
-        sl_lines = [
-            "🛡️ <b>تقرير إدارة المخاطر وحماية السيولة — EGX BOTS VIP</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-        ]
-        for s in dedup_stops:
-            ret_str = f"{s['return_pct']:.1f}%"
-            exit_price = float(s.get("exit_price") or s.get("stop_loss", 0.0))
-            entry_price = float(s.get("entry_price", 0.0))
-            sl_lines.append(
-                f"🛑 <b>#{s['symbol']}</b> — <b>تفعيل وقف الخسارة الصارم</b>\n"
-                f"   • سعر الرصد: <b>{entry_price:.2f} ج.م</b>  ←  الإغلاق: <b>{exit_price:.2f} ج.م</b>\n"
-                f"   • صافي التراجع المحدود: <b>{ret_str}</b> (تحرير السيولة لفرصة أقوى)"
-            )
-        sl_lines.append("━━━━━━━━━━━━━━━━━━━━")
-        sl_lines.append("⚖️ <i>قاعدة ذهبية: قطع الخسارة مبكراً عند -2.5% / -3.0% يحمي المحفظة من أي تصحيح عنيف.</i>")
-        sl_lines.append("📲 <a href=\"https://egxbots.com/scanner/backtests?tab=fast_scanner\">مراجعة سجل الإشارات والشارت اللحظي بلوحة الرصد</a>")
-        send_telegram_alert(vip_channel, "\n".join(sl_lines))
+        stop_symbols = [s["symbol"] for s in dedup_stops]
+        allowed_stops, lock_stops_id = acquire_dispatch_slot(
+            chat_id=vip_channel,
+            date_str=cairo["date_str"],
+            symbols=stop_symbols,
+            category="stop_loss",
+            cooldown_seconds=300,
+            force_bypass=force_dispatch
+        )
+        if allowed_stops:
+            sl_lines = [
+                "🛡️ <b>تقرير إدارة المخاطر وحماية السيولة — EGX BOTS VIP</b>",
+                "━━━━━━━━━━━━━━━━━━━━",
+            ]
+            for s in dedup_stops:
+                ret_str = f"{s['return_pct']:.1f}%"
+                exit_price = float(s.get("exit_price") or s.get("stop_loss", 0.0))
+                entry_price = float(s.get("entry_price", 0.0))
+                sl_lines.append(
+                    f"🛑 <b>#{s['symbol']}</b> — <b>تفعيل وقف الخسارة الصارم</b>\n"
+                    f"   • سعر الرصد: <b>{entry_price:.2f} ج.م</b>  ←  الإغلاق: <b>{exit_price:.2f} ج.م</b>\n"
+                    f"   • صافي التراجع المحدود: <b>{ret_str}</b> (تحرير السيولة لفرصة أقوى)"
+                )
+            sl_lines.append("━━━━━━━━━━━━━━━━━━━━")
+            sl_lines.append("⚖️ <i>قاعدة ذهبية: قطع الخسارة مبكراً عند -2.5% / -3.0% يحمي المحفظة من أي تصحيح عنيف.</i>")
+            sl_lines.append("📲 <a href=\"https://egxbots.com/scanner/backtests?tab=fast_scanner\">مراجعة سجل الإشارات والشارت اللحظي بلوحة الرصد</a>")
+            sent_stops_res = send_telegram_alert(vip_channel, "\n".join(sl_lines))
+            if sent_stops_res:
+                confirm_dispatch_slot(lock_stops_id, sent_stops_res if isinstance(sent_stops_res, int) else None)
+            else:
+                release_dispatch_slot(lock_stops_id)
+        else:
+            logger.info(f"[SCANNER_PY] Stop loss Telegram dispatch skipped by Supabase lock (symbols={stop_symbols})")
 
     # Deduplicate active & closed signals
     active_by_sym = {s["symbol"]: s for s in still_active_signals}
@@ -780,16 +923,31 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         lines.append(f"🕒 <b>توقيت الرصد:</b> {cairo['time_str']} بتوقيت القاهرة")
         lines.append("📲 <a href=\"https://egxbots.com/scanner/backtests?tab=fast_scanner\">فتح شارت وإشارات الرصد اللحظي</a>")
 
-        text = "\n".join(lines)
-        if send_telegram_alert(vip_channel, text):
-            alerts_dispatched = 1
-            for s in final_vol + final_bo + final_os:
-                sym = s["symbol"]
-                sent_keys.add(f"{sym}:volume_surge")
-                sent_keys.add(f"{sym}:breakout")
-                sent_keys.add(f"{sym}:rsi_oversold")
+        batch_symbols = [s["symbol"] for s in final_vol + final_bo + final_os]
+        allowed_batch, lock_batch_id = acquire_dispatch_slot(
+            chat_id=vip_channel,
+            date_str=cairo["date_str"],
+            symbols=batch_symbols,
+            category="intraday_scan",
+            cooldown_seconds=300,
+            force_bypass=force_dispatch
+        )
+        if allowed_batch:
+            text = "\n".join(lines)
+            sent_batch_res = send_telegram_alert(vip_channel, text)
+            if sent_batch_res:
+                alerts_dispatched = 1
+                confirm_dispatch_slot(lock_batch_id, sent_batch_res if isinstance(sent_batch_res, int) else None)
+                for s in final_vol + final_bo + final_os:
+                    sym = s["symbol"]
+                    sent_keys.add(f"{sym}:volume_surge")
+                    sent_keys.add(f"{sym}:breakout")
+                    sent_keys.add(f"{sym}:rsi_oversold")
+            else:
+                release_dispatch_slot(lock_batch_id)
+                logger.warning("[SCANNER_PY] VIP alert dispatch failed; signals NOT marked as sent so next scan will retry.")
         else:
-            logger.warning("[SCANNER_PY] VIP alert dispatch failed; signals NOT marked as sent so next scan will retry.")
+            logger.info(f"[SCANNER_PY] Intraday radar dispatch skipped by Supabase lock (symbols={batch_symbols})")
 
     # Update config and bot_states
     sent_today["sent_keys"] = list(sent_keys)[-200:]

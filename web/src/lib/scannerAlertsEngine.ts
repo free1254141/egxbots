@@ -1,4 +1,5 @@
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
+import crypto from "crypto";
 import {
   calculateScannerTradePlan,
   formatTelegramTradePlanSnippet,
@@ -217,6 +218,159 @@ export async function sendTelegramAlert(chatId: string | number, text: string): 
     }
   }
   return false;
+}
+
+function countTradingDaysBetween(entryDate?: string, currentDate?: string): number {
+  if (!entryDate || !currentDate) return 1;
+  try {
+    const startMs = Date.parse(`${entryDate}T00:00:00Z`);
+    const endMs = Date.parse(`${currentDate}T00:00:00Z`);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+      let count = 0;
+      let cur = new Date(startMs);
+      const end = new Date(endMs);
+      while (cur <= end) {
+        const d = cur.getUTCDay();
+        if (d >= 0 && d <= 4) count++;
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      return Math.max(1, count);
+    }
+  } catch {}
+  return 1;
+}
+
+export async function sendTelegramAlertWithReceipt(chatId: string | number, text: string): Promise<{ ok: boolean; messageId?: number }> {
+  const token = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
+  if (!token || !chatId) {
+    console.warn(`[SCANNER_ALERTS] Missing bot token or chatId: token=${Boolean(token)}, chatId=${chatId}`);
+    return { ok: false };
+  }
+
+  let targetChatId: string | number = chatId;
+  let targetThreadId: number | undefined = undefined;
+  if (typeof chatId === "string" && !chatId.startsWith("@") && chatId.includes("_")) {
+    const [c, t] = chatId.split("_", 2);
+    targetChatId = c;
+    if (t && !isNaN(Number(t))) {
+      targetThreadId = Number(t);
+    }
+  }
+
+  const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+  const payload: any = {
+    chat_id: targetChatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+  };
+  if (targetThreadId !== undefined) {
+    payload.message_thread_id = targetThreadId;
+  }
+
+  for (const base of [relayUrl, "https://api.telegram.org"]) {
+    try {
+      const res = await fetch(`${base}/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) {
+        return { ok: true, messageId: data.result?.message_id };
+      }
+      const desc = String(data?.description || "").toLowerCase();
+      if (desc.includes("can't parse") || desc.includes("parse_mode") || desc.includes("entities")) {
+        const fallbackPayload: any = { ...payload, text: text.replace(/<[^>]+>/g, "") };
+        delete fallbackPayload.parse_mode;
+        const retryRes = await fetch(`${base}/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fallbackPayload),
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+        const retryData = await retryRes.json().catch(() => ({}));
+        if (retryRes.ok && retryData?.ok) {
+          return { ok: true, messageId: retryData.result?.message_id };
+        }
+      }
+      if (base === relayUrl) continue;
+    } catch (err: any) {
+      if (base === relayUrl) continue;
+    }
+  }
+  return { ok: false };
+}
+
+async function acquireDispatchSlot(
+  client: any,
+  chatId: string | number,
+  dateStr: string,
+  symbols: string[],
+  category: string = "intraday_scan",
+  cooldownSeconds: number = 300,
+  forceBypass: boolean = false
+): Promise<{ allowed: boolean; dispatchId?: string }> {
+  if (forceBypass) return { allowed: true };
+  try {
+    const cleanChat = String(chatId).trim().split("_")[0];
+    const sortedSyms = Array.from(new Set(symbols.map((s) => s.toUpperCase()))).sort();
+    const batchRaw = `${cleanChat}_${dateStr}_${category}_${sortedSyms.join(",")}`;
+    const batchHash = crypto.createHash("sha256").update(batchRaw).digest("hex").slice(0, 16);
+    const serviceClient = client || getSupabaseServiceClient();
+    const { data, error } = await serviceClient.rpc("acquire_scanner_dispatch_lock", {
+      p_chat_id: cleanChat,
+      p_date: dateStr,
+      p_batch_hash: batchHash,
+      p_symbols: sortedSyms,
+      p_category: category,
+      p_worker: "vercel",
+      p_cooldown_seconds: cooldownSeconds,
+    });
+    if (error) {
+      console.warn("[SCANNER_LOCK_TS] acquire_scanner_dispatch_lock error:", error);
+      return { allowed: true };
+    }
+    if (data && typeof data === "object") {
+      if (data.allowed === true) {
+        return { allowed: true, dispatchId: data.dispatch_id };
+      } else {
+        console.info(`[SCANNER_LOCK_TS] Blocked duplicate dispatch: ${data.reason} (${category}: ${sortedSyms.join(",")})`);
+        return { allowed: false };
+      }
+    }
+  } catch (err) {
+    console.warn("[SCANNER_LOCK_TS] acquireDispatchSlot exception:", err);
+  }
+  return { allowed: true };
+}
+
+async function confirmDispatchSlot(client: any, dispatchId?: string, messageId?: number) {
+  if (!dispatchId) return;
+  try {
+    const serviceClient = client || getSupabaseServiceClient();
+    await serviceClient.rpc("confirm_scanner_dispatch", {
+      p_dispatch_id: dispatchId,
+      p_message_id: messageId || null,
+    });
+  } catch (err) {
+    console.warn("[SCANNER_LOCK_TS] confirmDispatchSlot error:", err);
+  }
+}
+
+async function releaseDispatchSlot(client: any, dispatchId?: string) {
+  if (!dispatchId) return;
+  try {
+    const serviceClient = client || getSupabaseServiceClient();
+    await serviceClient.rpc("delete_pending_dispatch", {
+      p_dispatch_id: dispatchId,
+    });
+  } catch (err) {
+    console.warn("[SCANNER_LOCK_TS] releaseDispatchSlot error:", err);
+  }
 }
 
 export interface RunScannerOptions {
@@ -604,9 +758,28 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     lines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">فتح الشارت التفاعلي (15 دقيقة) ولوحة إشارات الرصد اللحظي</a>`);
 
     const text = lines.join("\n");
+    const batchSymbols = [...freshVolume, ...freshBreakout, ...freshOversold].map((s) => s.symbol);
     for (const chatId of targetChatIds) {
-      const sent = await sendTelegramAlert(chatId, text);
-      if (sent) alertsDispatchedCount++;
+      const { allowed, dispatchId } = await acquireDispatchSlot(
+        serviceClient,
+        chatId,
+        cairoTime.dateStr,
+        batchSymbols,
+        "intraday_scan",
+        300,
+        options.forceDispatch
+      );
+      if (!allowed) {
+        console.info(`[SCANNER_TS] Skipping intraday scan dispatch for ${chatId} due to Supabase dispatch lock`);
+        continue;
+      }
+      const res = await sendTelegramAlertWithReceipt(chatId, text);
+      if (res.ok) {
+        alertsDispatchedCount++;
+        await confirmDispatchSlot(serviceClient, dispatchId, res.messageId);
+      } else {
+        await releaseDispatchSlot(serviceClient, dispatchId);
+      }
     }
 
     if (alertsDispatchedCount > 0) {
@@ -864,10 +1037,31 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     new Map(stoppedOutSignals.map((s) => [s.symbol, s])).values()
   );
 
+  // Filter out any stale signals - only alert on exits that occurred TODAY within valid swing window (<= 5 sessions)
+  const recentHits = dedupHitSignals.filter(
+    (s) => s.exit_date === cairoTime.dateStr && countTradingDaysBetween(s.entry_date, cairoTime.dateStr) <= 5
+  );
+  const recentStops = dedupStoppedSignals.filter(
+    (s) => s.exit_date === cairoTime.dateStr && countTradingDaysBetween(s.entry_date, cairoTime.dateStr) <= 5
+  );
+
   // Send Telegram follow-up alerts for target hit or stopped out (VIP Channel)
-  if ((dedupHitSignals.length > 0 || dedupStoppedSignals.length > 0) && targetChatIds.length > 0) {
+  if ((recentHits.length > 0 || recentStops.length > 0) && targetChatIds.length > 0) {
     for (const chatId of targetChatIds) {
-      if (dedupHitSignals.length > 0) {
+      if (recentHits.length > 0) {
+        const hitSymbols = recentHits.map((s) => s.symbol);
+        const { allowed, dispatchId } = await acquireDispatchSlot(
+          serviceClient,
+          chatId,
+          cairoTime.dateStr,
+          hitSymbols,
+          "target_hit",
+          300,
+          options.forceDispatch
+        );
+        if (!allowed) {
+          console.info(`[SCANNER_TS] Skipping target_hit dispatch for ${chatId} due to Supabase lock`);
+        } else {
         const hitLines: string[] = [
           `🎯 <b>حصاد أهداف رادار التدفقات اللحظي — EGX BOTS VIP</b>`,
           `━━━━━━━━━━━━━━━━━━━━`,
@@ -894,7 +1088,13 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         hitLines.push(`━━━━━━━━━━━━━━━━━━━━`);
         hitLines.push(`💡 <i>إدارة المحفظة: متابعة المستهدفات الفنية وتأمين نقطة الدخول سر استدامة النمو.</i>`);
         hitLines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">عرض الشارت التفاعلي للإشارات المغلقة بلوحة الرصد اللحظي</a>`);
-        await sendTelegramAlert(chatId, hitLines.join("\n"));
+        const hitRes = await sendTelegramAlertWithReceipt(chatId, hitLines.join("\n"));
+        if (hitRes.ok) {
+          await confirmDispatchSlot(serviceClient, dispatchId, hitRes.messageId);
+        } else {
+          await releaseDispatchSlot(serviceClient, dispatchId);
+        }
+        }
 
         // Dispatch winning target hits to the Free channel as Social Proof / Subscription Hook
         const winningHits = dedupHitSignals.filter((s) => Number(s.return_pct || 0) > 0);
@@ -922,7 +1122,20 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         }
       }
 
-      if (dedupStoppedSignals.length > 0) {
+      if (recentStops.length > 0) {
+        const stopSymbols = recentStops.map((s) => s.symbol);
+        const { allowed: slAllowed, dispatchId: slDispatchId } = await acquireDispatchSlot(
+          serviceClient,
+          chatId,
+          cairoTime.dateStr,
+          stopSymbols,
+          "stop_loss",
+          300,
+          options.forceDispatch
+        );
+        if (!slAllowed) {
+          console.info(`[SCANNER_TS] Skipping stop_loss dispatch for ${chatId} due to Supabase lock`);
+        } else {
         const slLines: string[] = [
           `🛡️ <b>تقرير إدارة المخاطر وحماية السيولة — EGX BOTS VIP</b>`,
           `━━━━━━━━━━━━━━━━━━━━`,
@@ -939,7 +1152,13 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
         slLines.push(`━━━━━━━━━━━━━━━━━━━━`);
         slLines.push(`⚖️ <i>قاعدة ذهبية: قطع الخسارة مبكراً عند -2.5% / -3.0% يحمي المحفظة من أي تصحيح عنيف.</i>`);
         slLines.push(`📲 <a href="https://egxbots.com/scanner/backtests?tab=fast_scanner">مراجعة سجل الإشارات والشارت اللحظي بلوحة الرصد</a>`);
-        await sendTelegramAlert(chatId, slLines.join("\n"));
+        const slRes = await sendTelegramAlertWithReceipt(chatId, slLines.join("\n"));
+        if (slRes.ok) {
+          await confirmDispatchSlot(serviceClient, slDispatchId, slRes.messageId);
+        } else {
+          await releaseDispatchSlot(serviceClient, slDispatchId);
+        }
+        }
       }
     }
   }
