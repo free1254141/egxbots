@@ -33,6 +33,23 @@ function isAuthorizedRequest(req: NextRequest): boolean {
     return Boolean(isLocal || (expectedKey && adminKey && adminKey === expectedKey));
 }
 
+function isTopicRecommendationsQuery(message: string): boolean {
+    const raw = (message || "").trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase().replace(/[@/]/g, "").trim();
+    if (lower === "recs" || lower === "recommendations" || lower === "signals" || lower === "daily") {
+        return true;
+    }
+    const norm = normalizeArabicIntent(raw);
+    const hasRecKw =
+        /(?:توصي[اهت]|توصياتك|فرص\s*(?:الشراء|اليوم|السوق|المتاح[اه])|اشار[اه]ت?\s*(?:الشراء|الدخول)|(?:اسهم|الاسهم)\s*(?:المرشح[اه]|المقترح[اه])\s*(?:للشراء)?|اشتري\s*ايه|انصحني\s*اشتري|رشحلي\s*سهم|افضل\s*سهم\s*للشراء)/.test(norm) ||
+        /\b(?:recs?|recommendations?|buy\s*signals?)\b/i.test(raw);
+    if (!hasRecKw) return false;
+    const symbols = extractExplicitSymbols(raw);
+    if (symbols.length > 0) return false;
+    return true;
+}
+
 function deterministicSessionUuid(seed: string): string {
     let h1 = 0xdeadbeef ^ seed.length;
     let h2 = 0x41c6ce57 ^ seed.length;
@@ -319,6 +336,33 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ ok: false, error: "Message is required" }, { status: 400 });
         }
 
+        const chatSource = body.chat_source === "telegram_private" ? "telegram_private" : "telegram_topic";
+
+        // Restriction: Public Telegram topic (Artoro topic in free group) must NEVER return open recommendations
+        if (chatSource === "telegram_topic" && isTopicRecommendationsQuery(rawMessage)) {
+            return NextResponse.json({
+                ok: true,
+                reply:
+                    "🔒 **توصيات الشراء اللحظية حصرية لمشتركي PRO في الشات الخاص أو الموقع!**\n\n" +
+                    "حفاظاً على سرية وعدالة إشارات التداول لجميع المشتركين، **لا تُعرض توصيات الشراء المفتوحة في هذه الغرفة العامة**.\n\n" +
+                    "📌 **للحصول على توصيات الشراء اللحظية فور صدورها:**\n" +
+                    "1️⃣ **تحدث مع أرتورو في شات خاص بخصوصية تامة:**\n" +
+                    "راسل البوت مباشرةً: [@egxbots_bot](https://t.me/egxbots_bot?start=artoro_chat)\n\n" +
+                    "2️⃣ **أو عبر ماسح الذكاء الاصطناعي على الموقع:**\n" +
+                    "[egxbots.com/scanner/ai](https://egxbots.com/scanner/ai)\n\n" +
+                    "💎 *إذا كنت مشتركاً في باقة PRO، افتح الشات الخاص مع البوت وستظهر لك كافة التوصيات المفتوحة فوراً وبسرية كاملة.*",
+                tables: [],
+                tools: { results: [], formattedText: "" },
+                linked: Boolean(userInfo.linkedUserId),
+                display_name: userInfo.displayName,
+                is_pro: userInfo.isPro,
+                used: userInfo.used,
+                limit: userInfo.limit,
+                remaining: userInfo.remaining,
+                period: userInfo.period,
+            });
+        }
+
         // Check portfolio tool requirement for unlinked users (requires linking account to read user's positions)
         if (!userInfo.linkedUserId && detectPortfolioIntent(rawMessage)) {
             return NextResponse.json(
@@ -449,7 +493,6 @@ export async function POST(req: NextRequest) {
 
         const deepSeekKey = getDeepSeekApiKey();
         const apiKeys = [...getNvidiaApiKeys(), ...(deepSeekKey ? [deepSeekKey] : [])];
-        const chatSource = body.chat_source === "telegram_private" ? "telegram_private" : "telegram_topic";
         const effectiveUserId = userInfo.linkedUserId || `tg_${telegramUserId}`;
         const auditUserId = userInfo.linkedUserId || deterministicSessionUuid(`tg-user-${telegramUserId}`);
         const sessionId = deterministicSessionUuid(`tg-${chatSource}-${auditUserId}`);

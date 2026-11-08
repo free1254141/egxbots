@@ -164,6 +164,59 @@ def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
     return ("free", cleaned)
 
 
+def is_topic_recommendation_query(text: str) -> bool:
+    """
+    Check if a message in the public group topic is requesting open recommendations / buy signals.
+    Returns True if user asks for open recommendations, buy opportunities, or signals across the market.
+    Returns False if user is asking about a specific stock (e.g. "حلل فوري وتوصيتك عليه").
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+
+    norm = _norm_ar(raw)
+
+    # 1. Direct commands / English keywords
+    cleaned_lower = raw.lower().split("@")[0].strip()
+    if cleaned_lower in ("/recs", "recs", "/recommendations", "recommendations", "/signals", "signals", "/daily", "daily"):
+        return True
+
+    # 2. General recommendation patterns (Arabic)
+    has_rec_kw = bool(re.search(
+        r"(?:توصي[اهت]|توصياتك|فرص\s*(?:الشراء|اليوم|السوق|المتاح[اه])|اشار[اه]ت?\s*(?:الشراء|الدخول)|"
+        r"(?:اسهم|الاسهم)\s*(?:المرشح[اه]|المقترح[اه])\s*(?:للشراء)?|"
+        r"اشتري\s*ايه|انصحني\s*اشتري|رشحلي\s*سهم|افضل\s*سهم\s*للشراء)",
+        norm
+    ))
+
+    if not has_rec_kw:
+        if re.search(r"\b(?:recs?|recommendations?|buy\s*signals?)\b", raw, flags=re.IGNORECASE):
+            has_rec_kw = True
+
+    if not has_rec_kw:
+        return False
+
+    # 3. If text contains recommendation keywords, check whether it is asking about a SPECIFIC stock:
+    # Check for known Latin ticker in query
+    latin_words = [w.upper() for w in re.findall(r"\b[A-Za-z]{2,6}\b", raw)]
+    excluded_latin = {"EGX", "AI", "PRO", "BOT", "ARTORO", "RECS", "DAILY", "BUY", "SELL", "HOLD", "TODAY", "SCAN", "NEWS", "FREE", "VIP"}
+    potential_tickers = [w for w in latin_words if w not in excluded_latin]
+    if potential_tickers:
+        if re.search(r"(?:في|سهم|حلل|رايك|رايك\s*في)\s*[A-Za-z]{2,6}", raw, flags=re.IGNORECASE):
+            return False
+
+    # Check for specific Arabic stock names
+    for stock_name in _get_normalized_arabic_stock_names():
+        if len(stock_name) >= 3 and stock_name in norm:
+            pattern = rf"(?:حلل|تحليل|رايك\s*في|توصيتك\s*في|وضع\s*سهم)\s*(?:سهم\s*)?(?:و|ف|ب|ل|ك|ال)?{re.escape(stock_name)}"
+            if re.search(pattern, norm):
+                return False
+            if re.search(rf"سهم\s*(?:و|ف|ب|ل|ك|ال)?{re.escape(stock_name)}", norm):
+                return False
+
+    return True
+
+
 def get_vip_group_id() -> str:
     raw = os.getenv("TELEGRAM_VIP_CHAT_ID", DEFAULT_VIP_GROUP_ID).strip()
     if "_" in raw:
@@ -208,6 +261,11 @@ def _topic_url() -> str:
 
 def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
     """Sleek interactive Inline Keyboard for summoning ARTORO and running quick tools."""
+    recs_button = (
+        {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"}
+        if is_private
+        else {"text": "🔒 التوصيات (خاص/الموقع)", "callback_data": "vip_tool_recs"}
+    )
     rows: List[List[Dict[str, Any]]] = [
         [
             {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
@@ -220,7 +278,7 @@ def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
         ],
         [
             {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
-            {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"},
+            recs_button,
             {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
         ],
         [
@@ -316,12 +374,56 @@ PRICING_FEATURES_ALERT_TEXT = (
     "🔥 عرض المؤسسين: 100 ج.م/شهر (15 يوم فقط)!"
 )
 
+TOPIC_RECS_RESTRICTED_ALERT_TEXT = (
+    "🔒 توصيات الشراء اللحظية حصرية لمشتركي PRO وتظهر فقط في الشات الخاص أو على الموقع."
+)
+
 ACCOUNT_LINK_ALERT_TEXT = (
     "🔗 لتحليل محفظتك الاستثمارية أو مزامنة اشتراكك:\n"
     "١. افتح صفحة البروفايل في الموقع (egxbots.com/profile)\n"
     "٢. اضغط على زر ربط التليجرام (Connect Telegram Bot)\n"
     "٣. ستتم مزامنة محفظتك وباقتك تلقائياً!"
 )
+
+
+def build_topic_recs_restricted_html(user_name: str, tg_user_id: int) -> str:
+    """Card explaining that open recommendations are exclusive to PRO in private DM or on the website."""
+    safe_name = html.escape(user_name or "المستثمر")
+    return (
+        f"🔒 <b>توصيات الشراء اللحظية حصرية لمشتركي PRO في الشات الخاص أو الموقع!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"عفواً يا <a href=\"tg://user?id={tg_user_id}\">{safe_name}</a>:\n"
+        f"حفاظاً على سرية وعدالة إشارات التداول لجميع المشتركين، <b>لا تُعرض توصيات الشراء المفتوحة في هذه الغرفة العامة</b>.\n\n"
+        f"📌 <b>للحصول على توصيات الشراء اللحظية فور صدورها:</b>\n"
+        f"1️⃣ <b>تحدث مع أرتورو في شات خاص بخصوصية تامة:</b>\n"
+        f"راسل البوت مباشرةً: <a href=\"https://t.me/egxbots_bot?start=artoro_chat\">@egxbots_bot</a>\n\n"
+        f"2️⃣ <b>أو عبر ماسح الذكاء الاصطناعي على الموقع:</b>\n"
+        f"<a href=\"https://egxbots.com/scanner/ai\">egxbots.com/scanner/ai</a>\n\n"
+        f"💎 <i>إذا كنت مشتركاً في باقة PRO، افتح الشات الخاص مع البوت وستظهر لك كافة التوصيات المفتوحة فوراً وبسرية كاملة.</i>"
+    )
+
+
+def build_topic_recs_restricted_keyboard() -> Dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🔒 فتح الشات الخاص مع أرتورو (@egxbots_bot)",
+                    "url": _private_bot_url(),
+                }
+            ],
+            [
+                {
+                    "text": "🌐 التوصيات اللحظية على الموقع",
+                    "url": "https://egxbots.com/scanner/ai",
+                },
+                {
+                    "text": "💎 باقة PRO والتسعير (100 ج.م)",
+                    "url": _pricing_url(),
+                },
+            ],
+        ]
+    }
 
 
 def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = None) -> str:
@@ -350,12 +452,14 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
         "يعمل أرتورو هنا بنفس محرك الموقع الذكي مع حفظ سياق محادثتك وأدوات التحليل اللحظية.\n\n"
         "💬 <b>كيف تستخدم أرتورو في هذه الغرفة؟</b>\n"
         "• <b>اكتب مباشرةً:</b> اكتب اسم أي سهم أو سؤالك مباشرة في الرسائل (مثل: <code>فوري</code> أو <code>حلل عتاقة</code> أو أي سؤال فني/مالي) وسيرد عليك أرتورو فوراً!\n"
-        "• <b>أو استخدم الأزرار السريعة بالأسفل:</b> لتحليل سهم، مقارنة سهمين، ملخص السوق، أسهم التجميع، المسح الفني، التوصيات المفتوحة، وتحليل محفظتك بضغطة واحدة.\n\n"
+        "• <b>أو استخدم الأزرار السريعة بالأسفل:</b> لتحليل سهم، مقارنة سهمين، ملخص السوق، أسهم التجميع، والمسح الفني بضغطة واحدة.\n\n"
+        "🔒 <b>توصيات الشراء اللحظية (PRO):</b>\n"
+        "• <i>حفاظاً على سرية وعدالة التوصيات لجميع المشتركين، توصيات الشراء اللحظية تظهر حصرياً لمشتركي PRO في الشات الخاص أو على الموقع.</i>\n\n"
         "🔒 <b>تفضل الخصوصية الكاملة؟ (شات خاص 1-on-1):</b>\n"
         "• إذا كنت لا ترغب في كتابة أسهمك أو محفظتك في الشات العام، اضغط على زر <b>«🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)»</b> بالأسفل أو راسل البوت <a href=\"https://t.me/egxbots_bot?start=artoro_chat\">@egxbots_bot</a> مباشرة للتحدث معه على انفراد وبخصوصية تامة!\n\n"
         "🎫 <b>نظام الباقات والرصيد:</b>\n"
         "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
-        "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 10 أسهم بمحفظتك.\n\n"
+        "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية (في الخاص والموقع) + متابعة 10 أسهم بمحفظتك.\n\n"
         "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل أو افتح الشات الخاص:</b>"
     )
 
@@ -1163,6 +1267,58 @@ def _show_limit_or_upgrade_dialog(
         )
 
 
+def _show_topic_recs_restricted_dialog(
+    bot_token: str,
+    chat_id: Any,
+    thread_id: Optional[int],
+    tg_user_id: int,
+    user_name: str,
+    callback_query_id: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None,
+) -> None:
+    """
+    In the public group topic, open recommendations are restricted to protect privacy & fairness.
+    1. If triggered by button (callback_query_id), answers with native modal alert.
+    2. Tries to send details to user's Private DM first.
+    3. If DM fails (or triggered by text in topic), replies in the group topic.
+    """
+    if callback_query_id:
+        answer_vip_callback(
+            bot_token=bot_token,
+            callback_query_id=callback_query_id,
+            text=TOPIC_RECS_RESTRICTED_ALERT_TEXT,
+            show_alert=True,
+        )
+
+    text_html = build_topic_recs_restricted_html(user_name=user_name, tg_user_id=tg_user_id)
+    keyboard = build_topic_recs_restricted_keyboard()
+
+    dm_sent = False
+    if tg_user_id and str(chat_id) != str(tg_user_id) and callback_query_id:
+        dm_res = _call_telegram_api(
+            bot_token,
+            "sendMessage",
+            {
+                "chat_id": tg_user_id,
+                "text": text_html,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": keyboard,
+            },
+        )
+        dm_sent = bool(dm_res.get("ok"))
+
+    if not dm_sent:
+        send_vip_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=text_html,
+            message_thread_id=thread_id,
+            reply_to_message_id=reply_to_message_id,
+            reply_markup=keyboard,
+        )
+
+
 _VIP_WORKER_SLOTS = threading.BoundedSemaphore(int(os.getenv("TELEGRAM_VIP_MAX_CONCURRENCY", "8") or 8))
 
 
@@ -1521,6 +1677,18 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             "vip_tool_portfolio": "حلل محفظتي الاستثمارية بالتفصيل",
         }
         if cb_data in tool_queries:
+            # In the public group topic, open recommendations are restricted completely
+            if cb_data == "vip_tool_recs" and not is_private:
+                _show_topic_recs_restricted_dialog(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    tg_user_id=tg_user_id,
+                    user_name=user_name,
+                    callback_query_id=cb_id,
+                )
+                return True
+
             query_text = tool_queries[cb_data]
             # Use fast in-memory quota cache when available so button clicks respond in 0ms!
             cached_q = _get_cached_user_quota(tg_user_id)
@@ -1730,6 +1898,18 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
 
     cleaned_input = text.strip()
     query_text = cleaned_input
+
+    # In the public group topic (not is_private), open recommendations are restricted completely!
+    if not is_private and is_topic_recommendation_query(cleaned_input):
+        _show_topic_recs_restricted_dialog(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            tg_user_id=tg_user_id,
+            user_name=user_name,
+            reply_to_message_id=msg_id,
+        )
+        return True
 
     if pending_mode == "stock":
         if not re.search(r"(?:حلل|تحليل|سعر|رايك|رأيك|مستويات|اخبار|أخبار)", cleaned_input):

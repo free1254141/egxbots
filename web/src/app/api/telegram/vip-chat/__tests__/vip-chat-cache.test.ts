@@ -203,4 +203,25 @@ describe("VIP Chat Route Demand-Driven Cache & Smart Tool Bypass", () => {
         expect(data2.cached).toBe(false);
         expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 2);
     });
+
+    test("recommendations query in public telegram topic is blocked and returns redirect notice", async () => {
+        const { runPipeline } = require("@/lib/ai/pipeline");
+        const callCountBefore = runPipeline.mock.calls.length;
+
+        const req = makeRequest({
+            action: "chat",
+            telegram_user_id: 88888888,
+            telegram_username: "topic_member",
+            message: "هات كل التوصيات المفتوحة اليوم",
+            chat_source: "telegram_topic",
+        });
+        const res = await POST(req);
+        const data = await res.json();
+        expect(data.ok).toBe(true);
+        expect(data.reply).toContain("توصيات الشراء اللحظية حصرية لمشتركي PRO");
+        expect(data.reply).toContain("@egxbots_bot");
+        expect(data.reply).toContain("egxbots.com/scanner/ai");
+        // Pipeline was never called!
+        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore);
+    });
 });

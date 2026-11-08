@@ -665,3 +665,132 @@ def test_telegram_formatter_blockquotes_and_headers():
     assert "──────────────────" in formatted
 
 
+
+
+def test_topic_recommendation_query_detection():
+    """Test that general recommendation queries are accurately detected and isolated from single stock queries."""
+    from api.telegram_vip_chat import is_topic_recommendation_query
+
+    # General recommendation queries -> Must be True (blocked in topic)
+    assert is_topic_recommendation_query("توصيات اليوم") is True
+    assert is_topic_recommendation_query("هات كل التوصيات المفتوحة حالياً") is True
+    assert is_topic_recommendation_query("في توصيات النهارده؟") is True
+    assert is_topic_recommendation_query("توصيات") is True
+    assert is_topic_recommendation_query("عايز توصيات شراء") is True
+    assert is_topic_recommendation_query("فرص الشراء المتاحة") is True
+    assert is_topic_recommendation_query("إشارات الدخول اليوم") is True
+    assert is_topic_recommendation_query("اشارات الشراء") is True
+    assert is_topic_recommendation_query("اشتري ايه النهارده") is True
+    assert is_topic_recommendation_query("رشحلي سهم اشتريه") is True
+    assert is_topic_recommendation_query("الأسهم المرشحة للشراء") is True
+    assert is_topic_recommendation_query("/recs") is True
+    assert is_topic_recommendation_query("recs") is True
+    assert is_topic_recommendation_query("signals") is True
+
+    # Single stock queries with recommendation wording -> Must be False (allowed in topic for analysis)
+    assert is_topic_recommendation_query("حلل سهم فوري وتوصيتك عليه") is False
+    assert is_topic_recommendation_query("توصيتك في AMOC") is False
+    assert is_topic_recommendation_query("رأيك وتوصيتك في حديد عز") is False
+    assert is_topic_recommendation_query("سهم طلعت مصطفى وتوصيتك") is False
+    assert is_topic_recommendation_query("حلل سهم بلتون") is False
+    assert is_topic_recommendation_query("ملخص السوق وأقوى الأسهم") is False
+
+
+def test_topic_recommendations_button_blocked_in_group_topic():
+    """Clicking recommendation button in public topic must never leak recommendations to the group."""
+    from api.telegram_vip_chat import handle_vip_chat_update
+
+    calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 999}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        return {"ok": True, "is_pro": True, "remaining": 100, "limit": 350}
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        cb_data = {
+            "callback_query": {
+                "id": "cb_recs_topic",
+                "data": "vip_tool_recs",
+                "from": {"id": 123456, "first_name": "Ahmed"},
+                "message": {
+                    "message_id": 40,
+                    "chat": {"id": -1002083067817, "type": "supergroup"},
+                    "message_thread_id": 1680,
+                },
+            }
+        }
+        res = handle_vip_chat_update(cb_data, "TEST_TOKEN")
+        assert res is True
+
+        # Pipeline was NOT called to execute recommendations into group
+        chat_web_calls = [c for c in web_calls if c.get("action") == "chat"]
+        assert len(chat_web_calls) == 0
+
+        # Answered callback with restriction alert
+        alert_calls = [p for m, p in calls if m == "answerCallbackQuery"]
+        assert len(alert_calls) == 1
+        assert alert_calls[0]["show_alert"] is True
+        assert "PRO" in alert_calls[0]["text"]
+        assert "الخاص" in alert_calls[0]["text"]
+
+
+def test_topic_recommendations_text_query_blocked_in_group_topic():
+    """Typing open recommendation queries in public topic must NOT execute pipeline into the group."""
+    from api.telegram_vip_chat import handle_vip_chat_update
+
+    calls = []
+    web_calls = []
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        calls.append((method, payload))
+        return {"ok": True, "result": {"message_id": 888}}
+
+    def fake_web_api(payload, timeout=75):
+        web_calls.append(payload)
+        return {"ok": True, "is_pro": True, "remaining": 100, "limit": 350}
+
+    with patch("api.telegram_vip_chat._call_telegram_api", side_effect=fake_tg_api), patch(
+        "api.telegram_vip_chat.call_web_vip_chat_api", side_effect=fake_web_api
+    ):
+        msg_data = {
+            "message": {
+                "message_id": 55,
+                "chat": {"id": -1002083067817, "type": "supergroup"},
+                "message_thread_id": 1680,
+                "from": {"id": 123456, "first_name": "Ahmed"},
+                "text": "هات التوصيات المفتوحة اليوم",
+            }
+        }
+        res = handle_vip_chat_update(msg_data, "TEST_TOKEN")
+        assert res is True
+
+        # Zero chat pipeline executions
+        chat_web_calls = [c for c in web_calls if c.get("action") == "chat"]
+        assert len(chat_web_calls) == 0
+
+        # Sent restriction notice into the topic
+        msg_calls = [p for m, p in calls if m == "sendMessage"]
+        assert len(msg_calls) >= 1
+        assert "توصيات الشراء اللحظية حصرية لمشتركي PRO" in msg_calls[0]["text"]
+        assert "@egxbots_bot" in msg_calls[0]["text"]
+        assert "egxbots.com/scanner/ai" in msg_calls[0]["text"]
+
+
+def test_topic_keyboard_shows_restricted_label():
+    """Public topic keyboard must display the restricted label pointing to private/web."""
+    from api.telegram_vip_chat import build_vip_chat_keyboard
+
+    kb_topic = build_vip_chat_keyboard(is_private=False)
+    all_buttons = [btn["text"] for row in kb_topic["inline_keyboard"] for btn in row]
+    assert any("🔒 التوصيات (خاص/الموقع)" in b for b in all_buttons)
+
+    kb_private = build_vip_chat_keyboard(is_private=True)
+    all_private = [btn["text"] for row in kb_private["inline_keyboard"] for btn in row]
+    assert any("🎯 التوصيات المفتوحة (PRO)" in b for b in all_private)
