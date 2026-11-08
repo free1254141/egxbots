@@ -28,6 +28,7 @@ const CACHEABLE_TOOLS = new Set([
   "get_sharia_cleanser",
   "get_price_traps",
   "screen_stocks",
+  "get_disclosures",
 ]);
 
 const ENABLED =

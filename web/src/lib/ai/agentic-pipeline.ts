@@ -103,6 +103,31 @@ export const AGENTIC_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "get_disclosures",
+            "description": "جلب أحدث إفصاحات البورصة المصرية المخزنة (تعاملات الداخليين، تغيير حصص كبار المساهمين، المادة 30، قرارات مجالس الإدارة) مع التحليل المالي الذكي ومعناها للمتداول. استدعها عندما يسأل المستخدم عن إفصاحات سهم معين أو تعاملات المطلعين (مين اشترى ومين باع) أو قرارات الجمعيات وهيكل الملكية.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "كود السهم اختياري مثل FWRY أو SCCD أو PRMH لجلب إفصاحاته، أو اتركه فارغاً لجلب أحدث إفصاحات السوق عموماً"
+                    },
+                    "disclosure_type": {
+                        "type": "string",
+                        "enum": ["all", "insider_trading", "major_shareholders", "board_resolution", "material_event"],
+                        "description": "نوع الإفصاح المطلوب"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "الحد الأقصى لعدد الإفصاحات (الافتراضي 10)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_stock",
             "description": "آخر سعر يومي مخزن مؤرخ ومؤشرات وأسماء الشركات وحالة التوافق مع الشريعة الإسلامية ومؤشر EGX33 من الدليل. صف اليوم الحالي لقطة جلسة دون تأكيد إغلاق نهائي، واتبع price_type. استخدم لكل سهم مطلوب ولتحديث بيانات متابعة ناقصة.",
             "parameters": {

@@ -176,7 +176,7 @@ const nextConfig = {
       },
       {
         // Public market overview and directories
-        source: '/(fair-value|sharia|scanner/technical)',
+        source: '/(fair-value|sharia|disclosures|scanner/technical)',
         headers: [
           {
             key: 'Cache-Control',

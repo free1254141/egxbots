@@ -1966,6 +1966,36 @@ export async function executeStructuredTools(
         }
     }
 
+    // ===== EGX DISCLOSURES & INSIDER TRACKING =====
+    if (plan.tools.includes("get_disclosures")) {
+        try {
+            let query = supabase.from("egx_disclosures")
+                .select("id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, party_name, party_role, source_url, metadata")
+                .order("disclosure_date", { ascending: false });
+
+            if (symbols.length > 0) {
+                query = query.in("symbol", symbols);
+            }
+            query = query.limit(10);
+            const { data: disclosures, error } = await query;
+            if (!error && disclosures && disclosures.length > 0) {
+                results.push({
+                    tool: "get_disclosures",
+                    source: "database",
+                    data_time: now,
+                    symbols,
+                    data_type: "cached",
+                    availability: "available",
+                    data: disclosures,
+                });
+                textParts.push(`\n [إفصاحات وتعاملات الداخليين]: تم العثور على ${disclosures.length} إفصاح حديث:\n` +
+                    disclosures.map((d: any) => `- ${d.disclosure_date} [${d.symbol || "عام"}]: ${d.title} (تحليل الذكاء الاصطناعي: ${d.ai_summary})`).join("\n") + "\n");
+            }
+        } catch (e) {
+            console.warn("Error fetching disclosures in tools-v2:", e);
+        }
+    }
+
     // ===== WEB SEARCH (explicit request / information missing from database) =====
     if (plan.tools.includes("search_web")) {
         try {

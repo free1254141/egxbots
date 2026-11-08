@@ -1949,6 +1949,52 @@ async function executeRawTool(
             return { status: "success", comparison: data, comparisons: data };
         }
 
+        if (toolName === "get_disclosures") {
+            const sym = args.symbol ? normalizeSymbol(args.symbol) : null;
+            let query = supabase.from("egx_disclosures")
+                .select("id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, party_name, party_role, source_url, metadata")
+                .order("disclosure_date", { ascending: false });
+
+            if (sym) {
+                query = query.eq("symbol", sym);
+            }
+            if (args.disclosure_type && args.disclosure_type !== "all") {
+                query = query.eq("disclosure_type", args.disclosure_type);
+            }
+            const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 30);
+            query = query.limit(limit);
+
+            const { data, error } = await query;
+            if (error) {
+                return { status: "error", availability: "error", message: "تعذر جلب إفصاحات الشركات من قاعدة البيانات" };
+            }
+            return {
+                status: "success",
+                availability: "available",
+                count: data?.length || 0,
+                symbol: sym || "all",
+                disclosures: (data || []).map((d: any) => ({
+                    id: d.id,
+                    symbol: d.symbol,
+                    company_name: d.company_name,
+                    date: d.disclosure_date,
+                    type: d.disclosure_type,
+                    title: d.title,
+                    action: d.action_type,
+                    shares: d.shares_count,
+                    party: d.party_name,
+                    role: d.party_role,
+                    ai_summary: d.ai_summary,
+                    sentiment: d.sentiment,
+                    key_takeaway: d.metadata?.key_takeaway || null,
+                    source_url: d.source_url
+                })),
+                note: sym
+                    ? `تم جلب أحدث إفصاحات سهم ${sym} المحفوظة والمحللة بالذكاء الاصطناعي مع شرح الأثر على السهم.`
+                    : `تم جلب أحدث إفصاحات وتعاملات الداخليين بالبورصة المصرية مع التحليل المالي.`
+            };
+        }
+
         return { status: "error", message: `Tool ${toolName} not recognized` };
     } catch (e: any) {
         return { status: "error", availability: "error", persisted: false, message: e.message || String(e) };
