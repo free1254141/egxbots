@@ -3683,6 +3683,19 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 _record_step("corporate_actions", False, str(e)[:200], 0)
                 print(f"[CORPORATE_ACTIONS] Error: {e}")
 
+        # 2.6b Incremental EGX Disclosures & Insider Filings Sync
+        print("\n>>> STEP 2.6b: Incremental EGX Disclosures & Insider Filings Sync...")
+        if _stage_needed('egx_disclosures'):
+            _start_step("egx_disclosures", "Syncing new EGX disclosures and insider transactions")
+            try:
+                from jobs.daily_disclosures_sync import run_incremental_sync
+                disc_res = run_incremental_sync()
+                disc_added = int(disc_res.get("added", 0)) if isinstance(disc_res, dict) else 0
+                _record_step("egx_disclosures", True, f"Synced {disc_added} new disclosures", disc_added)
+            except Exception as e:
+                _record_step("egx_disclosures", False, str(e)[:200], 0)
+                print(f"[EGX_DISCLOSURES] Error: {e}")
+
         # 2.7 Pre-compute and save Sector Heatmap
         print("\n>>> STEP 2.7: Pre-computing and saving Sector Heatmap...")
         if _stage_needed('precompute_heatmap'):
