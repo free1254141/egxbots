@@ -25,6 +25,7 @@ import AIChatbotTab from "./components/AIChatbotTab";
 import BillingTab from "./components/BillingTab";
 import ScannerAlertsTab from "./components/ScannerAlertsTab";
 import GrowthFunnelTab from "./components/GrowthFunnelTab";
+import B2BTab from "./components/B2BTab";
 
 
 const SESSION_KEY = "admin_unlocked_v1";
@@ -54,7 +55,7 @@ export default function AdminPage() {
     const [pageSize, setPageSize] = useState(100);
     // Opening Admin is normally for Chatbot/User review. Keep the large data
     // manager dormant until an administrator explicitly requests it.
-    const [activeMainTab, setActiveMainTab] = useState<"data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts" | "funnel">("support");
+    const [activeMainTab, setActiveMainTab] = useState<"data" | "ai" | "backtest" | "bot" | "schedule" | "similarity" | "jobs" | "users" | "support" | "billing" | "alerts" | "funnel" | "b2b">("support");
     const [dataLoaded, setDataLoaded] = useState(false);
     const [dataSourcesTab, setDataSourcesTab] = useState<"prices" | "funds">("prices");
     const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
@@ -615,6 +616,8 @@ export default function AdminPage() {
                     <BillingTab />
                 ) : activeMainTab === "funnel" ? (
                     <GrowthFunnelTab />
+                ) : activeMainTab === "b2b" ? (
+                    <B2BTab />
                 ) : (
                     <div className="flex items-center justify-center h-full text-zinc-500">
                         Select a tab to view content

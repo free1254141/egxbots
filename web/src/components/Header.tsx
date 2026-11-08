@@ -7,7 +7,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
     Globe, BarChart2, Brain, Activity, Menu, X, User, ChevronDown, BadgeDollarSign,
-    Search, Loader2, Sun, Moon, TrendingUp, Heart
+    Search, Loader2, Sun, Moon, TrendingUp, Heart, Bot
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -429,6 +429,10 @@ export default function Header() {
                                         <Link href="/profile" className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
                                             <User className="h-4 w-4" />
                                             {t("nav.profile")}
+                                        </Link>
+                                        <Link href="/b2b/dashboard" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
+                                            <Bot className="h-4 w-4 text-emerald-400" />
+                                            {language === "ar" ? "لوحة ترخيص البوت (B2B)" : "B2B Bot Dashboard"}
                                         </Link>
                                         <button
                                             onClick={() => { setAccountMenuOpen(false); void signOut(); }}
