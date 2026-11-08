@@ -2,7 +2,8 @@
 
 import React from "react";
 import SignalExplanation from "./SignalExplanation";
-import { Cpu, ArrowUpRight, ArrowDownRight, Sparkles, Target, ShieldAlert, Activity } from "lucide-react";
+import Link from "next/link";
+import { Cpu, ArrowUpRight, ArrowDownRight, Sparkles, Target, ShieldAlert, Activity, Lock, Zap, ShieldCheck } from "lucide-react";
 
 interface AISignal {
     symbol: string;
@@ -21,7 +22,136 @@ interface AISignal {
     council_score: number;
 }
 
-export function ActiveAISignals({ signals, isAr }: { signals: AISignal[]; isAr: boolean }) {
+interface ActiveAISignalsProps {
+    signals: AISignal[];
+    isAr: boolean;
+    isPro?: boolean;
+    totalOpen?: number;
+}
+
+export function ActiveAISignals({
+    signals,
+    isAr,
+    isPro = true,
+    totalOpen = 0,
+}: ActiveAISignalsProps) {
+    // 1. Gated View for Free / Non-PRO users
+    if (!isPro) {
+        const openCount = totalOpen > 0 ? totalOpen : (signals?.length || 7);
+        return (
+            <section className="overflow-hidden rounded-3xl border border-zinc-200 bg-white/80 shadow-sm dark:border-white/10 dark:bg-zinc-950/55">
+                <div className={`flex flex-col gap-3 border-b border-zinc-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 sm:px-6 ${isAr ? "sm:flex-row-reverse" : ""}`}>
+                    <div className={`flex items-center gap-3 ${isAr ? "flex-row-reverse text-right" : ""}`}>
+                        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-500/10 text-amber-500 dark:text-amber-400">
+                            <Lock className="h-5 w-5" />
+                        </span>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-base font-bold tracking-tight text-zinc-950 dark:text-white">
+                                    {isAr ? "توصيات الذكاء الاصطناعي النشطة" : "Active AI Recommendations"}
+                                </h3>
+                                <span className="px-2 py-0.5 border border-black bg-[#FFE600] text-black text-[10px] font-black uppercase shadow-[1px_1px_0px_#000]">
+                                    PRO
+                                </span>
+                            </div>
+                            <p className="mt-0.5 text-xs text-zinc-500">
+                                {isAr ? "متابعة موجزة لمستويات الدخول والأهداف والمخاطر" : "A concise view of entries, targets and risk levels"}
+                            </p>
+                        </div>
+                    </div>
+                    <span className="inline-flex w-fit items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                        <Lock className="h-3 w-3" />
+                        <span>{openCount} {isAr ? "توصية نشطة قيد التداول" : "active signals"}</span>
+                    </span>
+                </div>
+
+                {/* Locked Paywall Container */}
+                <div className="p-4 sm:p-6 space-y-6">
+                    <div className="border-4 border-black dark:border-white bg-[#FFE600] text-black p-6 sm:p-8 shadow-[5px_5px_0px_#000] dark:shadow-[5px_5px_0px_#fff]">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                            <div className="space-y-2 max-w-xl text-start">
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 border-2 border-black bg-black text-[#FFE600] text-xs font-black uppercase shadow-[2px_2px_0px_#000]">
+                                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>{isAr ? "ميزة حصرية لمشتركي PRO" : "PRO Exclusive Feature"}</span>
+                                </div>
+                                <h4 className="text-lg sm:text-xl font-black text-black">
+                                    {isAr
+                                        ? "توصيات الذكاء الاصطناعي النشطة متاحة حصرياً للمشتركين ⚡"
+                                        : "Active AI Recommendations are exclusive to PRO subscribers ⚡"}
+                                </h4>
+                                <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed">
+                                    {isAr
+                                        ? "احصل على وصول فوري لجميع إشارات وتوصيات الذكاء الاصطناعي النشطة في البورصة المصرية فور صدورها، مع مستويات الدخول الدقيقة، الأهداف الفنية، وقف الخسارة، ونسبة دقة النموذج."
+                                        : "Unlock real-time access to active EGX trading recommendations with precise entry points, staged price targets, strict stop losses, and AI model precision."}
+                                </p>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row md:flex-col gap-2.5 shrink-0">
+                                <Link
+                                    href="/pricing"
+                                    className="px-6 py-3 border-2 border-black bg-black text-[#FFE600] hover:bg-zinc-800 text-xs sm:text-sm font-black shadow-[3px_3px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all text-center flex items-center justify-center gap-2"
+                                >
+                                    <Zap className="w-4 h-4 text-amber-400" />
+                                    <span>{isAr ? "الترقية إلى باقة PRO الآن" : "Upgrade to PRO Now"}</span>
+                                </Link>
+                                <Link
+                                    href="/login"
+                                    className="px-6 py-2.5 border-2 border-black bg-white hover:bg-zinc-100 text-black text-xs font-black shadow-[2px_2px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all text-center"
+                                >
+                                    {isAr ? "تسجيل الدخول للمشتركين" : "Sign In to Access"}
+                                </Link>
+                            </div>
+                        </div>
+
+                        {/* Value Bullets */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6 pt-5 border-t-2 border-black/20 text-xs font-black">
+                            <div className="flex items-center gap-2">
+                                <Target className="w-4 h-4 text-black shrink-0" />
+                                <span>{isAr ? "مستويات دخول وأهداف سعرية دقيقة" : "Precise Entry & Price Targets"}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <ShieldAlert className="w-4 h-4 text-black shrink-0" />
+                                <span>{isAr ? "إدارة مخاطر ومستويات وقف خسارة" : "Strict Stop Loss Management"}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Cpu className="w-4 h-4 text-black shrink-0" />
+                                <span>{isAr ? "تفسير ذكاء اصطناعي عربي لكل سهم" : "Arabic AI Technical Rationale"}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Masked / Blurred Preview Cards */}
+                    <div className="relative overflow-hidden rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 p-4 sm:p-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 filter blur-[6px] select-none pointer-events-none opacity-40">
+                            {[1, 2].map((i) => (
+                                <div key={i} className="p-4 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <div className="h-6 w-20 bg-zinc-300 dark:bg-zinc-700 rounded" />
+                                        <div className="h-5 w-12 bg-emerald-500/20 rounded" />
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 py-2">
+                                        <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                                        <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                                        <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                                    </div>
+                                    <div className="h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded" />
+                                    <div className="h-3 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+                            <span className="inline-flex items-center gap-2 px-4 py-2 border-2 border-black bg-[#FFE600] text-black font-black text-xs shadow-[2px_2px_0px_#000]">
+                                <Lock className="w-4 h-4" />
+                                <span>{isAr ? `معاينة مقفلة: ${openCount} توصيات نشطة للمشتركين فقط` : `Locked: ${openCount} active trades for PRO only`}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        );
+    }
+
     if (!signals || signals.length === 0) {
         return (
             <div className="rounded-2xl border border-zinc-200 bg-white/80 p-8 text-center shadow-sm dark:border-white/10 dark:bg-zinc-950/60">

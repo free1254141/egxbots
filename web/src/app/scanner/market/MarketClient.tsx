@@ -1209,6 +1209,8 @@ export default function MarketClient() {
     const [breadthLoading, setBreadthLoading] = useState<boolean>(true);
     const [aiSignals, setAiSignals] = useState<any[]>([]);
     const [aiSignalsLoading, setAiSignalsLoading] = useState<boolean>(true);
+    const [aiSignalsGated, setAiSignalsGated] = useState<boolean>(false);
+    const [aiSignalsTotal, setAiSignalsTotal] = useState<number>(0);
     const [recommendationsByDate, setRecommendationsByDate] = useState<Record<string, number>>({});
 
     const fetchMarketStatus = async () => {
@@ -1251,6 +1253,8 @@ export default function MarketClient() {
             if (res.ok) {
                 const data = await res.json();
                 setAiSignals(data.signals || []);
+                setAiSignalsGated(Boolean(data.gated || data.is_pro === false));
+                setAiSignalsTotal(Number(data.total_open || 0));
             }
         } catch (err) {
             console.error("Failed to fetch AI signals:", err);
@@ -1891,7 +1895,12 @@ export default function MarketClient() {
                         </div>
                     )}
                     {!aiSignalsLoading && (
-                        <ActiveAISignals signals={aiSignals} isAr={isAr} />
+                        <ActiveAISignals
+                            signals={aiSignals}
+                            isAr={isAr}
+                            isPro={!aiSignalsGated}
+                            totalOpen={aiSignalsTotal}
+                        />
                     )}
                 </div>
                 <div className="lg:col-span-1">
