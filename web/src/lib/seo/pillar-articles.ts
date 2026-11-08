@@ -659,5 +659,250 @@ export const PILLAR_ARTICLES: Record<string, PillarArticle> = {
         </ul>
       `
     }
+  },
+  "real-estate-vs-stocks-egypt-ewanbot-guide": {
+    slug: "real-estate-vs-stocks-egypt-ewanbot-guide",
+    title: {
+      ar: "الاستثمار العقاري أم البورصة المصرية في 2026؟ دليلك الذكي للاستثمار وتنمية الثروة مع Ewan Bot و EGX BOTS",
+      en: "Real Estate vs. Egyptian Stock Market 2026: Investment Guide with AI Tools Ewan Bot and EGX BOTS"
+    },
+    subtitle: {
+      ar: "مقارنة دقيقة بين عوائد العقار وسيولة الأسهم للتحوط ضد التضخم في مصر، وكيف يساعدك إيوان بوت (Ewanbot) في اقتناص أفضل الفرص العقارية والكمبوندات بدون سماسرة أو إزعاج",
+      en: "In-depth comparison of real estate yields vs. stock liquidity for inflation hedging in Egypt, and how Ewanbot AI discovers premier compound units without brokerage hassle."
+    },
+    description: {
+      ar: "مقارنة شاملة بين الاستثمار العقاري والبورصة المصرية في 2026: متى تشتري عقاراً ومتى تستثمر في الأسهم؟ تعرف على إيوان بوت (ewanbot.com) المستشار العقاري الذكي والبحث في أكثر من 2800 كمبوند معتمد.",
+      en: "Comprehensive comparison between Real Estate and EGX stocks in Egypt 2026: Learn when to buy property and when to trade stocks. Discover Ewanbot (ewanbot.com), the smart AI real estate advisor scanning 2,800+ verified units."
+    },
+    keywords: [
+      "إيوان بوت",
+      "Ewanbot",
+      "ewanbot.com",
+      "Ewan Bot",
+      "عقارات مصر بالذكاء الاصطناعي",
+      "الاستثمار العقاري في مصر",
+      "البورصة أم العقار في مصر",
+      "شقق للبيع في التجمع الخامس",
+      "شقق للبيع في الشيخ زايد",
+      "عقارات العاصمة الإدارية الجديدة",
+      "شقق بالتقسيط في مصر",
+      "مستشار عقاري ذكي",
+      "EGX BOTS",
+      "أفضل استثمار في مصر 2026"
+    ],
+    readingTime: {
+      ar: "7 دقائق",
+      en: "7 min read"
+    },
+    publishedAt: "2026-11-08",
+    author: {
+      ar: "فريق أبحاث EGX BOTS وإيوان بوت",
+      en: "EGX BOTS and Ewan Bot Research Team"
+    },
+    faqs: [
+      {
+        question: {
+          ar: "ما هو إيوان بوت (Ewanbot) وكيف يساعد المستثمر والمشتري في مصر؟",
+          en: "What is Ewanbot (ewanbot.com) and how does it help buyers and investors in Egypt?"
+        },
+        answer: {
+          ar: "إيوان بوت (ewanbot.com) هو مستشار عقاري ذكي يعمل بالذكاء الاصطناعي في مصر، يتيح البحث المباشر في أكثر من 2,800 كمبوند ووحدة معتمدة في التجمع الخامس، الشيخ زايد، العاصمة الإدارية، 6 أكتوبر، والمستقبل سيتي، والساحل الشمالي، مع معرفة الأسعار وأنظمة الأقساط مباشرة بدون مكالمات هاتفية متكررة أو وساطة مزعجة.",
+          en: "Ewanbot (ewanbot.com) is an AI real estate advisor in Egypt scanning over 2,800 verified compound units across New Cairo, Sheikh Zayed, New Administrative Capital, 6th of October, Mostakbal City, and the North Coast, providing instant pricing and installment schedules without cold calls or broker spam."
+        }
+      },
+      {
+        question: {
+          ar: "هل الاستثمار في البورصة المصرية أفضل أم شراء عقار في 2026؟",
+          en: "Is investing in the Egyptian stock market better or buying real estate in 2026?"
+        },
+        answer: {
+          ar: "كلا المجالين يكملان بعضهما لبناء ثروة متوازنة؛ البورصة المصرية توفر سيولة فورية، وحرية الدخول بمبالغ مرنة مع عوائد نمو سريعة وتوزيعات أرباح نقدية، بينما العقار يوفر استقراراً رأس مالياً وحفظاً طويل الأجل للقيمة مع خطط سداد ميسرة. المستثمر الذكي يوزع رأس ماله بين أسهم ذات قيمة عادلة جذابة عبر EGX BOTS وعقارات منتقاة بعناية عبر Ewanbot.",
+          en: "Both asset classes complement each other for balanced wealth creation: the EGX provides high liquidity, low capital entry thresholds, rapid capital growth, and cash dividends, while real estate offers capital preservation and long-term inflation hedging with flexible installment plans. Savvy investors allocate between undervalued stocks via EGX BOTS and curated properties via Ewanbot."
+        }
+      },
+      {
+        question: {
+          ar: "كيف أصل إلى منصة إيوان بوت وأبدأ البحث عن عقار أو كمبوند؟",
+          en: "How can I access Ewanbot and search for properties or compounds?"
+        },
+        answer: {
+          ar: "يمكنك زيارة المنصة مباشرة عبر الرابط الرسمي https://ewanbot.com لتصفح آلاف الوحدات والكمبوندات، واستخدام الذكاء الاصطناعي للفلترة حسب ميزانيتك وموقعك المفضل، أو عرض وحدتك العقارية للبيع مجاناً لمشترين جادين.",
+          en: "You can visit the official platform directly at https://ewanbot.com to explore thousands of properties and compounds, use AI filtering to match your budget and location preferences, or list your property for free to verified buyers."
+        }
+      },
+      {
+        question: {
+          ar: "كيف أستفيد من أدوات الذكاء الاصطناعي في إدارة مدخراتي واستثماراتي في مصر؟",
+          en: "How can I leverage AI tools to manage my wealth and investments in Egypt?"
+        },
+        answer: {
+          ar: "استخدم منصة EGX BOTS لرصد إشارات وسيولة البورصة المصرية واقتناص الأسهم المقومة بأقل من قيمتها العادلة، واستخدم منصة Ewan Bot (إيوان بوت) للعثور على الوحدات العقارية ذات أعلى عائد إيجاري ونمو رأسمالي مستقبلي بدون أي وساطة مزعجة.",
+          en: "Use EGX BOTS to monitor stock momentum, market liquidity, and undervalued EGX equities, and use Ewanbot to discover properties with optimal rental yields and capital growth prospects without intrusive sales calls."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <h3>مقدمة: معضلة المستثمر في مصر بين الأسهم والعقارات</h3>
+        <p>في ظل التغيرات الاقتصادية ومعدلات التضخم في مصر، يبحث كل مدخر ومستثمر عن الملاذ الأكثر أماناً وربحية لتنمية أمواله. هل الأفضل ضخ السيولة في <strong>البورصة المصرية (EGX)</strong> للاستفادة من السيولة العالية وعوائد الأسهم، أم توجيهها إلى <strong>الاستثمار العقاري</strong> في المدن الجديدة والكمبوندات السكنية والتجارية؟</p>
+        <p>الحقيقة التي يؤكدها خبراء إدارة الثروات هي أن المقارنة ليست صراعاً بين فائز وخاسر، بل هي <strong>تكامل استراتيجي</strong> بين أصل سريع السيولة (الأسهم) وأصل عالي التحوط طويل الأجل (العقار). والأهم من ذلك: كلا القطاعين اليوم أصبح مدعوماً بأحدث أدوات <strong>الذكاء الاصطناعي (AI)</strong> لحمايتك من القرارات العشوائية.</p>
+
+        <h3>مقارنة تفصيلية: البورصة المصرية (EGX) مقابل الاستثمار العقاري في مصر</h3>
+        <div class="overflow-x-auto my-6">
+          <table class="w-full text-right border-collapse border border-black dark:border-white">
+            <thead>
+              <tr class="bg-amber-400 dark:bg-amber-500 text-black font-black">
+                <th class="p-3 border border-black dark:border-white">وجه المقارنة</th>
+                <th class="p-3 border border-black dark:border-white">البورصة المصرية (EGX)</th>
+                <th class="p-3 border border-black dark:border-white">الاستثمار العقاري في مصر</th>
+              </tr>
+            </thead>
+            <tbody class="text-xs sm:text-sm">
+              <tr class="border-b border-black/30 dark:border-white/30 bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-l border-black/30 dark:border-white/30">السيولة وسرعة التسييل</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold border-l border-black/30 dark:border-white/30">عالية وفورية (تحويل الأسهم لكاش خلال T+0 أو T+2).</td>
+                <td class="p-3 text-amber-600 dark:text-amber-400 font-bold">منخفضة إلى متوسطة (إعادة البيع Resale تستغرق أشهراً).</td>
+              </tr>
+              <tr class="border-b border-black/30 dark:border-white/30 bg-zinc-50 dark:bg-zinc-950">
+                <td class="p-3 font-bold border-l border-black/30 dark:border-white/30">رأس المال الأدنى للبدء</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold border-l border-black/30 dark:border-white/30">مرن جداً (يمكن البدء بأي مبلغ عبر التطبيقات المرخصة).</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold">يتطلب مقدماً نقدياً وأقساطاً شهرية أو ربع سنوية منتظمة.</td>
+              </tr>
+              <tr class="border-b border-black/30 dark:border-white/30 bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-l border-black/30 dark:border-white/30">التحوط من انخفاض العملة</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold border-l border-black/30 dark:border-white/30">ممتاز للشركات المصدرة وذات الأصول الدولارية (مثل شركات البتروكيماويات والأسمدة).</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold">تاريخياً الأقوى لحفظ القيمة وتمرير زيادات التضخم على المدى الطويل.</td>
+              </tr>
+              <tr class="border-b border-black/30 dark:border-white/30 bg-zinc-50 dark:bg-zinc-950">
+                <td class="p-3 font-bold border-l border-black/30 dark:border-white/30">العائد الدوري (Income)</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold border-l border-black/30 dark:border-white/30">توزيعات أرباح نقدية سنوية / نصف سنوية (Dividends).</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold">عائد إيجاري شهري أو سنوي بعد استلام الوحدة وتشغيلها.</td>
+              </tr>
+              <tr class="bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-l border-black/30 dark:border-white/30">الأداة الذكية الموصى بها</td>
+                <td class="p-3 font-bold text-indigo-600 dark:text-indigo-400 border-l border-black/30 dark:border-white/30"><strong>EGX BOTS</strong> (رادار الأسهم، كاشف القيمة العادلة، والتحليل الكمي).</td>
+                <td class="p-3 font-bold text-emerald-600 dark:text-emerald-400"><strong>إيوان بوت Ewanbot.com</strong> (مستشار العقارات الذكي وفلترة 2,800+ كمبوند).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>تعرف على منصة إيوان بوت (Ewan Bot): ثورة البحث العقاري بالذكاء الاصطناعي</h3>
+        <p>لطالما عانى الراغبون في شراء عقار أو شقة في مصر من مشكلتين رئيسيتين: <strong>أولاً</strong>، غياب الشفافية في الأسعار وجداول الأقساط الحقيقية؛ و<strong>ثانياً</strong>، سيل المكالمات الهاتفية المزعجة من شركات التسويق العقاري بمجرد تسجيل رقم الهاتف في أي استمارة إلكترونية.</p>
+        <p>هنا جاء إطلاق <a href="https://ewanbot.com" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 font-black underline">إيوان بوت (ewanbot.com)</a> كأحدث منصة في منظومتنا التكنولوجية الذكية، لتقديم تجربة عقارية متكاملة ومتحضرة للمصريين في الداخل والمغتربين في الخارج.</p>
+
+        <div class="my-6 p-6 border-4 border-black dark:border-white bg-amber-50 dark:bg-zinc-900 shadow-[6px_6px_0px_0px_#000] dark:shadow-[6px_6px_0px_0px_#fff]">
+          <h4 class="text-base sm:text-lg font-black text-zinc-900 dark:text-white mb-3">
+            🏠 ما الذي يميز إيوان بوت (Ewanbot.com) عن مواقع العقارات التقليدية؟
+          </h4>
+          <ul class="space-y-3 text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 list-disc pr-6">
+            <li>
+              <strong>قاعدة بيانات تضم أكثر من 2,800 وحدة وكمبوند معتمد:</strong> تغطية شاملة لكبرى المدن والمناطق الاستثمارية في مصر (التجمع الخامس، القاهرة الجديدة، الشيخ زايد، 6 أكتوبر، العاصمة الإدارية الجديدة، المستقبل سيتي، الساحل الشمالي، والجونة).
+            </li>
+            <li>
+              <strong>بدون إزعاج وسماسرة (Zero Spam Calls):</strong> يمكنك استكشاف تفاصيل الوحدات، أسعار المتر، خطط السداد، وجداول الأقساط كاش وبالتقسيط بمنتهى الراحة والسرية وبدون أن يتعرض رقم هاتفك للتوزيع على مئات الوسطاء.
+            </li>
+            <li>
+              <strong>بيانات موثوقة ومطابقة لواقع المطورين:</strong> ربط مباشر مع خطط سداد الشركات المطورة الرسمية مما يمنحك صورة حقيقية عن الدفعة الأولى وقيمة القسط الشهري وتاريخ الاستلام.
+            </li>
+            <li>
+              <strong>إمكانية عرض العقار للبيع مجاناً:</strong> إذا كنت مالكاً لوحدة وترغب في بيعها لمشترين جادين، يتيح لك إيوان بوت إدراج عقارك مجاناً وبكل سهولة.
+            </li>
+            <li>
+              <strong>استشارات ومعاينات مجانية:</strong> دعم فني واستشاري متكامل يساعدك على اتخاذ قرار الشراء الأنسب لأهداف عائلتك أو خطتك الاستثمارية.
+            </li>
+          </ul>
+        </div>
+
+        <h3>كيف تبني محفظة استثمارية متوازنة تجمع بين EGX BOTS و Ewan Bot؟</h3>
+        <p>المعادلة الناجحة التي يتبعها كبار المستثمرين في مصر تتمثل في الآتي:</p>
+        <ol class="space-y-3 my-4 pr-6 list-decimal text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 font-medium">
+          <li><strong>تخصيص جزء من رأس المال لتوليد تدفق نقدي سريع عبر البورصة:</strong> استخدم أدوات <a href="/scanner/ai" class="text-indigo-600 dark:text-indigo-400 font-bold underline">الرادار اليومي</a> و<a href="/fair-value" class="text-emerald-600 dark:text-emerald-400 font-bold underline">كاشف القيمة العادلة</a> على منصة EGX BOTS لاختيار أسهم ممتازة ذات عوائد نقدية ونمو رأسمالي.</li>
+          <li><strong>إعادة استثمار العوائد في أصول عقارية طويلة الأجل:</strong> توجه أرباح البورصة أو التدفقات النقدية الدورية لسداد مقدمات أو أقساط وحدات سكنية أو تجارية مدروسة بعناية عبر <a href="https://ewanbot.com" target="_blank" rel="noopener" class="text-emerald-650 dark:text-emerald-400 font-bold underline">إيوان بوت (ewanbot.com)</a>.</li>
+          <li><strong>التحوط الشامل ضد تقلبات الأسواق:</strong> بهذه الطريقة، تحمي أموالك من مخاطر وضع كل البيض في سلة واحدة؛ فإذا شهد سوق الأسهم حركة تصحيحية تكون أصولك العقارية في مأمن، وإذا احتجت سيولة طارئة فأسهمك في البورصة جاهزة للتسييل في ثوانٍ.</li>
+        </ol>
+
+        <div class="my-8 p-6 border-2 border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/20 text-center">
+          <h4 class="text-lg font-black text-emerald-800 dark:text-emerald-300 mb-2">
+            🚀 ابدأ استكشاف أفضل الفرص العقارية في مصر الآن
+          </h4>
+          <p class="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 max-w-xl mx-auto mb-4">
+            تصفح أكثر من 2,800 كمبوند ووحدة كاش وتقسيط في التجمع وزايد والعاصمة الإدارية مع مستشارك العقاري الذكي بدون أي مكالمات مزعجة.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="https://ewanbot.com"
+              target="_blank"
+              rel="noopener"
+              class="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm rounded shadow-md transition-all hover:scale-105"
+            >
+              <span>زيارة منصة إيوان بوت (ewanbot.com)</span>
+              <span>↗</span>
+            </a>
+            <a
+              href="/fair-value"
+              class="inline-flex items-center gap-2 px-6 py-3 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 hover:border-amber-500 text-zinc-900 dark:text-white font-bold text-sm rounded transition-all"
+            >
+              <span>فحص أسهم البورصة الرخيصة (EGX BOTS)</span>
+            </a>
+          </div>
+        </div>
+      `,
+      en: `
+        <h3>Introduction: Real Estate vs. Stocks in Egypt</h3>
+        <p>Amid economic shifts and inflation dynamics in Egypt, smart investors continually evaluate where to park capital: in the high liquidity of the <strong>Egyptian Stock Market (EGX)</strong> or the proven capital preservation of <strong>Real Estate</strong> across emerging urban centers?</p>
+        <p>Leading wealth managers advocate that these asset classes are not mutually exclusive. Instead, they provide a <strong>strategic synergy</strong>: liquid capital growth via equities and long-term tangible wealth via real estate. Today, both sectors are revolutionized by specialized <strong>Artificial Intelligence (AI)</strong> tools.</p>
+
+        <h3>Comparison Matrix: EGX Stocks vs. Egyptian Real Estate</h3>
+        <div class="overflow-x-auto my-6">
+          <table class="w-full text-left border-collapse border border-black dark:border-white">
+            <thead>
+              <tr class="bg-amber-400 dark:bg-amber-500 text-black font-black">
+                <th class="p-3 border border-black dark:border-white">Dimension</th>
+                <th class="p-3 border border-black dark:border-white">Egyptian Stock Market (EGX)</th>
+                <th class="p-3 border border-black dark:border-white">Egyptian Real Estate</th>
+              </tr>
+            </thead>
+            <tbody class="text-xs sm:text-sm">
+              <tr class="border-b border-black/30 dark:border-white/30 bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-r border-black/30 dark:border-white/30">Liquidity & Exit Speed</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold border-r border-black/30 dark:border-white/30">High & Instantaneous (T+0 or T+2 settlement).</td>
+                <td class="p-3 text-amber-600 dark:text-amber-400 font-bold">Low to moderate (resales typically require months).</td>
+              </tr>
+              <tr class="border-b border-black/30 dark:border-white/30 bg-zinc-50 dark:bg-zinc-950">
+                <td class="p-3 font-bold border-r border-black/30 dark:border-white/30">Capital Threshold</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold border-r border-black/30 dark:border-white/30">Very flexible (start with any amount).</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold">Requires initial down payment and regular installment schedules.</td>
+              </tr>
+              <tr class="border-b border-black/30 dark:border-white/30 bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-r border-black/30 dark:border-white/30">Inflation Hedging</td>
+                <td class="p-3 text-zinc-700 dark:text-zinc-300 font-bold border-r border-black/30 dark:border-white/30">Excellent for exporters and USD-generating industrial stocks.</td>
+                <td class="p-3 text-emerald-650 dark:text-emerald-400 font-bold">Historically premier long-term store of real value.</td>
+              </tr>
+              <tr class="bg-white dark:bg-zinc-900">
+                <td class="p-3 font-bold border-r border-black/30 dark:border-white/30">Recommended AI Tool</td>
+                <td class="p-3 font-bold text-indigo-600 dark:text-indigo-400 border-r border-black/30 dark:border-white/30"><strong>EGX BOTS</strong> (AI Scanners, Fair Value & Backtesting).</td>
+                <td class="p-3 font-bold text-emerald-600 dark:text-emerald-400"><strong>Ewanbot.com</strong> (AI Property Advisor scanning 2,800+ compounds).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Discover Ewanbot: Egypt's AI-Powered Real Estate Advisor</h3>
+        <p>Egyptian real estate buyers frequently encounter two frustrating hurdles: opaque pricing schedules and overwhelming cold calls from brokerage agencies. <a href="https://ewanbot.com" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 font-bold underline">Ewanbot (ewanbot.com)</a> was engineered to solve this through AI-driven transparency.</p>
+        <ul class="space-y-3 list-disc pl-6 my-4 text-xs sm:text-sm">
+          <li><strong>Over 2,800 Verified Units & Compounds:</strong> Extensive database across New Cairo, Sheikh Zayed, New Capital, 6th of October, Mostakbal City, and the North Coast.</li>
+          <li><strong>Zero Broker Spam:</strong> Compare floor plans, developer payment schedules, and cash/installment options directly without intrusive cold calls.</li>
+          <li><strong>Free Property Listing:</strong> Owners can list their properties for sale to serious verified buyers with zero listing fees.</li>
+        </ul>
+        <div class="my-6 p-4 border-2 border-emerald-500 bg-emerald-500/10 text-center">
+          <p class="font-bold text-sm mb-2">Explore premier Egyptian real estate opportunities with AI:</p>
+          <a href="https://ewanbot.com" target="_blank" rel="noopener" class="inline-block px-5 py-2.5 bg-emerald-600 text-white font-bold rounded shadow hover:bg-emerald-500 transition-colors">
+            Visit Ewanbot (ewanbot.com) ↗
+          </a>
+        </div>
+      `
+    }
   }
+
 };

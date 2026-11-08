@@ -113,7 +113,6 @@ HARDCODED_FILES = [
     "api/routers/admin.py",
     "api/telegram_bot.py",
     "api/routers/scan_tech.py",
-    "web/src/app/scanner/market/MarketClient.tsx"
 ]
 
 FILES_TO_UPLOAD = get_git_changes()

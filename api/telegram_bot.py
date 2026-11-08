@@ -643,6 +643,14 @@ class TelegramBot:
             except Exception:
                 pass
 
+            # B2B Telegram Group Bot Licensing Handler
+            try:
+                from api.telegram_b2b import handle_b2b_group_message
+                if handle_b2b_group_message(self.token, chat_id, text, msg, raw_update):
+                    return
+            except Exception as _b2b_err:
+                self._log(f"B2B group handler error: {_b2b_err}")
+
             # STRICT GROUP SILENCE: All group topics outside Topic 1680 (ARTORO) must be 100% silent.
             # Topic 1680 is handled exclusively by is_vip_chat_update before reaching here.
             # Suppress all commands (/daily, /weekly, /help, /start) and any messages in public groups/topics.
@@ -750,6 +758,12 @@ class TelegramBot:
                 display_name = (
                     profile.get("display_name") or profile.get("username") or "المستثمر"
                 )
+
+                # Unlink any other profiles with this telegram_chat_id so 1 Telegram account is uniquely 1-to-1
+                try:
+                    supabase.table("profiles").update({"telegram_chat_id": None}).eq("telegram_chat_id", str(chat_id)).neq("id", uid).execute()
+                except Exception as e:
+                    self._log(f"Could not clear duplicate telegram_chat_id: {e}")
 
                 # Update profiles table with telegram_chat_id
                 res = (

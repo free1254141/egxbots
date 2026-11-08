@@ -992,6 +992,28 @@ export default function BlogsPage() {
               <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
             </div>
           </Link>
+
+          <Link
+            href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
+            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+          >
+            <div>
+              <span className="inline-block px-2.5 py-1 border-2 border-black bg-emerald-300 text-black text-xs font-black mb-3">
+                {isAr ? "عقارات & بورصة" : "Real Estate & Stocks"}
+              </span>
+              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                {isAr ? "الاستثمار العقاري أم البورصة المصرية في 2026؟ دليلك الذكي مع Ewan Bot و EGX BOTS" : "Real Estate vs. Egyptian Stocks 2026: AI Guide with Ewan Bot & EGX BOTS"}
+              </h3>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                {isAr ? "مقارنة العوائد والتحوط ضد التضخم، والبحث في 2,800+ كمبوند بدون سماسرة أو مكالمات مزعجة عبر إيوان بوت (ewanbot.com)." : "Comparing ROI and inflation hedging in Egypt, and scanning 2,800+ verified compounds with Ewanbot."}
+              </p>
+            </div>
+            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
+              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+            </div>
+          </Link>
+
         </div>
       </div>
 

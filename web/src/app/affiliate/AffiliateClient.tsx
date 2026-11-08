@@ -564,6 +564,96 @@ export default function AffiliateClient() {
             </div>
           </div>
         </div>
+        {/* ── B2B Advertisers & Website Owners Section ── */}
+        <div id="advertisers" className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 sm:p-8 space-y-6 shadow-[6px_6px_0px_#f59e0b]">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b-2 border-black/10 dark:border-white/10 pb-4">
+            <div>
+              <span className="inline-block px-2.5 py-0.5 bg-amber-400 text-black text-[10px] font-black uppercase tracking-wider mb-1">
+                B2B & Partnerships
+              </span>
+              <h2 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white">
+                {isAr ? "📢 لأصحاب المواقع، التطبيقات، والشركات الإعلانية" : "📢 For Publishers, Website Owners & Advertisers"}
+              </h2>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                {isAr
+                  ? "هل تمتلك منصة أو موقعاً أو ترغب في الإعلان والرعاية والشراكة معنا؟ نرحب بالتعاون مع أصحاب الأعمال."
+                  : "Looking to advertise, exchange traffic, sponsor market analysis, or build commercial affiliate partnerships with our platforms?"}
+              </p>
+            </div>
+            <a
+              href="https://wa.me/201024359109?text=مرحباً، أنا صاحب موقع / معلن وأود الاستفسار عن الشراكات الإعلانية والتبادل التسويقي مع منصاتكم"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded shadow transition-all hover:scale-105 shrink-0"
+            >
+              <span>{isAr ? "تواصل للأعمال والشراكات (واتساب) 💬" : "Direct Business Contact (WhatsApp) 💬"}</span>
+            </a>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-4 text-xs">
+            <div className="p-4 border-2 border-black/10 dark:border-white/10 bg-zinc-50 dark:bg-zinc-950 space-y-2">
+              <span className="text-xl">🎯</span>
+              <h3 className="font-black text-zinc-900 dark:text-white">
+                {isAr ? "1. الرعاية والإعلانات المستهدفة" : "1. Sponsorships & Targeted Ads"}
+              </h3>
+              <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                {isAr
+                  ? "ضع علامتك التجارية أو خدماتك أمام آلاف المتداولين والمستثمرين النشطين يومياً في البورصة المصرية وأسواق المال والعقارات."
+                  : "Promote your brand directly to thousands of high-intent active Egyptian investors, traders, and property buyers."}
+              </p>
+            </div>
+
+            <div className="p-4 border-2 border-black/10 dark:border-white/10 bg-zinc-50 dark:bg-zinc-950 space-y-2">
+              <span className="text-xl">🔄</span>
+              <h3 className="font-black text-zinc-900 dark:text-white">
+                {isAr ? "2. تبادل الترافيك والروابط المرجعية" : "2. Traffic & Media Exchange"}
+              </h3>
+              <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                {isAr
+                  ? "إذا كنت صاحب موقع أو مدونة في مجالات الاقتصاد والاستثمار أو العقارات، نوفر شراكات تبادل ترافيك ومقالات مشتركة تسهم في تعزيز ظهور الطرفين في محركات البحث."
+                  : "Cross-platform traffic sharing, guest articles, and co-marketing initiatives designed to elevate mutual search ranking and referral volume."}
+              </p>
+            </div>
+
+            <div className="p-4 border-2 border-black/10 dark:border-white/10 bg-zinc-50 dark:bg-zinc-950 space-y-2">
+              <span className="text-xl">💼</span>
+              <h3 className="font-black text-zinc-900 dark:text-white">
+                {isAr ? "3. تكامل المنصات وتراخيص الـ API" : "3. API Licensing & Telegram Bots"}
+              </h3>
+              <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                {isAr
+                  ? "تكامل إشارات الرادار والتحليل الفني الذكي مع قنواتك الخاصة على تليجرام أو منصاتك التقنية بعقود شراكة B2B مخصصة."
+                  : "License our AI quant scanning feeds, custom indicators, and automated Telegram bots directly into your VIP channels or fintech portals."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-black/10 dark:border-white/10 text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400 font-bold">
+              {isAr ? "قنوات تواصل مسؤولي الشراكات التجارية:" : "Business Development & Media Buying Desk:"}
+            </span>
+            <div className="flex items-center gap-3">
+              <a
+                href="https://wa.me/201024359109?text=مرحباً، أنا صاحب موقع / معلن وأود الاستفسار عن الشراكات الإعلانية والتبادل التسويقي مع منصاتكم"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-600 dark:text-emerald-400 font-black hover:underline"
+              >
+                واتساب: 01024359109 (+20)
+              </a>
+              <span className="text-zinc-400">•</span>
+              <a
+                href="https://t.me/artoro_support"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sky-600 dark:text-sky-400 font-black hover:underline"
+              >
+                تليجرام: @artoro_support
+              </a>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   );

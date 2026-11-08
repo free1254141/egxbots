@@ -307,6 +307,16 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <a
+                  href="https://wa.me/201024359109?text=مرحباً، أنا صاحب موقع / معلن وأود الاستفسار عن الشراكات الإعلانية والتبادل التسويقي مع منصاتكم"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-bold text-amber-500 hover:text-amber-400 transition-colors"
+                >
+                  <span>📢 {isAr ? "للإعلان وشراكات المواقع (B2B)" : "Advertise & Partnerships (B2B)"}</span>
+                </a>
+              </li>
+              <li>
                 <Link
                   href="/refund"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
@@ -345,6 +355,95 @@ export default function Footer() {
                 </a>
               </li>
             </ul>
+          </div>
+        </div>
+
+        {/* ── B2B Advertisers & Publisher Partnerships Callout ── */}
+        <div className="border-4 border-black dark:border-white bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-indigo-500/15 border-dashed p-4 sm:p-5 mb-8 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_#10b981]">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
+            <div className="text-center lg:text-start space-y-1">
+              <div className="flex items-center justify-center lg:justify-start gap-2 flex-wrap">
+                <span className="px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black text-[10px] font-black uppercase tracking-wider">
+                  B2B & Advertising
+                </span>
+                <span className="text-xs sm:text-sm font-black text-emerald-700 dark:text-emerald-300">
+                  📢 {isAr ? "لأصحاب المواقع، المنصات، والمعلنين: شراكات الترافيك والإعلانات" : "For Website Owners, Publishers & Advertisers: Traffic & Ad Partnerships"}
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 max-w-2xl leading-relaxed">
+                {isAr
+                  ? "هل تمتلك موقعاً أو قناة وترغب في تبادل الزيارات أو تسويق منتجاتك؟ نوفر لأصحاب الأعمال رعاية تقارير السوق، حملات إعلانية مستهدفة لآلاف المتداولين والمستثمرين، وتكامل تقني عبر شبكتنا (EGX BOTS & EWAN BOT)."
+                  : "Own a website, blog, or financial service? Partner with us for traffic exchange, sponsored reports, targeted campaigns reaching thousands of Egyptian investors, and ecosystem integration."}
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 shrink-0 flex-wrap justify-center">
+              <a
+                href="https://wa.me/201024359109?text=مرحباً، أنا صاحب موقع / معلن وأود الاستفسار عن الشراكات الإعلانية والأفلييت والتبادل التسويقي مع منصاتكم"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 border-2 border-black dark:border-white bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black shadow-[2px_2px_0px_#000] transition-transform hover:-translate-y-0.5"
+              >
+                <span>{isAr ? "تواصل معنا للإعلان والشراكة 💬" : "Contact for Partnership 💬"}</span>
+              </a>
+              <Link
+                href="/affiliate#advertisers"
+                className="inline-flex items-center gap-1 px-3 py-2 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white text-xs font-bold shadow-[2px_2px_0px_#000] hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <span>{isAr ? "تفاصيل الشراكات ←" : "Partnership Details ←"}</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Our Ecosystem Products (منظومة منتجاتنا الذكية) ── */}
+        <div className="border-2 border-black/15 dark:border-white/15 bg-gradient-to-r from-emerald-500/10 via-amber-500/5 to-indigo-500/10 dark:from-emerald-950/30 dark:via-zinc-900/40 dark:to-indigo-950/30 p-5 sm:p-6 mb-8 shadow-xs">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-5">
+            <div className="space-y-1.5 text-center lg:text-start">
+              <div className="flex items-center justify-center lg:justify-start gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 bg-black dark:bg-white text-white dark:text-black text-[10px] font-black uppercase tracking-wider">
+                  {isAr ? "منظومة منتجاتنا" : "Our Ecosystem"}
+                </span>
+                <span className="text-xs font-black text-zinc-900 dark:text-white">
+                  {isAr ? "شبكة منصات الذكاء الاصطناعي للاستثمار في مصر" : "AI Investment Platforms Network in Egypt"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 max-w-xl leading-relaxed">
+                {isAr
+                  ? "منظومتنا تدير أدوات مالية وعقارية ذكية: EGX BOTS لتحليل وتداول البورصة المصرية، و Ewan Bot مستشارك العقاري الذكي للبحث في أكثر من 2,800 كمبوند ومشروع معتمد بدون سماسرة أو مكالمات مزعجة."
+                  : "We develop dedicated AI solutions: EGX BOTS for Egyptian stock market quantitative screening, and Ewanbot for discovering 2,800+ verified compound properties without cold calls."}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0 flex-wrap justify-center">
+              {/* Ewanbot Official Link Card */}
+              <a
+                href="https://ewanbot.com"
+                target="_blank"
+                rel="noopener"
+                className="group inline-flex items-center gap-2.5 px-4 py-2 bg-white dark:bg-zinc-950 border-2 border-emerald-500/60 hover:border-emerald-500 transition-all shadow-[2px_2px_0px_rgba(16,185,129,0.3)] hover:scale-105"
+                title="إيوان بوت Ewanbot - مستشارك العقاري الذكي في مصر"
+              >
+                <span className="text-lg">🏠</span>
+                <div className="text-start">
+                  <div className="flex items-center gap-1.5 font-black text-xs text-zinc-900 dark:text-white">
+                    <span>Ewan Bot</span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">({isAr ? "إيوان بوت" : "Real Estate AI"})</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
+                    {isAr ? "عقارات وكمبوندات مصر بالـ AI" : "AI Egypt Real Estate Advisor"}
+                  </p>
+                </div>
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-500 group-hover:translate-x-0.5 transition-transform" />
+              </a>
+
+              {/* Comprehensive Guide Link */}
+              <Link
+                href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-bold border border-zinc-300 dark:border-zinc-700 transition-colors"
+              >
+                <span>📖 {isAr ? "دليل العقار vs البورصة" : "Real Estate vs Stocks Guide"}</span>
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -433,6 +532,15 @@ export default function Footer() {
                     • {isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة" : "Fair Value of Egyptian Stocks & Undervalued Screener"}
                   </Link>
                 </li>
+                <li>
+                  <Link
+                    href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "الاستثمار العقاري vs البورصة في مصر: دليل Ewan Bot و EGX BOTS" : "Real Estate vs. Stocks in Egypt: Ewanbot & EGX BOTS Guide"}
+                  </Link>
+                </li>
+
               </ul>
             </div>
           </div>

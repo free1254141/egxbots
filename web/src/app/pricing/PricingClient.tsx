@@ -69,6 +69,7 @@ export default function PricingClient() {
   const [trialEligible, setTrialEligible] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
   const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
+  const [pricingCategory, setPricingCategory] = useState<"retail" | "b2b">("retail");
 
   useEffect(() => {
     if (!user) {
@@ -130,11 +131,19 @@ export default function PricingClient() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
+      const modeParam = params.get("mode");
+      if (modeParam === "b2b" || modeParam === "channels" || modeParam === "business") {
+        setPricingCategory("b2b");
+      }
       const planParam = params.get("plan");
-      if (planParam && ["pro", "pro_6m", "pro_1y", "lifetime"].includes(planParam)) {
+      if (planParam && ["pro", "pro_6m", "pro_1y", "lifetime", "b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
         setSelectedPlan(planParam);
         if (["pro", "pro_6m", "pro_1y"].includes(planParam)) {
           setActiveProDuration(planParam as "pro" | "pro_6m" | "pro_1y");
+          setPricingCategory("retail");
+        }
+        if (["b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
+          setPricingCategory("b2b");
         }
       }
     }
@@ -681,7 +690,99 @@ export default function PricingClient() {
     };
   });
 
-  const selectedPlanDetails = paidPlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
+  const b2bPlans = [
+    {
+      id: "b2b_starter",
+      name_ar: "باقة القنوات الناشئة (Starter B2B)",
+      name_en: "Channel Starter (B2B)",
+      amount_egp: 1000,
+      original_amount_egp: null as number | null,
+      monthlyEquivalent: null as number | null,
+      savingsPct: 0,
+      badge: null as string | null,
+      isLifetime: false,
+      days: 30,
+      daily_limit: 50,
+      max_members: "حتى 150 عضو",
+      monthly_est: "1,100",
+      badge_ar: "للقنوات حتى 150 عضو",
+      badge_en: "Up to 150 members",
+      tag: "STARTER",
+      border_class: "border-black dark:border-white",
+      shadow_class: "shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]",
+      btn_class: "bg-zinc-900 hover:bg-black text-white dark:bg-white dark:text-black dark:hover:bg-zinc-100",
+      is_featured: false,
+      features: [
+        { text: isAr ? "ترخيص وربط جروب تليجرام واحد" : "License 1 Telegram VIP Group", icon: <Check className="w-3.5 h-3.5" /> },
+        { text: isAr ? "كوتة 50 استفسار يومياً (~1,100 استفسار شهرياً)" : "50 queries daily (~1,100/mo)", icon: <Zap className="w-3.5 h-3.5 text-emerald-500" /> },
+        { text: isAr ? "توقيع مخصص باسم قناتك ومجتمعك أسفل كل تحليل" : "Custom signature footer on every bot reply", icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" /> },
+        { text: isAr ? "تحليل فني ومالي لجميع أسهم البورصة المصرية بلحظة" : "Instant AI analysis for all 280+ EGX stocks", icon: <BarChart3 className="w-3.5 h-3.5" /> },
+        { text: isAr ? "مانع التكرار والسبام الذكي (كولد داون 90 ثانية للعضو)" : "Anti-spam protection & 90s member cooldown", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+        { text: isAr ? "لوحة تحكم لمتابعة الاستهلاك وتعديل التوقيع" : "Dashboard for usage tracking & signature editing", icon: <Check className="w-3.5 h-3.5" /> },
+      ],
+    },
+    {
+      id: "b2b_pro",
+      name_ar: "باقة المحللين المحترفين (Pro VIP B2B)",
+      name_en: "Channel Pro VIP (B2B)",
+      amount_egp: 1500,
+      original_amount_egp: null as number | null,
+      monthlyEquivalent: null as number | null,
+      savingsPct: 0,
+      badge: null as string | null,
+      isLifetime: false,
+      days: 30,
+      daily_limit: 120,
+      max_members: "حتى 500 عضو",
+      monthly_est: "2,640",
+      badge_ar: "الأكثر طلباً 🔥 · حتى 500 عضو",
+      badge_en: "Most Popular 🔥 · Up to 500 members",
+      tag: "PRO VIP",
+      border_class: "border-emerald-500",
+      shadow_class: "shadow-[8px_8px_0px_#10b981]",
+      btn_class: "bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-black",
+      is_featured: true,
+      features: [
+        { text: isAr ? "كافة ميزات باقة Starter" : "All features in Starter Tier", icon: <Check className="w-3.5 h-3.5" /> },
+        { text: isAr ? "كوتة مضاعفة: 120 استفسار يومياً (~2,640 استفسار شهرياً)" : "Doubled quota: 120 queries daily (~2,640/mo)", icon: <Zap className="w-3.5 h-3.5 text-emerald-500" /> },
+        { text: isAr ? "سرعة استجابة فائقة وأولوية معالجة في ساعات التداول" : "Trading hours priority & sub-second response", icon: <Flame className="w-3.5 h-3.5 text-amber-500" /> },
+        { text: isAr ? "تحديث وتخصيص نص التوقيع في أي وقت من لوحة التحكم" : "Edit custom signature anytime from dashboard", icon: <Sparkles className="w-3.5 h-3.5 text-yellow-500" /> },
+        { text: isAr ? "دعم فني وتفعيل مخصص ومباشر عبر واتساب" : "Dedicated WhatsApp VIP support desk", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+      ],
+    },
+    {
+      id: "b2b_enterprise",
+      name_ar: "باقة كبار المحللين والشركات (Enterprise B2B)",
+      name_en: "Enterprise & Multi-Group",
+      amount_egp: 2500,
+      original_amount_egp: null as number | null,
+      monthlyEquivalent: null as number | null,
+      savingsPct: 0,
+      badge: null as string | null,
+      isLifetime: false,
+      days: 30,
+      daily_limit: 250,
+      max_members: "حتى 1,500 عضو أو جروبين",
+      monthly_est: "5,500",
+      badge_ar: "للمجموعات الكبرى 💎 · حتى 1,500 عضو",
+      badge_en: "Enterprise 💎 · Up to 1,500 members",
+      tag: "ENTERPRISE",
+      border_class: "border-purple-600 dark:border-purple-400",
+      shadow_class: "shadow-[8px_8px_0px_#7c3aed] dark:shadow-[8px_8px_0px_#a855f7]",
+      btn_class: "bg-[#FFE600] hover:bg-yellow-400 text-black font-black",
+      is_featured: false,
+      features: [
+        { text: isAr ? "كوتة استفسارات ضخمة: 250 استفسار يومياً (~5,500 شهرياً)" : "Heavy quota: 250 queries daily (~5,500/mo)", icon: <Zap className="w-3.5 h-3.5 text-emerald-500" /> },
+        { text: isAr ? "إمكانية ترخيص جروبين تليجرام منفصلين بنفس الاشتراك" : "License up to 2 separate Telegram VIP groups", icon: <Crown className="w-3.5 h-3.5 text-yellow-400" /> },
+        { text: isAr ? "توقيع مخصص لكل جروب على حدة" : "Separate custom signature branding per group", icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" /> },
+        { text: isAr ? "إحصائيات تفصيلية لأكثر الأسهم طلباً داخل الجروب" : "Deep analytics on most queried stocks in community", icon: <BarChart3 className="w-3.5 h-3.5" /> },
+        { text: isAr ? "خط تواصل ودعم مباشر مخصص لكبار المحللين والمديرين" : "Direct VIP line for fund managers and analysts", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+      ],
+    },
+  ];
+
+  const allAvailablePlans = [...paidPlans, ...b2bPlans];
+  const selectedPlanDetails = allAvailablePlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
   const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
   const baseProPrice = selectedPlanDetails?.amount_egp ?? 1000;
   const promoDiscountAmount =
@@ -1404,7 +1505,42 @@ export default function PricingClient() {
         )}
 
         {/* ── PRO DURATION SWITCHER (سويتشر مدة باقة Pro فقط: شهر، 6 شهور، سنة) ── */}
-        <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-2.5 sm:py-3 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/60 dark:border-zinc-800/60">
+        {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B ── */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex p-1.5 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981] gap-2 max-w-full flex-wrap justify-center">
+            <button
+              type="button"
+              onClick={() => setPricingCategory("retail")}
+              className={`flex items-center gap-2 px-5 sm:px-8 py-3 border-2 transition-all text-xs sm:text-sm font-black cursor-pointer ${
+                pricingCategory === "retail"
+                  ? "border-black dark:border-white bg-emerald-500 text-black shadow-[3px_3px_0px_#000]"
+                  : "border-transparent bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              }`}
+            >
+              <span>👤 {isAr ? "خطط الأفراد والمستثمرين" : "Individual Traders"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPricingCategory("b2b")}
+              className={`flex items-center gap-2 px-5 sm:px-8 py-3 border-2 transition-all text-xs sm:text-sm font-black cursor-pointer ${
+                pricingCategory === "b2b"
+                  ? "border-black dark:border-white bg-purple-600 text-yellow-300 shadow-[3px_3px_0px_#000]"
+                  : "border-transparent bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              }`}
+            >
+              <Crown className="w-4 h-4 text-yellow-300 shrink-0" />
+              <span>🤖 {isAr ? "باقات أصحاب القنوات والشركات (B2B)" : "Channel Bot Licensing (B2B)"}</span>
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#FFE600] text-black border border-black shadow-[1px_1px_0px_#000]">
+                {isAr ? "جديد ⚡" : "NEW ⚡"}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {pricingCategory === "retail" ? (
+          <>
+        <div id="pricing-duration-navbar"  className="sticky top-[var(--header-h,72px)] z-30 py-2.5 sm:py-3 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/60 dark:border-zinc-800/60">
           <div className="text-center">
             <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
               {isAr ? "اختر مدة اشتراك باقة EGX BOTS PRO:" : "SELECT PRO BILLING CYCLE:"}
@@ -1866,6 +2002,180 @@ export default function PricingClient() {
           </div>
         </div>
 
+          </>
+        ) : (
+          /* ── B2B CHANNELS & COMMUNITIES SECTION ── */
+          <div className="space-y-8">
+            {/* B2B Header Pitch Banner */}
+            <div className="border-4 border-purple-600 dark:border-purple-400 bg-gradient-to-r from-purple-900 via-indigo-950 to-zinc-950 p-6 sm:p-8 text-white shadow-[8px_8px_0px_#a855f7] space-y-3">
+              <div className="inline-flex items-center gap-2 px-3 py-1 border-2 border-yellow-400 bg-purple-900/80 text-yellow-300 text-xs font-black uppercase">
+                <Crown className="w-4 h-4 text-yellow-300" />
+                <span>{isAr ? "حلول الذكاء الاصطناعي للمجتمعات وقنوات التوصيات (B2B)" : "Enterprise AI for Trading Channels & Communities"}</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                {isAr ? "🤖 إيجار بوت التليجرام الذكي لقناتك أو مجموعتك المدفوعة" : "License EGX BOTS Inside Your Telegram Group"}
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-300 font-semibold max-w-3xl leading-relaxed">
+                {isAr
+                  ? "وفّر ساعات الإجابة المتكررة عن أهداف ودعوم ومقاومات الأسهم، وامنح مشتركي قناتك تجربة ذكية فورية تعمل 24/7. البوت يقرأ معرف مجموعتك ويرد على أسئلة الأعضاء تلقائياً مع توقيع باسم قناتك لتعزيز هويتك التجارية."
+                  : "Automate technical analysis and stock queries for your VIP channel members with instant AI answers and your custom branded signature footer on every response."}
+              </p>
+            </div>
+
+            {/* 3 B2B Cards Grid */}
+            <div className="grid lg:grid-cols-3 gap-6 items-stretch">
+              {b2bPlans.map((plan) => {
+                return (
+                  <div
+                    key={plan.id}
+                    className={`border-4 ${plan.border_class} ${
+                      plan.is_featured
+                        ? "bg-gradient-to-b from-emerald-50 via-white to-emerald-50/40 dark:from-emerald-950/40 dark:via-zinc-950 dark:to-emerald-950/20"
+                        : "bg-white dark:bg-zinc-950"
+                    } ${plan.shadow_class} p-6 sm:p-7 space-y-6 flex flex-col justify-between relative transition-all`}
+                  >
+                    {/* Top Floating Badge */}
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                      <span className={`border-2 border-black text-xs font-black uppercase px-3 py-0.5 tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] whitespace-nowrap flex items-center gap-1.5 ${
+                        plan.is_featured ? "bg-emerald-400 text-black" : "bg-amber-300 text-black"
+                      }`}>
+                        {plan.is_featured && <Flame className="w-3.5 h-3.5 fill-black" />}
+                        {isAr ? plan.badge_ar : plan.badge_en}
+                      </span>
+                    </div>
+
+                    <div className="space-y-5 pt-1">
+                      {/* Card Title & Tag */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
+                            <span>{isAr ? plan.name_ar : plan.name_en}</span>
+                          </h3>
+                          <span className="text-xs font-bold text-zinc-500 block mt-0.5">
+                            {isAr ? `سعة المجموعة: ${plan.max_members}` : plan.badge_en}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-black border-2 border-black dark:border-white px-2 py-0.5 ${
+                          plan.is_featured ? "bg-emerald-500 text-white" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
+                        }`}>
+                          {plan.tag}
+                        </span>
+                      </div>
+
+                      {/* Price Section */}
+                      <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
+                            {plan.amount_egp.toLocaleString()}
+                          </span>
+                          <span className="text-sm font-bold text-zinc-500">{isAr ? "ج.م / شهرياً" : "EGP / mo"}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <Zap className="w-3.5 h-3.5" />
+                            {isAr ? `كوتة يومية: ${plan.daily_limit} استفسار (~${plan.monthly_est}/شهر)` : `${plan.daily_limit} queries/day (~${plan.monthly_est}/mo)`}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Features List */}
+                      <div className="space-y-3">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+                          {isAr ? "الميزات والضوابط المشمولة:" : "INCLUDED IN PLAN:"}
+                        </span>
+                        <ul className="space-y-3">
+                          {plan.features.map((f, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-xs font-bold leading-tight text-zinc-800 dark:text-zinc-200">
+                              <span className="shrink-0 mt-0.5 text-emerald-500">{f.icon}</span>
+                              <span>{f.text}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="pt-4 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => openPaymentStep(plan.id)}
+                        className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer ${plan.btn_class}`}
+                      >
+                        <Rocket className="w-4 h-4 shrink-0" />
+                        <span>{isAr ? `اشترك في ${plan.name_ar} (${plan.amount_egp.toLocaleString()} ج.م)` : `Subscribe to ${plan.name_en}`}</span>
+                      </button>
+                      <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>{isAr ? "تفعيل فوري · ربط مباشر للجروب" : "Instant Activation · Dedicated Setup"}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* How B2B Works 3-Step Guide */}
+            <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900/60 p-6 sm:p-8 shadow-[6px_6px_0px_rgba(0,0,0,1)]">
+              <h3 className="text-lg font-black text-zinc-950 dark:text-white mb-6 text-center">
+                {isAr ? "⚡ كيف يعمل ترخيص البوت لمجموعتك في 3 خطوات بسيطة؟" : "⚡ How Channel Bot Licensing Works in 3 Simple Steps"}
+              </h3>
+              <div className="grid sm:grid-cols-3 gap-6">
+                <div className="border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 space-y-2 shadow-[2px_2px_0px_#000]">
+                  <div className="w-8 h-8 rounded-full border-2 border-black bg-amber-400 text-black font-black flex items-center justify-center text-sm">
+                    1
+                  </div>
+                  <h4 className="text-sm font-black text-zinc-900 dark:text-white">
+                    {isAr ? "اشترك في الباقة المناسبة" : "Select Your Tier"}
+                  </h4>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
+                    {isAr ? "اختر باقة تناسب حجم قناتك ومعدل الاستفسارات اليومي، وادفع بسهولة عبر EasyKash (فودافون كاش أو بطاقة بنكية)." : "Choose Starter, Pro VIP, or Enterprise based on your community size."}
+                  </p>
+                </div>
+
+                <div className="border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 space-y-2 shadow-[2px_2px_0px_#000]">
+                  <div className="w-8 h-8 rounded-full border-2 border-black bg-emerald-400 text-black font-black flex items-center justify-center text-sm">
+                    2
+                  </div>
+                  <h4 className="text-sm font-black text-zinc-900 dark:text-white">
+                    {isAr ? "أضف البوت لجروبك" : "Add Bot to Group"}
+                  </h4>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
+                    {isAr ? "أضف البوت الرسمي @egxbots_bot إلى مجموعتك وارفع صلاحياته لمشرف (Admin) ليتعرف على رسائل الأعضاء." : "Add @egxbots_bot as an admin in your group or supergroup."}
+                  </p>
+                </div>
+
+                <div className="border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 space-y-2 shadow-[2px_2px_0px_#000]">
+                  <div className="w-8 h-8 rounded-full border-2 border-black bg-sky-400 text-black font-black flex items-center justify-center text-sm">
+                    3
+                  </div>
+                  <h4 className="text-sm font-black text-zinc-900 dark:text-white">
+                    {isAr ? "حدد توقيع قناتك المخصص" : "Set Custom Signature"}
+                  </h4>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
+                    {isAr ? "اكتب من لوحة تحكمك سطر التوقيع الذي تريده أسفل كل رد (مثلاً: «تحليلات قناة الأستاذ فلان بالتعاون مع EGX Bots»)." : "Set your custom branding footer that appears below every analysis in your group."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Direct WhatsApp Consultation */}
+              <div className="mt-6 pt-6 border-t border-zinc-300 dark:border-zinc-800 text-center space-y-3">
+                <p className="text-xs sm:text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                  {isAr ? "لديك متطلبات خاصة، قنوات متعددة، أو تحتاج تجربة حية للبوت في جروبك أولاً؟" : "Have custom requirements, multiple channels, or need a live trial in your group?"}
+                </p>
+                <a
+                  href="https://wa.me/201024359109?text=مرحباً، أود الاستفسار عن باقات بوت التليجرام B2B للقنوات والمجموعات"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-6 py-3 border-3 border-black dark:border-white bg-[#FFE600] hover:bg-yellow-400 text-black text-xs font-black uppercase shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 transition-all"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>{isAr ? "تواصل معنا مباشرة عبر واتساب لتخصيص الباقة 💬" : "WhatsApp Custom Setup Desk"}</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Notice: Market Data & Signal Nature */}
         <div className="border-4 border-black dark:border-white bg-amber-50 dark:bg-amber-950/20 p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_#f59e0b]">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
@@ -1933,7 +2243,44 @@ export default function PricingClient() {
             </div>
           </div>
         </div>
+        {/* ── AFFILIATE & ADVERTISING PARTNERSHIPS BANNER ── */}
+        <div className="border-4 border-black dark:border-white bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 dark:from-emerald-950/40 dark:via-zinc-950 dark:to-teal-950/30 p-6 sm:p-8 shadow-[8px_8px_0px_#10b981] space-y-4">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-2 text-center md:text-start max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 border-2 border-black dark:border-white bg-emerald-400 text-black text-xs font-black uppercase shadow-[2px_2px_0px_#000]">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isAr ? "برنامج الشركاء والرعاية الإعلانية" : "Affiliate & Media Partnerships"}</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
+                {isAr ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في البورصة المصرية" : "Earn 25% Recurring Cash or Advertise to Thousands of Active EGX Traders"}
+              </h3>
+              <p className="text-xs sm:text-sm font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                {isAr
+                  ? "هل تدير قناة تليجرام، صفحة فيسبوك، أو منصة استثمارية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر، أو احجز مساحات رعاية إعلانية ذكية في تقاريرنا اليومية ورادار الأسهم."
+                  : "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Egyptian market investors."}
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-auto shrink-0">
+              <a
+                href="https://wa.me/201024359109?text=مرحباً، أود الاستفسار عن الشراكة الإعلانية وبرنامج الأفلييت مع EGX BOTS"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 border-4 border-black dark:border-white py-3.5 px-6 text-xs font-black uppercase tracking-wider bg-emerald-500 hover:bg-emerald-400 text-black shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 transition-all text-center"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>{isAr ? "تواصل للشراكة عبر واتساب 💬" : "WhatsApp Partnership Desk"}</span>
+              </a>
+              <Link
+                href="/affiliate"
+                className="inline-flex items-center justify-center gap-2 border-2 border-black dark:border-white py-2.5 px-4 text-xs font-black bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-[2px_2px_0px_#000] hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-center"
+              >
+                <span>{isAr ? "صفحة نظام الأفلييت (25%) ←" : "Affiliate Program Details →"}</span>
+              </Link>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+

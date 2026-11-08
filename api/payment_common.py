@@ -231,6 +231,12 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
 
 def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
     plan = (plan_id or "").strip().lower()
+    if plan == "b2b_starter":
+        return 1000.0
+    if plan == "b2b_pro":
+        return 1500.0
+    if plan == "b2b_enterprise":
+        return 2500.0
     if plan == "pro_renewal":
         return 50.0
     if plan == "pro":
@@ -284,7 +290,7 @@ def pro_regular_amount_egp() -> float:
 
 def subscription_days(plan_id: str) -> int:
     plan = (plan_id or "").strip().lower()
-    return {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "pro_lifetime": 36500}.get(plan, 30)
+    return {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "pro_lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}.get(plan, 30)
 
 
 def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash", payment_order_id: str | None = None) -> None:
@@ -304,6 +310,50 @@ def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash"
         "p_payment_order_id": payment_order_id,
         "p_price_monthly_cents": int(round(plan_amount_egp(requested_plan, user_id=user_id) * 100)),
     }).execute()
+    # Activate B2B group license if applicable
+    if requested_plan in {"b2b_starter", "b2b_pro", "b2b_enterprise"}:
+        daily_limits = {"b2b_starter": 50, "b2b_pro": 120, "b2b_enterprise": 250}
+        limit = daily_limits.get(requested_plan, 50)
+        now = datetime.now(timezone.utc)
+        try:
+            existing = (
+                supabase.table("b2b_group_licenses")
+                .select("id, expires_at")
+                .eq("owner_user_id", user_id)
+                .order("expires_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if existing and existing[0].get("expires_at"):
+                exp_str = existing[0]["expires_at"].replace("Z", "+00:00")
+                try:
+                    exp = datetime.fromisoformat(exp_str)
+                except Exception:
+                    exp = now
+                start_from = exp if exp > now else now
+                new_exp = start_from + timedelta(days=30)
+                supabase.table("b2b_group_licenses").update({
+                    "status": "active",
+                    "tier": requested_plan,
+                    "daily_limit": limit,
+                    "expires_at": new_exp.isoformat(),
+                    "updated_at": now.isoformat(),
+                }).eq("id", existing[0]["id"]).execute()
+            else:
+                new_exp = now + timedelta(days=30)
+                supabase.table("b2b_group_licenses").insert({
+                    "owner_user_id": user_id,
+                    "order_id": payment_order_id,
+                    "tier": requested_plan,
+                    "daily_limit": limit,
+                    "status": "active",
+                    "expires_at": new_exp.isoformat(),
+                    "custom_signature": "⚡ تحليلات خاصة بقناتنا بالتعاون مع EGX BOTS",
+                }).execute()
+        except Exception as _b2b_e:
+            print(f"[BILLING] Error activating B2B group license for {user_id}: {_b2b_e}")
+
     # Enroll user in founders_offer_members so they lock in founders rates for life
     if requested_plan in {"pro", "pro_renewal", "pro_6m", "pro_1y"} and founders_offer_is_open():
         try:

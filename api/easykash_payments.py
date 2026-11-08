@@ -96,7 +96,7 @@ _EASYKASH_INSTALLMENT_OPTIONS = [
 
 ]
 
-_PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500}
+_PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}
 
 _ACTIVE_PRO_PLAN_IDS = list(_PLANS)
 
@@ -349,6 +349,60 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
         "currency": "EGP",
 
         "plans": plans,
+        "b2b_plans": [
+            {
+                "id": "b2b_starter",
+                "name_ar": "باقة القنوات الناشئة (Starter B2B)",
+                "name_en": "Channel Starter",
+                "amount_egp": 1000,
+                "days": 30,
+                "daily_limit": 50,
+                "max_members": 150,
+                "badge_ar": "للقنوات حتى 150 عضو",
+                "features_ar": [
+                    "ترخيص وربط جروب تليجرام واحد",
+                    "كوتة 50 استفسار يومياً (~1,100 شهرياً)",
+                    "توقيع مخصص باسم قناتك أسفل كل تحليل",
+                    "تحليل شامل لجميع أسهم البورصة المصرية ومؤشراتها",
+                    "حماية مانع السبام والتكرار التلقائي (90 ثانية كولد داون)",
+                    "لوحة تحكم لمتابعة الاستهلاك وتعديل التوقيع",
+                ],
+            },
+            {
+                "id": "b2b_pro",
+                "name_ar": "باقة المحللين المحترفين (Pro VIP B2B)",
+                "name_en": "Channel Pro VIP",
+                "amount_egp": 1500,
+                "days": 30,
+                "daily_limit": 120,
+                "max_members": 500,
+                "badge_ar": "الأكثر طلباً 🔥 (حتى 500 عضو)",
+                "features_ar": [
+                    "كافة ميزات باقة Starter",
+                    "كوتة يومية مضاعفة 120 استفسار يومياً (~2,640 شهرياً)",
+                    "سرعة استجابة فائقة وأولوية معالجة في ساعات التداول",
+                    "تخصيص وتعديل نص التوقيع في أي وقت من لوحة التحكم",
+                    "دعم فني وتفعيل مخصص ومباشر عبر واتساب",
+                ],
+            },
+            {
+                "id": "b2b_enterprise",
+                "name_ar": "باقة كبار المحللين والجروبات الكبرى (Enterprise B2B)",
+                "name_en": "Enterprise & Multi-Group",
+                "amount_egp": 2500,
+                "days": 30,
+                "daily_limit": 250,
+                "max_members": 1500,
+                "badge_ar": "للمجموعات الكبرى 💎",
+                "features_ar": [
+                    "كوتة استفسارات ضخمة 250 استفسار يومياً (~5,500 شهرياً)",
+                    "إمكانية ترخيص جروبين تليجرام منفصلين بنفس الاشتراك",
+                    "توقيع مخصص لكل جروب على حدة",
+                    "إحصائيات تفصيلية لأكثر الأسهم طلباً داخل الجروب",
+                    "خط تواصل ودعم مباشر مخصص لكبار المحللين",
+                ],
+            },
+        ],
 
         "limits": {"free": free_limits(), "pro": pro_limits()},
 

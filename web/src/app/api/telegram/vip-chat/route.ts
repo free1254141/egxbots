@@ -90,8 +90,8 @@ async function resolveTelegramUser(
     const isAdmin = ADMIN_TG_IDS.has(tgIdStr);
     const todayCairo = getCairoDateString();
 
-    // 1. Load telegram_vip_chat_state row + look up linked profile in parallel
-    const [stateRes, profileRes, inviteRes] = await Promise.all([
+    // 1. Load telegram_vip_chat_state row + look up linked profiles and invites in parallel
+    const [stateRes, profilesRes, inviteRes] = await Promise.all([
         supabase
             .from("telegram_vip_chat_state")
             .select("telegram_user_id, telegram_username, linked_user_id, quota_date, daily_count, session_state, session_summary, chat_history, pending_prompt")
@@ -99,48 +99,82 @@ async function resolveTelegramUser(
             .maybeSingle(),
         supabase
             .from("profiles")
-            .select("id, display_name, username")
+            .select("id, display_name, username, updated_at")
             .eq("telegram_chat_id", tgIdStr)
-            .limit(1)
-            .maybeSingle(),
+            .limit(10),
         supabase
             .from("pro_telegram_invites")
             .select("user_id")
             .eq("vip_telegram_user_id", telegramUserId)
-            .limit(1)
-            .maybeSingle(),
+            .limit(10),
     ]);
 
     const stateRow = stateRes?.data || null;
     const testMode = stateRow?.session_state?.test_mode || null;
+
+    // Collect all candidate user IDs linked to this Telegram account
+    const candidateUserIds: string[] = Array.from(
+        new Set([
+            ...(profilesRes?.data || []).map((r: any) => r.id),
+            ...(inviteRes?.data || []).map((r: any) => r.user_id),
+            stateRow?.linked_user_id,
+        ].filter(Boolean))
+    );
+
+    // If candidate IDs exist, check for active or trialing subscriptions across all candidates!
+    let activeSubRow: any = null;
+    if (candidateUserIds.length > 0) {
+        const subRes = await supabase
+            .from("subscriptions")
+            .select("user_id, plan_id, status, current_period_start, current_period_end")
+            .in("user_id", candidateUserIds)
+            .in("status", ["active", "trialing"])
+            .order("current_period_end", { ascending: false })
+            .limit(10);
+
+        const activeSubs = subRes?.data || [];
+        if (activeSubs.length > 0) {
+            activeSubRow = activeSubs[0];
+        }
+    }
+
+    // Determine the true linked user: prefer active subscriber, else most recent profile, else invite/state
     const linkedUserId: string | null =
-        profileRes?.data?.id ||
-        inviteRes?.data?.user_id ||
+        activeSubRow?.user_id ||
+        (profilesRes?.data && profilesRes.data[0]?.id) ||
+        (inviteRes?.data && inviteRes.data[0]?.user_id) ||
         stateRow?.linked_user_id ||
         null;
 
+    // If we resolved a linked user that differs from stateRow, update stateRow in the background so it stays in sync
+    if (linkedUserId && stateRow?.linked_user_id !== linkedUserId) {
+        supabase
+            .from("telegram_vip_chat_state")
+            .update({ linked_user_id: linkedUserId })
+            .eq("telegram_user_id", telegramUserId)
+            .then(() => {});
+    }
+
+    const matchedProfile = (profilesRes?.data || []).find((p: any) => p.id === linkedUserId) || (profilesRes?.data && profilesRes.data[0]);
     const displayName =
-        profileRes?.data?.display_name ||
-        profileRes?.data?.username ||
+        matchedProfile?.display_name ||
+        matchedProfile?.username ||
         telegramUsername ||
         "المستثمر";
 
-    let isPro = false;
+    let isPro = isAdmin;
     let used = 0;
     let limit = 10;
     let period: "daily" | "monthly" = "monthly";
 
     if (linkedUserId) {
-        const subRes = await supabase
-            .from("subscriptions")
-            .select("plan_id, status, current_period_start, current_period_end")
-            .eq("user_id", linkedUserId)
-            .in("status", ["active", "trialing"])
-            .order("current_period_end", { ascending: false })
-            .limit(10);
+        const quotaWin = activeSubRow
+            ? resolveSubscriptionQuotaWindow([activeSubRow])
+            : { isPro: false, effectiveMonthStartStr: todayCairo.slice(0, 7) + "-01" };
 
-        const quotaWin = resolveSubscriptionQuotaWindow(subRes?.data || []);
-        isPro = quotaWin.isPro;
+        if (quotaWin.isPro || isAdmin) {
+            isPro = true;
+        }
 
         const limitsRes = await supabase
             .from("ai_chatbot_limits")
@@ -167,9 +201,9 @@ async function resolveTelegramUser(
         // Unlinked Telegram group user -> Free plan (10 messages allowance)
         const rowDate = stateRow?.quota_date ? String(stateRow.quota_date) : "";
         const todayCount = rowDate === todayCairo ? Number(stateRow?.daily_count || 0) : 0;
-        isPro = false;
+        isPro = isAdmin;
         period = "monthly";
-        limit = 10;
+        limit = isPro ? 350 : 10;
         used = todayCount;
     }
 
@@ -194,7 +228,7 @@ async function resolveTelegramUser(
         linkedUserId,
         displayName,
         isPro,
-        isAdmin: false,
+        isAdmin,
         used,
         limit,
         remaining,
@@ -336,7 +370,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ ok: false, error: "Message is required" }, { status: 400 });
         }
 
-        const chatSource = body.chat_source === "telegram_private" ? "telegram_private" : "telegram_topic";
+        const chatSource = body.chat_source === "telegram_private" ? "telegram_private" : (body.chat_source === "telegram_b2b" ? "telegram_b2b" : "telegram_topic");
+        const bypassQuota = Boolean(body.bypass_quota || chatSource === "telegram_b2b");
 
         // Restriction: Public Telegram topic (Artoro topic in free group) must NEVER return open recommendations
         if (chatSource === "telegram_topic" && isTopicRecommendationsQuery(rawMessage)) {
@@ -383,7 +418,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Check quota limit before running pipeline
-        if (!userInfo.isAdmin && userInfo.remaining <= 0) {
+        if (!userInfo.isAdmin && !bypassQuota && userInfo.remaining <= 0) {
             return NextResponse.json(
                 {
                     ok: false,
@@ -422,9 +457,9 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        // Atomically consume 1 quota unit
-        let newUsed = userInfo.used + 1;
-        if (!userInfo.isAdmin && userInfo.linkedUserId) {
+        // Atomically consume 1 quota unit (skipped for B2B queries where group quota is handled by B2B RPC)
+        let newUsed = bypassQuota ? userInfo.used : userInfo.used + 1;
+        if (!userInfo.isAdmin && !bypassQuota && userInfo.linkedUserId) {
             const effectiveDailyLimit = userInfo.isPro ? Math.max(350, userInfo.limit) : userInfo.limit;
             const { data: quotaRows, error: quotaErr } = await supabase.rpc(
                 "consume_ai_chat_quota",

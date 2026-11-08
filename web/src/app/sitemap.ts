@@ -91,6 +91,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.90,
     },
     {
+      url: `${baseUrl}/blogs/real-estate-vs-stocks-egypt-ewanbot-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
       url: `${baseUrl}/news`,
       changeFrequency: 'hourly',
       priority: 0.8,

@@ -63,41 +63,43 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
     state_rows = _supabase_request(f"telegram_vip_chat_state?telegram_user_id=eq.{telegram_user_id}&select=*") or []
     state_row = state_rows[0] if state_rows else None
 
-    profile_rows = _supabase_request(f"profiles?telegram_chat_id=eq.{tg_id_str}&select=id,display_name,username&limit=1") or []
-    invite_rows = _supabase_request(f"pro_telegram_invites?vip_telegram_user_id=eq.{telegram_user_id}&select=user_id&limit=1") or []
+    profile_rows = _supabase_request(f"profiles?telegram_chat_id=eq.{tg_id_str}&select=id,display_name,username&limit=10") or []
+    invite_rows = _supabase_request(f"pro_telegram_invites?vip_telegram_user_id=eq.{telegram_user_id}&select=user_id&limit=10") or []
 
-    linked_user_id = None
+    candidate_ids = []
+    for r in profile_rows:
+        if r.get("id") and r["id"] not in candidate_ids:
+            candidate_ids.append(r["id"])
+    for r in invite_rows:
+        if r.get("user_id") and r["user_id"] not in candidate_ids:
+            candidate_ids.append(r["user_id"])
+    if state_row and state_row.get("linked_user_id") and state_row["linked_user_id"] not in candidate_ids:
+        candidate_ids.append(state_row["linked_user_id"])
+
+    linked_user_id = candidate_ids[0] if candidate_ids else None
     display_name = telegram_username or "المستثمر"
-
     if profile_rows:
-        linked_user_id = profile_rows[0].get("id")
         display_name = profile_rows[0].get("display_name") or profile_rows[0].get("username") or display_name
-    elif invite_rows:
-        linked_user_id = invite_rows[0].get("user_id")
-    elif state_row and state_row.get("linked_user_id"):
-        linked_user_id = state_row.get("linked_user_id")
+    is_pro = is_admin
 
-    is_pro = False
-    used = 0
-    limit = 10
+    if candidate_ids:
+        id_filter = ",".join(candidate_ids)
+        sub_rows = _supabase_request(f"subscriptions?user_id=in.({id_filter})&status=in.(active,trialing)&select=user_id,plan_id,status,current_period_end&order=current_period_end.desc&limit=5") or []
+        if sub_rows:
+            active_sub = sub_rows[0]
+            linked_user_id = active_sub.get("user_id") or linked_user_id
+            is_pro = True
+
+    limit = 350 if is_pro else 10
     period = "monthly"
+    used = 0
 
     if linked_user_id:
-        sub_rows = _supabase_request(f"subscriptions?user_id=eq.{linked_user_id}&status=in.(active,trialing)&select=plan_id,status,current_period_end&order=current_period_end.desc&limit=1") or []
-        if sub_rows:
-            is_pro = True
-            limit = 350
-        else:
-            limit = 10
-            period = "daily"
-
-        # Check quota usage
         quota_rows = _supabase_request(f"ai_chatbot_limits?user_id=eq.{linked_user_id}&date=gte.{today[:7]}-01&select=chat_count") or []
         used = sum(int(r.get("chat_count") or 0) for r in quota_rows)
     else:
-        # Unlinked user
-        limit = 5
-        period = "daily"
+        limit = 350 if is_pro else 10
+        period = "monthly" if is_pro else "daily"
         if state_row and state_row.get("quota_date") == today:
             used = int(state_row.get("daily_count") or 0)
 
