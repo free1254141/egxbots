@@ -7,7 +7,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
     Globe, BarChart2, Brain, Activity, Menu, X, User, ChevronDown, BadgeDollarSign,
-    Search, Loader2, Sun, Moon, TrendingUp, Heart, Bot
+    Search, Loader2, Sun, Moon, TrendingUp, Heart, Bot, FileText
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -226,6 +226,7 @@ export default function Header() {
 
     const navItems = [
         { href: "/scanner/backtests?tab=bots", label: t("nav.scanner.ai_trading"), icon: <Brain className="w-4 h-4 shrink-0" />, activePath: "/scanner/backtests" },
+        { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
         { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
         { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
         { href: "/scanner/backtests?tab=similarity", label: t("nav.scanner.similarity"), icon: <TrendingUp className="w-4 h-4 shrink-0" />, activePath: null },
