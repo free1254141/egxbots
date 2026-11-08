@@ -2033,15 +2033,13 @@ async function executeRawTool(
                     sentiment: d.sentiment,
                     raw_content: d.raw_content,
                     key_takeaway: d.metadata?.key_takeaway || null,
-                    image_url: `/api/disclosures/image/${d.id}`,
                     pdf_url: `/api/disclosures/pdf/${d.id}`,
-                    markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
                     markdown_pdf: `[📄 فتح مستند الـ PDF الأصلي (البورصة المصرية)](/api/disclosures/pdf/${d.id})`,
                     source_url: d.source_url
                 })),
                 note: sym
-                    ? `تم جلب أحدث إفصاحات سهم ${sym} المحفوظة والمحللة بالذكاء الاصطناعي مع شرح الأثر على السهم.`
-                    : `تم جلب أحدث إفصاحات وتعاملات الداخليين بالبورصة المصرية مع التحليل المالي.`
+                    ? `تم جلب أحدث إفصاحات سهم ${sym}. اعرض رابط المستند الرسمي مرة واحدة فقط بصيغة markdown_pdf ليظهر المستند التفاعلي مباشرة في الشات، ولا تكرر الرابط مرتين ولا تطبع كود الـ UUID الداخلي.`
+                    : `تم جلب أحدث إفصاحات البورصة المصرية. اعرض رابط المستند الرسمي مرة واحدة فقط بصيغة markdown_pdf دون تكرار.`
             };
         }
 

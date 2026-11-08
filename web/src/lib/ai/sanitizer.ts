@@ -195,7 +195,7 @@ export function sanitizeReply(reply: string, liveDataString?: string): string {
     // sentences even when they quote the Arabic question or are short.
     if (/[\u0600-\u06FF]/.test(cleanReply)) {
         const countAr = (s: string) => (s.match(/[\u0600-\u06FF]/g) || []).length;
-        const countEn = (s: string) => (s.match(/[A-Za-z]/g) || []).length;
+        const countEn = (s: string) => (s.replace(/(?:https?:\/\/|\/api\/|\/disclosures)[^\s\)]*/gi, "").match(/[A-Za-z]/g) || []).length;
         const isStructural = (t: string) => /^(#{1,6}\s|\*\*\S{1,12}\*\*|[•\-]\s*[A-Z]{2,6}\b|[A-Z]{2,6}\s*[:：]|\|)/.test(t);
         let preservingSectorRows = false;
         const kept = cleanReply.split("\n").filter(line => {
@@ -205,6 +205,7 @@ export function sanitizeReply(reply: string, liveDataString?: string): string {
                 if (preservingSectorRows && /^[•*\-]\s/.test(t)) return true;
                 if ((t.startsWith("|") && t.endsWith("|")) || /^\|[\s:|-]+\|$/.test(t)) return true; // Markdown table row
                 if (/^https?:\/\//i.test(t)) return true;          // source URLs from web search
+                if (/\/api\/disclosures\/|!\[[^\]]*\]\(|\[[^\]]+\]\((?:https?:\/\/|\/)/i.test(t)) return true; // disclosure PDFs/images & markdown links
                 if (/^المصدر[:：]/.test(t)) return true;           // source attribution lines
                 const ar = countAr(t), en = countEn(t);
                 // A numbered strategy/ticker metric is data, not English deliberation.
@@ -482,7 +483,26 @@ export function sanitizeReply(reply: string, liveDataString?: string): string {
             cleanLines.push(line);
         }
     }
-    cleanReply = cleanLines.join("\n").trim()
+    // Deduplicate disclosure PDF/image links for the same disclosure UUID
+    const seenDisclosureIds = new Set<string>();
+    const dedupedDisclosureLines: string[] = [];
+    for (let i = 0; i < cleanLines.length; i++) {
+        const l = cleanLines[i];
+        const discMatch = l.match(/\/api\/disclosures\/(?:pdf|image)\/([0-9a-f-]{36})/i);
+        if (discMatch) {
+            const dId = discMatch[1].toLowerCase();
+            if (seenDisclosureIds.has(dId)) {
+                // If previous line was just a label like "**صورة الإفصاح:**", remove it too
+                while (dedupedDisclosureLines.length > 0 && /^\s*(?:\*\*)*\s*(?:صورة الإفصاح|المستند الرسمي(?:\s*\(PDF\))?)\s*[:：]?\s*(?:\*\*)*\s*[:：]?\s*$/i.test(dedupedDisclosureLines[dedupedDisclosureLines.length - 1])) {
+                    dedupedDisclosureLines.pop();
+                }
+                continue;
+            }
+            seenDisclosureIds.add(dId);
+        }
+        dedupedDisclosureLines.push(l);
+    }
+    cleanReply = dedupedDisclosureLines.join("\n").trim()
         .replace(/في الوقت الحالي، لا أجد أي بيانات سهمية متاحة في\s*\.?/gi, "")
         .replace(/لا أجد أي بيانات سهمية متاحة في\s*\.?/gi, "");
 

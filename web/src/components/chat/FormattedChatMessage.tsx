@@ -1228,9 +1228,30 @@ export function FormattedChatMessage({
         if (block.type !== "table") return true;
         return !tables.some(table => JSON.stringify(table.headers) === JSON.stringify(block.headers));
     });
+    const renderedDisclosureIds = new Set<string>();
     const renderFormattedText = (text: string, isLastBlock: boolean) => {
-        let cleanText = text.replace(/```mermaid\s+[\s\S]*?```/g, "").trim();
-        const lines = cleanText.split("\n");
+        let cleanText = text
+            .replace(/```mermaid\s+[\s\S]*?```/g, "")
+            .replace(/كود الإفصاح\s*`?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`?\s*(?:[—–-]\s*)?/gi, "")
+            .trim();
+        const rawLines = cleanText.split("\n");
+        const seenInBlock = new Set<string>();
+        const lines: string[] = [];
+        for (let i = 0; i < rawLines.length; i++) {
+            const rl = rawLines[i];
+            const dm = rl.match(/\/api\/disclosures\/(?:pdf|image)\/([0-9a-f-]{36})/i);
+            if (dm) {
+                const dId = dm[1].toLowerCase();
+                if (seenInBlock.has(dId) || renderedDisclosureIds.has(dId)) {
+                    while (lines.length > 0 && /^\s*(?:\*\*)*\s*(?:صورة الإفصاح|المستند الرسمي(?:\s*\(PDF\))?)\s*[:：]?\s*(?:\*\*)*\s*[:：]?\s*$/i.test(lines[lines.length - 1])) {
+                        lines.pop();
+                    }
+                    continue;
+                }
+                seenInBlock.add(dId);
+            }
+            lines.push(rl);
+        }
 
         return lines.map((line, idx) => {
             const isLastLine = isLastBlock && idx === lines.length - 1;
@@ -1305,12 +1326,16 @@ export function FormattedChatMessage({
                 return linkParts.map((linkPart, linkIdx) => {
                     if (!linkPart) return null;
 
-                    // Dedicated EGX Disclosures PDF / Document Viewer Card
+                    // Dedicated EGX Disclosures PDF / Document Viewer Card (Deduplicated per message)
                     const discMatch = linkPart.match(/(?:\/api\/disclosures\/(?:pdf|image)\/([0-9a-f-]{36}))/i);
                     if (discMatch) {
-                        const discId = discMatch[1];
+                        const discId = discMatch[1].toLowerCase();
+                        if (renderedDisclosureIds.has(discId)) {
+                            return null;
+                        }
+                        renderedDisclosureIds.add(discId);
                         return (
-                            <div key={`disc-pdf-${linkIdx}`} className="my-3 overflow-hidden border-3 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#FFE600]">
+                            <div key={`disc-pdf-${discId}`} className="my-3 w-full block overflow-hidden border-3 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 shadow-[4px_4px_0_0_#000] dark:shadow-[4px_4px_0_0_#FFE600]">
                                 <div className="px-3 py-1.5 bg-black text-white text-[11px] font-black flex items-center justify-between border-b-2 border-black dark:border-white">
                                     <span className="flex items-center gap-1.5 text-[#FFE600]">
                                         <FileText className="w-3.5 h-3.5" />
@@ -1320,12 +1345,20 @@ export function FormattedChatMessage({
                                         وثيقة أصلية
                                     </span>
                                 </div>
-                                <div className="relative w-full h-[320px] bg-white border-b-2 border-black">
-                                    <iframe
-                                        src={`/api/disclosures/pdf/${discId}#toolbar=0&navpanes=0`}
-                                        title="مستند الإفصاح الأصلي"
-                                        className="w-full h-full border-0 bg-white"
-                                    />
+                                <div className="relative w-full h-[340px] bg-white border-b-2 border-black">
+                                    {isStreaming ? (
+                                        <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 text-xs font-black">
+                                            <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                                            <span>جاري تجهيز مستند الـ PDF الرسمي للمعاينة...</span>
+                                        </div>
+                                    ) : (
+                                        <iframe
+                                            key={`iframe-pdf-${discId}`}
+                                            src={`/api/disclosures/pdf/${discId}#toolbar=0&navpanes=0&view=FitH`}
+                                            title="مستند الإفصاح الأصلي"
+                                            className="w-full h-full block border-0 bg-white"
+                                        />
+                                    )}
                                 </div>
                                 <div className="px-3 py-2 bg-[#FFE600] text-black text-xs font-black flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
@@ -1463,7 +1496,7 @@ export function FormattedChatMessage({
                     className={`leading-relaxed text-xs sm:text-sm break-words overflow-wrap-anywhere my-1 dir-auto text-zinc-900 dark:text-zinc-100 ${isBullet ? 'flex items-start gap-2 pr-2' : ''} ${isTableLine ? 'font-mono text-[11px] bg-zinc-100/80 dark:bg-black dark:border dark:border-white/20 p-1 rounded overflow-x-auto' : ''}`}
                 >
                     {isBullet && <span className="text-emerald-600 dark:text-emerald-400 font-bold mt-1">•</span>}
-                    <span className="flex-1">
+                    <div className="flex-1 min-w-0 w-full">
                         {parseTextSpans(lineContent)}
 
                         {isStreaming && isLastLine && (
@@ -1475,7 +1508,7 @@ export function FormattedChatMessage({
                                 ▌
                             </span>
                         )}
-                    </span>
+                    </div>
                 </div>
             );
         });

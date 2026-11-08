@@ -323,4 +323,25 @@ describe("StockCard Component", () => {
         expect(screen.getByText(/سكور: 49\/100/)).toBeTruthy();
         expect(screen.getByText("🔴 سلبي / أداء فني ضعيف")).toBeTruthy();
     });
+
+    test("FormattedChatMessage renders disclosure PDF iframe card once and deduplicates pdf + image links for the same UUID", () => {
+        const duplicateDisclosureMd = [
+            "## 🔗 مصدر إفصاح IEEC — بيع داخلي 11,000 سهم",
+            "",
+            "**المستند الرسمي (PDF):**",
+            "[📄 فتح مستند الـ PDF الأصلي — البورصة المصرية](/api/disclosures/pdf/0e2f2da5-234f-41ac-89f6-d4beb0266d00)",
+            "",
+            "**صورة الإفصاح:**",
+            "[🖼️ عرض صورة الإفصاح](/api/disclosures/image/0e2f2da5-234f-41ac-89f6-d4beb0266d00)",
+            "",
+            "**بيانات السجل:** كود الإفصاح `0e2f2da5-234f-41ac-89f6-d4beb0266d00` — النوع: تعاملات داخليين."
+        ].join("\n");
+
+        const { container } = render(<FormattedChatMessage role="assistant" content={duplicateDisclosureMd} />);
+
+        const iframes = container.querySelectorAll("iframe");
+        expect(iframes.length).toBe(1);
+        expect(iframes[0].getAttribute("src")).toContain("/api/disclosures/pdf/0e2f2da5-234f-41ac-89f6-d4beb0266d00");
+        expect(screen.queryByText(/صورة الإفصاح/)).toBeNull();
+    });
 });

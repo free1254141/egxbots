@@ -1,5 +1,6 @@
 import { executeAgenticTool } from "../agentic-tools";
 import { executeStructuredTools } from "../tools-v2";
+import { sanitizeReply } from "../sanitizer";
 
 describe("get_disclosures agentic tool", () => {
   it("should fetch disclosures and return structured response", async () => {
@@ -157,5 +158,24 @@ describe("get_disclosures agentic tool", () => {
     expect(res.disclosures[0].raw_content).toBe("نص الإفصاح الكامل...");
     expect(res.disclosures[0].image_url).toBe("/api/disclosures/image/123e4567-e89b-12d3-a456-426614174000");
     expect(res.disclosures[0].markdown_image).toContain("/api/disclosures/image/123e4567-e89b-12d3-a456-426614174000");
+  });
+
+  it("sanitizeReply preserves disclosure PDF links on first render and deduplicates duplicate image/pdf links", () => {
+    const rawReply = [
+      "## 🔗 مصدر إفصاح IEEC — بيع داخلي 11,000 سهم",
+      "",
+      "**المستند الرسمي (PDF):**",
+      "[📄 فتح مستند الـ PDF الأصلي — البورصة المصرية](/api/disclosures/pdf/0e2f2da5-234f-41ac-89f6-d4beb0266d00)",
+      "",
+      "**صورة الإفصاح:**",
+      "[🖼️ عرض صورة الإفصاح](/api/disclosures/image/0e2f2da5-234f-41ac-89f6-d4beb0266d00)",
+      "",
+      "تحليل الأثر المالي محدود جداً."
+    ].join("\n");
+
+    const cleaned = sanitizeReply(rawReply);
+    expect(cleaned).toContain("/api/disclosures/pdf/0e2f2da5-234f-41ac-89f6-d4beb0266d00");
+    expect(cleaned).not.toContain("/api/disclosures/image/0e2f2da5-234f-41ac-89f6-d4beb0266d00");
+    expect(cleaned).not.toContain("**صورة الإفصاح:**");
   });
 });
