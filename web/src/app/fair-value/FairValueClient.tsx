@@ -550,7 +550,8 @@ export default function FairValueClient({
                     </span>
                   </div>
                   <Link
-                    href={`/stocks/${selectedChartStock?.symbol || "COMI"}`}
+                    prefetch={false}
+                    href={`/stocks/${(selectedChartStock?.symbol || "COMI").toLowerCase()}`}
                     className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline"
                   >
                     <span>{isAr ? "صفحة السهم" : "View Stock"}</span>
@@ -1175,7 +1176,8 @@ function StockValuationCard({
 
       {/* Action link */}
       <Link
-        href={`/stocks/${stock.symbol}`}
+        prefetch={false}
+        href={`/stocks/${stock.symbol.toLowerCase()}`}
         className="block text-center py-2 px-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-500 hover:text-white dark:hover:bg-emerald-500 dark:hover:text-white text-xs font-bold text-zinc-700 dark:text-zinc-300 transition-colors"
       >
         {isAr ? "التحليل الفني والمالي الكامل للسهم ←" : "Full Technical & Financial Analysis →"}

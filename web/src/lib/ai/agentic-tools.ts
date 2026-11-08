@@ -1218,10 +1218,15 @@ async function executeRawTool(
                     const symUpper = s.symbol ? String(s.symbol).toUpperCase() : "";
                     const latestPriceInfo = symUpper ? latestPriceMap.get(symUpper) : null;
                     const entryPrice = finite(s.entry_price);
-                    const currentPrice = (latestPriceInfo?.close != null && Number.isFinite(latestPriceInfo.close))
-                        ? latestPriceInfo.close
+                    const isLatestPriceFresh = Boolean(
+                        latestPriceInfo?.close != null
+                        && Number.isFinite(latestPriceInfo.close)
+                        && (!s.entry_date || !latestPriceInfo.date || latestPriceInfo.date >= String(s.entry_date).slice(0, 10))
+                    );
+                    const currentPrice = isLatestPriceFresh
+                        ? latestPriceInfo!.close
                         : (finite(s.current_price) ?? entryPrice);
-                    const currentDate = latestPriceInfo?.date || s.entry_date || null;
+                    const currentDate = (isLatestPriceFresh ? latestPriceInfo?.date : null) || s.entry_date || null;
                     const unrealizedReturn = (entryPrice && currentPrice != null && entryPrice > 0)
                         ? Number((((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2))
                         : (finite(s.return_pct) ?? 0);
@@ -1253,7 +1258,7 @@ async function executeRawTool(
                         unrealized_return_pct: unrealizedReturn,
                         max_gain_pct: finite(s.max_gain_pct)
                     };
-                })
+                }).filter((rec: any) => !(rec.stop_loss != null && rec.current_price != null && rec.current_price < rec.stop_loss))
                 : [];
 
             const closedScannerRecs = (statusFilter === "closed" || statusFilter === "all")

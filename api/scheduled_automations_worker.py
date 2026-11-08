@@ -442,8 +442,12 @@ def _fetch_market_indicators_brief(
     # 1. User Portfolio (if prompt asks about portfolio / محفظتي)
     if user_id and any(k in combined_text for k in ("محفظت", "محفظة", "أسهمي", "اسهمي", "مراكزي", "portfolio")):
         pos_rows = _supabase_request(
-            f"positions?user_id=eq.{user_id}&status=eq.OPEN&select=symbol,quantity,entry_price&limit=15"
+            f"positions?user_id=eq.{user_id}&status=eq.open&select=symbol,quantity,entry_price&limit=15"
         ) or []
+        if not pos_rows:
+            pos_rows = _supabase_request(
+                f"positions?user_id=eq.{user_id}&status=eq.OPEN&select=symbol,quantity,entry_price&limit=15"
+            ) or []
         if isinstance(pos_rows, list) and pos_rows:
             port_lines = ["💼 محفظة المشترك المسجلة حالياً:"]
             for p in pos_rows:

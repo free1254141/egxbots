@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     });
 
     const backendRes = await fetch(backendUrl.toString(), {
-      cache: "no-store",
+      next: { revalidate: 3600 },
       signal: AbortSignal.timeout(15000),
     });
 

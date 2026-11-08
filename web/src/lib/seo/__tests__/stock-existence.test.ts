@@ -26,3 +26,9 @@ test('a verified missing stock still returns notFound', async () => {
     client({ data: [], error: null }, { data: [], error: null });
     await expect(StockPage(params())).rejects.toThrow('NOT_FOUND');
 });
+test('uppercase symbol metadata short-circuits without database reads before canonical redirect', async () => {
+    (getPublicMarketClient as jest.Mock).mockClear();
+    const meta = await generateMetadata({ params: Promise.resolve({ symbol: 'ABUK' }) });
+    expect(meta.alternates?.canonical).toBe('https://egxbots.com/stocks/abuk');
+    expect(getPublicMarketClient).not.toHaveBeenCalled();
+});

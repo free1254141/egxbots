@@ -1,5 +1,5 @@
 import { ARABIC_STOCK_MAPPINGS } from './symbol-aliases';
-import { CANONICAL_STOCK_NAMES } from './stock-names';
+import { CANONICAL_STOCK_NAMES, getCanonicalStockName } from './stock-names';
 import { executeAgenticTool, cairoTimeframeBounds } from './agentic-tools';
 import type { ChartHistoryCache } from './chart-strategy-tools';
 import { isShariaCompliant } from '../shariaStocks';
@@ -296,8 +296,13 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
         if (shortAvailable) for (const [closed, trades] of [[false, swings.active_trades], [true, swings.closed_trades]] as const) {
             if (status === 'open' && closed || status === 'closed' && !closed) continue;
             for (const t of Array.isArray(trades) ? trades : []) {
-                const row = { source_kind: 'short_swings', recommendation_type: 'صفقة قصيرة', id: t.signal_id,
-                    symbol: t.symbol, name: t.name_ar || t.name_en, signal: 'BUY', status: closed ? 'closed' : 'open',
+                const canonical = getCanonicalStockName(t.symbol);
+                const resolvedArName = (canonical.name_ar && canonical.name_ar !== String(t.symbol || '').toUpperCase())
+                    ? canonical.name_ar
+                    : (t.name_ar || t.name_en);
+                const row = { source_kind: 'short_swings', recommendation_type: 'صفقة قصيرة (وقف متحرك)', id: t.signal_id,
+                    symbol: t.symbol, name_ar: resolvedArName, name: resolvedArName, signal: 'BUY', status: closed ? 'closed' : 'open',
+                    sector: canonical.sector || null,
                     is_sharia_compliant: isShariaCompliant(t.symbol),
                     sharia_index: isShariaCompliant(t.symbol) ? "EGX33" : null,
                     signal_date: t.signal_date || t.entry_date, entry_date: t.entry_date,
@@ -305,13 +310,20 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
                     reference_close: t.is_pending_entry ? t.reference_close : null,
                     current_price: closed ? null : t.current_price, current_date: closed ? null : t.price_date || t.as_of || swings.as_of,
                     exit_price: closed ? t.exit_price : null, exit_date: closed ? t.exit_date : null,
-                    stop_loss: t.trailing_stop ?? t.stop_loss ?? null, target_price: null,
+                    stop_loss: t.trailing_stop ?? t.stop_loss ?? null, target_price: t.target_price ?? t.target_1 ?? null,
+                    stop_loss_type: t.trailing_stop != null ? 'trailing_stop_open_target' : 'fixed_stop',
                     realized_return_pct: closed ? t.return_pct : null, unrealized_return_pct: closed ? null : t.is_pending_entry ? null : t.return_pct,
                     is_pending_entry: Boolean(t.is_pending_entry), snapshot_date: swings.as_of };
                 if (filtered(row)) shorts.push(row);
             }
         }
-        const legacyRows = legacy.recommendations.map((r: any) => ({ ...r, source_kind: 'model_signals', recommendation_type: 'توصية نماذج' }));
+        const legacyRows = legacy.recommendations.map((r: any) => ({
+            ...r,
+            source_kind: 'model_signals',
+            recommendation_type: r.source === '15m_intraday_scanner' && r.recommendation_type
+                ? r.recommendation_type
+                : 'توصية نماذج',
+        }));
         const all = [...legacyRows, ...shorts].map(r => recommendationVisibility(r, access.isPro));
         const offset = Number.isInteger(args.offset) && args.offset >= 0 ? args.offset : 0;
         const limit = Number.isInteger(args.limit) && args.limit > 0 && args.limit <= 200 ? args.limit : 15;
@@ -332,7 +344,7 @@ export async function executeRequestTool(name: string, args: any, db: any, userI
             snapshot_date: shortAvailable ? swings.as_of : null,
             latest_recommendation_date: legacy.latest_recommendation_date,
             latest_returned_quote_date: [legacy.latest_returned_quote_date, shortAvailable ? swings.as_of : null].filter(Boolean).sort().at(-1) || null,
-            note: `${access.isPro ? 'المصادر المنشورة متاحة للبرو دون تشفير.' : 'التوصيات الحديثة المحمية تظل مشفرة وفق صلاحية الحساب.'} ${offset > 0 || page.length < total ? `معروض ${page.length} من إجمالي ${total} توصية مطابقة للفترة؛ اذكر ملخص الأداء الإحصائي (نسبة النجاح ومتوسط العائد) ثم اعرض الصفقات البارزة المعروضة في جدول دون محاولة سرد كل الصفقات.` : 'اذكر الإحصاءات والصفقات المعروضة بدقة.'} ${!completeSources ? 'تعذر إكمال مصدر أو تجاوز المصدر القديم حد القراءة؛ هذه نتائج جزئية وليست كل التوصيات.' : ''} سعر الدخول الفعلي منفصل عن الإشارة المعلقة؛ تاريخ التوصية منفصل عن تاريخ السعر.` };
+            note: `${access.isPro ? 'المصادر المنشورة متاحة للبرو دون تشفير.' : 'التوصيات الحديثة المحمية تظل مشفرة وفق صلاحية الحساب.'} ${offset > 0 || page.length < total ? `معروض ${page.length} من إجمالي ${total} توصية مطابقة للفترة؛ اذكر ملخص الأداء الإحصائي (نسبة النجاح ومتوسط العائد) ثم اعرض الصفقات البارزة المعروضة في جدول دون محاولة سرد كل الصفقات.` : 'اذكر الإحصاءات والصفقات المعروضة بدقة.'} ${!completeSources ? 'تعذر إكمال مصدر أو تجاوز المصدر القديم حد القراءة؛ هذه نتائج جزئية وليست كل التوصيات.' : ''} سعر الدخول الفعلي منفصل عن الإشارة المعلقة (reference_close هو سعر الإشارة المرجعي قبل التفعيل)؛ وفي صفقات short_swings ذات الوقف المتحرك (trailing_stop) يكون المستهدف مفتوحاً لتتبع الموجة بالوقف المتحرك (اكتب «مفتوح (وقف متحرك)» بدلاً من «غير محدد»). إذا تكرر نفس رمز السهم في نظامين مختلفين (توصية نماذج مقابل صفقة قصيرة بالوقف المتحرك)، وضّح اسم كل نظام صراحةً ولا تدمجهما كصفين متناقضين بنفس الوصف.` };
     }
     if (readBatches.has(name) && Array.isArray(args.symbols) && args.symbols.length > 10) {
         if (args.symbols.length > 30) return { status: 'error', availability: 'error', message: 'الطلب يتجاوز الحد المسموح 30 رمزًا؛ قسم الطلب.' };

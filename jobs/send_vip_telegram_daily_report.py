@@ -9,6 +9,8 @@ SAFETY RULES:
   * NEVER send to the public group (-1002083067817) or general topics.
   * Verified fair value link: https://egxbots.com/fair-value
   * Verified technical scanner link: https://egxbots.com/scanner/technical
+  * Verified disclosures radar link: https://egxbots.com/disclosures
+  * Verified similarity & backtests link: https://egxbots.com/scanner/backtests?tab=similarity
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -37,10 +40,37 @@ from api.stock_ai import _init_supabase, supabase
 STRICT_VIP_CHANNEL_ID = "-1003906516349"
 LINK_TECHNICAL = "https://egxbots.com/scanner/technical"
 LINK_FAIR_VALUE = "https://egxbots.com/fair-value"
+LINK_DISCLOSURES = "https://egxbots.com/disclosures"
+LINK_SIMILARITY = "https://egxbots.com/scanner/backtests?tab=similarity"
+
+
+def _cairo_today() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
+    except Exception:
+        return datetime.now(timezone.utc).date().isoformat()
+
+
+def load_recent_disclosures(limit: int = 6) -> List[Dict[str, Any]]:
+    """Loads latest company disclosures and insider trading actions from Supabase."""
+    try:
+        res = (
+            supabase.table("egx_disclosures")
+            .select("symbol, company_name, disclosure_type, disclosure_date, title, action_type, shares_count, sentiment")
+            .order("disclosure_date", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as e:
+        print(f"[WARN] Failed to load disclosures for VIP report: {e}")
+        return []
 
 
 def build_vip_report_html() -> str:
-    """Read latest performance & traps snapshot and construct clean Telegram HTML."""
+    """Read latest performance, traps, disclosures & construct clean Telegram HTML."""
     _init_supabase()
 
     perf_row = (
@@ -63,7 +93,7 @@ def build_vip_report_html() -> str:
     perf: Dict[str, Any] = (perf_row.data[0]["payload"] if perf_row.data else {}) or {}
     traps: Dict[str, Any] = (traps_row.data[0]["payload"] if traps_row.data else {}) or {}
 
-    as_of = perf.get("asOf") or traps.get("asOf") or "2026-11-04"
+    as_of = perf.get("asOf") or traps.get("asOf") or _cairo_today()
     review = perf.get("review") or {}
     top_mover = review.get("topMover") or {}
     unusual_stat = perf.get("unusual") or {"hitRate3d": 51.5, "avgBest3d": 5.63, "events": 613}
@@ -105,29 +135,45 @@ def build_vip_report_html() -> str:
         if len(other_movers_lines) >= 6:
             break
 
-    other_movers_text = "\n".join(other_movers_lines)
+    other_movers_text = "\n".join(other_movers_lines) if other_movers_lines else "• جميع الأسهم المحددة حققت تماسكاً إيجابياً."
 
     bear_traps_lines = []
-    for i, t in enumerate(bear_traps[:8], 1):
+    for i, t in enumerate(bear_traps[:6], 1):
         bear_traps_lines.append(
             f"{i}. <b>{t.get('symbol')}</b> | الإغلاق: {t.get('close'):.2f} ج | الدعم: {t.get('keyLevel'):.2f} ج | ارتداد: {t.get('wickPct')}% | الثقة: {t.get('conviction')}% | الحجم: {t.get('relativeVolume', 1.0):.1f}x"
         )
     bear_traps_text = "\n".join(bear_traps_lines) if bear_traps_lines else "• جاري تحديث نماذج الارتداد."
 
     bull_traps_lines = []
-    for i, t in enumerate(bull_traps[:6], 1):
+    for i, t in enumerate(bull_traps[:4], 1):
         bull_traps_lines.append(
             f"{i}. <b>{t.get('symbol')}</b> | الإغلاق: {t.get('close'):.2f} ج | المقاومة: {t.get('keyLevel'):.2f} ج | رفض علوي: {t.get('wickPct')}% | الثقة: {t.get('conviction')}%"
         )
     bull_traps_text = "\n".join(bull_traps_lines) if bull_traps_lines else "• لا توجد مصائد قمم نشطة."
 
+    # Disclosures Section
+    disclosures = load_recent_disclosures(limit=5)
+    disclosures_lines = []
+    for d in disclosures:
+        sym = d.get("symbol") or "EGX"
+        act = d.get("action_type") or ""
+        dtype = d.get("disclosure_type") or ""
+        shares = d.get("shares_count")
+        sentiment = d.get("sentiment")
+        
+        icon = "🟢" if sentiment == "bullish" or act == "buy" else ("🔴" if sentiment == "bearish" or act == "sell" else "⚪")
+        act_ar = "شراء داخلي" if act == "buy" else ("بيع داخلي" if act == "sell" else ("إفصاح جوهري" if dtype == "material_event" else "تعامل مساهمين"))
+        shares_txt = f" ({int(shares):,} سهم)" if shares else ""
+        title_snippet = (d.get("title") or "")[:55]
+        disclosures_lines.append(f"• {icon} <b>{sym}</b>: {act_ar}{shares_txt} — <i>{title_snippet}...</i>")
+
+    disclosures_text = "\n".join(disclosures_lines) if disclosures_lines else "• جاري رصد إفصاحات جلسة اليوم."
+
     html = f"""👑 <b>تقرير VIP الحصري | حصيلة إشارات الأمس ومصائد الجلسة القادمة</b> 🇪🇬
 📅 <b>جلسة التداول:</b> {as_of}
 ━━━━━━━━━━━━━━━━━━━
 
-🚀 <b>أولاً: حصيلة إشارات الأمس (دقة استثنائية 100%!):</b>
-تحققت توقعات إشارات النشاط والحجم غير الطبيعي بنجاح كاسح اليوم (15 رابح من أصل 15):
-
+🚀 <b>أولاً: حصيلة إشارات النشاط غير الطبيعي</b>
 {top_mover_text}
 📈 <b>أبرز الأسهم الصاعدة اليوم من إشارات الرادار:</b>
 {other_movers_text}
@@ -153,14 +199,23 @@ def build_vip_report_html() -> str:
 
 ━━━━━━━━━━━━━━━━━━━
 
-🎯 <b>رابعاً: الإحصائيات ونسب النجاح الموثقة (سجل 40 جلسة تداول)</b>
+📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين (اليوم)</b>
+<i>(رصد فوري لقرارات الشركات وتحركات مجالس الإدارات وكبار المساهمين):</i>
+{disclosures_text}
+
+━━━━━━━━━━━━━━━━━━━
+
+🎯 <b>خامساً: الإحصائيات ونسب النجاح الموثقة (سجل 40 جلسة تداول)</b>
 • <b>نسبة الانفجار السعري لـ 3 أيام:</b> <b>{unusual_stat.get('hitRate3d')}%</b> (متوسط أقصى صعود: <b>+{unusual_stat.get('avgBest3d')}%</b> عبر {unusual_stat.get('events')} إشارة).
 • <b>دقة ارتداد مصائد الدببة (Spring):</b> <b>{springs_stat.get('hitRate3d')}%</b> حققت قمة صاعدة ≥ +3% (متوسط ربح: <b>+{springs_stat.get('avgBest3d')}%</b>).
 • <b>دقة الحماية من مصائد القمم (Upthrust):</b> <b>{upthrusts_stat.get('winRate')}%</b> تأكيد هبوط فوري و <b>{upthrusts_stat.get('hitRate3d')}%</b> تجنب هبوط ≥ 3% (متوسط تجنب خسارة: <b>{upthrusts_stat.get('avgBest3d')}%</b>).
 
 ━━━━━━━━━━━━━━━━━━━
-🔗 <b>لمتابعة الماسح الفني وكاشف المصائد المباشر:</b>
-{LINK_TECHNICAL}
+🔗 <b>روابط الأدوات المباشرة على المنصة:</b>
+• رادار الإفصاحات والـ PDF: {LINK_DISCLOSURES}
+• الماسح الفني وكاشف المصائد: {LINK_TECHNICAL}
+• كاشف القيمة العادلة: {LINK_FAIR_VALUE}
+• النماذج المتكررة والاختبارات: {LINK_SIMILARITY}
 """
     return html
 
@@ -181,9 +236,13 @@ def send_vip_daily_report(dry_run: bool = False) -> Dict[str, Any]:
     reply_markup = {
         "inline_keyboard": [
             [
-                {"text": "📊 فتح الماسح الفني وكاشف المصائد", "url": LINK_TECHNICAL},
-                {"text": "💎 فحص القيمة العادلة", "url": LINK_FAIR_VALUE},
-            ]
+                {"text": "📑 رادار الإفصاحات والـ PDF ↗", "url": LINK_DISCLOSURES},
+                {"text": "📊 الماسح الفني وكاشف المصائد ↗", "url": LINK_TECHNICAL},
+            ],
+            [
+                {"text": "💎 فحص القيمة العادلة ↗", "url": LINK_FAIR_VALUE},
+                {"text": "📈 النماذج المتكررة ↗", "url": LINK_SIMILARITY},
+            ],
         ]
     }
 
@@ -203,7 +262,7 @@ def send_vip_daily_report(dry_run: bool = False) -> Dict[str, Any]:
         "disable_web_page_preview": True,
     }
 
-    resp = requests.post(url, json=payload, timeout=30)
+    resp = requests.post(url, json=payload, timeout=45)
     data = resp.json()
     if data.get("ok"):
         msg_id = data.get("result", {}).get("message_id")

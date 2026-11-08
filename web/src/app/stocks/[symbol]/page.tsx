@@ -59,6 +59,13 @@ interface PageProps {
 // Generate dynamic metadata for SEO search indexers
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const raw = (await params).symbol;
+  if (raw !== raw.toLowerCase()) {
+    return {
+      alternates: {
+        canonical: `https://egxbots.com/stocks/${raw.toLowerCase()}`,
+      },
+    };
+  }
   const symbol = raw.toUpperCase();
   const snapshot = await getPublicStockSnapshot(symbol);
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();

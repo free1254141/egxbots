@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { hasActiveProSubscription } from "@/lib/ai/plan-gate";
+import { getViewerContext } from "@/lib/supabase/viewer-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +23,10 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 500, 1), 1000);
 
   try {
-    const auth = await createSupabaseServerClient(request);
-    const { data: { user } } = await auth.auth.getUser();
-    if (!user) return NextResponse.json({ detail: "Pro subscription required" }, { status: 401 });
-    const { data: subs } = await auth.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", user.id);
-    const pro = hasActiveProSubscription(subs || []);
+    const { authenticated, pro } = await getViewerContext(request);
+    if (!authenticated) return NextResponse.json({ detail: "Pro subscription required" }, { status: 401 });
     if (!pro) return NextResponse.json({ detail: "Pro subscription required" }, { status: 403 });
-    const supabase = getSupabaseServiceClient();
+    const supabase = getSupabaseServiceClient({ cacheMarketData: true });
     const { data: events, error: eventError } = await supabase
       .from("recommendation_events")
       .select("id,recommendation_id,event_type,old_values,new_values,price_at_event,source,telegram_status,created_at")

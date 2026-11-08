@@ -344,4 +344,45 @@ describe("StockCard Component", () => {
         expect(iframes[0].getAttribute("src")).toContain("/api/disclosures/pdf/0e2f2da5-234f-41ac-89f6-d4beb0266d00");
         expect(screen.queryByText(/صورة الإفصاح/)).toBeNull();
     });
+
+    test("FormattedChatMessage parses multi-stock comparison table (NIPH vs MPCI) into accurate side-by-side StockCards without 60100/100 or 0.00 bugs", () => {
+        const comparisonMd = `## ⚖️ مقارنة: النيل للأدوية (NIPH) مقابل ممفيس للأدوية (MPCI)
+
+| البند | النيل للأدوية (NIPH) | ممفيس للأدوية (MPCI) |
+|---|---|---|
+| **السعر** | 277.25 ج.م (-1.33%) | **251.57 ج.م (+0.63%)** |
+| **السكور الكلي** | 60/100 — B (مراقبة) | 56/100 — B (مراقبة) |
+| **الشرعية** | ✅ متوافق (EGX33) | ✅ متوافق (EGX33) |
+| **RSI (14)** | **48.8** (حيادي متوازن) | 40.2 (يميل للضعف) |
+| **MACD / الإشارة / الهيستوجرام** | -7.745 / -11.952 / **+4.207** | -1.494 / -0.453 / -1.042 |
+| **EMA 50 / EMA 200** | 286.95 / 219.52 | 253.68 / 201.95 |
+| **الدعم / المقاومة الأولى** | 205.00 / 313.00 | 228.00 / 289.99 |
+| **المسافة للمقاومة الأولى** | +12.9% | **+15.3%** |
+| **الدعم والمقاومة الثانية** | 190.10 / 338.00 | 215.05 / 298.00 |
+| **الحجم النسبي** | 0.50x (ضعيف) | 0.44x (ضعيف) |
+| **وايكوف** | تجميع ضعيف (55) | محايد |
+| **KING AI / EGX AI** | 50.2% / 57.5% | **60.8%** / 57.7% |
+| **مضاعف الربحية P/E** | 45.4x | **9.66x** |`;
+
+        render(<FormattedChatMessage role="assistant" content={comparisonMd} />);
+
+        expect(screen.getByText("#NIPH")).toBeTruthy();
+        expect(screen.getByText("#MPCI")).toBeTruthy();
+
+        expect(screen.getByText("سكور: 60/100")).toBeTruthy();
+        expect(screen.getByText("سكور: 56/100")).toBeTruthy();
+        expect(screen.queryByText(/60100/)).toBeNull();
+
+        expect(screen.getAllByText("277.25").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("251.57").length).toBeGreaterThan(0);
+        expect(screen.queryByText("0.00")).toBeNull();
+
+        expect(screen.getByText("205.00 ج.م")).toBeTruthy();
+        expect(screen.getByText("313.00 ج.م")).toBeTruthy();
+        expect(screen.getByText("190.10 ج.م")).toBeTruthy();
+        expect(screen.getByText("338.00 ج.م")).toBeTruthy();
+
+        expect(screen.getAllByText("-7.745 / -11.952 / +4.207").length).toBeGreaterThan(0);
+        expect(screen.queryByText(/\*\*\+4\.207\*\*/)).toBeNull();
+    });
 });

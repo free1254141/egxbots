@@ -75,3 +75,25 @@
 2. **عدم تشغيل استعلامات عشوائية:** ممنوع استخدام `SELECT *` على جداول الأسعار الكبيرة أو عمل فحص للوجات سوبابيز عن بعد (`query_logs`).
 3. **حماية التخزين:** مساحة الـ `Deployment Storage` الحالية (8.4 جيجا) تعكس نسخ البناء الحديثة من اليوم السابق؛ تتم مراجعتها بشكل دوري كل دورة شهرية.
 4. **قاعدة الرفع لـ Git الصارمة:** ممنوع منعاً باتاً تنفيذ `git push` تلقائياً دون أمر بشري صريح ومباشر من المستخدم.
+
+---
+
+## 5. مراجعة اللوجات الحية وسد تسريبات الـ CPU الإضافية (تحديث 8 نوفمبر 2026)
+
+عند فحص لوجات Vercel الحية (`vercel logs requests`) ليوم 8 نوفمبر 2026 بعد تسجيل استهلاك `13m 25s` من `Fluid Active CPU` (بالتزامن مع 11 عملية Deploy في نفس اليوم)، تم رصد وسد التسريبات التالية:
+
+1. **منع الـ Prefetch بالحروف الكبيرة (`307 REVALIDATED`) لصفحات الأسهم `/stocks/[symbol]`:**
+   - **المشكلة:** دالة `generateStaticParams` تبني صفحات الأسهم بالحروف الصغيرة (`lowercase`) فقط، بينما كانت مكونات `FairValueClient.tsx` و`TrapDetector.tsx` و`UnusualActivity.tsx` و`FastScannerTab.tsx` و`PortfolioRebalancerModal.tsx` تعرض روابط `<Link href="/stocks/SYMBOL">` بالحروف الكبيرة وبدون `prefetch={false}`، مما جعل متصفح الزائر يطلب عشرات الروابط بـ `REVALIDATED` ويشغّل `generateMetadata` (5 استعلامات Supabase) قبل عمل Redirect `307` للنسخة الصغيرة.
+   - **الحل المطبق:**
+     - إضافة اختصار فوري (Short-circuit) في `generateMetadata` داخل `web/src/app/stocks/[symbol]/page.tsx` بحيث إذا كان الرمز يحتوي على حروف كبيرة (`raw !== raw.toLowerCase()`) يعيد الـ Canonical URL فوراً دون فتح اتصال بقاعدة البيانات قبل تنفيذ `redirect()`.
+     - توحيد كافة روابط `/stocks/` في المكونات المذكورة وتقارير اليوم `web/src/app/reports/[date]/[kind]/page.tsx` لاستخدام `.toLowerCase()` مع `prefetch={false}`.
+
+2. **إيقاف استدعاء `/api/recommendations/events?limit=1000` للزوار غير المشتركين وتفعيل كاش البيانات العامة:**
+   - **المشكلة:** مكون `RecommendationCalendar.tsx` كان يرسل طلب `fetch("/api/recommendations/events?limit=1000", { cache: "no-store" })` حتى لو كان الزائر غير مشترك (`!isPro`)، وكان الـ Route Handler يستدعي `auth.getUser()` وجدول `subscriptions` بدون كاش السوق العام.
+   - **الحل المطبق:**
+     - إيقاف طلب الشبكة في `RecommendationCalendar.tsx` إذا كان `!isPro`.
+     - تحديث `web/src/app/api/recommendations/events/route.ts` لاستخدام `getViewerContext(request)` و`getSupabaseServiceClient({ cacheMarketData: true })`.
+
+3. **تفعيل الكاش في مسار البحث `/api/symbols/search`:**
+   - **الحل المطبق:** استبدال `cache: "no-store"` بـ `next: { revalidate: 3600 }` وتمرير `{ cacheMarketData: true }` لعميل Supabase الاحتياطي في `web/src/app/api/symbols/search/route.ts`.
+

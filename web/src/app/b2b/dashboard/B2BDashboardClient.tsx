@@ -91,6 +91,29 @@ export default function B2BDashboardClient() {
   // Claim license code state
   const [claimCode, setClaimCode] = useState("");
   const [claiming, setClaiming] = useState(false);
+  const [startingTrial, setStartingTrial] = useState(false);
+
+  const handleStartTrialFromDashboard = async () => {
+    try {
+      setStartingTrial(true);
+      const res = await fetch("/api/b2b/trial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: "b2b_pro" }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        toast.success(isAr ? "🎉 تم إنشاء رخصتك التجريبية (3 أيام) بنجاح!" : "🎉 3-day trial activated!");
+        fetchLicense();
+      } else {
+        toast.error(data.message || data.error || (isAr ? "تعذر تفعيل التجربة" : "Could not start trial"));
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Network error");
+    } finally {
+      setStartingTrial(false);
+    }
+  };
 
   const fetchLicense = async (specificId?: string) => {
     setLoading(true);
@@ -264,6 +287,39 @@ export default function B2BDashboardClient() {
                   ? `حسابك (${user.email}) لا يملك رخصة نشطة في قاعدة البيانات حتى الآن. يمكنك ترخيص البوت فوراً لقناتك أو ربط رخصة سابقة عبر كود التفعيل.`
                   : `Your account (${user.email}) has no active B2B licenses in Supabase. You can subscribe to license the bot for your group or claim an existing order code.`}
               </p>
+            </div>
+
+            {/* Option 0: Start 3-day Free Trial (Hero) */}
+            <div className="border-4 border-black dark:border-white p-6 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 dark:from-amber-500/30 dark:via-zinc-900 dark:to-yellow-500/20 space-y-3 shadow-[4px_4px_0px_#000]">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black text-white text-[10px] font-black uppercase">
+                    <Sparkles className="w-3 h-3 text-amber-300" />
+                    <span>{isAr ? "تجربة مجانية فورية 3 أيام" : "Instant 3-Day Free Trial"}</span>
+                  </span>
+                  <h3 className="text-xl font-black text-zinc-950 dark:text-white">
+                    {isAr ? "🎁 جرّب البوت في مجموعتك مجاناً لمدة 3 أيام" : "🎁 Try the Bot Free in Your Group for 3 Days"}
+                  </h3>
+                  <p className="text-xs font-bold text-zinc-800 dark:text-zinc-300">
+                    {isAr
+                      ? "ربط آلي بالكامل بضغطة زر واحدة بدون إدخال أي بطاقة بنكية وبدون دفع أي مليم. اختبر تفاعل أعضاء قناتك مع التحليلات الفورية."
+                      : "Zero credit card required. 100% automated 1-click linking to your Telegram group."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={startingTrial}
+                  onClick={handleStartTrialFromDashboard}
+                  className="shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 border-3 border-black bg-zinc-950 text-white hover:bg-black font-black text-xs uppercase shadow-[3px_3px_0px_#000] active:translate-y-0.5 cursor-pointer disabled:opacity-50"
+                >
+                  {startingTrial ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Bot className="w-4 h-4 text-emerald-400" />
+                  )}
+                  <span>{isAr ? "بدء التجربة المجانية 3 أيام الآن ←" : "Start 3-Day Free Trial Now ←"}</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t-2 border-zinc-200 dark:border-zinc-800">
@@ -566,6 +622,30 @@ export default function B2BDashboardClient() {
                       </span>
                     </div>
                     <div className="space-y-2 text-[11px] text-zinc-700 dark:text-zinc-300 font-bold">
+                      {/* 1-Click Auto-Activation Button */}
+                      {!license.telegram_chat_id && (
+                        <div className="p-3 border-2 border-emerald-600 bg-emerald-100 dark:bg-emerald-950/60 space-y-2">
+                          <a
+                            href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full flex items-center justify-center gap-2 border-3 border-black bg-emerald-500 hover:bg-emerald-400 text-black py-3 px-4 text-xs font-black uppercase shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-transform text-center"
+                          >
+                            <Bot className="w-4 h-4" />
+                            <span>
+                              {isAr
+                                ? "🚀 ربط وتفعيل البوت آلياً بضغطة واحدة في تليجرام"
+                                : "🚀 1-Click Auto-Activate Bot on Telegram"}
+                            </span>
+                          </a>
+                          <p className="text-[10px] text-zinc-600 dark:text-zinc-300 font-bold text-center">
+                            {isAr
+                              ? "اضغط الزر أعلاه لاختيار مجموعتك وسيقوم تليجرام بإرسال كود التفعيل والربط آلياً دون أي كتابة منك!"
+                              : "Click above to pick your group; Telegram will auto-activate and link without typing!"}
+                          </p>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between gap-2">
                         <span>
                           {isAr
@@ -573,7 +653,7 @@ export default function B2BDashboardClient() {
                             : "1. Add @egxbots_bot to your group and promote to Admin."}
                         </span>
                         <a
-                          href="https://t.me/egxbots_bot?startgroup=true"
+                          href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="border border-black bg-emerald-500 text-black px-2 py-0.5 text-[10px] font-black shrink-0 hover:bg-emerald-600 inline-flex items-center gap-1"

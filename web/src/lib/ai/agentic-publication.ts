@@ -140,6 +140,7 @@ export function agenticFacts(evidence: AgenticEvidence[]): FactRecord[] {
         pe_ratio: row.pe_ratio ?? row.peRatio,
         eps: row.eps,
         market_cap: row.market_cap ?? row.marketCap,
+        upside_pct: row.upside_pct ?? row.fair_value_upside_pct,
     })) }));
     const facts = buildFactRecords(adapted);
     for (const e of evidence) {
@@ -361,10 +362,13 @@ function cleanCellText(text: string): string {
         .replace(/(?:\b|\D)\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\b|\D)/g, " ")
         .replace(/(?:جلسة|بتاريخ|تاريخ|يوم)\s*\b\d{1,2}[-/]\d{1,2}\b/g, " ")
         .replace(/\b(?:0?[1-9]|[12][0-9]|3[01])[-/](?:0?[1-9]|1[0-2])\b/g, " ")
+        // Strip score denominators like "60/100" or "60 من 100" before dash normalization
+        .replace(/(?<=\d)\s*\/\s*100\b/g, " ")
+        .replace(/\bمن\s*100\b/g, " ")
         // 2. Disambiguate range dashes vs negative values vs bullet points
         .replace(/(?:^|[\s|:،,])[-−–—•*]\s+(\d)/g, " $1")
         .replace(/(?<=\d)\s*[-−–—]\s*(?=\d)/g, " ")
-        .replace(/(\d+(?:\.\d+)?)\s*[%٪]?\s*[-−–](?!\s*\d)/g, "-$1")
+        .replace(/(\d+(?:\.\d+)?)\s*[%٪]?[-−–](?=\s|$|[)\]،,])/g, "-$1")
         .replace(/[−–—]/g, "-")
         .replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, "")
         // 3. Strip ordinal targets, rank markers, and indicator parameters
@@ -427,6 +431,13 @@ function compoundMetricFields(label: string): FactRecord["field"][] | null {
         return emaFields as FactRecord["field"][];
     }
 
+    // 4b. KING AI / EGX AI
+    const aiFields = parts.map(part => /KING/i.test(part) ? "king_ai_score"
+        : /EGX/i.test(part) ? "egx_ai_score" : null);
+    if (aiFields.every(Boolean) && new Set(aiFields).size === aiFields.length) {
+        return aiFields as FactRecord["field"][];
+    }
+
     // 5. Advancing / Declining counts (e.g. "صاعد / هابط", "صاعدة / هابطة")
     if (!/نسب|إلى|الى|ratio/i.test(label)) {
         const advDecFields = parts.map(part => /صاعد|مرتفع|advanc/i.test(part) ? "breadth_advancing"
@@ -485,7 +496,7 @@ function groundedTableDate(cell: string, dates: string[]): string | null {
 function tableMetricFields(label: string): FactRecord["field"][] | undefined {
     const text = label.replace(/[*_]/g, "");
     // Specific financial labels take precedence over generic profit/currency words.
-    if (/(?:السعر|سعر|القيمة|قيمة).*(?:العادل|العادلة)|fair.?value/i.test(text)) return ["fair_value"];
+    if (/(?:السعر|سعر|القيمة|قيمة).*(?:العادل|العادلة)|fair.?value/i.test(text)) return ["fair_value", "upside_pct"];
     if (/(?:نسبة|هامش).*(?:الرخص|التضخم|الفرق|علاوة|خصم)|upside/i.test(text)) return ["upside_pct"];
     if (/مبلغ.*تطهير|تطهير/i.test(text)) return ["purification_amount"];
     if (/زكاة/i.test(text)) return ["zakat_amount"];
@@ -507,7 +518,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/(?:(?:السعر|الإغلاق|اغلاق|إقفال|price|close).*(?:تغير|التغير|التغيّر|change))|(?:(?:تغير|التغير|التغيّر|change).*(?:السعر|الإغلاق|اغلاق|إقفال|price|close))/i, ["price", "close", "change_pct"]],
         [/(?:حصة|نسبة|وزن|تركز|تركيز).*(?:(?:ال)?سيول[ةه]|(?:ال)?سوق|(?:ال)?تداول|(?:ال)?قطاع|أعلى|أكبر)|market.?share|concentration/i,["position_pct","change_pct","value","quantity"]],
         [/(?:قيمة|إجمالي|مجموع|حجم|أحجام|احجام|متوسط)\s*(?:(?:ال)?تداول|(?:ال)?سيول[ةه])|(?:ال)?سيول[ةه]|تدفق.*سيول[ةه]|turnover|money.?flow/i,["value","volume","vol_ratio","position_pct","change_pct","quantity","acc_score","dist_score"]],
-        [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio"]], [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]],
+        [/صاعد.*هابط|الصاعدة.*الهابطة|advance.*decline/i,["breadth_ad_ratio","breadth_advancing","breadth_declining","breadth_total","quantity"]], [/نسبة.*صاعد|الصاعدة.*%|advancing.*%/i,["breadth_advancing_pct"]],
         [/صاعد|مرتفعة|advancing/i,["breadth_advancing"]], [/هابط|منخفضة|declining/i,["breadth_declining"]], [/ثابت|unchanged/i,["breadth_unchanged"]], [/الأسهم.*(?:صالحة|تغير صالح)|إجمالي.*(?:أسهم|تغير صالح)|total.*stocks/i,["breadth_total"]],
         [/^(?!.*سعر).*(?:إشارات.*شراء|buy.*signals|(?:إشارات|صفقات)\s*شراء|^شراء$)/i,["chart_buy_signal_count"]], [/^(?!.*سعر).*(?:إشارات.*بيع|sell.*signals|(?:إشارات|صفقات)\s*بيع|^بيع$)/i,["chart_sell_signal_count"]], [/(?:عدد|إجمالي|مجموع|كل)?\s*إشارات|signal.*count|إشارات/i,["chart_signal_count"]],
         ...BACKTEST_METRICS.map(({pattern,field}): [RegExp, FactRecord["field"][]] => [pattern,field === "backtest_return_pct" ? ["profit_pct",field] : [field]]),
@@ -515,7 +526,7 @@ function tableMetricFields(label: string): FactRecord["field"][] | undefined {
         [/EMA\s*50/i,["ema_50"]], [/EMA\s*200/i,["ema_200"]], [/حجم.*نسبي|الحجم النسبي|r_vol|vol_ratio/i,["vol_ratio","quantity"]],
         [/CMF|تدفق\s*نقدي|Chaikin/i,["vol_ratio","value","quantity"]],
         [/(?:حجم|أحجام|احجام)\s*(?:التداول|السيولة)?|volume/i,["volume","vol_ratio","value","quantity"]],
-        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]],
+        [/KING/i,["king_ai_score"]], [/EGX.*AI/i,["egx_ai_score"]], [/سكور|التقييم\s*(?:الكلي|الشامل|الفني)|composite/i,["acc_score"]],
         [/(?:(?:ال)?تجميع|acc).*(?:(?:ال)?توزيع|(?:ال)?تصريف|dist)|(?:(?:ال)?توزيع|(?:ال)?تصريف|dist).*(?:(?:ال)?تجميع|acc)/i, ["acc_score", "dist_score", "quantity"]],
         [/تجميع/i,["acc_score"]], [/(?:درجة|مؤشر|تقييم).*توزيع|تصريف|distribution.*score/i,["dist_score"]],
         [/أيام.*تجميع|يوم.*تجميع|consecutive.*acc/i, ["quantity"]],
@@ -1441,6 +1452,9 @@ export function safeAgenticFallback(evidence: AgenticEvidence[], _reason: string
             const secs = Array.isArray(e.data.sector_liquidity) ? e.data.sector_liquidity.slice(0, 6) : [];
             const topStocks = Array.isArray(e.data.top_liquidity_stocks) ? e.data.top_liquidity_stocks.slice(0, 6) : [];
             lines.push(`\nملخص سيولة السوق الكلية بتاريخ ${ml.session_date || e.data.session_date || "أحدث جلسة"}:`);
+            if (ml.total_turnover_million_egp != null && ml.advancing_turnover_pct != null && ml.declining_turnover_pct != null) {
+                lines.push(`بلغت السيولة المتداولة ${ml.total_turnover_million_egp} مليون ج.م (${ml.turnover_vs_20d_pct ?? "—"}% من متوسط 20 جلسة)، واستحوذت الأسهم الصاعدة على ${ml.advancing_turnover_pct}% من السيولة مقابل ${ml.declining_turnover_pct}% للأسهم الهابطة.`);
+            }
             lines.push("| المقياس | القيمة |", "|---|---|");
             if (ml.total_turnover_million_egp != null) lines.push(`| إجمالي السيولة المتداولة (مليون ج.م) | ${ml.total_turnover_million_egp} |`);
             if (ml.avg_20d_turnover_million_egp != null) lines.push(`| متوسط السيولة لـ 20 جلسة (مليون ج.م) | ${ml.avg_20d_turnover_million_egp} |`);

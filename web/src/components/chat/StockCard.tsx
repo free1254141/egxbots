@@ -179,6 +179,21 @@ export function StockCard({
     }
 
     // Quantitative Trading Plan Values
+    const parseFirstNum = (val: unknown): number | undefined => {
+        if (typeof val === "number") return isNaN(val) ? undefined : val;
+        if (val === undefined || val === null || val === "") return undefined;
+        const str = String(val)
+            .replace(/[\*`]/g, "")
+            .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString())
+            .replace(/٫/g, ".")
+            .replace(/(?<=\d)[,،](?=\d{3}(?:\D|$))/g, "")
+            .replace(/[−–]/g, "-");
+        const m = str.match(/[+-]?\d+(?:\.\d+)?/);
+        if (!m) return undefined;
+        const n = parseFloat(m[0]);
+        return isNaN(n) ? undefined : n;
+    };
+
     const entryRange = stockData.entryRange || stockData.entry_range || (
         stockData.entryPrice || stockData.entry_price 
             ? `${Number(stockData.entryPrice || stockData.entry_price).toFixed(2)} ج.م` 
@@ -190,11 +205,16 @@ export function StockCard({
     const stopLoss = stockData.stopLoss || stockData.stop_loss;
     const riskReward = stockData.riskReward || stockData.risk_reward;
 
+    const support1 = stockData.support1;
+    const support2 = stockData.support2;
+    const resistance1 = stockData.resistance1;
+    const resistance2 = stockData.resistance2;
+
     // Mathematically calculated Risk/Reward ratio if not directly provided
-    const rawTarget1Num = typeof target1 === "number" ? target1 : parseFloat(String(target1 || "").replace(/[^\d.-]/g, ""));
-    const rawStopLossNum = typeof stopLoss === "number" ? stopLoss : parseFloat(String(stopLoss || "").replace(/[^\d.-]/g, ""));
+    const rawTarget1Num = parseFirstNum(target1) ?? parseFirstNum(resistance1);
+    const rawStopLossNum = parseFirstNum(stopLoss) ?? parseFirstNum(support1);
     let calculatedRR: string | undefined = riskReward ? String(riskReward) : undefined;
-    if (!calculatedRR && !isNaN(rawTarget1Num) && !isNaN(rawStopLossNum) && !isNaN(rawPrice) && rawPrice > 0) {
+    if (!calculatedRR && rawTarget1Num !== undefined && rawStopLossNum !== undefined && !isNaN(rawPrice) && rawPrice > 0) {
         const reward = Math.abs(rawTarget1Num - rawPrice);
         const risk = Math.abs(rawPrice - rawStopLossNum);
         if (risk > 0) {
@@ -203,25 +223,30 @@ export function StockCard({
     }
     const relativeVol = stockData.rVol || stockData.r_vol || stockData.volumeRatio;
     const sector = stockData.sector;
-    const support1 = stockData.support1;
-    const support2 = stockData.support2;
-    const resistance1 = stockData.resistance1;
-    const resistance2 = stockData.resistance2;
     const ema50 = stockData.ema50;
     const ema200 = stockData.ema200;
-    const wyckoffPhase = stockData.wyckoffPhase;
-    const macdDesc = typeof stockData.macdSignal === "string" ? stockData.macdSignal : undefined;
+    const wyckoffPhase = typeof stockData.wyckoffPhase === "string"
+        ? stockData.wyckoffPhase.replace(/[\*`]/g, "").trim()
+        : stockData.wyckoffPhase;
+    const macdDesc = typeof stockData.macdSignal === "string"
+        ? stockData.macdSignal.replace(/[\*`]/g, "").trim()
+        : undefined;
     const peRatio = stockData.peRatio;
     const eps = stockData.eps;
     const rawKing = stockData.king_ai_score ?? stockData.kingScore;
-    const kingScoreVal = typeof rawKing === "number" ? rawKing : rawKing ? parseFloat(String(rawKing).replace(/[^\d.-]/g, "")) : undefined;
+    const kingScoreVal = parseFirstNum(rawKing);
     const rawEgx = stockData.egx_ai_score ?? stockData.egxScore;
-    const egxScoreVal = typeof rawEgx === "number" ? rawEgx : rawEgx ? parseFloat(String(rawEgx).replace(/[^\d.-]/g, "")) : undefined;
+    const egxScoreVal = parseFirstNum(rawEgx);
     const isShariah = Boolean(
         stockData.isShariah ?? stockData.is_sharia_compliant ?? (stockData.sharia_index === "EGX33")
     );
     const rawScore = stockData.composite_score ?? stockData.compositeScore;
-    const compositeScoreVal = typeof rawScore === "number" ? rawScore : rawScore ? parseFloat(String(rawScore).replace(/[^\d.-]/g, "")) : undefined;
+    const parsedScore = parseFirstNum(rawScore);
+    const compositeScoreVal = parsedScore !== undefined
+        ? (parsedScore > 100 && String(Math.round(parsedScore)).endsWith("100")
+            ? Math.min(100, Math.max(0, Math.round(parsedScore / 1000)))
+            : Math.min(100, Math.max(0, Math.round(parsedScore))))
+        : undefined;
     const compositeGrade = stockData.composite_grade ?? stockData.compositeGrade;
     const compositeVerdict = stockData.composite_verdict ?? stockData.compositeVerdict;
 
@@ -328,7 +353,10 @@ export function StockCard({
                 <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                         {/* Symbol Pill Badge */}
-                        <div className="flex items-center justify-center rounded-lg sm:rounded-xl bg-[#FFE600] text-black font-mono font-black text-xs sm:text-sm px-2.5 py-1 sm:px-3 sm:py-1.5 border-2 border-black shadow-[2px_2px_0_0_#000] shrink-0">
+                        <div
+                            dir="ltr"
+                            className="flex items-center justify-center rounded-lg sm:rounded-xl bg-[#FFE600] text-black font-mono font-black text-xs sm:text-sm px-2.5 py-1 sm:px-3 sm:py-1.5 border-2 border-black shadow-[2px_2px_0_0_#000] shrink-0"
+                        >
                             #{symbol}
                         </div>
 
@@ -338,9 +366,9 @@ export function StockCard({
                                     {nameAr}
                                 </h3>
                                 {nameEn && nameEn !== nameAr && (
-                                    <span className="text-[10px] sm:text-[11px] text-zinc-400 font-mono hidden sm:inline-block" dir="ltr">
+                                    <bdi className="text-[10px] sm:text-[11px] text-zinc-400 font-mono hidden sm:inline-block" dir="ltr">
                                         ({nameEn.replace(/^[\(\[]+|[\)\]]+$/g, "")})
-                                    </span>
+                                    </bdi>
                                 )}
                             </div>
 
@@ -543,7 +571,7 @@ export function StockCard({
                         {macdDesc && (
                             <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
                                 <span>MACD:</span>
-                                <strong>{macdDesc}</strong>
+                                <bdi dir="ltr" className="font-mono font-bold">{macdDesc}</bdi>
                             </span>
                         )}
 

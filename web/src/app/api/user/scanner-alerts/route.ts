@@ -31,10 +31,6 @@ export async function GET() {
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     let serviceClient: any = null;
     try {
       serviceClient = getSupabaseServiceClient();
@@ -43,28 +39,43 @@ export async function GET() {
     }
     const client = serviceClient || supabase;
 
-    // Check Pro status and profile telegram status in parallel
-    const [subRes, profileRes, settingsRes] = await Promise.all([
-      client
-        .from("subscriptions")
-        .select("plan_id, status, current_period_end")
-        .eq("user_id", user.id)
-        .in("status", ["active", "trialing"])
-        .limit(1),
-      client
-        .from("profiles")
-        .select("telegram_chat_id, notification_channel")
-        .eq("id", user.id)
-        .maybeSingle(),
-      client
-        .from("user_settings")
-        .select("app_state")
-        .eq("user_id", user.id)
-        .maybeSingle(),
-    ]);
+    // Check Pro status and profile telegram status in parallel (if authenticated)
+    let isPro = false;
+    let telegramLinked = false;
+    let profileRes: any = null;
+    let preferences: ScannerPreferences = DEFAULT_PREFERENCES;
 
-    const isPro = hasActiveProSubscription(subRes?.data || []);
-    const telegramLinked = Boolean(profileRes?.data?.telegram_chat_id);
+    if (user) {
+      const [subRes, pRes, settingsRes] = await Promise.all([
+        client
+          .from("subscriptions")
+          .select("plan_id, status, current_period_end")
+          .eq("user_id", user.id)
+          .in("status", ["active", "trialing"])
+          .limit(1),
+        client
+          .from("profiles")
+          .select("telegram_chat_id, notification_channel")
+          .eq("id", user.id)
+          .maybeSingle(),
+        client
+          .from("user_settings")
+          .select("app_state")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      ]);
+      profileRes = pRes;
+      isPro = hasActiveProSubscription(subRes?.data || []);
+      telegramLinked = Boolean(profileRes?.data?.telegram_chat_id);
+      const savedAlerts = settingsRes?.data?.app_state?.scanner_alerts || {};
+      preferences = {
+        volume_surge: savedAlerts.volume_surge ?? DEFAULT_PREFERENCES.volume_surge,
+        breakout: savedAlerts.breakout ?? DEFAULT_PREFERENCES.breakout,
+        rsi_oversold: savedAlerts.rsi_oversold ?? DEFAULT_PREFERENCES.rsi_oversold,
+        portfolio_watchlist: savedAlerts.portfolio_watchlist ?? DEFAULT_PREFERENCES.portfolio_watchlist,
+        disclosures: savedAlerts.disclosures ?? DEFAULT_PREFERENCES.disclosures,
+      };
+    }
 
     // Fetch scanner history, tracked signals & stats for calendar and signal tracker
     let scannerHistory: any[] = [];
@@ -120,14 +131,7 @@ export async function GET() {
       console.warn("Could not load bot_states for user calendar:", e);
     }
 
-    const savedAlerts = settingsRes?.data?.app_state?.scanner_alerts || {};
-    const preferences: ScannerPreferences = {
-      volume_surge: savedAlerts.volume_surge ?? DEFAULT_PREFERENCES.volume_surge,
-      breakout: savedAlerts.breakout ?? DEFAULT_PREFERENCES.breakout,
-      rsi_oversold: savedAlerts.rsi_oversold ?? DEFAULT_PREFERENCES.rsi_oversold,
-      portfolio_watchlist: savedAlerts.portfolio_watchlist ?? DEFAULT_PREFERENCES.portfolio_watchlist,
-      disclosures: savedAlerts.disclosures ?? DEFAULT_PREFERENCES.disclosures,
-    };
+// Preferences resolved above
 
     const cutoff15Days = new Date();
     cutoff15Days.setDate(cutoff15Days.getDate() - 15);

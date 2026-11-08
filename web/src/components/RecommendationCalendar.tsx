@@ -118,6 +118,12 @@ export default function RecommendationCalendar({
     }, []);
 
     useEffect(() => {
+        if (!isPro) {
+            setSentEvents([]);
+            setTrackedRecommendationIds([]);
+            setEventsUnavailable(true);
+            return;
+        }
         const controller = new AbortController();
         void loadSentEvents(controller.signal);
         return () => controller.abort();

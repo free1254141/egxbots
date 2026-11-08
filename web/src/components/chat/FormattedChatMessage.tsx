@@ -111,6 +111,8 @@ function parseNum(val: string | undefined): number | undefined {
     if (!val) return undefined;
     let str = String(val).trim();
     if (!str || str === "-" || str === "—" || str === "N/A" || str === "null") return undefined;
+    // Strip markdown formatting asterisks/backticks first
+    str = str.replace(/[\*`]/g, "").trim();
     // CRITICAL: Guard against dates (e.g. 30-10-2026 or 2026-10-30 or 30/10/2026)
     // parseFloat("30-10-2026") evaluates to 30, which falsely becomes 30.00 EGP price!
     if (/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(str)) {
@@ -118,13 +120,18 @@ function parseNum(val: string | undefined): number | undefined {
     }
     // Normalize Eastern Arabic numerals:
     str = str.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
-    // Normalize Arabic decimal separator (٫ or ،) to . if followed by digits
-    str = str.replace(/[٫،](?=\d)/g, ".");
+    // Normalize Arabic decimal separator (٫) to .
+    str = str.replace(/٫/g, ".");
+    // Remove thousand separators (comma followed by 3 digits)
+    str = str.replace(/(?<=\d)[,،](?=\d{3}(?:\D|$))/g, "");
+    // Normalize remaining Arabic comma decimal separator (،) to . if followed by digits
+    str = str.replace(/،(?=\d)/g, ".");
     // Normalize Unicode minus (U+2212) and en-dash (U+2013) to ASCII minus
     str = str.replace(/[−–]/g, "-");
-    const cleaned = str.replace(/[^\d.-]/g, "");
-    if (!cleaned) return undefined;
-    const n = parseFloat(cleaned);
+    // Extract only the FIRST valid numeric token (prevents "60/100" -> 60100)
+    const match = str.match(/[+-]?\d+(?:\.\d+)?/);
+    if (!match) return undefined;
+    const n = parseFloat(match[0]);
     return isNaN(n) ? undefined : n;
 }
 
@@ -230,8 +237,76 @@ export function tryParseRecommendationsTable(headers: string[], rows: string[][]
     return stocks.length > 0 ? stocks : null;
 }
 
-export function tryParseAnalysisTable(headers: string[], rows: string[][], recentText: string): StockData | null {
+function extractHeaderStockSymbol(headerText: string): { symbol: string; name: string } | null {
+    const clean = String(headerText || "").replace(/[\*`]/g, "").trim();
+    if (!clean) return null;
+    if (/^(?:البند|المعيار|المؤشر|المقياس|المستوى|القيمة|الوصف|القراءة|الدلالة|التقييم|الملاحظة|الأفضلية|الفرق|المقارنة|المصدر|النتيجة|السعر|المسافة)/i.test(clean)) {
+        return null;
+    }
+    const parenMatch = clean.match(/^([^\(\[\n\r]{1,80}?)\s*[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/);
+    if (parenMatch) {
+        const sym = parenMatch[2].trim().toUpperCase();
+        const canonical = getCanonicalStockName(sym);
+        if (KNOWN_STOCK_SYMBOLS.has(sym) || EGX_STOCKS_METADATA[sym] || canonical.name_ar !== sym) {
+            return { symbol: sym, name: parenMatch[1].trim() };
+        }
+    }
+    const directSym = clean.toUpperCase();
+    if (/^[A-Z0-9_]{2,8}$/.test(directSym)) {
+        const canonical = getCanonicalStockName(directSym);
+        if (KNOWN_STOCK_SYMBOLS.has(directSym) || EGX_STOCKS_METADATA[directSym] || canonical.name_ar !== directSym) {
+            return { symbol: directSym, name: canonical.name_ar || directSym };
+        }
+    }
+    return null;
+}
+
+export function tryParseComparisonTable(headers: string[], rows: string[][], recentText: string): StockData[] | null {
+    if (!headers || headers.length < 3 || !rows || rows.length < 2) return null;
+    const stockColumns: Array<{ colIdx: number; symbol: string; name: string }> = [];
+    const seenSymbols = new Set<string>();
+
+    for (let colIdx = 1; colIdx < headers.length; colIdx++) {
+        const info = extractHeaderStockSymbol(headers[colIdx]);
+        if (info && !seenSymbols.has(info.symbol)) {
+            seenSymbols.add(info.symbol);
+            stockColumns.push({ colIdx, symbol: info.symbol, name: info.name });
+        }
+    }
+
+    if (stockColumns.length < 2) return null;
+
+    const parsedStocks: StockData[] = [];
+    for (const sc of stockColumns) {
+        const singleRows = rows.map(r => [r[0] || "", r[sc.colIdx] || ""]);
+        const stockHint = `### 📊 تحليل سهم ${sc.name} (${sc.symbol})\n${recentText}`;
+        const parsed = tryParseAnalysisTable([headers[0] || "البند", headers[sc.colIdx] || sc.symbol], singleRows, stockHint, sc.symbol, sc.name);
+        if (parsed) {
+            parsedStocks.push(parsed);
+        }
+    }
+
+    return parsedStocks.length >= 2 ? parsedStocks : null;
+}
+
+export function tryParseAnalysisTable(
+    headers: string[],
+    rows: string[][],
+    recentText: string,
+    explicitSymbol?: string,
+    explicitName?: string
+): StockData | null {
     if (!rows || rows.length < 2) return null;
+
+    // If this is a multi-stock comparison table (2+ stock columns) and no explicitSymbol was requested,
+    // do not collapse it into a single stock card.
+    if (!explicitSymbol && headers && headers.length >= 3) {
+        let stockHeaderCount = 0;
+        for (let c = 1; c < headers.length; c++) {
+            if (extractHeaderStockSymbol(headers[c])) stockHeaderCount++;
+        }
+        if (stockHeaderCount >= 2) return null;
+    }
 
     let hasClose = false;
     let hasSupport = false;
@@ -259,40 +334,66 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     let compositeScore: number | undefined;
     let compositeGrade: string | undefined;
     let compositeVerdict: string | undefined;
+    let tableShariah: boolean | undefined;
 
     for (const row of rows) {
         if (!row || row.length < 2) continue;
-        const key = row[0]?.trim() || "";
+        const rawKey = row[0]?.trim() || "";
+        const key = rawKey.replace(/[\*`]/g, "").trim();
         const val = row[1]?.trim() || "";
+        const cleanVal = val.replace(/[\*`]/g, "").trim();
         const extraVal = row[2]?.trim() || "";
 
-        if (/الإغلاق الحالي|آخر سعر|سعر الإغلاق|إغلاق/i.test(key)) {
+        const isPriceRow = (
+            /الإغلاق الحالي|آخر سعر|سعر الإغلاق|آخر إغلاق|السعر الحالي|إغلاق/i.test(key)
+            || /^(?:السعر|سعر السهم)(?:\s*\(.*\))?$/i.test(key)
+        ) && !/السعر العادل|سعر الدخول|سعر الوقف|سعر المستهدف|القيمة العادلة/i.test(key);
+
+        const isDistanceOrPctRow = /المسافة|نسبة|بعد|التغير/i.test(key) || /^[+\-−–]?\s*\d+(?:\.\d+)?\s*%$/.test(cleanVal);
+
+        if (isPriceRow) {
             hasClose = true;
             price = parseNum(val);
-            if (changePct === undefined && extraVal) {
-                const rowChange = parseNum(extraVal);
-                if (rowChange !== undefined && /%/.test(extraVal)) {
-                    changePct = rowChange;
+            if (changePct === undefined) {
+                const inlineChangeMatch = cleanVal.match(/\(\s*([+\-−–]?\d+(?:\.\d+)?)\s*%\s*\)/);
+                if (inlineChangeMatch) {
+                    changePct = parseNum(inlineChangeMatch[1]);
+                } else if (extraVal) {
+                    const rowChange = parseNum(extraVal);
+                    if (rowChange !== undefined && /%/.test(extraVal)) {
+                        changePct = rowChange;
+                    }
                 }
             }
-        } else if (/الدعم/i.test(key)) {
+        } else if (!isDistanceOrPctRow && /الدعم/i.test(key) && /المقاومة|مقاومة/i.test(key)) {
             hasSupport = true;
-            if (val.includes("/")) {
-                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+            hasResistance = true;
+            const parts = cleanVal.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+            if (/ثاني|الثانية|2/i.test(key)) {
+                if (parts[0] !== undefined) support2 = parts[0];
+                if (parts[1] !== undefined) resistance2 = parts[1];
+            } else {
+                if (parts[0] !== undefined) support1 = parts[0];
+                if (parts[1] !== undefined) resistance1 = parts[1];
+            }
+        } else if (!isDistanceOrPctRow && /الدعم/i.test(key)) {
+            hasSupport = true;
+            if (cleanVal.includes("/")) {
+                const parts = cleanVal.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
                 if (parts[0] !== undefined) support1 = parts[0];
                 if (parts[1] !== undefined) support2 = parts[1];
-            } else if (/ثاني|2/i.test(key)) {
+            } else if (/ثاني|الثانية|2/i.test(key)) {
                 support2 = parseNum(val);
             } else {
                 support1 = parseNum(val);
             }
-        } else if (/المقاومة|مقاومة/i.test(key)) {
+        } else if (!isDistanceOrPctRow && /المقاومة|مقاومة/i.test(key)) {
             hasResistance = true;
-            if (val.includes("/")) {
-                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+            if (cleanVal.includes("/")) {
+                const parts = cleanVal.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
                 if (parts[0] !== undefined) resistance1 = parts[0];
                 if (parts[1] !== undefined) resistance2 = parts[1];
-            } else if (/ثاني|2/i.test(key)) {
+            } else if (/ثاني|الثانية|2/i.test(key)) {
                 resistance2 = parseNum(val);
             } else {
                 resistance1 = parseNum(val);
@@ -301,7 +402,7 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
             hasRsi = true;
             rsi = parseNum(val);
         } else if (/MACD/i.test(key)) {
-            macdVal = val;
+            macdVal = cleanVal;
         } else if (/الحجم النسبي/i.test(key)) {
             volRatio = parseNum(val);
         } else if (/مضاعف الربحية|P\/E/i.test(key)) {
@@ -309,13 +410,19 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
         } else if (/ربحية السهم|EPS/i.test(key)) {
             eps = parseNum(val);
         } else if (/القيمة السوقية/i.test(key)) {
-            marketCap = val;
+            marketCap = cleanVal;
         } else if (/مرحلة وايكوف|وايكوف/i.test(key)) {
-            wyckoffPhase = val;
+            wyckoffPhase = cleanVal;
+        } else if (/الشرعية|الشريعة/i.test(key)) {
+            if (/متوافق|شرعي|EGX\s*33/i.test(cleanVal) && !/غير متوافق|خارج/i.test(cleanVal)) {
+                tableShariah = true;
+            } else if (/غير متوافق|خارج/i.test(cleanVal)) {
+                tableShariah = false;
+            }
         } else if (/EMA/i.test(key)) {
             hasEma = true;
-            if (val.includes("/")) {
-                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+            if (cleanVal.includes("/")) {
+                const parts = cleanVal.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
                 if (parts[0] !== undefined) ema50 = parts[0];
                 if (parts[1] !== undefined) ema200 = parts[1];
             } else if (/200/i.test(key)) {
@@ -324,8 +431,8 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
                 ema50 = parseNum(val);
             }
         } else if (/KING.*EGX|KING|EGX/i.test(key)) {
-            if (/KING/i.test(key) && /EGX/i.test(key) && val.includes("/")) {
-                const parts = val.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
+            if (/KING/i.test(key) && /EGX/i.test(key) && cleanVal.includes("/")) {
+                const parts = cleanVal.split("/").map(s => parseNum(s)).filter((n): n is number => n !== undefined);
                 if (parts[0] !== undefined) kingAiScore = parts[0];
                 if (parts[1] !== undefined) egxAiScore = parts[1];
             } else if (/KING/i.test(key)) {
@@ -334,9 +441,14 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
                 egxAiScore = parseNum(val);
             }
         } else if (/سكور|التقييم الشامل|Composite|EGX\s*Score/i.test(key)) {
-            compositeScore = parseNum(val);
-            const gradeMatch = (val + " " + extraVal).match(/\b(A\+|A|B|C|D)\b/i);
+            const parsedScore = parseNum(val);
+            if (parsedScore !== undefined) {
+                compositeScore = Math.min(100, Math.max(0, parsedScore));
+            }
+            const gradeMatch = (cleanVal + " " + extraVal).match(/\b(A\+|A|B|C|D)\b/i);
             if (gradeMatch) compositeGrade = gradeMatch[1].toUpperCase();
+            const verdictParen = cleanVal.match(/\(([^\)\d]{2,40})\)/);
+            if (verdictParen) compositeVerdict = verdictParen[1].trim();
         }
     }
 
@@ -349,10 +461,10 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     // require at least 2 indicator rows only when used standalone, or allow enrichment to extract it:
     const isIndicatorsOnlyTable = !hasClose && !hasLevels && (hasRsi || hasEma || Boolean(macdVal));
 
-    let symbol = "";
-    let name = "";
+    let symbol = explicitSymbol ? explicitSymbol.trim().toUpperCase() : "";
+    let name = explicitName ? explicitName.trim() : "";
     let recommendation = "";
-    let isShariah = false;
+    let isShariah = tableShariah ?? false;
 
     // Clean asterisks from text for reliable regex matching
     const cleanRecent = recentText.replace(/\*/g, "");
@@ -431,7 +543,7 @@ export function tryParseAnalysisTable(headers: string[], rows: string[][], recen
     }
 
     // Shariah check
-    if (/متوافق مع الشريعة|EGX\s*33|شريعة/i.test(cleanRecent)) {
+    if (tableShariah === undefined && /متوافق مع الشريعة|EGX\s*33|شريعة/i.test(cleanRecent)) {
         if (!/غير متوافق|خارج EGX\s*33/i.test(cleanRecent)) {
             isShariah = true;
         }
@@ -731,9 +843,21 @@ function parseContentBlocks(content: string): ContentBlock[] {
                         return;
                     }
 
-                    // 2. Try single/comparative stock analysis table (avoid creating a second stock_card if one already exists in this message)
+                    // 2. Try comparative multi-stock table first, then single stock analysis table
                     const alreadyHasStockCard = blocks.some(b => b.type === "stock_card" || b.type === "stock_cards");
                     const recentText = currentTextLines.join("\n") + "\n" + (blocks.length > 0 && blocks[blocks.length - 1].type === "text" ? (blocks[blocks.length - 1] as any).content : "");
+                    const comparisonStocks = !alreadyHasStockCard ? tryParseComparisonTable(headers, rows, recentText) : null;
+                    if (comparisonStocks && comparisonStocks.length >= 2) {
+                        flushText();
+                        blocks.push({
+                            type: "stock_cards",
+                            stocks: comparisonStocks,
+                            tableData: { headers, rows }
+                        });
+                        currentTableLines = [];
+                        return;
+                    }
+
                     const analyzedStock = !alreadyHasStockCard ? tryParseAnalysisTable(headers, rows, recentText) : null;
                     if (analyzedStock) {
                         flushText();

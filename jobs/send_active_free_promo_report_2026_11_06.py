@@ -54,6 +54,8 @@ VIP_CHANNEL_ID = "-1003906516349"
 LINK_PRICING = "https://egxbots.com/pricing?plan=pro"
 LINK_TECHNICAL = "https://egxbots.com/scanner/technical"
 LINK_FAIR_VALUE = "https://egxbots.com/fair-value"
+LINK_DISCLOSURES = "https://egxbots.com/disclosures"
+LINK_SIMILARITY = "https://egxbots.com/scanner/backtests?tab=similarity"
 
 PRO_PLAN_IDS = {"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"}
 
@@ -366,7 +368,24 @@ def build_email_html(m: dict, fv: dict | None, user_id: str, email: str) -> str:
 </html>"""
 
 
+def load_recent_disclosures(limit: int = 5) -> list[dict]:
+    try:
+        r = (
+            supabase.table("egx_disclosures")
+            .select("symbol, company_name, disclosure_type, disclosure_date, title, action_type, shares_count, sentiment")
+            .order("disclosure_date", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return r.data or []
+    except Exception as exc:
+        print(f"[DISCLOSURES] Failed to load: {exc}")
+        return []
+
+
 def build_vip_telegram(m: dict, fv: dict | None) -> str:
+    session_date = m.get("as_of") or m.get("outcome_date") or REPORT_DATE
     top = m["top_mover"]
     top_block = ""
     if top.get("symbol"):
@@ -412,22 +431,41 @@ def build_vip_telegram(m: dict, fv: dict | None) -> str:
     else:
         fv_block = "💎 <b>ثالثاً: تقرير القيمة العادلة</b>\nالتقرير المحدث متاح على المنصة."
 
+    # Disclosures section
+    disclosures = load_recent_disclosures(limit=5)
+    disclosures_lines = []
+    for d in disclosures:
+        sym = d.get("symbol") or "EGX"
+        act = d.get("action_type") or ""
+        dtype = d.get("disclosure_type") or ""
+        shares = d.get("shares_count")
+        sentiment = d.get("sentiment")
+        icon = "🟢" if sentiment == "bullish" or act == "buy" else ("🔴" if sentiment == "bearish" or act == "sell" else "⚪")
+        act_ar = "شراء داخلي" if act == "buy" else ("بيع داخلي" if act == "sell" else ("إفصاح جوهري" if dtype == "material_event" else "تعامل مساهمين"))
+        shares_txt = f" ({int(shares):,} سهم)" if shares else ""
+        title_snippet = (d.get("title") or "")[:55]
+        disclosures_lines.append(f"• {icon} <b>{sym}</b>: {act_ar}{shares_txt} — <i>{title_snippet}...</i>")
+    disclosures_txt = "\n".join(disclosures_lines) if disclosures_lines else "• جاري رصد إفصاحات جلسة اليوم."
+
     st = m["stats"]
     return (
-        f"👑 <b>تقرير VIP | حصيلة جلسة {m['outcome_date'] or m['as_of']} ومصائد {REPORT_DATE}</b> 🇪🇬\n"
+        f"👑 <b>تقرير VIP | حصيلة جلسة {session_date} ومصائد الجلسة القادمة</b> 🇪🇬\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"🚀 <b>أولاً: إشارات النشاط غير الطبيعي ({m['unusual_score'].get('wins', 0)}/{m['unusual_score'].get('total', 0)})</b>\n"
         f"{top_block}\n"
         f"<b>أبرز النماذج الصاعدة:</b>\n" + "\n".join(movers) + "\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🪤 <b>ثانياً: كاشف المصائد — جلسة {REPORT_DATE}</b>\n"
+        f"🪤 <b>ثانياً: كاشف المصائد — جلسة {session_date}</b>\n"
         f"إجمالي: <b>{m['total_bear']}</b> ارتداد شرائي | <b>{m['total_bull']}</b> مصيدة قمم\n\n"
         f"🟢 <b>Wyckoff Spring:</b>\n{bear}\n\n"
         f"🔴 <b>Wyckoff Upthrust:</b>\n{bull}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
         f"{fv_block}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🎯 <b>رابعاً: الإحصاءات (40 جلسة)</b>\n"
+        f"📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين (اليوم)</b>\n"
+        f"{disclosures_txt}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🎯 <b>خامساً: الإحصاءات (40 جلسة)</b>\n"
         f"• انفجار 3 أيام: <b>{st['unusual'].get('hitRate3d', '-')}%</b> "
         f"(متوسط +{st['unusual'].get('avgBest3d', '-')}% | {st['unusual'].get('events', '-')} إشارة)\n"
         f"• ارتداد Spring: <b>{st['springs'].get('hitRate3d', '-')}%</b> "
@@ -435,7 +473,11 @@ def build_vip_telegram(m: dict, fv: dict | None) -> str:
         f"• حماية Upthrust: <b>{st['upthrusts'].get('winRate', '-')}%</b> "
         f"(تجنب هبوط {st['upthrusts'].get('hitRate3d', '-')}% | متوسط {st['upthrusts'].get('avgBest3d', '-')}%)\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"🔗 {LINK_TECHNICAL}"
+        f"🔗 <b>روابط الأدوات على المنصة:</b>\n"
+        f"• رادار الإفصاحات والـ PDF: {LINK_DISCLOSURES}\n"
+        f"• الماسح الفني وكاشف المصائد: {LINK_TECHNICAL}\n"
+        f"• كاشف القيمة العادلة: {LINK_FAIR_VALUE}\n"
+        f"• النماذج المتكررة: {LINK_SIMILARITY}"
     )
 
 
@@ -451,12 +493,18 @@ def send_vip(text: str) -> bool:
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
-        "reply_markup": {"inline_keyboard": [[
-            {"text": "📊 الماسح الفني", "url": LINK_TECHNICAL},
-            {"text": "💎 القيمة العادلة", "url": LINK_FAIR_VALUE},
-        ]]},
+        "reply_markup": {"inline_keyboard": [
+            [
+                {"text": "📑 رادار الإفصاحات والـ PDF ↗", "url": LINK_DISCLOSURES},
+                {"text": "📊 كاشف المصائد والماسح ↗", "url": LINK_TECHNICAL},
+            ],
+            [
+                {"text": "💎 فحص القيمة العادلة ↗", "url": LINK_FAIR_VALUE},
+                {"text": "📈 النماذج المتكررة ↗", "url": LINK_SIMILARITY},
+            ],
+        ]},
     }
-    res = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=30)
+    res = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=45)
     data = res.json()
     if data.get("ok"):
         print(f"[VIP] ✅ sent message_id={data['result']['message_id']}")

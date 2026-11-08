@@ -33,6 +33,7 @@ import {
   Flame,
   Award,
   BellRing,
+  Bot,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -55,6 +56,51 @@ export default function PricingClient() {
   const [localOrder, setLocalOrder] = useState<string | null>(null);
   const [customerMobile, setCustomerMobile] = useState("");
   const [step, setStep] = useState<Step>("plans");
+  const [b2bTrialModal, setB2bTrialModal] = useState<{
+    open: boolean;
+    license: any;
+    connectUrl: string;
+    code: string;
+    tier: string;
+  } | null>(null);
+  const [startingB2BTrial, setStartingB2BTrial] = useState<string | null>(null);
+
+  const handleStartB2BTrial = async (tier: string = "b2b_pro") => {
+    if (!user) {
+      toast.error(isAr ? "يرجى تسجيل الدخول أولاً لبدء التجربة المجانية لجروبك" : "Please sign in to start your 3-day free trial");
+      router.push("/login?redirect=/pricing?mode=b2b");
+      return;
+    }
+
+    try {
+      setStartingB2BTrial(tier);
+      const res = await fetch("/api/b2b/trial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && data.license) {
+        toast.success(isAr ? "🎉 تم تفعيل رخصتك التجريبية (3 أيام) بنجاح!" : "🎉 3-day trial activated successfully!");
+        setB2bTrialModal({
+          open: true,
+          license: data.license,
+          connectUrl: data.connect_url,
+          code: data.activation_code,
+          tier,
+        });
+      } else {
+        toast.error(data.message || data.error || (isAr ? "فشل إنشاء التجربة" : "Failed to start trial"));
+        if (data.error === "trial_already_claimed") {
+          openPaymentStep(tier);
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || (isAr ? "خطأ في الشبكة" : "Network error"));
+    } finally {
+      setStartingB2BTrial(null);
+    }
+  };
   const [orderStatus, setOrderStatus] = useState<string>("submitted");
   const [subscriptionEnd, setSubscriptionEnd] = useState<string | null>(null);
   const [telegramProUrl, setTelegramProUrl] = useState("");
@@ -2022,6 +2068,37 @@ export default function PricingClient() {
               </p>
             </div>
 
+            {/* 3-Day Free Trial Auto-Activation Banner */}
+            <div className="border-4 border-black dark:border-white bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 dark:from-amber-500/30 dark:via-zinc-900 dark:to-yellow-500/20 p-5 sm:p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] flex flex-col md:flex-row items-center justify-between gap-5">
+              <div className="space-y-1.5 text-center md:text-start">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black text-white text-[10px] font-black uppercase">
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>{isAr ? "تفعيل تلقائي بدون دفع مليم وبدون بطاقة" : "Instant Auto-Linking · Zero Card Required"}</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
+                  {isAr ? "🎁 جرّب بوت EGX BOTS في قناتك أو مجموعتك مجاناً لمدة 3 أيام" : "🎁 Try the Bot in Your Channel or Group Free for 3 Days"}
+                </h3>
+                <p className="text-xs font-bold text-zinc-800 dark:text-zinc-300 max-w-2xl leading-relaxed">
+                  {isAr
+                    ? "ربط آلي بالكامل بضغطة زر واحدة! بمجرد إضافة البوت لمجموعتك، يتعرف عليها تلقائياً ويبدأ بالرد على أسئلة الأعضاء بالتوقيع المخصص لقناتك."
+                    : "1-click fully automated group linking! As soon as the bot is added, it binds to your group and starts answering member stock queries."}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={startingB2BTrial === "b2b_pro"}
+                onClick={() => handleStartB2BTrial("b2b_pro")}
+                className="shrink-0 inline-flex items-center gap-2 px-6 py-3.5 border-4 border-black bg-zinc-950 text-white hover:bg-black font-black text-xs uppercase shadow-[4px_4px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-transform cursor-pointer disabled:opacity-50"
+              >
+                {startingB2BTrial === "b2b_pro" ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Bot className="w-4 h-4 text-emerald-400" />
+                )}
+                <span>{isAr ? "ابدأ التجربة المجانية 3 أيام الآن ←" : "Start 3-Day Free Trial Now ←"}</span>
+              </button>
+            </div>
+
             {/* 3 B2B Cards Grid */}
             <div className="grid lg:grid-cols-3 gap-6 items-stretch">
               {b2bPlans.map((plan) => {
@@ -2108,6 +2185,19 @@ export default function PricingClient() {
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                         <span>{isAr ? "تفعيل فوري · ربط مباشر للجروب" : "Instant Activation · Dedicated Setup"}</span>
                       </div>
+                      <button
+                        type="button"
+                        disabled={startingB2BTrial === plan.id}
+                        onClick={() => handleStartB2BTrial(plan.id)}
+                        className="w-full flex items-center justify-center gap-2 border-2 border-black dark:border-white bg-amber-400 hover:bg-amber-300 text-black py-2.5 px-3 text-xs font-black uppercase tracking-wider shadow-[2px_2px_0px_#000] transition-transform active:scale-95 cursor-pointer disabled:opacity-50"
+                      >
+                        {startingB2BTrial === plan.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isAr ? "🎁 ابدأ تجربة مجانية 3 أيام لجروبك" : "🎁 Start 3-Day Free Trial"}</span>
+                      </button>
                     </div>
                   </div>
                 );
@@ -2280,6 +2370,74 @@ export default function PricingClient() {
           </div>
         </div>
       </div>
+      {/* B2B 3-Day Free Trial Success Modal */}
+      {b2bTrialModal?.open && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 max-w-lg w-full p-6 sm:p-8 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] space-y-6 relative" dir={isAr ? "rtl" : "ltr"}>
+            <button
+              onClick={() => setB2bTrialModal(null)}
+              className="absolute top-4 left-4 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 p-1.5 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="text-center space-y-2">
+              <div className="w-16 h-16 border-4 border-black dark:border-white bg-amber-300 text-black flex items-center justify-center mx-auto shadow-[4px_4px_0px_#000]">
+                <Bot className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white">
+                {isAr ? "🎉 مبروك! تم تفعيل رخصتك التجريبية (3 أيام)" : "🎉 Congrats! 3-Day Trial Activated"}
+              </h3>
+              <p className="text-xs sm:text-sm font-bold text-zinc-600 dark:text-zinc-400">
+                {isAr
+                  ? "الآن اربط البوت بمجموعتك أو قناتك على تليجرام بضغطة زر واحدة وسيتم التفعيل آلياً بدون أي خطوات إضافية:"
+                  : "Now connect the bot to your Telegram group with 1 click. Linking is 100% automated!"}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <a
+                href={b2bTrialModal.connectUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  toast.success(isAr ? "جاري فتح تليجرام لاختيار المجموعة..." : "Opening Telegram...");
+                }}
+                className="w-full flex items-center justify-center gap-3 border-4 border-black bg-emerald-500 hover:bg-emerald-400 text-black py-4 px-4 text-sm font-black uppercase tracking-wider shadow-[4px_4px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-transform text-center"
+              >
+                <Bot className="w-5 h-5 shrink-0" />
+                <span>{isAr ? "🚀 ربط وتفعيل البوت في مجموعتي فوراً (تليجرام)" : "🚀 1-Click Auto-Activate Bot on Telegram"}</span>
+              </a>
+
+              <div className="border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800 p-3.5 space-y-2 text-xs">
+                <span className="font-bold text-zinc-500 block">
+                  {isAr ? "💡 كيف يعمل الربط الآلي؟" : "💡 How does auto-linking work?"}
+                </span>
+                <p className="text-[11px] text-zinc-700 dark:text-zinc-300 font-semibold leading-relaxed">
+                  {isAr
+                    ? "عند الضغط على الزر أعلاه، سيفتح تليجرام لتختار مجموعتك. فور إضافة البوت ورفعه مشرفاً، سيتعرف البوت على مجموعتك تلقائياً ويرسل رسالة التفعيل والترحيب ويبدأ في الرد على الأعضاء فوراً!"
+                    : "Clicking above opens Telegram to pick your group. Once added as admin, the bot automatically binds your group, posts a welcome greeting, and starts answering questions!"}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-2">
+                <Link
+                  href="/b2b/dashboard"
+                  onClick={() => setB2bTrialModal(null)}
+                  className="font-black text-emerald-600 dark:text-emerald-400 hover:underline"
+                >
+                  {isAr ? "الانتقال إلى لوحة تحكم البوت (B2B Dashboard) ←" : "Go to B2B Dashboard ←"}
+                </Link>
+                <span className="font-mono text-[11px] text-zinc-400">
+                  Code: {b2bTrialModal.code}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

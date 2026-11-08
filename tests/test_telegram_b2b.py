@@ -159,3 +159,42 @@ def test_activate_command_links_group():
             payload = mock_api.call_args[0][2]
             assert "تم تفعيل وربط رخصة البوت بنجاح" in payload["text"]
             assert payload["chat_id"] == -100998877
+
+
+def test_start_deep_link_activates_group_automatically():
+    fake_msg = {
+        "message_id": 9992,
+        "from": {"id": 8888, "is_bot": False, "first_name": "VIP Owner"},
+        "chat": {"id": -100998877, "type": "supergroup", "title": "قناة النخبة للبورصة المصرية"},
+        "text": "/start activate_trial1234",
+    }
+
+    with patch("api.telegram_b2b._call_telegram_api") as mock_api:
+        with patch("api.telegram_b2b.supabase") as mock_sb:
+            mock_select = MagicMock()
+            mock_select.execute.return_value.data = [
+                {
+                    "id": "trial1234_uuid_abc",
+                    "order_id": "B2B-TRIAL-89X",
+                    "tier": "b2b_pro",
+                    "daily_limit": 120,
+                    "custom_signature": "تحليلات قناة النخبة",
+                }
+            ]
+            mock_sb.table.return_value.select.return_value.in_.return_value = mock_select
+            mock_update = MagicMock()
+            mock_sb.table.return_value.update.return_value.eq.return_value = mock_update
+
+            handled = handle_b2b_group_message(
+                bot_token="fake_token",
+                chat_id=-100998877,
+                text="/start activate_trial1234",
+                msg=fake_msg,
+            )
+
+            assert handled is True
+            mock_api.assert_called_once()
+            payload = mock_api.call_args[0][2]
+            assert "تم تفعيل وربط رخصة البوت بنجاح" in payload["text"]
+            assert "فترة تجريبية 3 أيام" in payload["text"]
+            assert payload["chat_id"] == -100998877

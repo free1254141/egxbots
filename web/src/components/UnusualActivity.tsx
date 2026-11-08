@@ -272,7 +272,7 @@ export default function UnusualActivity() {
                   {reviewUnusual.map((row) => (
                     <tr key={row.symbol} className="hover:bg-amber-500/5">
                       <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
-                        <Link href={`/stocks/${row.symbol}`} className="hover:text-amber-500">
+                        <Link prefetch={false} href={`/stocks/${row.symbol.toLowerCase()}`} className="hover:text-amber-500">
                           {row.symbol}
                         </Link>
                       </td>
@@ -376,6 +376,7 @@ export default function UnusualActivity() {
                     : `${Math.abs(row.distanceToResistancePct).toFixed(1)}% above prior 20-session high`}
                 </p>
                 <Link
+                  prefetch={false}
                   aria-label={`${ar ? "فتح" : "Open"} ${row.symbol}`}
                   href={`/chart?symbol=${encodeURIComponent(row.symbol)}&exchange=EGX`}
                   className="absolute inset-0"

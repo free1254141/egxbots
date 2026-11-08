@@ -144,11 +144,18 @@ def handle_b2b_group_message(
         print("[TELEGRAM_B2B] Supabase not initialized; skipping B2B message.")
         return False
 
-    # Check for /activate or /link command to link group automatically
+    # Check for /activate, /link, or /start with deep link to link group automatically
     words = (text or "").strip().split()
     first_cmd = words[0].lower().split("@")[0] if words else ""
-    if first_cmd in ("/activate", "/link", "/activate_b2b"):
+    if first_cmd in ("/activate", "/link", "/activate_b2b", "/start"):
         code_arg = words[1].strip() if len(words) > 1 else ""
+        candidate_codes = [code_arg]
+        for pfx in ("activate_", "trial_"):
+            if code_arg.lower().startswith(pfx):
+                candidate_codes.append(code_arg[len(pfx):].strip())
+
+        group_title = str((msg.get("chat") or {}).get("title") or "قناة التليجرام").strip()
+
         if code_arg:
             try:
                 all_lics = supabase.table("b2b_group_licenses").select("*").in_("status", ["active", "paused"]).execute().data or []
@@ -156,11 +163,10 @@ def handle_b2b_group_message(
                 for lic in all_lics:
                     lic_id = str(lic.get("id") or "")
                     order_id = str(lic.get("order_id") or "")
-                    if lic_id.lower().startswith(code_arg.lower()) or code_arg.lower() in order_id.lower() or lic_id.lower() == code_arg.lower():
+                    if any(c and (lic_id.lower().startswith(c.lower()) or c.lower() in order_id.lower() or lic_id.lower() == c.lower()) for c in candidate_codes):
                         matched = lic
                         break
                 if matched:
-                    group_title = str((msg.get("chat") or {}).get("title") or "قناة التليجرام").strip()
                     supabase.table("b2b_group_licenses").update({
                         "telegram_chat_id": chat_id,
                         "group_title": group_title,
@@ -168,13 +174,15 @@ def handle_b2b_group_message(
                     }).eq("id", matched["id"]).execute()
                     tier_names = {"b2b_starter": "Starter B2B (150 عضو)", "b2b_pro": "Pro VIP B2B (500 عضو)", "b2b_enterprise": "Enterprise B2B (1,500 عضو)"}
                     t_name = tier_names.get(matched.get("tier"), "B2B VIP")
+                    is_trial = str(matched.get("order_id") or "").startswith("B2B-TRIAL-")
+                    trial_tag = " (🎁 فترة تجريبية 3 أيام)" if is_trial else ""
                     succ_msg = (
-                        f"🎉 <b>تم تفعيل وربط رخصة البوت بنجاح لهذه المجموعة!</b>\n\n"
+                        f"🎉 <b>تم تفعيل وربط رخصة البوت بنجاح لهذه المجموعة!{trial_tag}</b>\n\n"
                         f"• 👑 <b>الباقة:</b> {t_name}\n"
                         f"• 👥 <b>المجموعة:</b> {html.escape(group_title)}\n"
                         f"• ⚡ <b>الحد اليومي:</b> {matched.get('daily_limit', 120)} استفسار يومياً\n"
                         f"• ✍️ <b>التوقيع المعتمد:</b> <i>{html.escape(matched.get('custom_signature') or '')}</i>\n\n"
-                        f"🚀 <b>يمكن للأعضاء الآن السؤال عن أي سهم بكتابة:</b>\n"
+                        f"🚀 <b>يمكن لجميع الأعضاء الآن السؤال عن أي سهم بكتابة:</b>\n"
                         f"<code>@egxbots_bot تحليل سهم فوري</code> أو <code>/ask سهم طلعت مصطفى</code>"
                     )
                     _call_telegram_api(bot_token, "sendMessage", {
@@ -187,13 +195,33 @@ def handle_b2b_group_message(
                 else:
                     _call_telegram_api(bot_token, "sendMessage", {
                         "chat_id": chat_id,
-                        "text": "❌ <b>كود التفعيل غير صحيح أو منتهي الصلاحية.</b>\nيرجى مراجعة كود التفعيل من لوحة تحكم حسابك على موقع EGX BOTS.",
+                        "text": (
+                            "❌ <b>كود التفعيل غير صحيح أو منتهي الصلاحية.</b>\n"
+                            "يرجى مراجعة كود التفعيل من لوحة تحكم حسابك على موقع EGX BOTS، أو بدء تجربة مجانية 3 أيام لجروبك:\n"
+                            "https://egxbots.com/pricing?mode=b2b"
+                        ),
                         "parse_mode": "HTML",
                         "reply_to_message_id": msg_id,
                     })
                     return True
             except Exception as _act_err:
                 print(f"[TELEGRAM_B2B] Error in /activate: {_act_err}")
+        elif first_cmd == "/start":
+            welcome_intro = (
+                f"👋 <b>أهلاً بكم في مجموعة {html.escape(group_title)}!</b>\n\n"
+                f"أنا بوت <b>EGX BOTS</b> الذكي لتحليل أسهم البورصة المصرية لحظياً بالذكاء الاصطناعي.\n\n"
+                f"⚡ <b>لتفعيل البوت في هذه المجموعة، أرسل:</b>\n"
+                f"<code>/activate كود_الترخيص</code>\n\n"
+                f"🎁 <b>أو ابدأ تجربة مجانية 3 أيام لجروبك فوراً وبدون أي دفع من:</b>\n"
+                f"https://egxbots.com/pricing?mode=b2b"
+            )
+            _call_telegram_api(bot_token, "sendMessage", {
+                "chat_id": chat_id,
+                "text": welcome_intro,
+                "parse_mode": "HTML",
+                "reply_to_message_id": msg_id,
+            })
+            return True
 
     # 2. Check & consume B2B group quota atomically via RPC
     try:

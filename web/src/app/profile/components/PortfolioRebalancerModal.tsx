@@ -300,7 +300,8 @@ export default function PortfolioRebalancerModal({
                           <div>
                             <div className="flex items-center justify-between">
                               <Link
-                                href={`/stocks/${rep.symbol}`}
+                                prefetch={false}
+                                href={`/stocks/${rep.symbol.toLowerCase()}`}
                                 className="font-mono text-base font-black text-zinc-950 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400"
                               >
                                 {rep.symbol}
