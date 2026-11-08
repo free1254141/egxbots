@@ -371,15 +371,44 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     breakout_matches.sort(key=lambda x: x["change_pct"], reverse=True)
     oversold_matches.sort(key=lambda x: x["rsi_14"])
 
-    # Deduplicate within scan
-    top_volume = [s for s in volume_matches[:4] if force or f"{s['symbol']}:volume_surge" not in sent_keys]
-    top_breakout = [s for s in breakout_matches[:4] if force or f"{s['symbol']}:breakout" not in sent_keys]
-    top_oversold = [s for s in oversold_matches[:4] if force or f"{s['symbol']}:rsi_oversold" not in sent_keys]
+    # Cross-category deduplication so the same stock NEVER appears in multiple categories or repeats today
+    seen_fresh_symbols = set()
 
-    # Limit to top 2 per category to keep alerts actionable
-    final_vol = top_volume[:2]
-    final_bo = top_breakout[:2]
-    final_os = top_oversold[:2]
+    final_vol = []
+    for s in volume_matches:
+        sym = s["symbol"]
+        if sym in seen_fresh_symbols:
+            continue
+        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
+            continue
+        final_vol.append(s)
+        seen_fresh_symbols.add(sym)
+        if len(final_vol) >= 2:
+            break
+
+    final_bo = []
+    for s in breakout_matches:
+        sym = s["symbol"]
+        if sym in seen_fresh_symbols:
+            continue
+        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
+            continue
+        final_bo.append(s)
+        seen_fresh_symbols.add(sym)
+        if len(final_bo) >= 2:
+            break
+
+    final_os = []
+    for s in oversold_matches:
+        sym = s["symbol"]
+        if sym in seen_fresh_symbols:
+            continue
+        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
+            continue
+        final_os.append(s)
+        seen_fresh_symbols.add(sym)
+        if len(final_os) >= 2:
+            break
 
     # ── Tracked Signals Lifecycle & Targets/Stop-Loss Management ──────
     current_active: List[Dict[str, Any]] = list(config.get("active_signals", []))
@@ -680,6 +709,12 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     # Dispatch Fresh Signal Alerts to VIP
     alerts_dispatched = 0
     total_candidates = len(final_vol) + len(final_bo) + len(final_os)
+
+    # STALE DATA GUARD: If indicators are from a prior session (< today), never dispatch as today's live signals
+    is_data_stale = (not force and not force_dispatch) and cairo["is_trading_day"] and (as_of_date < cairo["date_str"])
+    if is_data_stale:
+        logger.warning(f"[SCANNER_PY] Indicators are from prior session ({as_of_date} < {cairo['date_str']}). Suppressing new entry alert dispatch until today's prices sync.")
+        total_candidates = 0
 
     if total_candidates > 0 or force_dispatch:
         net_adv = positive_stocks - negative_stocks

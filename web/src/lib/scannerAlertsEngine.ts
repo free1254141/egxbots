@@ -485,8 +485,12 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     }
   }
 
-  const hasAnyFreshMatches =
-    freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0 || freshDisclosures.length > 0;
+  // STALE DATA GUARD: If indicators are from a prior session (< today), never dispatch as today's live signals
+  const isDataStale = !options.forceDispatch && cairoTime.isTradingDay && (asOfDate < cairoTime.dateStr);
+
+  const hasAnyFreshMatches = !isDataStale && (
+    freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0 || freshDisclosures.length > 0
+  );
 
   // ── STEP 4: Active Pro Subscribers Stats (Informational) ─────────────────
   const [subRes, profileRes] = await Promise.all([
