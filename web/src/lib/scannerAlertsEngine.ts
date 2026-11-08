@@ -768,90 +768,92 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     );
   };
 
-  // Add new fresh signals into stillActiveSignals (only if symbol is NOT already active and portfolio has room)
-  for (const v of freshVolume) {
-    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyActiveOrClosedToday(v.symbol)) continue;
-    const plan = calculateScannerTradePlan(v.close, "volume_surge");
-    stillActiveSignals.push({
-      id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
-      symbol: v.symbol,
-      scanner_type: "volume_surge",
-      entry_price: v.close,
-      entry_date: cairoTime.dateStr,
-      entry_time: cairoTime.timeStr,
-      target_1: plan.target1,
-      target_1_pct: plan.target1Pct,
-      target_2: plan.target2,
-      target_2_pct: plan.target2Pct,
-      stop_loss: plan.stopLoss,
-      stop_loss_pct: plan.stopLossPct,
-      current_price: v.close,
-      highest_price: v.close,
-      lowest_price: v.close,
-      return_pct: 0,
-      max_gain_pct: 0,
-      status: "active",
-      sessions_count: 1,
-      max_sessions: plan.maxHoldingSessions,
-      updated_at: new Date().toISOString(),
-    });
-  }
-  for (const b of freshBreakout) {
-    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyActiveOrClosedToday(b.symbol)) continue;
-    const plan = calculateScannerTradePlan(b.close, "breakout");
-    stillActiveSignals.push({
-      id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
-      symbol: b.symbol,
-      scanner_type: "breakout",
-      entry_price: b.close,
-      entry_date: cairoTime.dateStr,
-      entry_time: cairoTime.timeStr,
-      target_1: plan.target1,
-      target_1_pct: plan.target1Pct,
-      target_2: plan.target2,
-      target_2_pct: plan.target2Pct,
-      stop_loss: plan.stopLoss,
-      stop_loss_pct: plan.stopLossPct,
-      current_price: b.close,
-      highest_price: b.close,
-      lowest_price: b.close,
-      return_pct: 0,
-      max_gain_pct: 0,
-      status: "active",
-      sessions_count: 1,
-      max_sessions: plan.maxHoldingSessions,
-      updated_at: new Date().toISOString(),
-    });
-  }
-  for (const o of freshOversold) {
-    if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
-    if (isSymbolAlreadyActiveOrClosedToday(o.symbol)) continue;
-    const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
-    stillActiveSignals.push({
-      id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,
-      symbol: o.symbol,
-      scanner_type: "rsi_oversold",
-      entry_price: o.close,
-      entry_date: cairoTime.dateStr,
-      entry_time: cairoTime.timeStr,
-      target_1: plan.target1,
-      target_1_pct: plan.target1Pct,
-      target_2: plan.target2,
-      target_2_pct: plan.target2Pct,
-      stop_loss: plan.stopLoss,
-      stop_loss_pct: plan.stopLossPct,
-      current_price: o.close,
-      highest_price: o.close,
-      lowest_price: o.close,
-      return_pct: 0,
-      max_gain_pct: 0,
-      status: "active",
-      sessions_count: 1,
-      max_sessions: plan.maxHoldingSessions,
-      updated_at: new Date().toISOString(),
-    });
+  // Add new fresh signals into stillActiveSignals ONLY IF data is not stale (or forced)
+  if (!isDataStale || options.forceDispatch) {
+    for (const v of freshVolume) {
+      if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
+      if (isSymbolAlreadyActiveOrClosedToday(v.symbol)) continue;
+      const plan = calculateScannerTradePlan(v.close, "volume_surge");
+      stillActiveSignals.push({
+        id: `${v.symbol}_${cairoTime.dateStr}_volume_surge`,
+        symbol: v.symbol,
+        scanner_type: "volume_surge",
+        entry_price: v.close,
+        entry_date: cairoTime.dateStr,
+        entry_time: cairoTime.timeStr,
+        target_1: plan.target1,
+        target_1_pct: plan.target1Pct,
+        target_2: plan.target2,
+        target_2_pct: plan.target2Pct,
+        stop_loss: plan.stopLoss,
+        stop_loss_pct: plan.stopLossPct,
+        current_price: v.close,
+        highest_price: v.close,
+        lowest_price: v.close,
+        return_pct: 0,
+        max_gain_pct: 0,
+        status: "active",
+        sessions_count: 1,
+        max_sessions: plan.maxHoldingSessions,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    for (const b of freshBreakout) {
+      if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
+      if (isSymbolAlreadyActiveOrClosedToday(b.symbol)) continue;
+      const plan = calculateScannerTradePlan(b.close, "breakout");
+      stillActiveSignals.push({
+        id: `${b.symbol}_${cairoTime.dateStr}_breakout`,
+        symbol: b.symbol,
+        scanner_type: "breakout",
+        entry_price: b.close,
+        entry_date: cairoTime.dateStr,
+        entry_time: cairoTime.timeStr,
+        target_1: plan.target1,
+        target_1_pct: plan.target1Pct,
+        target_2: plan.target2,
+        target_2_pct: plan.target2Pct,
+        stop_loss: plan.stopLoss,
+        stop_loss_pct: plan.stopLossPct,
+        current_price: b.close,
+        highest_price: b.close,
+        lowest_price: b.close,
+        return_pct: 0,
+        max_gain_pct: 0,
+        status: "active",
+        sessions_count: 1,
+        max_sessions: plan.maxHoldingSessions,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    for (const o of freshOversold) {
+      if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
+      if (isSymbolAlreadyActiveOrClosedToday(o.symbol)) continue;
+      const plan = calculateScannerTradePlan(o.close, "rsi_oversold");
+      stillActiveSignals.push({
+        id: `${o.symbol}_${cairoTime.dateStr}_rsi_oversold`,
+        symbol: o.symbol,
+        scanner_type: "rsi_oversold",
+        entry_price: o.close,
+        entry_date: cairoTime.dateStr,
+        entry_time: cairoTime.timeStr,
+        target_1: plan.target1,
+        target_1_pct: plan.target1Pct,
+        target_2: plan.target2,
+        target_2_pct: plan.target2Pct,
+        stop_loss: plan.stopLoss,
+        stop_loss_pct: plan.stopLossPct,
+        current_price: o.close,
+        highest_price: o.close,
+        lowest_price: o.close,
+        return_pct: 0,
+        max_gain_pct: 0,
+        status: "active",
+        sessions_count: 1,
+        max_sessions: plan.maxHoldingSessions,
+        updated_at: new Date().toISOString(),
+      });
+    }
   }
 
   // Deduplicate target hit and stopped out signals so Telegram never sends repeat lines

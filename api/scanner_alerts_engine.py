@@ -258,6 +258,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     # Fetch latest available trading date in stock_technical_indicators
     latest_date_rows = supabase_get("stock_technical_indicators?exchange=eq.EGX&select=date&order=date.desc&limit=1")
     as_of_date = latest_date_rows[0].get("date") if latest_date_rows else cairo["date_str"]
+    is_data_stale = (not force and not force_dispatch) and cairo["is_trading_day"] and (as_of_date < cairo["date_str"])
 
     # Fetch indicators and price OHLC for the asOfDate
     ind_rows = supabase_get(f"stock_technical_indicators?exchange=eq.EGX&date=eq.{as_of_date}&select=symbol,close,change_pct,volume,vol_sma20,r_vol,rsi_14,bb_upper,ema_20&limit=300")
@@ -511,96 +512,97 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
             return True
         return False
 
-    # Add fresh signals to portfolio
-    for v in final_vol:
-        if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-            break
-        if is_symbol_active_or_closed_today(v["symbol"]):
-            continue
-        plan = calculate_trade_plan(v["close"], "volume_surge")
-        still_active_signals.append({
-            "id": f"{v['symbol']}_{cairo['date_str']}_volume_surge",
-            "symbol": v["symbol"],
-            "scanner_type": "volume_surge",
-            "entry_price": v["close"],
-            "entry_date": cairo["date_str"],
-            "entry_time": cairo["time_str"],
-            "target_1": plan["target_1"],
-            "target_1_pct": plan["target_1_pct"],
-            "target_2": plan["target_2"],
-            "target_2_pct": plan["target_2_pct"],
-            "stop_loss": plan["stop_loss"],
-            "stop_loss_pct": plan["stop_loss_pct"],
-            "current_price": v["close"],
-            "highest_price": v["close"],
-            "lowest_price": v["close"],
-            "return_pct": 0.0,
-            "max_gain_pct": 0.0,
-            "status": "active",
-            "sessions_count": 1,
-            "max_sessions": plan["max_sessions"],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+    # Add fresh signals to portfolio ONLY IF data is not stale (or forced)
+    if not is_data_stale or force_dispatch:
+        for v in final_vol:
+            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
+                break
+            if is_symbol_active_or_closed_today(v["symbol"]):
+                continue
+            plan = calculate_trade_plan(v["close"], "volume_surge")
+            still_active_signals.append({
+                "id": f"{v['symbol']}_{cairo['date_str']}_volume_surge",
+                "symbol": v["symbol"],
+                "scanner_type": "volume_surge",
+                "entry_price": v["close"],
+                "entry_date": cairo["date_str"],
+                "entry_time": cairo["time_str"],
+                "target_1": plan["target_1"],
+                "target_1_pct": plan["target_1_pct"],
+                "target_2": plan["target_2"],
+                "target_2_pct": plan["target_2_pct"],
+                "stop_loss": plan["stop_loss"],
+                "stop_loss_pct": plan["stop_loss_pct"],
+                "current_price": v["close"],
+                "highest_price": v["close"],
+                "lowest_price": v["close"],
+                "return_pct": 0.0,
+                "max_gain_pct": 0.0,
+                "status": "active",
+                "sessions_count": 1,
+                "max_sessions": plan["max_sessions"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
 
-    for b in final_bo:
-        if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-            break
-        if is_symbol_active_or_closed_today(b["symbol"]):
-            continue
-        plan = calculate_trade_plan(b["close"], "breakout")
-        still_active_signals.append({
-            "id": f"{b['symbol']}_{cairo['date_str']}_breakout",
-            "symbol": b["symbol"],
-            "scanner_type": "breakout",
-            "entry_price": b["close"],
-            "entry_date": cairo["date_str"],
-            "entry_time": cairo["time_str"],
-            "target_1": plan["target_1"],
-            "target_1_pct": plan["target_1_pct"],
-            "target_2": plan["target_2"],
-            "target_2_pct": plan["target_2_pct"],
-            "stop_loss": plan["stop_loss"],
-            "stop_loss_pct": plan["stop_loss_pct"],
-            "current_price": b["close"],
-            "highest_price": b["close"],
-            "lowest_price": b["close"],
-            "return_pct": 0.0,
-            "max_gain_pct": 0.0,
-            "status": "active",
-            "sessions_count": 1,
-            "max_sessions": plan["max_sessions"],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        for b in final_bo:
+            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
+                break
+            if is_symbol_active_or_closed_today(b["symbol"]):
+                continue
+            plan = calculate_trade_plan(b["close"], "breakout")
+            still_active_signals.append({
+                "id": f"{b['symbol']}_{cairo['date_str']}_breakout",
+                "symbol": b["symbol"],
+                "scanner_type": "breakout",
+                "entry_price": b["close"],
+                "entry_date": cairo["date_str"],
+                "entry_time": cairo["time_str"],
+                "target_1": plan["target_1"],
+                "target_1_pct": plan["target_1_pct"],
+                "target_2": plan["target_2"],
+                "target_2_pct": plan["target_2_pct"],
+                "stop_loss": plan["stop_loss"],
+                "stop_loss_pct": plan["stop_loss_pct"],
+                "current_price": b["close"],
+                "highest_price": b["close"],
+                "lowest_price": b["close"],
+                "return_pct": 0.0,
+                "max_gain_pct": 0.0,
+                "status": "active",
+                "sessions_count": 1,
+                "max_sessions": plan["max_sessions"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
 
-    for o in final_os:
-        if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-            break
-        if is_symbol_active_or_closed_today(o["symbol"]):
-            continue
-        plan = calculate_trade_plan(o["close"], "rsi_oversold")
-        still_active_signals.append({
-            "id": f"{o['symbol']}_{cairo['date_str']}_rsi_oversold",
-            "symbol": o["symbol"],
-            "scanner_type": "rsi_oversold",
-            "entry_price": o["close"],
-            "entry_date": cairo["date_str"],
-            "entry_time": cairo["time_str"],
-            "target_1": plan["target_1"],
-            "target_1_pct": plan["target_1_pct"],
-            "target_2": plan["target_2"],
-            "target_2_pct": plan["target_2_pct"],
-            "stop_loss": plan["stop_loss"],
-            "stop_loss_pct": plan["stop_loss_pct"],
-            "current_price": o["close"],
-            "highest_price": o["close"],
-            "lowest_price": o["close"],
-            "return_pct": 0.0,
-            "max_gain_pct": 0.0,
-            "status": "active",
-            "sessions_count": 1,
-            "max_sessions": plan["max_sessions"],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        for o in final_os:
+            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
+                break
+            if is_symbol_active_or_closed_today(o["symbol"]):
+                continue
+            plan = calculate_trade_plan(o["close"], "rsi_oversold")
+            still_active_signals.append({
+                "id": f"{o['symbol']}_{cairo['date_str']}_rsi_oversold",
+                "symbol": o["symbol"],
+                "scanner_type": "rsi_oversold",
+                "entry_price": o["close"],
+                "entry_date": cairo["date_str"],
+                "entry_time": cairo["time_str"],
+                "target_1": plan["target_1"],
+                "target_1_pct": plan["target_1_pct"],
+                "target_2": plan["target_2"],
+                "target_2_pct": plan["target_2_pct"],
+                "stop_loss": plan["stop_loss"],
+                "stop_loss_pct": plan["stop_loss_pct"],
+                "current_price": o["close"],
+                "highest_price": o["close"],
+                "lowest_price": o["close"],
+                "return_pct": 0.0,
+                "max_gain_pct": 0.0,
+                "status": "active",
+                "sessions_count": 1,
+                "max_sessions": plan["max_sessions"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)
     dedup_hits = list({s["symbol"]: s for s in hit_target_signals}.values())
