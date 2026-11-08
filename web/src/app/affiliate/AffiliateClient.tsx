@@ -643,12 +643,12 @@ export default function AffiliateClient() {
               </a>
               <span className="text-zinc-400">•</span>
               <a
-                href="https://t.me/artoro_support"
+                href="https://t.me/egxbots"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sky-600 dark:text-sky-400 font-black hover:underline"
               >
-                تليجرام: @artoro_support
+                {isAr ? "قناة تليجرام: egxbots@" : "Telegram Channel: @egxbots"}
               </a>
             </div>
           </div>
