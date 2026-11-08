@@ -230,10 +230,26 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/scanner/backtests"
+                  href="/scanner/backtests?tab=bots"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
                 >
-                  {t("nav.scanner.backtests")}
+                  {isAr ? "بوتات التداول اليومية (AI)" : "AI Trading Bots"}
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/scanner/backtests?tab=similarity"
+                  className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                >
+                  {isAr ? "النماذج الفنية المتكررة (شبه ده)" : "Historical Pattern Similarity"}
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/disclosures"
+                  className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
+                >
+                  {isAr ? "رادار إفصاحات البورصة المصرية (PDF)" : "EGX Disclosures Radar (PDF)"}
                 </Link>
               </li>
               <li>

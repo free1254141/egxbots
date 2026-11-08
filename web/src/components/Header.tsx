@@ -124,16 +124,16 @@ export default function Header() {
     const [searchFocused, setSearchFocused] = useState(false);
 
     const updateHeaderOffset = useCallback(() => {
-        const headerEl = headerRef.current;
-        if (headerEl) {
-            const bottom = headerEl.getBoundingClientRect().bottom;
+        const shell = shellRef.current;
+        if (shell) {
+            const bottom = shell.getBoundingClientRect().bottom;
             document.documentElement.style.setProperty("--header-h", `${Math.ceil(bottom)}px`);
             document.documentElement.style.setProperty("--header-offset", `${Math.ceil(bottom + 8)}px`);
             return;
         }
-        const shell = shellRef.current;
-        if (!shell) return;
-        const bottom = shell.getBoundingClientRect().bottom;
+        const headerEl = headerRef.current;
+        if (!headerEl) return;
+        const bottom = headerEl.getBoundingClientRect().bottom;
         document.documentElement.style.setProperty("--header-h", `${Math.ceil(bottom)}px`);
         document.documentElement.style.setProperty("--header-offset", `${Math.ceil(bottom + 8)}px`);
     }, []);
@@ -146,18 +146,26 @@ export default function Header() {
 
     useEffect(() => {
         updateHeaderOffset();
-        const target = headerRef.current || shellRef.current;
+        const target = shellRef.current || headerRef.current;
         if (!target) return;
+
+        const handleResize = () => {
+            if (window.innerWidth >= 768) {
+                setMobileSearchOpen(false);
+                setMobileMenuOpen(false);
+            }
+            updateHeaderOffset();
+        };
 
         const observer = new ResizeObserver(updateHeaderOffset);
         observer.observe(target);
-        window.addEventListener("resize", updateHeaderOffset);
+        window.addEventListener("resize", handleResize);
 
         return () => {
             observer.disconnect();
-            window.removeEventListener("resize", updateHeaderOffset);
+            window.removeEventListener("resize", handleResize);
         };
-    }, [updateHeaderOffset, mobileMenuOpen, mobileSearchOpen, searchFocused, user]);
+    }, [updateHeaderOffset, user]);
 
     useEffect(() => {
         if (!searchQuery.trim()) {
@@ -215,9 +223,20 @@ export default function Header() {
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as Node;
             const container = document.getElementById("header-search-container");
-            if (container && !container.contains(e.target as Node)) {
+            if (container && !container.contains(target)) {
                 setSearchFocused(false);
+            }
+            const mobilePanel = document.getElementById("header-mobile-search-panel");
+            const mobileSearchBtn = document.getElementById("header-mobile-search-btn");
+            if (
+                mobilePanel &&
+                !mobilePanel.contains(target) &&
+                mobileSearchBtn &&
+                !mobileSearchBtn.contains(target)
+            ) {
+                setMobileSearchOpen(false);
             }
         };
         document.addEventListener("mousedown", handleClickOutside);
@@ -229,7 +248,6 @@ export default function Header() {
         { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
         { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
         { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
-        { href: "/scanner/backtests?tab=similarity", label: t("nav.scanner.similarity"), icon: <TrendingUp className="w-4 h-4 shrink-0" />, activePath: null },
         { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
         { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
     ];

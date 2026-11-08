@@ -1983,10 +1983,12 @@ async function executeRawTool(
                             sentiment: d.sentiment,
                             key_takeaway: d.metadata?.key_takeaway || null,
                             image_url: `/api/disclosures/image/${d.id}`,
-                            markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
+                            pdf_url: `/api/disclosures/pdf/${d.id}`,
+                    markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
+                    markdown_pdf: `[📄 فتح مستند الـ PDF الأصلي (البورصة المصرية)](/api/disclosures/pdf/${d.id})`,
                             source_url: d.source_url
                         }],
-                        note: `تم جلب تفاصيل الإفصاح المطلوب رقم ${d.id} بالكامل مع رابط صورته الرسمية /api/disclosures/image/${d.id}. إذا طلب المستخدم عرض صورة الإفصاح استخدم markdown_image.`
+                        note: `تم جلب تفاصيل الإفصاح المطلوب رقم ${d.id} بالكامل مع رابط مستند الـ PDF الأصلي /api/disclosures/pdf/${d.id}. يجب دائماً تضمين رابط الـ PDF المعتمد في الرد بصيغة: [📄 فتح مستند الـ PDF الأصلي (البورصة المصرية)](/api/disclosures/pdf/${d.id}) ليظهر المستند التفاعلي في الشات.`
                     };
                 }
             }
@@ -2032,7 +2034,9 @@ async function executeRawTool(
                     raw_content: d.raw_content,
                     key_takeaway: d.metadata?.key_takeaway || null,
                     image_url: `/api/disclosures/image/${d.id}`,
+                    pdf_url: `/api/disclosures/pdf/${d.id}`,
                     markdown_image: `![صورة الإفصاح الرسمي](/api/disclosures/image/${d.id})`,
+                    markdown_pdf: `[📄 فتح مستند الـ PDF الأصلي (البورصة المصرية)](/api/disclosures/pdf/${d.id})`,
                     source_url: d.source_url
                 })),
                 note: sym

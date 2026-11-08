@@ -4,6 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   FileText,
+  Download,
+  LayoutList,
+  LayoutGrid,
   Search,
   Bot,
   ExternalLink,
@@ -86,6 +89,7 @@ export default function DisclosuresClient({
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedSentiment, setSelectedSentiment] = useState<string>("all");
+  const [layoutMode, setLayoutMode] = useState<"list" | "grid">("list");
 
   // Modal state for full-screen disclosure image / PDF inspection
   const [previewItem, setPreviewItem] = useState<DisclosureItem | null>(null);
@@ -175,8 +179,8 @@ export default function DisclosuresClient({
   const handleDiscussInFloatingChat = (item: DisclosureItem) => {
     const symPart = item.symbol ? ` (${item.symbol})` : "";
     const prompt = isAr
-      ? `ناقش معي بالتفصيل إفصاح ${item.company_name}${symPart} الصادر بتاريخ ${item.disclosure_date} بعنوان: "${item.title}" [كود الإفصاح في سوبابيز: ${item.id}]. اشرح لي تفاصيله المخزنة وأثره المالي والفني على السهم، وجهز صورة الإفصاح (${window.location.origin}/api/disclosures/image/${item.id}) إذا طلبت عرضها.`
-      : `Discuss in detail the disclosure of ${item.company_name}${symPart} dated ${item.disclosure_date} titled: "${item.title}" [Supabase Disclosure ID: ${item.id}]. Explain its stored details, financial/technical impact on the stock, and keep the disclosure image (${window.location.origin}/api/disclosures/image/${item.id}) ready if requested.`;
+      ? `ما هو تحليلك المالي والفني لإفصاح شركة ${item.company_name}${symPart} الصادر بتاريخ ${item.disclosure_date} بعنوان: "${item.title}"؟ وما تأثيره المتوقع على السهم ومستويات التداول؟ واعرض لي مستند الـ PDF المعتمد للإفصاح.`
+      : `What is your financial and technical analysis of the disclosure from ${item.company_name}${symPart} dated ${item.disclosure_date} titled: "${item.title}"? What is the expected impact on the stock? Please provide the official filing PDF document.`;
 
     setIsOpen(true);
     void sendMessage(prompt);
@@ -406,26 +410,59 @@ export default function DisclosuresClient({
         </div>
       </div>
 
-      {/* Status Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-5 px-3 py-2 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-xs font-black text-black dark:text-white">
+      {/* Status Bar with View Mode Toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-3 py-2 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-xs font-black text-black dark:text-white">
         <span>
           {isAr
             ? `المعروض حالياً: ${disclosures.length} من أصل ${totalCount} إفصاح (تحميل ذكي تدريجي)`
             : `Showing ${disclosures.length} of ${totalCount} disclosures (progressive smart loading)`}
         </span>
-        {(search || selectedType !== "all" || selectedSentiment !== "all") && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearch("");
-              setSelectedType("all");
-              setSelectedSentiment("all");
-            }}
-            className="px-2.5 py-1 bg-[#FFE600] text-black border-2 border-black font-black text-xs cursor-pointer"
-          >
-            {isAr ? "إعادة ضبط الفلاتر" : "Reset Filters"}
-          </button>
-        )}
+
+        <div className="flex items-center gap-2">
+          {/* List / Grid Mode Switcher */}
+          <div className="flex border-2 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.4)]">
+            <button
+              type="button"
+              onClick={() => setLayoutMode("list")}
+              className={`px-2.5 py-1 flex items-center gap-1.5 text-xs font-black transition-none cursor-pointer ${
+                layoutMode === "list"
+                  ? "bg-black text-white dark:bg-white dark:text-black"
+                  : "bg-white text-black dark:bg-zinc-800 dark:text-white hover:bg-[#FFE600] hover:text-black"
+              }`}
+              title={isAr ? "عرض أفقي (قائمة)" : "List View"}
+            >
+              <LayoutList className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isAr ? "أفقي (قائمة)" : "List"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutMode("grid")}
+              className={`px-2.5 py-1 flex items-center gap-1.5 text-xs font-black transition-none cursor-pointer ${
+                layoutMode === "grid"
+                  ? "bg-black text-white dark:bg-white dark:text-black"
+                  : "bg-white text-black dark:bg-zinc-800 dark:text-white hover:bg-[#FFE600] hover:text-black"
+              }`}
+              title={isAr ? "عرض شبكي (كروت)" : "Grid View"}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isAr ? "شبكي (جريد)" : "Grid"}</span>
+            </button>
+          </div>
+
+          {(search || selectedType !== "all" || selectedSentiment !== "all") && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setSelectedType("all");
+                setSelectedSentiment("all");
+              }}
+              className="px-2.5 py-1 bg-[#FFE600] text-black border-2 border-black font-black text-xs cursor-pointer hover:bg-white transition-none"
+            >
+              {isAr ? "إعادة ضبط الفلاتر" : "Reset Filters"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Disclosures Feed */}
@@ -446,7 +483,173 @@ export default function DisclosuresClient({
           </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
+        <>
+          {layoutMode === "grid" ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {disclosures.map((item) => {
+              const isPdfSource = Boolean(
+                item.source_url && item.source_url.toLowerCase().includes(".pdf")
+              );
+              const shortCode = item.id.slice(0, 8).toUpperCase();
+
+              return (
+                <article
+                  key={item.id}
+                  className="flex flex-col justify-between p-4 rounded-none border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_0px_rgba(255,255,255,0.4)] transition-all"
+                >
+                  <div className="flex flex-col gap-3">
+                    {/* Grid Card Top Header */}
+                    <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-black/15 dark:border-white/15">
+                      <div className="flex items-center gap-2">
+                        <StockLogo
+                          symbol={item.symbol || "EGX"}
+                          size="sm"
+                          className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                        />
+                        {item.symbol ? (
+                          <Link
+                            prefetch={false}
+                            href={`/stocks/${item.symbol.toLowerCase()}`}
+                            className="px-2 py-0.5 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                          >
+                            {item.symbol}
+                          </Link>
+                        ) : (
+                          <span className="px-2 py-0.5 text-xs font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black">
+                            EGX
+                          </span>
+                        )}
+                        <span className="text-xs font-mono font-black text-zinc-500 dark:text-zinc-400">
+                          #{shortCode}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {getSentimentBadge(item)}
+                      </div>
+                    </div>
+
+                    {/* Company Name & Date & Type */}
+                    <div className="flex items-center justify-between text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                      <span className="font-black text-black dark:text-white truncate max-w-[170px]" title={item.company_name}>
+                        {item.company_name}
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0 text-[11px] font-black">
+                        <Calendar className="w-3 h-3" />
+                        {item.disclosure_date}
+                      </span>
+                    </div>
+
+                    <div className="inline-block self-start px-2 py-0.5 text-[10px] font-black bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white border border-black dark:border-white">
+                      {getTypeLabel(item.disclosure_type)}
+                    </div>
+
+                    {/* Title */}
+                    <h2 className="text-sm font-black text-black dark:text-white line-clamp-2 leading-snug">
+                      {item.title}
+                    </h2>
+
+                    {/* Quant chips if present */}
+                    {(item.party_name || item.shares_count || item.stake_before != null || item.stake_after != null) && (
+                      <div className="flex flex-wrap items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-950 border border-black dark:border-zinc-700 text-[11px] font-bold text-black dark:text-white">
+                        {item.party_name && (
+                          <span className="truncate max-w-full">
+                            {isAr ? "الطرف: " : "Party: "}
+                            <strong className="font-black">{item.party_name}</strong>
+                          </span>
+                        )}
+                        {item.shares_count != null && (
+                          <span className="px-1.5 py-0.5 bg-[#FFE600] text-black font-black text-[10px] border border-black">
+                            {Number(item.shares_count).toLocaleString()} {isAr ? "سهم" : "sh"}
+                          </span>
+                        )}
+                        {(item.stake_before != null || item.stake_after != null) && (
+                          <span className="font-black text-[10px]">
+                            {item.stake_before ?? "—"}% → {item.stake_after ?? "—"}%
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* AI Analysis Box */}
+                    <div className="p-2.5 bg-yellow-50 dark:bg-yellow-950/25 border-2 border-dashed border-yellow-600 dark:border-yellow-500/60">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Sparkles className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400 shrink-0" />
+                        <span className="text-[10px] font-black uppercase text-yellow-800 dark:text-yellow-400">
+                          {isAr ? "تحليل الذكاء الاصطناعي:" : "AI Analysis:"}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 line-clamp-3 leading-relaxed">
+                        {item.ai_summary}
+                      </p>
+                    </div>
+
+                    {/* Authentic PDF Viewer inside Grid Card */}
+                    <div className="border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                      <div className="flex items-center justify-between px-2 py-1 bg-black text-white text-[10px] font-black">
+                        <span className="flex items-center gap-1 text-[#FFE600]">
+                          <FileText className="w-3 h-3" />
+                          {isAr ? "مستند الـ PDF الأصلي" : "Official PDF Document"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewItem(item);
+                            setPreviewMode("pdf");
+                          }}
+                          className="text-black bg-[#FFE600] px-1.5 py-0.2 hover:bg-white flex items-center gap-0.5 font-black text-[9px] cursor-pointer"
+                        >
+                          <ZoomIn className="w-2.5 h-2.5" />
+                          {isAr ? "تكبير" : "Zoom"}
+                        </button>
+                      </div>
+                      <iframe
+                        src={`/api/disclosures/pdf/${item.id}#toolbar=0&navpanes=0`}
+                        title={item.title}
+                        className="w-full h-[180px] border-0 bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Grid Card Footer Action Buttons */}
+                  <div className="flex flex-col gap-2 pt-3 mt-3 border-t-2 border-black/15 dark:border-white/15">
+                    <button
+                      type="button"
+                      onClick={() => handleDiscussInFloatingChat(item)}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-black bg-[#00FF66] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] active:translate-y-0.5 transition-all cursor-pointer"
+                    >
+                      <Bot className="w-3.5 h-3.5" />
+                      {isAr ? "ناقش في الشات" : "Discuss in Chat"}
+                    </button>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewItem(item);
+                          setPreviewMode("pdf");
+                        }}
+                        className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-black bg-white dark:bg-zinc-800 text-black dark:text-white border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-all cursor-pointer"
+                      >
+                        <ZoomIn className="w-3 h-3" />
+                        {isAr ? "معاينة كاملة" : "Preview"}
+                      </button>
+
+                      <a
+                        href={`/api/disclosures/pdf/${item.id}`}
+                        download={`egx_disclosure_${item.symbol || 'official'}.pdf`}
+                        className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-black bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-all"
+                      >
+                        <Download className="w-3 h-3" />
+                        {isAr ? "تحميل PDF" : "Download"}
+                      </a>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-6">
           {disclosures.map((item) => {
             const docImageUrl = `/api/disclosures/image/${item.id}`;
             const isPdfSource = Boolean(
@@ -579,12 +782,12 @@ export default function DisclosuresClient({
                         type="button"
                         onClick={() => {
                           setPreviewItem(item);
-                          setPreviewMode("image");
+                          setPreviewMode("pdf");
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-black bg-white dark:bg-zinc-800 text-black dark:text-white border-3 border-black dark:border-white shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] hover:text-black transition-all cursor-pointer"
                       >
                         <ZoomIn className="w-3.5 h-3.5" />
-                        {isAr ? "تكبير صورة الإفصاح" : "Zoom Disclosure Scan"}
+                        {isAr ? "معاينة ملف الـ PDF الأصلي" : "View Original PDF"}
                       </button>
 
                       {item.symbol && (
@@ -619,40 +822,59 @@ export default function DisclosuresClient({
                     </div>
                   </div>
 
-                  {/* Inline Disclosure Document Image Preview (5 cols on desktop) */}
+                  {/* Inline Official PDF Document Preview (5 cols on desktop) */}
                   <div className="lg:col-span-5">
                     <div className="border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 p-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)]">
-                      <div className="flex items-center justify-between px-2 py-1 mb-1.5 bg-black text-white text-[11px] font-black">
-                        <span className="flex items-center gap-1.5">
-                          <Eye className="w-3.5 h-3.5 text-[#FFE600]" />
-                          {isAr ? "صورة مستند الإفصاح الرسمي" : "Official Disclosure Document"}
+                      <div className="flex items-center justify-between px-2.5 py-1.5 mb-2 bg-black text-white text-[11px] font-black">
+                        <span className="flex items-center gap-1.5 text-[#FFE600]">
+                          <FileText className="w-4 h-4" />
+                          {isAr ? "مستند الإفصاح الرسمي (PDF معتمد)" : "Official Filing Document (PDF)"}
                         </span>
                         <button
                           type="button"
                           onClick={() => {
                             setPreviewItem(item);
-                            setPreviewMode("image");
+                            setPreviewMode("pdf");
                           }}
-                          className="text-[#FFE600] hover:underline flex items-center gap-1 cursor-pointer"
+                          className="text-black bg-[#FFE600] px-2 py-0.5 border border-black hover:bg-white flex items-center gap-1 cursor-pointer font-black text-[10px]"
                         >
                           <ZoomIn className="w-3 h-3" />
-                          {isAr ? "عرض بالحجم الكامل" : "Full View"}
+                          {isAr ? "تكبير المستند" : "Fullscreen"}
                         </button>
                       </div>
 
-                      <div
-                        onClick={() => {
-                          setPreviewItem(item);
-                          setPreviewMode("image");
-                        }}
-                        className="relative cursor-zoom-in overflow-hidden border-2 border-black bg-white group"
-                      >
-                        <img
-                          src={docImageUrl}
-                          alt={item.title}
-                          loading="lazy"
-                          className="w-full h-auto object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                      <div className="relative border-2 border-black bg-white overflow-hidden">
+                        <iframe
+                          src={`/api/disclosures/pdf/${item.id}#toolbar=0&navpanes=0`}
+                          title={item.title}
+                          className="w-full h-[360px] border-0 bg-white"
                         />
+                        <div className="p-2 bg-zinc-50 dark:bg-zinc-900 border-t-2 border-black dark:border-white flex items-center justify-between gap-2 text-xs">
+                          <span className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 truncate">
+                            {isAr ? "ملف الإفصاح الأصلي - البورصة المصرية" : "Authentic EGX Filing Document"}
+                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <a
+                              href={`/api/disclosures/pdf/${item.id}`}
+                              download={`egx_disclosure_${item.symbol || 'official'}.pdf`}
+                              className="px-2 py-1 bg-white dark:bg-zinc-800 text-black dark:text-white border border-black dark:border-white font-black text-[10px] hover:bg-[#FFE600] hover:text-black transition-all flex items-center gap-1"
+                            >
+                              <Download className="w-3 h-3" />
+                              {isAr ? "تحميل PDF" : "Download"}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewItem(item);
+                                setPreviewMode("pdf");
+                              }}
+                              className="px-2 py-1 bg-[#00FF66] text-black border border-black font-black text-[10px] hover:bg-[#FFE600] transition-all flex items-center gap-1 cursor-pointer"
+                            >
+                              <ZoomIn className="w-3 h-3" />
+                              {isAr ? "عرض كامل" : "Full View"}
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -660,6 +882,8 @@ export default function DisclosuresClient({
               </article>
             );
           })}
+          </div>
+        )}
 
           {/* Progressive Load More Trigger & Button */}
           <div ref={loadMoreTriggerRef} className="pt-4 flex flex-col items-center justify-center">
@@ -692,21 +916,21 @@ export default function DisclosuresClient({
               </span>
             )}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Full-Screen Document Image & PDF Lightbox Modal */}
+      {/* Full-Screen PDF Document Viewer Lightbox Modal */}
       {previewItem && (
         <div
-          className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+          className="fixed inset-0 z-[200] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-5"
           onClick={() => setPreviewItem(null)}
         >
           <div
-            className="relative w-full max-w-4xl max-h-[90vh] flex flex-col border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[8px_8px_0px_0px_#FFE600] overflow-hidden"
+            className="relative w-full max-w-6xl max-h-[95vh] h-[92vh] flex flex-col border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[10px_10px_0px_0px_#FFE600] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-black text-white border-b-4 border-black dark:border-white">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-black text-white border-b-4 border-black dark:border-white">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="px-2 py-0.5 text-xs font-black bg-[#FFE600] text-black">
                   {previewItem.symbol || "EGX"}
@@ -714,30 +938,31 @@ export default function DisclosuresClient({
                 <span className="text-xs sm:text-sm font-black truncate">
                   {previewItem.company_name} — #{previewItem.id.slice(0, 8).toUpperCase()}
                 </span>
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-black bg-zinc-800 text-zinc-300 border border-zinc-700">
+                  {previewItem.disclosure_date}
+                </span>
               </div>
 
               <div className="flex items-center gap-2">
-                {previewItem.source_url?.toLowerCase().includes(".pdf") && (
-                  <div className="flex border-2 border-white">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewMode("image")}
-                      className={`px-2.5 py-1 text-xs font-black ${
-                        previewMode === "image" ? "bg-[#FFE600] text-black" : "bg-black text-white"
-                      }`}
-                    >
-                      {isAr ? "صورة المستند" : "Document Scan"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewMode("pdf")}
-                      className={`px-2.5 py-1 text-xs font-black ${
-                        previewMode === "pdf" ? "bg-[#FFE600] text-black" : "bg-black text-white"
-                      }`}
-                    >
-                      {isAr ? "ملف PDF التفاعلي" : "Interactive PDF"}
-                    </button>
-                  </div>
+                <a
+                  href={`/api/disclosures/pdf/${previewItem.id}`}
+                  download={`egx_disclosure_${previewItem.symbol || 'official'}.pdf`}
+                  className="px-3 py-1 text-xs font-black bg-[#FFE600] text-black border-2 border-white hover:bg-white transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{isAr ? "تحميل الـ PDF" : "Download PDF"}</span>
+                </a>
+
+                {previewItem.source_url && (
+                  <a
+                    href={previewItem.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 text-xs font-black bg-zinc-800 text-white border-2 border-white hover:bg-[#FFE600] hover:text-black transition-all flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span className="hidden sm:inline">{isAr ? "المصدر الأصلي" : "Original"}</span>
+                  </a>
                 )}
 
                 <button
@@ -747,15 +972,16 @@ export default function DisclosuresClient({
                     setPreviewItem(null);
                     handleDiscussInFloatingChat(itemToDiscuss);
                   }}
-                  className="px-3 py-1 text-xs font-black bg-[#00FF66] text-black border-2 border-white cursor-pointer"
+                  className="px-3 py-1 text-xs font-black bg-[#00FF66] text-black border-2 border-white hover:bg-[#FFE600] transition-all flex items-center gap-1 cursor-pointer"
                 >
-                  {isAr ? "ناقش في الشات" : "Discuss in Chat"}
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>{isAr ? "ناقش في الشات" : "Discuss in Chat"}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setPreviewItem(null)}
-                  className="h-8 w-8 flex items-center justify-center bg-[#FF3366] text-white border-2 border-white font-black cursor-pointer"
+                  className="h-8 w-8 flex items-center justify-center bg-[#FF3366] text-white border-2 border-white font-black hover:bg-black transition-all cursor-pointer"
                   aria-label="Close preview"
                 >
                   <X className="w-4 h-4" />
@@ -763,21 +989,13 @@ export default function DisclosuresClient({
               </div>
             </div>
 
-            {/* Modal Body */}
-            <div className="flex-1 overflow-auto p-4 bg-zinc-100 dark:bg-zinc-950 flex items-center justify-center">
-              {previewMode === "pdf" && previewItem.source_url ? (
-                <iframe
-                  src={previewItem.source_url}
-                  title={previewItem.title}
-                  className="w-full h-[70vh] border-2 border-black bg-white"
-                />
-              ) : (
-                <img
-                  src={`/api/disclosures/image/${previewItem.id}`}
-                  alt={previewItem.title}
-                  className="max-w-full h-auto border-2 border-black bg-white shadow-lg"
-                />
-              )}
+            {/* Modal Body: Full Live PDF Iframe */}
+            <div className="flex-1 w-full h-full bg-zinc-800 p-2 overflow-hidden">
+              <iframe
+                src={`/api/disclosures/pdf/${previewItem.id}#view=FitH`}
+                title={previewItem.title}
+                className="w-full h-full border-2 border-black bg-white shadow-2xl"
+              />
             </div>
           </div>
         </div>
