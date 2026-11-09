@@ -196,10 +196,10 @@ def confirm_dispatch_slot(dispatch_id: Optional[str], message_id: Optional[int])
     if not dispatch_id:
         return
     try:
-        supabase_rpc("confirm_scanner_dispatch", {
-            "p_dispatch_id": dispatch_id,
-            "p_message_id": message_id,
-        })
+        payload = {"p_dispatch_id": dispatch_id}
+        if message_id is not None:
+            payload["p_message_id"] = int(message_id)
+        supabase_rpc("confirm_scanner_dispatch", payload)
     except Exception as e:
         logger.warning(f"[SCANNER_LOCK] confirm_dispatch_slot error: {e}")
 
