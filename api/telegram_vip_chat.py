@@ -17,6 +17,14 @@ import time
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+try:
+    from dotenv import load_dotenv
+    _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(os.path.join(_repo_root, "web", ".env.local"))
+    load_dotenv(os.path.join(_repo_root, ".env"))
+except ImportError:
+    pass
+
 import requests
 
 from api.web_origin import get_web_origin
@@ -261,48 +269,66 @@ def _topic_url() -> str:
 
 def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
     """Sleek interactive Inline Keyboard for summoning ARTORO and running quick tools."""
-    recs_button = (
-        {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"}
-        if is_private
-        else {"text": "🔒 التوصيات (خاص/الموقع)", "callback_data": "vip_tool_recs"}
-    )
-    rows: List[List[Dict[str, Any]]] = [
-        [
-            {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
-            {"text": "🔍 حلل سهم", "callback_data": "vip_ask_stock"},
-            {"text": "⚖️ قارن سهمين", "callback_data": "vip_ask_compare"},
-        ],
-        [
-            {"text": "📈 ملخص السوق وأقوى الأسهم", "callback_data": "vip_tool_market"},
-            {"text": "🧲 أسهم التجميع والسيولة", "callback_data": "vip_tool_accum"},
-        ],
-        [
-            {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
-            recs_button,
-            {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
-        ],
-        [
-            {"text": "💼 تحليل محفظتي", "callback_data": "vip_tool_portfolio"},
-            {"text": "📊 رصيدي وخطتي", "callback_data": "vip_my_quota"},
-            {"text": "💎 مميزات PRO", "callback_data": "vip_pricing_dialog"},
-        ],
-    ]
     if is_private:
-        rows.append(
+        rows: List[List[Dict[str, Any]]] = [
+            [
+                {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
+                {"text": "🔍 حلل سهم", "callback_data": "vip_ask_stock"},
+                {"text": "⚖️ قارن سهمين", "callback_data": "vip_ask_compare"},
+            ],
+            [
+                {"text": "📈 ملخص السوق وأقوى الأسهم", "callback_data": "vip_tool_market"},
+                {"text": "🧲 أسهم التجميع والسيولة", "callback_data": "vip_tool_accum"},
+            ],
+            [
+                {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
+                {"text": "🎯 التوصيات المفتوحة (PRO)", "callback_data": "vip_tool_recs"},
+                {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
+            ],
+            [
+                {"text": "💼 تحليل محفظتي", "callback_data": "vip_tool_portfolio"},
+                {"text": "📊 رصيدي وخطتي", "callback_data": "vip_my_quota"},
+                {"text": "💎 مميزات PRO", "callback_data": "vip_pricing_dialog"},
+            ],
             [
                 {"text": "💬 غرفة أرتورو العامة", "url": _topic_url()},
                 {"text": "🔗 ربط حساب الموقع", "url": _profile_url()},
-            ]
-        )
+            ],
+        ]
     else:
-        rows.append(
+        # In the public group topic: completely remove recommendations callback button to prevent spam/fairness leaks
+        rows = [
+            [
+                {"text": "🤖 اسأل أرتورو", "callback_data": "vip_ask_free"},
+                {"text": "🔍 حلل سهم", "callback_data": "vip_ask_stock"},
+                {"text": "⚖️ قارن سهمين", "callback_data": "vip_ask_compare"},
+            ],
+            [
+                {"text": "📈 ملخص السوق وأقوى الأسهم", "callback_data": "vip_tool_market"},
+                {"text": "🧲 أسهم التجميع والسيولة", "callback_data": "vip_tool_accum"},
+            ],
+            [
+                {"text": "⚡ المسح الفني", "callback_data": "vip_tool_scan"},
+                {"text": "📰 أخبار السوق", "callback_data": "vip_tool_news"},
+            ],
+            [
+                {"text": "💼 تحليل محفظتي", "callback_data": "vip_tool_portfolio"},
+                {"text": "📊 رصيدي وخطتي", "callback_data": "vip_my_quota"},
+                {"text": "💎 مميزات PRO", "callback_data": "vip_pricing_dialog"},
+            ],
+            [
+                {
+                    "text": "🔒 توصيات PRO (خاص / الموقع)",
+                    "url": _private_bot_url(),
+                }
+            ],
             [
                 {
                     "text": "🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)",
                     "url": _private_bot_url(),
                 }
-            ]
-        )
+            ],
+        ]
     return {"inline_keyboard": rows}
 
 

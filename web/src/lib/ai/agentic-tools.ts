@@ -1,4 +1,5 @@
 import { summarizeStockHistory } from "./stock-history";
+import { fetchLiveMarketMovers, isEgxSessionOpen } from "./live-stock-updater";
 import { executeLiveQuoteTool } from "./live-quote-tool";
 import { reconcileStockQuote, stockPricePresentation, stockQuoteMetadata } from "./stock-quote";
 import { PLANNED_READ_TOOL_NAMES, executePlannedReadTool } from "./planned-read-tools";
@@ -454,7 +455,8 @@ async function executeRawTool(
                     .order("date", { ascending: false })
                     .limit(60);
                 if (pRows && pRows.length > 0) {
-                    const close = finite(pRows[0].close);
+                    const quote = await reconcileStockQuote(supabase, sym, pRows[0]);
+                    const close = finite(quote?.close) ?? finite(pRows[0].close);
                     const recentRows = pRows.slice(0, 20);
                     const recentLows = recentRows.map((r: any) => Number(r.low ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
                     const recentHighs = recentRows.map((r: any) => Number(r.high ?? r.close)).filter((v: number) => Number.isFinite(v) && v > 0);
@@ -547,6 +549,9 @@ async function executeRawTool(
                         is_sharia_compliant: isShariaCompliant(sym),
                         sharia_index: isShariaCompliant(sym) ? "EGX33" : null,
                         close,
+                        date: quote?.date ?? pRows[0]?.date,
+                        quote_source: quote?.quote_source ?? "stock_prices",
+                        ...stockQuoteMetadata(quote),
                         support,
                         support_2: support2,
                         resistance,
@@ -561,7 +566,6 @@ async function executeRawTool(
                         has_active_recommendation: hasActiveRecommendation,
                         active_recommendation: activeRecommendation,
                         trading_zone: tradingZone,
-                        date: pRows[0].date,
                         ...history,
                         methodology: "20-session range for support/resistance; 60-session range for support2/resistance2; stop=98% support; target2=60-session high or 105% resistance",
                         observations: pRows.length, ...stockPricePresentation(pRows[0].date)
@@ -1516,6 +1520,32 @@ async function executeRawTool(
 
         if (toolName === "get_technical_scan" || toolName === "get_accumulation_stocks") {
             const preset = toolName === "get_accumulation_stocks" ? "smart_money_flow" : args.preset;
+
+            // Live trading session interceptor: return real-time market movers during active EGX hours
+            if (toolName === "get_technical_scan" && isEgxSessionOpen() && ["top_gainers", "top_losers", "momentum_and_volume"].includes(preset)) {
+                try {
+                    const liveMovers = await fetchLiveMarketMovers(preset as any, 10);
+                    if (liveMovers.success && liveMovers.data && liveMovers.data.length > 0) {
+                        let stocks = liveMovers.data;
+                        if (Boolean(args.sharia_only)) {
+                            stocks = stocks.filter((s: any) => isShariaCompliant(s.symbol));
+                        }
+                        if (stocks.length > 0) {
+                            return {
+                                status: "success",
+                                preset,
+                                date: todayInCairo(),
+                                session_status: "live_trading_session",
+                                quote_source: "tradingview",
+                                session_label: "جلسة التداول الحية المباشرة (تحديث لحظي)",
+                                stocks
+                            };
+                        }
+                    }
+                } catch {
+                    // fallback to database
+                }
+            }
             const table = preset === "smart_money_flow" ? "stock_scans_summary" : "stock_technical_indicators";
             const dateField = table === "stock_scans_summary" ? "scan_date" : "date";
             let dateQuery = supabase.from(table).select(dateField);

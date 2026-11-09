@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const unrestricted = authenticated && (!paymentsEnabled() || pro);
     const delayDays = Number(process.env.FREE_SIGNAL_DELAY_DAYS || 15) || 15;
     const cutoff = Date.now() - delayDays * 86400000;
-    const db = getSupabaseServiceClient();
+    const db = getSupabaseServiceClient({ cacheMarketData: true });
     const { data, error } = await db.from("scan_results")
       .select("id,created_at,updated_at,status,signal,entry_price,exit_price,profit_loss_pct,last_close,target_price,stop_loss")
       .eq("symbol", symbol).eq("exchange", exchange).eq("is_public", true)

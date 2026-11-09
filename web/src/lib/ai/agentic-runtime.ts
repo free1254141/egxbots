@@ -279,7 +279,8 @@ function decodeAnswer(message: any): { answer:string; social:boolean } {
 }
 
 export async function* runAgenticRuntime(input: RuntimeInput): AsyncGenerator<Event> {
-    const scope = createExecutionScope(input.options.timeoutMs ?? AI_CONFIG.limits.requestDeadlineMs, input.options.signal);
+    const defaultDeadline = (input.images || []).length > 0 ? 65_000 : AI_CONFIG.limits.requestDeadlineMs;
+    const scope = createExecutionScope(input.options.timeoutMs ?? defaultDeadline, input.options.signal);
     const evidence: AgenticEvidence[] = [];
     const accounting = createUsageAccounting();
     const core = runCore(input, evidence, accounting);

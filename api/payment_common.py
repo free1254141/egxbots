@@ -293,7 +293,7 @@ def subscription_days(plan_id: str) -> int:
     return {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "pro_lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}.get(plan, 30)
 
 
-def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash", payment_order_id: str | None = None) -> None:
+def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash", payment_order_id: str | None = None, duration_days: int | None = None) -> None:
     """Activate the subscription only after a verified gateway callback."""
     _init_supabase()
     if not supabase:
@@ -305,7 +305,7 @@ def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash"
     supabase.rpc("activate_easykash_subscription", {
         "p_user_id": user_id,
         "p_plan_id": stored_plan,
-        "p_duration_days": subscription_days(requested_plan),
+        "p_duration_days": int(duration_days) if duration_days and int(duration_days) > 0 else subscription_days(requested_plan),
         "p_provider": provider,
         "p_payment_order_id": payment_order_id,
         "p_price_monthly_cents": int(round(plan_amount_egp(requested_plan, user_id=user_id) * 100)),

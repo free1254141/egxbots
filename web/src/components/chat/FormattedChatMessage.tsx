@@ -247,7 +247,7 @@ function extractHeaderStockSymbol(headerText: string): { symbol: string; name: s
     if (parenMatch) {
         const sym = parenMatch[2].trim().toUpperCase();
         const canonical = getCanonicalStockName(sym);
-        if (KNOWN_STOCK_SYMBOLS.has(sym) || EGX_STOCKS_METADATA[sym] || canonical.name_ar !== sym) {
+        if (KNOWN_STOCK_SYMBOLS.has(sym) || EGX_STOCKS_METADATA[sym] || canonical.name_ar !== sym || /^[A-Z0-9_]{2,8}$/.test(sym)) {
             return { symbol: sym, name: parenMatch[1].trim() };
         }
     }
@@ -345,11 +345,10 @@ export function tryParseAnalysisTable(
         const extraVal = row[2]?.trim() || "";
 
         const isPriceRow = (
-            /الإغلاق الحالي|آخر سعر|سعر الإغلاق|آخر إغلاق|السعر الحالي|إغلاق/i.test(key)
-            || /^(?:السعر|سعر السهم)(?:\s*\(.*\))?$/i.test(key)
+            /أحدث سعر|السعر اللحظي|سعر المزود|سعر التداول|الإغلاق الحالي|آخر سعر|سعر الإغلاق|آخر إغلاق|السعر الحالي|إغلاق|سعر السهم|السعر/i.test(key)
         ) && !/السعر العادل|سعر الدخول|سعر الوقف|سعر المستهدف|القيمة العادلة/i.test(key);
 
-        const isDistanceOrPctRow = /المسافة|نسبة|بعد|التغير/i.test(key) || /^[+\-−–]?\s*\d+(?:\.\d+)?\s*%$/.test(cleanVal);
+        const isDistanceOrPctRow = /المسافة|نسبة|بعد|التغير|فرق|قرب|هامش/i.test(key) || /%/.test(cleanVal);
 
         if (isPriceRow) {
             hasClose = true;
@@ -413,11 +412,11 @@ export function tryParseAnalysisTable(
             marketCap = cleanVal;
         } else if (/مرحلة وايكوف|وايكوف/i.test(key)) {
             wyckoffPhase = cleanVal;
-        } else if (/الشرعية|الشريعة/i.test(key)) {
-            if (/متوافق|شرعي|EGX\s*33/i.test(cleanVal) && !/غير متوافق|خارج/i.test(cleanVal)) {
-                tableShariah = true;
-            } else if (/غير متوافق|خارج/i.test(cleanVal)) {
+        } else if (/الشرعي|الشرعية|الشريعة|شريعة/i.test(key)) {
+            if (/غير متوافق|خارج|غير شرعي|حرام|لا يتوافق/i.test(cleanVal)) {
                 tableShariah = false;
+            } else if (/متوافق|شرعي|EGX\s*33/i.test(cleanVal)) {
+                tableShariah = true;
             }
         } else if (/EMA/i.test(key)) {
             hasEma = true;
@@ -476,7 +475,7 @@ export function tryParseAnalysisTable(
                      || cleanRecent.match(/(?:تحليل سهم|سهم|سهمي)\s+([A-Za-z0-9_]{2,8})/i)
                      || cleanRecent.match(/[\(\[]\s*([A-Za-z0-9_]{2,8})\s*[\)\]]/);
 
-    if (symbolMatch) {
+    if (!symbol && symbolMatch) {
         if (symbolMatch[2]) {
             name = symbolMatch[1].replace(/#{1,6}|📊/g, "").replace(/^(?:تحليل\s+سهم|سهم|شركة)\s+/i, "").trim();
             name = name.replace(/^[0-9\s\u0030-\u0039\uFE0F\u20E3\u2700-\u27BF\.\-—–]+/u, "").trim();
@@ -500,13 +499,30 @@ export function tryParseAnalysisTable(
 
     if (!symbol) return null;
 
-    // Price extraction from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC)
+    // Always prioritize the latest live provider price from the header to keep the price 100% unified
+    const liveHeaderPriceMatch = cleanRecent.match(/(?:السعر الأخير|أحدث سعر|السعر اللحظي)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
+    if (liveHeaderPriceMatch) {
+        const liveHeaderPrice = parseNum(liveHeaderPriceMatch[1]);
+        if (liveHeaderPrice && liveHeaderPrice > 0) {
+            price = liveHeaderPrice;
+            const liveHeaderChangeMatch = cleanRecent.match(/(?:تغير الجلسة|التغير)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*%/i)
+                                       || cleanRecent.match(/\(([+\-−–]?[\d\.]+)%\s*—\s*أحدث سعر/i);
+            if (liveHeaderChangeMatch) {
+                const liveChange = parseNum(liveHeaderChangeMatch[1]);
+                if (liveChange !== undefined) {
+                    changePct = liveChange;
+                }
+            }
+        }
+    }
+
+    // Price extraction fallback from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC)
     if (!price || price === 0) {
         const textPriceMatch = cleanRecent.match(/[\—\–\-]\s*([\d\.]+)\s*ج\.م/i)
                             || cleanRecent.match(/([\d\.]+)\s*ج\.م\s*\([+\-−–]?[\d\.]+%?\)/i)
-                            || cleanRecent.match(/(?:السعر الأخير|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+\-−–]?[\d\.]+)/i)
+                            || cleanRecent.match(/(?:السعر الأخير|أحدث سعر|السعر اللحظي|سعر المزود|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+\-−–]?[\d\.]+)/i)
                             || cleanRecent.match(/([+\-−–]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
-                            || cleanRecent.match(/(?:سعر السهم|سعر|الإغلاق)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
+                            || cleanRecent.match(/(?:سعر السهم|أحدث سعر|السعر اللحظي|سعر|الإغلاق)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
         if (textPriceMatch) {
             price = parseNum(textPriceMatch[1]);
         }
@@ -542,11 +558,27 @@ export function tryParseAnalysisTable(
             .trim();
     }
 
+    const canonical = getCanonicalStockName(symbol);
+    const meta = EGX_STOCKS_METADATA[symbol] || {
+        name: canonical.name_ar,
+        sector: canonical.sector || "سوق الأسهم المصرية",
+        isShariah: isShariaCompliant(symbol)
+    };
+    const verifiedName = (canonical.name_ar && canonical.name_ar !== symbol)
+        ? canonical.name_ar
+        : (name || meta?.name || symbol);
+
     // Shariah check
-    if (tableShariah === undefined && /متوافق مع الشريعة|EGX\s*33|شريعة/i.test(cleanRecent)) {
-        if (!/غير متوافق|خارج EGX\s*33/i.test(cleanRecent)) {
+    if (tableShariah !== undefined) {
+        isShariah = tableShariah;
+    } else if (/متوافق مع الشريعة|EGX\s*33|شريعة/i.test(cleanRecent)) {
+        if (/غير متوافق|خارج EGX\s*33/i.test(cleanRecent)) {
+            isShariah = false;
+        } else {
             isShariah = true;
         }
+    } else {
+        isShariah = meta?.isShariah ?? isShariaCompliant(symbol);
     }
 
     if (compositeScore === undefined && (price || rsi || macdVal || ema50)) {
@@ -569,15 +601,28 @@ export function tryParseAnalysisTable(
         compositeVerdict = calculated.verdictLabel;
     }
 
-    const canonical = getCanonicalStockName(symbol);
-    const meta = EGX_STOCKS_METADATA[symbol] || {
-        name: canonical.name_ar,
-        sector: canonical.sector || "سوق الأسهم المصرية",
-        isShariah: isShariaCompliant(symbol)
-    };
-    const verifiedName = (canonical.name_ar && canonical.name_ar !== symbol)
-        ? canonical.name_ar
-        : (name || meta?.name || symbol);
+    // Sanity check: ensure price levels make financial sense
+    if (support1 !== undefined && resistance1 !== undefined && support1 > resistance1) {
+        const temp = support1;
+        support1 = resistance1;
+        resistance1 = temp;
+    }
+    if (support2 !== undefined && resistance1 !== undefined && support2 > resistance1) {
+        if (price !== undefined && price > 0 && support2 > price) {
+            if (resistance2 === undefined) resistance2 = support2;
+        }
+        support2 = undefined;
+    }
+    if (support2 !== undefined && support1 !== undefined && support2 > support1) {
+        const temp = support1;
+        support1 = support2;
+        support2 = temp;
+    }
+    if (resistance2 !== undefined && resistance1 !== undefined && resistance2 < resistance1) {
+        const temp = resistance1;
+        resistance1 = resistance2;
+        resistance2 = temp;
+    }
 
     return {
         symbol,
@@ -609,7 +654,7 @@ export function tryParseAnalysisTable(
         kingScore: kingAiScore,
         egx_ai_score: egxAiScore,
         egxScore: egxAiScore,
-        isShariah: isShariah || meta?.isShariah,
+        isShariah: tableShariah !== undefined ? tableShariah : (isShariah ?? meta?.isShariah ?? false),
         compositeScore,
         composite_score: compositeScore,
         compositeGrade,
@@ -1445,7 +1490,7 @@ export function FormattedChatMessage({
             }
 
             const parseTextSpans = (textStr: string) => {
-                const linkRegex = /(!\[[^\]]*\]\((?:https?:\/\/|\/api\/disclosures\/(?:image|pdf)\/)[^\s\)]+\)|(?:\[[^\]]+\]|!\[[^\]]*\])\((?:https?:\/\/|\/api\/disclosures\/(?:image|pdf)\/|\/disclosures)[^\s\)]+\)|https?:\/\/[^\s<>]+)/g;
+                const linkRegex = /(!\[[^\]]*\]\((?:https?:\/\/|\/api\/disclosures\/(?:image|pdf)\/|\/[a-zA-Z0-9_\-\/?&=#%]+)[^\s\)]*\)|(?:\[[^\]]+\]|!\[[^\]]*\])\((?:https?:\/\/|\/api\/disclosures\/(?:image|pdf)\/|\/[a-zA-Z0-9_\-\/?&=#%]+)[^\s\)]*\)|https?:\/\/[^\s<>]+)/g;
                 const linkParts = textStr.split(linkRegex);
                 return linkParts.map((linkPart, linkIdx) => {
                     if (!linkPart) return null;
@@ -1534,9 +1579,22 @@ export function FormattedChatMessage({
                             </div>
                         );
                     }
-                    const mdMatch = linkPart.match(/^\[([^\]]+)\]\(((?:https?:\/\/|\/disclosures)[^\s\)]+)\)$/);
+                    const mdMatch = linkPart.match(/^\[([^\]]+)\]\(((?:https?:\/\/|\/[a-zA-Z0-9_\-\/?&=#%]+)[^\s\)]*)\)$/);
                     if (mdMatch) {
                         const [, label, href] = mdMatch;
+                        let displayLabel = label.trim();
+                        if (displayLabel === href || displayLabel.replace(/^\/+|\/+$/g, '') === href.replace(/^\/+|\/+$/g, '')) {
+                            if (href.startsWith('/scanner/technical')) displayLabel = "المسح الفني وكاشف المصائد";
+                            else if (href.startsWith('/scanner/backtests')) displayLabel = "النماذج المتكررة والباك تست";
+                            else if (href.startsWith('/scanner')) displayLabel = "صفحة الصفقات والمسح الفني";
+                            else if (href.startsWith('/disclosures')) displayLabel = "رادار إفصاحات الشركات";
+                            else if (href.startsWith('/fair-value')) displayLabel = "محدد السعر العادل";
+                            else if (href.startsWith('/sharia')) displayLabel = "حاسبة التوافق الشرعي";
+                            else if (href.startsWith('/portfolio')) displayLabel = "المحفظة الاستثمارية";
+                            else if (href.startsWith('/chart')) displayLabel = "شارت الأسهم اللحظي";
+                            else if (href.startsWith('/profile')) displayLabel = "الملف الشخصي وإعدادات التليجرام";
+                            else if (href.startsWith('/pricing')) displayLabel = "صفحة الباقات والتسعير";
+                        }
                         return (
                             <a
                                 key={`link-${linkIdx}`}
@@ -1545,7 +1603,7 @@ export function FormattedChatMessage({
                                 rel="noopener noreferrer"
                                 className="inline font-semibold text-blue-700 underline decoration-blue-400 underline-offset-2 hover:text-blue-500 dark:text-sky-400 dark:hover:text-sky-300"
                             >
-                                {label}
+                                {displayLabel}
                             </a>
                         );
                     }

@@ -9,7 +9,7 @@
  * - Read-only: live values are used for the current answer and never persisted
  */
 
-import { isEgxSessionOpen as isCairoEgxSessionOpen } from "./cairo-date";
+import { isEgxSessionOpen as isCairoEgxSessionOpen, todayInCairo } from "./cairo-date";
 import { executionFetch } from "./execution";
 import { isLiveUnsupportedSymbol, liveTickerCandidates, liveUnsupportedNotice } from "./live-coverage";
 import { isDailySyncComplete, shouldPreferLiveBeforeSync } from "./sync-gate";
@@ -229,4 +229,96 @@ export async function fetchLiveStockIndicators(symbol: string, supabase?: any,
     pendingLiveQuotes.set(key, request);
     try { return await request; }
     finally { if (pendingLiveQuotes.get(key) === request) pendingLiveQuotes.delete(key); }
+}
+
+
+/**
+ * Fetches real-time live market movers (gainers, losers, active volume)
+ * directly from TradingView egypt scanner during active trading session.
+ */
+export async function fetchLiveMarketMovers(
+    preset: "top_gainers" | "top_losers" | "momentum_and_volume",
+    limit = 10
+): Promise<{ success: boolean; data?: any[]; error?: string }> {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+        const filter: any[] = [{ left: "close", operation: "greater", right: 0.1 }];
+        let sort: any = { sortBy: "change", sortOrder: "desc" };
+
+        if (preset === "top_losers") {
+            filter.push({ left: "change", operation: "less", right: 0 });
+            sort = { sortBy: "change", sortOrder: "asc" };
+        } else if (preset === "momentum_and_volume") {
+            filter.push({ left: "change", operation: "greater", right: 0 });
+            filter.push({ left: "Value.Traded", operation: "greater", right: 2000000 });
+            sort = { sortBy: "Value.Traded", sortOrder: "desc" };
+        } else {
+            // top_gainers
+            filter.push({ left: "change", operation: "greater", right: 0 });
+            sort = { sortBy: "change", sortOrder: "desc" };
+        }
+
+        const payload = {
+            filter,
+            options: { lang: "en" },
+            sort,
+            range: [0, Math.min(50, limit * 2)],
+            columns: [
+                "name", "close", "change", "change_abs", "high", "low", "open", "volume",
+                "RSI", "MACD.macd", "MACD.signal", "EMA50", "EMA200", "Value.Traded"
+            ]
+        };
+
+        const res = await executionFetch("https://scanner.tradingview.com/egypt/scan", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+            return { success: false, error: `TradingView HTTP ${res.status}` };
+        }
+
+        const json = await res.json();
+        const rows = json.data || [];
+        const result = [];
+
+        for (const r of rows) {
+            const sym = (r.d[0] || r.s.replace(/^EGX:/, "")).trim().toUpperCase();
+            if (!sym || sym.includes(".") || sym.length > 8) continue;
+            const close = Number(r.d[1]);
+            const change = Number(r.d[2]);
+            if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(change)) continue;
+
+            result.push({
+                symbol: sym,
+                close: Number(close.toFixed(2)),
+                change_pct: Number(change.toFixed(2)),
+                volume: r.d[7] != null ? Math.round(Number(r.d[7])) : 0,
+                value_traded: r.d[13] != null ? Number(Number(r.d[13]).toFixed(2)) : 0,
+                rsi_14: r.d[8] != null ? Number(Number(r.d[8]).toFixed(2)) : null,
+                macd: r.d[9] != null ? Number(Number(r.d[9]).toFixed(4)) : null,
+                macd_signal: r.d[10] != null ? Number(Number(r.d[10]).toFixed(4)) : null,
+                macd_histogram: (r.d[9] != null && r.d[10] != null) ? Number((Number(r.d[9]) - Number(r.d[10])).toFixed(4)) : null,
+                ema_50: r.d[11] != null ? Number(Number(r.d[11]).toFixed(2)) : null,
+                ema_200: r.d[12] != null ? Number(Number(r.d[12]).toFixed(2)) : null,
+                r_vol: 1.5,
+                date: todayInCairo()
+            });
+
+            if (result.length >= limit) break;
+        }
+
+        return { success: true, data: result };
+    } catch (err: any) {
+        return { success: false, error: err?.message || "تعذر جلب بيانات الجلسة الحية" };
+    }
 }

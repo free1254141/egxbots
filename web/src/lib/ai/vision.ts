@@ -165,8 +165,99 @@ function isNumberOrNull(value: unknown): boolean {
     return value === null || value === undefined || coerceNumberOrNull(value) !== null;
 }
 
+export function normalizeVisionPayload(data: any): any {
+    if (!data || typeof data !== "object") return data;
+
+    // 1. Normalize image_type
+    const rawType = String(data.image_type || "").toLowerCase();
+    if (/portfolio|holding|position|محفظ|ثروة|رصيد/i.test(rawType)) {
+        data.image_type = "portfolio";
+    } else if (/chart|شارت|رسم|شموع|candle/i.test(rawType)) {
+        data.image_type = "chart";
+    } else if (/depth|عمق|أوامر|ladder|order/i.test(rawType)) {
+        data.image_type = "market_depth";
+    } else if (/table|watchlist|قائمة|أسعار|اسعار|أسهم|اسهم|market|stocks|exchange|screen/i.test(rawType)) {
+        data.image_type = "table";
+    } else if (!["portfolio", "chart", "market_depth", "table", "unknown"].includes(data.image_type)) {
+        data.image_type = "table";
+    }
+
+    // 2. Normalize market_depth
+    if (typeof data.market_depth === "string" || !data.market_depth || typeof data.market_depth !== "object") {
+        data.market_depth = { total_bid: null, total_ask: null, spread: null };
+    }
+
+    // 3. Normalize technical_observations when model outputs object with rows (table structure)
+    if (data.technical_observations && typeof data.technical_observations === "object" && !Array.isArray(data.technical_observations)) {
+        const rows = Array.isArray(data.technical_observations.rows) ? data.technical_observations.rows : [];
+        const extractedObs: any[] = [];
+        const extractedSymbols: any[] = [];
+        for (const row of rows) {
+            const sym = String(row.symbol || "").trim().toUpperCase();
+            const val = coerceNumberOrNull(row.value ?? row.price ?? row.close);
+            const chg = coerceNumberOrNull(row.percent ?? row.change_pct ?? row.change);
+            if (sym) {
+                extractedObs.push({
+                    symbol: sym,
+                    indicator: "سعر وتغير اللقطة",
+                    value: val,
+                    meaning: String(row.percent || row.change || "")
+                });
+                extractedSymbols.push({
+                    symbol: sym,
+                    name: String(row.name || ""),
+                    visible_values: {
+                        price: val,
+                        change_pct: chg,
+                        quantity: null,
+                        average_price: null,
+                        return_pct: null,
+                        market_value: null,
+                        cost_basis: null,
+                        profit_loss: null
+                    }
+                });
+            }
+        }
+        data.technical_observations = extractedObs;
+        if (!Array.isArray(data.symbols) || data.symbols.length === 0 || (typeof data.symbols[0] === "string")) {
+            data.symbols = extractedSymbols;
+        } else if (Array.isArray(data.symbols)) {
+            for (const s of data.symbols) {
+                const rowMatch = extractedSymbols.find(e => e.symbol === s.symbol);
+                if (rowMatch) {
+                    if (!s.visible_values) s.visible_values = {};
+                    if (s.visible_values.price == null) s.visible_values.price = rowMatch.visible_values.price;
+                    if (s.visible_values.change_pct == null) s.visible_values.change_pct = rowMatch.visible_values.change_pct;
+                }
+            }
+        }
+    }
+
+    // 4. Normalize symbols if array of strings
+    if (Array.isArray(data.symbols)) {
+        data.symbols = data.symbols.map((s: any) => {
+            if (typeof s === "string") {
+                return {
+                    symbol: s,
+                    name: "",
+                    visible_values: { price: null, change_pct: null, quantity: null, average_price: null, return_pct: null, market_value: null, cost_basis: null, profit_loss: null }
+                };
+            }
+            return s;
+        });
+    }
+
+    if (data.confidence == null || typeof data.confidence !== "number" || isNaN(data.confidence)) {
+        data.confidence = 0.85;
+    }
+
+    return data;
+}
+
 function hasValidVisionContract(data: any): boolean {
     if (!data || typeof data !== "object") return false;
+    normalizeVisionPayload(data);
     // Llama sometimes emits null for optional empty collections. Normalize
     // those values so an unreadable image becomes a safe `unknown` result
     // instead of a misleading invalid-JSON provider failure.
@@ -204,6 +295,7 @@ function hasValidVisionContract(data: any): boolean {
 
 export function validateVisionOutput(data: any): VisionContext | null {
     if (!data || typeof data !== "object") return null;
+    normalizeVisionPayload(data);
     const uncertainties = Array.isArray(data.uncertainties) ? data.uncertainties.map(String) : [];
     const numericOrNull = coerceNumberOrNull;
 
@@ -510,11 +602,14 @@ export async function analyzeImage(
     // Retry the same model with the other configured key after a provider
     // timeout or HTTP failure. Both keys can hit a congested backend, so the
     // second attempt is bounded by whatever time remains in the total budget.
-    const usableKeys = apiKeys.filter(Boolean).slice(0, 2);
-    const attempts: Array<{ provider: "deepseek"; model: string; key: string }> = [];
-    if (deepSeekKey) {
-        attempts.push({ provider: "deepseek", model: "deepseek-flash", key: deepSeekKey });
-    }
+    const usableKeys = (apiKeys && apiKeys.length > 0)
+        ? apiKeys.filter(Boolean).slice(0, 2)
+        : (deepSeekKey ? [deepSeekKey] : []);
+    const attempts: Array<{ provider: "deepseek"; model: string; key: string }> = usableKeys.map(key => ({
+        provider: "deepseek",
+        model: "deepseek-flash",
+        key
+    }));
     // `visionModels` documents the complete configured model set; attempts are
     // ordered separately so DeepSeek is tried before the NVIDIA fallback.
     for (const attempt of attempts) {

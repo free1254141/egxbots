@@ -179,7 +179,16 @@ _OFFER_HTML = (
 
 
 def build_vip_html(s: Dict[str, Any]) -> str:
+    from jobs.send_vip_telegram_daily_report import build_consensus_section
     us, sp, up = s["unusual_stat"], s["springs_stat"], s["upthrusts_stat"]
+    consensus = build_consensus_section(
+        s["as_of"],
+        s.get("bear") or [],
+        s.get("movers") or [],
+        s.get("disclosures") or []
+    )
+    consensus_block = f"\n━━━━━━━━━━━━━━━━━━━\n\n{consensus}\n" if consensus else ""
+
     return (
         f"👑 <b>تقرير VIP الحصري | حصيلة الإشارات ومصائد الجلسة القادمة</b> 🇪🇬\n"
         f"📅 <b>جلسة التداول:</b> {s['as_of']}\n━━━━━━━━━━━━━━━━━━━\n\n"
@@ -196,6 +205,7 @@ def build_vip_html(s: Dict[str, Any]) -> str:
         f"━━━━━━━━━━━━━━━━━━━\n🎯 <b>السجل الموثق (40 جلسة):</b>\n"
         f"• انفجار 3 أيام: <b>{us.get('hitRate3d', '-')}%</b> (عبر {us.get('events', '-')} إشارة)\n"
         f"• دقة Spring: <b>{sp.get('hitRate3d', '-')}%</b> | دقة Upthrust: <b>{up.get('winRate', '-')}%</b>\n\n"
+        f"{consensus_block}"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"🔗 <b>روابط الأدوات على المنصة:</b>\n"
         f"• رادار الإفصاحات والـ PDF: {LINK_DISCLOSURES}\n"
@@ -264,6 +274,39 @@ def _telegram_send(chat_raw: str, html: str, buttons: List[List[Dict[str, str]]]
     if not token or not chat_raw:
         return False, None
     chat_id, _, thread = chat_raw.partition("_")
+
+    split_marker = "🎯 <b>سادساً: رادار الإجماع الخوارزمي"
+    if len(html) > 3900 and split_marker in html:
+        parts = html.split(split_marker)
+        part1 = parts[0].strip()
+        part2 = (split_marker + parts[1]).strip()
+
+        p1_payload: Dict[str, Any] = {
+            "chat_id": chat_id, "text": part1, "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if thread.isdigit():
+            p1_payload["message_thread_id"] = int(thread)
+        try:
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p1_payload, timeout=45)
+        except Exception as e:
+            print(f"[REPORT_DISPATCH] Part 1 dispatch error: {e}")
+
+        p2_payload: Dict[str, Any] = {
+            "chat_id": chat_id, "text": part2, "parse_mode": "HTML",
+            "disable_web_page_preview": True, "reply_markup": {"inline_keyboard": buttons},
+        }
+        if thread.isdigit():
+            p2_payload["message_thread_id"] = int(thread)
+        try:
+            resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p2_payload, timeout=45)
+            data = resp.json()
+            if data.get("ok"):
+                return True, (data.get("result") or {}).get("message_id")
+        except Exception as e:
+            print(f"[REPORT_DISPATCH] Part 2 dispatch error: {e}")
+        return False, None
+
     payload: Dict[str, Any] = {
         "chat_id": chat_id, "text": html[:4096], "parse_mode": "HTML",
         "disable_web_page_preview": True, "reply_markup": {"inline_keyboard": buttons},

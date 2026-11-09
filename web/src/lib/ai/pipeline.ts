@@ -2014,7 +2014,8 @@ export async function* runPipelineStream(
         );
         return;
     }
-    const scope = createExecutionScope(options.timeoutMs ?? AI_CONFIG.limits.requestDeadlineMs, options.signal);
+    const defaultPipelineDeadline = (images || []).length > 0 ? 65_000 : AI_CONFIG.limits.requestDeadlineMs;
+    const scope = createExecutionScope(options.timeoutMs ?? defaultPipelineDeadline, options.signal);
     const core = runPipelineCore(userMessage, images, sessionState, sessionSummary, history,
         executionSupabase(supabase), apiKeys, userId, sessionId, messageId, requestedModel, options);
     let publicationPlan: IntentPlan | null = null;
@@ -2117,7 +2118,8 @@ async function* runPipelineCore(
     requestedModel?: string,
     options: PipelineOptions = {},
 ): AsyncGenerator<{ type: string; data: any }> {
-    const deadlineAt = Date.now() + Math.min(AI_CONFIG.limits.requestDeadlineMs, remainingExecutionMs());
+    const maxBudgetMs = (images || []).length > 0 ? 65_000 : AI_CONFIG.limits.requestDeadlineMs;
+    const deadlineAt = Date.now() + Math.min(maxBudgetMs, remainingExecutionMs());
     const pipelineStart = Date.now();
     const ensureBudget = (reserveMs = 0) => {
         if (Date.now() + reserveMs >= deadlineAt) throw new Error("PIPELINE_DEADLINE_EXCEEDED");

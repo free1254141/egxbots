@@ -34,6 +34,7 @@ ACTIVE_SESSION_TTL_SECONDS = 20 * 60  # 20 minutes of inactivity
 
 ADMIN_REPLY_KEYBOARD = {
     "keyboard": [
+        [{"text": "⚡ تفعيل PRO سريع"}],
         [{"text": "👥 المسجلين (اليوم وأمس)"}, {"text": "💬 مستخدمين الشات"}],
         [{"text": "⚡ نشاط المستخدمين"}, {"text": "📊 تقرير شامل"}]
     ],
@@ -43,6 +44,9 @@ ADMIN_REPLY_KEYBOARD = {
 
 ADMIN_INLINE_KEYBOARD = {
     "inline_keyboard": [
+        [
+            {"text": "⚡ تفعيل PRO سريع", "callback_data": "cmd_activate_prompt"}
+        ],
         [
             {"text": "👥 المسجلين", "callback_data": "cmd_users"},
             {"text": "💬 الشات", "callback_data": "cmd_chats"}
@@ -56,6 +60,200 @@ ADMIN_INLINE_KEYBOARD = {
         ]
     ]
 }
+
+_ADMIN_AWAITING_ACTIVATION: Dict[int, Dict[str, Any]] = {}
+_EMAIL_USER_CACHE: Dict[str, dict] = {}
+
+EMAIL_ACTIVATION_CMD_REGEX = re.compile(
+    r'^(?:/activate|/pro|تفعيل|تفعيل_برو)\s+([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)(?:\s+(\d+))?',
+    re.IGNORECASE
+)
+EMAIL_FINDER_REGEX = re.compile(r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', re.IGNORECASE)
+
+def find_user_by_email(email: str) -> Optional[dict]:
+    _init_supabase()
+    if not _supabase:
+        return None
+    clean = email.strip().lower()
+    if clean in _EMAIL_USER_CACHE:
+        return _EMAIL_USER_CACHE[clean]
+
+    page = 1
+    while page <= 15:
+        try:
+            users = _supabase.auth.admin.list_users(page=page, per_page=100)
+        except Exception as e:
+            print(f"[SUPPORT_CHAT] list_users error: {e}")
+            break
+        if not users:
+            break
+        for u in users:
+            u_email = (getattr(u, "email", "") or "").strip().lower()
+            if u_email:
+                meta = getattr(u, "user_metadata", {}) or {}
+                user_info = {
+                    "id": str(u.id),
+                    "email": u_email,
+                    "name": meta.get("full_name") or meta.get("name") or meta.get("display_name") or "",
+                    "created_at": str(getattr(u, "created_at", "") or "")
+                }
+                _EMAIL_USER_CACHE[u_email] = user_info
+                if u_email == clean:
+                    return user_info
+        if len(users) < 100:
+            break
+        page += 1
+    return None
+
+def quick_activate_pro(chat_id: int, target_email: str, duration_days: int = 30) -> None:
+    _init_supabase()
+    if not _supabase:
+        send_telegram_message(chat_id, "⚠️ خطأ: قاعدة البيانات غير متصلة حالياً.")
+        return
+
+    clean_email = target_email.strip().lower()
+    user = find_user_by_email(clean_email)
+    if not user:
+        send_telegram_message(
+            chat_id,
+            f"❌ <b>لم يتم العثور على حساب مسجل بهذا الإيميل:</b>\n<code>{clean_email}</code>\n\n"
+            f"⚠️ <b>يجب على العميل تسجيل الدخول أولاً:</b>\n"
+            f"اطلب من العميل الدخول لموقع <a href='https://egxbots.com'>egxbots.com</a> والضغط على 'تسجيل الدخول بحساب جوجل' لإنشاء حسابه.\n"
+            f"بمجرد تسجيله يمكنك تفعيله فوراً من هنا بضغطة زر 🚀",
+            reply_markup=ADMIN_REPLY_KEYBOARD
+        )
+        return
+
+    user_id = user["id"]
+    user_name = user.get("name") or "عميل EGX Bots"
+
+    send_telegram_message(
+        chat_id,
+        f"⏳ <b>جاري تفعيل باقة PRO لحساب:</b>\n<code>{clean_email}</code>\n"
+        f"📅 <b>المدة:</b> {duration_days} يوماً..."
+    )
+
+    import uuid
+    from datetime import datetime, timezone
+    from api.payment_common import activate_subscription
+    from api.telegram_pro_invites import ensure_pro_invite, send_pro_welcome_to_user_telegram
+
+    order_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        # Check if user has an existing pending order to update
+        existing = (
+            _supabase.table("local_payment_orders")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if existing and existing.data:
+            order_id = existing.data[0]["id"]
+            _supabase.table("local_payment_orders").update({
+                "provider": "admin_telegram",
+                "customer_note": f"Activated via Telegram Support Bot by admin {chat_id}",
+                "payment_reviewed_by": f"tg_admin_{chat_id}",
+                "payment_review_status": "reviewed",
+                "payment_reviewed_at": now_iso,
+                "updated_at": now_iso
+            }).eq("id", order_id).execute()
+        else:
+            _supabase.table("local_payment_orders").insert({
+                "id": order_id,
+                "user_id": user_id,
+                "plan_id": "pro",
+                "amount_egp": 100.0,
+                "provider": "admin_telegram",
+                "status": "pending",
+                "customer_note": f"Activated via Telegram Support Bot by admin {chat_id}",
+                "payment_reviewed_by": f"tg_admin_{chat_id}",
+                "payment_review_status": "reviewed",
+                "payment_reviewed_at": now_iso,
+                "created_at": now_iso,
+                "updated_at": now_iso
+            }).execute()
+
+        # Call activate_subscription with duration_days
+        activate_subscription(
+            user_id,
+            "pro",
+            provider="admin_telegram",
+            payment_order_id=order_id,
+            duration_days=duration_days
+        )
+
+        # Mark order approved
+        _supabase.table("local_payment_orders").update({
+            "status": "approved",
+            "updated_at": now_iso
+        }).eq("id", order_id).execute()
+
+        # Fetch updated subscription period end
+        sub_res = (
+            _supabase.table("subscriptions")
+            .select("current_period_end")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .order("current_period_end", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        sub_end = (sub_res.data or {}).get("current_period_end") if sub_res and sub_res.data else None
+        sub_end_str = str(sub_end)[:10] if sub_end else f"{duration_days} يوم"
+
+        # Generate unique VIP channel invite link
+        invite_link = ""
+        try:
+            inv = ensure_pro_invite(user_id, str(sub_end or ""))
+            invite_link = str((inv or {}).get("invite_link") or "").strip()
+        except Exception as inv_err:
+            print(f"[SUPPORT_CHAT] ensure_pro_invite warning: {inv_err}")
+
+        # Send Pro welcome to user on Telegram if connected
+        welcomed = False
+        try:
+            welcomed = send_pro_welcome_to_user_telegram(
+                user_id,
+                invite_link=invite_link,
+                plan_name="Pro VIP",
+                subscription_end=str(sub_end or "")
+            )
+        except Exception as w_err:
+            print(f"[SUPPORT_CHAT] send_pro_welcome warning: {w_err}")
+
+        tg_status_note = (
+            "📲 <b>تم إرسال رسالة ترحيبية ورابط قناة VIP للعميل على تليجرامه مباشرة!</b>"
+            if welcomed else
+            "ℹ️ <i>العميل لم يربط حسابه بتليجرام بعد — يمكنك نسخ رابط قناة VIP أدناه وإرساله له يدوياً.</i>"
+        )
+
+        success_msg = (
+            "👑 <b>تم تفعيل اشتراك PRO بنجاح! 🚀</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>العميل:</b> <code>{clean_email}</code>\n"
+            f"📛 <b>الاسم:</b> {user_name}\n"
+            f"📅 <b>صلاحية الباقة:</b> <code>{duration_days}</code> يوماً\n"
+            f"⏳ <b>ساري حتى:</b> <code>{sub_end_str}</code>\n"
+            f"💎 <b>رابط قناة VIP الخاص بالعميل:</b>\n"
+            f"{invite_link or 'https://t.me/EGX_Bots'}\n\n"
+            f"{tg_status_note}\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+        send_telegram_message(chat_id, success_msg, reply_markup=ADMIN_REPLY_KEYBOARD)
+
+    except Exception as exc:
+        print(f"[SUPPORT_CHAT] quick_activate_pro failed: {exc}")
+        send_telegram_message(
+            chat_id,
+            f"❌ <b>حدث خطأ أثناء التفعيل:</b>\n<code>{exc}</code>",
+            reply_markup=ADMIN_REPLY_KEYBOARD
+        )
 
 def load_admin_chat_id() -> Optional[int]:
     env_chat = os.getenv("SUPPORT_ADMIN_CHAT_ID") or os.getenv("ADMIN_CHAT_ID")
@@ -210,7 +408,19 @@ def handle_telegram_update(data: dict):
         save_admin_chat_id(chat_id)
         
         report_text = ""
-        if cb_data == "cmd_users":
+        if cb_data == "cmd_activate_prompt":
+            _ADMIN_AWAITING_ACTIVATION[chat_id] = {"time": time.time()}
+            prompt_text = (
+                "⚡ <b>تفعيل باقة PRO السريع للمستخدم</b> 👑\n\n"
+                "أرسل الآن إيميل المستخدم (Gmail) لتفعيل حسابه فوراً 🚀\n\n"
+                "أو اكتب:\n"
+                "<code>/activate email@gmail.com 30</code>\n\n"
+                "💡 <i>(إذا كتبت الإيميل فقط سيتم تفعيله لمدة 30 يوماً تلقائياً)</i>\n"
+                "<i>للإلغاء أرسل: إلغاء</i>"
+            )
+            send_telegram_message(chat_id, prompt_text)
+            return
+        elif cb_data == "cmd_users":
             report_text = get_registrations_summary()
         elif cb_data == "cmd_chats":
             report_text = get_chat_summary()
@@ -269,8 +479,13 @@ def handle_telegram_update(data: dict):
             "النشاط", "نشاط", "تفاعل", "التفاعل", "⚡ نشاط المستخدمين",
             "الشات", "شات", "محادثات", "المحادثات", "💬 مستخدمين الشات",
             "تقرير", "إحصائيات", "احصائيات", "التقرير", "الإحصائيات", "📊 تقرير شامل",
-            "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر"
+            "القائمة", "مساعدة", "اوامر", "الأوامر", "أوامر",
+            "⚡ تفعيل pro سريع", "تفعيل pro", "تفعيل برو", "تفعيل",
+            "الغاء", "إلغاء", "خروج"
         )
+        or EMAIL_ACTIVATION_CMD_REGEX.match(clean_cmd) is not None
+        or (chat_id in _ADMIN_AWAITING_ACTIVATION and EMAIL_FINDER_REGEX.search(text) is not None)
+        or (chat_id not in _ADMIN_ACTIVE_SESSIONS and EMAIL_FINDER_REGEX.search(text) is not None)
     )
 
     # 1. Resolve session_id from explicit reply
@@ -319,6 +534,63 @@ def handle_telegram_update(data: dict):
                 print(f"[SUPPORT_CHAT] Error saving admin reply: {e}")
                 send_telegram_message(chat_id, f"⚠️ خطأ أثناء حفظ الرد: {e}")
         return
+
+    # A. Check explicit command: /activate email [days] or تفعيل email [days]
+    act_match = EMAIL_ACTIVATION_CMD_REGEX.match(text.strip())
+    if act_match:
+        target_email = act_match.group(1)
+        days = int(act_match.group(2)) if act_match.group(2) else 30
+        _ADMIN_AWAITING_ACTIVATION.pop(chat_id, None)
+        quick_activate_pro(chat_id, target_email, days)
+        return
+
+    # B. Check prompt click or command without email
+    if clean_cmd in ("⚡ تفعيل pro سريع", "تفعيل pro", "تفعيل برو", "تفعيل", "/activate", "/pro", "⚡ تفعيل pro"):
+        _ADMIN_AWAITING_ACTIVATION[chat_id] = {"time": time.time()}
+        prompt_text = (
+            "⚡ <b>تفعيل باقة PRO السريع للمستخدم</b> 👑\n\n"
+            "أرسل الآن إيميل المستخدم (Gmail) لتفعيل حسابه فوراً 🚀\n\n"
+            "أو اكتب:\n"
+            "<code>/activate email@gmail.com 30</code>\n\n"
+            "💡 <i>(إذا كتبت الإيميل فقط سيتم تفعيله لمدة 30 يوماً تلقائياً)</i>\n"
+            "<i>للإلغاء أرسل: إلغاء</i>"
+        )
+        send_telegram_message(chat_id, prompt_text)
+        return
+
+    # C. If awaiting activation input
+    if chat_id in _ADMIN_AWAITING_ACTIVATION:
+        active_prompt = _ADMIN_AWAITING_ACTIVATION[chat_id]
+        if time.time() - active_prompt.get("time", 0) < 600:  # 10 min window
+            if clean_cmd in ("الغاء", "إلغاء", "cancel", "/cancel", "خروج"):
+                _ADMIN_AWAITING_ACTIVATION.pop(chat_id, None)
+                send_telegram_message(chat_id, "تم إلغاء عملية التفعيل.", reply_markup=ADMIN_REPLY_KEYBOARD)
+                return
+
+            email_match = EMAIL_FINDER_REGEX.search(text)
+            if email_match:
+                target_email = email_match.group(1)
+                days = 30
+                for p in text.split():
+                    if p.isdigit():
+                        days = int(p)
+                        break
+                _ADMIN_AWAITING_ACTIVATION.pop(chat_id, None)
+                quick_activate_pro(chat_id, target_email, days)
+                return
+
+    # D. If admin pasted an email directly without prompt (and not inside customer support session)
+    if not session_id and chat_id not in _ADMIN_ACTIVE_SESSIONS:
+        standalone_email = EMAIL_FINDER_REGEX.search(text)
+        if standalone_email:
+            target_email = standalone_email.group(1)
+            days = 30
+            for p in text.split():
+                if p.isdigit():
+                    days = int(p)
+                    break
+            quick_activate_pro(chat_id, target_email, days)
+            return
 
     clean_cmd = text.lower()
 

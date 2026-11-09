@@ -150,6 +150,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     const loadedLandingRef = useRef<boolean | null>(null);
     const recommendationsLoadedAtRef = useRef(0);
     const recommendationsReqVersionRef = useRef(0);
+    const recommendationsInFlightRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
     // The daily worker is the source of truth. Keep the browser snapshot for
     // one day and only refresh explicitly or after the next daily cycle.
     const RECOMMENDATIONS_FRESH_MS = 5 * 60 * 1000;
@@ -832,7 +833,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         if (recommendationsRef.current.length > 0 && !force && sameViewer && loadedLandingRef.current === isLandingPage) {
             return;
         }
+        const inFlightKey = `${userId ?? "anon"}:${isLandingPage}:${requestedLimit ?? "all"}`;
+        if (!force && recommendationsInFlightRef.current?.key === inFlightKey) {
+            return recommendationsInFlightRef.current.promise;
+        }
         const reqVersion = ++recommendationsReqVersionRef.current;
+        const runPromise = (async () => {
         setRecsLoading(true);
         setRecsError(null);
         try {
@@ -1088,11 +1094,17 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             console.error("Error loading recommendations in context:", err);
             setRecsError(err.message || "Failed to fetch data");
         } finally {
+            if (recommendationsInFlightRef.current?.key === inFlightKey) {
+                recommendationsInFlightRef.current = null;
+            }
             if (reqVersion === recommendationsReqVersionRef.current) {
                 setRecsLoading(false);
             }
         }
-    }, [supabase, user]);
+        })();
+        recommendationsInFlightRef.current = { key: inFlightKey, promise: runPromise };
+        return runPromise;
+    }, [supabase, user?.id]);
 
     // Recommendations are produced by the daily job and served through the
     // API cache. Do not keep a Supabase Realtime subscription here: every scan

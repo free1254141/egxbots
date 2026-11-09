@@ -114,16 +114,23 @@ export default function AdminPage() {
         if (!authLoading && !user) router.replace("/login");
     }, [authLoading, user, router]);
 
-    // Log admin page view for analytics
+    // Log admin page view once per session to avoid repeated invocations on AuthContext focus refreshes
     useEffect(() => {
-        if (!authLoading && user) {
+        if (!authLoading && user?.id) {
+            const logKey = `admin_page_view_logged_${user.id}`;
+            if (typeof window !== "undefined" && sessionStorage.getItem(logKey) === "1") {
+                return;
+            }
+            if (typeof window !== "undefined") {
+                sessionStorage.setItem(logKey, "1");
+            }
             fetch("/api/admin-access-log", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ eventType: "page_view", userEmail: user.email, userId: user.id }),
             }).catch(() => {});
         }
-    }, [authLoading, user]);
+    }, [authLoading, user?.id, user?.email]);
 
     // Load countries
     useEffect(() => {

@@ -137,9 +137,10 @@ export function StockCard({
     
     // Parse price - ALWAYS format with English numerals to prevent monospace font breakage and Arabic numeral comma distortion
     const rawPrice = typeof stockData.price === "number" ? stockData.price : parseFloat(String(stockData.price || "0"));
-    const formattedPrice = isNaN(rawPrice) 
-        ? "0.00" 
-        : rawPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const hasValidPrice = !isNaN(rawPrice) && rawPrice > 0;
+    const formattedPrice = hasValidPrice
+        ? rawPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : "—";
     
     const currency = stockData.currency || "ج.م";
 
@@ -148,7 +149,9 @@ export function StockCard({
     const changePctVal = typeof rawChangePct === "number" ? rawChangePct : parseFloat(String(rawChangePct || "0"));
     const isPositive = changePctVal > 0;
     const isNegative = changePctVal < 0;
-    const formattedChangePct = `${isPositive ? "+" : ""}${changePctVal.toFixed(2)}%`;
+    const formattedChangePct = (!hasValidPrice && changePctVal === 0)
+        ? "—"
+        : `${isPositive ? "+" : ""}${changePctVal.toFixed(2)}%`;
 
     // Parse RSI
     const rawRsi = stockData.rsi;
@@ -205,10 +208,32 @@ export function StockCard({
     const stopLoss = stockData.stopLoss || stockData.stop_loss;
     const riskReward = stockData.riskReward || stockData.risk_reward;
 
-    const support1 = stockData.support1;
-    const support2 = stockData.support2;
-    const resistance1 = stockData.resistance1;
-    const resistance2 = stockData.resistance2;
+    let support1 = stockData.support1;
+    let support2 = stockData.support2;
+    let resistance1 = stockData.resistance1;
+    let resistance2 = stockData.resistance2;
+
+    if (support1 !== undefined && resistance1 !== undefined && support1 > resistance1) {
+        const temp = support1;
+        support1 = resistance1;
+        resistance1 = temp;
+    }
+    if (support2 !== undefined && resistance1 !== undefined && Number(support2) > Number(resistance1)) {
+        if (hasValidPrice && Number(support2) > rawPrice && resistance2 === undefined) {
+            resistance2 = support2;
+        }
+        support2 = undefined;
+    }
+    if (support2 !== undefined && support1 !== undefined && support2 > support1) {
+        const temp = support1;
+        support1 = support2;
+        support2 = temp;
+    }
+    if (resistance2 !== undefined && resistance1 !== undefined && resistance2 < resistance1) {
+        const temp = resistance1;
+        resistance1 = resistance2;
+        resistance2 = temp;
+    }
 
     // Mathematically calculated Risk/Reward ratio if not directly provided
     const rawTarget1Num = parseFirstNum(target1) ?? parseFirstNum(resistance1);
@@ -450,13 +475,15 @@ export function StockCard({
                         <span dir="ltr">{formattedChangePct}</span>
                     </div>
 
-                    <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
-                        <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                        <span>لحظي</span>
-                    </div>
+                    {hasValidPrice && (
+                        <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span>لحظي</span>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -470,7 +497,7 @@ export function StockCard({
                             <span className="truncate">{target1 ? "نطاق الدخول" : "الدعم الأول"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
-                            {entryRange || (support1 ? `${Number(support1).toFixed(2)} ج.م` : `${formattedPrice} ج.م`)}
+                            {entryRange || (support1 ? `${Number(support1).toFixed(2)} ج.م` : (hasValidPrice ? `${formattedPrice} ج.م` : "—"))}
                         </div>
                     </div>
 

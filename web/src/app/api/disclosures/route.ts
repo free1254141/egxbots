@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { EGX_SECTORS } from "@/lib/disclosures-analytics";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -17,6 +19,8 @@ export async function GET(req: NextRequest) {
   const search = (searchParams.get("search") || "").trim();
   const type = (searchParams.get("type") || "all").trim();
   const sentiment = (searchParams.get("sentiment") || "all").trim();
+  const timeframe = (searchParams.get("timeframe") || "all").trim();
+  const sector = (searchParams.get("sector") || "all").trim();
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -40,6 +44,41 @@ export async function GET(req: NextRequest) {
       query = query.or("sentiment.eq.bearish,action_type.eq.sell");
     } else {
       query = query.eq("sentiment", sentiment);
+    }
+  }
+
+  // Sector filtering
+  if (sector !== "all") {
+    const secDef = EGX_SECTORS.find((s) => s.id === sector);
+    if (secDef && secDef.symbols.length > 0) {
+      query = query.in("symbol", secDef.symbols);
+    }
+  }
+
+  // Timeframe filtering (based on latest trading session date in DB)
+  if (timeframe !== "all") {
+    const { data: latestRow } = await supabase
+      .from("egx_disclosures")
+      .select("disclosure_date")
+      .order("disclosure_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const refDateStr = latestRow?.disclosure_date || new Date().toISOString().split("T")[0];
+
+    if (timeframe === "today") {
+      query = query.eq("disclosure_date", refDateStr);
+    } else {
+      let daysBack = 30;
+      if (timeframe === "7d") daysBack = 7;
+      else if (timeframe === "30d") daysBack = 30;
+      else if (timeframe === "90d") daysBack = 90;
+
+      const refDate = new Date(refDateStr);
+      const threshold = new Date(refDate.getTime() - daysBack * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0];
+      query = query.gte("disclosure_date", threshold);
     }
   }
 

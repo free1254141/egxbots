@@ -98,6 +98,19 @@ async def callback(request: Request):
     return {"ok": True, "code": result.get("code", "processed")}
 
 
+class FailedRecoveryRequest(BaseModel):
+    user_id: str
+
+
+@router.post("/failed-recovery")
+def failed_recovery(req: FailedRecoveryRequest, authorization: str | None = Header(default=None)):
+    authenticated_user_id = _authenticated_user_id(authorization)
+    if req.user_id != authenticated_user_id:
+        raise HTTPException(status_code=403, detail="User identity mismatch")
+    from jobs.send_failed_payment_recovery import dispatch_failed_payment_recovery_for_user
+    return dispatch_failed_payment_recovery_for_user(req.user_id)
+
+
 @router.get("/status")
 def status(order_id: str, user_id: str, authorization: str | None = Header(default=None)):
     if not is_payments_enabled():

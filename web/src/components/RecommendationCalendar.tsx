@@ -95,9 +95,8 @@ export default function RecommendationCalendar({
 
     const loadSentEvents = useCallback(async (signal?: AbortSignal) => {
         try {
-        const response = await fetch("/api/recommendations/events?limit=1000", {
+        const response = await fetch("/api/recommendations/events?limit=150", {
                 signal,
-                cache: "no-store",
             });
             if (response.status === 401 || response.status === 403) {
                 setEventsUnavailable(true);

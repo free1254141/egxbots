@@ -316,6 +316,9 @@ export default function PricingClient() {
           ? "failed"
           : data.status;
         setOrderStatus(settledStatus);
+        if (settledStatus === "failed") {
+          fetch("/api/payment/failed-recovery", { method: "POST" }).catch(() => {});
+        }
         if (settledStatus === "approved") {
           setIsPro(true);
           broadcastEntitlements(true);
@@ -1018,15 +1021,47 @@ export default function PricingClient() {
             </div>
           )}
 
-          {/* Failed Retry */}
+          {/* Failed Retry & Empathetic Recovery */}
           {orderStatus === "failed" && (
-            <div className="space-y-3 pt-2">
+            <div className="space-y-4 pt-2">
+              <div className="border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/40 p-4 text-start space-y-2">
+                <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-black text-sm">
+                  <HelpCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>{isAr ? "واجهتك مشكلة أثناء الدفع؟ احكيلنا ونساعدك فوراً 💬" : "Had an issue during checkout? Talk to us 💬"}</span>
+                </div>
+                <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                  {isAr
+                    ? "إذا رفض البنك المعاملة أو تأخر كود التأكيد (OTP) أو لا تتوفر معك بطاقة فيزا، يمكنك أيضاً التحويل المباشر عبر أي محفظة إلكترونية أو إنستاباي والتفعيل الفوري لحسابك بدون أي انتظار."
+                    : "If your bank declined the transaction or OTP was delayed, you can also pay directly via mobile wallet / InstaPay for instant activation."}
+                </p>
+                <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                  <a
+                    href="https://wa.me/201024359100?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7%D8%8C%20%D9%88%D8%A7%D8%AC%D9%87%D8%AA%20%D9%85%D8%B4%D9%83%D9%84%D8%A9%20%D9%81%D9%8A%20%D8%A7%D9%84%D8%AF%D9%81%D8%B9%20%D8%B9%D9%84%D9%89%20EGX%20BOTS%20%D9%88%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D8%B9%D8%AF%D8%A9%20%D9%88%D8%A7%D9%84%D8%AF%D9%81%D8%B9%20%D8%A8%D8%A7%D9%84%D9%85%D8%AD%D9%81%D8%B8%D8%A9"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 border-2 border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5 px-4 text-xs transition-colors"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    {isAr ? "تواصل معنا عبر واتساب للمساعدة الفورية" : "Chat on WhatsApp"}
+                  </a>
+                  <a
+                    href="https://t.me/SharksZone_support_bot"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 border-2 border-black dark:border-white bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-white dark:text-black dark:hover:bg-zinc-200 font-black py-2.5 px-4 text-xs transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {isAr ? "الدعم الفني على تليجرام" : "Telegram Support"}
+                  </a>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setStep("plans")}
-                className="w-full border-4 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-white font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                className="w-full border-4 border-black dark:border-white bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-950 dark:text-white font-black py-3 px-6 uppercase tracking-wider text-xs transition-all"
               >
-                {isAr ? "اختيار باقة والمحاولة مجددًا" : "Choose a Plan & Try Again"}
+                {isAr ? "المحاولة مجددًا باختيار باقة أخرى" : "Try Another Plan"}
               </button>
             </div>
           )}

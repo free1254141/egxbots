@@ -7,6 +7,13 @@ import os
 import re
 import json
 import logging
+try:
+    from dotenv import load_dotenv
+    _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    load_dotenv(os.path.join(_repo_root, "web", ".env.local"))
+    load_dotenv(os.path.join(_repo_root, ".env"))
+except ImportError:
+    pass
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone

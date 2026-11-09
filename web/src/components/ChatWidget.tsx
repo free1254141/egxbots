@@ -216,7 +216,7 @@ export default function ChatWidget() {
             })
             .catch(() => {});
 
-        fetch("/api/payment/easykash/config")
+        fetch("/api/payment/public-config")
             .then(r => r.ok ? r.json() : null)
             .then(cfg => {
                 if (active && cfg?.founders?.ends_at) {

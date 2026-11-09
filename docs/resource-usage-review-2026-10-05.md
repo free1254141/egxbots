@@ -97,3 +97,33 @@
 3. **تفعيل الكاش في مسار البحث `/api/symbols/search`:**
    - **الحل المطبق:** استبدال `cache: "no-store"` بـ `next: { revalidate: 3600 }` وتمرير `{ cacheMarketData: true }` لعميل Supabase الاحتياطي في `web/src/app/api/symbols/search/route.ts`.
 
+---
+
+## 6. قراءة لوجات الإنتاج بعد الكوميت الأخير (`d0cf1f67`) والتحسينات التكميلية (تحديث 9 نوفمبر 2026)
+
+تمت مراجعة لوجات Vercel الحية للـ Deployment الأخير (`dpl_FnoipyuH9JQ2G5FWJQtDj3b9fLkr` المنشور في `2026-11-08 22:48:14` بتوقيت القاهرة بعد الكوميت `d0cf1f67`) عبر سحب وتحليل **1,200 سجل طلبات حي**:
+
+### أ. النتائج المقاسة بعد نشر إصلاحات 8 نوفمبر
+- **زمن البناء (Build Duration):** `2m 19s` (`8 CPU minutes` على `2 vCPU`) والأخطاء القاتلة (`5xx`): **`0` أخطاء**.
+- **تسريب الحروف الكبيرة `/stocks/SYMBOL` (`307 REVALIDATED`):** انخفض إلى **`0` طلبات تماماً** (تم القضاء عليه بنسبة 100%).
+- **استدعاءات `/api/recommendations/events?limit=1000` للزوار غير المشتركين:** انخفضت إلى **`0` طلبات**.
+- **استدعاءات `/api/symbols/search` غير المخبأة (`MISS`):** انخفضت إلى **`0` طلبات**.
+- **كفاءة الكاش على الحافة (Edge Cache Hit Rate):**
+  - نسبة `HIT` + `STALE` الإجمالية وصلت إلى **`70.6%`** (`848` طلباً من أصل `1,200` خُدمت من الكاش مباشرة بدون لمس السيرفر).
+  - صفحات الـ Prerender / ISR (`/`, `/blogs/[slug]`, `/scanner/backtests`, `/disclosures`, `/scanner/market`, `/news`, `/stocks/[symbol]`) تُخدم بـ `prerender:HIT` (`285 HIT`).
+  - ملفات إفصاحات البورصة `GET /api/disclosures/pdf/[id]` سجلت **`67x HIT`** مقابل `28x MISS` (أول فتح لملف PDF جديد يُخزَّن في Edge Cache ثم يُخدم مباشرة بدون CPU).
+  - مسارات البيانات العامة سجلت `100% HIT`: `GET /api/market/status` (`16x HIT`)، `GET /api/symbols/inventory` (`15x HIT`)، `GET /api/symbols/countries` (`9x HIT`)، `GET /api/scan/similarity/published` و`GET /api/scan/news` (`14x HIT`).
+
+### ب. التحسينات التكميلية المطبقة في 9 نوفمبر 2026
+بناءً على تحليل الـ `220` طلباً المتبقية من نوع `streaming_func:MISS` و`BYPASS`، تم تطبيق التحسينات الإضافية التالية:
+1. **منع تكرار تسجيل `POST /api/admin-access-log` (`24x MISS`) أثناء فتح لوحة الإدارة (`web/src/app/admin/page.tsx`):**
+   - **السبب:** كان `useEffect` يعتمد على مرجع الكائن `[authLoading, user]` فيعيد إرسال `page_view` في كل مرة يحدّث فيها `AuthContext` مرجع الجلسة عند التبديل بين التبويبات.
+   - **الحل:** إضافة حارس `sessionStorage` (`admin_page_view_logged_${user.id}`) وربط الاعتمادية بـ `[authLoading, user?.id, user?.email]` ليتم التسجيل مرة واحدة فقط لكل جلسة.
+2. **تحويل نافذة الترقية في الشات (`web/src/components/ChatWidget.tsx`) إلى المسار العام المخبأ:**
+   - **السبب:** عند فتح نافذة الترقية (`showUpgradeModal`) كان يتم استدعاء `/api/payment/easykash/config` (`streaming_func:BYPASS`) فقط لقراءة `cfg?.founders?.ends_at`.
+   - **الحل:** تحويل الطلب إلى `/api/payment/public-config` المخبأ على حافة CDN (`s-maxage=300, stale-while-revalidate=3600`).
+3. **منع ازدواج طلبات `GET /api/ai_bot/recommendations` المتزامنة (`web/src/contexts/AIScannerContext.tsx`):**
+   - **السبب:** عند تحميل مكوني `OpenTradesDashboard` و`RecommendationsTable` في نفس اللحظة قبل اكتمال الطلب الأول (`recommendationsRef.current.length === 0`)، أو عند تغير مرجع كائن `user`، كان ينطلق طلبان متوازيان لنفس المسار.
+   - **الحل:** إضافة حارس دمج للطلبات الجارية (`recommendationsInFlightRef`) مع تثبيت الاعتمادية على `[supabase, user?.id]`.
+
+

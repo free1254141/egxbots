@@ -19,19 +19,30 @@ function numeric(value: unknown): number | null {
 }
 
 export async function GET(request: NextRequest) {
-  const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 500);
-  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 500, 1), 1000);
+  const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 100);
+  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 1), 300);
+  const monthParam = request.nextUrl.searchParams.get("month") || "";
 
   try {
     const { authenticated, pro } = await getViewerContext(request);
     if (!authenticated) return NextResponse.json({ detail: "Pro subscription required" }, { status: 401 });
     if (!pro) return NextResponse.json({ detail: "Pro subscription required" }, { status: 403 });
     const supabase = getSupabaseServiceClient({ cacheMarketData: true });
-    const { data: events, error: eventError } = await supabase
+
+    let query = supabase
       .from("recommendation_events")
       .select("id,recommendation_id,event_type,old_values,new_values,price_at_event,source,telegram_status,created_at")
       .in("event_type", PUBLIC_EVENT_TYPES)
-      .not("recommendation_id", "is", null)
+      .not("recommendation_id", "is", null);
+
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      const startIso = `${monthParam}-01T00:00:00Z`;
+      const [year, month] = monthParam.split("-").map(Number);
+      const nextMonthIso = new Date(Date.UTC(year, month, 1)).toISOString();
+      query = query.gte("created_at", startIso).lt("created_at", nextMonthIso);
+    }
+
+    const { data: events, error: eventError } = await query
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -105,7 +116,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       { events: sanitized, tracked_recommendation_ids: trackedRecommendationIds },
-      { headers: { "Cache-Control": "private, no-store" } },
+      { headers: { "Cache-Control": "private, max-age=300, stale-while-revalidate=600" } },
     );
   } catch (error) {
     console.error("[RECOMMENDATION_EVENTS_API] Failed to load sent events", error);
