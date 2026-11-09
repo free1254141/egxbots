@@ -8,7 +8,35 @@
  * 4. Extracts and groups Major Shareholders / Article 30 structures (Founders, 5%+ stakes, Free Float).
  */
 
-export interface DisclosureRecord {
+export interface DisclosureItem {
+  id: string;
+  symbol: string | null;
+  company_name: string;
+  disclosure_type: string;
+  disclosure_date: string;
+  title: string;
+  raw_content?: string | null;
+  ai_summary: string;
+  sentiment: "bullish" | "bearish" | "neutral" | string;
+  action_type: string | null;
+  shares_count: number | null;
+  stake_before?: number | null;
+  stake_after?: number | null;
+  party_name: string | null;
+  party_role: string | null;
+  source_url: string | null;
+  metadata?: {
+    key_takeaway?: string;
+    free_float_before?: number;
+    free_float_after?: number;
+    session?: string;
+    execution_price?: number;
+  };
+}
+
+export type DisclosureRecord = DisclosureItem;
+
+interface _UnusedDisclosureRecord {
   id: string;
   symbol: string | null;
   company_name: string;

@@ -1,6 +1,7 @@
 import { Metadata } from "next";
 import { createClient } from "@supabase/supabase-js";
-import DisclosuresClient, { DisclosureItem, DisclosuresInitialStats } from "./DisclosuresClient";
+import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient";
+import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
 
 export const dynamic = "force-dynamic";

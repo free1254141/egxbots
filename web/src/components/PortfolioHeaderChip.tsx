@@ -42,7 +42,7 @@ export default function PortfolioHeaderChip() {
 
   return (
     <Link
-      href="/profile"
+      href="/profile#portfolio"
       title={language === "ar" ? "محفظتي" : "My Portfolio"}
       className="hidden lg:flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-xs font-black bg-emerald-500/10 dark:bg-emerald-400/10 border-2 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:scale-105 hover:shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] transition-all"
     >

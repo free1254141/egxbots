@@ -37,6 +37,7 @@ import { useChat } from "@/contexts/ChatContext";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import StockLogo from "@/components/StockLogo";
 import {
+  DisclosureItem,
   DisclosuresAnalyticsResult,
   EGX_SECTORS,
   TimeframePeriod,
@@ -50,31 +51,7 @@ import MajorShareholdersTab from "@/components/disclosures/MajorShareholdersTab"
 import DisclosuresGlossary from "@/components/disclosures/DisclosuresGlossary";
 import StockDetailModal from "@/components/disclosures/StockDetailModal";
 
-export interface DisclosureItem {
-  id: string;
-  symbol: string | null;
-  company_name: string;
-  disclosure_type: string;
-  disclosure_date: string;
-  title: string;
-  raw_content?: string | null;
-  ai_summary: string;
-  sentiment: "bullish" | "bearish" | "neutral" | string;
-  action_type: string | null;
-  shares_count: number | null;
-  stake_before?: number | null;
-  stake_after?: number | null;
-  party_name: string | null;
-  party_role: string | null;
-  source_url: string | null;
-  metadata?: {
-    key_takeaway?: string;
-    free_float_before?: number;
-    free_float_after?: number;
-    session?: string;
-    execution_price?: number;
-  };
-}
+export type { DisclosureItem };
 
 export interface DisclosuresInitialStats {
   total: number;

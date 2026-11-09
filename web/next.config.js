@@ -9,6 +9,11 @@ const nextConfig = {
         destination: '/scanner/technical',
         permanent: true,
       },
+      {
+        source: '/portfolio',
+        destination: '/profile#portfolio',
+        permanent: false,
+      },
     ];
   },
 

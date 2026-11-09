@@ -27,8 +27,9 @@ import {
   InsiderMetric,
   CompanyOwnershipStructure,
   getSymbolSector,
+  DisclosureItem,
 } from "@/lib/disclosures-analytics";
-import { DisclosureItem } from "@/app/disclosures/DisclosuresClient";
+// DisclosureItem imported from disclosures-analytics
 
 interface StockDetailModalProps {
   symbol: string | null;
