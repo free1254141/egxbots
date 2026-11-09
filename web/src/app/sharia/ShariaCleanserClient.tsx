@@ -16,9 +16,15 @@ import {
   AlertTriangle,
   Info,
   X,
+  BookOpen,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { SHARIA_COMPLIANT_EGX_SYMBOLS, isShariaCompliant } from "@/lib/shariaStocks";
+import {
+  SHARIA_COMPLIANT_EGX_SYMBOLS,
+  isShariaCompliant,
+  getStockPurificationMeta,
+  type ShariaStockMeta,
+} from "@/lib/shariaStocks";
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
 import type { FairValueReport, FairValueStockItem } from "@/lib/market/fair-value";
 
@@ -62,7 +68,10 @@ export default function ShariaCleanserClient({
   const [selectedSymbol, setSelectedSymbol] = useState<string>("ABUK");
   const [sharesCount, setSharesCount] = useState<string>("1000");
   const [couponPerShare, setCouponPerShare] = useState<string>("5.00");
-  const [purificationRate, setPurificationRate] = useState<string>("2.4");
+  const [purificationRate, setPurificationRate] = useState<string>(() => {
+    const meta = getStockPurificationMeta("ABUK");
+    return meta ? meta.purificationRatePct.toString() : "0.9";
+  });
   const [calcMode, setCalcMode] = useState<"dividend" | "zakat">("dividend");
 
   useEffect(() => {
@@ -144,12 +153,21 @@ export default function ShariaCleanserClient({
     );
   }, [allStocks, selectedSymbol]);
 
+  const currentMeta = useMemo(() => {
+    return getStockPurificationMeta(selectedSymbol);
+  }, [selectedSymbol]);
+
   // When selected symbol changes, update default purification rate
   const onSelectStock = (sym: string) => {
     setSelectedSymbol(sym);
-    const st = allStocks.find((s) => s.symbol === sym);
-    const rate = getDefaultPurificationRate(st?.sectorAr);
-    setPurificationRate(rate.toString());
+    const meta = getStockPurificationMeta(sym);
+    if (meta) {
+      setPurificationRate(meta.purificationRatePct.toString());
+    } else {
+      const st = allStocks.find((s) => s.symbol === sym);
+      const rate = getDefaultPurificationRate(st?.sectorAr);
+      setPurificationRate(rate.toString());
+    }
   };
 
   // Filtered stocks for search
@@ -437,7 +455,7 @@ export default function ShariaCleanserClient({
                   </div>
                   <input
                     type="range"
-                    min="0.5"
+                    min="0.0"
                     max="8.0"
                     step="0.1"
                     value={purificationRate}
@@ -445,10 +463,40 @@ export default function ShariaCleanserClient({
                     className="w-full accent-emerald-500 cursor-pointer"
                   />
                   <div className="flex justify-between text-[10px] text-zinc-400 font-mono">
-                    <span>0.5% ({isAr ? "نقي جداً" : "Very Pure"})</span>
+                    <span>0.0% ({isAr ? "نقي 100%" : "Pure Halal"})</span>
                     <span>2.5% ({isAr ? "متوسط معظم القطاعات" : "Sector Median"})</span>
                     <span>8.0% ({isAr ? "سيولة بنكية عالية" : "High Cash"})</span>
                   </div>
+
+                  {/* Stock-specific Audited Rate Badge */}
+                  {currentMeta && (
+                    <div
+                      className={`p-3 rounded-2xl border text-xs space-y-1 mt-2.5 transition-all ${
+                        currentMeta.isPureHalal
+                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-800 dark:text-emerald-300"
+                          : "bg-blue-500/10 border-blue-500/30 text-blue-900 dark:text-blue-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-black">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>
+                          {currentMeta.isPureHalal
+                            ? isAr
+                              ? "سهم إسلامي نقي 100% — لا يتطلب أي تطهير للكوبون (0.0%)"
+                              : "100% Pure Islamic Institution — 0.0% Purification Required"
+                            : isAr
+                            ? `نسبة مالية مدققة للسهم: ${currentMeta.purificationRatePct}% (معيار 21 للأيوفي)`
+                            : `Audited Financial Ratio: ${currentMeta.purificationRatePct}% (AAOIFI 21)`}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-zinc-600 dark:text-zinc-300 leading-relaxed font-medium">
+                        {currentMeta.notesAr}
+                      </div>
+                      <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                        {isAr ? "المرجعية:" : "Source:"} {currentMeta.sourceLabelAr}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Calculated Result Box */}
@@ -535,7 +583,8 @@ export default function ShariaCleanserClient({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {filteredStocks.map((stock) => {
               const isSelected = selectedSymbol === stock.symbol;
-              const rate = getDefaultPurificationRate(stock.sectorAr);
+              const meta = getStockPurificationMeta(stock.symbol);
+              const rate = meta ? meta.purificationRatePct : getDefaultPurificationRate(stock.sectorAr);
               return (
                 <div
                   key={stock.symbol}
@@ -584,10 +633,18 @@ export default function ShariaCleanserClient({
 
                   <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-[11px]">
                     <span className="text-zinc-500 dark:text-zinc-400">
-                      {isAr ? "نسبة التطهير المقدرة:" : "Est. Purification:"}
+                      {isAr ? "نسبة التطهير:" : "Purification:"}
                     </span>
                     <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      %{rate}
+                      {meta?.isPureHalal ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                          0.0% ({isAr ? "نقي 100% ✅" : "Pure Halal ✅"})
+                        </span>
+                      ) : meta ? (
+                        <span>%{rate} ({isAr ? "مدقق" : "Audited"})</span>
+                      ) : (
+                        <span>%{rate} ({isAr ? "تقديري" : "Est."})</span>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -612,6 +669,65 @@ export default function ShariaCleanserClient({
           )}
         </section>
       </main>
+
+      {/* 📚 Educational & Transparency Methodology Guide (دليل معايير التطهير والشفافية) */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
+        <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="flex items-center gap-3 border-b-2 border-zinc-100 dark:border-zinc-800 pb-4">
+            <BookOpen className="w-6 h-6 text-emerald-500 shrink-0" />
+            <div>
+              <h2 className="text-lg sm:text-2xl font-black text-zinc-950 dark:text-white">
+                {isAr
+                  ? "دليل الشفافية الشرعية: لماذا تختلف نسب التطهير بين المنصات والمواقع؟"
+                  : "Transparency Guide: Why Do Purification Rates Differ Across Platforms?"}
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
+                {isAr
+                  ? "توضيح الفوارق الفقهية والمحاسبية بين المعيار 21 للأيوفي والمنهجيات الأخرى في البورصة المصرية"
+                  : "Clarification of accounting and Sharia differences between AAOIFI 21 and other methodologies"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/80 space-y-2.5">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{isAr ? "1. تطهير الكوبون فقط (الأيوفي 21)" : "1. Dividend Only (AAOIFI 21)"}</span>
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                {isAr
+                  ? "وفق المعيار الشرعي رقم 21 للأيوفي، يُخرج التطهير كنسبة مئوية من الكوبونات النقدية الموزعة فقط. أرباح المضاربة الرأسمالية اليومية (فارق سعر البيع والشراء) لا تطهير فيها لأنها ناتجة عن قوى العرض والطلب السوقية."
+                  : "Under AAOIFI 21, purification applies strictly to distributed cash dividends. Capital gains from market trading do not require purification as price movements reflect supply and demand."}
+              </p>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/80 space-y-2.5">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-700 dark:text-blue-400 text-xs font-bold">
+                <Scale className="w-3.5 h-3.5" />
+                <span>{isAr ? "2. نسب مدققة لكل شركة على حدة" : "2. Audited Per-Company Ratios"}</span>
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                {isAr
+                  ? "كل شركة تختلف نسبة الفوائد الدائنة في قوائمها المالية (مثلاً أبو قير 0.9%، موبكو 0.4%، السويدي 1.2%، طلعت مصطفى 3.2%). أما البنوك الإسلامية النقية (بنك فيصل ومصرف أبوظبي الإسلامي) فنصيبها 0.0% ولا تتطلب أي تطهير."
+                  : "Each company has distinct incidental interest income in its financial statements (e.g. ABUK 0.9%, MFPC 0.4%, SWDY 1.2%, TMGH 3.2%). Pure Islamic banks (FAIT, ADIB) are 0.0% pure with zero cleansing."}
+              </p>
+            </div>
+
+            <div className="p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/80 space-y-2.5">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-bold">
+                <Coins className="w-3.5 h-3.5" />
+                <span>{isAr ? "3. الفارق بين الزكاة والتطهير" : "3. Zakat vs Purification"}</span>
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                {isAr
+                  ? "التطهير هو تخلص من كسب عارض بإنفاقه في وجوه الخير تبرؤاً منه، ولا يحتسب صدقة للمستثمر. أما الزكاة (2.5%) فهي فريضة شرعية سنوية على القيمة السوقية لمحفظة المضارب إذا حال عليها الحول وبلغت النصاب."
+                  : "Purification is relinquishing incidental interest to charitable public benefit without expecting personal reward. Zakat (2.5%) is a religious obligation on speculation portfolio value after one lunar year."}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

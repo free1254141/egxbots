@@ -42,7 +42,7 @@ async function fetchAndComputeFairValueReport(): Promise<FairValueReport> {
  */
 export const getCachedFairValueReport = unstable_cache(
   fetchAndComputeFairValueReport,
-  ["fair-value-egx-daily-v2"],
+  ["fair-value-egx-daily-v3"],
   {
     revalidate: 86400,
     tags: [DAILY_CACHE_TAGS.market],

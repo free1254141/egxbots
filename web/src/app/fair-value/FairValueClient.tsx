@@ -489,6 +489,59 @@ export default function FairValueClient({
           </div>
         </div>
 
+        {/* 📌 Institutional Methodology & Broker Research Comparison Disclosure */}
+        <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 border-2 border-emerald-500/30 dark:border-emerald-500/20 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-emerald-500 text-white shrink-0">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-zinc-950 dark:text-white">
+                  {isAr
+                    ? "📌 الفارق بين السعر العادل الكمي المحافظ وأهداف بحوث بنوك الاستثمار (DCF Targets)"
+                    : "📌 Difference Between Quantitative Fair Value and Broker DCF Targets"}
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {isAr
+                    ? "دليل توضيحي يفسر سبب اختلاف الأرقام المحافظة عن تقارير بلتون، هيرميس، وسي آي كابيتال"
+                    : "Why our valuation numbers differ from broker reports (Beltone, Hermes, CI Capital)"}
+                </p>
+              </div>
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-mono font-bold shrink-0">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>{isAr ? "استثمار القيمة المحافظ (Value Investing)" : "Conservative Value Model"}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+            <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-zinc-900/80 border border-emerald-500/20 space-y-1.5">
+              <div className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "السعر العادل في منصتنا (Quantitative Fair Value):" : "Platform Model (Quantitative):"}</span>
+              </div>
+              <p>
+                {isAr
+                  ? "يعتمد على أرقام القوائم المالية التاريخية المدققة (ربحية السهم المحققة EPS والقيمة الدفترية BVPS) ومضاعفات القطاع ونموذج بنجامين جراهام. هدفه هو 'حماية رأس المال' وتوفير هامش أمان حقيقي يمنع الشراء عند قمم الأسعار المتضخمة."
+                  : "Based on audited trailing financial results (EPS, BVPS, Sector Median Multiples, and Benjamin Graham formula). Built for capital preservation and true margin of safety against inflated peaks."}
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-white/80 dark:bg-zinc-900/80 border border-indigo-500/20 space-y-1.5">
+              <div className="font-bold text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5">
+                <Info className="w-4 h-4 shrink-0" />
+                <span>{isAr ? "مستهدفات بنوك الاستثمار والإنترنت (Broker Targets):" : "Broker Target Prices (Internet):"}</span>
+              </div>
+              <p>
+                {isAr
+                  ? "تعتمد على نماذج التدفقات النقدية المستقبلية (DCF) لـ 5 إلى 10 سنوات قادمة وتفترض إدراج صفقات وتوسعات كبرى لم تتحقق بعد (مثل مشروع رأس الحكمة لطلعت مصطفى، وتوسعات مراكز البيانات للسويدي)، وتختلف بيوت البحوث نفسها اختلافا شاسعاً فيما بينها."
+                  : "Broker targets (Beltone, Hermes, CI Capital) use forward DCF models for 5-10 years projecting future expansion cash flows (e.g. Ras El Hekma for TMGH). Broker houses also frequently diverge significantly among themselves."}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* 📊 Interactive Valuation Chart (الشارت التفاعلي للخريطة السعرية) */}
         <section className="bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-zinc-100 dark:border-zinc-800 pb-5">

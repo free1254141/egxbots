@@ -199,6 +199,11 @@ export function computeSingleStockFairValue(params: {
     sectorAr.includes("خدمات مالية") ||
     sectorAr.includes("استثمار");
 
+  const isTechGrowth =
+    sectorAr.includes("تكنولوجيا") ||
+    sectorAr.includes("مدفوعات") ||
+    sectorAr.includes("اتصالات");
+
   if (eps !== null && eps > 0 && bvps !== null && bvps > 0) {
     const epsRound = Number(eps.toFixed(2));
     const bvpsRound = Number(bvps.toFixed(2));
@@ -220,6 +225,22 @@ export function computeSingleStockFairValue(params: {
         `1️⃣ تقييم مضاعف ربحية القطاع (${sectorAr}): ربحية السهم (${epsRound} ج) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ج.م (وزن 55%)`,
         `2️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية (${bvpsRound} ج) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ج.م (وزن 45%)`,
         `✅ السعر العادل المعتمد = ${fairValue} ج.م (تقييم مؤسسي متوازن للقطاع المالي بدون تضخيم).`,
+      ];
+    } else if (isTechGrowth) {
+      // Tech / Fintech / Telecom: High-growth scalable digital models.
+      // Weighted heavily towards earnings multiple & digital volume rather than tangible machinery/book value.
+      const blended = 0.70 * peFair + 0.30 * pbFair;
+      fairValue = clamp(blended, close * 0.55, close * 1.65);
+      fairValue = Number(fairValue.toFixed(2));
+      modelType = "graham_fundamental";
+      modelLabelAr = "مضاعفات قطاع التكنولوجيا والنمو الرقمي (P/E + P/B)";
+      formulaEquationAr =
+        "السعر العادل = (70% × هدف مكرر ربحية قطاع التكنولوجيا) + (30% × هدف مضاعف القيمة الدفترية)";
+      formulaSubstitutionAr = `(0.70 × ${peFair}) + (0.30 × ${pbFair}) = ${fairValue} ج.م`;
+      formulaStepsAr = [
+        `1️⃣ تقييم مضاعف ربحية قطاع التكنولوجيا (${sectorAr}): ربحية السهم (${epsRound} ج) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ج.م (وزن 70% للنمو الرقمي)`,
+        `2️⃣ تقييم مضاعف القيمة الدفترية: القيمة الدفترية (${bvpsRound} ج) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ج.م (وزن 30%)`,
+        `✅ السعر العادل المعتمد = ${fairValue} ج.م (تقييم متزن لشركات التكنولوجيا والنمو بدون خفضها ظلماً بنماذج الأصول المادية).`,
       ];
     } else {
       // Non-financial: EGX-calibrated Graham benchmark based on Egyptian market realities (8.0 - 14.0)

@@ -3,7 +3,7 @@ import {
   computeSingleStockFairValue,
 } from "../market/fair-value";
 import { getCachedFairValueReport } from "../market/fair-value-server";
-import { isShariaCompliant } from "../shariaStocks";
+import { isShariaCompliant, getStockPurificationMeta } from "../shariaStocks";
 import { getCanonicalStockName } from "./stock-names";
 
 const SECTOR_PURIFICATION_RATES: Record<string, number> = {
@@ -222,7 +222,8 @@ export async function executeShariaCleanserTool(
   }
 
   const sector = canonical.sector || "قطاعات متنوعة";
-  const defaultPurification = SECTOR_PURIFICATION_RATES[sector] || 2.5;
+  const meta = getStockPurificationMeta(symbol);
+  const defaultPurification = meta ? meta.purificationRatePct : (SECTOR_PURIFICATION_RATES[sector] || 2.0);
   const purificationRatePct = Number(
     args.purification_rate_pct ?? defaultPurification
   );
@@ -251,6 +252,12 @@ export async function executeShariaCleanserTool(
     ? Number((marketValue * 0.025).toFixed(2))
     : null;
 
+  const basisAr = meta
+    ? meta.isPureHalal
+      ? "مؤسسة إسلامية نقية 100% بإشراف هيئة رقابة شرعية — لا يتطلب أي تطهير للكوبون (0.0%)."
+      : `نسبة مالية مدققة للسهم (${meta.purificationRatePct}%) وفق معيار الأيوفي (21): ${meta.notesAr}.`
+    : `نسبة تطهير تقديرية (${purificationRatePct}%) لتطهير عوائد الفوائد البنكية وأذون الخزانة غير التشغيلية لقطاع ${sector}.`;
+
   return {
     status: "success",
     symbol,
@@ -259,8 +266,9 @@ export async function executeShariaCleanserTool(
     is_sharia_compliant: true,
     sharia_index: "EGX33",
     verdict_ar: "متوافق مع الشريعة الإسلامية ومؤشر EGX 33 ✅",
+    is_pure_halal: meta?.isPureHalal ?? false,
     purification_rate_pct: purificationRatePct,
-    purification_basis_ar: `نسبة تطهير تقديرية (${purificationRatePct}%) لتطهير عوائد الفوائد البنكية وأذون الخزانة غير التشغيلية لقطاع ${sector}.`,
+    purification_basis_ar: basisAr,
     dividend_purification: {
       shares_count: sharesCount,
       coupon_per_share_egp: coupon,

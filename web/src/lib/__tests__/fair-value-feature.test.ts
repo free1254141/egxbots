@@ -220,10 +220,10 @@ describe("3-Tier Fair Value Engine & Feature Tools", () => {
 
             expect(result.status).toBe("success");
             expect(result.is_sharia_compliant).toBe(true);
-            expect(result.purification_rate_pct).toBe(2.4); // From SECTOR_PURIFICATION_RATES
+            expect(result.purification_rate_pct).toBe(0.9); // From audited STOCK_PURIFICATION_RATES
             expect(result.dividend_purification.total_dividend_egp).toBe(5000);
-            expect(result.dividend_purification.purification_amount_egp).toBe(120); // 5000 * 2.4% = 120
-            expect(result.dividend_purification.net_halal_dividend_egp).toBe(4880);
+            expect(result.dividend_purification.purification_amount_egp).toBe(45); // 5000 * 0.9% = 45
+            expect(result.dividend_purification.net_halal_dividend_egp).toBe(4955);
             expect(result.zakat_calculation.zakat_due_egp).toBe(1500); // 60,000 * 2.5% = 1500
         });
     });
