@@ -357,7 +357,6 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     # Fetch latest available trading date in stock_technical_indicators
     latest_date_rows = supabase_get("stock_technical_indicators?exchange=eq.EGX&select=date&order=date.desc&limit=1")
     as_of_date = latest_date_rows[0].get("date") if latest_date_rows else cairo["date_str"]
-    is_data_stale = (not force and not force_dispatch) and cairo["is_trading_day"] and (as_of_date < cairo["date_str"])
 
     # Fetch indicators and price OHLC for the asOfDate
     ind_rows = supabase_get(f"stock_technical_indicators?exchange=eq.EGX&date=eq.{as_of_date}&select=symbol,close,change_pct,volume,vol_sma20,r_vol,rsi_14,bb_upper,ema_20&limit=300")
@@ -611,8 +610,8 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
             return True
         return False
 
-    # Add fresh signals to portfolio ONLY IF data is not stale (or forced)
-    if not is_data_stale or force_dispatch:
+    # Add fresh signals to portfolio
+    if True:
         for v in final_vol:
             if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
                 break
@@ -855,11 +854,6 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     alerts_dispatched = 0
     total_candidates = len(final_vol) + len(final_bo) + len(final_os)
 
-    # STALE DATA GUARD: If indicators are from a prior session (< today), never dispatch as today's live signals
-    is_data_stale = (not force and not force_dispatch) and cairo["is_trading_day"] and (as_of_date < cairo["date_str"])
-    if is_data_stale:
-        logger.warning(f"[SCANNER_PY] Indicators are from prior session ({as_of_date} < {cairo['date_str']}). Suppressing new entry alert dispatch until today's prices sync.")
-        total_candidates = 0
 
     if total_candidates > 0 or force_dispatch:
         net_adv = positive_stocks - negative_stocks

@@ -3232,7 +3232,7 @@ def update_market_heatmap():
 
 
 async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sync: bool = False, trigger: str = "manual", phase: str = "close", resume_job_id: str = None):
-    if phase not in {"midday", "close"}:
+    if phase not in {"morning", "midday", "close"}:
         raise ValueError("Invalid daily job phase")
     print(f"--- Daily Bot Run Job Started: {dt.datetime.now()} ---")
     if dry_run:
@@ -3271,7 +3271,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         original = saved[0]
         session_date = dt.datetime.fromisoformat(original['started_at'].replace('Z', '+00:00')).astimezone(ZoneInfo('Africa/Cairo')).date()
         if (original['status'] == 'running' or session_date != dt.datetime.now(ZoneInfo('Africa/Cairo')).date()
-                or original['job_type'] != ('daily_midday' if phase == 'midday' else 'daily_bot')):
+                or original['job_type'] != ('daily_morning' if phase == 'morning' else ('daily_midday' if phase == 'midday' else 'daily_bot'))):
             raise ValueError('Only the stopped current-session matching phase may continue')
         job_run_id, job_start_time = original['id'], original['started_at']
         steps_log = json.loads(original['steps']) if isinstance(original['steps'], str) else list(original['steps'] or [])
@@ -3291,7 +3291,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             ])
             stock_ai.supabase.table("daily_job_runs").upsert({
                 "id": job_run_id,
-                "job_type": "daily_midday" if phase == "midday" else "daily_bot",
+                "job_type": "daily_morning" if phase == "morning" else ("daily_midday" if phase == "midday" else "daily_bot"),
                 "status": status,
                 "started_at": job_start_time,
                 "completed_at": dt.datetime.utcnow().isoformat() if status in ("completed", "failed") else None,
@@ -3582,7 +3582,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
 
         # Protect/monitor short positions promptly after prices and indicators;
         # heavy ML/news stages must not delay the trading lifecycle.
-        if phase == "midday" and _stage_needed('refresh_market_status_for_gate'):
+        if phase in {"morning", "midday"} and _stage_needed('refresh_market_status_for_gate'):
             _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
             try:
                 ok_status, status_message = _refresh_market_status_cache()
@@ -3622,7 +3622,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 print(f"[ML_SCORES] Error updating scores: {e}")
 
         # Intraday monitoring must finish before optional external RSS sweeps.
-        if phase == "midday":
+        if phase in {"morning", "midday"}:
             if _stage_needed('refresh_market_status_for_gate'):
                 _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
                 try:
@@ -3707,7 +3707,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                 _record_step("precompute_heatmap", False, str(e)[:200], 0)
                 print(f"[HEATMAP] Error pre-computing heatmap: {e}")
 
-        if phase == "midday":
+        if phase in {"morning", "midday"}:
             # Only shared site data and short-position monitoring run intraday.
             # Ordinary portfolio/recommendation lifecycle and LLM reports stay EOD.
             _finish_critical_prices()

@@ -13,6 +13,7 @@ from api.daily_job_outcome import scheduler_result_status
 
 _scheduler_state: Dict[str, Any] = {
     "enabled": True,
+    "morning_run_time": "10:15",
     "midday_run_time": "12:15",
     "run_time": "17:00",  # Cairo time — after market close
     "timezone": "Africa/Cairo",
@@ -157,7 +158,7 @@ def _daily_job_ran_today(today: str, phase: str = "close") -> bool:
         result = (
             supabase.table("daily_job_runs")
             .select("id,status,started_at,steps")
-            .eq("job_type", "daily_midday" if phase == "midday" else "daily_bot")
+            .eq("job_type", "daily_morning" if phase == "morning" else ("daily_midday" if phase == "midday" else "daily_bot"))
             .gte("started_at", utc_start.isoformat())
             .lt("started_at", utc_end.isoformat())
             .in_("status", ["running", "completed", "failed"])
@@ -226,6 +227,8 @@ def _due_phase(now):
     # A missed midday run is not replayed after the session has closed.
     if _minutes(_scheduler_state["midday_run_time"]) <= current < 14 * 60 + 30:
         return "midday"
+    if _minutes(_scheduler_state.get("morning_run_time", "10:15")) <= current < _minutes(_scheduler_state["midday_run_time"]):
+        return "morning"
     return None
 
 
