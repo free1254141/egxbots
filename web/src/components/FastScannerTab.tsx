@@ -1449,7 +1449,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                       : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                   }`}
                 >
-                  {isAr ? "اليوم (أكتوبر 2026)" : "Today (Oct 2026)"}
+                  {isAr ? `الشهر الحالي (${currentMonthName})` : `This Month (${currentMonthName})`}
                 </button>
                 <button
                   onClick={() => {
