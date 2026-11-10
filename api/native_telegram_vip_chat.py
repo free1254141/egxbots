@@ -348,7 +348,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             "title": session_title,
             "is_deleted_by_user": False,
             "updated_at": now_iso,
-        }).execute()
+        }, on_conflict="id").execute()
 
         # 2. Insert messages so Admin sees the full prompt and answer
         supabase.from_("ai_chat_messages").insert([

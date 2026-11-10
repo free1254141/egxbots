@@ -218,3 +218,65 @@ async def test_update_session_authenticated_updates_with_user_filter():
         assert resp["updated"] == "sess_123"
         assert resp["title"] == "Renamed Title"
         mock_supabase.from_.return_value.update.return_value.eq.return_value.eq.assert_called_with("user_id", "user_owner")
+
+
+# ==========================================
+# 4. Tests for Egyptian Stock Hints & Resolution
+# ==========================================
+
+def test_known_symbol_hints_egyptian_stocks():
+    from api.agentic_chat.pipeline import known_symbol_hints
+
+    # 1. Test "عتاقه" / "عتاقة" resolves to ATQA
+    hints_1 = known_symbol_hints("عتاقه")
+    assert any("ATQA" in h["symbols"] for h in hints_1), f"Expected ATQA in hints: {hints_1}"
+
+    hints_2 = known_symbol_hints("حلل سهم عتاقة")
+    assert any("ATQA" in h["symbols"] for h in hints_2), f"Expected ATQA in hints: {hints_2}"
+
+    # 2. Test multi-stock comparison
+    hints_3 = known_symbol_hints("قارن بين التجاري الدولي وطلعت مصطفى")
+    syms_3 = [s for h in hints_3 for s in h["symbols"]]
+    assert "COMI" in syms_3
+    assert "TMGH" in syms_3
+
+
+def test_normalize_symbol_resolves_arabic_and_aliases():
+    from api.agentic_chat.tools_execution import _normalize_symbol
+
+    assert _normalize_symbol("عتاقه") == "ATQA"
+    assert _normalize_symbol("عتاقة") == "ATQA"
+    assert _normalize_symbol("ATQA.CA") == "ATQA"
+    assert _normalize_symbol("فوري") == "FWRY"
+    assert _normalize_symbol("comi") == "COMI"
+
+
+@pytest.mark.anyio
+async def test_get_session_history_camel_case_sessionId():
+    req = build_mock_request(query_params={"sessionId": "sess_camel_123"})
+    mock_supabase = MagicMock()
+    mock_supabase.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[
+            {
+                "id": "msg_1",
+                "role": "user",
+                "content": "سهم عتاقه كام",
+                "created_at": "2026-11-10T12:00:00Z",
+                "image_url": None,
+                "latency_ms": 120,
+            }
+        ]
+    )
+
+    with patch("api.agentic_chat.router.get_authenticated_user", return_value={"id": "user_owner", "is_authenticated": True}), \
+         patch("api.agentic_chat.router.supabase", mock_supabase):
+        resp = await get_chat_root(req)
+        assert resp.status_code == 200
+        body = json.loads(resp.body.decode())
+        # Must return BOTH "history" and "messages" for frontend compatibility
+        assert "history" in body
+        assert "messages" in body
+        assert len(body["history"]) == 1
+        assert body["history"][0]["content"] == "سهم عتاقه كام"
+        assert isinstance(body["history"][0]["timestamp"], int)
+

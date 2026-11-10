@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 import pytz
 
 from api.stock_ai import _init_supabase, supabase
+from api.stock_aliases import resolve_stock_symbol
 from api.sharia_stocks import is_sharia_compliant
 from api.stock_aliases import ARABIC_STOCK_MAPPINGS
 
@@ -26,12 +27,19 @@ def _get_sb():
 
 
 def _normalize_symbol(sym: Any) -> str:
-    """Normalize stock symbol to uppercase without exchange suffix."""
+    """Normalize stock symbol: strip .CA suffix, resolve Arabic names / aliases to official ticker."""
     if not sym:
         return ""
-    clean = str(sym).strip().upper()
+    raw = str(sym).strip()
+    clean = raw.upper()
     if clean.endswith(".CA"):
         clean = clean[:-3]
+    resolved = resolve_stock_symbol(clean)
+    if resolved:
+        return resolved
+    resolved_ar = resolve_stock_symbol(raw)
+    if resolved_ar:
+        return resolved_ar
     return clean
 
 
@@ -532,7 +540,24 @@ async def execute_get_news(symbols: Optional[List[str]] = None) -> Dict[str, Any
 # Tool: get_comparison
 # ---------------------------------------------------------------------------
 def _sync_get_comparison(symbols: List[str]) -> Dict[str, Any]:
-    return _sync_get_stock(symbols[:10])
+    clean_syms = [_normalize_symbol(s) for s in symbols if s][:10]
+    stock_res = _sync_get_stock(clean_syms)
+    levels_res = _sync_get_stock_levels(clean_syms)
+    levels_map = {}
+    for item in levels_res.get("levels", []):
+        if isinstance(item, dict) and item.get("symbol"):
+            levels_map[item["symbol"]] = item
+
+    stocks = stock_res.get("stocks", [])
+    for s in stocks:
+        sym = s.get("symbol")
+        lvl = levels_map.get(sym, {})
+        s["support_1"] = lvl.get("support_1")
+        s["resistance_1"] = lvl.get("resistance_1")
+        s["support_2"] = lvl.get("support_2")
+        s["resistance_2"] = lvl.get("resistance_2")
+
+    return {"status": "success", "stocks": stocks}
 
 
 async def execute_get_comparison(symbols: List[str]) -> Dict[str, Any]:

@@ -88,7 +88,7 @@ def _persist_message_background(
         if user_id:
             session_payload["user_id"] = user_id
 
-        supabase.from_("ai_chat_sessions").upsert(session_payload).execute()
+        supabase.from_("ai_chat_sessions").upsert(session_payload, on_conflict="id").execute()
 
         # 2. NOW INSERT MESSAGES INTO ai_chat_messages
         rows = [
@@ -171,31 +171,43 @@ async def get_chat_root(
             "unlimited": user_is_pro,
         })
 
-    if session_id:
+    target_sid = session_id or request.query_params.get("session_id") or request.query_params.get("sessionId")
+    if target_sid:
         messages = []
         if user_id:
             try:
                 res = (
                     supabase.from_("ai_chat_messages")
                     .select("id, role, content, image_url, created_at, latency_ms, metadata")
-                    .eq("session_id", session_id)
+                    .eq("session_id", target_sid)
                     .eq("user_id", user_id)
                     .order("created_at", desc=False)
                     .limit(50)
                     .execute()
                 )
                 for m in (res.data or []):
+                    created_at_val = m.get("created_at")
+                    ts = int(time.time() * 1000)
+                    if created_at_val:
+                        try:
+                            ts = int(datetime.fromisoformat(created_at_val.replace("Z", "+00:00")).timestamp() * 1000)
+                        except Exception:
+                            pass
                     messages.append({
                         "id": m.get("id"),
                         "role": m.get("role"),
                         "content": m.get("content", ""),
-                        "timestamp": m.get("created_at"),
+                        "timestamp": ts,
                         "imageUrl": m.get("image_url"),
                         "latencyMs": m.get("latency_ms"),
                     })
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[agentic_chat] Error fetching session messages: {e}")
                 messages = []
-        return JSONResponse({"messages": messages})
+        return JSONResponse({
+            "history": messages,
+            "messages": messages,
+        })
 
     return JSONResponse({
         "status": "healthy",

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Any, List, Optional
@@ -26,6 +27,65 @@ CAIRO_TZ = pytz.timezone("Africa/Cairo")
 def _get_deepseek_key() -> str:
     key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or ""
     return key.strip()
+
+
+def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
+    """
+    Extract Egyptian stock symbol hints from Arabic company names, aliases, and tickers.
+    Matches known Egyptian stock mappings (e.g. 'عتاقة' / 'عتاقه' -> 'ATQA').
+    """
+    if not message:
+        return []
+    try:
+        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, resolve_stock_symbol
+    except Exception:
+        return []
+
+    norm_msg = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", message)
+    norm_msg = re.sub(r"[أإآ]", "ا", norm_msg)
+    norm_msg = re.sub(r"ة", "ه", norm_msg)
+    norm_msg = re.sub(r"ى", "ي", norm_msg).lower()
+    norm_msg = re.sub(r"(?:بورص[ةه]|سوق|مؤشر)\s+النيل", " ", norm_msg)
+
+    hints: List[Dict[str, Any]] = []
+    seen_symbols = set()
+
+    # 1. Match Arabic full names and aliases, sorted longest first
+    sorted_aliases = sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True)
+    for ar_name, sym in sorted_aliases:
+        norm_key = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", ar_name)
+        norm_key = re.sub(r"[أإآ]", "ا", norm_key)
+        norm_key = re.sub(r"ة", "ه", norm_key)
+        norm_key = re.sub(r"ى", "ي", norm_key).lower()
+        if len(norm_key) < 2:
+            continue
+
+        escaped = re.escape(norm_key)
+        if norm_key.startswith("ال"):
+            without_al = re.escape(norm_key[2:])
+            pattern = rf"(?:^|[^\w\u0621-\u064a])(?:(?:و|ف|ب|ل|ك|ال)?{escaped}|لل{without_al})(?:$|[^\w\u0621-\u064a])"
+        else:
+            pattern = rf"(?:^|[^\w\u0621-\u064a])(?:و|ف|ب|ل|ك|ال)?{escaped}(?:$|[^\w\u0621-\u064a])"
+
+        if re.search(pattern, norm_msg, re.IGNORECASE):
+            s_upper = sym.upper()
+            if s_upper not in seen_symbols:
+                seen_symbols.add(s_upper)
+                hints.append({"name": ar_name, "symbols": [s_upper]})
+
+    # 2. Match Latin tickers (2-6 uppercase letters)
+    latin_matches = re.findall(r"\b[A-Za-z]{2,6}\b", message)
+    stopwords = {"EGX", "BUY", "SELL", "HOLD", "THE", "AND", "FOR", "RSI", "MACD", "EMA", "SMA", "VIP", "PRO", "API", "NOW", "TODAY", "NEWS", "USD", "EGP"}
+    for tok in latin_matches:
+        u = tok.upper()
+        if u in stopwords:
+            continue
+        res = resolve_stock_symbol(u)
+        if res and res not in seen_symbols:
+            seen_symbols.add(res)
+            hints.append({"name": tok, "symbols": [res]})
+
+    return hints[:10]
 
 
 async def run_agentic_chat_stream(
@@ -74,6 +134,17 @@ async def run_agentic_chat_stream(
             content = msg.get("content", "")
             if role in ("user", "assistant") and content:
                 formatted_messages.append({"role": role, "content": str(content)[:2000]})
+
+    # Inject symbol hints if detected in user message or context
+    hints = known_symbol_hints(message)
+    if hints:
+        hints_payload = {"symbol_hints": hints}
+        hints_text = (
+            "سياق رموز البورصة المصرية المكتشفة في استفسار المستخدم (symbol_hints):\n"
+            f"{json.dumps(hints_payload, ensure_ascii=False)}\n"
+            "التزم بدقة بهذه الرموز عند استدعاء الأدوات get_stock و get_stock_levels و get_comparison ولا تخترع رمزاً بديلاً (مثل استخدام ATQA لعتاقة وعدم استبداله بـ ORAS)."
+        )
+        formatted_messages.append({"role": "system", "content": hints_text})
 
     # Append current user message
     formatted_messages.append({"role": "user", "content": message})
@@ -265,25 +336,47 @@ async def run_agentic_chat_stream(
     # Format tables into standard ExcelTable schema expected by frontend
     excel_tables = []
     if tables_data:
-        rows_list = []
-        for s in tables_data:
-            if isinstance(s, dict):
-                sym = s.get("symbol") or ""
-                name = s.get("name_ar") or sym
-                close_str = f"{s.get('close', '')} ج.م" if s.get('close') is not None else "—"
-                chg_str = f"{s.get('change_pct', '')}%" if s.get('change_pct') is not None else "—"
-                rsi_str = str(s.get('rsi_14', '—'))
-                verdict_str = s.get('verdict') or "—"
-                rows_list.append([sym, name, close_str, chg_str, rsi_str, verdict_str])
-        if rows_list:
+        stocks_with_symbol = [s for s in tables_data if isinstance(s, dict) and s.get("symbol")]
+        if len(stocks_with_symbol) >= 2:
+            headers = ["المعيار"] + [f"{s.get('name_ar') or s.get('symbol')} ({s.get('symbol')})" for s in stocks_with_symbol]
+            rows_list = [
+                ["السعر الحالي"] + [f"{s.get('close', '—')} ج.م" if s.get('close') is not None else "—" for s in stocks_with_symbol],
+                ["التغير اليومي"] + [f"{s.get('change_pct', '—')}%" if s.get('change_pct') is not None else "—" for s in stocks_with_symbol],
+                ["مؤشر RSI"] + [str(s.get('rsi_14', '—')) for s in stocks_with_symbol],
+                ["التقييم الفني"] + [str(s.get('verdict', '—')) for s in stocks_with_symbol],
+                ["الدعم الأول"] + [f"{s.get('support_1', '—')} ج.م" if s.get('support_1') is not None else "—" for s in stocks_with_symbol],
+                ["المقاومة الأولى"] + [f"{s.get('resistance_1', '—')} ج.م" if s.get('resistance_1') is not None else "—" for s in stocks_with_symbol],
+                ["مؤشر King AI"] + [str(s.get('king_ai_score', '—')) for s in stocks_with_symbol],
+                ["التوافق الشرعي"] + ["متوافق (EGX33)" if s.get('is_sharia_compliant') else "غير متوافق" for s in stocks_with_symbol],
+            ]
             excel_tables.append({
-                "id": f"table_{int(time.time())}",
-                "title": "جدول الأسهم والتحليل الفني",
-                "headers": ["الكود", "اسم الشركة", "السعر", "التغير %", "RSI", "التقييم الفني"],
+                "id": f"comparison_{int(time.time())}",
+                "title": "مقارنة الأسهم الفنية والمالية",
+                "headers": headers,
                 "rows": rows_list,
                 "source": "EGX BOTS",
                 "data_time": time.strftime("%Y-%m-%d"),
             })
+        else:
+            rows_list = []
+            for s in tables_data:
+                if isinstance(s, dict):
+                    sym = s.get("symbol") or ""
+                    name = s.get("name_ar") or sym
+                    close_str = f"{s.get('close', '')} ج.م" if s.get('close') is not None else "—"
+                    chg_str = f"{s.get('change_pct', '')}%" if s.get('change_pct') is not None else "—"
+                    rsi_str = str(s.get('rsi_14', '—'))
+                    verdict_str = s.get('verdict') or "—"
+                    rows_list.append([sym, name, close_str, chg_str, rsi_str, verdict_str])
+            if rows_list:
+                excel_tables.append({
+                    "id": f"table_{int(time.time())}",
+                    "title": "جدول الأسهم والتحليل الفني",
+                    "headers": ["الكود", "اسم الشركة", "السعر", "التغير %", "RSI", "التقييم الفني"],
+                    "rows": rows_list,
+                    "source": "EGX BOTS",
+                    "data_time": time.strftime("%Y-%m-%d"),
+                })
 
     # Final done event with accurate quota and pro status
     done_event = {
