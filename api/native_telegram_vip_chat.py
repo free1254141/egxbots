@@ -7,6 +7,10 @@ import os
 import re
 import json
 import logging
+import hashlib
+import time
+import asyncio
+import concurrent.futures
 try:
     from dotenv import load_dotenv
     _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,8 +28,12 @@ logger = logging.getLogger("native_telegram_vip_chat")
 logger.setLevel(logging.INFO)
 
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 ADMIN_TG_IDS = {"5149631436"}
+
+
+def deterministic_session_uuid(seed: str) -> str:
+    h = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"{h[:8]}-{h[8:12]}-4{h[13:16]}-a{h[17:20]}-{h[20:32]}"
 
 
 def get_cairo_date_str() -> str:
@@ -199,6 +207,12 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not query:
         return {"ok": False, "error": "Empty message"}
 
+    chat_source = payload.get("chat_source") or "telegram_topic"
+    audit_user_id = user_info["linked_user_id"] or deterministic_session_uuid(f"tg-user-{tg_user_id}")
+    session_id = deterministic_session_uuid(f"tg-{chat_source}-{audit_user_id}")
+    room_prefix = "🔒 [بوت تليجرام الخاص]" if chat_source == "telegram_private" else "📢 [تليجرام التوبيك العام]"
+    session_title = f"{room_prefix} {query[:28]}"
+
     if not user_info["is_admin"] and user_info["remaining"] <= 0:
         return {
             "ok": False,
@@ -213,84 +227,98 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             "detail": "لقد استهلكت رصيد أسئلتك المتاح. يرجى الترقية لباقة PRO للمتابعة والاستفسار اللامحدود.",
         }
 
-    # Detect symbol
-    symbol = _extract_stock_symbol(query)
-    stock_context = ""
-    evidence_data = []
-
-    if symbol:
-        ind_rows = _supabase_request(f"stock_technical_indicators?exchange=eq.EGX&symbol=eq.{symbol}&select=symbol,date,close,change_pct,volume,vol_sma20,r_vol,rsi_14,macd,bb_upper,bb_lower,ema_20,ema_50&order=date.desc&limit=5") or []
-        if ind_rows:
-            latest = ind_rows[0]
-            stock_context = (
-                f"بيانات سهم #{symbol} لجلسة {latest.get('date')}:\n"
-                f"• الإغلاق: {latest.get('close')} ج.م ({float(latest.get('change_pct') or 0):+.2f}%)\n"
-                f"• حجم التداول: {int(latest.get('volume') or 0):,} سهم (الحجم النسبي: {float(latest.get('r_vol') or 1.0):.2f}x)\n"
-                f"• مؤشر RSI(14): {float(latest.get('rsi_14') or 50):.1f}\n"
-                f"• المتوسطات: EMA20={latest.get('ema_20')}, EMA50={latest.get('ema_50')}\n"
-                f"• حدود بولينجر: العلوي={latest.get('bb_upper')}, السفلي={latest.get('bb_lower')}\n"
-            )
-            evidence_data.append(latest)
-
-    # General market context if no stock found
-    if not stock_context:
-        market_rows = _supabase_request(f"stock_technical_indicators?exchange=eq.EGX&date=eq.{today}&select=symbol,close,change_pct,volume&limit=50") or []
-        pos = sum(1 for r in market_rows if float(r.get("change_pct") or 0) > 0.1)
-        neg = sum(1 for r in market_rows if float(r.get("change_pct") or 0) < -0.1)
-        stock_context = f"بيانات السوق العام: صاعد {pos} سهم، هابط {neg} سهم."
-
-    deepseek_key = (os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_OFFICIAL_API_KEY") or "").strip()
-    reply_text = ""
-
-    if deepseek_key:
-        sys_prompt = (
-            "أنت المساعد المالي والتقني الذكي (ARTORO AI) الخاص بمنصة EGX BOTS المعتمد لتحليل البورصة المصرية.\n"
-            "مهمتك: الإجابة على استفسار المستثمر بدقة فنية ومالية عالية، بأسلوب عربي فصيح، راقٍ ومهني.\n"
-            "قواعد التحليل:\n"
-            "1. استند حصرياً إلى البيانات والأرقام المرفقة ولا تخترع أسعاراً أو أرقاماً غير موجودة.\n"
-            "2. وضح مستويات الدعم والمقاومة، وقف الخسارة، والاتجاه والزخم بناءً على المؤشرات الفنية المتاحة.\n"
-            "3. رتّب الإجابة في نقاط واضحة برؤوس أقلام بارزة تناسب شاشة تليجرام على الموبايل.\n"
-            "4. اذكر دائماً أن التحليل فني وقراءة للأدلة الرقمية ولا يمثل دعوة شراء أو بيع ملزمة."
-        )
-        usr_prompt = f"استفسار المستثمر: {query}\n\nالبيانات الرقمية الموثقة من السوق:\n{stock_context}"
-
-        req = urllib.request.Request(
-            DEEPSEEK_API_URL,
-            data=json.dumps({
-                "model": "deepseek-chat",
-                "temperature": 0.2,
-                "max_tokens": 900,
-                "messages": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": usr_prompt},
-                ]
-            }).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {deepseek_key}",
-            },
-            method="POST"
-        )
+    # Consume quota if linked account exists
+    if user_info["linked_user_id"] and not user_info["is_admin"]:
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                ds_res = json.loads(resp.read().decode("utf-8"))
-                reply_text = ds_res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            from api.agentic_chat.auth_guard import check_and_consume_quota
+            allowed, rem, lim, err = check_and_consume_quota(user_info["linked_user_id"], user_info["is_pro"])
+            if not allowed:
+                return {
+                    "ok": False,
+                    "error_code": "LIMIT_REACHED",
+                    "linked": True,
+                    "display_name": user_info["display_name"],
+                    "is_pro": user_info["is_pro"],
+                    "used": lim,
+                    "limit": lim,
+                    "remaining": 0,
+                    "period": user_info["period"],
+                    "detail": err or "لقد استهلكت رصيدك المتاح.",
+                }
         except Exception as e:
-            logger.warning(f"[NATIVE_VIP_CHAT] DeepSeek chat error: {e}")
+            logger.warning(f"[NATIVE_VIP_CHAT] Quota check warning: {e}")
 
+    start_time = time.time()
+    reply_text = ""
+    tables: List[Dict[str, Any]] = []
+
+    # Run the full Agentic Chat Pipeline with all 9 tools (DeepSeek-V3)
+    try:
+        from api.agentic_chat.pipeline import run_agentic_chat_stream
+
+        chat_history = (user_info.get("state_row") or {}).get("chat_history") or []
+        formatted_history = [
+            {"role": h.get("role", "user"), "content": h.get("content", "")}
+            for h in chat_history[-10:]
+        ]
+
+        async def _run_agentic():
+            full = ""
+            tbls = []
+            async for sse_chunk in run_agentic_chat_stream(
+                message=query,
+                history=formatted_history,
+                session_id=session_id,
+                user_id=audit_user_id,
+                model="deepseek-chat",
+                is_pro=user_info["is_pro"],
+                remaining_quota=user_info["remaining"],
+                quota_limit=user_info["limit"],
+            ):
+                line = sse_chunk.strip()
+                if line.startswith("data:"):
+                    dp = line[5:].strip()
+                    if dp != "[DONE]":
+                        try:
+                            ev = json.loads(dp)
+                            if ev.get("type") == "token":
+                                full += ev.get("token", "")
+                            elif ev.get("type") == "done":
+                                full = ev.get("reply", full)
+                                tbls = ev.get("tables", [])
+                        except Exception:
+                            pass
+            return full, tbls
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    reply_text, tables = pool.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
+            else:
+                reply_text, tables = loop.run_until_complete(_run_agentic())
+        except RuntimeError:
+            reply_text, tables = asyncio.run(_run_agentic())
+    except Exception as exc:
+        logger.warning(f"[NATIVE_VIP_CHAT] Agentic pipeline error: {exc}")
+
+    # Fallback to direct technical indicators if agentic call failed
     if not reply_text:
-        # Fallback response
-        if symbol and evidence_data:
-            latest = evidence_data[0]
-            reply_text = (
-                f"📊 **التحليل الفني السريع لسهم #{symbol}:**\n\n"
-                f"• **آخر سعر إغلاق:** `{latest.get('close')} ج.م` ({float(latest.get('change_pct') or 0):+.2f}%)\n"
-                f"• **النشاط والسيولة:** حجم التداول `{int(latest.get('volume') or 0):,}` سهم بنشاط نسبي `{float(latest.get('r_vol') or 1.0):.2f}x`\n"
-                f"• **مؤشر القوة النسبية RSI:** `{float(latest.get('rsi_14') or 50):.1f}`\n"
-                f"• **الدعم والمقاومة:** الدعم الفني عند متوسط 20 يوم `{latest.get('ema_20')} ج.م` والمقاومة عند `{latest.get('bb_upper')} ج.م`.\n\n"
-                f"💡 _نصيحة إدارة المخاطر: ينصح دائماً بوضع وقف خسارة أسفل مستوى الدعم بنسبة 2.5% إلى 3.0% لحماية المحفظة._"
-            )
-        else:
+        symbol = _extract_stock_symbol(query)
+        if symbol:
+            ind_rows = _supabase_request(f"stock_technical_indicators?exchange=eq.EGX&symbol=eq.{symbol}&select=symbol,date,close,change_pct,volume,vol_sma20,r_vol,rsi_14,macd,bb_upper,bb_lower,ema_20,ema_50&order=date.desc&limit=5") or []
+            if ind_rows:
+                latest = ind_rows[0]
+                reply_text = (
+                    f"📊 **التحليل الفني السريع لسهم #{symbol}:**\n\n"
+                    f"• **آخر سعر إغلاق:** `{latest.get('close')} ج.م` ({float(latest.get('change_pct') or 0):+.2f}%)\n"
+                    f"• **النشاط والسيولة:** حجم التداول `{int(latest.get('volume') or 0):,}` سهم بنشاط نسبي `{float(latest.get('r_vol') or 1.0):.2f}x`\n"
+                    f"• **مؤشر القوة النسبية RSI:** `{float(latest.get('rsi_14') or 50):.1f}`\n"
+                    f"• **الدعم والمقاومة:** الدعم الفني عند متوسط 20 يوم `{latest.get('ema_20')} ج.م` والمقاومة عند `{latest.get('bb_upper')} ج.م`.\n\n"
+                    f"💡 _نصيحة إدارة المخاطر: ينصح دائماً بوضع وقف خسارة أسفل مستوى الدعم بنسبة 2.5% إلى 3.0% لحماية المحفظة._"
+                )
+
+        if not reply_text:
             reply_text = (
                 f"مرحباً بك يا {user_info['display_name']}! 👋\n\n"
                 f"أنا **أرتورو (ARTORO AI)**، المساعد الذكي لتحليل الأسهم المصرية.\n"
@@ -298,13 +326,61 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"أو الاستفسار عن وضع المؤشرات العامة والسيولة وسأجيبك بأدق القراءات الفنية اللحظية."
             )
 
-    # Increment quota & save state
+    latency_ms = int((time.time() - start_time) * 1000)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    common_meta = {
+        "chat_source": chat_source,
+        "telegram_user_id": tg_user_id,
+        "telegram_username": user_name,
+        "display_name": user_info["display_name"],
+        "linked_user_id": user_info["linked_user_id"],
+        "tables": tables,
+    }
+
+    # Record session & messages in Supabase for Admin Control Panel visibility (Support & AI tab)
+    try:
+        from api.stock_ai import _init_supabase, supabase
+        _init_supabase()
+        # 1. Upsert session so Admin sees the user's room
+        supabase.from_("ai_chat_sessions").upsert({
+            "id": session_id,
+            "user_id": audit_user_id,
+            "title": session_title,
+            "is_deleted_by_user": False,
+            "updated_at": now_iso,
+        }).execute()
+
+        # 2. Insert messages so Admin sees the full prompt and answer
+        supabase.from_("ai_chat_messages").insert([
+            {
+                "session_id": session_id,
+                "user_id": audit_user_id,
+                "role": "user",
+                "content": query,
+                "metadata": common_meta,
+                "created_at": now_iso,
+            },
+            {
+                "session_id": session_id,
+                "user_id": audit_user_id,
+                "role": "assistant",
+                "content": reply_text,
+                "latency_ms": latency_ms,
+                "metadata": common_meta,
+                "created_at": now_iso,
+            }
+        ]).execute()
+        logger.info(f"[NATIVE_VIP_CHAT] Successfully persisted session {session_id} to ai_chat_sessions & ai_chat_messages for admin.")
+    except Exception as err:
+        logger.warning(f"[NATIVE_VIP_CHAT] Admin message persistence error: {err}")
+
+    # Increment quota & save Telegram state
     state_row = user_info["state_row"] or {}
     new_daily_count = (int(state_row.get("daily_count") or 0) + 1) if state_row.get("quota_date") == today else 1
 
     chat_history = state_row.get("chat_history") or []
-    chat_history.append({"role": "user", "content": query, "created_at": datetime.now(timezone.utc).isoformat()})
-    chat_history.append({"role": "assistant", "content": reply_text[:1200], "created_at": datetime.now(timezone.utc).isoformat()})
+    chat_history.append({"role": "user", "content": query, "created_at": now_iso})
+    chat_history.append({"role": "assistant", "content": reply_text[:1600], "created_at": now_iso})
 
     _supabase_request(
         "telegram_vip_chat_state?on_conflict=telegram_user_id",
@@ -317,7 +393,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             "daily_count": new_daily_count,
             "chat_history": chat_history[-14:],
             "pending_prompt": None,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now_iso,
         }
     )
 
@@ -327,7 +403,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "reply": reply_text,
-        "tables": [],
+        "tables": tables,
         "display_name": user_info["display_name"],
         "is_pro": user_info["is_pro"],
         "used": new_used,
