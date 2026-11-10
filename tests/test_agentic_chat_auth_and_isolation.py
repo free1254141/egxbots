@@ -280,3 +280,101 @@ async def test_get_session_history_camel_case_sessionId():
         assert body["history"][0]["content"] == "سهم عتاقه كام"
         assert isinstance(body["history"][0]["timestamp"], int)
 
+
+# ==========================================
+# 6. Tests for Portfolio Management Fixes
+# ==========================================
+
+def test_manage_portfolio_requires_login():
+    from api.agentic_chat.tools_execution import _sync_manage_portfolio
+    res = _sync_manage_portfolio(user_id=None, operation="view")
+    assert res.get("status") == "error"
+    assert res.get("requires_login") is True
+
+
+def test_manage_portfolio_anti_injection_blocks_unauthorized_mutation():
+    from api.agentic_chat.tools_execution import _sync_manage_portfolio
+    # Prompt without explicit write keywords
+    res = _sync_manage_portfolio(
+        user_id="user_123",
+        operation="add",
+        symbol="COMI",
+        quantity=100,
+        price=120.0,
+        user_prompt="ما هو أفضل سهم للشراء اليوم؟",
+    )
+    assert res.get("status") == "blocked"
+
+
+def test_manage_portfolio_view_from_positions_table():
+    from api.agentic_chat.tools_execution import _sync_manage_portfolio
+
+    mock_sb = MagicMock()
+
+    # Mock positions table query
+    positions_mock_query = MagicMock()
+    positions_mock_query.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[
+            {
+                "id": "p_1",
+                "symbol": "COMI",
+                "name": "البنك التجاري الدولي",
+                "quantity": 100,
+                "entry_price": 120.0,
+                "status": "open",
+                "added_at": "2026-11-10T10:00:00Z",
+            }
+        ]
+    )
+
+    # Mock profiles table for cash balance
+    profiles_mock_query = MagicMock()
+    profiles_mock_query.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"cash_balance": 5000.0}]
+    )
+
+    # Mock technical indicators for current price
+    tech_mock_query = MagicMock()
+    tech_mock_query.select.return_value.in_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"symbol": "COMI", "close": 125.0, "change_pct": 1.5, "date": "2026-11-10"}]
+    )
+
+    def from_side_effect(table_name):
+        if table_name == "positions":
+            return positions_mock_query
+        elif table_name == "profiles":
+            return profiles_mock_query
+        elif table_name == "stock_technical_indicators":
+            return tech_mock_query
+        return MagicMock()
+
+    mock_sb.from_.side_effect = from_side_effect
+
+    with patch("api.agentic_chat.tools_execution._get_sb", return_value=mock_sb):
+        res = _sync_manage_portfolio(user_id="user_123", operation="view")
+        assert res.get("status") == "success"
+        assert res.get("positions_count") == 1
+        pos = res.get("positions")[0]
+        assert pos["symbol"] == "COMI"
+        assert pos["cost_basis"] == 12000.0
+        assert pos["market_value"] == 12500.0
+        assert pos["profit_value"] == 500.0
+        assert round(pos["profit_pct"], 2) == 4.17
+        assert res.get("cash_balance") == 5000.0
+        assert res.get("totals")["equity"] == 17500.0
+
+
+@pytest.mark.anyio
+async def test_dispatch_tool_manage_portfolio_benchmark():
+    from api.agentic_chat.tools_execution import dispatch_tool
+
+    res = await dispatch_tool(
+        tool_name="manage_portfolio",
+        arguments={"operation": "view"},
+        user_id="00000000-0000-0000-0000-000000000000",
+    )
+    assert res.get("status") == "success"
+    assert res.get("positions_count") == 2
+    assert res.get("totals")["equity"] == 105450.0
+
+

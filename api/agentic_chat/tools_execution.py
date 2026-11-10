@@ -747,8 +747,8 @@ def _sync_manage_portfolio(
     user_prompt: str = "",
 ) -> Dict[str, Any]:
     """
-    Secure portfolio management.
-    Requires verified user_id (not client-supplied).
+    Secure portfolio management backed by Supabase `positions` table and `profiles.cash_balance`.
+    Requires verified user_id.
     Enforces anti-injection: write operations (add/update/remove/sell) require explicit
     confirmation words in user_prompt to prevent autonomous hallucinated mutations.
     """
@@ -762,28 +762,152 @@ def _sync_manage_portfolio(
     sb = _get_sb()
     op = (operation or "view").lower().strip()
 
-    if op == "view":
+    if op in ("view", "get"):
         try:
+            # 1. Fetch open positions from `positions` table
             res = (
-                sb.from_("profiles")
-                .select("portfolio")
-                .eq("id", user_id)
-                .limit(1)
+                sb.from_("positions")
+                .select("id, symbol, name, quantity, entry_price, entry_at, status, source, added_at")
+                .eq("user_id", user_id)
+                .eq("status", "open")
+                .order("added_at", desc=True)
+                .limit(100)
                 .execute()
             )
-            data = res.data or []
-            positions = data[0].get("portfolio", []) if data else []
+            raw_positions = res.data or []
+
+            # Filter real holdings (quantity > 0)
+            holdings = [
+                p for p in raw_positions
+                if p.get("quantity") is not None and _safe_float(p.get("quantity")) is not None and _safe_float(p.get("quantity")) > 0
+            ]
+
+            # 2. Fetch cash balance from `profiles`
+            cash = 0.0
+            try:
+                prof_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
+                if prof_res.data:
+                    cash = _safe_float(prof_res.data[0].get("cash_balance")) or 0.0
+            except Exception:
+                cash = 0.0
+
+            if not holdings:
+                return {
+                    "status": "success",
+                    "operation": "view",
+                    "message": "محفظتك فاضية حالياً. تقدر تضيف أسهمك هنا بالكتابة أو برفع سكرين شوت لمحفظتك وهحللها فوراً.",
+                    "positions_count": 0,
+                    "positions": [],
+                    "cash_balance": round(cash, 2),
+                    "totals": {
+                        "positions_count": 0,
+                        "cost_basis": 0.0,
+                        "market_value": 0.0,
+                        "profit_value": 0.0,
+                        "profit_pct": 0.0,
+                        "equity": round(cash, 2),
+                    },
+                }
+
+            # 3. Enrich holdings with latest market prices
+            symbols = list({str(p.get("symbol", "")).upper() for p in holdings if p.get("symbol")})
+            price_map: Dict[str, Optional[float]] = {}
+            change_map: Dict[str, Optional[float]] = {}
+            if symbols:
+                try:
+                    tech_res = (
+                        sb.from_("stock_technical_indicators")
+                        .select("symbol, close, change_pct, date")
+                        .in_("symbol", symbols)
+                        .order("date", desc=True)
+                        .limit(len(symbols) * 3)
+                        .execute()
+                    )
+                    for row in tech_res.data or []:
+                        s = str(row.get("symbol", "")).upper()
+                        if s and s not in price_map:
+                            price_map[s] = _safe_float(row.get("close"))
+                            change_map[s] = _safe_float(row.get("change_pct"))
+                except Exception:
+                    pass
+
+                missing = [s for s in symbols if s not in price_map]
+                if missing:
+                    try:
+                        sp_res = (
+                            sb.from_("stock_prices")
+                            .select("symbol, close, change_pct, date")
+                            .in_("symbol", missing)
+                            .order("date", desc=True)
+                            .limit(len(missing) * 3)
+                            .execute()
+                        )
+                        for row in sp_res.data or []:
+                            s = str(row.get("symbol", "")).upper()
+                            if s and s not in price_map:
+                                price_map[s] = _safe_float(row.get("close"))
+                                change_map[s] = _safe_float(row.get("change_pct"))
+                    except Exception:
+                        pass
+
+            enriched = []
+            for p in holdings:
+                s = str(p.get("symbol", "")).upper()
+                qty = _safe_float(p.get("quantity"))
+                entry = _safe_float(p.get("entry_price"))
+                last_price = price_map.get(s)
+                change_pct = change_map.get(s)
+
+                valid_entry = entry is not None and entry > 0
+                cost_basis = (qty * entry) if (qty is not None and valid_entry) else None
+                market_value = (qty * last_price) if (qty is not None and last_price is not None) else None
+                profit_value = (market_value - cost_basis) if (cost_basis is not None and market_value is not None) else None
+                profit_pct = ((profit_value / cost_basis) * 100) if (cost_basis and cost_basis > 0 and profit_value is not None) else None
+
+                enriched.append({
+                    "id": p.get("id"),
+                    "symbol": s,
+                    "name": p.get("name") or s,
+                    "quantity": qty,
+                    "entry_price": entry,
+                    "last_price": last_price,
+                    "change_pct": change_pct,
+                    "market_value": round(market_value, 2) if market_value is not None else None,
+                    "cost_basis": round(cost_basis, 2) if cost_basis is not None else None,
+                    "profit_value": round(profit_value, 2) if profit_value is not None else None,
+                    "profit_pct": round(profit_pct, 2) if profit_pct is not None else None,
+                    "added_at": p.get("added_at"),
+                })
+
+            has_unknown_cost = any(p["cost_basis"] is None for p in enriched)
+            total_cost = None if has_unknown_cost else sum(p["cost_basis"] or 0 for p in enriched)
+            has_unknown_val = any(p["market_value"] is None for p in enriched)
+            total_value = None if has_unknown_val else sum(p["market_value"] or 0 for p in enriched)
+            total_profit = (total_value - total_cost) if (total_cost is not None and total_value is not None) else None
+            total_profit_pct = ((total_profit / total_cost) * 100) if (total_cost and total_cost > 0 and total_profit is not None) else None
+            equity = (total_value + cash) if total_value is not None else cash
+
             return {
                 "status": "success",
                 "operation": "view",
-                "positions_count": len(positions),
-                "positions": positions,
+                "message": f"محفظتك تحتوي على {len(enriched)} سهم.",
+                "positions_count": len(enriched),
+                "positions": enriched,
+                "cash_balance": round(cash, 2),
+                "totals": {
+                    "positions_count": len(enriched),
+                    "cost_basis": round(total_cost, 2) if total_cost is not None else None,
+                    "market_value": round(total_value, 2) if total_value is not None else None,
+                    "profit_value": round(total_profit, 2) if total_profit is not None else None,
+                    "profit_pct": round(total_profit_pct, 2) if total_profit_pct is not None else None,
+                    "equity": round(equity, 2),
+                },
             }
         except Exception as e:
             return {"status": "error", "message": f"تعذر استرجاع المحفظة: {str(e)}"}
 
     # Write operations require explicit intent in user's prompt (anti-injection guard)
-    write_intent_patterns = r"(احفظ|سجل|اشتريت|شريت|ضف|اضف|بيع|بعت|احذف|امسح|عدل)"
+    write_intent_patterns = r"(احفظ|سجل|اشتريت|شريت|ضف|اضف|بيع|بعت|احذف|امسح|عدل|عدلي|غير|حدث)"
     if not re.search(write_intent_patterns, user_prompt):
         return {
             "status": "blocked",
@@ -794,40 +918,136 @@ def _sync_manage_portfolio(
     if not clean_sym:
         return {"status": "error", "message": "رمز السهم مطلوب لإجراء تعديل المحفظة."}
 
-    # Execute view first to modify in place
     try:
-        res = sb.from_("profiles").select("portfolio").eq("id", user_id).limit(1).execute()
-        current_portfolio = res.data[0].get("portfolio", []) if res.data else []
+        res = (
+            sb.from_("positions")
+            .select("id, symbol, name, quantity, entry_price, status")
+            .eq("user_id", user_id)
+            .eq("symbol", clean_sym)
+            .eq("status", "open")
+            .limit(1)
+            .execute()
+        )
+        existing = res.data[0] if res.data else None
 
-        if op in ("add", "update"):
-            # Update existing or append
-            found = False
-            for p in current_portfolio:
-                if _normalize_symbol(p.get("symbol")) == clean_sym:
-                    if quantity is not None:
-                        p["quantity"] = quantity
-                    if price is not None:
-                        p["average_price"] = price
-                    found = True
-                    break
-            if not found:
-                current_portfolio.append({
+        if op in ("add", "buy"):
+            if existing:
+                old_qty = _safe_float(existing.get("quantity")) or 0.0
+                add_qty = _safe_float(quantity) or 0.0
+                new_qty = old_qty + add_qty
+                old_entry = _safe_float(existing.get("entry_price"))
+                new_entry = _safe_float(price)
+                if old_entry and new_entry and new_qty > 0:
+                    avg_entry = ((old_entry * old_qty) + (new_entry * add_qty)) / new_qty
+                else:
+                    avg_entry = new_entry if new_entry is not None else old_entry
+                sb.from_("positions").update({
+                    "quantity": new_qty,
+                    "entry_price": round(avg_entry, 4) if avg_entry is not None else None,
+                }).eq("id", existing["id"]).execute()
+                msg = f"تم بنجاح تحديث سهم {clean_sym}: إجمالي الرصيد الآن {new_qty} سهم بمتوسط سعر {round(avg_entry, 2) if avg_entry else '—'} ج.م."
+            else:
+                stock_name = clean_sym
+                try:
+                    s_res = sb.from_("stocks").select("name_ar, name").eq("symbol", clean_sym).limit(1).execute()
+                    if s_res.data:
+                        stock_name = s_res.data[0].get("name_ar") or s_res.data[0].get("name") or clean_sym
+                except Exception:
+                    pass
+                row = {
+                    "user_id": user_id,
                     "symbol": clean_sym,
+                    "name": stock_name,
                     "quantity": quantity or 0,
-                    "average_price": price or 0,
-                })
+                    "entry_price": price,
+                    "status": "open",
+                    "source": "chatbot",
+                }
+                try:
+                    sb.from_("positions").insert(row).execute()
+                except Exception as ins_err:
+                    if "source" in str(ins_err).lower() or "enum" in str(ins_err).lower():
+                        row.pop("source", None)
+                        sb.from_("positions").insert(row).execute()
+                    else:
+                        raise
+                msg = f"تم بنجاح إضافة {quantity or 0} سهم من {clean_sym} إلى محفظتك" + (f" بسعر {price} ج.م." if price else ".")
+
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "message": msg,
+            }
+
+        elif op in ("update",):
+            if not existing:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك المفتوحة."}
+            updates = {}
+            if quantity is not None:
+                updates["quantity"] = quantity
+            if price is not None:
+                updates["entry_price"] = price
+            if not updates:
+                return {"status": "error", "message": "يلزم تحديد الكمية أو السعر لتعديل المركز."}
+            sb.from_("positions").update(updates).eq("id", existing["id"]).execute()
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "message": f"تم تعديل مركز سهم {clean_sym} بنجاح.",
+            }
+
         elif op in ("remove", "delete"):
-            current_portfolio = [p for p in current_portfolio if _normalize_symbol(p.get("symbol")) != clean_sym]
+            if not existing:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك."}
+            try:
+                sb.from_("positions").update({"status": "removed"}).eq("id", existing["id"]).execute()
+            except Exception:
+                sb.from_("positions").delete().eq("id", existing["id"]).execute()
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "message": f"تم حذف سهم {clean_sym} من محفظتك بنجاح.",
+            }
 
-        sb.from_("profiles").update({"portfolio": current_portfolio}).eq("id", user_id).execute()
+        elif op in ("sell",):
+            if not existing:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك المفتوحة."}
+            held = _safe_float(existing.get("quantity")) or 0.0
+            sell_qty = _safe_float(quantity) if quantity is not None else held
+            if sell_qty <= 0:
+                return {"status": "error", "message": "كمية البيع يجب أن تكون أكبر من الصفر."}
+            if sell_qty >= held:
+                update_data = {"status": "closed"}
+                if price is not None:
+                    update_data["status_price"] = price
+                sb.from_("positions").update(update_data).eq("id", existing["id"]).execute()
+                msg = f"تم تسجيل بيع كامل رصيد سهم {clean_sym} ({held} سهم)."
+            else:
+                rem = held - sell_qty
+                sb.from_("positions").update({"quantity": rem}).eq("id", existing["id"]).execute()
+                msg = f"تم تسجيل بيع {sell_qty} سهم من {clean_sym}، والمتبقي {rem} سهم."
 
-        return {
-            "status": "success",
-            "operation": op,
-            "symbol": clean_sym,
-            "message": f"تم تحديث مركز سهم {clean_sym} في محفظتك بنجاح.",
-            "positions_count": len(current_portfolio),
-        }
+            # Update cash if price provided
+            if price and price > 0:
+                proceeds = sell_qty * price
+                try:
+                    p_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
+                    current_cash = _safe_float(p_res.data[0].get("cash_balance")) or 0.0 if p_res.data else 0.0
+                    sb.from_("profiles").update({"cash_balance": current_cash + proceeds}).eq("id", user_id).execute()
+                except Exception:
+                    pass
+
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "message": msg,
+            }
+        else:
+            return {"status": "error", "message": f"العملية {op} غير مدعومة."}
     except Exception as e:
         return {"status": "error", "message": f"تعذر تحديث المحفظة: {str(e)}"}
 
@@ -982,6 +1202,60 @@ BENCHMARK_FIXTURES: Dict[str, Any] = {
         "news": [
             {"title": "نتائج أعمال قوية ونمو أرباح قياسي", "date": "اليوم", "impact": "إيجابي"}
         ]
+    },
+    "manage_portfolio": {
+        "status": "success",
+        "operation": "view",
+        "message": "محفظتك تحتوي على 2 سهم.",
+        "positions_count": 2,
+        "positions": [
+            {
+                "id": "pos_1",
+                "symbol": "COMI",
+                "name": "البنك التجاري الدولي",
+                "quantity": 500,
+                "entry_price": 125.0,
+                "last_price": 129.50,
+                "change_pct": 1.25,
+                "market_value": 64750.0,
+                "cost_basis": 62500.0,
+                "profit_value": 2250.0,
+                "profit_pct": 3.6,
+            },
+            {
+                "id": "pos_2",
+                "symbol": "FWRY",
+                "name": "فوري لتكنولوجيا البنوك",
+                "quantity": 2000,
+                "entry_price": 7.50,
+                "last_price": 7.85,
+                "change_pct": 2.10,
+                "market_value": 15700.0,
+                "cost_basis": 15000.0,
+                "profit_value": 700.0,
+                "profit_pct": 4.67,
+            },
+        ],
+        "cash_balance": 25000.0,
+        "totals": {
+            "positions_count": 2,
+            "cost_basis": 77500.0,
+            "market_value": 80450.0,
+            "profit_value": 2950.0,
+            "profit_pct": 3.81,
+            "equity": 105450.0,
+        },
+    },
+    "calculate_position": {
+        "status": "success",
+        "symbol": "COMI",
+        "quantity": 500,
+        "entry_price": 125.0,
+        "close_price": 129.50,
+        "total_cost": 62500.0,
+        "current_market_value": 64750.0,
+        "profit_loss_egp": 2250.0,
+        "profit_loss_pct": 3.6,
     }
 }
 
