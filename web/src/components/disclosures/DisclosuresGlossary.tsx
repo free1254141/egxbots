@@ -123,7 +123,10 @@ export default function DisclosuresGlossary({ isAr }: DisclosuresGlossaryProps) 
   ];
 
   return (
-    <section className="mt-12 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-5 sm:p-7 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] text-black dark:text-white transition-colors">
+    <section
+      id="glossary"
+      className="mt-12 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-5 sm:p-7 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] text-black dark:text-white transition-colors"
+    >
       {/* Glossary Header with Toggle */}
       <div className="flex items-center justify-between border-b-4 border-black dark:border-white pb-4 mb-6">
         <div className="flex items-center gap-3">

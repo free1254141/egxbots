@@ -1,8 +1,7 @@
 {
   "enabled": true,
-  "morning_run_time": "10:15",
-  "midday_run_time": "12:15",
   "run_time": "17:00",
+  "midday_run_time": "12:15",
   "active_days": [
     0,
     1,

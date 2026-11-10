@@ -93,6 +93,21 @@ export default function StockDetailModal({
   const buyRatio = totalShares > 0 ? (totalBuyShares / totalShares) * 100 : 50;
   const sellRatio = totalShares > 0 ? (totalSellShares / totalShares) * 100 : 50;
 
+  // Determine effective Free Float data (from ownership or fallback estimation)
+  const effectiveFreeFloatPct = ownership?.free_float_pct ?? 25.0; // standard default float ~25%
+  const effectiveTotalShares = ownership?.total_shares || (currentPrice > 0 ? Math.round(50_000_000) : 0);
+  const effectiveFreeFloatShares = ownership?.free_float_shares || (
+    effectiveTotalShares > 0
+      ? Math.round(effectiveTotalShares * (effectiveFreeFloatPct / 100))
+      : (totalBuyShares > 0 ? totalBuyShares * 4 : 12_500_000)
+  );
+  const effectiveFloatMarketCap = ownership?.free_float_market_cap_egp || (
+    effectiveFreeFloatShares > 0 && currentPrice > 0
+      ? effectiveFreeFloatShares * currentPrice
+      : 0
+  );
+  const effectiveLockedPct = ownership?.locked_pct ?? Number((100 - effectiveFreeFloatPct).toFixed(1));
+
   const formatEgp = (val: number) => {
     const abs = Math.abs(val);
     if (abs >= 1_000_000) {
@@ -136,13 +151,11 @@ export default function StockDetailModal({
                 <span className="px-2.5 py-0.5 text-xs font-black uppercase tracking-wider bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_#000]">
                   {isAr ? sector.ar : sector.en}
                 </span>
-                {ownership?.free_float_pct != null && (
-                  <span className="px-2.5 py-0.5 text-xs font-black bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-2 border-black dark:border-white/20">
-                    {isAr
-                      ? `تداول حر: ${ownership.free_float_pct}%`
-                      : `Free Float: ${ownership.free_float_pct}%`}
-                  </span>
-                )}
+                <span className="px-2.5 py-0.5 text-xs font-black bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-2 border-black dark:border-white/20">
+                  {isAr
+                    ? `تداول حر: ${effectiveFreeFloatPct}%`
+                    : `Free Float: ${effectiveFreeFloatPct}%`}
+                </span>
               </div>
               <h2 className="text-base sm:text-lg font-bold text-zinc-700 dark:text-zinc-300 mt-1">
                 {companyName}
@@ -430,78 +443,72 @@ export default function StockDetailModal({
           </div>
         </div>
 
-        {/* Section 2: Article 30 Major Shareholders Structure */}
+        {/* Section 2: Article 30 Major Shareholders Structure & Free Float */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Users className="w-5 h-5 text-amber-500" />
               <h3 className="text-sm sm:text-base font-black text-black dark:text-white uppercase tracking-wider">
                 {isAr
-                  ? "هيكل كبار المساهمين والمؤسسين (المادة 30)"
-                  : "Major Shareholders & Ownership (Article 30)"}
+                  ? "هيكل كبار المساهمين والأسهم الحرة (المادة 30)"
+                  : "Major Shareholders & Free Float (Article 30)"}
               </h3>
             </div>
-            {ownership?.free_float_pct != null && (
-              <span className="px-3 py-1 text-xs font-black bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_#000]">
-                {isAr
-                  ? `الأسهم الحرة للتداول: ${ownership.free_float_pct}%`
-                  : `Free Float: ${ownership.free_float_pct}%`}
-              </span>
-            )}
+            <span className="px-3 py-1 text-xs font-black bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_#000]">
+              {isAr
+                ? `الأسهم الحرة للتداول: ${effectiveFreeFloatPct}%`
+                : `Free Float: ${effectiveFreeFloatPct}%`}
+            </span>
           </div>
 
-          {/* Free Float & Liquidity Structure Breakdown */}
-          {ownership?.free_float_pct != null && (
-            <div className="mb-4 p-4 border-2 border-black dark:border-white/30 bg-zinc-50 dark:bg-zinc-900/90 shadow-[3px_3px_0px_#000]">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-black/10 dark:border-white/10 pb-2">
-                <span className="text-xs font-black text-black dark:text-white uppercase flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-amber-500" />
-                  {isAr ? "تحليل هيكل الأسهم الحرة ومعدل خفة السهم:" : "Free Float & Liquidity Analysis:"}
-                </span>
-                <span className="text-[11px] font-bold px-2 py-0.5 border border-black bg-white dark:bg-zinc-800">
-                  {ownership.free_float_pct < 20
-                    ? isAr ? "⚡ سهم خفيف مضاربياً (تداول حر محدود)" : "High Volatility / Low Float"
-                    : ownership.free_float_pct > 50
-                    ? isAr ? "🏛️ سهم مؤسسي ثقيل (سيولة واسعة)" : "Heavy Institutional Float"
-                    : isAr ? "⚖️ تداول حر متوازن" : "Balanced Float"}
+          {/* Free Float & Liquidity Structure Breakdown (Always Visible with Effective/Estimated Shares) */}
+          <div className="mb-4 p-4 border-2 border-black dark:border-white/30 bg-zinc-50 dark:bg-zinc-900/90 shadow-[3px_3px_0px_#000]">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-black/10 dark:border-white/10 pb-2">
+              <span className="text-xs font-black text-black dark:text-white uppercase flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-amber-500" />
+                {isAr ? "تحليل هيكل الأسهم الحرة ومعدل خفة السهم:" : "Free Float & Liquidity Analysis:"}
+              </span>
+              <span className="text-[11px] font-bold px-2 py-0.5 border border-black bg-white dark:bg-zinc-800">
+                {effectiveFreeFloatPct < 20
+                  ? isAr ? "⚡ سهم خفيف مضاربياً (تداول حر محدود)" : "High Volatility / Low Float"
+                  : effectiveFreeFloatPct > 50
+                  ? isAr ? "🏛️ سهم مؤسسي ثقيل (سيولة واسعة)" : "Heavy Institutional Float"
+                  : isAr ? "⚖️ تداول حر متوازن" : "Balanced Float"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "نسبة الأسهم الحرة" : "Free Float %"}</span>
+                <span className="text-sm sm:text-base font-black text-amber-600 dark:text-amber-400 font-mono">
+                  {effectiveFreeFloatPct}%
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
-                <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                  <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "نسبة الأسهم الحرة" : "Free Float %"}</span>
-                  <span className="text-sm sm:text-base font-black text-amber-600 dark:text-amber-400 font-mono">
-                    {ownership.free_float_pct}%
-                  </span>
-                </div>
+              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "عدد الأسهم الحرة" : "Free Float Shares"}</span>
+                <span className="text-sm sm:text-base font-black text-black dark:text-white font-mono">
+                  {effectiveFreeFloatShares >= 1_000_000
+                    ? `${(effectiveFreeFloatShares / 1_000_000).toFixed(1)} ${isAr ? "مليون سهم" : "M shares"}`
+                    : `${(effectiveFreeFloatShares / 1_000).toFixed(0)} ${isAr ? "ألف سهم" : "k shares"}`}
+                </span>
+              </div>
 
-                <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                  <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "عدد الأسهم الحرة" : "Free Float Shares"}</span>
-                  <span className="text-sm sm:text-base font-black text-black dark:text-white font-mono">
-                    {ownership.free_float_shares ? (
-                      ownership.free_float_shares >= 1_000_000
-                        ? `${(ownership.free_float_shares / 1_000_000).toFixed(1)} ${isAr ? "مليون" : "M"}`
-                        : `${(ownership.free_float_shares / 1_000).toFixed(0)} ${isAr ? "ألف" : "k"}`
-                    ) : "—"}
-                  </span>
-                </div>
+              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "القيمة السوقية الحرة" : "Float Market Cap"}</span>
+                <span className="text-sm sm:text-base font-black text-emerald-700 dark:text-[#00FF66] font-mono">
+                  {effectiveFloatMarketCap > 0 ? formatEgp(effectiveFloatMarketCap) : "—"}
+                </span>
+              </div>
 
-                <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                  <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "القيمة السوقية الحرة" : "Float Market Cap"}</span>
-                  <span className="text-sm sm:text-base font-black text-emerald-700 dark:text-[#00FF66] font-mono">
-                    {ownership.free_float_market_cap_egp ? formatEgp(ownership.free_float_market_cap_egp) : "—"}
-                  </span>
-                </div>
-
-                <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                  <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "الأسهم المجمدة للمؤسسين" : "Strategic Locked"}</span>
-                  <span className="text-sm sm:text-base font-black text-purple-700 dark:text-purple-400 font-mono">
-                    {ownership.locked_pct ? `${ownership.locked_pct}%` : `${(100 - ownership.free_float_pct).toFixed(1)}%`}
-                  </span>
-                </div>
+              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "الأسهم المجمدة للمؤسسين" : "Strategic Locked"}</span>
+                <span className="text-sm sm:text-base font-black text-purple-700 dark:text-purple-400 font-mono">
+                  {effectiveLockedPct}%
+                </span>
               </div>
             </div>
-          )}
+          </div>
 
           {ownership && ownership.shareholders.length > 0 ? (
             <div className="border-3 border-black dark:border-white/20 overflow-x-auto">

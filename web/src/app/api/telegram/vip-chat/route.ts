@@ -619,34 +619,39 @@ export async function POST(req: NextRequest) {
             },
         ];
 
-        // Persist updated state, history, and daily_count in telegram_vip_chat_state
-        await supabase.from("telegram_vip_chat_state").upsert(
-            {
-                telegram_user_id: telegramUserId,
-                telegram_username: telegramUsername,
-                linked_user_id: userInfo.linkedUserId,
-                quota_date: todayCairo,
-                daily_count:
-                    userInfo.stateRow?.quota_date === todayCairo
-                        ? Number(userInfo.stateRow?.daily_count || 0) + 1
-                        : 1,
-                session_state: updatedSessionState,
-                session_summary: (result as any).summary_state || sessionSummary || {},
-                chat_history: updatedHistory,
-                pending_prompt: null,
-                updated_at: new Date().toISOString(),
-            },
-            { onConflict: "telegram_user_id" }
-        );
+        // Persist state & audit logs in parallel without blocking response
+        const roomPrefix =
+            chatSource === "telegram_private"
+                ? "🔒 [بوت تليجرام الخاص]"
+                : "📢 [تليجرام التوبيك العام]";
+        const commonMeta = {
+            chat_source: chatSource,
+            telegram_user_id: telegramUserId,
+            telegram_username: telegramUsername,
+            display_name: userInfo.displayName,
+            linked_user_id: userInfo.linkedUserId,
+        };
 
-        // Permanently log ALL Telegram messages (both linked and unlinked users, both Private Bot and Public Topic)
-        // in ai_chat_sessions & ai_chat_messages so they are always retained in Admin Logs even if the user deletes the bot.
-        try {
-            const roomPrefix =
-                chatSource === "telegram_private"
-                    ? "🔒 [بوت تليجرام الخاص]"
-                    : "📢 [تليجرام التوبيك العام]";
-            await supabase.from("ai_chat_sessions").upsert(
+        const backgroundTasks = [
+            supabase.from("telegram_vip_chat_state").upsert(
+                {
+                    telegram_user_id: telegramUserId,
+                    telegram_username: telegramUsername,
+                    linked_user_id: userInfo.linkedUserId,
+                    quota_date: todayCairo,
+                    daily_count:
+                        userInfo.stateRow?.quota_date === todayCairo
+                            ? Number(userInfo.stateRow?.daily_count || 0) + 1
+                            : 1,
+                    session_state: updatedSessionState,
+                    session_summary: (result as any).summary_state || sessionSummary || {},
+                    chat_history: updatedHistory,
+                    pending_prompt: null,
+                    updated_at: new Date().toISOString(),
+                },
+                { onConflict: "telegram_user_id" }
+            ),
+            supabase.from("ai_chat_sessions").upsert(
                 {
                     id: sessionId,
                     user_id: auditUserId,
@@ -657,15 +662,8 @@ export async function POST(req: NextRequest) {
                     updated_at: new Date().toISOString(),
                 },
                 { onConflict: "id" }
-            );
-            const commonMeta = {
-                chat_source: chatSource,
-                telegram_user_id: telegramUserId,
-                telegram_username: telegramUsername,
-                display_name: userInfo.displayName,
-                linked_user_id: userInfo.linkedUserId,
-            };
-            await supabase.from("ai_chat_messages").insert([
+            ),
+            supabase.from("ai_chat_messages").insert([
                 {
                     session_id: sessionId,
                     user_id: auditUserId,
@@ -699,10 +697,11 @@ export async function POST(req: NextRequest) {
                     },
                     created_at: new Date().toISOString(),
                 },
-            ]);
-        } catch (logErr) {
-            console.warn("[telegram/vip-chat] Non-fatal session log error:", logErr);
-        }
+            ])
+        ];
+
+        // Await all parallel writes safely with fallback catch
+        await Promise.allSettled(backgroundTasks).catch((err) => console.warn("[vip-chat] background write error:", err));
 
         return NextResponse.json({
             ok: true,

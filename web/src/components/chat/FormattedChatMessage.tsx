@@ -1162,8 +1162,10 @@ function renderTableCell(cellText: string) {
     );
 }
 
-function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function ExportableTable({ headers, rows }: { headers?: string[]; rows?: string[][] }) {
     const [copied, setCopied] = useState(false);
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const safeHeaders = Array.isArray(headers) ? headers : [];
     return (
         <div className="my-3.5 border border-zinc-200 dark:border-white/20 rounded-xl overflow-hidden bg-white dark:bg-black shadow-md max-w-full">
             <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-gradient-to-r from-zinc-50 to-zinc-100 dark:from-black dark:to-zinc-950 border-b border-zinc-200 dark:border-white/20 min-w-0">
@@ -1175,12 +1177,12 @@ function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][
                         جدول البيانات والتحليل
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-zinc-200 dark:bg-black text-zinc-600 dark:text-zinc-200 dark:border dark:border-white/20 font-bold">
-                        {rows.length} {rows.length === 1 ? "صف" : rows.length === 2 ? "صفين" : rows.length <= 10 ? "صفوف" : "صف"}
+                        {safeRows.length} {safeRows.length === 1 ? "صف" : safeRows.length === 2 ? "صفين" : safeRows.length <= 10 ? "صفوف" : "صف"}
                     </span>
                 </div>
                 <button
                     onClick={() => {
-                        exportTableToExcel(headers, rows);
+                        exportTableToExcel(safeHeaders, safeRows);
                         setCopied(true);
                         setTimeout(() => setCopied(false), 2000);
                     }}
@@ -1196,7 +1198,7 @@ function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][
                 <table className="w-full text-right border-collapse text-xs">
                     <thead>
                         <tr className="bg-zinc-100/90 dark:bg-black text-zinc-900 dark:text-white border-b border-zinc-200 dark:border-white/20">
-                            {headers.map((h, i) => (
+                            {safeHeaders.map((h, i) => (
                                 <th
                                     key={i}
                                     className="px-3 py-2.5 text-[11px] sm:text-xs font-extrabold whitespace-nowrap text-zinc-700 dark:text-zinc-200 border-l border-zinc-200/80 dark:border-white/15 last:border-l-0"
@@ -1207,12 +1209,12 @@ function ExportableTable({ headers, rows }: { headers: string[]; rows: string[][
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200/70 dark:divide-white/10">
-                        {rows.map((row, rIdx) => (
+                        {safeRows.map((row, rIdx) => (
                             <tr
                                 key={rIdx}
                                 className="even:bg-zinc-50/60 dark:even:bg-zinc-950/70 hover:bg-amber-500/5 dark:hover:bg-zinc-900/60 transition-colors"
                             >
-                                {row.map((cell, cIdx) => (
+                                {(Array.isArray(row) ? row : []).map((cell, cIdx) => (
                                     <td
                                         key={cIdx}
                                         className="px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap border-l border-zinc-200/60 dark:border-white/10 last:border-l-0"

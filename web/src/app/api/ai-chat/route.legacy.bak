@@ -1,0 +1,1740 @@
+import { canTraceChat, createDiagnosticTrace } from "@/lib/ai/diagnostic-trace";
+import { NextRequest, NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseClient, getSupabaseServiceClient } from "@/lib/supabase/route-data";
+
+import { loadSessionBundle, loadSessionState, loadSessionSummary, isUuid, updateSessionState, updateSessionSummary, SessionDataBundle } from "@/lib/ai/session";
+import { runPlanner } from "@/lib/ai/planner";
+import { executeTools } from "@/lib/ai/tools";
+import { selectOptimalModel } from "@/lib/ai/router";
+import { AI_CONFIG } from "@/lib/ai/config";
+import { logAiInteraction } from "@/lib/ai/logger";
+
+import { extractExplicitSymbols, runPipeline, runPipelineStream } from "@/lib/ai/pipeline";
+import { sanitizeChartContext } from "@/lib/ai/chart-strategy-tools";
+import { stockStrategyFollowups } from "@/lib/ai/strategy-followups";
+import { detectPortfolioIntent, normalizeArabicIntent } from "@/lib/ai/intent-policy";
+import { analyzeImage } from "@/lib/ai/vision";
+import { retrieveRelevantMemory } from "@/lib/ai/memory";
+import { executeStructuredTools } from "@/lib/ai/tools-v2";
+import { generateV2Response, generateV2Stream } from "@/lib/ai/final-v2";
+import { getDeepSeekApiKey, getExperientialApiKey, getNvidiaApiKeys, isUnlimitedChatUser } from "@/lib/ai/server-secrets";
+import { uploadChatImages } from "@/lib/ai/chat-storage";
+import { createChatMessageTimestamps, orderChatMessages } from "@/lib/ai/chat-order";
+import {
+    buildAnalysisCacheKey,
+    getVipAnalysisCache,
+    personalizeCachedAnalysis,
+    setVipAnalysisCache,
+} from "@/lib/ai/analysis-cache";
+import { extractVoiceAnalysisSpeech, cleanVoiceText, VOICE_NOTE_TTS } from "@/lib/voice-utils";
+import { generateVoiceNoteSpokenScript } from "@/lib/ai/voice-summarizer";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
+export const preferredRegion = "fra1"; // Pin to Frankfurt to avoid cold starts across regions
+
+const VOICE_TTS_BACKEND_URL = (
+    process.env.PYTHON_BACKEND_URL ||
+    process.env.TRADING_SIGNALS_API_URL ||
+    "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
+function prewarmVoiceNoteTts(spokenText: string | null | undefined): void {
+    const clean = (spokenText || "").trim();
+    if (!clean) return;
+    fetch(`${VOICE_TTS_BACKEND_URL}/api/voice/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            text: clean,
+            voice: VOICE_NOTE_TTS.voice,
+            rate: VOICE_NOTE_TTS.rate,
+            pitch: VOICE_NOTE_TTS.pitch,
+        }),
+        signal: AbortSignal.timeout(20_000),
+    })
+        .then((res) => res.arrayBuffer())
+        .catch(() => {});
+}
+
+const BLOCKED_INPUT_PATTERNS = [
+    "system prompt", "ignore previous instructions", "ignore all previous",
+    "developer mode", "jailbreak", "admin_secret_key", "service_role_key",
+    "بيانات سرية للمستخدمين", "كلمة سر السيرفر", "اختراق الموقع", "اختراق السيرفر", "اختراق النظام"
+];
+
+function filterInput(text: string): boolean {
+    const lowered = text.toLowerCase();
+    return !BLOCKED_INPUT_PATTERNS.some(pattern => lowered.includes(pattern));
+}
+
+function filterOutput(response: string): string {
+    const blockedOutputRegex = /(اشتري الآن|شراء فوراً|شراء الان|أرباح مؤكدة|guaranteed profits|buy now)/i;
+    const cleanResponse = response
+        .replace(/<environment_details>[\s\S]*?<\/environment_details>/gi, "")
+        .replace(/<\s*environment_details\s*>[\s\S]*?(?:<\s*\/\s*environment_details\s*>|$)/gi, "")
+        .replace(/\[?\s*environment_details\s*\]?[\s\S]*$/gi, "")
+        .replace(/environment_details[\s\S]*$/gi, "")
+        .replace(/Current time:\s*[^\n]+/gi, "")
+        .replace(/Working directory:\s*[^\n]+/gi, "")
+        .replace(/Workspace root folder:\s*[^\n]+/gi, "")
+        .replace(/\[?environment_details\]?[\s\S]*$/gi, "")
+        .trim();
+    if (blockedOutputRegex.test(cleanResponse)) {
+        return "أنا أداة تحليلية ذكية، ولا يمكنني تقديم نصائح مالية أو توصيات شراء مباشرة. يمكنك مراجعة تقييم الأسهم في صفحة الماسح الذكي لمساعدتك في اتخاذ القرار.";
+    }
+    return cleanResponse;
+}
+
+function filterOutputBlocks(text: string): boolean {
+    const blockedPattern = /(اشتري الآن|شراء فوراً|شراء الان|أرباح مؤكدة|guaranteed profits|buy now)/i;
+    return blockedPattern.test(text);
+}
+
+function isPotentialBlockedPrefix(text: string): boolean {
+    const normalized = text.toLowerCase()
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ة/g, "ه")
+        .trim();
+
+    const lastPart = normalized.slice(-20);
+    const blockedPrefixes = [
+        "اشتري", "شراء", "مضمون", "ضمان", "ارباح", "guar", "assur", "buy"
+    ];
+
+    for (const pref of blockedPrefixes) {
+        for (let i = 1; i <= Math.min(lastPart.length, pref.length); i++) {
+            const suffix = lastPart.slice(-i);
+            if (pref.startsWith(suffix)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function isPotentialEnvironmentPrefix(text: string): boolean {
+    const suffix = text.toLowerCase().slice(-24);
+    const marker = "<environment_details>";
+    for (let length = 1; length <= marker.length; length++) {
+        if (suffix.endsWith(marker.slice(0, length))) return true;
+    }
+    const plainMarker = "environment_details";
+    for (let length = 1; length <= plainMarker.length; length++) if (suffix.endsWith(plainMarker.slice(0, length))) return true;
+    return false;
+}
+
+function stripEnvironmentMetadata(text: string): string {
+    const markerIndex = text.toLowerCase().indexOf("environment_details");
+    if (markerIndex >= 0) text = text.slice(0, markerIndex).replace(/<\s*$/g, "");
+    const clean = text
+        .replace(/<\s*environment_details[^>]*>[\s\S]*$/gi, "")
+        .replace(/<\s*environment_details[\s\S]*$/gi, "")
+        .replace(/<environment_details>[\s\S]*?<\/environment_details>/gi, "")
+        .replace(/<environment_details[\s\S]*$/gi, "")
+        .replace(/\[?environment_details\]?[\s\S]*$/gi, "")
+        .replace(/Current time:\s*[^\n]+/gi, "")
+        .replace(/Working directory:\s*[^\n]+/gi, "")
+        .replace(/Workspace root folder:\s*[^\n]+/gi, "")
+        .replace(/<\/?environment_details>/gi, "");
+    return /environment_details|Current time:|Working directory:|Workspace root folder:/i.test(clean) ? "" : clean;
+}
+
+function containsEnvironmentMetadata(text: unknown): boolean {
+    return /environment_details|Current time:|Working directory:|Workspace root folder:/i.test(String(text || ""));
+}
+
+function hasPartialEnvironmentMetadata(text: string): boolean {
+    const normalized = text.toLowerCase();
+    return /(?:<\s*environment_details?|environment_detail|current\s*time|working\s*directory|workspace\s*root)/i.test(normalized.slice(-80));
+}
+
+function sanitizeUserMessage(text: string): string {
+    return stripEnvironmentMetadata(text).replace(/\s{2,}/g, " ").trim();
+}
+
+// The latency_ms / metadata columns ship with migrations
+// 20260813_ai_chat_messages_latency_ms.sql and 20260906_ai_chat_messages_metadata.sql.
+// Until those migrations are applied to the live DB, any insert/select mentioning
+// the columns fails with a PostgREST schema error — retry without the columns so chat
+// logging and the admin history keep working either way.
+function isMissingColumnError(error: any): boolean {
+    const text = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""}`;
+    return /42703|PGRST204|does not exist/i.test(text);
+}
+
+async function insertChatMessages(supabase: any, rows: any[]): Promise<void> {
+    const { error } = await supabase.from("ai_chat_messages").insert(rows);
+    if (!error) return;
+    if (isMissingColumnError(error)) {
+        const { error: retryError } = await supabase.from("ai_chat_messages").insert(
+            rows.map((row) => { const { latency_ms, metadata, ...rest } = row; return rest; })
+        );
+        if (retryError) console.error("Failed to log chat messages to DB:", retryError);
+        else console.warn("[ai-chat] latency_ms/metadata columns not applied yet — messages logged without them (run supabase/migrations/20260813_ai_chat_messages_latency_ms.sql and 20260906_ai_chat_messages_metadata.sql)");
+    } else {
+        console.error("Failed to log chat messages to DB:", error);
+    }
+}
+
+function classifyChatError(error: unknown): string {
+    const text = String((error as any)?.message || error || "");
+    if (/supabase|postgrest|database|PGRST|23505|42P01/i.test(text)) return "supabase_error";
+    if (/timeout|abort|deadline/i.test(text)) return "timeout";
+    if (/vision|image|nvidia|model/i.test(text)) return "vision_error";
+    if (/quota|limit/i.test(text)) return "quota_error";
+    return "chat_error";
+}
+
+async function recordChatError(
+    supabase: any,
+    input: {
+        sessionId?: string | null;
+        userId: string;
+        clientMessageId?: string | null;
+        correlationId: string;
+        phase: string;
+        error: unknown;
+        latencyMs?: number;
+        imageUrl?: string | null;
+    }
+): Promise<void> {
+    const safeType = classifyChatError(input.error);
+    const safeMessage = "تعذر إكمال الطلب حاليًا. حاول مرة أخرى.";
+    const metadata = { error: true, error_type: safeType, phase: input.phase, correlation_id: input.correlationId };
+    console.error(`[AI CHAT ERROR] correlation=${input.correlationId} phase=${input.phase} type=${safeType}`, input.error);
+    if (!input.sessionId) return;
+    try {
+        await insertChatMessages(supabase, [{
+            session_id: input.sessionId,
+            user_id: input.userId,
+            role: "error",
+            content: `${safeMessage} [${safeType}/${input.phase}/${input.correlationId}]`,
+            client_message_id: null,
+            image_url: input.imageUrl || null,
+            latency_ms: input.latencyMs ?? null,
+            metadata,
+            created_at: new Date().toISOString(),
+        }]);
+    } catch (loggingError) {
+        console.error("Failed to persist chatbot error record:", loggingError);
+    }
+}
+
+/**
+ * Extract data provenance from pipeline tool results so the admin chat tab can
+ * show whether the LLM reply was built from real-time market data or from the
+ * Supabase database, and which data date the decision was based on.
+ * Also carries the Excel tables the customer saw, so the admin tab renders the
+ * exact same view.
+ */
+function extractProvenanceFromToolResults(results: any[], tables?: any[]): Record<string, any> | null {
+    if (!Array.isArray(results) || results.length === 0) {
+        if (!Array.isArray(tables) || tables.length === 0) return null;
+    }
+    let dataSource: string | null = null;
+    let dataDate: string | null = null;
+    let quoteFetchedAt: string | null = null;
+    const toolSources: Record<string, string> = {};
+    for (const result of results || []) {
+        if (!result || !result.tool) continue;
+        const source = String(result.source || "unknown");
+        toolSources[result.tool] = source;
+        if (result.tool === "get_live_quote" && result.data?.stocks?.some((row: any) => row.live_quote_available)) {
+            dataSource = "provider_snapshot";
+            for (const row of result.data.stocks) if (row.live_quote_available && row.fetched_at && (!quoteFetchedAt || row.fetched_at > quoteFetchedAt)) quoteFetchedAt = row.fetched_at;
+        }
+        // TradingView live-session refresh marks the reply as real-time
+        if (source === "live_session" && !dataSource) dataSource = "realtime";
+        const time = String(result.data_time || "");
+        if (time && (!dataDate || time > dataDate)) dataDate = time;
+    }
+    if (!dataSource) dataSource = "supabase";
+    const provenance: Record<string, any> = {
+        data_source: dataSource,
+        data_date: dataDate,
+        tool_sources: toolSources,
+        ...(quoteFetchedAt ? { quote_fetched_at: quoteFetchedAt, quote_trade_time: null, provider_delay: "unknown" } : {}),
+    };
+    if (Array.isArray(tables) && tables.length > 0) {
+        // Keep the payload bounded so pathological scans don't bloat the row
+        const MAX_TABLES_BYTES = 256 * 1024;
+        const trimmed = tables.map((t: any) => ({
+            id: String(t?.id ?? `table_${Math.random().toString(36).slice(2, 8)}`),
+            title: String(t?.title ?? ""),
+            headers: Array.isArray(t?.headers) ? t.headers.map(String) : [],
+            rows: Array.isArray(t?.rows) ? t.rows.map((r: any) => (Array.isArray(r) ? r.map((c: any) => String(c ?? "")) : [])) : [],
+            source: String(t?.source ?? ""),
+            data_time: String(t?.data_time ?? ""),
+        }));
+        try {
+            const encoded = JSON.stringify(trimmed);
+            if (encoded.length <= MAX_TABLES_BYTES) {
+                provenance.tables = trimmed;
+            }
+        } catch {}
+    }
+    return provenance;
+}
+
+function generateSuggestedButtons(plannerResult: any, sessionState: any): string[] {
+    if (plannerResult?.clarification_needed && Array.isArray(plannerResult?.clarification_options)) {
+        return plannerResult.clarification_options;
+    }
+    const isRecQuery = Array.isArray(plannerResult?.tools) && plannerResult.tools.includes("get_recommendations");
+    if (isRecQuery) {
+        const filter = plannerResult?.entities?.recommendation_filter;
+        if (filter === "this_week") {
+            return [
+                "عايز توصيات الاسبوع اللى فات",
+                "هات كل التوصيات المفتوحه",
+                "أقوى الأسهم النهارده"
+            ];
+        }
+        if (filter === "last_week") {
+            return [
+                "عايز توصيات الاسبوع الحالى",
+                "هات كل التوصيات المفتوحه",
+                "أقوى الأسهم النهارده"
+            ];
+        }
+        return [
+            "عايز توصيات الاسبوع الحالى",
+            "عايز توصيات الاسبوع اللى فات",
+            "أقوى الأسهم النهارده"
+        ];
+    }
+    if (plannerResult?.intent === "sector_analysis") {
+        const sec = plannerResult?.entities?.sector;
+        return [
+            sec ? `أقوى أسهم قطاع ${sec}` : "أقوى قطاع بالسيولة",
+            "هات كل التوصيات المفتوحه",
+            "أقوى الأسهم النهارده"
+        ];
+    }
+    if (plannerResult?.intent === "general_chat" || plannerResult?.intent === "market_summary") {
+        return [
+            "هات كل التوصيات المفتوحه",
+            "أقوى الأسهم النهارده",
+            "مقارنة COMI و EAST"
+        ];
+    }
+    const symbols = plannerResult?.entities?.symbols || [];
+    if (symbols.length > 0) {
+        const sym = symbols[0];
+        return [
+            sym === "COMI" ? `مقارنة ${sym} مع EAST` : `مقارنة ${sym} مع COMI`,
+            `أخبار ${sym} اليوم`,
+            `تحليل السيولة لـ ${sym}`
+        ];
+    }
+    const fallbackSymbols = sessionState?.last_symbols || [];
+    if (fallbackSymbols.length > 0) {
+        const sym = fallbackSymbols[0];
+        return [
+            sym === "COMI" ? `مقارنة ${sym} مع EAST` : `مقارنة ${sym} مع COMI`,
+            `أخبار ${sym} اليوم`,
+            `تحليل السيولة لـ ${sym}`
+        ];
+    }
+    return [
+        "أقوى الأسهم النهارده",
+        "مقارنة COMI و EAST",
+        "البنوك حالتها إيه؟"
+    ];
+}
+
+function sanitizeSuggestedButtons(buttons: unknown): string[] | undefined {
+    if (!Array.isArray(buttons)) return undefined;
+    const clean = buttons.map(button => stripEnvironmentMetadata(String(button)).replace(/\s*✅\s*تحليل EGX Bots مبني على بيانات حية[^\n]*/gi, "").trim()).filter(Boolean);
+    return clean.length ? clean : undefined;
+}
+
+async function resolveSessionBundleAndHistory(
+    supabase: any,
+    userId: string,
+    inputSessionId: string | null,
+    message: string | null,
+    hasImages: boolean,
+    authClient?: any
+): Promise<{
+    activeSessionId: string;
+    sessionState: any;
+    sessionSummary: any;
+    dbFormattedHistory: any[];
+}> {
+    const client = supabase || authClient;
+    const isGivenValidUuid = Boolean(inputSessionId && isUuid(inputSessionId));
+    const activeSessionId = isGivenValidUuid ? (inputSessionId as string) : crypto.randomUUID();
+
+    let sessionBundlePromise: Promise<SessionDataBundle>;
+    let historyPromise: Promise<any>;
+
+    if (isGivenValidUuid) {
+        // Parallel fetch for existing session: bundle (title, state, summary_state) + history in a single round-trip!
+        sessionBundlePromise = loadSessionBundle(client, activeSessionId, userId);
+        historyPromise = client
+            .from("ai_chat_messages")
+            .select("role, content")
+            .eq("session_id", activeSessionId)
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(30);
+    } else {
+        // Brand new session: no existing history or state
+        sessionBundlePromise = Promise.resolve({
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        });
+        historyPromise = Promise.resolve({ data: [] });
+    }
+
+    let bundle: SessionDataBundle;
+    let historyRes: any;
+    try {
+        const timeoutPromise = new Promise((_, reject) => {
+            const timer = setTimeout(() => reject(new Error("SESSION_BUNDLE_TIMEOUT")), 2500);
+            if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+        });
+        const [b, h] = await Promise.race([
+            Promise.all([sessionBundlePromise, historyPromise]),
+            timeoutPromise
+        ]) as any;
+        bundle = b;
+        historyRes = h;
+    } catch {
+        bundle = {
+            sessionState: { current_symbol: null, last_symbols: [], summary: null, current_sector: null, persisted: false },
+            sessionSummary: null
+        };
+        historyRes = { data: [] };
+    }
+    let sessionState = bundle.sessionState;
+    const sessionSummary = bundle.sessionSummary;
+
+    // Ensure session is persisted in DB if it's new
+    if (!sessionState.persisted) {
+        const sessionTitle = message?.trim().substring(0, 32) || (hasImages ? "تحليل صورة محفظة" : "محادثة جديدة");
+        const insertPayload: any = {
+            id: activeSessionId,
+            title: sessionTitle,
+            user_id: userId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            await client.from("ai_chat_sessions").upsert(insertPayload, { onConflict: "id" });
+            sessionState.persisted = true;
+        } catch (insertError) {
+            console.warn("[resolveSessionBundleAndHistory] Session upsert failed:", insertError);
+        }
+    } else {
+        // Touch session updated_at in the background without awaiting
+        client
+            .from("ai_chat_sessions")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", activeSessionId)
+            .eq("user_id", userId)
+            .then(() => {})
+            .catch(() => {});
+    }
+
+    const rawHistory = Array.isArray(historyRes?.data) ? historyRes.data : [];
+    const dbFormattedHistory = rawHistory
+        .reverse()
+        .map((item: any) => {
+            let contentStr = stripEnvironmentMetadata(String(item.content))
+                .replace(/\s*✅\s*تحليل EGX Bots مبني على بيانات حية[^\n]*/g, "")
+                .trim();
+            if (contentStr.length > 500) {
+                contentStr = contentStr.substring(0, 500) + "...";
+            }
+            return { role: item.role, content: stripEnvironmentMetadata(contentStr) || "تحليل" };
+        });
+
+    return {
+        activeSessionId,
+        sessionState,
+        sessionSummary,
+        dbFormattedHistory
+    };
+}
+
+async function handleSessionResolution(
+    supabase: any,
+    userId: string,
+    inputSessionId: string | null,
+    message: string | null,
+    hasImages: boolean,
+    authClient?: any
+): Promise<string> {
+    const res = await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
+    return res.activeSessionId;
+}
+
+async function persistAutonomousSetting(supabaseClient: any, userId: string, enabled: boolean) {
+    if (!supabaseClient || !userId) return;
+    try {
+        const { data: settingsRow } = await supabaseClient
+            .from("user_settings")
+            .select("app_state")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+        const currentAppState = (settingsRow?.app_state && typeof settingsRow.app_state === "object") ? settingsRow.app_state : {};
+        const newAppState = {
+            ...currentAppState,
+            chat: {
+                ...(currentAppState.chat || {}),
+                autonomous_recommendations: enabled,
+            },
+            autonomous_recommendations: enabled,
+        };
+
+        if (settingsRow) {
+            await supabaseClient
+                .from("user_settings")
+                .update({
+                    app_state: newAppState,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", userId);
+        } else {
+            await supabaseClient.from("user_settings").insert({
+                user_id: userId,
+                app_state: newAppState,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            });
+        }
+    } catch (err) {
+        console.warn("[persistAutonomousSetting] Failed to persist autonomous recommendations:", err);
+    }
+}
+
+export async function POST(req: NextRequest) {
+    const requestReceivedAt = Date.now();
+    const totalRequestStartTime = Date.now();
+    let correlationId = req.headers.get("x-correlation-id")?.slice(0, 128) || crypto.randomUUID();
+    let supabase: any = null;
+    let userId = "";
+    let requestSessionId: string | null = null;
+    let clientMessageId = "";
+    try {
+        const authClient = await createSupabaseServerClient(req);
+        try {
+            supabase = getSupabaseServiceClient();
+        } catch {
+            supabase = getSupabaseClient();
+        }
+        if (!supabase) {
+            supabase = getSupabaseClient();
+        }
+
+        const { data: { user }, error: authError } = await authClient.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+        
+        userId = user.id;
+        let userRules = "";
+        try {
+            const { data: profileRules } = await supabase
+                .from("profiles")
+                .select("custom_ai_rules")
+                .eq("id", userId)
+                .maybeSingle();
+            userRules = String(profileRules?.custom_ai_rules || "").trim();
+        } catch (rulesError) {
+            console.warn("[ai-chat] custom_ai_rules load skipped:", rulesError);
+        }
+        const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
+        const billingOn = paymentsEnabled();
+        const isUnlimited = isUnlimitedChatUser(user);
+        let userIsPro = isUnlimited;
+        let userMonthlyCap = isUnlimited ? Number.MAX_SAFE_INTEGER : planLimits("free").chat_messages_per_month;
+        let quotaWin = resolveSubscriptionQuotaWindow([]);
+        if (billingOn) {
+            try {
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient
+                    .from("subscriptions")
+                    .select("plan_id,status,current_period_start,current_period_end")
+                    .eq("user_id", userId)
+                    .order("current_period_end", { ascending: false })
+                    .limit(10);
+                if (gateIsPro(planRows || [])) {
+                    userIsPro = true;
+                }
+                userMonthlyCap = planLimits(userIsPro ? "pro" : "free").chat_messages_per_month;
+                quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
+            } catch {
+                if (!isUnlimited) {
+                    userIsPro = false;
+                    userMonthlyCap = planLimits("free").chat_messages_per_month;
+                }
+            }
+        }
+        const body = await req.json();
+
+        const { searchParams } = new URL(req.url);
+        const action = searchParams.get("action");
+        if (action === "settings" || body.action === "update_settings") {
+            if (billingOn && !isUnlimited && !userIsPro) {
+                return NextResponse.json({
+                    error: "ميزة وضع التوصيات الحرة حصرية لمشتركي باقة Pro.",
+                    is_pro: false,
+                }, { status: 403 });
+            }
+            const enabled = Boolean(body.autonomous_recommendations);
+            await persistAutonomousSetting(supabase, userId, enabled);
+            return NextResponse.json({ ok: true, autonomous_recommendations: enabled });
+        }
+
+        const diagnostics = createDiagnosticTrace(canTraceChat(user));
+        diagnostics.capture("http_request", { message: body.message, history: body.history, model: body.model,
+            session_id: body.session_id, client_message_id: body.client_message_id, stream: body.stream,
+            chart_context: sanitizeChartContext(body.chart_context), image_count: Array.isArray(body.images) ? body.images.length : body.image ? 1 : 0 });
+        const chartContext = sanitizeChartContext(body.chart_context);
+        const rawMessage = typeof body.message === "string" ? body.message : "";
+        const message = sanitizeUserMessage(rawMessage);
+        const isVoiceCall = Boolean(body.is_voice_call ?? body.isVoiceCall);
+        const isVoiceNote = Boolean(body.is_voice_note ?? body.isVoiceNote);
+        const isVoice = Boolean(body.is_voice ?? body.isVoice ?? isVoiceCall ?? isVoiceNote);
+        const messageChannel = typeof body.channel === "string" ? body.channel : (isVoiceCall ? "voice_call" : (isVoiceNote ? "voice_note" : "chat"));
+        const rawAudioDuration = body.audio_duration ?? body.audioDuration;
+        const audioDuration = typeof rawAudioDuration === "number" && rawAudioDuration > 0 ? rawAudioDuration : undefined;
+        const rawVoiceUrl = typeof (body.voice_audio_url ?? body.voiceAudioUrl) === "string" ? (body.voice_audio_url ?? body.voiceAudioUrl).trim() : undefined;
+        const voiceAudioUrl = rawVoiceUrl && (rawVoiceUrl.startsWith("http://") || rawVoiceUrl.startsWith("https://")) ? rawVoiceUrl : undefined;
+        const { history, image, images, model: userRequestedModel, session_id: inputSessionId, stream } = body;
+        clientMessageId = typeof body.client_message_id === "string" ? body.client_message_id.trim().slice(0, 128) : "";
+
+        const rawImages: string[] = Array.isArray(images) && images.length > 0 
+            ? images 
+            : (typeof image === "string" && (image.startsWith("data:image/") || image.startsWith("http://") || image.startsWith("https://")) ? [image] : []);
+        
+        const allowedImageMime = /^data:image\/(jpeg|jpg|png|webp);base64,/i;
+        const maxImageBytes = 5 * 1024 * 1024;
+        const imageList = rawImages.filter(img => {
+            if (typeof img !== "string") return false;
+            if (img.startsWith("http://") || img.startsWith("https://")) return true;
+            return allowedImageMime.test(img) && Buffer.from(img.split(",", 2)[1] || "", "base64").byteLength <= maxImageBytes;
+        }).slice(0, 4);
+        if (rawImages.length > 4 || imageList.length !== rawImages.length) {
+            return NextResponse.json({ detail: "Images must be JPEG, PNG, or WebP and no larger than 5 MB each; maximum 4 images." }, { status: 400 });
+        }
+        if (message.length > 4000) return NextResponse.json({ detail: "Message is too long" }, { status: 413 });
+        const hasImages = imageList.length > 0;
+
+        // Vision / Portfolio Image Upload is a Pro-exclusive feature.
+        if (billingOn && !isUnlimited && !userIsPro && hasImages) {
+            return NextResponse.json({
+                reply:
+                    "📸 **ميزة تحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI) متاحة حصرياً لمشتركي باقة Pro.**\n\n" +
+                    "اشترك الآن في باقة Pro (**100 ج.م فقط شهرياً** ضمن عرض المؤسسين لفترة محدودة 15 يوماً بدلاً من 200 ج.م) للاستفادة من:\n" +
+                    "- 📸 رفع وتحليل لقطات شاشة محفظتك من ثندر أو أي تطبيق تداول والشارت الفني فوراً\n" +
+                    "- 🎯 فتح جميع التوصيات المفتوحة ووضع التوصيات الحرة في الشات\n" +
+                    "- 🚀 350 رسالة شات بوت ذكي شهرياً + قناة التليجرام VIP\n\n" +
+                    "👉 [الترقية إلى Pro الآن من صفحة التسعير](/pricing)",
+                is_pro: false,
+                quota_limit: userMonthlyCap,
+            });
+        }
+
+        // Open recommendations and Autonomous recommendations are Pro-exclusive features.
+        const normalizedForGate = normalizeArabicIntent(message);
+        const asksClosedRecsOnly = /(?:مغلقه|مقفوله|ارشيف|سابقه|تاريخيه|closed)/i.test(normalizedForGate)
+            && !/(?:مفتوحه|حالي|الان|دلوقتي|اليوم|النهارده|نشطه|open)/i.test(normalizedForGate);
+        const asksProRecs = /(?:توصيات|توصيه|اشارات|اشاره|ترشيحات|recommendations?|signals?)/i.test(normalizedForGate)
+            && !/(?:يعني\s*ايه|ما\s*معنى|ما\s*هو|شرح|تعريف)/i.test(normalizedForGate)
+            && !asksClosedRecsOnly;
+        let autonomousRecommendations = (!billingOn || isUnlimited || userIsPro) ? Boolean(body.autonomous_recommendations) : false;
+        if (!autonomousRecommendations && (!billingOn || isUnlimited || userIsPro)) {
+            try {
+                const { data: settingsRow } = await supabase
+                    .from("user_settings")
+                    .select("app_state")
+                    .eq("user_id", userId)
+                    .maybeSingle();
+                const appState = settingsRow?.app_state || {};
+                if (Boolean(appState.chat?.autonomous_recommendations ?? appState.autonomous_recommendations)) {
+                    autonomousRecommendations = true;
+                }
+            } catch (err) {
+                console.warn("[autonomousRecommendations] Failed to read fallback setting:", err);
+            }
+        }
+        const mentionsAutonomousMode = /(?:وضع\s*التوصيات|توصيات\s*حرة|توصيات\s*بمزاجك|فعل\s*الوضع|شغل\s*الوضع)/i.test(normalizedForGate);
+        if (billingOn && !isUnlimited && !userIsPro && message && !detectPortfolioIntent(message) && (asksProRecs || mentionsAutonomousMode)) {
+            try {
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId);
+                if (!isUnlimited && !gateIsPro(planRows || [])) {
+                    return NextResponse.json({
+                        reply:
+                            "🔒 **التوصيات المفتوحة ووضع التوصيات الحرة في الشات متاحان حصرياً لمشتركي باقة Pro.**\n\n" +
+                            "اشترك الآن في باقة Pro (**100 ج.م فقط شهرياً** ضمن عرض المؤسسين لفترة محدودة 15 يوماً بدلاً من 200 ج.م) للحصول على:\n" +
+                            "- 🎯 جميع التوصيات المفتوحة وإشارات الدخول والأهداف ووقف الخسارة لحظياً\n" +
+                            "- 🤖 تفعيل وضع التوصيات الحرة المستقلة للذكاء الاصطناعي في الشات\n" +
+                            "- 📸 تحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI)\n" +
+                            "- 🚀 350 رسالة شات بوت شهرياً + قناة التليجرام VIP\n\n" +
+                            "👉 [الترقية إلى Pro الآن من صفحة التسعير](/pricing)",
+                        is_pro: false,
+                        quota_limit: userMonthlyCap,
+                    });
+                }
+            } catch {
+                return NextResponse.json({
+                    reply: "التوصيات المفتوحة ووضع التوصيات الحرة متاحان ضمن خطة Pro فقط. فعّل Pro لعرض التوصيات الفورية والبيانات الكاملة.",
+                    is_pro: false,
+                    quota_limit: userMonthlyCap,
+                });
+            }
+        }
+
+        if (!message && !hasImages) {
+            return NextResponse.json({ detail: "Message or image is required" }, { status: 400 });
+        }
+
+        if (message && typeof message === "string" && !filterInput(message)) {
+            return NextResponse.json({
+                reply: "معذرة، لا يمكنني الاستجابة لهذه الرسالة بناءً على إرشادات الأمان والحماية الخاصة بالمنصة."
+            });
+        }
+
+        // Maintenance / Under-Development Mode (only when explicitly enabled via AI_CHAT_MAINTENANCE_MODE === "true")
+        const isMaintenanceMode =
+            process.env.AI_CHAT_MAINTENANCE_MODE === "true" &&
+            !process.env.JEST_WORKER_ID &&
+            process.env.NODE_ENV !== "test";
+
+        if (isMaintenanceMode) {
+            const maintenanceReply =
+                "🛠️ **المساعد الذكي (ARTORO AI) تحت التطوير والتحديث حالياً**\n\n" +
+                "نقوم حالياً بإجراء تحديثات وترقية لمحرك الذكاء الاصطناعي لتحسين سرعة ودقة التحليل الفني والمالي للبورصة المصرية.\n\n" +
+                "✅ **لن يتم خصم هذه الرسالة من رصيدك اليومي أو الشهري.**\n" +
+                "📊 يمكنك في الوقت الحالي استخدام **الماسح الذكي**، **التوصيات الفنية**، و**الشارت اللحظي** في المنصة بشكل طبيعي حتى انتهاء التحديث قريباً جداً.";
+
+            const activeSessionId = inputSessionId || crypto.randomUUID();
+            if (stream) {
+                const encoder = new TextEncoder();
+                const readable = new ReadableStream({
+                    start(controller) {
+                        const sendEvent = (payload: Record<string, unknown>) => {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+                        };
+                        sendEvent({ type: "token", content: maintenanceReply });
+                        sendEvent({
+                            type: "done",
+                            reply: maintenanceReply,
+                            session_id: activeSessionId,
+                            remaining_quota: userIsPro ? 99 : 5,
+                            suggested_buttons: [],
+                            tables: [],
+                            chart_actions: [],
+                            latency_ms: 15,
+                        });
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        controller.close();
+                    },
+                });
+                return new Response(readable, {
+                    headers: {
+                        "Content-Type": "text/event-stream; charset=utf-8",
+                        "Cache-Control": "no-cache, no-transform",
+                        Connection: "keep-alive",
+                    },
+                });
+            }
+
+            return NextResponse.json({
+                reply: maintenanceReply,
+                tables: [],
+                chart_actions: [],
+                session_id: activeSessionId,
+                remaining_quota: userIsPro ? 99 : 5,
+                suggested_buttons: [],
+                latency_ms: 15,
+            });
+        }
+
+        if (clientMessageId) {
+            const { data: existing } = await supabase.from("ai_chat_idempotency").select("status,response,updated_at,created_at").eq("user_id", userId).eq("client_message_id", clientMessageId).maybeSingle();
+            if (existing?.status === "completed" && existing.response) return NextResponse.json({ reply: existing.response, duplicate: true });
+            const reservationAge = existing ? Date.now() - Date.parse(existing.updated_at || existing.created_at) : 0;
+            if (existing?.status === "processing" && reservationAge < 90000) return NextResponse.json({ detail: "Request already in progress" }, { status: 409 });
+            if (existing) await supabase.from("ai_chat_idempotency").delete().eq("user_id", userId).eq("client_message_id", clientMessageId);
+            const { error: reserveError } = await supabase.from("ai_chat_idempotency").insert({ user_id: userId, client_message_id: clientMessageId, status: "processing" });
+            if (reserveError) return NextResponse.json({ detail: "Request already in progress" }, { status: 409 });
+        }
+
+        const today = getCairoDateString();
+        let limitData: { chat_count: number } | null = null;
+        let monthlyUsed = 0;
+
+        // 1. Monthly budget gate (permanent ledger via ai_chatbot_limits and ai_chat_messages).
+        // Deleting old chats must NEVER reduce or refund consumed quota.
+        let usedBonusCredit = false;
+        if (billingOn && !isUnlimited) {
+            const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
+            const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
+
+            let limitRowsRes: any = { data: [] };
+            let monthRowsRes: any = { data: [] };
+            try {
+                const quotaTimeout = new Promise((_, reject) => {
+                    const timer = setTimeout(() => reject(new Error("QUOTA_CHECK_TIMEOUT")), 2500);
+                    if (typeof (timer as any)?.unref === "function") (timer as any).unref();
+                });
+                const [lRes, mRes] = await Promise.race([
+                    Promise.all([
+                        supabase
+                            .from("ai_chatbot_limits")
+                            .select("chat_count")
+                            .eq("user_id", userId)
+                            .gte("date", monthStartStr),
+                        supabase
+                            .from("ai_chat_messages")
+                            .select("id, client_message_id")
+                            .eq("user_id", userId)
+                            .eq("role", "user")
+                            .gte("created_at", effectiveStart.toISOString()),
+                    ]),
+                    quotaTimeout
+                ]) as any;
+                limitRowsRes = lRes;
+                monthRowsRes = mRes;
+            } catch {
+                limitRowsRes = { data: [] };
+                monthRowsRes = { data: [] };
+            }
+
+            const limitsSum = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
+            const msgsCount = new Set((monthRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
+            monthlyUsed = Math.max(limitsSum, msgsCount);
+
+            // Activation telemetry: the first message inside an active trial is the
+            // step that actually predicts conversion, so record it once. The
+            // monthly window starts at the subscription/trial start, making
+            // monthlyUsed === 0 a cheap "first message of this trial" signal.
+            if (quotaWin?.activeSub?.status === "trialing" && monthlyUsed === 0 && userId) {
+                try {
+                    const { data: existing } = await supabase
+                        .from("user_activity_events")
+                        .select("id")
+                        .eq("user_id", userId)
+                        .eq("event_name", "trial_first_message")
+                        .limit(1)
+                        .maybeSingle();
+                    if (!existing) {
+                        await supabase.from("user_activity_events").insert({
+                            user_id: userId,
+                            event_name: "trial_first_message",
+                            path: "/chat",
+                            metadata: { source: "chat" },
+                        });
+                    }
+                } catch (logError) {
+                    console.warn("[ai-chat] trial_first_message log skipped:", logError);
+                }
+            }
+
+            if (monthlyUsed >= userMonthlyCap) {
+                if (!userIsPro) {
+                    const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
+                    if (bonusRes && bonusRes.allowed === true) {
+                        usedBonusCredit = true;
+                    } else {
+                        return NextResponse.json({
+                            error: "LIMIT_REACHED",
+                            limit_type: "monthly",
+                            daily_limit: userMonthlyCap,
+                            detail: `لقد استهلكت باقتك المجانية (${userMonthlyCap}/${userMonthlyCap} رسائل). 🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة (15 يوماً فقط) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!`
+                        }, { status: 429 });
+                    }
+                } else {
+                    return NextResponse.json({
+                        detail: `Monthly message limit reached (${userMonthlyCap}). Upgrade to Pro for ${planLimits("pro").chat_messages_per_month} messages/month.`
+                    }, { status: 429 });
+                }
+            }
+        }
+
+        // 2. Consume / record chat quota in ai_chatbot_limits.
+        // Voice notes are ALWAYS billable — even for unlimited/admin accounts — so
+        // the owner can verify the deduction in ai_chatbot_limits and /api/user/quota.
+        // Regular chat messages from unlimited accounts remain uncharged.
+        const chargeVoiceNoteQuota = isVoiceNote && !isVoiceCall;
+        if (!isUnlimited || chargeVoiceNoteQuota) {
+            // Postgres int4 upper bound: Number.MAX_SAFE_INTEGER would overflow the RPC param.
+            const effectiveDailyLimit = isUnlimited
+                ? 2147483647
+                : userIsPro
+                    ? Math.max(AI_CONFIG.limits.dailyMessages, userMonthlyCap)
+                    : Math.max(10, userMonthlyCap);
+            const { data: quotaRows, error: quotaError } = await supabase.rpc("consume_ai_chat_quota", {
+                p_user_id: userId,
+                p_date: today,
+                p_limit: effectiveDailyLimit,
+            });
+            if (quotaError) return NextResponse.json({ detail: "Unable to reserve chat quota" }, { status: 503 });
+            const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
+            if (!quota?.allowed) {
+                if (usedBonusCredit) {
+                    limitData = { chat_count: Number(quota?.chat_count || effectiveDailyLimit) };
+                } else {
+                    // Check if the user has bonus credits (e.g. from linking Telegram)
+                    const { data: bonusRes } = await supabase.rpc("consume_chat_bonus", { p_user_id: userId });
+                    if (bonusRes && bonusRes.allowed === true) {
+                        limitData = { chat_count: Number(quota?.chat_count || effectiveDailyLimit) };
+                    } else {
+                        return NextResponse.json({
+                            error: "LIMIT_REACHED",
+                            limit_type: "monthly",
+                            daily_limit: userMonthlyCap,
+                            detail: `لقد استهلكت باقتك المجانية (${userMonthlyCap}/${userMonthlyCap} رسائل). 🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة (15 يوماً فقط) واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!`
+                        }, { status: 429 });
+                    }
+                }
+            } else {
+                limitData = { chat_count: Number(quota.chat_count || 0) };
+            }
+            monthlyUsed += 1;
+        }
+
+        const calcRemainingQuota = () => {
+            if (isUnlimited) return 999;
+            return Math.max(0, userMonthlyCap - monthlyUsed);
+        };
+
+        diagnostics.capture("runtime_configuration", {config: AI_CONFIG, user_is_pro: userIsPro, unlimited: isUnlimited, billing_enabled: billingOn, history_source: "server_session_messages_preferred", endpoint: "/api/ai-chat", transport: stream === true || stream === "true" || (req.headers.get("accept") || "").includes("text/event-stream") ? "sse" : "json"});
+        const keysToTry = getNvidiaApiKeys();
+
+        if (!getDeepSeekApiKey() && !getExperientialApiKey() && keysToTry.length === 0) {
+            return NextResponse.json({ detail: "AI service not configured" }, { status: 500 });
+        }
+
+        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        requestSessionId = inputSessionId || null;
+
+        const acceptHeader = req.headers.get("accept") || "";
+        const isStreamingRequested = stream === true || stream === "true" || acceptHeader.includes("text/event-stream");
+
+        if (isStreamingRequested) {
+            const encoder = new TextEncoder();
+            let streamSessionId: string | null = null;
+            const customStream = new ReadableStream({
+                async start(controller) {
+                    let streamClosed = false;
+                    const sendEvent = (data: any) => {
+                        if (streamClosed) return;
+                        try {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                        } catch (e: any) {
+                            if (e.code !== 'ERR_INVALID_STATE') {
+                                console.warn("Failed to enqueue event:", e.message);
+                            }
+                        }
+                    };
+                    const heartbeat = setInterval(() => sendEvent({ type: "heartbeat", timestamp: Date.now() }), 12000);
+
+                    try {
+                        // STEP 1: RESOLVE SESSION ID & HISTORY IN PARALLEL
+                        sendEvent({ type: "status", status: "session", message: "Resolving session..." });
+                        const { activeSessionId, sessionState, sessionSummary, dbFormattedHistory } =
+                            await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
+                        requestSessionId = activeSessionId;
+                        streamSessionId = activeSessionId;
+                        sendEvent({ type: "session_id", session_id: activeSessionId });
+
+                        let permanentImageUrls: string[] = [];
+                        if (hasImages) {
+                            try {
+                                permanentImageUrls = await uploadChatImages(supabase, userId, activeSessionId, imageList);
+                                if (permanentImageUrls.length > 0) {
+                                    sendEvent({ type: "image_urls", image_urls: permanentImageUrls });
+                                }
+                            } catch (uploadErr) {
+                                console.warn("[ai-chat] Image upload to Supabase storage failed:", uploadErr);
+                            }
+                        }
+                        const finalSavedImageUrl = permanentImageUrls[0] || (imageList[0]?.length < 1000 ? imageList[0] : null);
+
+                        const explicitSymbols = extractExplicitSymbols(message || "");
+                        if (explicitSymbols.length > 0) {
+                            sessionState.current_symbol = explicitSymbols[0];
+                            sessionState.last_symbols = explicitSymbols;
+                        }
+
+                        const isPortfolio = Boolean(detectPortfolioIntent(message || ""));
+                        const cacheKey = !hasImages && !chartContext
+                            ? buildAnalysisCacheKey(message || "", explicitSymbols, isPortfolio, userRules)
+                            : null;
+
+                        if (cacheKey) {
+                            const cached = await getVipAnalysisCache(cacheKey, supabase);
+                            if (cached) {
+                                const personalizedReply = await personalizeCachedAnalysis(
+                                    cached.reply,
+                                    userId,
+                                    explicitSymbols[0],
+                                    supabase
+                                );
+                                const streamingTotalLatencyMs = Date.now() - totalRequestStartTime;
+                                sendEvent({ type: "status", status: "ready", message: "Analyzing..." });
+                                if (cached.tables && Array.isArray(cached.tables) && cached.tables.length > 0) {
+                                    sendEvent({ type: "tables", data: cached.tables });
+                                }
+                                sendEvent({ type: "token", content: personalizedReply });
+
+                                const suggestedButtons = sanitizeSuggestedButtons(
+                                    Array.isArray(cached.extra?.suggested_buttons) && cached.extra.suggested_buttons.length > 0
+                                        ? cached.extra.suggested_buttons
+                                        : generateSuggestedButtons({ intent: "analyze_stock" }, sessionState)
+                                );
+
+                                const spokenText = isVoiceCall ? extractVoiceAnalysisSpeech(personalizedReply, message) : (isVoiceNote ? await generateVoiceNoteSpokenScript(personalizedReply, message, getDeepSeekApiKey()) : null);
+                                prewarmVoiceNoteTts(spokenText);
+                                const provenance = {
+                                    ...(cached.extra?.provenance || {}),
+                                    correlation_id: correlationId,
+                                    is_voice: isVoice,
+                                    is_voice_call: isVoiceCall,
+                                    is_voice_note: isVoiceNote,
+                                    channel: messageChannel,
+                                    audio_duration: audioDuration,
+                                    spoken_text: spokenText,
+                                    cached: true,
+                                    response_origin: "cache",
+                                    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, provider_calls: 0, tool_calls: Array.isArray(cached.tools?.results) ? cached.tools.results.length : 0, model: "cache (0 tokens)" },
+                                    suggested_buttons: suggestedButtons,
+                                };
+
+                                if (clientMessageId) {
+                                    await supabase.from("ai_chat_idempotency").update({
+                                        status: "completed",
+                                        response: personalizedReply,
+                                        updated_at: new Date().toISOString()
+                                    }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+                                }
+
+                                if (activeSessionId) {
+                                    const messageTimestamps = createChatMessageTimestamps(requestReceivedAt, Date.now());
+                                    await insertChatMessages(supabase, [
+                                        {
+                                            session_id: activeSessionId,
+                                            user_id: userId,
+                                            role: "user",
+                                            content: sanitizeUserMessage(message || ""),
+                                            client_message_id: clientMessageId || null,
+                                            image_url: finalSavedImageUrl,
+                                            metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}), ...(voiceAudioUrl ? { voice_audio_url: voiceAudioUrl } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
+                                            created_at: messageTimestamps.user
+                                        },
+                                        {
+                                            session_id: activeSessionId,
+                                            user_id: userId,
+                                            role: "assistant",
+                                            content: personalizedReply,
+                                            latency_ms: streamingTotalLatencyMs,
+                                            metadata: provenance,
+                                            created_at: messageTimestamps.assistant
+                                        }
+                                    ]);
+                                    await updateSessionState(supabase, activeSessionId, userId, {
+                                        current_symbol: explicitSymbols[0] || sessionState.current_symbol,
+                                        last_symbols: explicitSymbols.length > 0 ? explicitSymbols : sessionState.last_symbols,
+                                        summary: sessionState.summary,
+                                        current_sector: sessionState.current_sector,
+                                    });
+                                }
+
+                                sendEvent({
+                                    type: "done",
+                                    reply: personalizedReply,
+                                    spoken_text: spokenText,
+                                    session_id: activeSessionId,
+                                    remaining_quota: calcRemainingQuota(),
+                                    quota_limit: isUnlimited ? 999 : userMonthlyCap,
+                                    is_pro: isUnlimited || userIsPro,
+                                    suggested_buttons: suggestedButtons,
+                                    session_state: {
+                                        current_symbol: explicitSymbols[0] || sessionState.current_symbol,
+                                        last_symbols: explicitSymbols.length > 0 ? explicitSymbols : sessionState.last_symbols,
+                                    },
+                                    tables: cached.tables || [],
+                                    chart_actions: [],
+                                    latency_ms: streamingTotalLatencyMs,
+                                });
+
+                                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                                streamClosed = true;
+                                clearInterval(heartbeat);
+                                controller.close();
+                                return;
+                            }
+                        }
+
+                        // Use new pipeline for streaming
+                        const pipelineStream = runPipelineStream(
+                            message || "",
+                            imageList,
+                            sessionState,
+                            sessionSummary,
+                            dbFormattedHistory,
+                            supabase,
+                            keysToTry,
+                            userId,
+                            activeSessionId,
+                            messageId,
+                            userRequestedModel,
+                            {
+                                isPro: !billingOn || userIsPro,
+                                chartContext,
+                                diagnosticCapture: diagnostics.capture,
+                                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
+                                gateMode: "audit_only",
+                                autonomousRecommendations,
+                                isVoice,
+                                isVoiceCall,
+                                isVoiceNote,
+                                userRules,
+                                skipCache: Boolean(userRules),
+                            }
+                        );
+
+                        // Keep only a bounded rolling window for safety checks.
+                        // Re-scanning the entire accumulated answer for every
+                        // streamed token makes long replies O(n²) in CPU time.
+                        let outputSafetyWindow = "";
+                        let streamBlocked = false;
+                        let tokenBuffer = "";
+                        let plannerResult: any = null;
+                        let liveDataString = "";
+                        let toolsResults: any[] = [];
+                        let streamTables: any[] = [];
+                        let plannerLatencyMs = 0;
+                        let toolsLatencyMs = 0;
+                        let responseLatencyMs = 0;
+                        let toolsStartTime = 0;
+                        let responseStartTime = 0;
+                        let firstTokenLatencyMs: number | null = null;
+
+                        for await (const event of pipelineStream) {
+                            switch (event.type) {
+                                case "status":
+                                    sendEvent({ type: "status", status: event.data.status, message: event.data.message });
+                                    break;
+                                case "enable_autonomous_recs":
+                                    sendEvent({ type: "enable_autonomous_recs", enabled: true });
+                                    if (!billingOn || isUnlimited || userIsPro) {
+                                        void persistAutonomousSetting(supabase, userId, true);
+                                    }
+                                    break;
+                                case "disable_autonomous_recs":
+                                    sendEvent({ type: "disable_autonomous_recs", enabled: false });
+                                    void persistAutonomousSetting(supabase, userId, false);
+                                    break;
+                                case "vision_result":
+                                    sendEvent({ type: "vision", data: event.data });
+                                    break;
+                                case "plan":
+                                    plannerResult = event.data;
+                                    plannerLatencyMs = Date.now() - totalRequestStartTime;
+                                    toolsStartTime = Date.now();
+                                    break;
+                                case "tools_data":
+                                    liveDataString = event.data.formattedText || "";
+                                    toolsResults = Array.isArray(event.data.results) ? event.data.results : [];
+                                    toolsLatencyMs = toolsStartTime ? Date.now() - toolsStartTime : 0;
+                                    responseStartTime = Date.now();
+                                    break;
+                                case "tables":
+                                    streamTables = Array.isArray(event.data) ? event.data : [];
+                                    sendEvent({ type: "tables", data: event.data });
+                                    break;
+                                case "token":
+                                    if (streamBlocked) break;
+                                    if (firstTokenLatencyMs === null) firstTokenLatencyMs = Date.now() - totalRequestStartTime;
+                                    const rawToken = String(event.data || "");
+                                    if (containsEnvironmentMetadata(rawToken) || hasPartialEnvironmentMetadata(rawToken)) break;
+                                    outputSafetyWindow = stripEnvironmentMetadata(
+                                        (outputSafetyWindow + rawToken).slice(-8192)
+                                    );
+                                    if (filterOutputBlocks(outputSafetyWindow)) {
+                                        const blockedResponse = "أنا أداة تحليلية ذكية، ولا يمكنني تقديم نصائح مالية أو توصيات شراء مباشرة. يمكنك مراجعة تقييم الأسهم في صفحة الماسح الذكي لمساعدتك في اتخاذ القرار.";
+                                        streamBlocked = true;
+                                        tokenBuffer = "";
+                                        sendEvent({ type: "token", content: blockedResponse });
+                                        // Complete through the normal done path so quota,
+                                        // idempotency and message history are persisted.
+                                        break;
+                                    }
+                                    tokenBuffer = stripEnvironmentMetadata(tokenBuffer + rawToken);
+                                    if (hasPartialEnvironmentMetadata(tokenBuffer)) {
+                                        tokenBuffer = "";
+                                        break;
+                                    }
+                                    if ((isPotentialBlockedPrefix(tokenBuffer) && tokenBuffer.length < 60) || isPotentialEnvironmentPrefix(tokenBuffer)) {
+                                        // Buffering to avoid token leakage
+                                    } else {
+                                        if (tokenBuffer.length > 0) {
+                                            sendEvent({ type: "token", content: tokenBuffer });
+                                            tokenBuffer = "";
+                                        }
+                                    }
+                                    break;
+                                case "done":
+                                    responseLatencyMs = responseStartTime ? Date.now() - responseStartTime : Math.max(0, Date.now() - totalRequestStartTime - plannerLatencyMs - toolsLatencyMs);
+                                    const streamingTotalLatencyMs = Date.now() - totalRequestStartTime;
+                                    console.log(`[AI TELEMETRY DETAIL] Correlation=${correlationId} first_token_ms=${firstTokenLatencyMs ?? "n/a"} planner_ms=${plannerLatencyMs} tools_ms=${toolsLatencyMs} response_ms=${responseLatencyMs} total_ms=${streamingTotalLatencyMs}`);
+                                    if (tokenBuffer.length > 0) {
+                                        const safeBuffer = stripEnvironmentMetadata(tokenBuffer);
+                                        if (safeBuffer && !filterOutputBlocks(safeBuffer) && !containsEnvironmentMetadata(safeBuffer)) sendEvent({ type: "token", content: safeBuffer });
+                                        tokenBuffer = "";
+                                    }
+                                     const replyText = filterOutput(stripEnvironmentMetadata(event.data.response));
+                                     const suggestedButtons = sanitizeSuggestedButtons(stockStrategyFollowups(toolsResults,event.data?.publication_review?.final_passed === true)
+                                         ?? generateSuggestedButtons(plannerResult || {}, sessionState));
+                                     const responseMetadata = {
+                                         ...extractProvenanceFromToolResults(toolsResults, streamTables),
+                                         correlation_id: correlationId,
+                                         publication_review: event.data?.publication_review || null,
+                                         usage: event.data?.response_origin === "cache"
+                                             ? { model: "cache (0 tokens)", prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+                                             : (event.data?.usage || null),
+                                         diagnostic_trace: diagnostics.snapshot(),
+                                         response_origin: event.data?.response_origin || null,
+                                         cached: event.data?.cached === true || event.data?.response_origin === "cache",
+                                         response_task: event.data?.response_task || null,
+                                         vision_error: event.data?.vision_error || null,
+                                         response_kind: event.data?.vision_error ? "vision_fallback" : event.data?.response_origin === "fallback" ? "fallback" : "normal",
+                                         suggested_buttons: suggestedButtons,
+                                     };
+                                    if (clientMessageId) await supabase.from("ai_chat_idempotency").update({ status: "completed", response: replyText, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+                                     const isVoiceMode = Boolean(isVoice || isVoiceNote || isVoiceCall);
+                                     if (
+                                         cacheKey &&
+                                         replyText &&
+                                         !isVoiceMode &&
+                                         !streamBlocked &&
+                                         responseMetadata.response_kind === "normal"
+                                     ) {
+                                         setVipAnalysisCache(
+                                             cacheKey,
+                                             {
+                                                 reply: replyText,
+                                                 tables: streamTables || [],
+                                                 tools: { results: toolsResults },
+                                                 extra: {
+                                                     suggested_buttons: suggestedButtons || [],
+                                                     provenance: extractProvenanceFromToolResults(toolsResults, streamTables) || {},
+                                                 },
+                                             },
+                                             supabase
+                                         ).catch((err) => console.warn("[ai-chat] cache save error:", err));
+                                     }
+                                    const sessionUpdate = event.data.session_update;
+
+                                    const newCount = limitData?.chat_count || 0;
+
+                                    let spokenText: string | null = null;
+                                    if (isVoiceCall) {
+                                        spokenText = extractVoiceAnalysisSpeech(replyText, message);
+                                    } else if (isVoiceNote) {
+                                        spokenText = await generateVoiceNoteSpokenScript(replyText, message, getDeepSeekApiKey());
+                                    }
+
+                                    // Save messages to DB
+                                    try {
+                                        if (activeSessionId) {
+                                             prewarmVoiceNoteTts(spokenText);
+                                             const provenance = {
+                                                ...responseMetadata,
+                                                is_voice: isVoice,
+                                                is_voice_call: isVoiceCall,
+                                                is_voice_note: isVoiceNote,
+                                                channel: messageChannel,
+                                                audio_duration: audioDuration,
+                                                spoken_text: spokenText,
+                                            };
+                                            const messageTimestamps = createChatMessageTimestamps(requestReceivedAt, Date.now());
+                                            await insertChatMessages(supabase, [
+                                                {
+                                                    session_id: activeSessionId,
+                                                    user_id: userId,
+                                                    role: "user",
+                                                    content: sanitizeUserMessage(message || (hasImages ? "📷 [Image attached]" : "")),
+                                                    client_message_id: clientMessageId || null,
+                                             image_url: finalSavedImageUrl,
+                                             metadata: isVoice ? { is_voice: true, is_voice_call: isVoiceCall, is_voice_note: isVoiceNote, channel: messageChannel, ...(audioDuration ? { audio_duration: audioDuration } : {}), ...(voiceAudioUrl ? { voice_audio_url: voiceAudioUrl } : {}) } : (messageChannel !== "chat" ? { channel: messageChannel } : null),
+                                                    created_at: messageTimestamps.user
+                                                },
+                                                {
+                                                    session_id: activeSessionId,
+                                                    user_id: userId,
+                                                    role: "assistant",
+                                                    content: replyText,
+                                                    latency_ms: streamingTotalLatencyMs,
+                                             metadata: provenance,
+                                                    created_at: messageTimestamps.assistant
+                                                }
+                                            ]);
+                                        }
+                                    } catch (dbErr) {
+                                        console.error("Failed to log chat messages to DB:", dbErr);
+                                    }
+
+                                    const optimalModel = selectOptimalModel(plannerResult?.intent || "general_chat", plannerResult?.entities?.symbols?.length || 0, userRequestedModel);
+
+                                     await logAiInteraction(supabase, {
+                                        sessionId: activeSessionId,
+                                        userId: userId,
+                                        intent: plannerResult?.intent || "general_chat",
+                                        symbols: plannerResult?.entities?.symbols || [],
+                                        plannerModel: hasImages ? AI_CONFIG.models.planner.vision[0] : AI_CONFIG.models.planner.text[0],
+                                        responseModel: optimalModel,
+                                        plannerLatencyMs,
+                                        toolsLatencyMs,
+                                        responseLatencyMs,
+                                        correlationId,
+                                        totalLatencyMs: streamingTotalLatencyMs,
+                                        dataSizeChars: liveDataString ? liveDataString.length : 0,
+                                         error: null
+                                     });
+                                     if (event.data?.vision_error) {
+                                         await recordChatError(supabase, {
+                                             sessionId: activeSessionId,
+                                             userId,
+                                             clientMessageId,
+                                             correlationId,
+                                             phase: "vision",
+                                             error: event.data.vision_error,
+                                             latencyMs: streamingTotalLatencyMs,
+                                             imageUrl: finalSavedImageUrl,
+                                         });
+                                     }
+
+                                    sendEvent({
+                                        type: "done",
+                                        reply: replyText,
+                                        spoken_text: spokenText,
+                                        session_id: activeSessionId,
+                                        remaining_quota: calcRemainingQuota(),
+                                        quota_limit: isUnlimited ? 999 : userMonthlyCap,
+                                        is_pro: isUnlimited || userIsPro,
+                                        suggested_buttons: suggestedButtons,
+                                        session_state: sessionUpdate,
+                                        tables: event.data.tables || [],
+                                        chart_actions: event.data.chart_actions || [],
+                                        latency_ms: streamingTotalLatencyMs,
+                                        enable_autonomous_recs: event.data.enable_autonomous_recs || undefined,
+                                        disable_autonomous_recs: event.data.disable_autonomous_recs || undefined
+                                    });
+
+                                    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                                    streamClosed = true;
+                                    clearInterval(heartbeat);
+                                    controller.close();
+                                    return;
+                            }
+                        }
+                    } catch (err: any) {
+                        if (clientMessageId) await supabase.from("ai_chat_idempotency").delete().eq("user_id", userId).eq("client_message_id", clientMessageId);
+                        if (err.code !== 'ERR_INVALID_STATE') {
+                            console.error("Streaming error:", err);
+                        }
+                        const internalDetail = String(err?.message || "Streaming failed");
+                        await recordChatError(supabase, {
+                            sessionId: streamSessionId,
+                            userId,
+                            clientMessageId,
+                            correlationId,
+                            phase: "streaming",
+                            error: err,
+                            latencyMs: Date.now() - totalRequestStartTime,
+                        });
+                        let friendlyDetail = "تعذر إكمال التحليل حاليًا. يرجى إعادة المحاولة.";
+                        if (/PIPELINE_DEADLINE_EXCEEDED|DEADLINE|Timeout|AbortError/i.test(internalDetail)) {
+                            friendlyDetail = "استغرق التحليل وقتًا أطول من المتوقع نظرًا لضغط السيرفرات حالياً. يرجى إعادة إرسال السؤال أو تجربة إرساله بدون صورة للحصول على رد فوري.";
+                        }
+                        sendEvent({ type: "error", detail: friendlyDetail });
+                        streamClosed = true;
+                        clearInterval(heartbeat);
+                        try { controller.close(); } catch (e) {}
+                    }
+                }
+            });
+
+            return new Response(customStream, {
+                headers: {
+                    "Content-Type": "text/event-stream; charset=utf-8",
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            });
+        }
+
+        // --- NON-STREAMING JSON FALLBACK ---
+        console.log(`[BOT STAGE] Starting non-streaming pipeline...`);
+        const { activeSessionId, sessionState, sessionSummary, dbFormattedHistory } =
+            await resolveSessionBundleAndHistory(supabase, userId, inputSessionId, message, hasImages, authClient);
+        requestSessionId = activeSessionId;
+
+        let permanentImageUrls: string[] = [];
+        if (hasImages) {
+            try {
+                permanentImageUrls = await uploadChatImages(supabase, userId, activeSessionId, imageList);
+            } catch (uploadErr) {
+                console.warn("[ai-chat] Image upload to Supabase storage failed:", uploadErr);
+            }
+        }
+        const finalSavedImageUrl = permanentImageUrls[0] || (imageList[0]?.length < 1000 ? imageList[0] : null);
+
+        const explicitSymbols = extractExplicitSymbols(message || "");
+        if (explicitSymbols.length > 0) {
+            sessionState.current_symbol = explicitSymbols[0];
+            sessionState.last_symbols = explicitSymbols;
+        }
+
+        const pipelineStartTime = Date.now();
+        const pipelineResult = await runPipeline(
+            message || "",
+            imageList,
+            sessionState,
+            sessionSummary,
+            dbFormattedHistory,
+            supabase,
+            keysToTry,
+            userId,
+            activeSessionId,
+            messageId,
+            userRequestedModel,
+            {
+                isPro: !billingOn || userIsPro,
+                chartContext,
+                diagnosticCapture: diagnostics.capture,
+                skipReview: body?.skipReview !== undefined ? Boolean(body.skipReview) : (req.headers.get("x-skip-review") === "false" ? false : true),
+                gateMode: "audit_only",
+                autonomousRecommendations,
+                userRules,
+                skipCache: Boolean(userRules),
+            }
+        );
+
+        const replyText = filterOutput(pipelineResult.response);
+        const suggestedButtons = sanitizeSuggestedButtons(stockStrategyFollowups(pipelineResult?.tools?.results || [],pipelineResult.publication_review?.final_passed === true)
+            ?? generateSuggestedButtons(pipelineResult.plan,sessionState));
+        if (clientMessageId) await supabase.from("ai_chat_idempotency").update({ status: "completed", response: replyText, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("client_message_id", clientMessageId);
+
+        // Update Limits
+        const newCount = limitData?.chat_count || 0;
+        const totalLatencyMs = Date.now() - totalRequestStartTime;
+
+        // Save messages to DB
+        try {
+            if (activeSessionId) {
+                const provenance = extractProvenanceFromToolResults(pipelineResult?.tools?.results || [], pipelineResult?.tables || []) || {};
+                provenance.usage = pipelineResult.usage || null;
+                provenance.diagnostic_trace = diagnostics.snapshot();
+                provenance.correlation_id = correlationId;
+                provenance.publication_review = pipelineResult.publication_review || null;
+                provenance.response_origin = pipelineResult.response_origin || null;
+                provenance.suggested_buttons = suggestedButtons;
+                const messageTimestamps = createChatMessageTimestamps(requestReceivedAt, Date.now());
+                await insertChatMessages(supabase, [
+                    {
+                        session_id: activeSessionId,
+                        user_id: userId,
+                        role: "user",
+                        content: message || (hasImages ? "📷 [Image attached]" : ""),
+                        client_message_id: clientMessageId || null,
+                        image_url: finalSavedImageUrl,
+                        created_at: messageTimestamps.user
+                    },
+                    {
+                        session_id: activeSessionId,
+                        user_id: userId,
+                        role: "assistant",
+                        content: replyText,
+                        latency_ms: totalLatencyMs,
+                        metadata: provenance,
+                        created_at: messageTimestamps.assistant
+                    }
+                ]);
+            }
+        } catch (dbErr) {
+            console.error("Failed to log chat messages to DB:", dbErr);
+        }
+
+
+        await logAiInteraction(supabase, {
+            sessionId: activeSessionId,
+            userId: userId,
+            intent: pipelineResult.plan.intent,
+            symbols: pipelineResult.plan.entities.symbols || [],
+            plannerModel: hasImages ? AI_CONFIG.models.planner.vision[0] : AI_CONFIG.models.planner.text[0],
+            responseModel: AI_CONFIG.models.response.default,
+            plannerLatencyMs: null,
+            toolsLatencyMs: null,
+            responseLatencyMs: null,
+            correlationId,
+            totalLatencyMs,
+            dataSizeChars: pipelineResult.tools?.formattedText?.length || 0,
+            error: pipelineResult.vision_error
+        });
+        if (pipelineResult.vision_error) {
+            await recordChatError(supabase, {
+                sessionId: activeSessionId,
+                userId,
+                clientMessageId,
+                correlationId,
+                phase: "vision",
+                error: pipelineResult.vision_error,
+                latencyMs: totalLatencyMs,
+                imageUrl: finalSavedImageUrl,
+            });
+        }
+
+        return NextResponse.json({
+            reply: replyText,
+            tables: pipelineResult.tables,
+            chart_actions: pipelineResult.chart_actions || [],
+            session_id: activeSessionId,
+            remaining_quota: calcRemainingQuota(),
+            quota_limit: isUnlimited ? 999 : userMonthlyCap,
+            is_pro: isUnlimited || userIsPro,
+            suggested_buttons: suggestedButtons,
+            session_state: pipelineResult.session_update,
+            latency_ms: totalLatencyMs,
+            enable_autonomous_recs: (pipelineResult as any).enable_autonomous_recs || undefined,
+            disable_autonomous_recs: (pipelineResult as any).disable_autonomous_recs || undefined
+        });
+
+        if ((pipelineResult as any).enable_autonomous_recs) {
+            if (!billingOn || isUnlimited || userIsPro) {
+                await persistAutonomousSetting(supabase, userId, true);
+            }
+        } else if ((pipelineResult as any).disable_autonomous_recs) {
+            await persistAutonomousSetting(supabase, userId, false);
+        }
+
+    } catch (error: any) {
+        console.error("Critical Chat API Error:", error);
+        if (supabase && userId) {
+            await recordChatError(supabase, {
+                sessionId: requestSessionId,
+                userId,
+                clientMessageId,
+                correlationId,
+                phase: "critical",
+                error,
+                latencyMs: Date.now() - totalRequestStartTime,
+            });
+        }
+        return NextResponse.json({ detail: "Failed to process chat request." }, { status: 500 });
+    }
+}
+
+export async function GET(req: NextRequest) {
+    try {
+        const authClient = await createSupabaseServerClient(req);
+        let supabase: any = null;
+        try {
+            supabase = getSupabaseServiceClient();
+        } catch {
+            supabase = getSupabaseClient();
+        }
+        if (!supabase) {
+            supabase = getSupabaseClient();
+        }
+
+        const { data: { user }, error: authError } = await authClient.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+
+        const userId = user.id;
+        const { searchParams } = new URL(req.url);
+        const action = searchParams.get("action");
+        const sessionId = searchParams.get("session_id");
+
+        if (action === "sessions") {
+            const { data: sessions } = await supabase
+                .from("ai_chat_sessions")
+                .select("id, title, created_at, updated_at")
+                .eq("user_id", userId)
+                .or("is_deleted_by_user.is.null,is_deleted_by_user.eq.false")
+                .order("updated_at", { ascending: false });
+
+            const { paymentsEnabled, planLimits, isPro: gateIsPro, getCairoDateString, resolveSubscriptionQuotaWindow } = await import("@/lib/ai/plan-gate");
+            const today = getCairoDateString();
+            const billingOn = paymentsEnabled();
+            const isUnlimited = isUnlimitedChatUser(user);
+            let quotaLimit = AI_CONFIG.limits.dailyMessages;
+            let usedCount = 0;
+            let userIsPro = isUnlimited;
+
+            if (billingOn) {
+                const subClient = supabase || authClient;
+                const { data: planRows } = await subClient
+                    .from("subscriptions")
+                    .select("plan_id,status,current_period_start,current_period_end")
+                    .eq("user_id", userId)
+                    .order("current_period_end", { ascending: false });
+                if (gateIsPro(planRows || [])) {
+                    userIsPro = true;
+                }
+                const quotaWin = resolveSubscriptionQuotaWindow(planRows || []);
+                quotaLimit = (isUnlimited || userIsPro) ? planLimits("pro").chat_messages_per_month : planLimits("free").chat_messages_per_month;
+                const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : quotaWin.calMonthStartStr;
+                const effectiveStart = userIsPro ? quotaWin.effectiveStartDate : new Date(`${quotaWin.calMonthStartStr}T00:00:00.000Z`);
+
+                const [limitRowsRes, msgRowsRes] = await Promise.all([
+                    supabase.from("ai_chatbot_limits").select("chat_count").eq("user_id", userId).gte("date", monthStartStr),
+                    supabase.from("ai_chat_messages").select("id, client_message_id").eq("user_id", userId).eq("role", "user").gte("created_at", effectiveStart.toISOString()),
+                ]);
+
+                const limitsCount = (limitRowsRes.data || []).reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
+                const msgCount = new Set((msgRowsRes.data || []).map((row: any) => row.client_message_id || row.id)).size;
+                usedCount = Math.max(limitsCount, msgCount);
+            } else {
+                const { data: limitData } = await supabase
+                    .from("ai_chatbot_limits")
+                    .select("chat_count")
+                    .eq("user_id", userId)
+                    .eq("date", today)
+                    .maybeSingle();
+                quotaLimit = 10;
+                usedCount = limitData?.chat_count || 0;
+            }
+
+            let savedAutonomousRecs = false;
+            try {
+                const { data: settingsRow } = await supabase
+                    .from("user_settings")
+                    .select("app_state")
+                    .eq("user_id", userId)
+                    .maybeSingle();
+                const appState = settingsRow?.app_state || {};
+                savedAutonomousRecs = Boolean(
+                    appState.chat?.autonomous_recommendations ??
+                    appState.autonomous_recommendations
+                );
+            } catch (err) {
+                console.warn("[sessions GET] Failed to fetch user_settings:", err);
+            }
+
+            return NextResponse.json({
+                sessions: sessions || [],
+                remaining_quota: isUnlimited ? 999 : Math.max(0, quotaLimit - usedCount),
+                quota_limit: isUnlimited ? 999 : quotaLimit,
+                is_pro: isUnlimited || userIsPro,
+                autonomous_recommendations: (isUnlimited || userIsPro) ? savedAutonomousRecs : false,
+            });
+        }
+
+        if (sessionId) {
+            let { data: messages, error: historyError } = await supabase
+                .from("ai_chat_messages")
+                .select("id, role, content, image_url, created_at, latency_ms, metadata")
+                .eq("session_id", sessionId)
+                .eq("user_id", userId)
+                .order("created_at", { ascending: true });
+            if (historyError && isMissingColumnError(historyError)) {
+                const fallback = await supabase
+                    .from("ai_chat_messages")
+                    .select("id, role, content, image_url, created_at")
+                    .eq("session_id", sessionId)
+                    .eq("user_id", userId)
+                    .order("created_at", { ascending: true });
+                messages = fallback.data;
+            }
+
+            const formattedHistory = orderChatMessages((messages || []).map((m: any) => ({
+                id: m.id,
+                role: m.role,
+                content: stripEnvironmentMetadata(String(m.content || "")),
+                timestamp: new Date(m.created_at).getTime(),
+                imageUrl: m.image_url || undefined,
+                latencyMs: typeof m.latency_ms === "number" && m.latency_ms > 0 ? m.latency_ms : undefined,
+                suggestedButtons: m.role === "assistant" ? sanitizeSuggestedButtons(m.metadata?.suggested_buttons) : undefined,
+                isVoice: Boolean(m.metadata?.is_voice),
+                isVoiceNote: Boolean(m.metadata?.is_voice_note),
+                voiceAudioUrl: typeof m.metadata?.voice_audio_url === "string" ? m.metadata.voice_audio_url : undefined,
+                voiceDuration: typeof m.metadata?.audio_duration === "number" ? m.metadata.audio_duration : undefined,
+                spokenText: typeof m.metadata?.spoken_text === "string" ? m.metadata.spoken_text : undefined,
+            })));
+
+            return NextResponse.json({ history: formattedHistory });
+        }
+
+        return NextResponse.json({ detail: "Invalid request parameters" }, { status: 400 });
+    } catch (e: any) {
+        return NextResponse.json({ detail: stripEnvironmentMetadata(e.message || "Failed to fetch session data") }, { status: 500 });
+    }
+}
+
+export async function PUT(req: NextRequest) {
+    try {
+        const authClient = await createSupabaseServerClient(req);
+        const supabase = getSupabaseClient();
+
+        const { data: { user }, error: authError } = await authClient.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+
+        const { session_id, title } = await req.json();
+        if (!session_id || !title) {
+            return NextResponse.json({ detail: "session_id and title required" }, { status: 400 });
+        }
+
+        await supabase
+            .from("ai_chat_sessions")
+            .update({ title, updated_at: new Date().toISOString() })
+            .eq("id", session_id)
+            .eq("user_id", user.id);
+
+        return NextResponse.json({ success: true });
+    } catch (e: any) {
+        return NextResponse.json({ detail: stripEnvironmentMetadata(e.message || "Failed to rename session") }, { status: 500 });
+    }
+}
+
+export async function DELETE(req: NextRequest) {
+    try {
+        const authClient = await createSupabaseServerClient(req);
+        const supabase = getSupabaseClient();
+
+        const { data: { user }, error: authError } = await authClient.auth.getUser();
+        if (authError || !user) {
+            return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+        }
+
+        const { searchParams } = new URL(req.url);
+        const sessionId = searchParams.get("session_id");
+
+        if (!sessionId) {
+            return NextResponse.json({ detail: "session_id required" }, { status: 400 });
+        }
+
+        // Soft delete: Mark session as deleted by user, preserving all messages for admin
+        await supabase
+            .from("ai_chat_sessions")
+            .update({
+                is_deleted_by_user: true,
+                deleted_at: new Date().toISOString()
+            })
+            .eq("id", sessionId)
+            .eq("user_id", user.id);
+
+        return NextResponse.json({ success: true });
+    } catch (e: any) {
+        return NextResponse.json({ detail: e.message || "Failed to delete session" }, { status: 500 });
+    }
+}

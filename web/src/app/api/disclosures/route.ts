@@ -57,20 +57,31 @@ export async function GET(req: NextRequest) {
 
   // Timeframe filtering (based on latest trading session date in DB)
   if (timeframe !== "all") {
-    const { data: latestRow } = await supabase
+    const { data: latestRows } = await supabase
       .from("egx_disclosures")
       .select("disclosure_date")
       .order("disclosure_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(10);
 
-    const refDateStr = latestRow?.disclosure_date || new Date().toISOString().split("T")[0];
+    const uniqueDates = Array.from(
+      new Set((latestRows || []).map((r) => r.disclosure_date).filter(Boolean))
+    );
+    const refDateStr = uniqueDates[0] || new Date().toISOString().split("T")[0];
+    const yesterdayDateStr = uniqueDates.length > 1 ? uniqueDates[1] : null;
 
     if (timeframe === "today") {
       query = query.eq("disclosure_date", refDateStr);
+    } else if (timeframe === "yesterday") {
+      if (yesterdayDateStr) {
+        query = query.eq("disclosure_date", yesterdayDateStr);
+      } else {
+        query = query.eq("disclosure_date", refDateStr);
+      }
     } else {
       let daysBack = 30;
-      if (timeframe === "7d") daysBack = 7;
+      if (timeframe === "3d") daysBack = 3;
+      else if (timeframe === "7d") daysBack = 7;
+      else if (timeframe === "14d") daysBack = 14;
       else if (timeframe === "30d") daysBack = 30;
       else if (timeframe === "90d") daysBack = 90;
 
@@ -104,8 +115,9 @@ export async function GET(req: NextRequest) {
     {
       status: 200,
       headers: {
-        "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
-        "Vercel-CDN-Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+        "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
+        "Vercel-Cache-Tag": "daily-disclosures",
       },
     }
   );

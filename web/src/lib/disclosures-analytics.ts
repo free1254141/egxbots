@@ -67,7 +67,7 @@ export interface SymbolPriceInfo {
   change_pct?: number;
 }
 
-export type TimeframePeriod = "all" | "today" | "7d" | "30d" | "90d";
+export type TimeframePeriod = "all" | "today" | "yesterday" | "3d" | "7d" | "14d" | "30d" | "90d";
 
 export interface SectorDefinition {
   id: string;
@@ -196,6 +196,12 @@ export function filterDisclosuresByTimeframeAndSector(
       }, "");
 
     if (latestDateStr) {
+      // Find all unique dates descending to accurately determine "yesterday" (the previous trading session)
+      const uniqueDates = Array.from(
+        new Set(filtered.map((d) => d.disclosure_date).filter(Boolean))
+      ).sort((a, b) => b.localeCompare(a));
+
+      const yesterdayDateStr = uniqueDates.length > 1 ? uniqueDates[1] : null;
       const latestTime = new Date(latestDateStr).getTime();
 
       filtered = filtered.filter((d) => {
@@ -203,10 +209,15 @@ export function filterDisclosuresByTimeframeAndSector(
         if (timeframe === "today") {
           return d.disclosure_date === latestDateStr;
         }
+        if (timeframe === "yesterday") {
+          return yesterdayDateStr ? d.disclosure_date === yesterdayDateStr : false;
+        }
         const itemTime = new Date(d.disclosure_date).getTime();
         const diffDays = Math.max(0, (latestTime - itemTime) / (1000 * 60 * 60 * 24));
 
+        if (timeframe === "3d") return diffDays <= 3;
         if (timeframe === "7d") return diffDays <= 7;
+        if (timeframe === "14d") return diffDays <= 14;
         if (timeframe === "30d") return diffDays <= 30;
         if (timeframe === "90d") return diffDays <= 90;
         return true;

@@ -23,16 +23,49 @@ const nextConfig = {
     let backendUrl =
       process.env.TRADING_SIGNALS_API_URL ||
       process.env.PYTHON_BACKEND_URL ||
-      "http://127.0.0.1:8000";
+      (process.env.NODE_ENV === "production"
+        ? "https://weeasdwee-ai-bot.hf.space"
+        : "http://127.0.0.1:8000");
     if (/localhost:3000|:3000\b/.test(backendUrl)) {
       console.warn(
         "[next.config] Ignoring backend URL pointing at Next.js dev server; using http://127.0.0.1:8000"
       );
       backendUrl = "http://127.0.0.1:8000";
     }
+    if (process.env.NODE_ENV === "production" && (/localhost|127\.0\.0\.1/.test(backendUrl))) {
+      backendUrl = "https://weeasdwee-ai-bot.hf.space";
+    }
     console.log("Using Trading Signals Backend URL:", backendUrl);
     const BACKEND_URL = backendUrl.replace(/\/$/, "");
-    return [
+
+    // Permanent Python Agentic Chatbot (HF Space in production, local in development)
+    const defaultChatbotBackend = process.env.NODE_ENV === "production" ? "hf" : "local";
+    const chatbotBackend = (process.env.CHATBOT_BACKEND || defaultChatbotBackend).toLowerCase().trim();
+    const isPythonChatbot = chatbotBackend !== "vercel";
+    const pythonChatbotDestination = chatbotBackend === "local"
+      ? "http://127.0.0.1:8000/api/ai_chat/:path*"
+      : `${BACKEND_URL}/api/ai_chat/:path*`;
+    const pythonChatbotExact = chatbotBackend === "local"
+      ? "http://127.0.0.1:8000/api/ai_chat"
+      : `${BACKEND_URL}/api/ai_chat`;
+    console.log(`[next.config] Chatbot backend configured: ${chatbotBackend} (isPython: ${isPythonChatbot}) -> ${pythonChatbotDestination}`);
+
+    const beforeFiles = isPythonChatbot
+      ? [
+          {
+            source: '/api/ai-chat/:path*',
+            destination: pythonChatbotDestination,
+          },
+          {
+            source: '/api/ai-chat',
+            destination: pythonChatbotExact,
+          },
+        ]
+      : [];
+
+    return {
+      beforeFiles,
+      afterFiles: [
       // Bypass rewrites to keep backtests, scan alerts, and admin proxy routes local
       {
         source: '/api/backtests/:path*',
@@ -64,7 +97,11 @@ const nextConfig = {
       },
       {
         source: '/api/ai-chat/:path*',
-        destination: '/api/ai-chat/:path*',
+        destination: pythonChatbotDestination,
+      },
+      {
+        source: '/api/ai-chat',
+        destination: pythonChatbotExact,
       },
       {
         source: '/api/disclosures/:path*',
@@ -144,9 +181,10 @@ const nextConfig = {
         source: '/bot/:path*',
         destination: `${BACKEND_URL}/bot/:path*`,
       },
-    ];
-  },
-  compress: true,
+    ],
+  };
+},
+compress: true,
   poweredByHeader: false,
 
   async headers() {

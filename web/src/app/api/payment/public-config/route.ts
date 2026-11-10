@@ -21,8 +21,8 @@ const BACKEND_URL = (
 ).replace(/\/$/, "");
 
 const PUBLIC_CONFIG_HEADERS = {
-  "Cache-Control": "public, max-age=60, must-revalidate",
-  "Vercel-CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
+  "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+  "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
 };
 
 export async function GET() {

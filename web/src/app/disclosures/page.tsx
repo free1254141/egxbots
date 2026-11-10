@@ -4,8 +4,7 @@ import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient"
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 86400; // 24-hour Edge ISR cache - refreshed automatically via daily job cache invalidation
 
 export const metadata: Metadata = {
   title: "رادار إفصاحات البورصة المصرية وتعاملات الداخليين | EGX BOTS",

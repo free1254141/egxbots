@@ -31,6 +31,7 @@ import {
   DollarSign,
   Briefcase,
   PieChart,
+  BookOpen,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useChat } from "@/contexts/ChatContext";
@@ -105,6 +106,27 @@ export default function DisclosuresClient({
   const [selectedSentiment, setSelectedSentiment] = useState<string>("all");
   const [smartFilter, setSmartFilter] = useState<"all" | "below_cost" | "accumulating" | "distributing">("all");
   const [layoutMode, setLayoutMode] = useState<"list" | "grid">("list");
+
+  // Load layout mode preference from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("disclosures_layout_mode");
+      if (saved === "grid" || saved === "list") {
+        setLayoutMode(saved);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const handleSetLayoutMode = (mode: "list" | "grid") => {
+    setLayoutMode(mode);
+    try {
+      localStorage.setItem("disclosures_layout_mode", mode);
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  };
 
   // Modal state for full-screen disclosure image / PDF inspection
   const [previewItem, setPreviewItem] = useState<DisclosureItem | null>(null);
@@ -363,14 +385,23 @@ export default function DisclosuresClient({
             : "Live tracking of Article 30 shareholding reports, insider transactions, and official disclosure scans with instant AI financial impact analysis."
         }
         action={
-          <button
-            type="button"
-            onClick={handleOpenGeneralFloatingChat}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black uppercase tracking-wider bg-[#00FF66] text-black border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] active:translate-y-0.5 transition-all cursor-pointer"
-          >
-            <Bot className="w-4 h-4" />
-            {isAr ? "اسأل المساعد الذكي عن أي إفصاح" : "Ask AI Assistant About Filings"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="#glossary"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-black uppercase tracking-wider bg-white text-black dark:bg-zinc-900 dark:text-white border-4 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] hover:text-black active:translate-y-0.5 transition-all cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4 text-amber-500" />
+              <span>{isAr ? "دليل المصطلحات والمفاهيم" : "Glossary & Terms"}</span>
+            </a>
+            <button
+              type="button"
+              onClick={handleOpenGeneralFloatingChat}
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black uppercase tracking-wider bg-[#00FF66] text-black border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] active:translate-y-0.5 transition-all cursor-pointer"
+            >
+              <Bot className="w-4 h-4" />
+              {isAr ? "اسأل المساعد الذكي عن أي إفصاح" : "Ask AI Assistant About Filings"}
+            </button>
+          </div>
         }
       />
 
@@ -477,7 +508,10 @@ export default function DisclosuresClient({
             {[
               { id: "all", ar: "كامل السجل (الكل)", en: "All Time" },
               { id: "today", ar: "جلسة اليوم / الأحدث", en: "Today / Latest" },
+              { id: "yesterday", ar: "جلسة أمس", en: "Yesterday" },
+              { id: "3d", ar: "آخر 3 أيام", en: "Last 3 Days" },
               { id: "7d", ar: "آخر 7 أيام", en: "Last 7 Days" },
+              { id: "14d", ar: "آخر 14 يوماً", en: "Last 14 Days" },
               { id: "30d", ar: "آخر 30 يوماً", en: "Last 30 Days" },
               { id: "90d", ar: "آخر 90 يوماً", en: "Last 90 Days" },
             ].map((tf) => (
@@ -773,7 +807,7 @@ export default function DisclosuresClient({
               <div className="flex border-2 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.4)]">
                 <button
                   type="button"
-                  onClick={() => setLayoutMode("list")}
+                  onClick={() => handleSetLayoutMode("list")}
                   className={`px-2.5 py-1 flex items-center gap-1.5 text-xs font-black transition-none cursor-pointer ${
                     layoutMode === "list"
                       ? "bg-black text-white dark:bg-white dark:text-black"
@@ -786,7 +820,7 @@ export default function DisclosuresClient({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLayoutMode("grid")}
+                  onClick={() => handleSetLayoutMode("grid")}
                   className={`px-2.5 py-1 flex items-center gap-1.5 text-xs font-black transition-none cursor-pointer ${
                     layoutMode === "grid"
                       ? "bg-black text-white dark:bg-white dark:text-black"

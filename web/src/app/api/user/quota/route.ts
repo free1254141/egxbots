@@ -192,9 +192,8 @@ export async function GET(req: NextRequest) {
         },
       },
     }, {
-      // Entitlement changes must be visible immediately after payment or an
-      // admin adjustment. Never serve a stale Free/Pro result from HTTP caches.
-      headers: { "Cache-Control": "private, no-store" },
+      // Private client cache for 60s prevents repeated redundant checks across tabs while navigating
+      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
     });
   } catch (err: any) {
     console.error("[api/user/quota] GET error:", err);

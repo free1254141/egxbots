@@ -42,11 +42,11 @@ All agents (Planners, Developers, QA Reviewers, Subagents, and AI tools) must st
    - Rely on Vercel Data Cache, SWR revalidation on focus/action, and event-driven updates.
 
 5. **Agentic AI Chat Architecture & Integrity**:
-   - All user chat queries are routed through the pure LLM-driven Agentic architecture in `web/src/lib/ai/agentic-pipeline.ts` (delegated from `web/src/lib/ai/pipeline.ts`).
+   - All user chat queries are routed permanently through the pure LLM-driven Agentic architecture in the Python FastAPI backend (`api/agentic_chat/`), running on Hugging Face Space (`weeasdwee-ai-bot.hf.space`) in production and `http://127.0.0.1:8000` locally, completely eliminating Vercel Active CPU. Next.js proxies/rewrites `/api/ai-chat` directly to the Python backend.
    - DeepSeek-V3 determines intent and selects tools in parallel (`get_stock`, `get_stock_levels`, `manage_portfolio`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_accumulation_stocks`, `get_news`, `get_comparison`).
    - NEVER re-introduce brittle regex intent routers, rigid keyword blocklists, or mechanical symbol substitutions (e.g. swapping `ADRI` for `ADCI`) that break Egyptian dialect, Nile market stocks, or multi-turn queries.
    - All tool executions against Supabase must specify explicit column projections and strict `limit()` clauses.
-   - Reference documentation is maintained in `docs/chatbot-current-architecture.md` and `docs/chatbot-agentic-architecture-2026-10-08.md`.
+   - Reference documentation is maintained in `docs/chatbot-python-agentic-architecture-2026-11-10.md`, `docs/chatbot-current-architecture.md`, and `docs/chatbot-agentic-architecture-2026-10-08.md`.
 
 6. **Hugging Face Deployment Rule (Python Backend Only)**:
    - When deploying or syncing updates to the Hugging Face Space (`weeasdwee/AI_BOT`), **ONLY push updated Python files (`.py`)** and backend configuration files (e.g. `api/`, `jobs/`, `scripts/`, `requirements*.txt`, `daily_job_config.json`, `Dockerfile`).

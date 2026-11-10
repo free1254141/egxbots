@@ -64,12 +64,12 @@ These instructions apply to the entire repository, including AI assistants, revi
 
 ## AI Chat Architecture (Agentic Function Calling)
 
-- All user chat queries are routed through the pure LLM-driven Agentic architecture in `web/src/lib/ai/agentic-pipeline.ts` (delegated from `web/src/lib/ai/pipeline.ts`).
+- All user chat queries are routed permanently through the pure LLM-driven Agentic architecture in the Python FastAPI backend (`api/agentic_chat/`), running on Hugging Face Space (`weeasdwee-ai-bot.hf.space`) in production and `http://127.0.0.1:8000` locally, completely eliminating Vercel Active CPU. Next.js proxies/rewrites `/api/ai-chat` directly to the Python backend.
 - DeepSeek-V3 determines user intent and selects from the 9 available tools in parallel (`get_stock`, `get_stock_levels`, `manage_portfolio`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_accumulation_stocks`, `get_news`, `get_comparison`).
 - Do NOT re-introduce brittle regex intent routers, rigid keyword blocklists, or mechanical symbol substitutions (e.g., swapping `ADRI` for `ADCI`) that break Egyptian dialect, Nile market stocks, or multi-turn queries.
 - Tool executions must always query Supabase directly with explicit column projections and strict `limit()` clauses.
 - Public read-only tool results (`get_stock`, `get_market`, `get_recommendations`, `get_technical_scan`, `get_news`, `get_fair_value`, `get_sharia_cleanser`, ...) are cached per Cairo trading day in `web/src/lib/ai/tool-result-cache.ts`. Never add portfolio, alert, automation or live-quote tools to that allowlist: they read `userId` or must stay intraday. Disable the cache with `TOOL_RESULT_CACHE=off` if it ever misbehaves.
-- Detailed architecture and historical reviews are in `docs/chatbot-current-architecture.md` and `docs/chatbot-agentic-architecture-2026-10-08.md`.
+- Detailed architecture, Python backend engine (`api/agentic_chat/`), and historical reviews are in `docs/chatbot-python-agentic-architecture-2026-11-10.md`, `docs/chatbot-current-architecture.md`, and `docs/chatbot-agentic-architecture-2026-10-08.md`.
 
 ## Google Search Console & SEO / GEO Intelligence
 
