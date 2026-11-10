@@ -6,6 +6,7 @@ session persistence, and non-blocking async execution.
 """
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -141,6 +142,7 @@ async def get_chat_root(
                     supabase.from_("ai_chat_sessions")
                     .select("id, title, created_at, updated_at")
                     .eq("user_id", user_id)
+                    .or_("is_deleted_by_user.is.null,is_deleted_by_user.eq.false")
                     .order("updated_at", desc=True)
                     .limit(20)
                     .execute()
@@ -241,9 +243,12 @@ async def delete_session(request: Request, session_id: Optional[str] = None):
         if not uid:
             return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
 
-        supabase.from_("ai_chat_messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
-        supabase.from_("ai_chat_sessions").delete().eq("id", sid).eq("user_id", uid).execute()
-        return {"status": "ok", "deleted": sid}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        supabase.from_("ai_chat_sessions").update({
+            "is_deleted_by_user": True,
+            "deleted_at": now_iso
+        }).eq("id", sid).eq("user_id", uid).execute()
+        return {"status": "ok", "deleted": sid, "success": True}
     except Exception as e:
         logger.warning(f"[agentic_chat] Session delete error: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)

@@ -150,8 +150,7 @@ async def test_get_sessions_unauthenticated_returns_empty():
 async def test_get_sessions_authenticated_queries_by_user_id():
     req = build_mock_request(query_params={"action": "sessions"})
     mock_supabase = MagicMock()
-    mock_query = MagicMock()
-    mock_supabase.from_.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+    mock_supabase.from_.return_value.select.return_value.eq.return_value.or_.return_value.order.return_value.limit.return_value.execute.return_value.data = [
         {"id": "sess_1", "title": "My Stock Query", "created_at": "2026-11-10T00:00:00Z", "updated_at": "2026-11-10T00:00:00Z"}
     ]
 
@@ -196,8 +195,8 @@ async def test_delete_session_authenticated_deletes_with_user_filter():
         resp = await delete_session(req, session_id="sess_123")
         assert resp["status"] == "ok"
         assert resp["deleted"] == "sess_123"
-        # Verify eq("user_id", "user_owner") was executed on both messages and sessions
-        assert mock_supabase.from_.return_value.delete.return_value.eq.return_value.eq.call_count == 2
+        # Verify eq("user_id", "user_owner") was executed for soft-delete
+        mock_supabase.from_.return_value.update.return_value.eq.return_value.eq.assert_called_with("user_id", "user_owner")
 
 
 @pytest.mark.anyio
