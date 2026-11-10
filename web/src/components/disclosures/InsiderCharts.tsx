@@ -1,8 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { CostComparisonItem, FlowDistribution } from "@/lib/disclosures-analytics";
-import { BarChart3, Sparkles, TrendingUp, TrendingDown, Target } from "lucide-react";
+import { BarChart3, Sparkles, TrendingUp, TrendingDown, Target, ChevronDown, ChevronUp } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
 
 interface InsiderChartsProps {
@@ -10,6 +10,7 @@ interface InsiderChartsProps {
   flowDistribution: FlowDistribution;
   isAr: boolean;
   onSelectSymbol?: (symbol: string) => void;
+  onFilterBelowCost?: () => void;
 }
 
 export default function InsiderCharts({
@@ -17,7 +18,10 @@ export default function InsiderCharts({
   flowDistribution,
   isAr,
   onSelectSymbol,
+  onFilterBelowCost,
 }: InsiderChartsProps) {
+  const [showAllDiscounts, setShowAllDiscounts] = useState(false);
+
   const formatEgp = (val: number) => {
     const abs = Math.abs(val);
     if (abs >= 1_000_000) {
@@ -28,6 +32,8 @@ export default function InsiderCharts({
     }
     return `${val.toFixed(0)} ${isAr ? "ج.م" : "EGP"}`;
   };
+
+  const displayedDiscounts = showAllDiscounts ? costDiscounts : costDiscounts.slice(0, 5);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 my-6">
@@ -48,9 +54,23 @@ export default function InsiderCharts({
                 </p>
               </div>
             </div>
-            <span className="px-2 py-0.5 border-2 border-black bg-[#FFE600] text-black text-[10px] font-black uppercase shadow-[1px_1px_0px_#000]">
-              {isAr ? "فرص ذهبية" : "OPPORTUNITIES"}
-            </span>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {costDiscounts.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllDiscounts(!showAllDiscounts)}
+                  className="px-2 py-0.5 border-2 border-black bg-amber-400 hover:bg-[#FFE600] text-black text-[10px] font-black uppercase shadow-[1px_1px_0px_#000] cursor-pointer transition-colors flex items-center gap-0.5"
+                  title={isAr ? "إظهار أو طي كافة الأسهم" : "Toggle all stocks"}
+                >
+                  <span>{showAllDiscounts ? (isAr ? "عرض 5 فقط" : "Show 5") : (isAr ? `عرض الكل (${costDiscounts.length})` : `All (${costDiscounts.length})`)}</span>
+                  {showAllDiscounts ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+              )}
+              <span className="px-2 py-0.5 border-2 border-black bg-[#FFE600] text-black text-[10px] font-black uppercase shadow-[1px_1px_0px_#000]">
+                {isAr ? "فرص ذهبية" : "OPPORTUNITIES"}
+              </span>
+            </div>
           </div>
 
           {costDiscounts.length === 0 ? (
@@ -58,8 +78,8 @@ export default function InsiderCharts({
               {isAr ? "جميع الأسهم تتداول حالياً عند أو فوق تكلفة الداخليين." : "All tracked stocks are currently trading at or above insider cost."}
             </div>
           ) : (
-            <div className="space-y-3.5">
-              {costDiscounts.slice(0, 5).map((item) => {
+            <div className={`space-y-3.5 ${showAllDiscounts ? "max-h-[460px] overflow-y-auto pr-1 sm:pr-2" : ""}`}>
+              {displayedDiscounts.map((item) => {
                 const maxPrice = Math.max(item.insider_vwap, item.current_price) * 1.15;
                 const costWidth = Math.min(100, Math.max(15, (item.insider_vwap / maxPrice) * 100));
                 const curWidth = Math.min(100, Math.max(15, (item.current_price / maxPrice) * 100));
@@ -123,11 +143,48 @@ export default function InsiderCharts({
               })}
             </div>
           )}
+
+          {/* Interactive Toggle & Filter Action Strip */}
+          {costDiscounts.length > 5 && (
+            <div className="mt-4 pt-3 border-t-2 border-black/15 dark:border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAllDiscounts(!showAllDiscounts)}
+                className="flex-1 py-2 px-3 bg-[#FFE600] hover:bg-black hover:text-white text-black border-2 border-black font-black text-xs uppercase shadow-[2px_2px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer active:translate-y-0.5 transition-all"
+              >
+                <Target className="w-3.5 h-3.5" />
+                <span>
+                  {showAllDiscounts
+                    ? (isAr ? "طي القائمة (إظهار أول 5 أسهم فقط) ▴" : "Collapse to Top 5 ▴")
+                    : (isAr ? `عرض جميع الأسهم الـ (${costDiscounts.length}) التي تتداول بأقل من التكلفة ▾` : `Show all (${costDiscounts.length}) discounted stocks ▾`)}
+                </span>
+              </button>
+
+              {onFilterBelowCost && (
+                <button
+                  type="button"
+                  onClick={onFilterBelowCost}
+                  className="py-2 px-3 bg-white dark:bg-zinc-900 hover:bg-[#00FF66] text-black dark:text-white hover:text-black border-2 border-black dark:border-white font-black text-xs uppercase shadow-[2px_2px_0px_#000] flex items-center justify-center gap-1.5 cursor-pointer active:translate-y-0.5 transition-all"
+                  title={isAr ? "تصفية جدول الإفصاحات بهذه الأسهم فقط" : "Filter table for these stocks"}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{isAr ? "تصفية الجدول بهذه الأسهم" : "Filter Table"}</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mt-4 pt-3 border-t-2 border-black/10 dark:border-white/10 flex items-center justify-between text-[11px] text-zinc-600 dark:text-zinc-400 font-bold">
           <span>{isAr ? "💡 محسوب استناداً إلى متوسط أسعار تنفيذ عمليات الشراء" : "Calculated from execution average prices"}</span>
-          <span className="text-amber-600 dark:text-amber-400 font-black">{costDiscounts.length} {isAr ? "أسهم تحت التكلفة" : "stocks discounted"}</span>
+          <button
+            type="button"
+            onClick={() => setShowAllDiscounts(!showAllDiscounts)}
+            className="text-amber-600 dark:text-amber-400 font-black hover:underline cursor-pointer flex items-center gap-1"
+          >
+            <span>{costDiscounts.length} {isAr ? "أسهم تحت التكلفة" : "stocks discounted"}</span>
+            <span className="text-[10px]">{showAllDiscounts ? (isAr ? "(طي ▴)" : "(less ▴)") : (isAr ? "(عرض الكل ▾)" : "(all ▾)")}</span>
+          </button>
         </div>
       </div>
 

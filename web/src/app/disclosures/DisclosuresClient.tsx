@@ -92,6 +92,9 @@ export default function DisclosuresClient({
   // Stock Deep-Dive Modal state
   const [modalSymbol, setModalSymbol] = useState<string | null>(null);
 
+  // Financial Terminology & Guide Modal state
+  const [isGlossaryOpen, setIsGlossaryOpen] = useState<boolean>(false);
+
   const [disclosures, setDisclosures] = useState<DisclosureItem[]>(initialDisclosures);
   const [totalCount, setTotalCount] = useState<number>(initialStats.total || initialDisclosures.length);
   const [hasMore, setHasMore] = useState<boolean>(
@@ -386,13 +389,14 @@ export default function DisclosuresClient({
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <a
-              href="#glossary"
+            <button
+              type="button"
+              onClick={() => setIsGlossaryOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-black uppercase tracking-wider bg-white text-black dark:bg-zinc-900 dark:text-white border-4 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] hover:text-black active:translate-y-0.5 transition-all cursor-pointer"
             >
               <BookOpen className="w-4 h-4 text-amber-500" />
               <span>{isAr ? "دليل المصطلحات والمفاهيم" : "Glossary & Terms"}</span>
-            </a>
+            </button>
             <button
               type="button"
               onClick={handleOpenGeneralFloatingChat}
@@ -461,18 +465,29 @@ export default function DisclosuresClient({
         </div>
 
         {/* KPI 3: Stocks Trading Below Insider Cost */}
-        <div className="p-4 border-4 border-black dark:border-white bg-amber-400/25 dark:bg-amber-400/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+        <div
+          onClick={() => {
+            setSmartFilter("below_cost");
+            const el = document.getElementById("disclosures-feed");
+            if (el) el.scrollIntoView({ behavior: "smooth" });
+          }}
+          className="p-4 border-4 border-black dark:border-white bg-amber-400/25 dark:bg-amber-400/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)] cursor-pointer hover:bg-amber-400/40 transition-colors group"
+          title={isAr ? "اضغط لتصفية الإفصاحات بالأسهم التي تتداول بأقل من التكلفة" : "Click to filter stocks trading below insider cost"}
+        >
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-black uppercase text-amber-950 dark:text-amber-300">
               {isAr ? "أقل من تكلفة الداخلي" : "Below Insider Cost"}
             </span>
-            <Target className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300">
-            {activeAnalytics ? activeAnalytics.costDiscountTop.length : 0}
+          <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300 flex items-baseline gap-2">
+            <span>{activeAnalytics ? activeAnalytics.costDiscountTop.length : 0}</span>
+            <span className="text-xs font-bold text-amber-800 dark:text-amber-400 underline">
+              {isAr ? "تصفية" : "Filter"}
+            </span>
           </div>
           <span className="text-[11px] font-bold text-amber-900/80 dark:text-amber-300/80">
-            {isAr ? "فرص شراء بأقل من سعر صانعه" : "Discounted vs insider entry"}
+            {isAr ? "فرص شراء بأقل من سعر صانعه (اضغط للتصفية)" : "Discounted vs insider entry (Click to filter)"}
           </span>
         </div>
 
@@ -650,11 +665,16 @@ export default function DisclosuresClient({
               flowDistribution={activeAnalytics.flowDistribution}
               isAr={isAr}
               onSelectSymbol={(sym) => setModalSymbol(sym)}
+              onFilterBelowCost={() => {
+                setSmartFilter("below_cost");
+                const el = document.getElementById("disclosures-feed");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
             />
           )}
 
           {/* Controls Bar: Search + Type Filters + Sentiment + Smart Filter */}
-          <div className="space-y-3 mb-8">
+          <div id="disclosures-feed" className="space-y-3 mb-8">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
               {/* Search Input */}
               <div className="lg:col-span-4 relative flex items-center">
@@ -1352,14 +1372,21 @@ export default function DisclosuresClient({
         />
       )}
 
-      {/* Comprehensive Disclosures & Financial Terminology Glossary */}
-      <DisclosuresGlossary isAr={isAr} />
-
       {/* Legal & Regulatory Comprehensive Disclaimer Footer */}
       <footer className="mt-8 p-5 rounded-2xl border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.4)] text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
-        <div className="flex items-center gap-2 mb-2 font-black text-black dark:text-white text-sm">
-          <Scale className="w-4 h-4 text-amber-500" />
-          <span>{isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (EGX & FRA Compliance):" : "Regulatory & Legal Disclaimer:"}</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+          <div className="flex items-center gap-2 font-black text-black dark:text-white text-sm">
+            <Scale className="w-4 h-4 text-amber-500" />
+            <span>{isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (EGX & FRA Compliance):" : "Regulatory & Legal Disclaimer:"}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsGlossaryOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-black bg-white dark:bg-zinc-900 border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-colors cursor-pointer shadow-[2px_2px_0px_#000]"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-500" />
+            <span>{isAr ? "دليل المصطلحات والمفاهيم 📖" : "Glossary & Terms 📖"}</span>
+          </button>
         </div>
         <p>
           {isAr
@@ -1478,6 +1505,13 @@ export default function DisclosuresClient({
           setSearch(sym);
           window.scrollTo({ top: 850, behavior: "smooth" });
         }}
+      />
+
+      {/* Comprehensive Disclosures & Financial Terminology Glossary Modal Dialog */}
+      <DisclosuresGlossary
+        isOpen={isGlossaryOpen}
+        onClose={() => setIsGlossaryOpen(false)}
+        isAr={isAr}
       />
     </div>
   );

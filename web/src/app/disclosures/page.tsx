@@ -47,8 +47,8 @@ async function getInitialDisclosuresData(): Promise<{
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Fetch initial batch of disclosures, stats pool, and latest technical closing prices in parallel
-  const [pageRes, statsRes, pricesRes] = await Promise.all([
+  // Fetch initial batch of disclosures, stats pool, latest prices, and company fundamentals in parallel
+  const [pageRes, statsRes, pricesRes, fundamentalsRes] = await Promise.all([
     supabase
       .from("egx_disclosures")
       .select(
@@ -68,7 +68,11 @@ async function getInitialDisclosuresData(): Promise<{
     supabase
       .from("stock_technical_indicators")
       .select("symbol, close, change_pct")
-      .limit(300),
+      .limit(350),
+    supabase
+      .from("stock_fundamentals")
+      .select("symbol, data")
+      .limit(350),
   ]);
 
   const allDisclosures = (statsRes.data || []) as DisclosureItem[];
@@ -80,6 +84,30 @@ async function getInitialDisclosuresData(): Promise<{
           close: Number(p.close),
           change_pct: p.change_pct != null ? Number(p.change_pct) : 0,
         };
+      }
+    }
+  }
+
+  // Enrich priceMap with verified marketCap and totalShares from fundamentals
+  if (fundamentalsRes.data) {
+    for (const f of fundamentalsRes.data) {
+      if (f.symbol && f.data && typeof f.data === "object") {
+        const sym = f.symbol.toUpperCase();
+        const mc = (f.data as Record<string, unknown>).marketCap;
+        if (typeof mc === "number" && mc > 0) {
+          if (priceMap[sym]) {
+            priceMap[sym].market_cap = mc;
+            if (priceMap[sym].close > 0) {
+              priceMap[sym].total_shares = Math.round(mc / priceMap[sym].close);
+            }
+          } else {
+            priceMap[sym] = {
+              close: 0,
+              change_pct: 0,
+              market_cap: mc,
+            };
+          }
+        }
       }
     }
   }

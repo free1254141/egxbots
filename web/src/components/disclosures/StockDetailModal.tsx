@@ -93,30 +93,66 @@ export default function StockDetailModal({
   const buyRatio = totalShares > 0 ? (totalBuyShares / totalShares) * 100 : 50;
   const sellRatio = totalShares > 0 ? (totalSellShares / totalShares) * 100 : 50;
 
-  // Determine effective Free Float data (from ownership or fallback estimation)
-  const effectiveFreeFloatPct = ownership?.free_float_pct ?? 25.0; // standard default float ~25%
-  const effectiveTotalShares = ownership?.total_shares || (currentPrice > 0 ? Math.round(50_000_000) : 0);
-  const effectiveFreeFloatShares = ownership?.free_float_shares || (
-    effectiveTotalShares > 0
-      ? Math.round(effectiveTotalShares * (effectiveFreeFloatPct / 100))
-      : (totalBuyShares > 0 ? totalBuyShares * 4 : 12_500_000)
+  // Check if this stock has authentic Article 30 major ownership filings
+  const hasDeclaredStructure = Boolean(
+    ownership &&
+    ownership.free_float_pct != null &&
+    ownership.shareholders &&
+    ownership.shareholders.length > 0
   );
-  const effectiveFloatMarketCap = ownership?.free_float_market_cap_egp || (
-    effectiveFreeFloatShares > 0 && currentPrice > 0
-      ? effectiveFreeFloatShares * currentPrice
-      : 0
-  );
-  const effectiveLockedPct = ownership?.locked_pct ?? Number((100 - effectiveFreeFloatPct).toFixed(1));
 
-  const formatEgp = (val: number) => {
+  const realTotalShares = metric?.total_shares || ownership?.total_shares || 0;
+  const realMarketCap =
+    metric?.market_cap ||
+    (realTotalShares > 0 && currentPrice > 0 ? realTotalShares * currentPrice : 0);
+
+  const effectiveFreeFloatPct = hasDeclaredStructure
+    ? (ownership?.free_float_pct ?? 100)
+    : 100;
+  const effectiveFreeFloatShares = hasDeclaredStructure
+    ? (ownership?.free_float_shares ||
+        (realTotalShares > 0 ? Math.round(realTotalShares * (effectiveFreeFloatPct / 100)) : 0))
+    : realTotalShares;
+  const effectiveFloatMarketCap = hasDeclaredStructure
+    ? (ownership?.free_float_market_cap_egp ||
+        (effectiveFreeFloatShares > 0 && currentPrice > 0
+          ? effectiveFreeFloatShares * currentPrice
+          : 0))
+    : realMarketCap;
+  const effectiveLockedPct = hasDeclaredStructure
+    ? (ownership?.locked_pct ?? Number((100 - effectiveFreeFloatPct).toFixed(1)))
+    : 0;
+
+  const formatShares = (val: number) => {
+    if (val == null || isNaN(val) || val === 0) return "—";
     const abs = Math.abs(val);
+    const sign = val < 0 ? "-" : "";
+    if (abs >= 1_000_000_000) {
+      return `${sign}${(abs / 1_000_000_000).toFixed(2)} ${isAr ? "مليار سهم" : "B shares"}`;
+    }
     if (abs >= 1_000_000) {
-      return `${(val / 1_000_000).toFixed(1)} ${isAr ? "مليون ج.م" : "M EGP"}`;
+      return `${sign}${(abs / 1_000_000).toFixed(1)} ${isAr ? "مليون سهم" : "M shares"}`;
     }
     if (abs >= 1_000) {
-      return `${(val / 1_000).toFixed(0)} ${isAr ? "ألف ج.م" : "k EGP"}`;
+      return `${sign}${(abs / 1_000).toFixed(0)} ${isAr ? "ألف سهم" : "k shares"}`;
     }
-    return `${val.toFixed(0)} ${isAr ? "ج.م" : "EGP"}`;
+    return `${sign}${abs.toLocaleString()} ${isAr ? "سهم" : "shares"}`;
+  };
+
+  const formatEgp = (val: number) => {
+    if (val == null || isNaN(val) || val === 0) return "—";
+    const abs = Math.abs(val);
+    const sign = val < 0 ? "-" : "";
+    if (abs >= 1_000_000_000) {
+      return `${sign}${(abs / 1_000_000_000).toFixed(2)} ${isAr ? "مليار ج.م" : "B EGP"}`;
+    }
+    if (abs >= 1_000_000) {
+      return `${sign}${(abs / 1_000_000).toFixed(1)} ${isAr ? "مليون ج.م" : "M EGP"}`;
+    }
+    if (abs >= 1_000) {
+      return `${sign}${(abs / 1_000).toFixed(0)} ${isAr ? "ألف ج.م" : "k EGP"}`;
+    }
+    return `${sign}${abs.toFixed(0)} ${isAr ? "ج.م" : "EGP"}`;
   };
 
   return (
@@ -152,9 +188,9 @@ export default function StockDetailModal({
                   {isAr ? sector.ar : sector.en}
                 </span>
                 <span className="px-2.5 py-0.5 text-xs font-black bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-2 border-black dark:border-white/20">
-                  {isAr
-                    ? `تداول حر: ${effectiveFreeFloatPct}%`
-                    : `Free Float: ${effectiveFreeFloatPct}%`}
+                  {hasDeclaredStructure
+                    ? (isAr ? `تداول حر معتمد: ${effectiveFreeFloatPct}%` : `Free Float: ${effectiveFreeFloatPct}%`)
+                    : (isAr ? "تداول عام كامل (مفتوح بالكامل)" : "100% Public Float")}
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-bold text-zinc-700 dark:text-zinc-300 mt-1">
@@ -455,58 +491,96 @@ export default function StockDetailModal({
               </h3>
             </div>
             <span className="px-3 py-1 text-xs font-black bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_#000]">
-              {isAr
-                ? `الأسهم الحرة للتداول: ${effectiveFreeFloatPct}%`
-                : `Free Float: ${effectiveFreeFloatPct}%`}
+              {hasDeclaredStructure
+                ? (isAr ? `الأسهم الحرة للتداول: ${effectiveFreeFloatPct}%` : `Free Float: ${effectiveFreeFloatPct}%`)
+                : (isAr ? "تداول عام كامل 100%" : "100% Public Trading Float")}
             </span>
           </div>
 
-          {/* Free Float & Liquidity Structure Breakdown (Always Visible with Effective/Estimated Shares) */}
+          {/* Free Float & Liquidity Structure Breakdown */}
           <div className="mb-4 p-4 border-2 border-black dark:border-white/30 bg-zinc-50 dark:bg-zinc-900/90 shadow-[3px_3px_0px_#000]">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-black/10 dark:border-white/10 pb-2">
               <span className="text-xs font-black text-black dark:text-white uppercase flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-amber-500" />
-                {isAr ? "تحليل هيكل الأسهم الحرة ومعدل خفة السهم:" : "Free Float & Liquidity Analysis:"}
+                {hasDeclaredStructure
+                  ? (isAr ? "تحليل هيكل الأسهم الحرة ومعدل خفة السهم:" : "Free Float & Liquidity Analysis:")
+                  : (isAr ? "بيانات رأس المال والسيولة المتاحة للتداول:" : "Capital & Public Trading Liquidity:")}
               </span>
               <span className="text-[11px] font-bold px-2 py-0.5 border border-black bg-white dark:bg-zinc-800">
-                {effectiveFreeFloatPct < 20
-                  ? isAr ? "⚡ سهم خفيف مضاربياً (تداول حر محدود)" : "High Volatility / Low Float"
-                  : effectiveFreeFloatPct > 50
-                  ? isAr ? "🏛️ سهم مؤسسي ثقيل (سيولة واسعة)" : "Heavy Institutional Float"
-                  : isAr ? "⚖️ تداول حر متوازن" : "Balanced Float"}
+                {hasDeclaredStructure ? (
+                  effectiveFreeFloatPct < 20
+                    ? isAr ? "⚡ سهم خفيف مضاربياً (تداول حر محدود)" : "High Volatility / Low Float"
+                    : effectiveFreeFloatPct > 50
+                    ? isAr ? "🏛️ سهم مؤسسي ثقيل (سيولة واسعة)" : "Heavy Institutional Float"
+                    : isAr ? "⚖️ تداول حر متوازن" : "Balanced Float"
+                ) : (
+                  isAr ? "🟢 سيولة تداول عامة كاملة" : "Full Public Liquidity"
+                )}
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
-              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "نسبة الأسهم الحرة" : "Free Float %"}</span>
-                <span className="text-sm sm:text-base font-black text-amber-600 dark:text-amber-400 font-mono">
-                  {effectiveFreeFloatPct}%
-                </span>
-              </div>
+              {hasDeclaredStructure ? (
+                <>
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "نسبة الأسهم الحرة" : "Free Float %"}</span>
+                    <span className="text-sm sm:text-base font-black text-amber-600 dark:text-amber-400 font-mono">
+                      {effectiveFreeFloatPct}%
+                    </span>
+                  </div>
 
-              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "عدد الأسهم الحرة" : "Free Float Shares"}</span>
-                <span className="text-sm sm:text-base font-black text-black dark:text-white font-mono">
-                  {effectiveFreeFloatShares >= 1_000_000
-                    ? `${(effectiveFreeFloatShares / 1_000_000).toFixed(1)} ${isAr ? "مليون سهم" : "M shares"}`
-                    : `${(effectiveFreeFloatShares / 1_000).toFixed(0)} ${isAr ? "ألف سهم" : "k shares"}`}
-                </span>
-              </div>
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "عدد الأسهم الحرة" : "Free Float Shares"}</span>
+                    <span className="text-sm sm:text-base font-black text-black dark:text-white font-mono">
+                      {formatShares(effectiveFreeFloatShares)}
+                    </span>
+                  </div>
 
-              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "القيمة السوقية الحرة" : "Float Market Cap"}</span>
-                <span className="text-sm sm:text-base font-black text-emerald-700 dark:text-[#00FF66] font-mono">
-                  {effectiveFloatMarketCap > 0 ? formatEgp(effectiveFloatMarketCap) : "—"}
-                </span>
-              </div>
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "القيمة السوقية الحرة" : "Float Market Cap"}</span>
+                    <span className="text-sm sm:text-base font-black text-emerald-700 dark:text-[#00FF66] font-mono">
+                      {formatEgp(effectiveFloatMarketCap)}
+                    </span>
+                  </div>
 
-              <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
-                <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "الأسهم المجمدة للمؤسسين" : "Strategic Locked"}</span>
-                <span className="text-sm sm:text-base font-black text-purple-700 dark:text-purple-400 font-mono">
-                  {effectiveLockedPct}%
-                </span>
-              </div>
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "الأسهم المجمدة للمؤسسين" : "Strategic Locked"}</span>
+                    <span className="text-sm sm:text-base font-black text-purple-700 dark:text-purple-400 font-mono">
+                      {effectiveLockedPct}%
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "إجمالي أسهم الشركة" : "Total Listed Shares"}</span>
+                    <span className="text-sm sm:text-base font-black text-black dark:text-white font-mono">
+                      {formatShares(realTotalShares)}
+                    </span>
+                  </div>
+
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "رأس المال السوقي" : "Market Cap"}</span>
+                    <span className="text-sm sm:text-base font-black text-emerald-700 dark:text-[#00FF66] font-mono">
+                      {formatEgp(realMarketCap)}
+                    </span>
+                  </div>
+
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "حالة التداول الحر" : "Free Float Status"}</span>
+                    <span className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                      {isAr ? "100% متاح للتداول" : "100% Open Float"}
+                    </span>
+                  </div>
+
+                  <div className="p-2 border border-black dark:border-white/20 bg-white dark:bg-zinc-950">
+                    <span className="text-[10px] text-zinc-500 font-bold block">{isAr ? "حصص السيطرة (>5%)" : "Major Control (>5%)"}</span>
+                    <span className="text-sm sm:text-base font-black text-purple-700 dark:text-purple-400 font-mono">
+                      {isAr ? "لا توجد (0%)" : "None (0%)"}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -580,10 +654,16 @@ export default function StockDetailModal({
               </table>
             </div>
           ) : (
-            <div className="p-4 border-2 border-black/20 dark:border-white/10 bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-bold text-center">
-              {isAr
-                ? "لا توجد تعديلات معلنة حديثاً بنماذج المادة (30) لكبار الملاك لهذا السهم، والتداول الحر متاح بالكامل للمستثمرين."
-                : "No recent Article 30 major ownership filings on record for this symbol. Free float is fully accessible to public investors."}
+            <div className="p-4 border-2 border-black/20 dark:border-white/10 bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 text-xs leading-relaxed">
+              <div className="flex items-center gap-1.5 font-black text-black dark:text-white mb-1.5">
+                <ShieldCheck className="w-4 h-4 text-amber-500" />
+                <span>{isAr ? "إيضاح رقابي بشأن المادة (30):" : "Regulatory Notice (Article 30):"}</span>
+              </div>
+              <p>
+                {isAr
+                  ? `تُلزم قواعد قيد واستمرار قيد الأوراق المالية بالبورصة المصرية بالإفصاح عن نماذج المادة (30) فقط عند وصول أي مساهم منفرد أو مجموعته المرتبطة إلى نسبة 5% أو أكثر من أسهم الشركة أو تعديلها. سهم ${companyName} (${upperSym}) لا توجد له أي حصص سيطرة معلنة تتجاوز 5%، وبالتالي فإن كامل أسهم الشركة الرأسمالية متاحة للتداول الحر للمستثمرين في السوق دون تجميد استراتيجي.`
+                  : `EGX listing rules require Article 30 disclosures only when a single shareholder or affiliated group reaches or modifies a 5%+ stake. ${companyName} (${upperSym}) has no declared controlling stakes exceeding 5%, making 100% of its capital shares freely accessible to public investors.`}
+              </p>
             </div>
           )}
         </div>

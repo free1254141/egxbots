@@ -65,6 +65,8 @@ interface _UnusedDisclosureRecord {
 export interface SymbolPriceInfo {
   close: number;
   change_pct?: number;
+  market_cap?: number;
+  total_shares?: number;
 }
 
 export type TimeframePeriod = "all" | "today" | "yesterday" | "3d" | "7d" | "14d" | "30d" | "90d";
@@ -246,6 +248,8 @@ export interface InsiderMetric {
   sector?: { id: string; ar: string; en: string };
   current_price: number;
   change_pct: number;
+  market_cap?: number;
+  total_shares?: number;
   insider_vwap: number;
   discount_pct: number; // Negative means trading below insider cost (undervalued vs insider)
   total_buy_shares: number;
@@ -524,6 +528,8 @@ export function analyzeDisclosures(
       sector: sec,
       current_price: curPrice,
       change_pct: priceInfo.change_pct || 0,
+      market_cap: priceInfo.market_cap,
+      total_shares: priceInfo.total_shares,
       insider_vwap: Number(insiderVWAP.toFixed(2)),
       discount_pct: discountPct,
       total_buy_shares: totalBuyShares,
@@ -596,7 +602,7 @@ export function analyzeDisclosures(
   // Enrich majorShareholder structures with mathematical free float and shares count
   for (const [sym, comp] of Object.entries(majorShareholderMap)) {
     const curPrice = priceMap[sym]?.close || 0;
-    let totalShares = comp.total_shares || 0;
+    let totalShares = comp.total_shares || priceMap[sym]?.total_shares || 0;
 
     if (!totalShares) {
       for (const d of disclosures) {

@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  HelpCircle,
-  ChevronDown,
+  X,
   BookOpen,
   PieChart,
   Target,
@@ -11,17 +10,43 @@ import {
   TrendingUp,
   FileCheck,
   Users,
-  Shield,
   Layers,
   Sparkles,
+  Search,
 } from "lucide-react";
 
 interface DisclosuresGlossaryProps {
-  isAr: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
+  isAr?: boolean;
 }
 
-export default function DisclosuresGlossary({ isAr }: DisclosuresGlossaryProps) {
-  const [isOpen, setIsOpen] = useState(true);
+export default function DisclosuresGlossary({
+  isOpen = false,
+  onClose = () => {},
+  isAr = true,
+}: DisclosuresGlossaryProps) {
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // ESC key listener & body scroll lock
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
 
   const terms = [
     {
@@ -122,66 +147,125 @@ export default function DisclosuresGlossary({ isAr }: DisclosuresGlossaryProps) 
     },
   ];
 
+  const filteredTerms = terms.filter((t) => {
+    if (!searchTerm.trim()) return true;
+    const q = searchTerm.toLowerCase();
+    return (
+      t.title_ar.toLowerCase().includes(q) ||
+      t.title_en.toLowerCase().includes(q) ||
+      t.desc_ar.toLowerCase().includes(q) ||
+      t.desc_en.toLowerCase().includes(q) ||
+      t.badge_ar.toLowerCase().includes(q) ||
+      t.badge_en.toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <section
-      id="glossary"
-      className="mt-12 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-5 sm:p-7 shadow-[8px_8px_0px_#000] dark:shadow-[8px_8px_0px_#fff] text-black dark:text-white transition-colors"
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+      dir={isAr ? "rtl" : "ltr"}
     >
-      {/* Glossary Header with Toggle */}
-      <div className="flex items-center justify-between border-b-4 border-black dark:border-white pb-4 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_#000]">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-xl font-black text-black dark:text-white uppercase tracking-tight flex items-center gap-2">
-              <span>{isAr ? "دليل مفاهيم ومصطلحات رادار الإفصاحات وتعاملات الداخليين" : "Disclosures & Insider Trading Financial Glossary"}</span>
-            </h2>
-            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 block mt-0.5">
-              {isAr
-                ? "دليلك الشامل لفهم مؤشرات البورصة المصرية، نماذج المادة 30، وحسابات الأسهم الحرة وتكلفة صانع السهم"
-                : "Comprehensive guide to EGX disclosures, Article 30 filings, free float math, and Smart Money metrics"}
-            </span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black border-2 border-black bg-zinc-100 dark:bg-zinc-800 hover:bg-[#FFE600] hover:text-black dark:hover:bg-[#FFE600] dark:hover:text-black shadow-[2px_2px_0px_#000] cursor-pointer transition-colors"
-          aria-expanded={isOpen}
-        >
-          <span>{isOpen ? (isAr ? "طي الدليل" : "Collapse") : (isAr ? "عرض الدليل" : "Expand")}</span>
-          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
-        </button>
-      </div>
-
-      {/* Terms Grid */}
-      {isOpen && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {terms.map((t) => (
-            <div
-              key={t.id}
-              className="p-4 border-3 border-black dark:border-white/30 bg-zinc-50 dark:bg-zinc-900/80 shadow-[3px_3px_0px_#000] dark:shadow-[3px_3px_0px_rgba(255,255,255,0.2)] hover:border-amber-500 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2 mb-2 border-b border-black/10 dark:border-white/10 pb-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  {t.icon}
-                  <h3 className="font-black text-sm sm:text-base text-black dark:text-white truncate">
-                    {isAr ? t.title_ar : t.title_en}
-                  </h3>
-                </div>
-                <span className="shrink-0 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-[#FFE600] text-black border border-black shadow-[1px_1px_0px_#000]">
-                  {isAr ? t.badge_ar : t.badge_en}
-                </span>
-              </div>
-              <p className="text-xs sm:text-[13px] font-medium text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-line">
-                {isAr ? t.desc_ar : t.desc_en}
-              </p>
+      <div
+        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[10px_10px_0px_0px_#000] dark:shadow-[10px_10px_0px_0px_#fff] text-black dark:text-white my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="p-4 sm:p-5 border-b-4 border-black dark:border-white bg-[#FFE600] text-black flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="grid h-10 w-10 shrink-0 place-items-center bg-black text-[#FFE600] border-2 border-black shadow-[2px_2px_0px_#000]">
+              <BookOpen className="w-5 h-5" />
             </div>
-          ))}
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-xl font-black uppercase tracking-tight truncate">
+                {isAr
+                  ? "دليل مفاهيم ومصطلحات رادار الإفصاحات وتعاملات الداخليين"
+                  : "Disclosures & Insider Trading Financial Glossary"}
+              </h2>
+              <span className="text-xs font-bold text-zinc-800 block truncate mt-0.5">
+                {isAr
+                  ? "دليلك الشامل لفهم مؤشرات البورصة، المادة 30، الأسهم الحرة، وتكلفة صانع السهم"
+                  : "Comprehensive guide to EGX disclosures, Article 30 filings, and Smart Money metrics"}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 border-2 border-black bg-white hover:bg-black hover:text-white transition-colors cursor-pointer shadow-[2px_2px_0px_#000] shrink-0"
+            aria-label={isAr ? "إغلاق" : "Close"}
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      )}
-    </section>
+
+        {/* Quick Search inside Glossary */}
+        <div className="p-3 sm:px-5 sm:py-3 border-b-2 border-black/15 dark:border-white/15 bg-zinc-50 dark:bg-zinc-900/60 shrink-0">
+          <div className="relative">
+            <Search className={`w-4 h-4 absolute top-1/2 -translate-y-1/2 text-zinc-500 ${isAr ? "right-3" : "left-3"}`} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={isAr ? "ابحث في المصطلحات والمفاهيم (مثال: تكلفة الداخلي، الأسهم الحرة، مادة 30...)" : "Search terms & concepts..."}
+              className={`w-full py-1.5 text-xs font-bold bg-white dark:bg-zinc-950 border-2 border-black dark:border-white text-black dark:text-white placeholder:text-zinc-500 shadow-[2px_2px_0px_#000] dark:shadow-[2px_2px_0px_#fff] focus:outline-none focus:bg-[#FFE600]/10 ${
+                isAr ? "pr-9 pl-3" : "pl-9 pr-3"
+              }`}
+            />
+          </div>
+        </div>
+
+        {/* Modal Scrollable Body */}
+        <div className="overflow-y-auto p-4 sm:p-6 space-y-4 max-h-[calc(90vh-170px)]">
+          {filteredTerms.length === 0 ? (
+            <div className="py-12 text-center text-zinc-500 font-bold text-xs">
+              {isAr ? "لا توجد نتائج مطابقة لبحثك في الدليل." : "No glossary items match your search."}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredTerms.map((t) => (
+                <div
+                  key={t.id}
+                  className="p-4 border-3 border-black dark:border-white/30 bg-zinc-50 dark:bg-zinc-900/80 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_rgba(255,255,255,0.2)] hover:border-amber-500 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2 border-b border-black/10 dark:border-white/10 pb-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {t.icon}
+                      <h3 className="font-black text-sm sm:text-base text-black dark:text-white truncate">
+                        {isAr ? t.title_ar : t.title_en}
+                      </h3>
+                    </div>
+                    <span className="shrink-0 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-[#FFE600] text-black border border-black shadow-[1px_1px_0px_#000]">
+                      {isAr ? t.badge_ar : t.badge_en}
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-[13px] font-medium text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-line">
+                    {isAr ? t.desc_ar : t.desc_en}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-3 sm:p-4 border-t-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 flex items-center justify-between gap-3 shrink-0">
+          <span className="text-[11px] font-bold text-zinc-600 dark:text-zinc-400">
+            {isAr
+              ? "💡 تم إعداد هذا الدليل وفقاً للائحة التنفيذية وقواعد قيد الأوراق المالية بالبورصة المصرية (EGX & FRA)"
+              : "Reference guide based on EGX listing rules and FRA disclosure regulations"}
+          </span>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 bg-black text-white dark:bg-white dark:text-black font-black text-xs uppercase border-2 border-black dark:border-white shadow-[2px_2px_0px_#000] hover:bg-[#FFE600] hover:text-black transition-colors cursor-pointer shrink-0"
+          >
+            {isAr ? "إغلاق النافذة" : "Close"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
