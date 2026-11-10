@@ -721,7 +721,14 @@ export default function PricingClient() {
     }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
-    const effectiveMonthlyBase = foundersIsOpen ? 100 : (monthlyPrice || 200);
+    const unbundledBase = (days / 30) * (monthlyPrice || 200);
+    const savingsPct = plan.isLifetime
+      ? 95
+      : originalAmount && originalAmount > amount
+      ? Math.round((1 - amount / originalAmount) * 100)
+      : unbundledBase > amount
+      ? Math.round((1 - amount / unbundledBase) * 100)
+      : 0;
     return {
       ...plan,
       amount_egp: amount,
@@ -729,13 +736,7 @@ export default function PricingClient() {
       discount: configured?.discount || (originalAmount ? { active: true, original_amount_egp: originalAmount } : null),
       days,
       monthlyEquivalent,
-      savingsPct: plan.isLifetime
-        ? 95
-        : plan.id === "pro"
-        ? (originalAmount && originalAmount > amount ? Math.round((1 - amount / originalAmount) * 100) : 0)
-        : effectiveMonthlyBase > 0 && monthlyEquivalent
-        ? Math.max(0, Math.round((1 - monthlyEquivalent / effectiveMonthlyBase) * 100))
-        : 0,
+      savingsPct,
     };
   });
 
@@ -833,7 +834,7 @@ export default function PricingClient() {
   const allAvailablePlans = [...paidPlans, ...b2bPlans];
   const selectedPlanDetails = allAvailablePlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
   const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
-  const baseProPrice = selectedPlanDetails?.amount_egp ?? 1000;
+  const baseProPrice = selectedPlanDetails?.amount_egp ?? (paidPlans[0]?.amount_egp || 100);
   const promoDiscountAmount =
     appliedPromo && appliedPromo.discount_percent > 0
       ? Math.min(Math.max(0, baseProPrice - 20), Math.round((baseProPrice * appliedPromo.discount_percent) / 100))
@@ -1880,8 +1881,9 @@ export default function PricingClient() {
                       </span>
                       <span className="text-sm font-bold text-zinc-500">ج.م</span>
                       {planDiscount && (
-                        <span className="ms-2 text-xl font-black text-zinc-400 line-through">
-                          {planDiscount.original_amount_egp} ج.م
+                        <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
+                          {isAr ? "بدل " : "was "}
+                          {Number(planDiscount.original_amount_egp).toLocaleString()} {isAr ? "ج.م" : "EGP"}
                         </span>
                       )}
                     </div>
