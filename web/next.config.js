@@ -93,7 +93,7 @@ const nextConfig = {
       },
       {
         source: '/api/telegram/:path*',
-        destination: '/api/telegram/:path*',
+        destination: `${BACKEND_URL}/api/telegram/:path*`,
       },
       {
         source: '/api/ai-chat/:path*',

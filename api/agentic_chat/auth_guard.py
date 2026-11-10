@@ -70,12 +70,17 @@ def extract_jwt_token(request: Request) -> Optional[str]:
             if not raw_val:
                 continue
 
-            # Handle base64- prefix used by @supabase/ssr
+            # Handle base64- prefix used by @supabase/ssr (URL-safe base64 with missing padding)
             if raw_val.startswith("base64-"):
                 try:
-                    raw_val = base64.b64decode(raw_val[7:]).decode("utf-8")
+                    b64_str = raw_val[7:]
+                    b64_str += "=" * (-len(b64_str) % 4)
+                    raw_val = base64.urlsafe_b64decode(b64_str.encode("ascii")).decode("utf-8")
                 except Exception:
-                    pass
+                    try:
+                        raw_val = base64.b64decode(raw_val[7:]).decode("utf-8")
+                    except Exception:
+                        pass
 
             # Parse JSON token bundle
             try:
@@ -100,21 +105,34 @@ def get_authenticated_user(request: Request) -> Optional[Dict[str, Any]]:
     {"id": user_id, "email": user_email, "is_authenticated": True}
     Returns None if token is invalid or absent.
     """
-    auth_header = request.headers.get("authorization", "").strip()
-    is_benchmark = (
-        request.headers.get("x-benchmark-test") == "true"
-        or auth_header == "Bearer BENCHMARK_TEST_TOKEN"
-        or auth_header == "Bearer TEST_TOKEN"
-    )
-    if is_benchmark:
+    # 1. Benchmark Guard (Strictly gated behind ALLOW_LOADTEST_BENCHMARK environment variable)
+    allow_benchmark = os.getenv("ALLOW_LOADTEST_BENCHMARK", "").strip().lower() in ("true", "1")
+    benchmark_secret = os.getenv("BENCHMARK_SECRET_KEY", "").strip()
+    if allow_benchmark and benchmark_secret:
+        header_bench = request.headers.get("x-benchmark-key", "").strip()
+        auth_header = request.headers.get("authorization", "").strip()
+        if header_bench == benchmark_secret or auth_header == f"Bearer {benchmark_secret}":
+            return {
+                "id": "00000000-0000-0000-0000-000000000000",
+                "email": "benchmark@egxbots.com",
+                "is_authenticated": True,
+                "is_pro": True,
+                "is_benchmark": True,
+            }
+
+    # 2. Trusted internal proxy check (e.g. from Vercel proxy with ADMIN_SECRET_KEY)
+    admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
+    incoming_admin_key = (request.headers.get("x-admin-key") or "").strip()
+    incoming_user_id = (request.headers.get("x-user-id") or "").strip()
+    if admin_key and incoming_admin_key == admin_key and incoming_user_id:
+        incoming_email = (request.headers.get("x-user-email") or "").strip()
         return {
-            "id": "00000000-0000-0000-0000-000000000000",
-            "email": "benchmark@egxbots.com",
+            "id": incoming_user_id,
+            "email": incoming_email,
             "is_authenticated": True,
-            "is_pro": True,
-            "is_benchmark": True,
         }
 
+    # 3. Standard Supabase JWT token verification
     token = extract_jwt_token(request)
     if not token:
         return None
@@ -225,21 +243,44 @@ def sanitize_user_input(text: str) -> Tuple[bool, str]:
     return True, clean
 
 
+def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int, int]:
+    """
+    Calculate (used, remaining, limit) exactly matching web/src/app/api/user/quota/route.ts.
+    """
+    limit = 350 if is_pro else 10
+    if not user_id or user_id == "00000000-0000-0000-0000-000000000000":
+        return 0, limit, limit
+
+    today = get_cairo_date_string()
+    month_start = f"{today[:7]}-01"
+    try:
+        _init_supabase()
+        res = (
+            supabase.from_("ai_chatbot_limits")
+            .select("date, chat_count")
+            .eq("user_id", user_id)
+            .gte("date", month_start if is_pro else today)
+            .execute()
+        )
+        used = sum(int(r.get("chat_count") or 0) for r in (res.data or []))
+        remaining = max(0, limit - used)
+        return used, remaining, limit
+    except Exception as e:
+        return 0, limit, limit
+
+
 def filter_output(response_text: str) -> str:
     """
-    Clean output:
-    - Block illegal profit guarantees or forced buy directives.
+    Clean output matching legacy Vercel pipeline:
+    - Replace forced buy directives with compliant advisory language (never wipe out whole reply).
     - Remove leaked environment details.
     """
     clean = response_text
     clean = re.sub(r"<environment_details>[\s\S]*?<\/environment_details>", "", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\[?\s*environment_details\s*\]?[\s\S]*$", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"Current time:\s*[^\n]+", "", clean, flags=re.IGNORECASE)
     clean = clean.strip()
 
-    if BLOCKED_OUTPUT_REGEX.search(clean):
-        return (
-            "أنا أداة تحليلية ذكية بالبورصة المصرية، ولا يمكنني تقديم نصائح مالية أو وعود أرباح مؤكدة. "
-            "القرار الاستثماري مسؤوليتك الكاملة بناءً على خطتك لإدارة المخاطر."
-        )
-
+    # Preserves full text while sanitizing forced-action words
+    clean = BLOCKED_OUTPUT_REGEX.sub("فرصة شراء مقترحة بناءً على المؤشرات", clean)
     return clean

@@ -76,7 +76,7 @@ def test_native_vip_chat_admin_unconditionally_pro():
         assert res["is_admin"] is True
         assert res["is_pro"] is True
         assert res["limit"] == 350
-        assert res["remaining"] == 9999
+        assert res["remaining"] == 350
 
 
 def test_telegram_bot_unlink_conflicting_profiles_on_link():

@@ -110,7 +110,7 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
         if state_row and state_row.get("quota_date") == today:
             used = int(state_row.get("daily_count") or 0)
 
-    remaining = 9999 if is_admin else max(0, limit - used)
+    remaining = max(0, limit - used)
 
     return {
         "telegram_user_id": telegram_user_id,
@@ -322,7 +322,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     new_used = user_info["used"] + 1
-    new_remaining = 9999 if user_info["is_admin"] else max(0, user_info["limit"] - new_used)
+    new_remaining = max(0, user_info["limit"] - new_used)
 
     return {
         "ok": True,

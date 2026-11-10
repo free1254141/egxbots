@@ -20,6 +20,7 @@ from api.agentic_chat.pipeline import run_agentic_chat_stream
 from api.agentic_chat.auth_guard import (
     get_authenticated_user,
     check_and_consume_quota,
+    get_user_chat_quota,
     sanitize_user_input,
 )
 from api.stock_ai import _init_supabase, supabase
@@ -70,10 +71,25 @@ def _persist_message_background(
     latency_ms: int = 0,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
-    if user_id == "00000000-0000-0000-0000-000000000000":
+    if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
         return
     try:
         _init_supabase()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        title = (user_msg or "محادثة جديدة")[:45].strip()
+
+        # 1. MUST UPSERT SESSION FIRST TO SATISFY FOREIGN KEY CONSTRAINT
+        session_payload = {
+            "id": session_id,
+            "title": title,
+            "updated_at": now_iso,
+        }
+        if user_id:
+            session_payload["user_id"] = user_id
+
+        supabase.from_("ai_chat_sessions").upsert(session_payload).execute()
+
+        # 2. NOW INSERT MESSAGES INTO ai_chat_messages
         rows = [
             {
                 "session_id": session_id,
@@ -90,14 +106,7 @@ def _persist_message_background(
             },
         ]
         supabase.from_("ai_chat_messages").insert(rows).execute()
-
-        # Touch or create session
-        if user_id:
-            supabase.from_("ai_chat_sessions").upsert({
-                "id": session_id,
-                "user_id": user_id,
-                "updated_at": "now()",
-            }).execute()
+        logger.info(f"[agentic_chat] Successfully persisted session {session_id} and messages.")
     except Exception as e:
         logger.warning(f"[agentic_chat] Message persistence warning: {e}")
 
@@ -126,54 +135,64 @@ async def get_chat_root(
 
     if action == "sessions":
         sessions_list = []
-        try:
-            query = supabase.from_("ai_chat_sessions").select("id, title, created_at, updated_at")
-            if user_id:
-                query = query.eq("user_id", user_id)
-            res = query.order("updated_at", desc=True).limit(20).execute()
-            sessions_list = res.data or []
-        except Exception:
-            sessions_list = []
+        if user_id:
+            try:
+                res = (
+                    supabase.from_("ai_chat_sessions")
+                    .select("id, title, created_at, updated_at")
+                    .eq("user_id", user_id)
+                    .order("updated_at", desc=True)
+                    .limit(20)
+                    .execute()
+                )
+                sessions_list = res.data or []
+            except Exception as e:
+                logger.warning(f"[agentic_chat] Error fetching sessions: {e}")
+                sessions_list = []
 
+        _used, remaining, limit = get_user_chat_quota(user_id, user_is_pro)
         return JSONResponse({
             "sessions": sessions_list,
-            "remaining_quota": 350 if user_is_pro else 10,
-            "quota_limit": 350 if user_is_pro else 10,
+            "remaining_quota": remaining,
+            "quota_limit": limit,
             "is_pro": user_is_pro,
             "autonomous_recommendations": False,
         })
 
     if action == "settings":
+        _used, remaining, limit = get_user_chat_quota(user_id, user_is_pro)
         return JSONResponse({
             "status": "ok",
-            "remaining_quota": 350 if user_is_pro else 10,
-            "quota_limit": 350 if user_is_pro else 10,
+            "remaining_quota": remaining,
+            "quota_limit": limit,
             "is_pro": user_is_pro,
             "unlimited": user_is_pro,
         })
 
     if session_id:
         messages = []
-        try:
-            res = (
-                supabase.from_("ai_chat_messages")
-                .select("id, role, content, image_url, created_at, latency_ms, metadata")
-                .eq("session_id", session_id)
-                .order("created_at", desc=False)
-                .limit(50)
-                .execute()
-            )
-            for m in (res.data or []):
-                messages.append({
-                    "id": m.get("id"),
-                    "role": m.get("role"),
-                    "content": m.get("content", ""),
-                    "timestamp": m.get("created_at"),
-                    "imageUrl": m.get("image_url"),
-                    "latencyMs": m.get("latency_ms"),
-                })
-        except Exception:
-            messages = []
+        if user_id:
+            try:
+                res = (
+                    supabase.from_("ai_chat_messages")
+                    .select("id, role, content, image_url, created_at, latency_ms, metadata")
+                    .eq("session_id", session_id)
+                    .eq("user_id", user_id)
+                    .order("created_at", desc=False)
+                    .limit(50)
+                    .execute()
+                )
+                for m in (res.data or []):
+                    messages.append({
+                        "id": m.get("id"),
+                        "role": m.get("role"),
+                        "content": m.get("content", ""),
+                        "timestamp": m.get("created_at"),
+                        "imageUrl": m.get("image_url"),
+                        "latencyMs": m.get("latency_ms"),
+                    })
+            except Exception:
+                messages = []
         return JSONResponse({"messages": messages})
 
     return JSONResponse({
@@ -188,41 +207,46 @@ async def get_chat_root(
 @router.put("")
 @router.put("/")
 async def update_session(request: Request):
-    """Update session title: PUT /api/ai-chat { session_id, title }"""
+    """Update session title: PUT /api/ai-chat { session_id, title } (authenticated user only)"""
     try:
         body = await request.json()
         sid = body.get("session_id") or body.get("sessionId")
         new_title = (body.get("title") or "").strip()
         if sid and new_title:
             _init_supabase()
-            supabase.from_("ai_chat_sessions").update({"title": new_title}).eq("id", sid).execute()
+            auth_user = get_authenticated_user(request)
+            uid = auth_user.get("id") if auth_user else None
+            if not uid:
+                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+            supabase.from_("ai_chat_sessions").update({"title": new_title}).eq("id", sid).eq("user_id", uid).execute()
             return {"status": "ok", "updated": sid, "title": new_title}
     except Exception as e:
         logger.warning(f"[agentic_chat] Failed to update session title: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     return {"status": "ok"}
 
 
 @router.delete("")
 @router.delete("/")
 async def delete_session(request: Request, session_id: Optional[str] = None):
-    """Delete a chat session."""
+    """Delete a chat session (authenticated user only)."""
     try:
         sid = session_id or request.query_params.get("session_id")
-        if sid:
-            _init_supabase()
-            auth_user = get_authenticated_user(request)
-            uid = auth_user.get("id") if auth_user else None
-            q1 = supabase.from_("ai_chat_messages").delete().eq("session_id", sid)
-            q2 = supabase.from_("ai_chat_sessions").delete().eq("id", sid)
-            if uid:
-                q1 = q1.eq("user_id", uid)
-                q2 = q2.eq("user_id", uid)
-            q1.execute()
-            q2.execute()
-            return {"status": "ok", "deleted": sid}
+        if not sid:
+            return JSONResponse({"status": "error", "message": "Missing session_id"}, status_code=400)
+
+        _init_supabase()
+        auth_user = get_authenticated_user(request)
+        uid = auth_user.get("id") if auth_user else None
+        if not uid:
+            return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+
+        supabase.from_("ai_chat_messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
+        supabase.from_("ai_chat_sessions").delete().eq("id", sid).eq("user_id", uid).execute()
+        return {"status": "ok", "deleted": sid}
     except Exception as e:
         logger.warning(f"[agentic_chat] Session delete error: {e}")
-    return {"status": "ok", "deleted": session_id}
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @router.post("")

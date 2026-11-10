@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { readAccessToken } from "@/lib/supabase/read-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,11 +40,24 @@ async function proxyToPythonChatbot(req: NextRequest, pathSuffix: string = "") {
       k === "cookie" ||
       k === "content-type" ||
       k === "accept" ||
-      k === "x-benchmark-test"
+      k === "x-benchmark-test" ||
+      k === "x-benchmark-key"
     ) {
       headers.set(k, val);
     }
   });
+
+  // Extract Supabase access token from cookies if not explicitly sent in Authorization header
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  const existingAuth = headers.get("authorization");
+  if (!existingAuth || !existingAuth.toLowerCase().startsWith("bearer ")) {
+    if (supabaseUrl) {
+      const extractedToken = readAccessToken(req.cookies, supabaseUrl);
+      if (extractedToken) {
+        headers.set("authorization", `Bearer ${extractedToken}`);
+      }
+    }
+  }
 
   const init: RequestInit = {
     method: req.method,

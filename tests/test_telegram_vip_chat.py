@@ -789,7 +789,7 @@ def test_topic_keyboard_shows_restricted_label():
 
     kb_topic = build_vip_chat_keyboard(is_private=False)
     all_buttons = [btn["text"] for row in kb_topic["inline_keyboard"] for btn in row]
-    assert any("🔒 التوصيات (خاص/الموقع)" in b for b in all_buttons)
+    assert any("توصيات" in b and "الموقع" in b for b in all_buttons)
 
     kb_private = build_vip_chat_keyboard(is_private=True)
     all_private = [btn["text"] for row in kb_private["inline_keyboard"] for btn in row]

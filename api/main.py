@@ -617,6 +617,25 @@ async def trigger_accumulation_scan(request: Request):
 
 
 
+@app.post("/api/telegram/vip-chat")
+@app.get("/api/telegram/vip-chat")
+async def telegram_vip_chat_api(request: Request):
+    """Native Telegram VIP Chat endpoint running on Python FastAPI.
+    Permanently offloads VIP chat execution from Vercel Serverless Functions.
+    """
+    try:
+        if request.method == "GET":
+            payload = dict(request.query_params)
+        else:
+            payload = await request.json()
+        from api.native_telegram_vip_chat import handle_native_vip_chat
+        res = handle_native_vip_chat(payload)
+        return JSONResponse(content=res or {"ok": False, "error": "Empty response"})
+    except Exception as exc:
+        logging.error(f"[TELEGRAM_VIP_API] Error: {exc}")
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
 @app.post("/tg-webhook/{token}")
 
 async def telegram_webhook(

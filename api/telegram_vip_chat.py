@@ -689,21 +689,8 @@ def answer_vip_callback(
 
 def _web_vip_chat_endpoints() -> List[str]:
     urls: List[str] = []
-    is_hf = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE"))
-    origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
-    prod_url = (
-        f"{origin}/api/telegram/vip-chat"
-        if origin and "127.0.0.1" not in origin and "localhost" not in origin
-        else "https://egxbots.com/api/telegram/vip-chat"
-    )
-
-    if is_hf:
-        urls.append(prod_url)
-    else:
-        local_port = os.getenv("PORT_WEB", "3000")
-        urls.append(f"http://127.0.0.1:{local_port}/api/telegram/vip-chat")
-        if prod_url not in urls:
-            urls.append(prod_url)
+    local_port = os.getenv("PORT", os.getenv("PORT_WEB", "8000"))
+    urls.append(f"http://127.0.0.1:{local_port}/api/telegram/vip-chat")
     return urls
 
 
@@ -740,20 +727,29 @@ def _get_cached_user_quota(tg_user_id: int, max_age_sec: float = 300.0) -> Optio
 
 
 def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[str, Any]:
-    """Execute VIP chat action via web API (Agentic Pipeline with 9 tools).
-    Falls back to native Python handler only if the web endpoint is unreachable or fails.
+    """Execute VIP chat action directly via native Python engine on Hugging Face Space.
+    Never invokes Vercel Serverless Functions, completely eliminating Vercel Active CPU.
     """
+    tg_uid = int(payload.get("telegram_user_id") or 0)
+    try:
+        from api.native_telegram_vip_chat import handle_native_vip_chat
+        res = handle_native_vip_chat(payload)
+        if res and (res.get("ok") or res.get("error_code")):
+            _update_user_quota_cache(tg_uid, res)
+            return res
+    except Exception as exc:
+        print(f"[TELEGRAM_VIP_CHAT] Native chat handler error: {exc}")
+
+    # Fallback to local Python FastAPI if available, NEVER to external Vercel prod
     admin_key = os.getenv("ADMIN_SECRET_KEY", "").strip()
     headers = {
         "Content-Type": "application/json",
         "x-admin-key": admin_key,
     }
-    tg_uid = int(payload.get("telegram_user_id") or 0)
-    last_error = "Unreachable"
+    last_error = "Native handler failed"
     for url in _web_vip_chat_endpoints():
         try:
-            connect_timeout = 2.0 if "127.0.0.1" in url else 8.0
-            resp = _WEB_SESSION.post(url, json=payload, headers=headers, timeout=(connect_timeout, timeout))
+            resp = _WEB_SESSION.post(url, json=payload, headers=headers, timeout=(2.0, timeout))
             if resp.status_code in (200, 400, 403, 429):
                 data = resp.json()
                 if not data.get("skipped"):
@@ -763,15 +759,6 @@ def call_web_vip_chat_api(payload: Dict[str, Any], timeout: int = 75) -> Dict[st
         except Exception as exc:
             last_error = str(exc)
             continue
-
-    # Fallback to native Python chat handler if web endpoint is unreachable
-    try:
-        from api.native_telegram_vip_chat import handle_native_vip_chat
-        res = handle_native_vip_chat(payload)
-        if res and (res.get("ok") or res.get("error_code")):
-            return res
-    except Exception as exc:
-        print(f"[TELEGRAM_VIP_CHAT] Native chat handler error: {exc}")
 
     return {"ok": False, "error": last_error}
 

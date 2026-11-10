@@ -23,6 +23,8 @@ FILES_TO_SYNC = [
     "api/agentic_chat/tools_schema.py",
     "api/main.py",
     "api/cache_invalidation.py",
+    "api/telegram_vip_chat.py",
+    "api/native_telegram_vip_chat.py",
     "requirements.txt",
 ]
 

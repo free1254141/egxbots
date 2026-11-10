@@ -1,227 +1,125 @@
 import { NextRequest } from "next/server";
-import { POST } from "../route";
+import { GET, POST } from "../route";
 
-jest.mock("@/lib/ai/pipeline", () => ({
-    extractExplicitSymbols: jest.fn((msg: string) => {
-        const syms: string[] = [];
-        if (msg.includes("FWRY") || msg.includes("فوري")) syms.push("FWRY");
-        if (msg.includes("TMGH") || msg.includes("طلعت مصطفى")) syms.push("TMGH");
-        return syms;
-    }),
-    runPipeline: jest.fn(async (msg: string) => ({
-        response: `## 📊 تقرير تفصيلي ممتاز لسهم (${msg})\nتم احتساب كافة المؤشرات الفنية بدقة 100%.`,
-        tables: [{ title: "مستويات الدعم والمقاومة", rows: [] }],
-        tools: { results: [{ tool: "wyckoff" }, { tool: "technical_indicators" }] },
-        session_update: { current_symbol: "FWRY", last_symbols: ["FWRY"] },
-    })),
-}));
-
-jest.mock("@/lib/supabase/route-data", () => {
-    const mockStateRow = {
-        telegram_user_id: 12345678,
-        telegram_username: "test_investor",
-        daily_count: 1,
-        quota_date: "2026-11-02",
-        session_state: {},
-        session_summary: {},
-        chat_history: [],
-    };
-
-    const mockDb: Record<string, any> = {};
-
-    const createQueryChain = (table: string, filterVal?: any) => {
-        const chain: any = {
-            select: jest.fn(() => chain),
-            eq: jest.fn((_col: string, val: any) => createQueryChain(table, val)),
-            in: jest.fn(() => chain),
-            order: jest.fn(() => chain),
-            limit: jest.fn(() => chain),
-            gte: jest.fn(() => chain),
-            maybeSingle: jest.fn(async () => {
-                if (table === "telegram_vip_chat_state") {
-                    return { data: mockStateRow, error: null };
-                }
-                if (table === "market_cache") {
-                    return { data: mockDb[filterVal] || null, error: null };
-                }
-                return { data: null, error: null };
-            }),
-            data: [],
-        };
-        return chain;
-    };
-
-    const mockClient = {
-        from: jest.fn((table: string) => ({
-            ...createQueryChain(table),
-            upsert: jest.fn(async (payload: any) => {
-                if (table === "market_cache") {
-                    mockDb[payload.cache_key] = payload;
-                }
-                return { data: payload, error: null };
-            }),
-            insert: jest.fn().mockResolvedValue({ data: [], error: null }),
-        })),
-        rpc: jest.fn().mockResolvedValue({ data: [{ allowed: true }], error: null }),
-    };
-
-    return {
-        getSupabaseClient: jest.fn(() => mockClient),
-        getSupabaseServiceClient: jest.fn(() => mockClient),
-    };
-});
-
-describe("VIP Chat Route Demand-Driven Cache & Smart Tool Bypass", () => {
+describe("VIP Chat Proxy Route (Next.js -> Python Backend)", () => {
     const originalEnv = process.env;
+    const originalFetch = global.fetch;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        process.env = { ...originalEnv, ADMIN_SECRET_KEY: "test_secret_123" };
+        process.env = {
+            ...originalEnv,
+            ADMIN_SECRET_KEY: "test_secret_123",
+            PYTHON_BACKEND_URL: "http://127.0.0.1:8000",
+        };
     });
 
     afterAll(() => {
         process.env = originalEnv;
+        global.fetch = originalFetch;
     });
 
-    function makeRequest(body: any): NextRequest {
-        return new NextRequest("http://localhost:3000/api/telegram/vip-chat", {
+    test("proxies POST request to Python FastAPI backend with headers and body", async () => {
+        const mockResponseData = {
+            ok: true,
+            reply: "تم الرد من المحرك البايثوني",
+            cached: false,
+        };
+
+        const mockFetch = jest.fn().mockResolvedValue({
+            status: 200,
+            headers: new Headers({ "content-type": "application/json" }),
+            json: async () => mockResponseData,
+            arrayBuffer: async () => Buffer.from(JSON.stringify(mockResponseData)),
+        });
+        global.fetch = mockFetch;
+
+        const req = new NextRequest("http://localhost:3000/api/telegram/vip-chat", {
             method: "POST",
             headers: {
                 "content-type": "application/json",
                 "x-admin-key": "test_secret_123",
+                authorization: "Bearer test_token",
             },
-            body: JSON.stringify(body),
-        });
-    }
-
-    test("first query is a cache miss, runs pipeline, and warms cache for subsequent asks", async () => {
-        const { runPipeline } = require("@/lib/ai/pipeline");
-
-        const req1 = makeRequest({
-            action: "chat",
-            telegram_user_id: 12345678,
-            telegram_username: "test_investor",
-            message: "سهم فوري FWRY",
+            body: JSON.stringify({
+                action: "chat",
+                telegram_user_id: 12345678,
+                message: "سهم فوري",
+            }),
         });
 
-        const res1 = await POST(req1);
-        const data1 = await res1.json();
-
-        expect(res1.status).toBe(200);
-        expect(data1.ok).toBe(true);
-        expect(data1.cached).toBe(false);
-        expect(runPipeline).toHaveBeenCalledTimes(1);
-        expect(data1.reply).toContain("تقرير تفصيلي ممتاز لسهم");
-
-        // Second request for the same stock by a different user hits the warmed cache
-        const req2 = makeRequest({
-            action: "chat",
-            telegram_user_id: 99999999,
-            telegram_username: "another_user",
-            message: "حلل فوري",
-        });
-
-        const res2 = await POST(req2);
-        const data2 = await res2.json();
-
-        expect(res2.status).toBe(200);
-        expect(data2.ok).toBe(true);
-        expect(data2.cached).toBe(true); // HIT!
-        expect(runPipeline).toHaveBeenCalledTimes(1); // Pipeline NOT called again!
-        expect(data2.reply).toBe(data1.reply);
-    });
-
-    test("market summary button warms cache on first click and hits on second click", async () => {
-        const { runPipeline } = require("@/lib/ai/pipeline");
-        const callCountBefore = runPipeline.mock.calls.length;
-
-        const req1 = makeRequest({
-            action: "chat",
-            telegram_user_id: 11111111,
-            telegram_username: "user_a",
-            message: "ملخص السوق وأقوى الأسهم",
-        });
-        const res1 = await POST(req1);
-        const data1 = await res1.json();
-        expect(data1.cached).toBe(false);
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 1);
-
-        const req2 = makeRequest({
-            action: "chat",
-            telegram_user_id: 22222222,
-            telegram_username: "user_b",
-            message: "ملخص السوق",
-        });
-        const res2 = await POST(req2);
-        const data2 = await res2.json();
-        expect(data2.cached).toBe(true);
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 1);
-        expect(data2.reply).toBe(data1.reply);
-    });
-
-    test("open-ended dialogues and custom questions bypass cache and go directly to the 9 tools", async () => {
-        const { runPipeline } = require("@/lib/ai/pipeline");
-        const callCountBefore = runPipeline.mock.calls.length;
-
-        // Even though FWRY is already cached as vip_stock_FWRY, a custom question about FWRY must bypass cache!
-        const reqCustom = makeRequest({
-            action: "chat",
-            telegram_user_id: 55555555,
-            telegram_username: "custom_trader",
-            message: "ليه سهم فوري بينزل وهل اشتري على 16.5؟",
-        });
-        const resCustom = await POST(reqCustom);
-        const dataCustom = await resCustom.json();
-        expect(dataCustom.ok).toBe(true);
-        expect(dataCustom.cached).toBe(false); // Directly executed tools!
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 1);
-    });
-
-    test("portfolio queries never use cache", async () => {
-        const { runPipeline } = require("@/lib/ai/pipeline");
-        const callCountBefore = runPipeline.mock.calls.length;
-
-        const req1 = makeRequest({
-            action: "chat",
-            telegram_user_id: 33333333,
-            telegram_username: "user_portfolio_1",
-            message: "عندي فوري ومتعلق فيه اعمل ايه",
-        });
-        const res1 = await POST(req1);
-        const data1 = await res1.json();
-        expect(data1.cached).toBe(false);
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 1);
-
-        const req2 = makeRequest({
-            action: "chat",
-            telegram_user_id: 44444444,
-            telegram_username: "user_portfolio_2",
-            message: "عندي فوري ومتعلق فيه اعمل ايه",
-        });
-        const res2 = await POST(req2);
-        const data2 = await res2.json();
-        expect(data2.cached).toBe(false);
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore + 2);
-    });
-
-    test("recommendations query in public telegram topic is blocked and returns redirect notice", async () => {
-        const { runPipeline } = require("@/lib/ai/pipeline");
-        const callCountBefore = runPipeline.mock.calls.length;
-
-        const req = makeRequest({
-            action: "chat",
-            telegram_user_id: 88888888,
-            telegram_username: "topic_member",
-            message: "هات كل التوصيات المفتوحة اليوم",
-            chat_source: "telegram_topic",
-        });
         const res = await POST(req);
+        expect(res.status).toBe(200);
+
         const data = await res.json();
         expect(data.ok).toBe(true);
-        expect(data.reply).toContain("توصيات الشراء اللحظية حصرية لمشتركي PRO");
-        expect(data.reply).toContain("@egxbots_bot");
-        expect(data.reply).toContain("egxbots.com/scanner/ai");
-        // Pipeline was never called!
-        expect(runPipeline).toHaveBeenCalledTimes(callCountBefore);
+        expect(data.reply).toBe("تم الرد من المحرك البايثوني");
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const [targetUrl, init] = mockFetch.mock.calls[0];
+        expect(targetUrl).toBe("http://127.0.0.1:8000/api/telegram/vip-chat");
+        expect(init.method).toBe("POST");
+        expect(init.headers.get("x-admin-key")).toBe("test_secret_123");
+        expect(init.headers.get("authorization")).toBe("Bearer test_token");
+        const bodyParsed = JSON.parse(Buffer.from(init.body).toString("utf-8"));
+        expect(bodyParsed).toEqual({
+            action: "chat",
+            telegram_user_id: 12345678,
+            message: "سهم فوري",
+        });
+    });
+
+    test("proxies GET request with search query parameters to Python backend", async () => {
+        const mockResponseData = { ok: true, status: "healthy" };
+
+        const mockFetch = jest.fn().mockResolvedValue({
+            status: 200,
+            headers: new Headers({ "content-type": "application/json" }),
+            json: async () => mockResponseData,
+            arrayBuffer: async () => Buffer.from(JSON.stringify(mockResponseData)),
+        });
+        global.fetch = mockFetch;
+
+        const req = new NextRequest("http://localhost:3000/api/telegram/vip-chat?check_quota=true&tg_id=123", {
+            method: "GET",
+            headers: {
+                "x-admin-key": "test_secret_123",
+            },
+        });
+
+        const res = await GET(req);
+        expect(res.status).toBe(200);
+
+        const data = await res.json();
+        expect(data.ok).toBe(true);
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const [targetUrl, init] = mockFetch.mock.calls[0];
+        expect(targetUrl).toBe("http://127.0.0.1:8000/api/telegram/vip-chat?check_quota=true&tg_id=123");
+        expect(init.method).toBe("GET");
+    });
+
+    test("passes through HTTP error status codes from Python backend", async () => {
+        const mockFetch = jest.fn().mockResolvedValue({
+            status: 403,
+            headers: new Headers({ "content-type": "application/json" }),
+            json: async () => ({ ok: false, error: "Unauthorized" }),
+            arrayBuffer: async () => Buffer.from(JSON.stringify({ ok: false, error: "Unauthorized" })),
+        });
+        global.fetch = mockFetch;
+
+        const req = new NextRequest("http://localhost:3000/api/telegram/vip-chat", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({ action: "chat" }),
+        });
+
+        const res = await POST(req);
+        expect(res.status).toBe(403);
+        const data = await res.json();
+        expect(data.ok).toBe(false);
+        expect(data.error).toBe("Unauthorized");
     });
 });

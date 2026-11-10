@@ -102,14 +102,33 @@ async def run_agentic_chat_stream(
                     "tools": AGENTIC_TOOLS_SCHEMA,
                     "tool_choice": "auto",
                     "temperature": 0.2,
-                    "max_tokens": 2500,
+                    "max_tokens": 4000,
                 }
 
-                resp = await client.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers=headers,
-                    json=req_payload,
-                )
+                t_turn1_start = time.time()
+                resp = None
+                for attempt in range(2):
+                    try:
+                        resp = await client.post(
+                            "https://api.deepseek.com/chat/completions",
+                            headers=headers,
+                            json=req_payload,
+                        )
+                        if resp.status_code == 200:
+                            break
+                        if resp.status_code in (429, 500, 502, 503, 504) and attempt == 0:
+                            logger.warning(f"[agentic_chat] DeepSeek HTTP {resp.status_code}, retrying in 1.5s...")
+                            await asyncio.sleep(1.5)
+                            continue
+                        break
+                    except (httpx.TimeoutException, httpx.NetworkError) as net_err:
+                        if attempt == 0:
+                            logger.warning(f"[agentic_chat] DeepSeek network glitch {net_err}, retrying in 1.5s...")
+                            await asyncio.sleep(1.5)
+                            continue
+                        raise
+
+                t_turn1 = time.time() - t_turn1_start
 
                 if resp.status_code != 200:
                     logger.error(f"[agentic_chat] DeepSeek error: HTTP {resp.status_code} - {resp.text[:300]}")
@@ -127,8 +146,13 @@ async def run_agentic_chat_stream(
                     content = assistant_msg.get("content", "")
                     if content:
                         accumulated_reply = filter_output(content)
-                        # Stream the natural reply directly without fake sleeps
-                        yield f"data: {json.dumps({'type': 'token', 'token': accumulated_reply}, ensure_ascii=False)}\n\n"
+                        # Stream the reply smoothly in natural word chunks
+                        words = accumulated_reply.split(" ")
+                        chunk_size = 4
+                        for i in range(0, len(words), chunk_size):
+                            chunk = " ".join(words[i:i+chunk_size]) + " "
+                            yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.015)
                     break
 
                 # Tool calls requested:
@@ -139,6 +163,7 @@ async def run_agentic_chat_stream(
                 formatted_messages.append(assistant_msg)
 
                 # Execute all tools concurrently with asyncio.gather
+                t_tools_start = time.time()
                 tool_tasks = []
                 for tc in tool_calls:
                     fn_name = tc.get("function", {}).get("name", "")
@@ -150,6 +175,8 @@ async def run_agentic_chat_stream(
                     tool_tasks.append(dispatch_tool(fn_name, fn_args, user_id=user_id, user_prompt=message))
 
                 tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+                t_tools = time.time() - t_tools_start
+                logger.info(f"[agentic_chat] Phase timing: Turn1={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
                 for tc, result in zip(tool_calls, tool_results):
                     tc_id = tc.get("id", f"call_{int(time.time()*1000)}")
@@ -178,11 +205,12 @@ async def run_agentic_chat_stream(
                     "messages": formatted_messages,
                     "stream": True,
                     "temperature": 0.3,
-                    "max_tokens": 2500,
+                    "max_tokens": 4000,
                 }
 
                 yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'جاري صياغة التقرير والتحليل الفني...'}, ensure_ascii=False)}\n\n"
 
+                t_turn2_start = time.time()
                 async with client.stream(
                     "POST",
                     "https://api.deepseek.com/chat/completions",
@@ -211,6 +239,9 @@ async def run_agentic_chat_stream(
                                     yield f"data: {json.dumps({'type': 'token', 'token': delta}, ensure_ascii=False)}\n\n"
                             except Exception:
                                 continue
+
+                t_turn2 = time.time() - t_turn2_start
+                logger.info(f"[agentic_chat] Synthesis stream finished: Turn2={t_turn2:.2f}s, Total={time.time()-start_time:.2f}s")
 
     except Exception as e:
         logger.exception(f"[agentic_chat] Unexpected exception in chat stream: {e}")
