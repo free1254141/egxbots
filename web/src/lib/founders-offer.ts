@@ -107,15 +107,15 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       if (plan.id === "pro_1y") {
         return {
           ...plan,
-          amount_egp: hasSpecialRate ? 900 : 1800,
+          amount_egp: hasSpecialRate ? 1000 : 1850,
           founders_lock_rate: hasSpecialRate ? 100 : null,
           discount: hasSpecialRate
             ? {
                 active: true,
                 kind: "founders",
-                label_ar: "عرض المؤسسين خصم 50% (900 بدل 1,800 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                label_en: "Founders Offer 50% OFF (900 instead of 1,800 EGP + locks 100 EGP/mo for life) 🔥",
-                original_amount_egp: 1800,
+                label_ar: "عرض المؤسسين (1,000 بدل 1,850 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
+                label_en: "Founders Offer (1,000 instead of 1,850 EGP + locks 100 EGP/mo for life) 🔥",
+                original_amount_egp: 1850,
                 ends_at: isOpen ? configEndsAt : null,
               }
             : null,

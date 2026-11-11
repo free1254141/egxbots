@@ -120,7 +120,7 @@ class ProDiscountTests(unittest.TestCase):
                     "PRO_DISCOUNT_ENDS_AT": self.FUTURE,
                     "PRO_PRICE_EGP": "200",
                     "PRO_6M_PRICE_EGP": "1000",
-                    "PRO_1Y_PRICE_EGP": "1800",
+                    "PRO_1Y_PRICE_EGP": "1850",
                 },
                 clear=False,
             ),
@@ -130,7 +130,7 @@ class ProDiscountTests(unittest.TestCase):
             self.assertEqual(discount["price_egp"], 50.0)
             self.assertEqual(plan_amount_egp("pro"), 50.0)
             self.assertEqual(plan_amount_egp("pro_6m"), 1000.0)
-            self.assertEqual(plan_amount_egp("pro_1y"), 1800.0)
+            self.assertEqual(plan_amount_egp("pro_1y"), 1850.0)
             self.assertEqual(pro_regular_amount_egp(), 200.0)
 
     def test_expired_discount_falls_back_to_base_price(self):
@@ -187,7 +187,7 @@ class PaymentConfigTests(unittest.TestCase):
                     "PRO_DISCOUNT_ENDS_AT": future,
                     "PRO_PRICE_EGP": "200",
                     "PRO_6M_PRICE_EGP": "1000",
-                    "PRO_1Y_PRICE_EGP": "1800",
+                    "PRO_1Y_PRICE_EGP": "1850",
                 },
                 clear=False,
             ),

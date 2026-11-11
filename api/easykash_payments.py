@@ -270,11 +270,11 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
             "kind": "founders",
 
-            "label_ar": "عرض المؤسسين خصم 50% (900 بدل 1,800 ج.م) 🔥",
+            "label_ar": "عرض المؤسسين (1,000 بدل 1,850 ج.م) 🔥",
 
-            "label_en": "Founders Offer 50% OFF (900 instead of 1,800 EGP) 🔥",
+            "label_en": "Founders Offer (1,000 instead of 1,850 EGP) 🔥",
 
-            "original_amount_egp": 1800,
+            "original_amount_egp": 1850,
 
             "ends_at": _founders_ends_at_str,
 

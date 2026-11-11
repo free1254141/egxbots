@@ -7,7 +7,7 @@ const config = {
   plans: [
     { id: "pro", amount_egp: 200 },
     { id: "pro_6m", amount_egp: 1000 },
-    { id: "pro_1y", amount_egp: 1800 },
+    { id: "pro_1y", amount_egp: 1850 },
     { id: "lifetime", amount_egp: 2250 },
   ],
   founders: { count: 0 },
@@ -25,8 +25,8 @@ it("applies 50% founders offer to pro, pro_6m, and pro_1y while keeping lifetime
     discount: { active: true, ends_at: "2026-11-14T01:00:00Z", original_amount_egp: 1000 },
   });
   expect(result.plans[2]).toMatchObject({
-    amount_egp: 900,
-    discount: { active: true, ends_at: "2026-11-14T01:00:00Z", original_amount_egp: 1800 },
+    amount_egp: 1000,
+    discount: { active: true, ends_at: "2026-11-14T01:00:00Z", original_amount_egp: 1850 },
   });
   expect(result.plans[3]).toEqual(config.plans[3]);
   expect(result.founders.ends_at).toBe("2026-11-14T01:00:00Z");
@@ -37,28 +37,28 @@ it("closes and reverts pro, pro_6m, and pro_1y to regular prices when offer is c
   const result = applyFoundersOffer(config, { ...offer, count: 100, remaining: 0, is_open: false, price_egp: 200 });
   expect(result.plans[0]).toMatchObject({ amount_egp: 200, discount: null });
   expect(result.plans[1]).toMatchObject({ amount_egp: 1000, discount: null });
-  expect(result.plans[2]).toMatchObject({ amount_egp: 1800, discount: null });
+  expect(result.plans[2]).toMatchObject({ amount_egp: 1850, discount: null });
   expect(result.plans[3]).toEqual({ id: "lifetime", amount_egp: 2250 });
   expect(result.founders.is_open).toBe(false);
 });
 
-it("reverts to regular 200 / 1000 / 1800 EGP when time is expired in the past", () => {
+it("reverts to regular 200 / 1000 / 1850 EGP when time is expired in the past", () => {
   const pastOffer = { ...offer, is_open: true, ends_at: "2026-11-01T00:00:00Z" };
   const result = applyFoundersOffer(config, pastOffer);
   expect(result.plans[0]).toMatchObject({ amount_egp: 200, discount: null });
   expect(result.plans[1]).toMatchObject({ amount_egp: 1000, discount: null });
-  expect(result.plans[2]).toMatchObject({ amount_egp: 1800, discount: null });
+  expect(result.plans[2]).toMatchObject({ amount_egp: 1850, discount: null });
   expect(result.founders.is_open).toBe(false);
 });
 
-it("preserves 100 EGP (and 500/900 on 6m/1y) for grandfathered-100 users even after offer expires", () => {
+it("preserves 100 EGP (and 500/1000 on 6m/1y) for grandfathered-100 users even after offer expires", () => {
   const expiredOffer = { ...offer, is_open: false, ends_at: "2026-11-01T00:00:00Z" };
   const grandfatheredConfig = {
     ...config,
     plans: [
       { id: "pro", amount_egp: 200, is_grandfathered_100: true },
       { id: "pro_6m", amount_egp: 1000 },
-      { id: "pro_1y", amount_egp: 1800 },
+      { id: "pro_1y", amount_egp: 1850 },
     ],
   };
   const result = applyFoundersOffer(grandfatheredConfig, expiredOffer);
@@ -73,9 +73,9 @@ it("preserves 100 EGP (and 500/900 on 6m/1y) for grandfathered-100 users even af
     discount: { active: true, ends_at: null, original_amount_egp: 1000 },
   });
   expect(result.plans[2]).toMatchObject({
-    amount_egp: 900,
+    amount_egp: 1000,
     founders_lock_rate: 100,
-    discount: { active: true, ends_at: null, original_amount_egp: 1800 },
+    discount: { active: true, ends_at: null, original_amount_egp: 1850 },
   });
   expect(result.founders.is_grandfathered_100).toBe(true);
 });

@@ -289,7 +289,7 @@ export default function BillingTab() {
                                 </label>
                                 <label>
                                     <span className={labelClass}>سنة</span>
-                                    <input type="number" min="0" value={pro1yPrice} onChange={(e) => setPro1yPrice(e.target.value)} placeholder="1800" className={inputClass} dir="ltr" />
+                                    <input type="number" min="0" value={pro1yPrice} onChange={(e) => setPro1yPrice(e.target.value)} placeholder="1850" className={inputClass} dir="ltr" />
                                 </label>
                             </div>
                         </div>
