@@ -17,6 +17,28 @@ import { SupportChatProvider } from "@/contexts/SupportChatContext";
 import UserActivityTracker from "@/components/UserActivityTracker";
 
 if (typeof window !== "undefined") {
+  // Proactive ChunkLoadError auto-recovery (handles deployment skew / stale client chunks)
+  const handleChunkError = (err: any) => {
+    const msg = err?.message || String(err || '');
+    const isChunk =
+      err?.name === 'ChunkLoadError' ||
+      msg.includes('Loading chunk') ||
+      msg.includes('ChunkLoadError') ||
+      msg.includes('Failed to fetch dynamically imported module');
+
+    if (isChunk) {
+      const key = `chunk_retry_${window.location.pathname}`;
+      const hasRetried = sessionStorage.getItem(key);
+      if (!hasRetried) {
+        sessionStorage.setItem(key, Date.now().toString());
+        window.location.reload();
+      }
+    }
+  };
+
+  window.addEventListener('error', (e) => handleChunkError(e.error || e));
+  window.addEventListener('unhandledrejection', (e) => handleChunkError(e.reason));
+
   const originalFetch = window.fetch;
   window.fetch = async (input, init) => {
     let url = "";
