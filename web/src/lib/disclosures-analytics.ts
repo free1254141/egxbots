@@ -686,8 +686,12 @@ export function groupDisclosuresByStock(
   const groups: Map<string, GroupedStockDisclosure> = new Map();
 
   for (const item of disclosures) {
-    const sym = item.symbol ? item.symbol.toUpperCase() : null;
-    const groupKey = sym || item.company_name || item.id;
+    const sym = item.symbol ? item.symbol.toUpperCase().trim() : null;
+    const isGenericCompany =
+      !item.company_name ||
+      item.company_name.trim() === "البورصة المصرية" ||
+      item.company_name.trim() === "EGX";
+    const groupKey = sym || (!isGenericCompany ? item.company_name.trim() : item.id);
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {

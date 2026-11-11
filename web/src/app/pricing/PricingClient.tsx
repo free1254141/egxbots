@@ -1456,116 +1456,17 @@ export default function PricingClient() {
         </div>
 
         {isPro && (
-          <div className="border-3 border-emerald-500 bg-emerald-500/10 px-5 py-3.5 text-center text-sm font-bold text-emerald-800 dark:text-emerald-200 shadow-[3px_3px_0px_#10b981]" role="status">
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-3.5 text-center text-sm font-bold text-emerald-800 dark:text-emerald-200 shadow-sm" role="status">
             {isAr ? "اشتراك Pro نشط على حسابك الآن" : "Your Pro subscription is active"}
-            {subscriptionEnd && ` · ${isAr ? "ساري حتى" : "Valid until"} ${new Date(subscriptionEnd).toLocaleDateString(isAr ? "ar-EG" : "en-US")}`}
+            {subscriptionEnd && ` · ${isAr ? "ساري حتى" : "Valid until"} ${new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(subscriptionEnd))}`}
           </div>
         )}
 
-        {/* ── LIFETIME VIP SPOTLIGHT BANNER ── */}
-        <div className="relative border-4 border-black dark:border-white bg-gradient-to-br from-purple-950 via-indigo-950 to-zinc-950 text-white p-6 sm:p-8 shadow-[8px_8px_0px_#FFE600] dark:shadow-[8px_8px_0px_#FFE600] overflow-hidden">
-          {/* Neon corner badge */}
-          <div className="absolute top-0 end-0 bg-[#FFE600] text-black font-black text-[11px] sm:text-xs px-4 py-1.5 border-b-3 border-s-3 border-black tracking-wider uppercase flex items-center gap-1.5 shadow-sm">
-            <Crown className="w-4 h-4 fill-black" />
-            {isAr ? "فرصة استثنائية · 20 مقعداً فقط" : "LIMITED TO 20 SPOTS ONLY"}
-          </div>
-
-          <div className="grid lg:grid-cols-12 gap-6 items-center pt-4 sm:pt-0">
-            <div className="lg:col-span-8 space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/30 border border-purple-400/50 text-purple-200 text-xs font-black tracking-wide">
-                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-                  {isAr ? "باقة مدى الحياة (LIFETIME VIP)" : "LIFETIME VIP DEAL"}
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-red-500/20 border border-red-500/50 text-red-300 text-[11px] font-black animate-pulse">
-                  <Flame className="w-3 h-3 text-red-400" />
-                  {isAr ? "محدودة لـ 20 مستثمراً فقط" : "Strictly 20 Spots"}
-                </span>
-              </div>
-
-              <div>
-                <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                  {isAr ? "ادفع 2,250 ج.م مرة واحدة.. واستفد بـ Pro مدى الحياة للأبد 👑" : "Pay 2,250 EGP Once.. Access Pro Forever for Life 👑"}
-                </h2>
-                <p className="text-xs sm:text-sm font-semibold text-zinc-300 mt-2 leading-relaxed max-w-2xl">
-                  {isAr
-                    ? "اشتراك دائم بدون أي رسوم أو تجديدات شهرية نهائياً. تمتع بكافة إشارات وتنبيهات الخوارزميات الفورية، والصفقات القصيرة ⚡ PRO، و350 استشارة ذكاء اصطناعي تتجدد شهرياً تلقائياً للأبد."
-                    : "Permanent membership with zero recurring monthly fees forever. Unrestricted instant Telegram channel signals, Short Swings PRO trades, and 350 monthly AI queries refreshed automatically for life."}
-                </p>
-              </div>
-
-              {/* Progress & spots tracker */}
-              <div className="bg-black/60 border-2 border-purple-400/40 p-4 space-y-2.5 max-w-xl">
-                <div className="flex items-center justify-between text-xs font-black">
-                  <span className="text-[#FFE600] flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-[#FFE600]" />
-                    {isAr ? "حالة المقاعد المتاحة:" : "Spots Availability:"}
-                  </span>
-                  <span className="font-mono text-white">
-                    {lifetimeIsOpen
-                      ? (isAr ? `متبقي ${lifetimeRemaining} من أصل ${lifetimeLimit} مقعداً` : `${lifetimeRemaining} of ${lifetimeLimit} spots left`)
-                      : (isAr ? "اكتملت جميع المقاعد (20/20) ❌" : "SOLD OUT (20/20) ❌")}
-                  </span>
-                </div>
-                <div className="w-full bg-zinc-800 border border-zinc-700 h-2.5 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-yellow-400 to-[#FFE600] transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(5, (lifetimeCount / lifetimeLimit) * 100))}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400">
-                  <span>{isAr ? `تم حجز ${lifetimeCount} مقاعد` : `${lifetimeCount} claimed`}</span>
-                  <span>{isAr ? `الحد الأقصى: ${lifetimeLimit} مقعداً فقط` : `Cap: ${lifetimeLimit} spots`}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right CTA box in banner */}
-            <div className="lg:col-span-4 border-2 border-purple-400/30 bg-purple-950/40 p-5 space-y-4 text-center">
-              <div className="space-y-1">
-                <span className="text-[11px] font-black uppercase tracking-wider text-purple-300">
-                  {isAr ? "سعر الباقة لمرة واحدة" : "ONE-TIME PAYMENT"}
-                </span>
-                <div className="flex items-baseline justify-center gap-1">
-                  <span className="text-4xl sm:text-5xl font-black text-[#FFE600]">2,250</span>
-                  <span className="text-sm font-bold text-zinc-300">ج.م</span>
-                </div>
-                <span className="inline-block text-[11px] font-black text-emerald-400">
-                  {isAr ? "وفر أكثر من 95% على المدى الطويل" : "Save 95%+ Long Term"}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                disabled={!lifetimeIsOpen}
-                onClick={() => openPaymentStep("lifetime")}
-                className={`w-full flex items-center justify-center gap-2 border-3 border-black py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all ${
-                  lifetimeIsOpen
-                    ? "bg-[#FFE600] hover:bg-yellow-400 text-black cursor-pointer"
-                    : "bg-zinc-700 text-zinc-400 cursor-not-allowed"
-                }`}
-              >
-                <Crown className="w-4 h-4 fill-current" />
-                {lifetimeIsOpen
-                  ? isPro
-                    ? (isAr ? "ترقية لحساب مدى الحياة (2,250 ج.م)" : "Upgrade to Lifetime")
-                    : (isAr ? "احجز مقعدك مدى الحياة الآن (2,250 ج.م)" : "Claim Lifetime Spot (2,250 EGP)")
-                  : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
-              </button>
-
-              <div className="text-[10px] text-zinc-400 font-bold space-y-0.5">
-                <div>{isAr ? "✓ بدون أي رسوم خفية أو تجديد شهري" : "✓ No hidden fees or recurring bills"}</div>
-                <div>{isAr ? "✓ تفعيل فوري مع رابط قناة VIP" : "✓ Instant unlock with VIP Telegram link"}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* ── ACTIVE AFFILIATE / PROMO BANNER ── */}
         {appliedPromo && (
-          <div className="border-4 border-black dark:border-white bg-emerald-500 text-black p-4 shadow-[6px_6px_0px_rgba(0,0,0,1)] flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-black">
-              <Sparkles className="w-5 h-5 shrink-0 fill-black" />
+          <div className="rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200 p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+              <Sparkles className="w-5 h-5 shrink-0 text-emerald-500" />
               <span>
                 {isAr
                   ? `🎁 تم تفعيل كود الإحالة الخاص بـ (${appliedPromo.name}) — كود: ${appliedPromo.code}${
@@ -1579,24 +1480,23 @@ export default function PricingClient() {
             <button
               type="button"
               onClick={removePromoCode}
-              className="text-[11px] font-black px-3 py-1 border-2 border-black bg-white hover:bg-zinc-100 text-black shrink-0 cursor-pointer"
+              className="text-[11px] font-bold px-3 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 shrink-0 cursor-pointer transition-colors"
             >
               {isAr ? "إلغاء الكود" : "Remove"}
             </button>
           </div>
         )}
 
-        {/* ── PRO DURATION SWITCHER (سويتشر مدة باقة Pro فقط: شهر، 6 شهور، سنة) ── */}
         {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B ── */}
         <div className="flex justify-center mb-6">
-          <div className="inline-flex p-1.5 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981] gap-2 max-w-full flex-wrap justify-center">
+          <div className="inline-flex p-1.5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm gap-2 max-w-full flex-wrap justify-center">
             <button
               type="button"
               onClick={() => setPricingCategory("retail")}
-              className={`flex items-center gap-2 px-5 sm:px-8 py-3 border-2 transition-all text-xs sm:text-sm font-black cursor-pointer ${
+              className={`flex items-center gap-2 px-5 sm:px-8 py-3 rounded-xl transition-all text-xs sm:text-sm font-black cursor-pointer ${
                 pricingCategory === "retail"
-                  ? "border-black dark:border-white bg-emerald-500 text-black shadow-[3px_3px_0px_#000]"
-                  : "border-transparent bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                  ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+                  : "bg-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400"
               }`}
             >
               <span>👤 {isAr ? "خطط الأفراد والمستثمرين" : "Individual Traders"}</span>
@@ -1605,15 +1505,15 @@ export default function PricingClient() {
             <button
               type="button"
               onClick={() => setPricingCategory("b2b")}
-              className={`flex items-center gap-2 px-5 sm:px-8 py-3 border-2 transition-all text-xs sm:text-sm font-black cursor-pointer ${
+              className={`flex items-center gap-2 px-5 sm:px-8 py-3 rounded-xl transition-all text-xs sm:text-sm font-black cursor-pointer ${
                 pricingCategory === "b2b"
-                  ? "border-black dark:border-white bg-purple-600 text-yellow-300 shadow-[3px_3px_0px_#000]"
-                  : "border-transparent bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                  ? "bg-purple-600 text-yellow-300 shadow-md shadow-purple-600/20"
+                  : "bg-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400"
               }`}
             >
-              <Crown className="w-4 h-4 text-yellow-300 shrink-0" />
+              <Crown className="w-4 h-4 text-yellow-400 shrink-0" />
               <span>🤖 {isAr ? "باقات أصحاب القنوات والشركات (B2B)" : "Channel Bot Licensing (B2B)"}</span>
-              <span className="text-[10px] font-black uppercase px-2 py-0.5 bg-[#FFE600] text-black border border-black shadow-[1px_1px_0px_#000]">
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-black">
                 {isAr ? "جديد ⚡" : "NEW ⚡"}
               </span>
             </button>
@@ -1622,7 +1522,7 @@ export default function PricingClient() {
 
         {pricingCategory === "retail" ? (
           <>
-        <div id="pricing-duration-navbar"  className="sticky top-[var(--header-h,72px)] z-30 py-2.5 sm:py-3 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/60 dark:border-zinc-800/60">
+        <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/80 dark:border-zinc-800/80">
           <div className="text-center">
             <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
               {isAr ? "اختر مدة اشتراك باقة EGX BOTS PRO:" : "SELECT PRO BILLING CYCLE:"}
@@ -1630,7 +1530,7 @@ export default function PricingClient() {
           </div>
 
           <div className="flex justify-center">
-            <div className="inline-flex p-1.5 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981] flex-wrap justify-center gap-1.5 sm:gap-2 max-w-full">
+            <div className="inline-flex p-1.5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex-wrap justify-center gap-1.5 sm:gap-2 max-w-full">
               {[
                 {
                   id: "pro" as const,
@@ -1650,7 +1550,7 @@ export default function PricingClient() {
                     : foundersIsOpen
                     ? "100 EGP (Locked for life) 🔥"
                     : `${monthlyPrice || 200} EGP / mo`,
-                  badgeBg: "bg-amber-300 text-black",
+                  badgeBg: "bg-amber-400 text-black",
                 },
                 {
                   id: "pro_6m" as const,
@@ -1675,15 +1575,15 @@ export default function PricingClient() {
                     key={tab.id}
                     type="button"
                     onClick={() => handleDurationSelect(tab.id, true)}
-                    className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 border-2 transition-all text-xs sm:text-sm font-black active:translate-y-0.5 cursor-pointer ${
+                    className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition-all text-xs sm:text-sm font-black cursor-pointer ${
                       isSelected
-                        ? "border-black dark:border-white bg-black text-white dark:bg-white dark:text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_#10b981]"
-                        : "border-transparent bg-transparent hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                        ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20 font-black"
+                        : "bg-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400"
                     }`}
                   >
                     <span>{isAr ? tab.name_ar : tab.name_en}</span>
                     <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 border border-black shadow-[1px_1px_0px_#000] whitespace-nowrap ${tab.badgeBg}`}
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap ${tab.badgeBg}`}
                     >
                       {isAr ? tab.badge_ar : tab.badge_en}
                     </span>
@@ -1697,7 +1597,7 @@ export default function PricingClient() {
         {/* ── 3 DISTINCT CARDS: FREE | PRO (WITH SWITCHER) | LIFETIME VIP ── */}
         <div className="grid lg:grid-cols-3 gap-6 items-stretch">
           {/* ── 01. Free Plan Card ── */}
-          <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_rgba(255,255,255,0.2)] p-6 sm:p-7 space-y-6 flex flex-col justify-between">
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-sm hover:border-zinc-300 dark:hover:border-zinc-700 transition-all">
             <div className="space-y-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -1708,34 +1608,42 @@ export default function PricingClient() {
                     {isAr ? "استكشاف المنصة وتجربة التحليلات" : "Explore platform basics"}
                   </span>
                 </div>
-                <span className="text-[10px] font-black uppercase px-2.5 py-1 border-2 border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800/70 text-zinc-600 dark:text-zinc-400">
                   {isPro ? (isAr ? "متاحة" : "Available") : isAr ? "الخطة الحالية" : "Current"}
                 </span>
               </div>
 
-              <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
+              <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                 <div className="flex items-baseline gap-1">
                   <span className="text-5xl font-black text-zinc-950 dark:text-white">0</span>
                   <span className="text-sm font-bold text-zinc-500">ج.م / للأبد</span>
                 </div>
-                <p className="text-xs font-semibold text-zinc-500 mt-1">
+                <p className="text-xs font-medium text-zinc-500 mt-1">
                   {isAr ? "بدون أي بطاقة بنكية أو رسوم خفية" : "No credit card required"}
                 </p>
               </div>
 
               <div className="space-y-3">
                 <span className="text-[11px] font-black uppercase tracking-wider text-zinc-400 block">
-                  {isAr ? "الميزات المتاحة في المجاني:" : "INCLUDED IN FREE:"}
+                  {isAr ? "الميزات المشمولة في المجاني:" : "INCLUDED IN FREE:"}
                 </span>
                 <ul className="space-y-3.5">
                   {freeFeatures.map((f, i) => (
                     <li
                       key={i}
-                      className={`flex items-start gap-2.5 text-xs font-bold leading-snug ${
-                        f.included ? "text-zinc-700 dark:text-zinc-300" : "text-zinc-400 dark:text-zinc-600 line-through"
+                      className={`flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug ${
+                        f.included
+                          ? "text-zinc-800 dark:text-zinc-200"
+                          : "text-zinc-400 dark:text-zinc-400/80 line-through decoration-zinc-400 dark:decoration-zinc-500"
                       }`}
                     >
-                      <span className="shrink-0 mt-0.5">{f.included ? <Check className="w-4 h-4 text-emerald-500" /> : <X className="w-4 h-4 text-zinc-400" />}</span>
+                      <span className="shrink-0 mt-0.5">
+                        {f.included ? (
+                          <Check className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
+                        )}
+                      </span>
                       <span>{f.text}</span>
                     </li>
                   ))}
@@ -1749,7 +1657,7 @@ export default function PricingClient() {
                   type="button"
                   onClick={handleStartTrial}
                   disabled={trialLoading}
-                  className="w-full border-3 border-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   {trialLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1768,14 +1676,14 @@ export default function PricingClient() {
               <button
                 type="button"
                 disabled
-                className="w-full border-3 border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 py-3.5 text-xs font-black uppercase tracking-wider cursor-not-allowed mt-4"
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 py-3.5 text-xs font-bold uppercase tracking-wider cursor-not-allowed mt-4"
               >
                 {isPro ? (isAr ? "الخطة المجانية متاحة" : "Free plan available") : (isAr ? "خطتك الحالية" : "Current Plan")}
               </button>
             )}
           </div>
 
-          {/* ── 02. Pro Plan Card (with Dynamic Duration Switcher) ── */}
+          {/* ── 02. Pro Plan Card (The Hero Tier) ── */}
           {(() => {
             const isFeatured = activeProDuration === "pro_6m";
             const isAnnual = activeProDuration === "pro_1y";
@@ -1797,36 +1705,24 @@ export default function PricingClient() {
               <div
                 id="pro-plan-card"
                 ref={proCardRef}
-                className={`scroll-mt-48 border-4 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative transition-all duration-300 ${
-                  isFeatured
-                    ? "border-black dark:border-white bg-emerald-50/70 dark:bg-emerald-950/30 ring-4 ring-emerald-500 shadow-[8px_8px_0px_#10b981]"
-                    : "border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_#10b981]"
-                }`}
+                className="scroll-mt-48 rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/10 ring-1 ring-emerald-500/30 transition-all duration-300"
               >
                 {/* Floating Top Badge */}
                 <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                  <span
-                    className={`border-2 border-black text-xs font-black uppercase px-3.5 py-1 tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] whitespace-nowrap flex items-center gap-1.5 ${
-                      isFeatured
-                        ? "bg-emerald-400 text-black"
-                        : isAnnual
-                        ? "bg-sky-300 text-black"
-                        : "bg-amber-300 text-black"
-                    }`}
-                  >
+                  <span className="rounded-full bg-emerald-500 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
                     {isMonthly && planDiscount ? (
                       foundersCountdown
-                        ? `عرض المؤسسين 100 ج.م مدى الحياة (ينتهي خلال ⏰ ${foundersCountdown})`
+                        ? `عرض المؤسسين 100 ج.م شهرياً (ينتهي خلال ⏰ ${foundersCountdown})`
                         : (planDiscount.label_ar || "عرض المؤسسين (100 ج.م شهرياً مدى الحياة) 🔥")
                     ) : isMonthly ? (
-                      isAr ? "⚡ باقة التداول الشهري" : "⚡ Monthly Pro Plan"
+                      isAr ? "⚡ باقة التداول الاحترافي" : "⚡ Monthly Pro Plan"
                     ) : isFeatured ? (
                       foundersIsOpen
-                        ? (isAr ? "⭐ الأكثر طلباً · خصم المؤسسين 50% (500 بدل 1,000 ج.م)" : "⭐ Most Popular · 50% OFF (500 EGP)")
+                        ? (isAr ? "⭐ الأكثر طلباً · خصم المؤسسين 50%" : "⭐ Most Popular · 50% OFF")
                         : (isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular")
                     ) : (
                       foundersIsOpen
-                        ? (isAr ? "💎 أكبر توفير · خصم المؤسسين 50% (900 بدل 1,800 ج.م)" : "💎 Max Value · 50% OFF (900 EGP)")
+                        ? (isAr ? "💎 أكبر توفير · خصم المؤسسين 50%" : "💎 Max Value · 50% OFF")
                         : (isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value")
                     )}
                   </span>
@@ -1843,38 +1739,13 @@ export default function PricingClient() {
                         {isAr ? activeProDetails.name_ar : activeProDetails.name_en} · {activeProDetails.days} {isAr ? "يوماً" : "days"}
                       </span>
                     </div>
-                    <span className="text-xs font-black border-2 border-black dark:border-white px-2.5 py-1 bg-emerald-500 text-white shadow-[2px_2px_0px_rgba(0,0,0,1)]">
+                    <span className="text-xs font-black rounded-lg border border-emerald-500/30 px-2.5 py-1 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                       PRO
                     </span>
                   </div>
 
-                  {/* Mini Duration Switcher inside Pro Card */}
-                  <div className="p-1 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 grid grid-cols-3 gap-1 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                    {[
-                      { id: "pro" as const, label_ar: "شهر", label_en: "1 Mo" },
-                      { id: "pro_6m" as const, label_ar: "6 شهور ⭐", label_en: "6 Mo ⭐" },
-                      { id: "pro_1y" as const, label_ar: "سنة 💎", label_en: "1 Yr 💎" },
-                    ].map((d) => {
-                      const isCur = activeProDuration === d.id;
-                      return (
-                        <button
-                          key={d.id}
-                          type="button"
-                          onClick={() => handleDurationSelect(d.id)}
-                          className={`py-1.5 text-xs font-black transition-all cursor-pointer ${
-                            isCur
-                              ? "bg-black text-white dark:bg-white dark:text-black shadow-[1px_1px_0px_#000]"
-                              : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                          }`}
-                        >
-                          {isAr ? d.label_ar : d.label_en}
-                        </button>
-                      );
-                    })}
-                  </div>
-
                   {/* Price Section */}
-                  <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
+                  <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                     <div className="flex items-baseline gap-2">
                       <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
                         {activeProDetails.amount_egp.toLocaleString()}
@@ -1893,7 +1764,7 @@ export default function PricingClient() {
                         {isAr ? `ما يعادل ${activeProDetails.monthlyEquivalent} ج.م / شهر` : `EGP ${activeProDetails.monthlyEquivalent}/mo`}
                       </span>
                       {activeProDetails.savingsPct > 0 && (
-                        <span className="border border-emerald-600/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
+                        <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
                           {isAr ? `توفير ${activeProDetails.savingsPct}%` : `${activeProDetails.savingsPct}% OFF`}
                         </span>
                       )}
@@ -1902,12 +1773,12 @@ export default function PricingClient() {
 
                   {/* Founding perk callout across all Pro durations */}
                   {(foundersIsOpen || isGrandfathered || isGrandfathered100) && (
-                    <div className="bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 p-3 space-y-1 text-black dark:text-amber-200">
+                    <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-500/30 p-3.5 space-y-1 text-black dark:text-amber-200">
                       <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 dark:text-amber-300">
                         <Clock className="w-3.5 h-3.5" />
                         <span>{isAr ? "🔒 ميزة المؤسسين الأوائل (تثبيت السعر مدى الحياة):" : "🔒 Founding Member Lifetime Price Lock:"}</span>
                       </div>
-                      <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-200">
+                      <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-300">
                         {isFeatured
                           ? (isAr
                             ? "باشتراكك في باقة الـ 6 شهور (500 ج.م بدلاً من 1,000 ج.م — أي 83 ج.م/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر 100 ج.م (أو 500 ج.م للـ 6 شهور) للأبد حتى بعد عودة السعر الأساسي إلى 200 ج.م."
@@ -1938,7 +1809,7 @@ export default function PricingClient() {
                     </span>
                     <ul className="space-y-3.5">
                       {proFeatures.map((f, i) => (
-                        <li key={i} className="flex items-start gap-2.5 text-xs font-bold leading-tight text-zinc-800 dark:text-zinc-200">
+                        <li key={i} className="flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug text-zinc-800 dark:text-zinc-200">
                           <span className="shrink-0 mt-0.5 text-emerald-500">{f.icon || <Check className="w-3.5 h-3.5" />}</span>
                           <span>{f.text}</span>
                         </li>
@@ -1952,11 +1823,7 @@ export default function PricingClient() {
                   <button
                     type="button"
                     onClick={() => openPaymentStep(activeProDetails.id)}
-                    className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer ${
-                      isFeatured
-                        ? "bg-emerald-500 hover:bg-emerald-600 text-zinc-950 dark:text-black font-black"
-                        : "bg-zinc-900 hover:bg-black text-white dark:bg-white dark:text-black dark:hover:bg-zinc-100"
-                    }`}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
                     {isPro
@@ -1973,13 +1840,13 @@ export default function PricingClient() {
           })()}
 
           {/* ── 03. Lifetime VIP Card ── */}
-          <div className="border-4 border-purple-600 dark:border-purple-400 bg-gradient-to-b from-purple-50 via-white to-purple-50/50 dark:from-purple-950/40 dark:via-zinc-950 dark:to-purple-950/20 shadow-[8px_8px_0px_#7c3aed] dark:shadow-[8px_8px_0px_#a855f7] p-6 sm:p-7 space-y-6 flex flex-col justify-between relative transition-all">
+          <div className="relative rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/40 dark:from-amber-950/30 dark:via-zinc-900/95 dark:to-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-xl shadow-amber-500/10 dark:shadow-amber-500/5 transition-all">
             {/* Floating Top Badge */}
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-              <span className="border-2 border-black text-xs font-black uppercase px-3.5 py-1 tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] whitespace-nowrap flex items-center gap-1.5 bg-[#FFE600] text-black">
+              <span className="rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-amber-500/20 whitespace-nowrap flex items-center gap-1.5">
                 <Crown className="w-3.5 h-3.5 fill-black" />
                 {lifetimeIsOpen
-                  ? (isAr ? `حصري لـ ${lifetimeRemaining} مقعداً فقط` : `${lifetimeRemaining} Spots Left`)
+                  ? (isAr ? `حصري · متبقي ${lifetimeRemaining} مقعداً فقط` : `${lifetimeRemaining} Spots Left`)
                   : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
               </span>
             </div>
@@ -1989,51 +1856,64 @@ export default function PricingClient() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
-                    <Crown className="w-6 h-6 text-purple-600 dark:text-yellow-400 shrink-0" />
+                    <Crown className="w-6 h-6 text-amber-500 dark:text-amber-400 shrink-0" />
                     <span>{isAr ? "مدى الحياة VIP" : "Lifetime VIP"}</span>
                   </h3>
-                  <span className="text-xs font-bold text-zinc-500 block mt-0.5">
+                  <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 block mt-0.5">
                     {isAr ? "صلاحية دائمة للأبد (36,500 يوم)" : "Permanent access for life"}
                   </span>
                 </div>
-                <span className="text-xs font-black border-2 border-black dark:border-white px-2.5 py-1 bg-purple-600 text-yellow-300 shadow-[2px_2px_0px_#000]">
+                <span className="text-xs font-black rounded-lg border border-amber-300 dark:border-amber-500/30 px-2.5 py-1 bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-400">
                   VIP 20
                 </span>
               </div>
 
               {/* Price Section */}
-              <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
+              <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                 <div className="flex items-baseline gap-2">
                   <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">2,250</span>
-                  <span className="text-sm font-bold text-zinc-500">ج.م</span>
+                  <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">ج.م</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <span className="text-xs font-black text-purple-700 dark:text-yellow-400 flex items-center gap-1 bg-purple-500/10 border border-purple-500/30 px-2 py-0.5">
-                    <Sparkles className="w-3 h-3" />
+                  <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1 bg-amber-100/90 dark:bg-amber-500/10 border border-amber-300/80 dark:border-amber-500/20 rounded-md px-2 py-0.5">
+                    <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                     {isAr ? "دفعة واحدة للأبد · بدون أي تجديد" : "One-time payment · Zero renewals"}
                   </span>
-                  <span className="border border-purple-600/40 bg-purple-500/15 text-purple-700 dark:text-purple-300 px-2 py-0.5 text-xs font-black">
+                  <span className="rounded-md border border-amber-300 dark:border-amber-500/30 bg-amber-200/60 dark:bg-amber-500/15 text-amber-900 dark:text-amber-300 px-2 py-0.5 text-xs font-black">
                     {isAr ? "وفر للأبد 👑" : "Save Forever 👑"}
                   </span>
                 </div>
               </div>
 
+              {/* Breakeven Value Analysis Box */}
+              <div className="rounded-xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-300/80 dark:border-amber-500/25 p-3.5 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 dark:text-amber-400">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>{isAr ? "💡 حساب نقطة التعادل والقيمة:" : "💡 Breakeven Value Analysis:"}</span>
+                </div>
+                <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                  {isAr
+                    ? "سعر الباقة (2,250 ج.م) يعادل اشتراك 22.5 شهر فقط في باقة Pro — أي بعد أقل من عامين تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!"
+                    : "At 2,250 EGP, this equals just ~22 months of Pro. After less than 2 years, all platform AI models, alerts, and updates are 100% free forever!"}
+                </p>
+              </div>
+
               {/* Spots Tracker Box */}
-              <div className="bg-black/90 dark:bg-purple-950/50 border-2 border-purple-500/50 p-3.5 space-y-2 text-white">
-                <div className="flex items-center justify-between text-xs font-black">
-                  <span className="text-[#FFE600] flex items-center gap-1">
-                    <Award className="w-3.5 h-3.5 text-[#FFE600]" />
+              <div className="rounded-xl bg-amber-50/60 dark:bg-zinc-950/80 border border-amber-200/90 dark:border-zinc-800 p-3.5 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-amber-800 dark:text-amber-400 flex items-center gap-1">
+                    <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                     {isAr ? "المقاعد المتبقية:" : "Remaining Spots:"}
                   </span>
-                  <span className="font-mono text-white text-[11px]">
+                  <span className="font-mono text-zinc-800 dark:text-zinc-300 text-[11px] font-bold">
                     {lifetimeIsOpen
                       ? (isAr ? `${lifetimeRemaining} من ${lifetimeLimit} مقعداً` : `${lifetimeRemaining}/${lifetimeLimit}`)
                       : (isAr ? "اكتملت (20/20) ❌" : "Sold Out ❌")}
                   </span>
                 </div>
-                <div className="w-full bg-zinc-800 border border-zinc-700 h-2 overflow-hidden">
+                <div className="w-full rounded-full bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700/60 h-2 overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-yellow-400 to-[#FFE600] transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-amber-400 to-yellow-400 transition-all duration-500"
                     style={{ width: `${Math.min(100, Math.max(5, (lifetimeCount / lifetimeLimit) * 100))}%` }}
                   />
                 </div>
@@ -2042,12 +1922,12 @@ export default function PricingClient() {
               {/* Features List */}
               <div className="space-y-3">
                 <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
-                  {isAr ? "الميزات الملكية المشمولة مدى الحياة:" : "INCLUDED FOR LIFE:"}
+                  {isAr ? "الميزات المشمولة مدى الحياة:" : "INCLUDED FOR LIFE:"}
                 </span>
                 <ul className="space-y-3.5">
                   {lifetimeFeatures.map((f, i) => (
-                    <li key={i} className="flex items-start gap-2.5 text-xs font-bold leading-tight text-zinc-800 dark:text-zinc-200">
-                      <span className="shrink-0 mt-0.5 text-emerald-500">{f.icon || <Check className="w-3.5 h-3.5" />}</span>
+                    <li key={i} className="flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug text-zinc-800 dark:text-zinc-200">
+                      <span className="shrink-0 mt-0.5 text-amber-500 dark:text-amber-400">{f.icon || <Check className="w-3.5 h-3.5" />}</span>
                       <span>{f.text}</span>
                     </li>
                   ))}
@@ -2064,10 +1944,10 @@ export default function PricingClient() {
                   setSelectedPlan("lifetime");
                   setStep("payment");
                 }}
-                className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all ${
+                className={`w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg transition-all ${
                   lifetimeIsOpen
-                    ? "bg-[#FFE600] hover:bg-yellow-400 text-black shadow-[3px_3px_0px_#000] cursor-pointer"
-                    : "bg-zinc-300 dark:bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                    ? "bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black shadow-amber-500/20 hover:shadow-amber-500/30 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+                    : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
                 }`}
               >
                 <Crown className="w-4 h-4 fill-current" />
@@ -2077,8 +1957,8 @@ export default function PricingClient() {
                     : (isAr ? "احجز مقعدك مدى الحياة الآن (2,250 ج.م) 👑" : "Get Lifetime Deal 👑")
                   : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
               </button>
-              <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
-                <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
+              <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                 <span>{isAr ? "صلاحية 36,500 يوم · بدون أي تجديد" : "36,500 days · Zero renewals"}</span>
               </div>
             </div>
@@ -2303,27 +2183,32 @@ export default function PricingClient() {
           </div>
         )}
 
-        {/* Notice: Market Data & Signal Nature */}
-        <div className="border-4 border-black dark:border-white bg-amber-50 dark:bg-amber-950/20 p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_#f59e0b]">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <div className="p-2.5 border-2 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black shrink-0 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-              <Info className="w-5 h-5" />
+        {/* Notice: Market Data & Regulatory Position */}
+        <div className="rounded-2xl border border-amber-300 dark:border-amber-500/30 bg-amber-50/70 dark:bg-gradient-to-r dark:from-zinc-900/90 dark:via-zinc-900/95 dark:to-amber-950/20 p-6 shadow-sm dark:shadow-xl dark:shadow-black/20">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="p-3 rounded-xl border border-amber-300 dark:border-amber-500/30 bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 shrink-0 shadow-sm">
+              <ShieldCheck className="w-6 h-6" />
             </div>
-            <div className="space-y-1">
-              <h4 className="text-sm font-black text-zinc-950 dark:text-white">
-                {isAr ? "تنويه هام بشأن طبيعة الأسعار والإشارات الفنية" : "Important Notice on Market Data & Technical Signals"}
-              </h4>
-              <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm sm:text-base font-black text-zinc-950 dark:text-white">
+                  {isAr ? "خلاصة الموقف القانوني وطبيعة التحليلات الفنية" : "Legal Notice on Market Data & Quantitative Models"}
+                </h4>
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30">
+                  {isAr ? "الهيئة العامة للرقابة المالية (قانون 95 لسنة 1992)" : "FRA Regulatory Notice"}
+                </span>
+              </div>
+              <p className="text-xs sm:text-[13px] font-medium text-zinc-800 dark:text-zinc-300 leading-relaxed">
                 {isAr
-                  ? "المنصة لا تقدم شاشة بث أسعار لحظية للأسهم (Live Ticker) أثناء جلسة التداول، وإنما تعتمد على بيانات الإغلاق والتحليل الفني والكمي. المقصود بـ «الإشارات الفورية» هو وصول التنبيهات الفنية للمشتركين فور صدورها واعتمادها من النماذج الإحصائية دون أي تأخير زمني، بينما يتم اتخاذ أي قرار استثماري وتنفيذه باستقلالية تامة عبر تطبيق السمسرة المرخص الخاص بك."
-                  : "The platform does not provide a live streaming stock ticker during trading sessions; it relies on closing data and quantitative technical analysis. «Instant Signals» refers to technical alerts being delivered to subscribers immediately upon statistical model calculation without delay. Buy/sell orders are executed independently through your licensed broker."}
+                  ? "منصة EGX BOTS هي شركة وأداة برمجيات مالية (FinTech SaaS) وليست وسيط تداول أو مستشاراً مالياً معتمداً من الهيئة العامة للرقابة المالية (FRA). المنصة لا تدير أموالاً ولا تتلقى ودائع ولا تضمن أي أرباح. مخرجات الذكاء الاصطناعي والإشارات الفنية هي مؤشرات إحصائية مؤتمتة لأغراض البحث والدراسة الذاتية، وقرار التداول يقع على عاتق المستثمر وحده عبر وسيطه المرخص."
+                  : "EGX BOTS is a FinTech Software-as-a-Service (SaaS) provider and not a broker or financial advisor certified by the FRA. The platform does not manage funds, receive deposits, or guarantee returns. All algorithmic signals and technical indicators are statistical tools for educational and personal research purposes only."}
               </p>
-              <div className="pt-1.5">
+              <div className="pt-1">
                 <Link
                   href="/legal-status"
-                  className="inline-flex items-center gap-1 text-xs font-black text-amber-800 dark:text-amber-300 underline underline-offset-4 hover:text-amber-950 dark:hover:text-amber-200"
+                  className="inline-flex items-center gap-1.5 text-xs font-black text-amber-800 dark:text-amber-400 hover:text-amber-950 dark:hover:text-amber-300 transition-colors"
                 >
-                  {isAr ? "اقرأ بيان الموقف القانوني والتنظيمي للمنصة (الهيئة العامة للرقابة المالية) ←" : "Read our full Legal & Regulatory Compliance Statement (Egyptian FRA) →"}
+                  <span>{isAr ? "اقرأ بيان الموقف القانوني والتنظيمي الكامل للمنصة ←" : "Read our full Legal & Regulatory Compliance Statement →"}</span>
                 </Link>
               </div>
             </div>
@@ -2331,57 +2216,57 @@ export default function PricingClient() {
         </div>
 
         {/* Guarantee Banner */}
-        <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/50 p-6 sm:p-8 backdrop-blur-sm shadow-sm">
           <div className="grid sm:grid-cols-3 gap-6 text-center">
-            <div className="space-y-1.5">
-              <div className="w-10 h-10 border-2 border-black dark:border-white bg-amber-300 text-black flex items-center justify-center mx-auto shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <ShieldCheck className="w-5 h-5" />
+            <div className="space-y-2">
+              <div className="w-12 h-12 rounded-xl border border-amber-300 dark:border-amber-500/30 bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-500 flex items-center justify-center mx-auto shadow-sm">
+                <ShieldCheck className="w-6 h-6" />
               </div>
               <h4 className="text-sm font-black text-zinc-950 dark:text-white">
                 {isAr ? "دفع رسمي ومعتمد" : "Certified Gateway"}
               </h4>
-              <p className="text-xs font-semibold text-zinc-500">
-                {isAr ? "عبر بوابة EasyKash المشفرة برخصة البنك المركزي" : "Licensed 256-bit encrypted checkout"}
+              <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                {isAr ? "عبر بوابة EasyKash المشفرة برخصة البنك المركزي المصري" : "Licensed 256-bit encrypted checkout via Central Bank of Egypt"}
               </p>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="w-10 h-10 border-2 border-black dark:border-white bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <Zap className="w-5 h-5" />
+            <div className="space-y-2">
+              <div className="w-12 h-12 rounded-xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500 flex items-center justify-center mx-auto shadow-sm">
+                <Zap className="w-6 h-6" />
               </div>
               <h4 className="text-sm font-black text-zinc-950 dark:text-white">
                 {isAr ? "تفعيل تلقائي ولحظي" : "Instant Activation"}
               </h4>
-              <p className="text-xs font-semibold text-zinc-500">
-                {isAr ? "يتم فتح الصلاحيات وتوليد رابط VIP فور اكتمال الدفع" : "Pro perks unlock instantly upon payment"}
+              <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                {isAr ? "يتم فتح الصلاحيات وتوليد رابط VIP فور اكتمال الدفع آلياً" : "Pro perks unlock instantly upon automated payment"}
               </p>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="w-10 h-10 border-2 border-black dark:border-white bg-sky-400 text-black flex items-center justify-center mx-auto shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <HelpCircle className="w-5 h-5" />
+            <div className="space-y-2">
+              <div className="w-12 h-12 rounded-xl border border-sky-300 dark:border-sky-500/30 bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400 flex items-center justify-center mx-auto shadow-sm">
+                <HelpCircle className="w-6 h-6" />
               </div>
               <h4 className="text-sm font-black text-zinc-950 dark:text-white">
                 {isAr ? "دعم مستمر عبر واتساب" : "WhatsApp Support"}
               </h4>
-              <p className="text-xs font-semibold text-zinc-500">
-                {isAr ? "فريقنا متواجد للإجابة على أي استفسارات 01024359109" : "Direct human assistance anytime"}
+              <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                {isAr ? "فريقنا متواجد للإجابة على أي استفسارات 01024359109" : "Direct human assistance anytime: 01024359109"}
               </p>
             </div>
           </div>
         </div>
         {/* ── AFFILIATE & ADVERTISING PARTNERSHIPS BANNER ── */}
-        <div className="border-4 border-black dark:border-white bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 dark:from-emerald-950/40 dark:via-zinc-950 dark:to-teal-950/30 p-6 sm:p-8 shadow-[8px_8px_0px_#10b981] space-y-4">
+        <div className="rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-gradient-to-r from-emerald-50/80 via-teal-50/50 to-emerald-50/80 dark:from-emerald-950/30 dark:via-zinc-900/90 dark:to-teal-950/30 p-6 sm:p-8 shadow-sm dark:shadow-lg space-y-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="space-y-2 text-center md:text-start max-w-2xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 border-2 border-black dark:border-white bg-emerald-400 text-black text-xs font-black uppercase shadow-[2px_2px_0px_#000]">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-300 dark:border-emerald-500/30 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-400 text-xs font-black uppercase">
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{isAr ? "برنامج الشركاء والرعاية الإعلانية" : "Affiliate & Media Partnerships"}</span>
               </div>
               <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
                 {isAr ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في البورصة المصرية" : "Earn 25% Recurring Cash or Advertise to Thousands of Active EGX Traders"}
               </h3>
-              <p className="text-xs sm:text-sm font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+              <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
                 {isAr
                   ? "هل تدير قناة تليجرام، صفحة فيسبوك، أو منصة استثمارية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر، أو احجز مساحات رعاية إعلانية ذكية في تقاريرنا اليومية ورادار الأسهم."
                   : "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Egyptian market investors."}
@@ -2392,14 +2277,14 @@ export default function PricingClient() {
                 href="https://wa.me/201024359109?text=مرحباً، أود الاستفسار عن الشراكة الإعلانية وبرنامج الأفلييت مع EGX BOTS"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 border-4 border-black dark:border-white py-3.5 px-6 text-xs font-black uppercase tracking-wider bg-emerald-500 hover:bg-emerald-400 text-black shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 transition-all text-center"
+                className="inline-flex items-center justify-center gap-2 rounded-xl py-3.5 px-6 text-xs font-black uppercase tracking-wider bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 transition-all text-center"
               >
                 <MessageSquare className="w-4 h-4" />
                 <span>{isAr ? "تواصل للشراكة عبر واتساب 💬" : "WhatsApp Partnership Desk"}</span>
               </a>
               <Link
                 href="/affiliate"
-                className="inline-flex items-center justify-center gap-2 border-2 border-black dark:border-white py-2.5 px-4 text-xs font-black bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-[2px_2px_0px_#000] hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-center"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-300 dark:border-zinc-700 py-2.5 px-4 text-xs font-black bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all text-center"
               >
                 <span>{isAr ? "صفحة نظام الأفلييت (25%) ←" : "Affiliate Program Details →"}</span>
               </Link>

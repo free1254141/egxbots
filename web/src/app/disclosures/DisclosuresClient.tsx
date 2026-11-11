@@ -45,12 +45,15 @@ import {
   filterDisclosuresByTimeframeAndSector,
   analyzeDisclosures,
   SymbolPriceInfo,
+  groupDisclosuresByStock,
+  GroupedStockDisclosure,
 } from "@/lib/disclosures-analytics";
 import InsiderHeatmap from "@/components/disclosures/InsiderHeatmap";
 import InsiderCharts from "@/components/disclosures/InsiderCharts";
 import MajorShareholdersTab from "@/components/disclosures/MajorShareholdersTab";
 import DisclosuresGlossary from "@/components/disclosures/DisclosuresGlossary";
 import StockDetailModal from "@/components/disclosures/StockDetailModal";
+import GroupedDisclosureCard from "@/components/disclosures/GroupedDisclosureCard";
 
 export type { DisclosureItem };
 
@@ -309,9 +312,18 @@ export default function DisclosuresClient({
     );
   };
 
-  // Analytical pool (all available disclosures in the dataset)
+  // Analytical pool (all available disclosures in the dataset, merged and deduplicated)
   const basePool = useMemo(() => {
-    return initialPool && initialPool.length > 0 ? initialPool : disclosures;
+    const map = new Map<string, DisclosureItem>();
+    if (initialPool) {
+      for (const item of initialPool) {
+        map.set(item.id, item);
+      }
+    }
+    for (const item of disclosures) {
+      map.set(item.id, item);
+    }
+    return Array.from(map.values());
   }, [initialPool, disclosures]);
 
   // Filter pool by active timeframe and sector
@@ -323,13 +335,32 @@ export default function DisclosuresClient({
     );
   }, [basePool, selectedTimeframe, selectedSector]);
 
-  // Dynamically compute active analytics for the selected timeframe and sector
+  // Dynamically compute active analytics for the selected timeframe and sector (with daily netting & offset)
   const activeAnalytics = useMemo(() => {
-    if (selectedTimeframe === "all" && selectedSector === "all" && initialAnalytics) {
-      return initialAnalytics;
-    }
     return analyzeDisclosures(filteredPool, priceMap || {});
-  }, [filteredPool, priceMap, selectedTimeframe, selectedSector, initialAnalytics]);
+  }, [filteredPool, priceMap]);
+
+  // Timeframe label in Arabic / English
+  const timeframeLabel = useMemo(() => {
+    switch (selectedTimeframe) {
+      case "today":
+        return isAr ? "جلسة اليوم" : "Today";
+      case "yesterday":
+        return isAr ? "جلسة أمس" : "Yesterday";
+      case "3d":
+        return isAr ? "آخر 3 أيام" : "Last 3 Days";
+      case "7d":
+        return isAr ? "آخر 7 أيام" : "Last 7 Days";
+      case "14d":
+        return isAr ? "آخر 14 يوماً" : "Last 14 Days";
+      case "30d":
+        return isAr ? "آخر 30 يوماً" : "Last 30 Days";
+      case "90d":
+        return isAr ? "آخر 90 يوماً" : "Last 90 Days";
+      default:
+        return isAr ? "كامل السجل" : "All Time";
+    }
+  }, [selectedTimeframe, isAr]);
 
   // Date range of the active timeframe
   const timeframeDateRange = useMemo(() => {
@@ -357,7 +388,7 @@ export default function DisclosuresClient({
 
       const m = metrics[sym];
       if (smartFilter === "below_cost") {
-        return m.discount_pct < -1.0;
+        return m.discount_pct < -1.0 && m.net_shares > 0;
       }
       if (smartFilter === "accumulating") {
         return m.action_bias === "accumulating";
@@ -368,6 +399,11 @@ export default function DisclosuresClient({
       return true;
     });
   }, [disclosures, selectedTimeframe, selectedSector, smartFilter, activeAnalytics]);
+
+  // Group disclosures by stock into unified cards (one consolidated card per stock per timeframe!)
+  const groupedDisclosures = useMemo(() => {
+    return groupDisclosuresByStock(displayedDisclosures, priceMap || {});
+  }, [displayedDisclosures, priceMap]);
 
   return (
     <div className="w-full pt-5 sm:pt-7 pb-16" dir={isAr ? "rtl" : "ltr"}>
@@ -664,6 +700,8 @@ export default function DisclosuresClient({
               costDiscounts={activeAnalytics.costDiscountTop}
               flowDistribution={activeAnalytics.flowDistribution}
               isAr={isAr}
+              timeframeLabel={timeframeLabel}
+              onSelectTimeframe={(tf) => setSelectedTimeframe(tf)}
               onSelectSymbol={(sym) => setModalSymbol(sym)}
               onFilterBelowCost={() => {
                 setSmartFilter("below_cost");
@@ -818,8 +856,8 @@ export default function DisclosuresClient({
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-3 py-2 border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 text-xs font-black text-black dark:text-white">
             <span>
               {isAr
-                ? `المعروض حالياً: ${displayedDisclosures.length} من أصل ${totalCount} إفصاح (تحميل ذكي تدريجي)`
-                : `Showing ${displayedDisclosures.length} of ${totalCount} disclosures`}
+                ? `المعروض حالياً: ${groupedDisclosures.length} شركة / سهم (${displayedDisclosures.length} إفصاح) من أصل ${totalCount} إفصاح`
+                : `Showing ${groupedDisclosures.length} stocks (${displayedDisclosures.length} filings) of ${totalCount}`}
             </span>
 
             <div className="flex items-center gap-2">
@@ -891,437 +929,50 @@ export default function DisclosuresClient({
             <>
               {layoutMode === "grid" ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                  {displayedDisclosures.map((item) => {
-                    const shortCode = item.id.slice(0, 8).toUpperCase();
-                    const symUpper = item.symbol ? item.symbol.toUpperCase() : null;
+                  {groupedDisclosures.map((group) => {
+                    const symUpper = group.symbol ? group.symbol.toUpperCase() : null;
                     const metric = symUpper && activeAnalytics ? activeAnalytics.symbolMetrics[symUpper] : null;
 
                     return (
-                      <article
-                        key={item.id}
-                        className="flex flex-col justify-between p-4 rounded-none border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_0px_rgba(255,255,255,0.4)] transition-all"
-                      >
-                        <div className="flex flex-col gap-3">
-                          {/* Grid Card Top Header */}
-                          <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-black/15 dark:border-white/15">
-                            <div className="flex items-center gap-2">
-                              <StockLogo
-                                symbol={item.symbol || "EGX"}
-                                size="sm"
-                                className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                              />
-                              {item.symbol ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setModalSymbol(item.symbol!)}
-                                  className="px-2 py-0.5 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-                                  title={isAr ? "تحليل شامل لهذا السهم" : "Stock Deep-Dive"}
-                                >
-                                  {item.symbol}
-                                </button>
-                              ) : (
-                                <span className="px-2 py-0.5 text-xs font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black">
-                                  EGX
-                                </span>
-                              )}
-                              <span className="text-xs font-mono font-black text-zinc-500 dark:text-zinc-400">
-                                #{shortCode}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              {getSentimentBadge(item)}
-                            </div>
-                          </div>
-
-                          {/* Company Name & Date & Type */}
-                          <div className="flex items-center justify-between text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                            <button
-                              type="button"
-                              onClick={() => item.symbol && setModalSymbol(item.symbol)}
-                              className="font-black text-black dark:text-white truncate max-w-[170px] text-right hover:text-amber-500 transition-colors cursor-pointer"
-                              title={item.company_name}
-                            >
-                              {item.company_name}
-                            </button>
-                            <span className="flex items-center gap-1 shrink-0 text-[11px] font-black">
-                              <Calendar className="w-3 h-3" />
-                              {item.disclosure_date}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="inline-block px-2 py-0.5 text-[10px] font-black bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white border border-black dark:border-white">
-                              {getTypeLabel(item.disclosure_type)}
-                            </span>
-
-                            {item.symbol && (
-                              <button
-                                type="button"
-                                onClick={() => setModalSymbol(item.symbol!)}
-                                className="text-[10px] font-black text-emerald-700 dark:text-[#00FF66] hover:text-black dark:hover:text-[#FFE600] underline flex items-center gap-1 cursor-pointer"
-                              >
-                                <Target className="w-3 h-3" />
-                                <span>{isAr ? "تحليل شامل بالسهم 🔍" : "Deep-Dive 🔍"}</span>
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Title */}
-                          <h2 className="text-sm font-black text-black dark:text-white line-clamp-2 leading-snug">
-                            {item.title}
-                          </h2>
-
-                          {/* Insider Cost (VWAP) & Discount Badge */}
-                          {metric && metric.insider_vwap > 0 && (
-                            <div className="p-2.5 rounded-none border-2 border-black dark:border-white bg-[#FFE600]/20 dark:bg-[#FFE600]/10 flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-1.5">
-                                <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                                <div>
-                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 block">
-                                    {isAr ? "متوسط تكلفة الداخلي:" : "Insider VWAP:"}
-                                  </span>
-                                  <span className="font-mono font-black text-black dark:text-white">
-                                    {metric.insider_vwap.toFixed(2)} ج.م
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="text-right">
-                                {metric.discount_pct < -1.0 ? (
-                                  <span className="px-2 py-0.5 rounded border border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 font-black text-[10px]">
-                                    {isAr ? `خصم -${Math.abs(metric.discount_pct)}% 🟢` : `-${Math.abs(metric.discount_pct)}% Discount`}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] font-mono text-zinc-600 dark:text-zinc-400">
-                                    {isAr ? `سعر اليوم: ${metric.current_price.toFixed(2)} ج` : `${metric.current_price.toFixed(2)} EGP`}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Quant chips if present */}
-                          {(item.party_name || item.shares_count || item.stake_before != null || item.stake_after != null) && (
-                            <div className="flex flex-wrap items-center gap-1.5 p-2 bg-zinc-50 dark:bg-zinc-950 border border-black dark:border-zinc-700 text-[11px] font-bold text-black dark:text-white">
-                              {item.party_name && (
-                                <span className="truncate max-w-full">
-                                  {isAr ? "الطرف: " : "Party: "}
-                                  <strong className="font-black">{item.party_name}</strong>
-                                </span>
-                              )}
-                              {item.shares_count != null && (
-                                <span className="px-1.5 py-0.5 bg-[#FFE600] text-black font-black text-[10px] border border-black">
-                                  {Number(item.shares_count).toLocaleString()} {isAr ? "سهم" : "sh"}
-                                </span>
-                              )}
-                              {(item.stake_before != null || item.stake_after != null) && (
-                                <span className="font-black text-[10px]">
-                                  {item.stake_before ?? "—"}% → {item.stake_after ?? "—"}%
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {/* AI Analysis Box */}
-                          <div className="p-2.5 bg-yellow-50 dark:bg-yellow-950/25 border-2 border-dashed border-yellow-600 dark:border-yellow-500/60">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <Sparkles className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400 shrink-0" />
-                              <span className="text-[10px] font-black uppercase text-yellow-800 dark:text-yellow-400">
-                                {isAr ? "تحليل الذكاء الاصطناعي:" : "AI Analysis:"}
-                              </span>
-                            </div>
-                            <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 line-clamp-3 leading-relaxed">
-                              {item.ai_summary}
-                            </p>
-                          </div>
-
-                          {/* Authentic PDF Viewer inside Grid Card */}
-                          <div className="border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 overflow-hidden shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-                            <div className="flex items-center justify-between px-2 py-1 bg-black text-white text-[10px] font-black">
-                              <span className="flex items-center gap-1 text-[#FFE600]">
-                                <FileText className="w-3 h-3" />
-                                {isAr ? "مستند الـ PDF الأصلي" : "Official PDF Document"}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewItem(item);
-                                  setPreviewMode("pdf");
-                                }}
-                                className="text-black bg-[#FFE600] px-1.5 py-0.2 hover:bg-white flex items-center gap-0.5 font-black text-[9px] cursor-pointer"
-                              >
-                                <ZoomIn className="w-2.5 h-2.5" />
-                                {isAr ? "تكبير" : "Full View"}
-                              </button>
-                            </div>
-                            <iframe
-                              src={`/api/disclosures/pdf/${item.id}#view=FitH&toolbar=0&navpanes=0`}
-                              title={item.title}
-                              loading="lazy"
-                              className="w-full h-[220px] border-0 bg-white"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Bottom Actions */}
-                        <div className="flex items-center justify-between gap-2 pt-3 mt-3 border-t-2 border-black/15 dark:border-white/15 text-xs">
-                          <button
-                            type="button"
-                            onClick={() => handleDiscussInFloatingChat(item)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#00FF66] text-black border-2 border-black font-black text-[11px] shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] cursor-pointer"
-                          >
-                            <Bot className="w-3.5 h-3.5" />
-                            <span>{isAr ? "ناقش في الشات" : "Discuss"}</span>
-                          </button>
-
-                          {item.source_url && (
-                            <a
-                              href={item.source_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-black text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span>{isAr ? "المصدر" : "Source"}</span>
-                            </a>
-                          )}
-                        </div>
-                      </article>
+                      <GroupedDisclosureCard
+                        key={group.key}
+                        group={group}
+                        metric={metric}
+                        layoutMode="grid"
+                        isAr={isAr}
+                        onSelectSymbol={(sym) => setModalSymbol(sym)}
+                        onInspectShareholders={(sym) => handleInspectShareholders(sym)}
+                        onDiscussInFloatingChat={(item) => handleDiscussInFloatingChat(item)}
+                        onPreviewPdf={(item) => {
+                          setPreviewItem(item);
+                          setPreviewMode("pdf");
+                        }}
+                      />
                     );
                   })}
                 </div>
               ) : (
-                /* List View (Horizontal) */
+                                /* List View (Horizontal) */
                 <div className="space-y-4">
-                  {displayedDisclosures.map((item) => {
-                    const shortCode = item.id.slice(0, 8).toUpperCase();
-                    const symUpper = item.symbol ? item.symbol.toUpperCase() : null;
+                  {groupedDisclosures.map((group) => {
+                    const symUpper = group.symbol ? group.symbol.toUpperCase() : null;
                     const metric = symUpper && activeAnalytics ? activeAnalytics.symbolMetrics[symUpper] : null;
 
                     return (
-                      <article
-                        key={item.id}
-                        className="p-5 border-4 border-black dark:border-white bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.4)] transition-all"
-                      >
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                          {/* Column 1: Info & AI Summary (7 cols) */}
-                          <div className="lg:col-span-7 flex flex-col justify-between space-y-3">
-                            <div>
-                              {/* Header row */}
-                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b-2 border-black/15 dark:border-white/15 mb-2">
-                                <div className="flex items-center gap-2">
-                                  <StockLogo
-                                    symbol={item.symbol || "EGX"}
-                                    size="sm"
-                                    className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                                  />
-                                  {item.symbol ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setModalSymbol(item.symbol!)}
-                                      className="px-2.5 py-0.5 text-xs font-black uppercase tracking-wider bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white hover:bg-[#FFE600] hover:text-black transition-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] cursor-pointer"
-                                      title={isAr ? "اضغط لفتح بطاقة التحليل الشامل للسهم" : "Click to open stock deep-dive"}
-                                    >
-                                      {item.symbol}
-                                    </button>
-                                  ) : (
-                                    <span className="px-2 py-0.5 text-xs font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black">
-                                      EGX
-                                    </span>
-                                  )}
-                                  <span className="font-black text-black dark:text-white text-xs">
-                                    {item.company_name}
-                                  </span>
-                                  <span className="text-xs font-mono font-bold text-zinc-500">
-                                    #{shortCode}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-black text-zinc-500 flex items-center gap-1">
-                                    <Calendar className="w-3.5 h-3.5" />
-                                    {item.disclosure_date}
-                                  </span>
-                                  {getSentimentBadge(item)}
-                                </div>
-                              </div>
-
-                              {/* Title */}
-                              <h2 className="text-base font-black text-black dark:text-white leading-snug mb-2">
-                                {item.title}
-                              </h2>
-
-                              {/* Insider Cost and VWAP bar */}
-                              {metric && metric.insider_vwap > 0 && (
-                                <div className="p-3 mb-2 border-2 border-black dark:border-white bg-[#FFE600]/20 dark:bg-[#FFE600]/10 flex flex-wrap items-center justify-between gap-2 text-xs">
-                                  <div className="flex items-center gap-2">
-                                    <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                                    <span className="font-bold text-zinc-700 dark:text-zinc-300">
-                                      {isAr ? "متوسط تكلفة شراء الداخليين:" : "Insider VWAP Cost:"}
-                                    </span>
-                                    <span className="font-mono font-black text-sm text-black dark:text-white">
-                                      {metric.insider_vwap.toFixed(2)} ج.م
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    {metric.discount_pct < -1.0 ? (
-                                      <span className="px-2.5 py-0.5 rounded border border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 font-black text-xs">
-                                        {isAr ? `فرصة: يتداول بأقل من التكلفة بـ -${Math.abs(metric.discount_pct)}% 🟢` : `-${Math.abs(metric.discount_pct)}% Discount`}
-                                      </span>
-                                    ) : (
-                                      <span className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
-                                        {isAr ? `السعر الحالي: ${metric.current_price.toFixed(2)} ج.م` : `Price: ${metric.current_price.toFixed(2)} EGP`}
-                                      </span>
-                                    )}
-
-                                    <span className="text-[11px] font-bold text-zinc-500">
-                                      ({metric.buy_count} {isAr ? "عمليات تجميع" : "buys"})
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Quant details */}
-                              {(item.party_name || item.shares_count || item.stake_before != null || item.stake_after != null) && (
-                                <div className="flex flex-wrap items-center gap-2 p-2.5 mb-2 bg-zinc-100 dark:bg-zinc-950 border-2 border-black dark:border-zinc-700 text-xs font-bold text-black dark:text-white">
-                                  {item.party_name && (
-                                    <span>
-                                      {isAr ? "الطرف: " : "Party: "}
-                                      <strong className="font-black text-emerald-700 dark:text-emerald-400">
-                                        {item.party_name}
-                                      </strong>
-                                    </span>
-                                  )}
-                                  {item.shares_count != null && (
-                                    <span className="px-2 py-0.5 bg-[#FFE600] text-black font-black text-xs border border-black">
-                                      {isAr ? "الكمية:" : "Shares:"} {Number(item.shares_count).toLocaleString()} {isAr ? "سهم" : "sh"}
-                                    </span>
-                                  )}
-                                  {(item.stake_before != null || item.stake_after != null) && (
-                                    <span className="font-black text-xs">
-                                      {isAr ? "نسبة المساهمة:" : "Stake:"} {item.stake_before ?? "—"}% → {item.stake_after ?? "—"}%
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* AI Analysis */}
-                              <div className="p-3 bg-yellow-50 dark:bg-yellow-950/25 border-2 border-dashed border-yellow-600 dark:border-yellow-500/60">
-                                <div className="flex items-center gap-1.5 mb-1">
-                                  <Sparkles className="w-4 h-4 text-yellow-600 dark:text-yellow-400 shrink-0" />
-                                  <span className="text-xs font-black uppercase text-yellow-800 dark:text-yellow-400">
-                                    {isAr ? "تحليل الذكاء الاصطناعي والأثر المالي:" : "AI Financial Analysis & Impact:"}
-                                  </span>
-                                </div>
-                                <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed">
-                                  {item.ai_summary}
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="flex flex-wrap items-center gap-2 pt-3 border-t-2 border-black/15 dark:border-white/15">
-                              <button
-                                type="button"
-                                onClick={() => handleDiscussInFloatingChat(item)}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#00FF66] text-black border-2 border-black font-black text-xs shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-[#FFE600] cursor-pointer"
-                              >
-                                <Bot className="w-4 h-4" />
-                                <span>{isAr ? "ناقش هذا الإفصاح في الشات" : "Discuss in Chat"}</span>
-                              </button>
-
-                              {item.symbol && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleInspectShareholders(item.symbol!)}
-                                  className="inline-flex items-center gap-1 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white border-2 border-black dark:border-white font-black text-xs hover:bg-[#FFE600] hover:text-black transition-all cursor-pointer"
-                                >
-                                  <Users className="w-3.5 h-3.5" />
-                                  <span>{isAr ? "فحص هيكل المساهمين" : "Shareholders Registry"}</span>
-                                </button>
-                              )}
-
-                              {item.symbol && (
-                                <button
-                                  type="button"
-                                  onClick={() => setModalSymbol(item.symbol!)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-black text-white dark:bg-white dark:text-black border-2 border-black dark:border-white font-black text-xs hover:bg-[#FFE600] hover:text-black transition-all cursor-pointer shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                                >
-                                  <Target className="w-3.5 h-3.5" />
-                                  <span>{isAr ? `تحليل شامل لسهم ${item.symbol} 🔍` : `Deep-Dive ${item.symbol} 🔍`}</span>
-                                </button>
-                              )}
-
-                              {item.source_url && (
-                                <a
-                                  href={item.source_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-xs font-black text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white ms-auto"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                  <span>{isAr ? "المصدر الأصلي" : "Original Source"}</span>
-                                </a>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Column 2: Authentic PDF Viewer (5 cols) */}
-                          <div className="lg:col-span-5 flex flex-col justify-between border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-950 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-2 bg-black text-white text-xs font-black border-b-2 border-black">
-                              <span className="flex items-center gap-1.5 text-[#FFE600]">
-                                <FileText className="w-4 h-4" />
-                                {isAr ? "مستند الإفصاح الرسمي (PDF معتمد)" : "Official Disclosure Document (PDF)"}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewItem(item);
-                                  setPreviewMode("pdf");
-                                }}
-                                className="text-black bg-[#FFE600] px-2 py-0.5 hover:bg-white flex items-center gap-1 font-black text-[10px] cursor-pointer"
-                              >
-                                <ZoomIn className="w-3 h-3" />
-                                {isAr ? "تكبير" : "Full View"}
-                              </button>
-                            </div>
-
-                            <iframe
-                              src={`/api/disclosures/pdf/${item.id}#view=FitH&toolbar=0&navpanes=0`}
-                              title={item.title}
-                              loading="lazy"
-                              className="w-full h-[360px] border-0 bg-white"
-                            />
-
-                            <div className="p-2 bg-zinc-50 dark:bg-zinc-900 border-t-2 border-black dark:border-white flex items-center justify-between gap-2 text-xs">
-                              <span className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 truncate">
-                                {isAr ? "ملف الإفصاح الأصلي - البورصة المصرية" : "Authentic EGX Filing Document"}
-                              </span>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <a
-                                  href={`/api/disclosures/pdf/${item.id}`}
-                                  download={`egx_disclosure_${item.symbol || 'official'}.pdf`}
-                                  className="px-2 py-1 bg-white dark:bg-zinc-800 text-black dark:text-white border border-black dark:border-white font-black text-[10px] hover:bg-[#FFE600] hover:text-black transition-all flex items-center gap-1"
-                                >
-                                  <Download className="w-3 h-3" />
-                                  {isAr ? "تحميل PDF" : "Download"}
-                                </a>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewItem(item);
-                                    setPreviewMode("pdf");
-                                  }}
-                                  className="px-2 py-1 bg-[#00FF66] text-black border border-black font-black text-[10px] hover:bg-[#FFE600] transition-all flex items-center gap-1 cursor-pointer"
-                                >
-                                  <ZoomIn className="w-3 h-3" />
-                                  {isAr ? "عرض كامل" : "Full View"}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </article>
+                      <GroupedDisclosureCard
+                        key={group.key}
+                        group={group}
+                        metric={metric}
+                        layoutMode="list"
+                        isAr={isAr}
+                        onSelectSymbol={(sym) => setModalSymbol(sym)}
+                        onInspectShareholders={(sym) => handleInspectShareholders(sym)}
+                        onDiscussInFloatingChat={(item) => handleDiscussInFloatingChat(item)}
+                        onPreviewPdf={(item) => {
+                          setPreviewItem(item);
+                          setPreviewMode("pdf");
+                        }}
+                      />
                     );
                   })}
                 </div>

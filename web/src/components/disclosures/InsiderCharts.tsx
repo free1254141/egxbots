@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { CostComparisonItem, FlowDistribution } from "@/lib/disclosures-analytics";
+import { CostComparisonItem, FlowDistribution, TimeframePeriod } from "@/lib/disclosures-analytics";
 import { BarChart3, Sparkles, TrendingUp, TrendingDown, Target, ChevronDown, ChevronUp } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
 
@@ -9,6 +9,8 @@ interface InsiderChartsProps {
   costDiscounts: CostComparisonItem[];
   flowDistribution: FlowDistribution;
   isAr: boolean;
+  timeframeLabel?: string;
+  onSelectTimeframe?: (tf: TimeframePeriod) => void;
   onSelectSymbol?: (symbol: string) => void;
   onFilterBelowCost?: () => void;
 }
@@ -17,6 +19,8 @@ export default function InsiderCharts({
   costDiscounts,
   flowDistribution,
   isAr,
+  timeframeLabel,
+  onSelectTimeframe,
   onSelectSymbol,
   onFilterBelowCost,
 }: InsiderChartsProps) {
@@ -46,11 +50,18 @@ export default function InsiderCharts({
                 <Target className="h-5 w-5" />
               </div>
               <div>
-                <h4 className="text-sm sm:text-base font-black text-black dark:text-white">
-                  {isAr ? "مقارنة تكلفة الداخلي بسعر السوق (خصم استثنائي)" : "Insider Cost vs Market Price"}
-                </h4>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm sm:text-base font-black text-black dark:text-white">
+                    {isAr ? "مقارنة تكلفة الداخلي بسعر السوق (خصم استثنائي)" : "Insider Cost vs Market Price"}
+                  </h4>
+                  {timeframeLabel && (
+                    <span className="px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black font-black text-[10px] uppercase shadow-[1px_1px_0px_#FFE600]">
+                      {timeframeLabel}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-zinc-600 dark:text-zinc-400 font-bold">
-                  {isAr ? "أسهم يتداول فيها السوق حالياً بأقل من تكلفة شراء أصحاب الشركة" : "Stocks currently trading below the purchase cost of insiders"}
+                  {isAr ? "أسهم يتداول فيها السوق حالياً بأقل من تكلفة شراء أصحاب الشركة (بعد خصم أي عمليات بيع)" : "Stocks trading below insider cost (net of any insider sales)"}
                 </p>
               </div>
             </div>
@@ -74,8 +85,35 @@ export default function InsiderCharts({
           </div>
 
           {costDiscounts.length === 0 ? (
-            <div className="py-8 text-center text-zinc-500 font-bold text-xs">
-              {isAr ? "جميع الأسهم تتداول حالياً عند أو فوق تكلفة الداخليين." : "All tracked stocks are currently trading at or above insider cost."}
+            <div className="py-8 px-4 text-center border-2 border-dashed border-black/20 dark:border-white/20 bg-zinc-50 dark:bg-zinc-900/40 my-3">
+              <div className="text-zinc-700 dark:text-zinc-200 font-black text-xs sm:text-sm mb-1.5">
+                {isAr
+                  ? `لا توجد أسهم تتداول بأقل من تكلفة الداخليين خلال فترة (${timeframeLabel || "المحددة"}).`
+                  : `No stocks trading below insider cost during (${timeframeLabel || "selected period"}).`}
+              </div>
+              <p className="text-[11px] text-zinc-500 font-bold mb-3 max-w-md mx-auto leading-relaxed">
+                {isAr
+                  ? "جميع الأسهم التي شهدت تجميعاً داخلياً تتداول حالياً عند أو فوق تكلفة الشراء، أو أن عمليات البيع ألغت الشراء (الصافي صفر أو سالب)."
+                  : "All accumulated stocks trade at/above insider cost, or sells offset buys (net <= 0)."}
+              </p>
+              {onSelectTimeframe && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSelectTimeframe("30d")}
+                    className="px-3 py-1 bg-[#FFE600] text-black border-2 border-black font-black text-[11px] hover:bg-black hover:text-white transition-colors cursor-pointer shadow-[2px_2px_0px_#000]"
+                  >
+                    {isAr ? "🔍 استعراض فرص آخر 30 يوماً" : "View 30-Day Discounts"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTimeframe("all")}
+                    className="px-3 py-1 bg-white dark:bg-zinc-800 text-black dark:text-white border-2 border-black font-black text-[11px] hover:bg-[#00FF66] hover:text-black transition-colors cursor-pointer shadow-[2px_2px_0px_#000]"
+                  >
+                    {isAr ? "عرض كامل السجل" : "View All-Time"}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className={`space-y-3.5 ${showAllDiscounts ? "max-h-[460px] overflow-y-auto pr-1 sm:pr-2" : ""}`}>
@@ -197,9 +235,16 @@ export default function InsiderCharts({
                 <BarChart3 className="h-5 w-5" />
               </div>
               <div>
-                <h4 className="text-sm sm:text-base font-black text-black dark:text-white">
-                  {isAr ? "ميزان تدفق السيولة الكلية للداخليين" : "Total Insider Net Flow Balance"}
-                </h4>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm sm:text-base font-black text-black dark:text-white">
+                    {isAr ? "ميزان تدفق السيولة الكلية للداخليين" : "Total Insider Net Flow Balance"}
+                  </h4>
+                  {timeframeLabel && (
+                    <span className="px-2 py-0.5 bg-black text-white dark:bg-white dark:text-black font-black text-[10px] uppercase shadow-[1px_1px_0px_#00FF66]">
+                      {timeframeLabel}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-zinc-600 dark:text-zinc-400 font-bold">
                   {isAr ? "مقارنة إجمالي قيمة الشراء والتجميع مقابل البيع والتصريف في السوق" : "Aggregate buy vs sell transaction values across all tracked symbols"}
                 </p>

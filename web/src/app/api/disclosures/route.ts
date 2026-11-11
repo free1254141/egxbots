@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       .from("egx_disclosures")
       .select("disclosure_date")
       .order("disclosure_date", { ascending: false })
-      .limit(10);
+      .limit(150);
 
     const uniqueDates = Array.from(
       new Set((latestRows || []).map((r) => r.disclosure_date).filter(Boolean))
