@@ -6,7 +6,7 @@ session persistence, and non-blocking async execution.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import logging
 import os
@@ -70,13 +70,18 @@ def _persist_message_background(
     user_msg: str,
     reply: str,
     latency_ms: int = 0,
+    image_url: Optional[str] = None,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
         return
     try:
         _init_supabase()
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        safe_latency = max(int(latency_ms or 0), 0)
+        time_diff = safe_latency if safe_latency > 0 else 1000
+        user_created_at_iso = (now - timedelta(milliseconds=time_diff)).isoformat()
         title = (user_msg or "محادثة جديدة")[:45].strip()
 
         # 1. MUST UPSERT SESSION FIRST TO SATISFY FOREIGN KEY CONSTRAINT
@@ -91,23 +96,35 @@ def _persist_message_background(
         supabase.from_("ai_chat_sessions").upsert(session_payload, on_conflict="id").execute()
 
         # 2. NOW INSERT MESSAGES INTO ai_chat_messages
+        meta = {
+            "latency_ms": safe_latency,
+            "engine": "deepseek-v3",
+            "chat_source": "web_chat",
+        }
+        user_row = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "role": "user",
+            "content": user_msg,
+            "created_at": user_created_at_iso,
+        }
+        if image_url:
+            user_row["image_url"] = image_url
+
         rows = [
-            {
-                "session_id": session_id,
-                "user_id": user_id,
-                "role": "user",
-                "content": user_msg,
-            },
+            user_row,
             {
                 "session_id": session_id,
                 "user_id": user_id,
                 "role": "assistant",
                 "content": reply,
-                "latency_ms": latency_ms,
+                "latency_ms": safe_latency,
+                "metadata": meta,
+                "created_at": now_iso,
             },
         ]
         supabase.from_("ai_chat_messages").insert(rows).execute()
-        logger.info(f"[agentic_chat] Successfully persisted session {session_id} and messages.")
+        logger.info(f"[agentic_chat] Successfully persisted session {session_id} and messages with latency_ms={safe_latency}.")
     except Exception as e:
         logger.warning(f"[agentic_chat] Message persistence warning: {e}")
 
@@ -357,16 +374,21 @@ async def chat_stream_endpoint(
     model = body.model or "deepseek-chat"
     auto_recs = (body.autonomous_recommendations or body.autonomousRecommendations or False) and user_is_pro
 
-    accept_header = accept or request.headers.get("accept", "")
+    accept_header = accept if isinstance(accept, str) else (request.headers.get("accept", "") or "")
     wants_streaming = body.stream is not False or "text/event-stream" in accept_header
+
+    primary_image_url = body.images[0] if (body.images and len(body.images) > 0 and body.images[0]) else None
 
     if wants_streaming:
         # Wrap generator to intercept final reply and persist messages in background
         async def streaming_wrapper():
             final_reply = ""
+            latency_ms = 0
+            t_req_start = time.time()
             async for sse_chunk in run_agentic_chat_stream(
                 message=user_msg,
                 history=body.history,
+                images=body.images,
                 session_id=session_id,
                 user_id=verified_user_id,
                 model=model,
@@ -383,19 +405,25 @@ async def chat_stream_endpoint(
                             event = json.loads(data_part)
                             if event.get("type") == "done":
                                 final_reply = event.get("reply", "")
+                                latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
                         except Exception:
                             pass
                 yield sse_chunk
+
+            if not latency_ms:
+                latency_ms = int((time.time() - t_req_start) * 1000)
 
             # Persist after stream completes (skip for benchmark load tests)
             if final_reply and session_id and verified_user_id != "00000000-0000-0000-0000-000000000000":
                 asyncio.create_task(
                     asyncio.to_thread(
                         _persist_message_background,
-                        session_id,
-                        verified_user_id,
-                        user_msg,
-                        final_reply,
+                        session_id=session_id,
+                        user_id=verified_user_id,
+                        user_msg=user_msg,
+                        reply=final_reply,
+                        latency_ms=latency_ms,
+                        image_url=primary_image_url,
                     )
                 )
 
@@ -413,9 +441,12 @@ async def chat_stream_endpoint(
         # Non-streaming JSON fallback
         full_reply = ""
         tables = []
+        latency_ms = 0
+        t_req_start = time.time()
         async for sse_chunk in run_agentic_chat_stream(
             message=user_msg,
             history=body.history,
+            images=body.images,
             session_id=session_id,
             user_id=verified_user_id,
             model=model,
@@ -435,17 +466,23 @@ async def chat_stream_endpoint(
                         elif event.get("type") == "done":
                             full_reply = event.get("reply", full_reply)
                             tables = event.get("tables", [])
+                            latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
                     except Exception:
                         pass
+
+        if not latency_ms:
+            latency_ms = int((time.time() - t_req_start) * 1000)
 
         if full_reply and session_id and verified_user_id != "00000000-0000-0000-0000-000000000000":
             asyncio.create_task(
                 asyncio.to_thread(
                     _persist_message_background,
-                    session_id,
-                    verified_user_id,
-                    user_msg,
-                    full_reply,
+                    session_id=session_id,
+                    user_id=verified_user_id,
+                    user_msg=user_msg,
+                    reply=full_reply,
+                    latency_ms=latency_ms,
+                    image_url=primary_image_url,
                 )
             )
 
@@ -453,6 +490,7 @@ async def chat_stream_endpoint(
             "reply": full_reply,
             "session_id": session_id,
             "tables": tables,
+            "latency_ms": latency_ms,
             "is_pro": user_is_pro,
             "remaining_quota": remaining_quota,
             "quota_limit": quota_limit,

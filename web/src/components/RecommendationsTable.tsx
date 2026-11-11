@@ -304,7 +304,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             if (checking) return;
             checking = true;
             try {
-                const response = await fetch("/api/user/quota", { cache: "no-store" });
+                const response = await fetch("/api/user/quota");
                 const payload = response.ok ? await response.json() : null;
                 const pro = payload?.plan?.is_pro === true;
                 if (active) setHasProAccess(pro);

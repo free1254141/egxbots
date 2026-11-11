@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
         // CDN-shared response cross between anonymous and authenticated users.
         // Keep plan-specific responses private, but allow the same browser
         // tab to reuse the daily snapshot while navigating between tabs.
-        "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
         "Vercel-Cache-Tag": DAILY_CACHE_TAGS.recommendations,
       },
     });

@@ -65,6 +65,43 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
     if not clean_symbols:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
 
+    # Batch fetch price history for accurate support/resistance levels
+    levels_map = {}
+    try:
+        res_prices = (
+            sb.from_("stock_prices")
+            .select("symbol,high,low,close,date")
+            .eq("exchange", "EGX")
+            .in_("symbol", clean_symbols)
+            .order("date", desc=True)
+            .limit(len(clean_symbols) * 30)
+            .execute()
+        )
+        by_sym = {}
+        for r in (res_prices.data or []):
+            s_sym = r.get("symbol")
+            by_sym.setdefault(s_sym, []).append(r)
+        for s_sym, sym_rows in by_sym.items():
+            recent_20 = sym_rows[:20]
+            recent_lows = [float(r["low"]) for r in recent_20 if r.get("low")]
+            recent_highs = [float(r["high"]) for r in recent_20 if r.get("high")]
+            all_lows = [float(r["low"]) for r in sym_rows if r.get("low")]
+            all_highs = [float(r["high"]) for r in sym_rows if r.get("high")]
+            s1 = _safe_float(min(recent_lows)) if recent_lows else None
+            r1 = _safe_float(max(recent_highs)) if recent_highs else None
+            s2 = _safe_float(min(all_lows)) if all_lows else (round(s1 * 0.96, 2) if s1 else None)
+            r2 = _safe_float(max(all_highs)) if all_highs else (round(r1 * 1.05, 2) if r1 else None)
+            levels_map[s_sym] = {
+                "support_1": s1,
+                "resistance_1": r1,
+                "support_2": s2,
+                "resistance_2": r2,
+                "stop_loss": round(s1 * 0.98, 2) if s1 else None,
+                "entry_zone": f"{s1} – {round(s1 * 1.02, 2)}" if s1 else "غير محدد"
+            }
+    except Exception:
+        pass
+
     stocks_data = []
     for sym in clean_symbols:
         stock_name_ar = None
@@ -82,6 +119,9 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 if mapped_sym == sym:
                     stock_name_ar = ar_name
                     break
+
+        if stock_name_ar:
+            stock_name_ar = stock_name_ar.split(",")[0].strip()
 
         latest_tech = {}
         try:
@@ -145,9 +185,19 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
         acc_score = _safe_float(wyckoff_info.get("acc_score"))
         rsi = _safe_float(latest_tech.get("rsi_14"))
 
+        bb_low = _safe_float(latest_tech.get("bb_lower"))
+        bb_up = _safe_float(latest_tech.get("bb_upper"))
+        lvl = levels_map.get(sym, {})
+        support_1 = lvl.get("support_1") or (round(bb_low, 2) if bb_low else (round(close_price * 0.96, 2) if close_price else None))
+        resistance_1 = lvl.get("resistance_1") or (round(bb_up, 2) if bb_up else (round(close_price * 1.05, 2) if close_price else None))
+        support_2 = lvl.get("support_2") or (round(support_1 * 0.96, 2) if support_1 else None)
+        resistance_2 = lvl.get("resistance_2") or (round(resistance_1 * 1.05, 2) if resistance_1 else None)
+        stop_loss = lvl.get("stop_loss") or (round(support_1 * 0.98, 2) if support_1 else None)
+        entry_zone = lvl.get("entry_zone") or (f"{support_1} – {round(support_1 * 1.02, 2)}" if support_1 else "غير محدد")
+
         if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
             verdict = "🟢 إيجابي / فرصة جيدة"
-        elif change_pct is not None and change_pct < -2 or (rsi is not None and rsi > 75):
+        elif (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
             verdict = "🔴 سلبي / مخاطرة مرتفعة"
         else:
             verdict = "🟡 حيادي للمراقبة"
@@ -169,6 +219,12 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
             "ema_200": _safe_float(latest_tech.get("ema_200")),
             "r_vol": _safe_float(latest_tech.get("r_vol")),
             "volume": latest_tech.get("volume"),
+            "support_1": support_1,
+            "resistance_1": resistance_1,
+            "support_2": support_2,
+            "resistance_2": resistance_2,
+            "stop_loss": stop_loss,
+            "entry_zone": entry_zone,
             "king_ai_score": king_score,
             "egx_ai_score": _safe_float(latest_tech.get("egx_ai_score")),
             "wyckoff_phase": wyckoff_info.get("wyckoff_phase"),
@@ -297,29 +353,44 @@ def _sync_get_market() -> Dict[str, Any]:
     except Exception:
         pass
 
-    egx30_info = {}
+    egx30_close = None
+    egx30_change_pct = None
+    m_date = None
     try:
-        res_egx30 = (
-            sb.from_("stock_technical_indicators")
-            .select("date,close,change_pct,volume")
-            .eq("symbol", "EGX30")
-            .order("date", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if res_egx30.data:
-            egx30_info = res_egx30.data[0]
+        res_egx30 = sb.from_("stock_prices").select("close,date").eq("symbol", "EGX30").order("date", desc=True).limit(2).execute()
+        if res_egx30.data and len(res_egx30.data) >= 1:
+            egx30_close = _safe_float(res_egx30.data[0].get("close"))
+            m_date = res_egx30.data[0].get("date")
+            if len(res_egx30.data) >= 2:
+                prev = _safe_float(res_egx30.data[1].get("close"))
+                if prev and egx30_close:
+                    egx30_change_pct = round(((egx30_close - prev) / prev) * 100, 2)
     except Exception:
         pass
+
+    top_gainers = payload.get("top_gainers") or []
+    top_losers = payload.get("top_losers") or []
+    if not top_gainers:
+        try:
+            res_g = sb.from_("stock_technical_indicators").select("symbol,close,change_pct").eq("exchange", "EGX").order("change_pct", desc=True).limit(5).execute()
+            top_gainers = res_g.data or []
+        except Exception:
+            pass
+    if not top_losers:
+        try:
+            res_l = sb.from_("stock_technical_indicators").select("symbol,close,change_pct").eq("exchange", "EGX").order("change_pct", desc=False).limit(5).execute()
+            top_losers = res_l.data or []
+        except Exception:
+            pass
 
     return {
         "status": "success",
         "market": "EGX (البورصة المصرية)",
-        "egx30_close": _safe_float(egx30_info.get("close")) or payload.get("egx30_close"),
-        "egx30_change_pct": _safe_float(egx30_info.get("change_pct")) or payload.get("egx30_change_pct"),
-        "date": egx30_info.get("date") or payload.get("date"),
-        "top_gainers": payload.get("top_gainers", []),
-        "top_losers": payload.get("top_losers", []),
+        "egx30_close": egx30_close or payload.get("egx30_close"),
+        "egx30_change_pct": egx30_change_pct or payload.get("egx30_change_pct"),
+        "date": m_date or payload.get("date"),
+        "top_gainers": top_gainers,
+        "top_losers": top_losers,
         "liquidity_summary": payload.get("liquidity", "سيولة متوازنة في جلسة اليوم"),
     }
 
@@ -341,12 +412,12 @@ def _sync_get_recommendations(
     sb = _get_sb()
     try:
         query = sb.from_("scan_results").select(
-            "symbol,signal,entry_price,target_price,stop_loss,status,created_at,strategy,timeframe"
+            "id,symbol,name,signal,entry_price,target_price,stop_loss,status,created_at,model_name"
         )
         if status == "open":
             query = query.in_("status", ["open", "active"])
         elif status == "closed":
-            query = query.eq("status", "closed")
+            query = query.in_("status", ["closed", "win", "loss"])
 
         if symbols:
             clean_syms = [_normalize_symbol(s) for s in symbols if s]
@@ -364,15 +435,24 @@ def _sync_get_recommendations(
         if sharia_only and not is_sharia_compliant(sym):
             continue
 
+        stock_name_ar = None
+        for ar_name, mapped_sym in ARABIC_STOCK_MAPPINGS.items():
+            if mapped_sym == sym:
+                stock_name_ar = ar_name
+                break
+        clean_name = (stock_name_ar or r.get("name") or sym).split(",")[0].strip()
+
         recs.append({
             "symbol": sym,
+            "name": clean_name,
+            "name_ar": clean_name,
             "signal": r.get("signal", "BUY"),
             "entry_price": _safe_float(r.get("entry_price")),
             "target_price": _safe_float(r.get("target_price")),
             "stop_loss": _safe_float(r.get("stop_loss")),
-            "status": r.get("status"),
-            "timeframe": r.get("timeframe") or "سوينغ قصير 🎯",
-            "strategy": r.get("strategy") or "خوارزمية الذكاء الاصطناعي",
+            "status": "نشطة (مفتوحة)" if r.get("status") in ["open", "active"] else r.get("status"),
+            "timeframe": "سوينغ يومي 🎯",
+            "strategy": r.get("model_name") or "خوارزمية الذكاء الاصطناعي",
             "date": str(r.get("created_at") or "")[:10],
             "is_sharia_compliant": is_sharia_compliant(sym),
         })
@@ -403,7 +483,8 @@ def _sync_get_technical_scan(preset: str, sharia_only: bool = False) -> Dict[str
     sb = _get_sb()
     try:
         query = sb.from_("stock_technical_indicators").select(
-            "symbol,date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram"
+            "symbol,date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram,"
+            "bb_upper,bb_lower,ema_50,ema_200,king_ai_score,egx_ai_score"
         ).eq("exchange", "EGX")
 
         if preset == "rsi_oversold":
@@ -435,13 +516,45 @@ def _sync_get_technical_scan(preset: str, sharia_only: bool = False) -> Dict[str
         if sharia_only and not is_sharia_compliant(sym):
             continue
 
+        close = _safe_float(r.get("close"))
+        change_pct = _safe_float(r.get("change_pct"))
+        rsi = _safe_float(r.get("rsi_14"))
+        bb_low = _safe_float(r.get("bb_lower"))
+        bb_up = _safe_float(r.get("bb_upper"))
+        s1 = round(bb_low, 2) if bb_low else (round(close * 0.96, 2) if close else None)
+        r1 = round(bb_up, 2) if bb_up else (round(close * 1.05, 2) if close else None)
+
+        if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
+            verdict = "🟢 إيجابي / فرصة جيدة"
+        elif (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
+            verdict = "🔴 سلبي / مخاطرة مرتفعة"
+        else:
+            verdict = "🟡 حيادي للمراقبة"
+
+        stock_name_ar = None
+        for ar_name, mapped_sym in ARABIC_STOCK_MAPPINGS.items():
+            if mapped_sym == sym:
+                stock_name_ar = ar_name
+                break
+        clean_name = (stock_name_ar or sym).split(",")[0].strip()
+
         results.append({
             "symbol": sym,
-            "close": _safe_float(r.get("close")),
-            "change_pct": _safe_float(r.get("change_pct")),
-            "rsi_14": _safe_float(r.get("rsi_14")),
+            "name": clean_name,
+            "name_ar": clean_name,
+            "close": close,
+            "change_pct": change_pct,
+            "rsi_14": rsi,
             "r_vol": _safe_float(r.get("r_vol")),
             "macd": _safe_float(r.get("macd"), 3),
+            "king_ai_score": _safe_float(r.get("king_ai_score")),
+            "egx_ai_score": _safe_float(r.get("egx_ai_score")),
+            "support_1": s1,
+            "resistance_1": r1,
+            "support_2": round(s1 * 0.96, 2) if s1 else None,
+            "resistance_2": round(r1 * 1.05, 2) if r1 else None,
+            "stop_loss": round(s1 * 0.98, 2) if s1 else None,
+            "verdict": verdict,
             "date": r.get("date"),
             "is_sharia_compliant": is_sharia_compliant(sym),
         })
@@ -496,7 +609,64 @@ def _sync_get_accumulation_stocks(sharia_only: bool = False) -> Dict[str, Any]:
         if len(stocks) >= 10:
             break
 
-    return {"status": "success", "accumulation_stocks": stocks}
+    acc_symbols = [s["symbol"] for s in stocks]
+    if acc_symbols:
+        try:
+            res_ti = (
+                sb.from_("stock_technical_indicators")
+                .select("symbol,close,change_pct,rsi_14,bb_lower,bb_upper,king_ai_score,egx_ai_score,date")
+                .eq("exchange", "EGX")
+                .in_("symbol", acc_symbols)
+                .order("date", desc=True)
+                .execute()
+            )
+            ti_map = {}
+            for row in (res_ti.data or []):
+                s_sym = row.get("symbol")
+                if s_sym not in ti_map:
+                    ti_map[s_sym] = row
+            for s in stocks:
+                s_sym = s["symbol"]
+                ti = ti_map.get(s_sym, {})
+                close = _safe_float(ti.get("close"))
+                change_pct = _safe_float(ti.get("change_pct"))
+                rsi = _safe_float(ti.get("rsi_14"))
+                bb_low = _safe_float(ti.get("bb_lower"))
+                bb_up = _safe_float(ti.get("bb_upper"))
+                s1 = round(bb_low, 2) if bb_low else (round(close * 0.96, 2) if close else None)
+                r1 = round(bb_up, 2) if bb_up else (round(close * 1.05, 2) if close else None)
+
+                if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
+                    verdict = "🟢 إيجابي / فرصة جيدة"
+                elif (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
+                    verdict = "🔴 سلبي / مخاطرة مرتفعة"
+                else:
+                    verdict = "🟡 حيادي للمراقبة"
+
+                stock_name_ar = None
+                for ar_name, mapped_sym in ARABIC_STOCK_MAPPINGS.items():
+                    if mapped_sym == s_sym:
+                        stock_name_ar = ar_name
+                        break
+                clean_name = (stock_name_ar or s_sym).split(",")[0].strip()
+
+                s["name"] = clean_name
+                s["name_ar"] = clean_name
+                s["close"] = close
+                s["change_pct"] = change_pct
+                s["rsi_14"] = rsi
+                s["support_1"] = s1
+                s["resistance_1"] = r1
+                s["support_2"] = round(s1 * 0.96, 2) if s1 else None
+                s["resistance_2"] = round(r1 * 1.05, 2) if r1 else None
+                s["stop_loss"] = round(s1 * 0.98, 2) if s1 else None
+                s["king_ai_score"] = _safe_float(ti.get("king_ai_score"))
+                s["egx_ai_score"] = _safe_float(ti.get("egx_ai_score"))
+                s["verdict"] = verdict
+        except Exception:
+            pass
+
+    return {"status": "success", "accumulation_stocks": stocks, "stocks": stocks}
 
 
 async def execute_get_accumulation_stocks(sharia_only: bool = False) -> Dict[str, Any]:

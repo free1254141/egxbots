@@ -134,7 +134,7 @@ export default function RecommendationCalendar({
             { table: "scan_results", filter: "is_public=eq.true" },
         ],
         () => loadSentEvents(),
-        { enabled: true, debounceMs: 500 },
+        { enabled: Boolean(isPro), debounceMs: 500 },
     );
 
     // View Mode: Calendar vs Agenda List
@@ -626,7 +626,20 @@ export default function RecommendationCalendar({
                                         : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                                 }`}
                             >
-                                {isAr ? "اليوم" : "Today"}
+                                {isAr ? "الشهر الحالي" : "Today"}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    selectCalendarMonth(new Date(2026, 9, 1));
+                                    setSelectedDayDateStr(null);
+                                }}
+                                className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                                    year === 2026 && month === 9 && filterPreset !== "30days" && filterPreset !== "all"
+                                        ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                                        : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {isAr ? "شهر 10 (أكتوبر 2026)" : "Oct 2026"}
                             </button>
                             <button
                                 onClick={() => {

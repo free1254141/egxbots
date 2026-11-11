@@ -483,7 +483,9 @@ export function analyzeDisclosures(
 
     const sec = getSymbolSector(sym);
 
-    if (discountPct < -1.0 && totalBuyShares > 0) {
+    // Netting condition: Insider must still maintain net accumulated shares (netShares > 0).
+    // If a subsequent or concurrent sell cancelled out the buy (netShares <= 0), it is not an active accumulation opportunity!
+    if (discountPct < -1.0 && netShares > 0) {
       symbolsBelowCostCount++;
       costDiscountTop.push({
         symbol: sym,
@@ -492,7 +494,7 @@ export function analyzeDisclosures(
         insider_vwap: Number(insiderVWAP.toFixed(2)),
         current_price: Number(curPrice.toFixed(2)),
         discount_pct: Math.abs(discountPct),
-        shares_accumulated: totalBuyShares,
+        shares_accumulated: netShares, // الصافي الفعلي بعد خصم أي بيع
       });
     }
 
@@ -646,4 +648,160 @@ export function analyzeDisclosures(
       net_insider_flow_egp: grandTotalBuyValue - grandTotalSellValue,
     },
   };
+}
+
+export interface GroupedStockDisclosure {
+  key: string;
+  symbol: string | null;
+  company_name: string;
+  sector?: { id: string; ar: string; en: string };
+  latest_date: string;
+  items: DisclosureRecord[];
+
+  // Net insider trading metrics in the period:
+  has_insider_trades: boolean;
+  total_buy_shares: number;
+  total_sell_shares: number;
+  net_shares: number;
+  total_buy_value_egp: number;
+  total_sell_value_egp: number;
+  net_value_egp: number;
+  trade_summary: {
+    status: "net_accumulation" | "net_distribution" | "offset" | "none";
+    message_ar: string;
+    message_en: string;
+  };
+
+  // Consolidated sentiment & status:
+  overall_sentiment: "bullish" | "bearish" | "neutral" | "mixed";
+  sentiment_badge_ar: string;
+  sentiment_badge_en: string;
+  badge_color: "green" | "red" | "yellow" | "blue";
+}
+
+export function groupDisclosuresByStock(
+  disclosures: DisclosureRecord[],
+  priceMap: Record<string, SymbolPriceInfo> = {}
+): GroupedStockDisclosure[] {
+  const groups: Map<string, GroupedStockDisclosure> = new Map();
+
+  for (const item of disclosures) {
+    const sym = item.symbol ? item.symbol.toUpperCase() : null;
+    const groupKey = sym || item.company_name || item.id;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        symbol: sym,
+        company_name: item.company_name || sym || "إفصاح عام",
+        sector: sym ? getSymbolSector(sym) : undefined,
+        latest_date: item.disclosure_date,
+        items: [],
+        has_insider_trades: false,
+        total_buy_shares: 0,
+        total_sell_shares: 0,
+        net_shares: 0,
+        total_buy_value_egp: 0,
+        total_sell_value_egp: 0,
+        net_value_egp: 0,
+        trade_summary: { status: "none", message_ar: "", message_en: "" },
+        overall_sentiment: "neutral",
+        sentiment_badge_ar: "محايد / إداري",
+        sentiment_badge_en: "Neutral",
+        badge_color: "yellow",
+      });
+    }
+
+    const group = groups.get(groupKey)!;
+    group.items.push(item);
+    if (item.disclosure_date && item.disclosure_date > group.latest_date) {
+      group.latest_date = item.disclosure_date;
+    }
+
+    // Accumulate trades if buy/sell
+    const act = (item.action_type || "").toLowerCase();
+    const shares = Math.abs(item.shares_count || 0);
+    const priceInfo = sym && priceMap[sym] ? priceMap[sym] : { close: 1.0 };
+    const execPrice = item.metadata?.execution_price && item.metadata.execution_price > 0
+      ? item.metadata.execution_price
+      : priceInfo.close > 0
+      ? priceInfo.close
+      : 1.0;
+
+    if (act === "buy") {
+      group.has_insider_trades = true;
+      group.total_buy_shares += shares;
+      group.total_buy_value_egp += shares * execPrice;
+    } else if (act === "sell") {
+      group.has_insider_trades = true;
+      group.total_sell_shares += shares;
+      group.total_sell_value_egp += shares * execPrice;
+    }
+  }
+
+  // Finalize net metrics & sentiment per group
+  for (const group of groups.values()) {
+    group.net_shares = group.total_buy_shares - group.total_sell_shares;
+    group.net_value_egp = group.total_buy_value_egp - group.total_sell_value_egp;
+
+    // Check trade offset logic: "عشان نحدث اذا كان فيه بيع الغى شراء معين او العكس وهكذا"
+    if (group.has_insider_trades) {
+      if (group.total_buy_shares > 0 && group.total_sell_shares > 0 && group.net_shares === 0) {
+        group.trade_summary = {
+          status: "offset",
+          message_ar: "عمليات البيع عادلت الشراء بالكامل (الصافي = 0 سهم)",
+          message_en: "Selling fully cancelled out buying (Net = 0 shares)",
+        };
+      } else if (group.net_shares > 0) {
+        const offsetNote = group.total_sell_shares > 0
+          ? ` (بعد خصم مبيعات ${group.total_sell_shares.toLocaleString()} سهم)`
+          : "";
+        group.trade_summary = {
+          status: "net_accumulation",
+          message_ar: `صافي تجميع إيجابي: +${group.net_shares.toLocaleString()} سهم${offsetNote}`,
+          message_en: `Net Accumulation: +${group.net_shares.toLocaleString()} shares`,
+        };
+      } else if (group.net_shares < 0) {
+        const offsetNote = group.total_buy_shares > 0
+          ? ` (بعد خصم مشتريات ${group.total_buy_shares.toLocaleString()} سهم)`
+          : "";
+        group.trade_summary = {
+          status: "net_distribution",
+          message_ar: `صافي تخارج وتسييل: ${group.net_shares.toLocaleString()} سهم${offsetNote}`,
+          message_en: `Net Distribution: ${group.net_shares.toLocaleString()} shares`,
+        };
+      }
+    }
+
+    // Determine overall sentiment
+    const sentiments = group.items.map((it) => (it.sentiment || "neutral").toLowerCase());
+    const hasBullish = sentiments.includes("bullish") || group.net_shares > 0;
+    const hasBearish = sentiments.includes("bearish") || group.net_shares < 0;
+
+    if (hasBullish && hasBearish) {
+      // Mixed: e.g. EGCH had 1 neutral/bullish operational event and 1 bearish lawsuit
+      group.overall_sentiment = "mixed";
+      group.sentiment_badge_ar = "مختلط / أحداث متعددة";
+      group.sentiment_badge_en = "Mixed Events";
+      group.badge_color = "yellow";
+    } else if (hasBullish) {
+      group.overall_sentiment = "bullish";
+      group.sentiment_badge_ar = "إيجابي / تجميع ومحفز";
+      group.sentiment_badge_en = "Bullish / Accumulation";
+      group.badge_color = "green";
+    } else if (hasBearish) {
+      group.overall_sentiment = "bearish";
+      group.sentiment_badge_ar = "سلبي / تسييل وتخارج";
+      group.sentiment_badge_en = "Bearish / Liquidation";
+      group.badge_color = "red";
+    } else {
+      group.overall_sentiment = "neutral";
+      group.sentiment_badge_ar = "محايد / إداري";
+      group.sentiment_badge_en = "Neutral / Admin";
+      group.badge_color = "yellow";
+    }
+  }
+
+  // Return groups sorted by latest date descending
+  return Array.from(groups.values()).sort((a, b) => b.latest_date.localeCompare(a.latest_date));
 }

@@ -321,27 +321,27 @@ def build_vip_report_html() -> str:
             other_movers_lines.append(
                 f"• <b>{sym}:</b> صعود قمة <b>+{peak:.1f}%</b> (إغلاق <b>+{ret:.1f}%</b> | حجم {rvol:.1f}x)"
             )
-        if len(other_movers_lines) >= 6:
+        if len(other_movers_lines) >= 4:
             break
 
     other_movers_text = "\n".join(other_movers_lines) if other_movers_lines else "• جميع الأسهم المحددة حققت تماسكاً إيجابياً."
 
     bear_traps_lines = []
-    for i, t in enumerate(bear_traps[:6], 1):
+    for i, t in enumerate(bear_traps[:4], 1):
         bear_traps_lines.append(
             f"{i}. <b>{t.get('symbol')}</b> | الإغلاق: {t.get('close'):.2f} ج | الدعم: {t.get('keyLevel'):.2f} ج | ارتداد: {t.get('wickPct')}% | الثقة: {t.get('conviction')}% | الحجم: {t.get('relativeVolume', 1.0):.1f}x"
         )
     bear_traps_text = "\n".join(bear_traps_lines) if bear_traps_lines else "• جاري تحديث نماذج الارتداد."
 
     bull_traps_lines = []
-    for i, t in enumerate(bull_traps[:4], 1):
+    for i, t in enumerate(bull_traps[:3], 1):
         bull_traps_lines.append(
             f"{i}. <b>{t.get('symbol')}</b> | الإغلاق: {t.get('close'):.2f} ج | المقاومة: {t.get('keyLevel'):.2f} ج | رفض علوي: {t.get('wickPct')}% | الثقة: {t.get('conviction')}%"
         )
     bull_traps_text = "\n".join(bull_traps_lines) if bull_traps_lines else "• لا توجد مصائد قمم نشطة."
 
     # Disclosures Section
-    disclosures = load_recent_disclosures(limit=5)
+    disclosures = load_recent_disclosures(limit=4)
     disclosures_lines = []
     for d in disclosures:
         sym = d.get("symbol") or "EGX"
@@ -353,7 +353,7 @@ def build_vip_report_html() -> str:
         icon = "🟢" if sentiment == "bullish" or act == "buy" else ("🔴" if sentiment == "bearish" or act == "sell" else "⚪")
         act_ar = "شراء داخلي" if act == "buy" else ("بيع داخلي" if act == "sell" else ("إفصاح جوهري" if dtype == "material_event" else "تعامل مساهمين"))
         shares_txt = f" ({int(shares):,} سهم)" if shares else ""
-        title_snippet = (d.get("title") or "")[:55]
+        title_snippet = (d.get("title") or "")[:45]
         disclosures_lines.append(f"• {icon} <b>{sym}</b>: {act_ar}{shares_txt} — <i>{title_snippet}...</i>")
 
     disclosures_text = "\n".join(disclosures_lines) if disclosures_lines else "• جاري رصد إفصاحات جلسة اليوم."
@@ -453,7 +453,7 @@ def send_vip_daily_report(dry_run: bool = False) -> Dict[str, Any]:
 
     # Telegram message length guard (4096 chars limit)
     split_marker = "🎯 <b>سادساً: رادار الإجماع الخوارزمي"
-    if len(html_content) > 3900 and split_marker in html_content:
+    if len(html_content) > 4000 and split_marker in html_content:
         parts = html_content.split(split_marker)
         part1 = parts[0].strip()
         part2 = (split_marker + parts[1]).strip()
@@ -464,7 +464,7 @@ def send_vip_daily_report(dry_run: bool = False) -> Dict[str, Any]:
             "text": part1,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
-        }, timeout=45)
+        }, timeout=55)
 
         # Send Part 2 with inline keyboard
         resp2 = requests.post(url, json={
@@ -473,7 +473,7 @@ def send_vip_daily_report(dry_run: bool = False) -> Dict[str, Any]:
             "parse_mode": "HTML",
             "reply_markup": reply_markup,
             "disable_web_page_preview": True,
-        }, timeout=45)
+        }, timeout=55)
         
         data = resp2.json()
         if data.get("ok"):

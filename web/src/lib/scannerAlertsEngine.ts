@@ -1178,7 +1178,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       closedMap.set(key, c);
     }
   }
-  const finalClosedSignals = Array.from(closedMap.values()).slice(0, 300);
+  const finalClosedSignals = Array.from(closedMap.values()).slice(0, 1000);
 
   // Compute updated signals KPIs from deduplicated signals
   const closedWins = finalClosedSignals.filter((s) => (s.return_pct || 0) > 0);

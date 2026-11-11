@@ -19,6 +19,14 @@ from api.agentic_chat.prompts import AGENTIC_SYSTEM_PROMPT
 from api.agentic_chat.tools_schema import AGENTIC_TOOLS_SCHEMA
 from api.agentic_chat.tools_execution import dispatch_tool
 from api.agentic_chat.auth_guard import filter_output
+from api.agentic_chat.vision import (
+    analyze_image,
+    reconcile_vision_with_market,
+    safe_image_evidence_reply,
+    safe_portfolio_image_reply,
+    format_vision_context_for_prompt,
+)
+from api.stock_ai import _init_supabase, supabase
 
 logger = logging.getLogger("agentic_chat")
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
@@ -91,6 +99,7 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
 async def run_agentic_chat_stream(
     message: str,
     history: Optional[List[Dict[str, Any]]] = None,
+    images: Optional[List[str]] = None,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     model: str = "deepseek-chat",
@@ -98,7 +107,7 @@ async def run_agentic_chat_stream(
     is_pro: bool = True,
     remaining_quota: int = 999,
     quota_limit: int = 999,
-) -> AsyncGenerator[str, None]:
+):
     """
     Main agentic streaming generator.
     Yields Server-Sent Events (SSE) formatted as: `data: <json_or_marker>\\n\\n`
@@ -132,22 +141,109 @@ async def run_agentic_chat_stream(
         for msg in history[-10:]:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            if role in ("user", "assistant") and content:
-                formatted_messages.append({"role": role, "content": str(content)[:2000]})
+            img_url = msg.get("image_url") or msg.get("imageUrl")
+            if role in ("user", "assistant") and (content or img_url):
+                if role == "user" and img_url:
+                    formatted_messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": str(content)[:2000] if content else "صورة مرفقة"},
+                            {"type": "image_url", "image_url": {"url": img_url}}
+                        ]
+                    })
+                else:
+                    formatted_messages.append({"role": role, "content": str(content)[:2000]})
 
-    # Inject symbol hints if detected in user message or context
+    # 1. Vision Analysis Pipeline (Ported 1:1 from legacy Vercel system)
+    valid_images = [img for img in (images or []) if img and isinstance(img, str) and img.strip()]
+    vision_data = None
+    if valid_images:
+        yield f"data: {json.dumps({'type': 'status', 'status': 'vision', 'message': 'قراءة الصورة مع حفظ درجة الثقة وحدودها...'}, ensure_ascii=False)}\n\n"
+        try:
+            vision_data, vision_err = await analyze_image(
+                image_url=valid_images,
+                user_message=message,
+                api_key=api_key,
+                message_id=session_id or "",
+            )
+        except Exception as v_ex:
+            logger.error(f"[agentic_chat] Vision exception: {v_ex}")
+            vision_data, vision_err = None, str(v_ex)
+
+        if vision_data:
+            try:
+                _init_supabase()
+                vision_data = reconcile_vision_with_market(vision_data, supabase)
+            except Exception as rec_ex:
+                logger.warning(f"[agentic_chat] Reconcile error: {rec_ex}")
+
+            # Send vision result events to client immediately
+            yield f"data: {json.dumps({'type': 'vision_result', 'data': vision_data}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'vision', 'data': vision_data}, ensure_ascii=False)}\n\n"
+        else:
+            # Fallback when vision cannot extract anything from the image
+            fallback_text = "وصلت الصورة إلى الشات، لكن تعذّر تحليلها بخدمة قراءة الصور حالياً. لذلك لم أستخرج منها رموزاً أو أرقاماً، ولم أعتمد على صورة أو بيانات سابقة. جرّب إعادة إرفاقها لاحقاً."
+            words = fallback_text.split(" ")
+            for i in range(0, len(words), 4):
+                chunk = " ".join(words[i : i + 4]) + " "
+                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.015)
+
+            total_lat = int((time.time() - start_time) * 1000)
+            done_ev = {
+                "type": "done",
+                "reply": fallback_text,
+                "session_id": session_id,
+                "suggested_buttons": ["تحليل سهم معين", "أقوى الأسهم اليوم"],
+                "tables": [],
+                "latency_ms": total_lat,
+                "is_pro": is_pro,
+                "remaining_quota": remaining_quota,
+                "quota_limit": quota_limit,
+                "vision": None,
+                "vision_error": vision_err or "vision_analysis_failed",
+            }
+            yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+    # Inject symbol hints if detected in user message, context, or vision
     hints = known_symbol_hints(message)
+    if vision_data:
+        vision_symbols = [
+            s["symbol"].upper()
+            for s in vision_data.get("symbols", [])
+            if s.get("symbol")
+        ]
+        for vsym in vision_symbols:
+            if not any(vsym in h.get("symbols", []) for h in hints):
+                hints.insert(0, {"name": vsym, "symbols": [vsym]})
+
     if hints:
         hints_payload = {"symbol_hints": hints}
         hints_text = (
-            "سياق رموز البورصة المصرية المكتشفة في استفسار المستخدم (symbol_hints):\n"
+            "سياق رموز البورصة المصرية المكتشفة في استفسار المستخدم والصور المرفقة (symbol_hints):\n"
             f"{json.dumps(hints_payload, ensure_ascii=False)}\n"
-            "التزم بدقة بهذه الرموز عند استدعاء الأدوات get_stock و get_stock_levels و get_comparison ولا تخترع رمزاً بديلاً (مثل استخدام ATQA لعتاقة وعدم استبداله بـ ORAS)."
+            "التزم بدقة بهذه الرموز عند استدعاء الأدوات get_stock و get_stock_levels و get_comparison ولا تخترع رمزاً بديلاً."
         )
         formatted_messages.append({"role": "system", "content": hints_text})
 
-    # Append current user message
-    formatted_messages.append({"role": "user", "content": message})
+    # Append vision context and user message
+    if vision_data:
+        vision_context_str = format_vision_context_for_prompt(vision_data)
+        formatted_messages.append({"role": "system", "content": vision_context_str})
+
+        clean_user_text = message.strip() if message and message.strip() else "قم بتحليل محفظتي / الصورة المرفقة وقارنها بأسعار السوق اليوم ومستويات الدعم والمقاومة."
+        formatted_messages.append({"role": "user", "content": clean_user_text})
+
+        if vision_symbols:
+            prompt_instruction = (
+                f"استدعِ فوراً الأدوات get_stock و get_stock_levels للرموز المستخرجة من الصورة: {', '.join(vision_symbols)} "
+                f"لجلب أسعار الإغلاق اللحظية ومستويات الدعم والمقاومة، لمقارنتها بأسعار الشراء وكميات المراكز المستخرجة من الصورة وتقديم تحليل مالي وفني متكامل."
+            )
+            formatted_messages.append({"role": "system", "content": prompt_instruction})
+    else:
+        formatted_messages.append({"role": "user", "content": message})
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -157,6 +253,7 @@ async def run_agentic_chat_stream(
     start_time = time.time()
     accumulated_reply = ""
     tables_data: List[Any] = []
+    recommendations_data: List[Any] = []
     tools_executed_count = 0
 
     max_rounds = 3
@@ -215,6 +312,8 @@ async def run_agentic_chat_stream(
                 # If DeepSeek has NO more tool calls to make:
                 if not tool_calls:
                     content = assistant_msg.get("content", "")
+                    if not content and vision_data:
+                        content = safe_image_evidence_reply(vision_data, message)
                     if content:
                         accumulated_reply = filter_output(content)
                         # Stream the reply smoothly in natural word chunks
@@ -256,8 +355,13 @@ async def run_agentic_chat_stream(
                     else:
                         content_str = json.dumps(result, ensure_ascii=False)
                         # Extract table data if present
-                        if isinstance(result, dict) and "stocks" in result and isinstance(result["stocks"], list):
-                            tables_data.extend(result["stocks"])
+                        if isinstance(result, dict):
+                            if "stocks" in result and isinstance(result["stocks"], list):
+                                tables_data.extend(result["stocks"])
+                            elif "accumulation_stocks" in result and isinstance(result["accumulation_stocks"], list):
+                                tables_data.extend(result["accumulation_stocks"])
+                            if "recommendations" in result and isinstance(result["recommendations"], list):
+                                recommendations_data.extend(result["recommendations"])
 
                     formatted_messages.append({
                         "role": "tool",
@@ -335,10 +439,54 @@ async def run_agentic_chat_stream(
 
     # Format tables into standard ExcelTable schema expected by frontend
     excel_tables = []
+
+    # 1. Recommendations Table
+    if recommendations_data:
+        rec_rows = []
+        seen_rec = set()
+        for r in recommendations_data:
+            if isinstance(r, dict):
+                sym = r.get("symbol") or ""
+                if not sym or sym in seen_rec:
+                    continue
+                seen_rec.add(sym)
+                name = (r.get("name") or r.get("name_ar") or sym).split(",")[0].strip()
+                sig = r.get("signal") or "BUY"
+                ep = f"{r.get('entry_price', '—')} ج.م" if r.get('entry_price') is not None else "—"
+                tp = f"{r.get('target_price', '—')} ج.م" if r.get('target_price') is not None else "—"
+                sl = f"{r.get('stop_loss', '—')} ج.م" if r.get('stop_loss') is not None else "—"
+                status_txt = r.get("status") or "نشطة (مفتوحة)"
+                d_str = str(r.get("date") or "")
+                sharia_txt = "متوافق (EGX33)" if r.get("is_sharia_compliant") else "غير متوافق"
+                rec_rows.append([sym, name, sig, ep, tp, sl, status_txt, d_str, sharia_txt])
+        if rec_rows:
+            excel_tables.append({
+                "id": f"recs_{int(time.time())}",
+                "title": "توصيات وإشارات التداول",
+                "headers": ["الكود", "اسم الشركة", "الإشارة", "سعر الدخول", "المستهدف", "وقف الخسارة", "الحالة", "التاريخ", "التوافق الشرعي"],
+                "rows": rec_rows,
+                "source": "EGX BOTS",
+                "data_time": time.strftime("%Y-%m-%d"),
+            })
+
+    # 2. Stocks Comparison Matrix or Stock Analysis Table
     if tables_data:
-        stocks_with_symbol = [s for s in tables_data if isinstance(s, dict) and s.get("symbol")]
+        merged_stocks = {}
+        for s in tables_data:
+            if not isinstance(s, dict) or not s.get("symbol"):
+                continue
+            sym = str(s["symbol"]).upper().strip()
+            if sym not in merged_stocks:
+                merged_stocks[sym] = dict(s)
+            else:
+                for k, v in s.items():
+                    if v is not None and v != "" and v != "—":
+                        if merged_stocks[sym].get(k) is None or merged_stocks[sym].get(k) == "" or merged_stocks[sym].get(k) == "—":
+                            merged_stocks[sym][k] = v
+
+        stocks_with_symbol = list(merged_stocks.values())[:10]  # Cap at 10 columns for clean UI display
         if len(stocks_with_symbol) >= 2:
-            headers = ["المعيار"] + [f"{s.get('name_ar') or s.get('symbol')} ({s.get('symbol')})" for s in stocks_with_symbol]
+            headers = ["المعيار"] + [f"{(s.get('name_ar') or s.get('symbol')).split(',')[0].strip()} ({s.get('symbol')})" for s in stocks_with_symbol]
             rows_list = [
                 ["السعر الحالي"] + [f"{s.get('close', '—')} ج.م" if s.get('close') is not None else "—" for s in stocks_with_symbol],
                 ["التغير اليومي"] + [f"{s.get('change_pct', '—')}%" if s.get('change_pct') is not None else "—" for s in stocks_with_symbol],
@@ -357,26 +505,26 @@ async def run_agentic_chat_stream(
                 "source": "EGX BOTS",
                 "data_time": time.strftime("%Y-%m-%d"),
             })
-        else:
-            rows_list = []
-            for s in tables_data:
-                if isinstance(s, dict):
-                    sym = s.get("symbol") or ""
-                    name = s.get("name_ar") or sym
-                    close_str = f"{s.get('close', '')} ج.م" if s.get('close') is not None else "—"
-                    chg_str = f"{s.get('change_pct', '')}%" if s.get('change_pct') is not None else "—"
-                    rsi_str = str(s.get('rsi_14', '—'))
-                    verdict_str = s.get('verdict') or "—"
-                    rows_list.append([sym, name, close_str, chg_str, rsi_str, verdict_str])
-            if rows_list:
-                excel_tables.append({
-                    "id": f"table_{int(time.time())}",
-                    "title": "جدول الأسهم والتحليل الفني",
-                    "headers": ["الكود", "اسم الشركة", "السعر", "التغير %", "RSI", "التقييم الفني"],
-                    "rows": rows_list,
-                    "source": "EGX BOTS",
-                    "data_time": time.strftime("%Y-%m-%d"),
-                })
+        elif len(stocks_with_symbol) == 1:
+            s = stocks_with_symbol[0]
+            sym = s.get("symbol") or ""
+            name = (s.get("name_ar") or sym).split(",")[0].strip()
+            close_str = f"{s.get('close', '—')} ج.م" if s.get('close') is not None else "—"
+            chg_str = f"{s.get('change_pct', '—')}%" if s.get('change_pct') is not None else "—"
+            rsi_str = str(s.get('rsi_14', '—'))
+            verdict_str = s.get('verdict') or "—"
+            s1_str = f"{s.get('support_1', '—')} ج.م" if s.get('support_1') is not None else "—"
+            r1_str = f"{s.get('resistance_1', '—')} ج.م" if s.get('resistance_1') is not None else "—"
+            king_str = str(s.get('king_ai_score', '—'))
+            sharia_str = "متوافق (EGX33)" if s.get('is_sharia_compliant') else "غير متوافق"
+            excel_tables.append({
+                "id": f"table_{int(time.time())}",
+                "title": f"التحليل الفني لسهم {name} ({sym})",
+                "headers": ["الكود", "اسم الشركة", "السعر", "التغير %", "RSI", "الدعم الأول", "المقاومة الأولى", "مؤشر King AI", "التقييم الفني", "التوافق الشرعي"],
+                "rows": [[sym, name, close_str, chg_str, rsi_str, s1_str, r1_str, king_str, verdict_str, sharia_str]],
+                "source": "EGX BOTS",
+                "data_time": time.strftime("%Y-%m-%d"),
+            })
 
     # Final done event with accurate quota and pro status
     done_event = {
@@ -389,6 +537,7 @@ async def run_agentic_chat_stream(
         "is_pro": is_pro,
         "remaining_quota": remaining_quota,
         "quota_limit": quota_limit,
+        "vision": vision_data,
     }
 
     yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"

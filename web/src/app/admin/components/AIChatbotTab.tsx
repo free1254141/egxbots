@@ -1753,11 +1753,11 @@ export default function AIChatbotTab() {
 
                                                                             )}
 
-                                                                            {log.latency_ms && log.latency_ms > 0 && (
+                                                                            {(Number(log.latency_ms || log.latencyMs) > 0) && (
 
-                                                                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 flex items-center gap-1">
+                                                                                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 flex items-center gap-1" title="زمن استجابة البوت الإجمالي">
 
-                                                                                    <Clock className="w-3 h-3 text-emerald-500" /> {(log.latency_ms / 1000).toFixed(2)}s
+                                                                                    <Clock className="w-3 h-3 text-emerald-500" /> {((Number(log.latency_ms || log.latencyMs)) / 1000).toFixed(2)}s
 
                                                                                 </span>
 
@@ -1847,7 +1847,7 @@ export default function AIChatbotTab() {
 
                                                                                 showSuggestedButtons={false}
 
-                                                                                latencyMs={log.latency_ms}
+                                                                                latencyMs={Number(log.latency_ms || log.latencyMs) || undefined}
 
                                                                                 tables={Array.isArray(log.tables) ? log.tables : []}
 

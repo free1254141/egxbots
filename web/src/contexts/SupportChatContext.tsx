@@ -57,7 +57,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         } catch {
             // ignore storage/JSON errors and fall through to the network
         }
-        fetch("/api/user/quota", { cache: "no-store" })
+        fetch("/api/user/quota")
             .then((res) => res.json())
             .then((data) => {
                 const pro = Boolean(data?.ok && data?.plan?.is_pro);
@@ -93,8 +93,12 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
     const canReadHistory = Boolean(user) && sessionId === user?.id;
 
     const isOpenRef = useRef(isOpen);
+    const [hasInteracted, setHasInteracted] = useState(false);
     useEffect(() => {
         isOpenRef.current = isOpen;
+        if (isOpen) {
+            setHasInteracted(true);
+        }
     }, [isOpen]);
 
     // Newest confirmed (non-optimistic) message, used for incremental polling.
@@ -103,9 +107,12 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         messagesRef.current = messages;
     }, [messages]);
 
-    // Load history and subscribe to changes
+    // Load history and subscribe to changes ONLY when the chat is opened by the user,
+    // or if the user has active messages in this session.
+    // Passive visitors who never touch the support chat should never hold a persistent
+    // Supabase Realtime WebSocket channel with recurring heartbeats and logs.
     useEffect(() => {
-        if (!sessionId) return;
+        if (!sessionId || (!isOpen && !hasInteracted && messages.length === 0)) return;
 
         const fetchHistory = async () => {
             if (!canReadHistory) return;
@@ -173,7 +180,7 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
         return () => {
             void supabase.removeChannel(channel);
         };
-    }, [sessionId, supabase, canReadHistory]);
+    }, [sessionId, supabase, canReadHistory, isOpen, hasInteracted]);
 
     // Fallback polling ONLY while the chat is open AND the tab is visible.
     // Realtime (above) delivers new messages instantly via WebSocket — this

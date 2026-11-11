@@ -3688,9 +3688,13 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         if _stage_needed('egx_disclosures'):
             _start_step("egx_disclosures", "Syncing new EGX disclosures and insider transactions")
             try:
-                from jobs.daily_disclosures_sync import run_incremental_sync
-                disc_res = run_incremental_sync()
-                disc_added = int(disc_res.get("added", 0)) if isinstance(disc_res, dict) else 0
+                try:
+                    from jobs.daily_disclosures_sync import run_incremental_sync
+                    disc_res = run_incremental_sync()
+                except ImportError:
+                    from jobs.daily_disclosures_sync import run_daily_sync
+                    disc_res = run_daily_sync()
+                disc_added = int(disc_res.get("added", disc_res.get("new_count", 0))) if isinstance(disc_res, dict) else 0
                 _record_step("egx_disclosures", True, f"Synced {disc_added} new disclosures", disc_added)
             except Exception as e:
                 _record_step("egx_disclosures", False, str(e)[:200], 0)

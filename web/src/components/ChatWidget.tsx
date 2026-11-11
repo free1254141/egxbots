@@ -203,7 +203,7 @@ export default function ChatWidget() {
     useEffect(() => {
         if (!showUpgradeModal) return;
         let active = true;
-        fetch("/api/user/quota", { cache: "no-store" })
+        fetch("/api/user/quota")
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (!active || !data?.ok) return;

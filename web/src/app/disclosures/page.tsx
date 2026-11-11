@@ -4,7 +4,7 @@ import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient"
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
 
-export const revalidate = 86400; // 24-hour Edge ISR cache - refreshed automatically via daily job cache invalidation
+export const revalidate = 86400; // 24-hour cache (until next trading day run)
 
 export const metadata: Metadata = {
   title: "رادار إفصاحات البورصة المصرية وتعاملات الداخليين | EGX BOTS",

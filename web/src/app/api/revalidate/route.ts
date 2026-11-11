@@ -66,6 +66,10 @@ async function handleRevalidate(req: NextRequest) {
       for (const tag of tags) {
         revalidateTag(tag);
         revalidated.push(`tag:${tag}`);
+        if (tag === "daily-disclosures") {
+          revalidatePath("/disclosures");
+          revalidated.push("/disclosures");
+        }
       }
       await invalidateByTag(tags);
       cdnInvalidated.push(...tags);
@@ -87,11 +91,11 @@ async function handleRevalidate(req: NextRequest) {
         revalidated.push(path);
       }
     } else if (tags.length === 0) {
-      // Default: purge cache across all pages, layout and major data endpoints
-      revalidatePath("/", "layout");
+      // Targeted purge: refresh main public entrypoints without forcing layout re-render
       revalidatePath("/");
       revalidatePath("/scanner/market");
-      revalidated.push("layout", "home", "market");
+      revalidatePath("/disclosures");
+      revalidated.push("home", "market", "disclosures");
       await invalidateByTag(DAILY_CACHE_TAG_VALUES);
       cdnInvalidated.push(...DAILY_CACHE_TAG_VALUES);
     }

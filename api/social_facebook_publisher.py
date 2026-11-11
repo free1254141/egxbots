@@ -34,6 +34,10 @@ def _is_transient_publish_error(exc: BaseException) -> bool:
 
 def get_facebook_credentials(client=None):
     """Retrieve Facebook Page ID and Access Token from environment or market_cache."""
+    # Check if Facebook publishing is explicitly disabled
+    if os.getenv("ENABLE_FACEBOOK_PUBLISHING", "").lower() in ("false", "0", "off", "no"):
+        return None
+
     token = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
     page_id = os.getenv("FACEBOOK_PAGE_ID") or DEFAULT_PAGE_ID
 

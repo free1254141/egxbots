@@ -108,13 +108,12 @@ def _top_block(s: Dict[str, Any]) -> str:
         return ""
     return (
         f"⭐ <b>نجم الجلسة: {t['symbol']}</b>\n"
-        f"• سعر رصد الإشارة: <b>{_f(t.get('signalClose'))} ج.م</b>\n"
-        f"• أعلى قمة لحظية: <b>{_f(t.get('nextHigh'))} ج.م (+{_f(t.get('intradayHighPct'))}%)</b>\n"
-        f"• الإغلاق: <b>{_f(t.get('nextClose'))} ج.م (+{_f(t.get('retPct'))}%)</b> | حجم {_f(t.get('relativeVolume'), 1)}x\n"
+        f"• سعر الإشارة: <b>{_f(t.get('signalClose'))} ج.م</b> | القمة: <b>{_f(t.get('nextHigh'))} ج (+{_f(t.get('intradayHighPct'))}%)</b>\n"
+        f"• الإغلاق: <b>{_f(t.get('nextClose'))} ج (+{_f(t.get('retPct'))}%)</b> | حجم {_f(t.get('relativeVolume'), 1)}x\n"
     )
 
 
-def _movers_lines(s: Dict[str, Any], limit: int = 6) -> str:
+def _movers_lines(s: Dict[str, Any], limit: int = 4) -> str:
     top_sym = s["top"].get("symbol")
     lines = []
     for u in s["movers"]:
@@ -127,7 +126,7 @@ def _movers_lines(s: Dict[str, Any], limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-def _bear_lines(s: Dict[str, Any], limit: int = 6) -> str:
+def _bear_lines(s: Dict[str, Any], limit: int = 4) -> str:
     return "\n".join(
         f"{i}. <b>{t.get('symbol')}</b> | إغلاق {_f(t.get('close'))} | دعم {_f(t.get('keyLevel'))} | "
         f"ثقة {_f(t.get('conviction'), 0)}% | حجم {_f(t.get('relativeVolume'), 1)}x"
@@ -135,7 +134,7 @@ def _bear_lines(s: Dict[str, Any], limit: int = 6) -> str:
     ) or "• لا توجد نماذج ارتداد مؤكدة اليوم."
 
 
-def _bull_lines(s: Dict[str, Any], limit: int = 4) -> str:
+def _bull_lines(s: Dict[str, Any], limit: int = 3) -> str:
     return "\n".join(
         f"{i}. <b>{t.get('symbol')}</b> | إغلاق {_f(t.get('close'))} | مقاومة {_f(t.get('keyLevel'))} | "
         f"ثقة {_f(t.get('conviction'), 0)}%"
@@ -143,7 +142,7 @@ def _bull_lines(s: Dict[str, Any], limit: int = 4) -> str:
     ) or "• لا توجد مصائد قمم نشطة اليوم."
 
 
-def _disclosures_lines(s: Dict[str, Any], limit: int = 5) -> str:
+def _disclosures_lines(s: Dict[str, Any], limit: int = 4) -> str:
     disclosures = s.get("disclosures") or []
     if not disclosures:
         return "• لا توجد إفصاحات جديدة مسجلة في جلسة اليوم."
@@ -157,7 +156,7 @@ def _disclosures_lines(s: Dict[str, Any], limit: int = 5) -> str:
         icon = "🟢" if sentiment == "bullish" or act == "buy" else ("🔴" if sentiment == "bearish" or act == "sell" else "⚪")
         act_ar = "شراء داخلي" if act == "buy" else ("بيع داخلي" if act == "sell" else ("إفصاح جوهري" if dtype == "material_event" else "تعامل مساهمين"))
         shares_txt = f" ({int(shares):,} سهم)" if shares else ""
-        title_snippet = (d.get("title") or "")[:55]
+        title_snippet = (d.get("title") or "")[:45]
         lines.append(f"• {icon} <b>{sym}</b>: {act_ar}{shares_txt} — <i>{title_snippet}...</i>")
     return "\n".join(lines)
 
@@ -193,17 +192,17 @@ def build_vip_html(s: Dict[str, Any]) -> str:
         f"👑 <b>تقرير VIP الحصري | حصيلة الإشارات ومصائد الجلسة القادمة</b> 🇪🇬\n"
         f"📅 <b>جلسة التداول:</b> {s['as_of']}\n━━━━━━━━━━━━━━━━━━━\n\n"
         f"{_record_line(s)}{_top_block(s)}\n"
-        f"📈 <b>أبرز الصاعدين من إشارات الرادار:</b>\n{_movers_lines(s)}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n🟢 <b>مصائد الدببة (Spring) — ارتداد تجميعي:</b>\n{_bear_lines(s)}\n\n"
-        f"🔴 <b>مصائد الثيران (Upthrust) — تجنب الشراء عند القمم:</b>\n{_bull_lines(s)}\n\n"
+        f"📈 <b>أبرز الصاعدين من إشارات الرادار:</b>\n{_movers_lines(s, 4)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n🟢 <b>مصائد الدببة (Spring) — ارتداد تجميعي:</b>\n{_bear_lines(s, 4)}\n\n"
+        f"🔴 <b>مصائد الثيران (Upthrust) — تجنب الشراء عند القمم:</b>\n{_bull_lines(s, 3)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n💎 <b>ثالثاً: فرص الأسهم بأقل من قيمتها العادلة:</b>\n"
-        f"• <b>HRHO:</b> خصم 39% عن القيمة العادلة (+65% صعود متوقع).\n"
+        f"• <b>HRHO:</b> خصم 39% (+65% صعود متوقع).\n"
         f"• <b>OCPH:</b> خصم 28% مع تدفقات نقدية قوية.\n"
         f"• <b>AUTO:</b> خصم 38% ومضاعف ربحية منخفض.\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين (اليوم):</b>\n"
-        f"{_disclosures_lines(s)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n📑 <b>رابعاً: رادار إفصاحات الشركات وتعاملات الداخليين:</b>\n"
+        f"{_disclosures_lines(s, 4)}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n🎯 <b>السجل الموثق (40 جلسة):</b>\n"
-        f"• انفجار 3 أيام: <b>{us.get('hitRate3d', '-')}%</b> (عبر {us.get('events', '-')} إشارة)\n"
+        f"• انفجار 3 أيام: <b>{us.get('hitRate3d', '-')}%</b> ({us.get('events', '-')} إشارة)\n"
         f"• دقة Spring: <b>{sp.get('hitRate3d', '-')}%</b> | دقة Upthrust: <b>{up.get('winRate', '-')}%</b>\n\n"
         f"{consensus_block}"
         f"━━━━━━━━━━━━━━━━━━━\n"
@@ -276,55 +275,81 @@ def _telegram_send(chat_raw: str, html: str, buttons: List[List[Dict[str, str]]]
     chat_id, _, thread = chat_raw.partition("_")
 
     split_marker = "🎯 <b>سادساً: رادار الإجماع الخوارزمي"
-    if len(html) > 3900 and split_marker in html:
-        parts = html.split(split_marker)
-        part1 = parts[0].strip()
-        part2 = (split_marker + parts[1]).strip()
 
-        p1_payload: Dict[str, Any] = {
-            "chat_id": chat_id, "text": part1, "parse_mode": "HTML",
+    # If within Telegram limit (4096 chars), send in one single complete message!
+    if len(html) <= 4000 or split_marker not in html:
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": html[:4096],
+            "parse_mode": "HTML",
             "disable_web_page_preview": True,
+            "reply_markup": {"inline_keyboard": buttons},
         }
         if thread.isdigit():
-            p1_payload["message_thread_id"] = int(thread)
-        try:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p1_payload, timeout=45)
-        except Exception as e:
-            print(f"[REPORT_DISPATCH] Part 1 dispatch error: {e}")
+            payload["message_thread_id"] = int(thread)
 
-        p2_payload: Dict[str, Any] = {
-            "chat_id": chat_id, "text": part2, "parse_mode": "HTML",
-            "disable_web_page_preview": True, "reply_markup": {"inline_keyboard": buttons},
-        }
-        if thread.isdigit():
-            p2_payload["message_thread_id"] = int(thread)
-        try:
-            resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p2_payload, timeout=45)
-            data = resp.json()
-            if data.get("ok"):
-                return True, (data.get("result") or {}).get("message_id")
-        except Exception as e:
-            print(f"[REPORT_DISPATCH] Part 2 dispatch error: {e}")
+        for attempt in range(3):
+            try:
+                resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=55)
+                data = resp.json()
+                if data.get("ok"):
+                    msg_id = (data.get("result") or {}).get("message_id")
+                    print(f"[REPORT_DISPATCH] Sent single message to {chat_id} (msg_id: {msg_id})")
+                    return True, msg_id
+                else:
+                    print(f"[REPORT_DISPATCH] Telegram API error on attempt {attempt+1}: {data}")
+                    time.sleep(2)
+            except Exception as exc:
+                print(f"[REPORT_DISPATCH] Exception on attempt {attempt+1}: {exc}")
+                if attempt == 2:
+                    return False, None
+                time.sleep(3)
         return False, None
 
-    payload: Dict[str, Any] = {
-        "chat_id": chat_id, "text": html[:4096], "parse_mode": "HTML",
+    # Multi-part fallback if ever exceeding 4000 characters
+    parts = html.split(split_marker)
+    part1 = parts[0].strip()
+    part2 = (split_marker + parts[1]).strip()
+
+    p1_payload: Dict[str, Any] = {
+        "chat_id": chat_id, "text": part1, "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if thread.isdigit():
+        p1_payload["message_thread_id"] = int(thread)
+
+    p1_sent = False
+    for attempt in range(3):
+        try:
+            r1 = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p1_payload, timeout=55)
+            d1 = r1.json()
+            if d1.get("ok"):
+                p1_sent = True
+                break
+            time.sleep(2)
+        except Exception as e:
+            print(f"[REPORT_DISPATCH] Part 1 dispatch error (attempt {attempt+1}): {e}")
+            time.sleep(3)
+
+    p2_payload: Dict[str, Any] = {
+        "chat_id": chat_id, "text": part2, "parse_mode": "HTML",
         "disable_web_page_preview": True, "reply_markup": {"inline_keyboard": buttons},
     }
     if thread.isdigit():
-        payload["message_thread_id"] = int(thread)
+        p2_payload["message_thread_id"] = int(thread)
 
-    for attempt in range(2):
+    for attempt in range(3):
         try:
-            resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=45)
+            resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=p2_payload, timeout=55)
             data = resp.json()
             if data.get("ok"):
-                return True, (data.get("result") or {}).get("message_id")
-            time.sleep(1)
-        except Exception as exc:
-            if attempt == 1:
-                raise exc
+                msg_id = (data.get("result") or {}).get("message_id")
+                print(f"[REPORT_DISPATCH] Sent multi-part message to {chat_id} (msg_id: {msg_id})")
+                return True, msg_id
             time.sleep(2)
+        except Exception as e:
+            print(f"[REPORT_DISPATCH] Part 2 dispatch error (attempt {attempt+1}): {e}")
+            time.sleep(3)
     return False, None
 
 

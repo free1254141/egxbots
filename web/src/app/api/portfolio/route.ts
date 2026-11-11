@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+let cachedMarketSymbols: Array<{ symbol: string; name: string | null }> | null = null;
+let cachedMarketSymbolsExpiresAt = 0;
+const SYMBOLS_CACHE_TTL_MS = 10 * 60 * 1000;
+
 // GET /api/portfolio — current user's holdings + cash + live valuation + market symbols list
 export async function GET() {
     try {
@@ -17,22 +21,29 @@ export async function GET() {
         const pro = hasActiveProSubscription(planRows || []);
         const portfolioLimit = planLimits(pro ? "pro" : "free").portfolio_stocks;
 
-        // Real EGX symbols for the profile-page autocomplete selector
+        // Real EGX symbols for the profile-page autocomplete selector (cached in memory)
         let marketSymbols: Array<{ symbol: string; name: string | null }> = [];
-        try {
-            const { data: symbolsRows } = await supabase
-                .from("stocks")
-                .select("symbol, name")
-                .order("symbol", { ascending: true })
-                .limit(500);
-            marketSymbols = (symbolsRows || []).map((r: any) => ({ symbol: r.symbol, name: r.name || null }));
-        } catch (e) {
-            console.warn("[api/portfolio] symbols list unavailable:", e);
+        const now = Date.now();
+        if (cachedMarketSymbols && now < cachedMarketSymbolsExpiresAt) {
+            marketSymbols = cachedMarketSymbols;
+        } else {
+            try {
+                const { data: symbolsRows } = await supabase
+                    .from("stocks")
+                    .select("symbol, name")
+                    .order("symbol", { ascending: true })
+                    .limit(500);
+                marketSymbols = (symbolsRows || []).map((r: any) => ({ symbol: r.symbol, name: r.name || null }));
+                cachedMarketSymbols = marketSymbols;
+                cachedMarketSymbolsExpiresAt = now + SYMBOLS_CACHE_TTL_MS;
+            } catch (e) {
+                console.warn("[api/portfolio] symbols list unavailable:", e);
+            }
         }
 
         return NextResponse.json(
             { ...snapshot, market_symbols: marketSymbols, portfolio_limit: pro ? null : portfolioLimit, is_pro: pro },
-            { headers: { "Cache-Control": "private, no-cache, no-store, must-revalidate" } },
+            { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=60" } },
         );
     } catch (e: any) {
         console.error("[api/portfolio] GET error:", e);

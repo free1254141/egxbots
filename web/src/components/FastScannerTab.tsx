@@ -116,6 +116,8 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
     "July", "August", "September", "October", "November", "December"
   ];
   const currentMonthName = isAr ? monthNamesAr[month] : monthNamesEn[month];
+  const realCurrentMonthIndex = useMemo(() => new Date().getMonth(), []);
+  const realCurrentMonthName = isAr ? monthNamesAr[realCurrentMonthIndex] : monthNamesEn[realCurrentMonthIndex];
   const currentMonthStr = `${year}-${String(month + 1).padStart(2, "0")}`;
 
   const prevMonth = () => {
@@ -1449,7 +1451,20 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                       : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                   }`}
                 >
-                  {isAr ? `الشهر الحالي (${currentMonthName})` : `This Month (${currentMonthName})`}
+                  {isAr ? `الشهر الحالي (${realCurrentMonthName})` : `This Month (${realCurrentMonthName})`}
+                </button>
+                <button
+                  onClick={() => {
+                    setFilterPreset("this_month");
+                    setCurrentDate(new Date(2026, 9, 1));
+                  }}
+                  className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap cursor-pointer ${
+                    currentMonthStr === "2026-10" && filterPreset !== "30days" && filterPreset !== "all"
+                      ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                  }`}
+                >
+                  {isAr ? "شهر 10 (أكتوبر 2026)" : "October 2026"}
                 </button>
                 <button
                   onClick={() => {

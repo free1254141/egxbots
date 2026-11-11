@@ -137,7 +137,7 @@ def run_daily_sync():
 
     if not new_items:
         print("✅ No new disclosures today. Zero token consumption.")
-        return {"status": "ok", "new_count": 0}
+        return {"status": "ok", "new_count": 0, "added": 0}
 
     # 4. Analyze in batches of 5
     batch_size = 5
@@ -153,7 +153,13 @@ def run_daily_sync():
             print(f"  ❌ Insertion error: {e}")
 
     print(f"🎉 Successfully synced and analyzed {inserted} new disclosures.")
-    return {"status": "ok", "new_count": inserted}
+    return {"status": "ok", "new_count": inserted, "added": inserted}
+
+
+def run_incremental_sync():
+    """Alias for daily bot run pipeline compatibility."""
+    return run_daily_sync()
+
 
 if __name__ == '__main__':
     run_daily_sync()

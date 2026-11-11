@@ -413,7 +413,7 @@ export default function PricingClient() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const response = await fetch("/api/user/quota", { cache: "no-store" });
+        const response = await fetch("/api/user/quota");
         if (!response.ok) return;
         const data = await response.json();
         if (!active) return;

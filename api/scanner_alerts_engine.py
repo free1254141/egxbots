@@ -830,7 +830,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         key = f"{c.get('symbol')}_{c.get('exit_date')}_{c.get('scanner_type')}"
         if key not in closed_dedup:
             closed_dedup[key] = c
-    final_closed = list(closed_dedup.values())[:300]
+    final_closed = list(closed_dedup.values())[:1000]
 
     # Calculate Signals KPIs
     closed_wins = [s for s in final_closed if float(s.get("return_pct") or 0.0) > 0]

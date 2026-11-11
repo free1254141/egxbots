@@ -178,6 +178,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   ];
 
   const currentMonthName = isAr ? monthNamesAr[month] : monthNamesEn[month];
+  const realCurrentMonthIndex = useMemo(() => new Date().getMonth(), []);
+  const realCurrentMonthName = isAr ? monthNamesAr[realCurrentMonthIndex] : monthNamesEn[realCurrentMonthIndex];
   const currentMonthStr = `${year}-${String(month + 1).padStart(2, "0")}`;
 
   const prevMonth = () => {
@@ -1018,7 +1020,20 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                   }`}
                 >
-                  اليوم (أكتوبر 2026)
+                  {isAr ? `الشهر الحالي (${realCurrentMonthName})` : `This Month (${realCurrentMonthName})`}
+                </button>
+                <button
+                  onClick={() => {
+                    setFilterPreset("this_month");
+                    setCurrentDate(new Date(2026, 9, 1));
+                  }}
+                  className={`px-2.5 sm:px-3 py-1 transition-all whitespace-nowrap ${
+                    currentMonthStr === "2026-10" && filterPreset !== "30days" && filterPreset !== "all"
+                      ? "bg-[#FFE600] text-black font-black border border-black shadow-sm"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
+                  }`}
+                >
+                  {isAr ? "شهر 10 (أكتوبر 2026)" : "October 2026"}
                 </button>
                 <button
                   onClick={() => {
@@ -1031,7 +1046,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       : "text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white"
                   }`}
                 >
-                  شهر 9 (سبتمبر 2026)
+                  {isAr ? "شهر 9 (سبتمبر 2026)" : "September 2026"}
                 </button>
                 <button
                   onClick={() => {

@@ -378,3 +378,36 @@ async def test_dispatch_tool_manage_portfolio_benchmark():
     assert res.get("totals")["equity"] == 105450.0
 
 
+def test_persist_message_background_stores_latency_ms():
+    from api.agentic_chat.router import _persist_message_background
+
+    mock_supabase = MagicMock()
+    inserted_rows = []
+
+    def mock_insert(rows):
+        inserted_rows.extend(rows)
+        return MagicMock(execute=lambda: None)
+
+    mock_supabase.from_.return_value.upsert.return_value.execute = MagicMock()
+    mock_supabase.from_.return_value.insert = mock_insert
+
+    with patch("api.agentic_chat.router.supabase", mock_supabase), \
+         patch("api.agentic_chat.router._init_supabase", lambda: None):
+        _persist_message_background(
+            session_id="sess_test_latency",
+            user_id="user_test_123",
+            user_msg="سعر فوري كام",
+            reply="سعر فوري 7.85 ج.م",
+            latency_ms=5430,
+        )
+
+        assert len(inserted_rows) == 2
+        user_row = [r for r in inserted_rows if r["role"] == "user"][0]
+        asst_row = [r for r in inserted_rows if r["role"] == "assistant"][0]
+
+        assert asst_row["latency_ms"] == 5430
+        assert asst_row["metadata"]["latency_ms"] == 5430
+        assert user_row["created_at"] < asst_row["created_at"]
+
+
+
