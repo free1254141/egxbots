@@ -10,9 +10,9 @@ export const runtime = "nodejs";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
-// Cache-Control: 5-min Edge CDN cache, 1-hour stale-while-revalidate for public
+// Cache-Control: 5-min Edge CDN cache, 30-min stale-while-revalidate for public
 const PAYMENT_CONFIG_HEADERS = {
-  "Cache-Control": "no-store, no-cache, must-revalidate",
+  "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=1800",
   "Vary": "Cookie, Authorization",
 };
 

@@ -27,6 +27,7 @@ from api.agentic_chat.vision import (
     format_vision_context_for_prompt,
 )
 from api.stock_ai import _init_supabase, supabase
+from api.agentic_chat.analysis_cache import get_cached_analysis, set_cached_analysis
 
 logger = logging.getLogger("agentic_chat")
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
@@ -112,6 +113,7 @@ async def run_agentic_chat_stream(
     Main agentic streaming generator.
     Yields Server-Sent Events (SSE) formatted as: `data: <json_or_marker>\\n\\n`
     """
+    start_time = time.time()
     api_key = _get_deepseek_key()
     if not api_key:
         err_event = {
@@ -250,11 +252,44 @@ async def run_agentic_chat_stream(
         "Content-Type": "application/json",
     }
 
-    start_time = time.time()
     accumulated_reply = ""
     tables_data: List[Any] = []
     recommendations_data: List[Any] = []
     tools_executed_count = 0
+
+    # 0. Check In-Memory Analysis Cache for Repeatable Canonical Queries (Zero-Token, Zero-Latency)
+    if not vision_data and (not images or len(images) == 0):
+        cached_hit = get_cached_analysis(message, images=images)
+        if cached_hit:
+            logger.info(f"[agentic_chat] Serving from In-Memory Analysis Cache: {cached_hit.get('key')}")
+            yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': 'تم استرجاع أحدث قراءة فنية موثقة من الذاكرة اللحظية...'}, ensure_ascii=False)}\n\n"
+
+            cached_reply = cached_hit["reply"]
+            words = cached_reply.split(" ")
+            chunk_size = 5
+            for i in range(0, len(words), chunk_size):
+                chunk = " ".join(words[i : i + chunk_size]) + " "
+                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.01)
+
+            total_lat = int((time.time() - start_time) * 1000)
+            suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
+            done_ev = {
+                "type": "done",
+                "reply": cached_reply,
+                "session_id": session_id,
+                "suggested_buttons": suggested_buttons,
+                "tables": cached_hit.get("tables") or [],
+                "recommendations": cached_hit.get("recommendations") or [],
+                "latency_ms": max(total_lat, 180),
+                "is_pro": is_pro,
+                "remaining_quota": remaining_quota,
+                "quota_limit": quota_limit,
+                "cached": True,
+            }
+            yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
     max_rounds = 3
     round_count = 0
@@ -369,8 +404,10 @@ async def run_agentic_chat_stream(
                         "content": content_str,
                     })
 
-                # If we've reached max_rounds or tools provided the final data, stream the final response
-                if round_count >= max_rounds:
+                # Once tools have been executed, break directly to the final streaming synthesis.
+                # This eliminates re-sending the 16 tools schema (saving ~2,000 tokens)
+                # and streams the response directly to the user in real time.
+                if tools_executed_count > 0 or round_count >= max_rounds:
                     break
 
             # If tools were executed and we need to stream the final synthesis:
@@ -426,6 +463,19 @@ async def run_agentic_chat_stream(
 
     # Apply compliance filter on final reply
     accumulated_reply = filter_output(accumulated_reply)
+
+    # Cache repeatable public analyses in memory (0 tokens for subsequent queries)
+    if accumulated_reply and not vision_data and (not images or len(images) == 0):
+        try:
+            set_cached_analysis(
+                query=message,
+                reply=accumulated_reply,
+                tables=tables_data,
+                recommendations=recommendations_data,
+                images=images,
+            )
+        except Exception as cache_err:
+            logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
 
     # Suggest dynamic follow-up buttons based on context
     if "تحليل سهم" in accumulated_reply or "الدعم" in accumulated_reply or "المقاومة" in accumulated_reply:

@@ -242,7 +242,8 @@ export async function refreshMarketQueries(tags: string[], eventId: string, fetc
   const summary = { queries: 0, bytes: 0, storedBytes: 0, unchanged: 0, coldSkipped: 0, completed: [] as string[] };
   for (const tag of tags) {
     if (!Object.values(TABLES).includes(tag)) continue;
-    for (const key of keys) {
+    const targetKeys = keys.slice(0, 1);
+    for (const key of targetKeys) {
       const scope = { url, key };
       const id = scopeId(scope);
       const current = (await cacheGet(versionKey(id, tag)) as string) || "bootstrap";
@@ -251,11 +252,11 @@ export async function refreshMarketQueries(tags: string[], eventId: string, fetc
       const registered = (groups.flatMap(group => Array.isArray(group) ? group : []) as Query[]);
       const activity = await Promise.all(registered.map(q => cacheGet(hotKey(q))));
       const queries = registered.filter((_, i) => Boolean(activity[i]));
-      summary.coldSkipped += registered.length - queries.length;
-      // Stage each new generation before switching readers. Failed refreshes
-      // leave the entire previous generation available, and do not purge CDN.
-      for (let i = 0; i < queries.length; i += 4) {
-        await Promise.all(queries.slice(i, i + 4).map(async q => {
+      // Cap proactive warming to top 4 hot queries to keep serverless CPU under 500ms
+      const warmQueries = queries.slice(0, 4);
+      summary.coldSkipped += registered.length - warmQueries.length;
+      for (let i = 0; i < warmQueries.length; i += 4) {
+        await Promise.all(warmQueries.slice(i, i + 4).map(async q => {
           const previous = await cacheGet(entryKey(q, current)) as Entry | null;
           const staged = await cacheGet(entryKey(q, eventId)) as Entry | null;
           const entry = staged && await read(q, eventId) ? staged : await save(q, eventId, await origin(q, scope, fetcher));

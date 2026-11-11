@@ -269,10 +269,22 @@ def build_subject(s: Dict[str, Any]) -> str:
 
 # ────────────────────────────── delivery ──────────────────────────────
 def _telegram_send(chat_raw: str, html: str, buttons: List[List[Dict[str, str]]]) -> Tuple[bool, Optional[int]]:
-    token = (os.getenv("ARTORO_AI_BOT") or os.getenv("SUPPORT_BOT_TOKEN") or "").strip()
+    token = (
+        os.getenv("ARTORO_AI_BOT")
+        or os.getenv("TELEGRAM_BOT_TOKEN")
+        or os.getenv("TELEGRAM_TOKEN")
+        or os.getenv("SUPPORT_BOT_TOKEN")
+        or ""
+    ).strip().strip('"').strip("'")
     if not token or not chat_raw:
+        print(f"[REPORT_DISPATCH] Skipped Telegram send: token_found={bool(token)}, chat_raw={bool(chat_raw)}")
         return False, None
     chat_id, _, thread = chat_raw.partition("_")
+
+    relay_url = (os.getenv("TELEGRAM_RELAY_URL") or "https://api.telegram.org").rstrip("/")
+    bases = [relay_url] if relay_url != "https://api.telegram.org" else ["https://api.telegram.org"]
+    if "https://api.telegram.org" not in bases:
+        bases.append("https://api.telegram.org")
 
     split_marker = "🎯 <b>سادساً: رادار الإجماع الخوارزمي"
 
@@ -289,21 +301,19 @@ def _telegram_send(chat_raw: str, html: str, buttons: List[List[Dict[str, str]]]
             payload["message_thread_id"] = int(thread)
 
         for attempt in range(3):
-            try:
-                resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=55)
-                data = resp.json()
-                if data.get("ok"):
-                    msg_id = (data.get("result") or {}).get("message_id")
-                    print(f"[REPORT_DISPATCH] Sent single message to {chat_id} (msg_id: {msg_id})")
-                    return True, msg_id
-                else:
-                    print(f"[REPORT_DISPATCH] Telegram API error on attempt {attempt+1}: {data}")
-                    time.sleep(2)
-            except Exception as exc:
-                print(f"[REPORT_DISPATCH] Exception on attempt {attempt+1}: {exc}")
-                if attempt == 2:
-                    return False, None
-                time.sleep(3)
+            for base in bases:
+                try:
+                    resp = requests.post(f"{base}/bot{token}/sendMessage", json=payload, timeout=55)
+                    data = resp.json()
+                    if data.get("ok"):
+                        msg_id = (data.get("result") or {}).get("message_id")
+                        print(f"[REPORT_DISPATCH] Sent single message to {chat_id} via {base} (msg_id: {msg_id})")
+                        return True, msg_id
+                    else:
+                        print(f"[REPORT_DISPATCH] Telegram API error via {base} on attempt {attempt+1}: {data}")
+                except Exception as exc:
+                    print(f"[REPORT_DISPATCH] Exception via {base} on attempt {attempt+1}: {exc}")
+            time.sleep(2)
         return False, None
 
     # Multi-part fallback if ever exceeding 4000 characters

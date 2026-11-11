@@ -8,6 +8,8 @@ never blocks.
 import asyncio
 import os
 import re
+import threading
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import pytz
@@ -18,6 +20,27 @@ from api.sharia_stocks import is_sharia_compliant
 from api.stock_aliases import ARABIC_STOCK_MAPPINGS
 
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
+
+_TOOL_CACHE: Dict[str, Dict[str, Any]] = {}
+_TOOL_CACHE_LOCK = threading.Lock()
+TOOL_CACHE_TTL_SECONDS = 300  # 5 minutes in-memory cache for public market data
+
+
+def _get_tool_cached(cache_key: str) -> Optional[Any]:
+    with _TOOL_CACHE_LOCK:
+        entry = _TOOL_CACHE.get(cache_key)
+        if entry and (time.time() - entry["ts"]) < TOOL_CACHE_TTL_SECONDS:
+            return entry["val"]
+        _TOOL_CACHE.pop(cache_key, None)
+        return None
+
+
+def _set_tool_cached(cache_key: str, val: Any) -> None:
+    with _TOOL_CACHE_LOCK:
+        if len(_TOOL_CACHE) > 500:
+            oldest = min(_TOOL_CACHE.keys(), key=lambda k: _TOOL_CACHE[k]["ts"])
+            _TOOL_CACHE.pop(oldest, None)
+        _TOOL_CACHE[cache_key] = {"val": val, "ts": time.time()}
 
 
 def _get_sb():
@@ -60,10 +83,16 @@ def _safe_float(val: Any, decimals: int = 2) -> Optional[float]:
 # Tool: get_stock
 # ---------------------------------------------------------------------------
 def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
-    sb = _get_sb()
-    clean_symbols = [_normalize_symbol(s) for s in symbols if s][:10]
+    clean_symbols = sorted(list(set(_normalize_symbol(s) for s in symbols if s)))[:10]
     if not clean_symbols:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
+
+    cache_key = f"get_stock:{','.join(clean_symbols)}"
+    cached = _get_tool_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    sb = _get_sb()
 
     # Batch fetch price history for accurate support/resistance levels
     levels_map = {}
@@ -235,7 +264,9 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
             **fundamentals,
         })
 
-    return {"status": "success", "stocks": stocks_data}
+    res = {"status": "success", "stocks": stocks_data}
+    _set_tool_cached(cache_key, res)
+    return res
 
 
 async def execute_get_stock(symbols: List[str]) -> Dict[str, Any]:
@@ -246,8 +277,16 @@ async def execute_get_stock(symbols: List[str]) -> Dict[str, Any]:
 # Tool: get_stock_levels
 # ---------------------------------------------------------------------------
 def _sync_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
+    clean_symbols = sorted(list(set(_normalize_symbol(s) for s in symbols if s)))[:10]
+    if not clean_symbols:
+        return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
+
+    cache_key = f"get_stock_levels:{','.join(clean_symbols)}"
+    cached = _get_tool_cached(cache_key)
+    if cached is not None:
+        return cached
+
     sb = _get_sb()
-    clean_symbols = [_normalize_symbol(s) for s in symbols if s][:10]
     levels = []
 
     for sym in clean_symbols:
@@ -333,7 +372,9 @@ def _sync_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
             "active_recommendation": rec_data,
         })
 
-    return {"status": "success", "levels": levels}
+    res = {"status": "success", "levels": levels}
+    _set_tool_cached(cache_key, res)
+    return res
 
 
 async def execute_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
@@ -344,6 +385,11 @@ async def execute_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
 # Tool: get_market
 # ---------------------------------------------------------------------------
 def _sync_get_market() -> Dict[str, Any]:
+    cache_key = "get_market"
+    cached = _get_tool_cached(cache_key)
+    if cached is not None:
+        return cached
+
     sb = _get_sb()
     payload = {}
     try:
@@ -383,7 +429,7 @@ def _sync_get_market() -> Dict[str, Any]:
         except Exception:
             pass
 
-    return {
+    res = {
         "status": "success",
         "market": "EGX (البورصة المصرية)",
         "egx30_close": egx30_close or payload.get("egx30_close"),
@@ -393,6 +439,8 @@ def _sync_get_market() -> Dict[str, Any]:
         "top_losers": top_losers,
         "liquidity_summary": payload.get("liquidity", "سيولة متوازنة في جلسة اليوم"),
     }
+    _set_tool_cached(cache_key, res)
+    return res
 
 
 async def execute_get_market() -> Dict[str, Any]:

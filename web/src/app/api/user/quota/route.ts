@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
     // Execute all user-scoped queries in a single parallel round-trip
     // to minimize serverless wall-clock & active CPU time.
-    const [subResult, limitRowsRes, posResult, trialRes, bonusRes, profileRes] = await Promise.all([
+    const [subResult, limitRowsRes, posResult, trialRes, bonusRes, profileRes, ordersRes, founderRes] = await Promise.all([
       clientForData
         .from("subscriptions")
         .select("id, plan_id, status, current_period_start, current_period_end, created_at")
@@ -91,6 +91,17 @@ export async function GET(req: NextRequest) {
         .select("telegram_chat_id")
         .eq("id", user.id)
         .maybeSingle(),
+      clientForData
+        .from("local_payment_orders")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("status", "approved")
+        .limit(1),
+      clientForData
+        .from("founders_offer_members")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .limit(1),
     ]);
 
     const subRows = subResult.data;
@@ -152,7 +163,11 @@ export async function GET(req: NextRequest) {
     const isTrial = activeSub?.status === "trialing" || activeSub?.provider === "trial" || isTrialActive;
     const bonusBalance = Number(bonusRes.data || 0);
     const telegramLinked = Boolean(profileRes.data?.telegram_chat_id);
-    const trialEligible = !hasUsedTrial && !pro;
+    const hasPaidBefore = Boolean(
+      (ordersRes?.data && ordersRes.data.length > 0) ||
+      (founderRes?.data && founderRes.data.length > 0)
+    );
+    const trialEligible = !hasUsedTrial && !pro && !hasPaidBefore;
 
     return NextResponse.json({
       ok: true,

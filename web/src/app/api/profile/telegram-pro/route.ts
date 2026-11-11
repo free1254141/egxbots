@@ -194,7 +194,9 @@ export async function GET(request: Request) {
   }
   const end = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : 0;
   if (!subscription || !Number.isFinite(end) || end <= Date.now()) {
-    return NextResponse.json({ is_pro: false, bot_active: botActive, telegram_chat_id: telegramChatId });
+    return NextResponse.json({ is_pro: false, bot_active: botActive, telegram_chat_id: telegramChatId }, {
+      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+    });
   }
 
   const subscriptionEnd = String(subscription.current_period_end);
@@ -237,5 +239,7 @@ export async function GET(request: Request) {
     invite_status: validInvite ? "ready" : "unavailable",
     bot_active: botActive,
     telegram_chat_id: telegramChatId,
+  }, {
+    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
   });
 }

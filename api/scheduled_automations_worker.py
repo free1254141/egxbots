@@ -715,6 +715,22 @@ def execute_single_automation(automation: Dict[str, Any], is_test: bool = False)
     scheduled_time = automation.get("scheduled_time") or "08:30"
     today_cairo = get_cairo_time().strftime("%Y-%m-%d")
 
+    # 0. Distributed Atomic Claim: Ensure only ONE worker/instance executes this automation today
+    # Prevents duplicate runs between HF Space and local dev servers running concurrently
+    if not is_test:
+        claim_patch = _supabase_request(
+            f"scheduled_chat_automations?id=eq.{auto_id}&or=(last_run_date.is.null,last_run_date.neq.{today_cairo})&select=id",
+            method="PATCH",
+            payload={
+                "last_run_date": today_cairo,
+                "last_run_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "last_status": "running",
+            },
+        )
+        if not claim_patch or not isinstance(claim_patch, list) or len(claim_patch) == 0:
+            logger.info(f"[AUTOMATIONS_WORKER] Automation {auto_id} was already claimed/executed today ({today_cairo}). Skipping duplicate run.")
+            return {"ok": True, "reason": "already_claimed_today"}
+
     # 1. Pro check
     if not _is_user_pro(user_id):
         logger.info(f"[AUTOMATIONS_WORKER] Skipped {auto_id}: user {user_id} is not Pro.")

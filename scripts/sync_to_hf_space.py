@@ -15,13 +15,18 @@ load_dotenv(".env")
 
 FILES_TO_SYNC = [
     "api/agentic_chat/__init__.py",
+    "api/agentic_chat/analysis_cache.py",
     "api/agentic_chat/auth_guard.py",
     "api/agentic_chat/pipeline.py",
     "api/agentic_chat/prompts.py",
     "api/agentic_chat/router.py",
     "api/agentic_chat/tools_execution.py",
     "api/agentic_chat/tools_schema.py",
+    "api/agentic_chat/vision.py",
     "api/main.py",
+    "api/scheduled_automations_worker.py",
+    "api/easykash_payments.py",
+    "api/daily_report_dispatch.py",
     "api/cache_invalidation.py",
     "api/telegram_vip_chat.py",
     "api/native_telegram_vip_chat.py",

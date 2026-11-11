@@ -40,6 +40,67 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
 
+    // If order is pending/submitted, reconcile in real time with EasyKash
+    if (order && (order.status === "pending" || order.status === "submitted")) {
+      const easykashKey = (process.env.EASYKASH_API_KEY || "").trim();
+      if (easykashKey) {
+        try {
+          const inqRes = await fetch("https://back.easykash.net/api/cash-api/inquire", {
+            method: "POST",
+            headers: {
+              authorization: easykashKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ customerReference: orderId }),
+            signal: AbortSignal.timeout(6000),
+          });
+
+          if (inqRes.ok) {
+            const inqData = await inqRes.json();
+            const ekStatus = String(inqData?.status || "").toUpperCase();
+            const easykashRef = String(inqData?.easykashRef || "");
+            const method = String(inqData?.PaymentMethod || "");
+            const nowIso = new Date().toISOString();
+
+            if (ekStatus === "PAID") {
+              const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+              try {
+                const { data: { session } } = await auth.auth.getSession();
+                await fetch(`${BACKEND_URL}/payment/easykash/status?order_id=${encodeURIComponent(orderId)}&user_id=${encodeURIComponent(user.id)}`, {
+                  headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+                  signal: AbortSignal.timeout(6000),
+                });
+              } catch {}
+              const { data: refreshed } = await service
+                .from("local_payment_orders")
+                .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note")
+                .eq("id", orderId)
+                .maybeSingle();
+              if (refreshed) Object.assign(order, refreshed);
+            } else if (["FAILED", "FAIL", "REJECTED"].includes(ekStatus)) {
+              const note = `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim();
+              await service
+                .from("local_payment_orders")
+                .update({ status: "failed", payment_review_status: "rejected", customer_note: note, updated_at: nowIso })
+                .eq("id", orderId);
+              order.status = "failed";
+              order.customer_note = note;
+            } else if (["EXPIRED", "CANCELLED", "CANCELED"].includes(ekStatus)) {
+              const note = `EasyKash: ${ekStatus} (${method}) | ref: ${easykashRef}`.trim();
+              await service
+                .from("local_payment_orders")
+                .update({ status: "expired", customer_note: note, updated_at: nowIso })
+                .eq("id", orderId);
+              order.status = "expired";
+              order.customer_note = note;
+            }
+          }
+        } catch (inqErr) {
+          console.warn("[easykash/status] real-time inquiry sync error:", inqErr);
+        }
+      }
+    }
+
     if (error || !order) {
       // Fallback to python backend if not found in direct query
       const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");

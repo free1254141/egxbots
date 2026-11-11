@@ -68,6 +68,30 @@ export async function GET() {
       });
     }
 
+    // Check if user previously had an approved paid subscription or is a founders offer member
+    const [{ data: approvedOrders }, { data: founderMember }] = await Promise.all([
+      client
+        .from("local_payment_orders")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("status", "approved")
+        .limit(1),
+      client
+        .from("founders_offer_members")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .limit(1),
+    ]);
+
+    if ((approvedOrders && approvedOrders.length > 0) || (founderMember && founderMember.length > 0)) {
+      return NextResponse.json({
+        ok: true,
+        eligible: false,
+        has_used_trial: false,
+        reason: "التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك",
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       eligible: true,
@@ -101,6 +125,28 @@ export async function POST(request: Request) {
       serviceClient = supabase;
     }
     const client = serviceClient || supabase;
+
+    // Reject users who previously had an approved paid subscription or are founders offer members
+    const [{ data: approvedOrders }, { data: founderMember }] = await Promise.all([
+      client
+        .from("local_payment_orders")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("status", "approved")
+        .limit(1),
+      client
+        .from("founders_offer_members")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .limit(1),
+    ]);
+
+    if ((approvedOrders && approvedOrders.length > 0) || (founderMember && founderMember.length > 0)) {
+      return NextResponse.json(
+        { ok: false, error: "PREVIOUS_SUBSCRIBER", message: "التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك" },
+        { status: 400 }
+      );
+    }
 
     // Call RPC start_pro_trial
     const { data, error } = await client.rpc("start_pro_trial", {

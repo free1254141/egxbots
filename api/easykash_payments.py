@@ -1218,6 +1218,70 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def sync_easykash_order_status(order: Dict[str, Any]) -> Dict[str, Any]:
+    """Inquire EasyKash gateway if an order is still pending/submitted and reconcile state."""
+    order_id = str(order.get("id") or "")
+    current_status = str(order.get("status") or "")
+    if current_status not in ("pending", "submitted"):
+        return order
+
+    api_key = os.getenv("EASYKASH_API_KEY", "").strip()
+    if not api_key:
+        return order
+
+    try:
+        resp = requests.post(
+            os.getenv("EASYKASH_INQUIRE_API_URL", "https://back.easykash.net/api/cash-api/inquire"),
+            json={"customerReference": order_id},
+            headers={"authorization": api_key, "Content-Type": "application/json"},
+            timeout=(3, 8),
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            ek_status = str(data.get("status") or "").upper()
+            easykash_ref = str(data.get("easykashRef") or "")
+            method = str(data.get("PaymentMethod") or "")
+            now = datetime.now(timezone.utc).isoformat()
+
+            if ek_status == "PAID":
+                try:
+                    activate_subscription(order["user_id"], order.get("plan_id") or "pro", provider="easykash", payment_order_id=order_id)
+                    update_data = {
+                        "status": "approved",
+                        "payment_review_status": "reviewed",
+                        "payment_reviewed_at": now,
+                        "customer_note": f"EasyKash reference: {easykash_ref[:100]} | {method}",
+                        "updated_at": now,
+                    }
+                    supabase.table("local_payment_orders").update(update_data).eq("id", order_id).execute()
+                    order.update(update_data)
+                except Exception as act_err:
+                    print(f"[EASYKASH] sync activation error for {order_id}: {act_err}")
+            elif ek_status in ("FAILED", "FAIL", "REJECTED"):
+                note = f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip()
+                supabase.table("local_payment_orders").update({
+                    "status": "failed",
+                    "payment_review_status": "rejected",
+                    "customer_note": note,
+                    "updated_at": now,
+                }).eq("id", order_id).execute()
+                order["status"] = "failed"
+                order["customer_note"] = note
+            elif ek_status in ("EXPIRED", "CANCELLED", "CANCELED"):
+                note = f"EasyKash: {ek_status} ({method}) | ref: {easykash_ref}".strip()
+                supabase.table("local_payment_orders").update({
+                    "status": "expired",
+                    "customer_note": note,
+                    "updated_at": now,
+                }).eq("id", order_id).execute()
+                order["status"] = "expired"
+                order["customer_note"] = note
+    except Exception as exc:
+        print(f"[EASYKASH] sync inquiry failed for {order_id}: {exc}")
+
+    return order
+
+
 def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
     order_id = _customer_reference(order_id)
@@ -1231,6 +1295,9 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
     if not order:
 
         raise ValueError("Payment order not found")
+
+    if order.get("status") in ("pending", "submitted"):
+        order = sync_easykash_order_status(order)
 
     end = None
 
