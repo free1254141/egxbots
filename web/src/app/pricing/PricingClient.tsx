@@ -55,6 +55,8 @@ export default function PricingClient() {
   const [localConfig, setLocalConfig] = useState<any>(null);
   const [localOrder, setLocalOrder] = useState<string | null>(null);
   const [customerMobile, setCustomerMobile] = useState("");
+  const [selectedDialCode, setSelectedDialCode] = useState("+20");
+  const [dialDropdownOpen, setDialDropdownOpen] = useState(false);
   const [step, setStep] = useState<Step>("plans");
   const [b2bTrialModal, setB2bTrialModal] = useState<{
     open: boolean;
@@ -266,13 +268,45 @@ export default function PricingClient() {
   const lifetimeRemaining: number = localConfig?.lifetime?.remaining ?? Math.max(0, lifetimeLimit - lifetimeCount);
   const lifetimeIsOpen: boolean = localConfig?.lifetime?.is_open ?? (lifetimeRemaining > 0);
 
-  const normalizedMobile = customerMobile.trim().replace(/[\s\-\(\)]/g, "");
+  // ─── قائمة الدول المدعومة ───────────────────────────────────────────────────
+  const DIAL_COUNTRIES = [
+    { code: "+20",  flag: "🇪🇬", name: "مصر",      nameEn: "Egypt" },
+    { code: "+966", flag: "🇸🇦", name: "السعودية", nameEn: "Saudi Arabia" },
+    { code: "+971", flag: "🇦🇪", name: "الإمارات", nameEn: "UAE" },
+    { code: "+965", flag: "🇰🇼", name: "الكويت",   nameEn: "Kuwait" },
+    { code: "+974", flag: "🇶🇦", name: "قطر",      nameEn: "Qatar" },
+    { code: "+973", flag: "🇧🇭", name: "البحرين",  nameEn: "Bahrain" },
+    { code: "+968", flag: "🇴🇲", name: "عُمان",    nameEn: "Oman" },
+    { code: "+962", flag: "🇯🇴", name: "الأردن",   nameEn: "Jordan" },
+    { code: "+961", flag: "🇱🇧", name: "لبنان",    nameEn: "Lebanon" },
+    { code: "+249", flag: "🇸🇩", name: "السودان",  nameEn: "Sudan" },
+    { code: "+218", flag: "🇱🇾", name: "ليبيا",    nameEn: "Libya" },
+    { code: "+216", flag: "🇹🇳", name: "تونس",     nameEn: "Tunisia" },
+    { code: "+212", flag: "🇲🇦", name: "المغرب",   nameEn: "Morocco" },
+    { code: "+1",   flag: "🇺🇸", name: "أمريكا",   nameEn: "USA" },
+    { code: "+44",  flag: "🇬🇧", name: "بريطانيا", nameEn: "UK" },
+  ];
+
+  const selectedCountry = DIAL_COUNTRIES.find((c) => c.code === selectedDialCode) ?? DIAL_COUNTRIES[0];
+
+  // بناء الرقم الكامل: مفتاح + الأرقام المحلية (بدون الصفر الأول)
+  const localDigits = customerMobile.trim().replace(/[\s\-\(\)]/g, "").replace(/^0+/, "");
+  const fullMobileNumber =
+    localDigits.length === 0
+      ? ""
+      : selectedDialCode === "+20"
+        ? `${selectedDialCode}${localDigits}`
+        : `${selectedDialCode}${localDigits}`;
+
+  const normalizedMobile = fullMobileNumber || customerMobile.trim().replace(/[\s\-\(\)]/g, "");
+
   const isEgyptianMobile =
-    /^(01[0125]\d{8}|00201[0125]\d{8}|\+201[0125]\d{8})$/.test(normalizedMobile);
+    selectedDialCode === "+20" &&
+    /^\+?20[1][0125]\d{8}$/.test(normalizedMobile);
   const isInternationalMobile =
-    /^\+\d{7,15}$/.test(normalizedMobile) ||
-    (!normalizedMobile.startsWith("0") && /^\d{7,15}$/.test(normalizedMobile));
-  const isMobileValid = isEgyptianMobile || isInternationalMobile;
+    selectedDialCode !== "+20" &&
+    /^\+\d{7,15}$/.test(normalizedMobile);
+  const isMobileValid = (isEgyptianMobile || isInternationalMobile) && localDigits.length >= 5;
 
   useEffect(() => {
     if (step !== "submitted" || !localOrder) return;
@@ -573,8 +607,8 @@ export default function PricingClient() {
     if (!isMobileValid) {
       toast.error(
         isAr
-          ? "أدخل رقم موبايل صحيح (مصري مثل 01012345678 أو دولي مثل +966512345678)"
-          : "Enter a valid mobile number (Egyptian: 01... or international: +966...)"
+          ? `أدخل رقم الموبايل بدون مفتاح الدولة — ${selectedDialCode} هيتضاف تلقائياً`
+          : `Enter your number without country code — ${selectedDialCode} is added automatically`
       );
       return;
     }
@@ -1175,28 +1209,77 @@ export default function PricingClient() {
 
                 <div className="space-y-1.5">
                   <label htmlFor="mobile-input" className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
-                    {isAr ? "رقم الموبايل (مصري أو دولي)" : "Mobile Number (Egyptian or International)"}
+                    {isAr ? "رقم الموبايل" : "Mobile Number"}
                   </label>
-                  <div className="flex items-center gap-3 border-3 border-black dark:border-white bg-white dark:bg-zinc-900 px-4 py-3 focus-within:ring-2 focus-within:ring-emerald-500">
-                    <Smartphone className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <input
-                      id="mobile-input"
-                      type="tel"
-                      value={customerMobile}
-                      onChange={(e) => setCustomerMobile(e.target.value)}
-                      placeholder={isAr ? "01012345678 أو +966512345678" : "01012345678 or +966512345678"}
-                      className="w-full bg-transparent font-mono text-base font-black outline-none placeholder:text-zinc-400 text-zinc-950 dark:text-white"
-                      dir="ltr"
-                    />
+
+                  {/* ── Country Code Picker + Input ── */}
+                  <div className="flex border-3 border-black dark:border-white bg-white dark:bg-zinc-900 focus-within:ring-2 focus-within:ring-emerald-500">
+
+                    {/* Country selector */}
+                    <div className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setDialDropdownOpen((v) => !v)}
+                        className="flex items-center gap-1.5 h-full px-3 py-3 border-e-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors font-black text-sm"
+                      >
+                        <span className="text-lg leading-none">{selectedCountry.flag}</span>
+                        <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300">{selectedDialCode}</span>
+                        <svg className="w-3 h-3 text-zinc-500" viewBox="0 0 12 12" fill="currentColor">
+                          <path d="M6 8L1 3h10z" />
+                        </svg>
+                      </button>
+
+                      {dialDropdownOpen && (
+                        <div className="absolute z-50 top-full start-0 mt-1 w-56 max-h-64 overflow-y-auto bg-white dark:bg-zinc-900 border-2 border-black dark:border-white shadow-xl">
+                          {DIAL_COUNTRIES.map((country) => (
+                            <button
+                              key={country.code}
+                              type="button"
+                              onClick={() => {
+                                setSelectedDialCode(country.code);
+                                setDialDropdownOpen(false);
+                              }}
+                              className={`flex items-center gap-2 w-full px-3 py-2 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors text-start
+                                ${selectedDialCode === country.code ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300" : "text-zinc-800 dark:text-zinc-200"}`}
+                            >
+                              <span className="text-base">{country.flag}</span>
+                              <span className="flex-1">{isAr ? country.name : country.nameEn}</span>
+                              <span className="font-mono text-zinc-500">{country.code}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Number input */}
+                    <div className="flex items-center flex-1 px-3 py-3 gap-2">
+                      <Smartphone className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <input
+                        id="mobile-input"
+                        type="tel"
+                        value={customerMobile}
+                        onChange={(e) => {
+                          setCustomerMobile(e.target.value.replace(/[^\d]/g, ""));
+                        }}
+                        placeholder={selectedDialCode === "+20" ? "1012345678" : "512345678"}
+                        className="w-full bg-transparent font-mono text-base font-black outline-none placeholder:text-zinc-400 text-zinc-950 dark:text-white"
+                        dir="ltr"
+                        inputMode="numeric"
+                      />
+                    </div>
                   </div>
+
+                  {/* Validation hint */}
                   <div className="flex items-center justify-between text-xs font-bold pt-0.5">
                     <span className={isMobileValid ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}>
                       {isMobileValid
-                        ? isAr ? "✓ رقم صحيح" : "✓ Valid number"
-                        : isAr ? "مصري: 01... | دولي: +966... | +971..." : "Egyptian: 01... | International: +966... | +971..."}
+                        ? `✓ ${selectedCountry.flag} ${normalizedMobile}`
+                        : isAr
+                          ? `أدخل رقمك بدون مفتاح الدولة (${selectedDialCode} تلقائي)`
+                          : `Enter number without country code (${selectedDialCode} auto-added)`}
                     </span>
                     <span className="text-[10px] text-zinc-400 font-mono">
-                      {customerMobile.length > 0 ? `${customerMobile.length} chars` : ""}
+                      {localDigits.length > 0 ? `${selectedDialCode} ${localDigits}` : ""}
                     </span>
                   </div>
                 </div>
