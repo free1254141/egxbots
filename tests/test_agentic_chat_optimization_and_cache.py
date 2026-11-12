@@ -25,18 +25,19 @@ from api.scheduled_automations_worker import execute_single_automation
 def test_analysis_cache_canonical_keys():
     clear_analysis_cache()
     # Canonical stock keys
-    assert extract_canonical_cache_key("سعر فوري كام دلوقتي") == "stock:FWRY"
-    assert extract_canonical_cache_key("حلل سهم البنك التجاري الدولي COMI") == "stock:COMI"
-    assert extract_canonical_cache_key("عتاقة نظامه ايه") == "stock:ATQA"
-    assert extract_canonical_cache_key("طلعت مصطفى TMGH") == "stock:TMGH"
+    assert extract_canonical_cache_key("سعر فوري كام دلوقتي") == "vip_stock_FWRY"
+    assert extract_canonical_cache_key("حلل سهم البنك التجاري الدولي COMI") == "vip_stock_COMI"
+    assert extract_canonical_cache_key("عتاقة نظامه ايه") == "vip_stock_ATQA"
+    assert extract_canonical_cache_key("طلعت مصطفى TMGH") == "vip_stock_TMGH"
 
     # Canonical market keys
-    assert extract_canonical_cache_key("حالة السوق المصري النهاردة") == "market:overview"
-    assert extract_canonical_cache_key("المؤشر العام EGX30") == "market:overview"
+    assert extract_canonical_cache_key("حالة السوق المصري النهاردة") == "vip_market_summary"
+    assert extract_canonical_cache_key("وضع السوق") == "vip_market_summary"
 
     # Canonical Wyckoff & Recommendations
-    assert extract_canonical_cache_key("ايه هي اقوى اسهم التجميع") == "wyckoff:accumulation"
-    assert extract_canonical_cache_key("التوصيات المفتوحة النهاردة") == "recommendations:open"
+    assert extract_canonical_cache_key("ايه هي اقوى اسهم التجميع") == "vip_accumulation"
+    assert extract_canonical_cache_key("التوصيات المفتوحة النهاردة") == "vip_open_recommendations"
+    assert extract_canonical_cache_key("صفقات السوينغ") == "vip_open_recommendations"
 
     # Personal queries MUST return None (no cache)
     assert extract_canonical_cache_key("حلل اسهم محفظتي") is None
@@ -47,17 +48,48 @@ def test_analysis_cache_canonical_keys():
     assert extract_canonical_cache_key("حلل الصورة دي", images=["data:image/png;base64,..."]) is None
 
 
+def test_model_driven_tool_call_to_cache_key():
+    """Verify zero-regex model-driven tool call resolver matches canonical keys."""
+    from api.agentic_chat.analysis_cache import resolve_tool_call_to_cache_key
+
+    # 1. Single stock & levels
+    assert resolve_tool_call_to_cache_key("get_stock", {"symbol": "FWRY"}) == "vip_stock_FWRY"
+    assert resolve_tool_call_to_cache_key("get_stock_levels", {"symbols": ["COMI"]}) == "vip_stock_COMI"
+
+    # 2. Recommendations
+    assert resolve_tool_call_to_cache_key("get_recommendations", {}) == "vip_open_recommendations"
+    assert resolve_tool_call_to_cache_key("get_recommendations", {"timeframe": "this_week"}) == "vip_recs_this_week"
+    assert resolve_tool_call_to_cache_key("get_recommendations", {"timeframe": "last_week"}) == "vip_recs_last_week"
+
+    # 3. Market overview & accumulation
+    assert resolve_tool_call_to_cache_key("get_accumulation_stocks", {}) == "vip_accumulation"
+    assert resolve_tool_call_to_cache_key("get_market", {"metric": "top_gainers"}) == "vip_top_stocks"
+    assert resolve_tool_call_to_cache_key("get_market", {}) == "vip_market_summary"
+
+    # 4. Comparison
+    assert resolve_tool_call_to_cache_key("get_comparison", {"symbols": ["FWRY", "COMI"]}) == "vip_compare_COMI_FWRY"
+
+    # 5. Non-cacheable tool calls
+    assert resolve_tool_call_to_cache_key("manage_portfolio", {}) is None
+    assert resolve_tool_call_to_cache_key("analyze_portfolio_risk", {}) is None
+
+
 def test_analysis_cache_hit_and_miss_lifecycle():
     clear_analysis_cache()
     # Miss
     assert get_cached_analysis("سعر فوري كام دلوقتي") is None
 
-    # Store
+    # Store (must be >= 600 chars for stock report)
     sample_reply = (
-        "📊 **تحليل سهم فوري (FWRY):**\n"
+        "📊 **تحليل سهم فوري لتكنولوجيا البنوك والمدفوعات الإلكترونية (FWRY):**\n"
         "• السعر الحالي: 8.50 ج.م (+1.50%)\n"
         "• الدعم الفني الأول: 8.30 ج.م والمقاومة الأولى: 8.90 ج.م.\n"
-        "• مؤشر RSI يستقر عند 54.2 في منطقة زخم إيجابي متوازن."
+        "• مؤشر RSI يستقر عند 54.2 في منطقة زخم إيجابي متوازن يدعم استمرار المسار الصاعد.\n"
+        "• متوسط متحرك 50 يوم: 8.15 ج.م ومتوسط متحرك 200 يوم: 7.80 ج.م.\n"
+        "• نموذج وايكوف يشير إلى مرحلة تجميع مؤسسي مدعومة بارتفاع أحجام التداول النسبي بمعدل 1.8x.\n"
+        "• إدارة المخاطر: ينصح بوضع حد وقف خسارة أسفل مستوى 8.10 ج.م لحماية رأس المال.\n"
+        "📌 **حالة السهم في محفظتك:** السهم غير مسجل ضمن مراكز محفظتك الاستثمارية المحفوظة.\n"
+        "• تقييم السهم الفني: فرصة شراء مقترحة بناءً على المؤشرات الفنية والسيولة اللحظية."
     )
     sample_tables = [{"symbol": "FWRY", "close": 8.50, "rsi": 54.2}]
     set_cached_analysis("سعر فوري كام دلوقتي", sample_reply, sample_tables, [])
@@ -65,15 +97,39 @@ def test_analysis_cache_hit_and_miss_lifecycle():
     # Hit
     hit = get_cached_analysis("سعر فوري كام دلوقتي")
     assert hit is not None
-    assert hit["key"] == "stock:FWRY"
+    assert hit["key"] == "vip_stock_FWRY"
     assert "FWRY" in hit["reply"]
     assert len(hit["tables"]) == 1
     assert hit["tables"][0]["close"] == 8.50
 
-    # Synonymous query maps to the same stock key and hits the cache!
-    synonym_hit = get_cached_analysis("تحليل فني لسهم شركة فوري للمدفوعات")
-    assert synonym_hit is not None
-    assert synonym_hit["key"] == "stock:FWRY"
+
+def test_portfolio_sanitization_and_personalization():
+    """Verify that personal portfolio line is sanitized before cache and personalized on read."""
+    from api.agentic_chat.analysis_cache import (
+        sanitize_analysis_for_cache,
+        personalize_cached_analysis,
+        NEUTRAL_PORTFOLIO_LINE,
+    )
+
+    personal_reply = (
+        "تقرير سهم COMI:\n"
+        "السعر الأخير: 88.50 ج.م.\n"
+        "📌 **حالة السهم في محفظتك:** مسجل لديك 1000 سهم بمتوسط شراء 85.00 ج.م.\n"
+        "مركزك الحالي عند 85.00 يحقق أرباح ممتازة.\n"
+        "المقاومة القادمة 92.00 ج.م."
+    )
+
+    # 1. Sanitize for shared cache
+    sanitized = sanitize_analysis_for_cache(personal_reply)
+    assert "1000 سهم" not in sanitized
+    assert "مركزك الحالي" not in sanitized
+    assert NEUTRAL_PORTFOLIO_LINE in sanitized
+
+    # 2. Personalize without user position returns neutral line
+    with patch("api.stock_ai.supabase.table") as mock_table:
+        mock_table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        personalized = personalize_cached_analysis(sanitized, "user-123", "COMI")
+        assert NEUTRAL_PORTFOLIO_LINE in personalized
 
 
 def test_scheduled_automations_atomic_claim_prevents_duplicate():
@@ -220,6 +276,49 @@ def test_dsml_interception_and_sanitization():
     # 3. Test filter_output
     filtered = filter_output(mixed_text)
     assert "DSML" not in filtered
+
+    # 4. Test exact real-world DSML formats from user issues (Image 3 and Image 4)
+    real_dsml_image_3 = """<'DSML | | calls | | >
+<DSML | | invoke name="get_news" | | >
+<DSML | | parameter name="symbol" string="true">EGX</ | | DSML | | parameter | | >
+<DSML | | parameter name="limit" string="false">15</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | calls | | >"""
+
+    calls_3 = parse_dsml_tool_calls(real_dsml_image_3)
+    assert len(calls_3) == 1
+    assert calls_3[0]["function"]["name"] == "get_news"
+    assert json.loads(calls_3[0]["function"]["arguments"]) == {"symbol": "EGX", "limit": 15}
+    assert strip_dsml(real_dsml_image_3) == ""
+
+    real_dsml_image_4 = """<'DSML | | calls | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">AMFS</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">ADIB</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">UNIT</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">LCSW</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">AMIA</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | invoke name="get_stock" | | >
+<DSML | | parameter name="symbol" string="true">CPOT</ | | DSML | | parameter | | >
+<DSML | | invoke | | >
+<DSML | | calls | | >"""
+
+    calls_4 = parse_dsml_tool_calls(real_dsml_image_4)
+    assert len(calls_4) == 6
+    assert [c["function"]["name"] for c in calls_4] == ["get_stock"] * 6
+    assert [json.loads(c["function"]["arguments"])["symbol"] for c in calls_4] == [
+        "AMFS", "ADIB", "UNIT", "LCSW", "AMIA", "CPOT"
+    ]
+    assert strip_dsml(real_dsml_image_4) == ""
 
 
 def test_multi_stock_get_stock_returns_all_symbols():

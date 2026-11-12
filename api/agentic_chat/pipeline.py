@@ -27,7 +27,14 @@ from api.agentic_chat.vision import (
     format_vision_context_for_prompt,
 )
 from api.stock_ai import _init_supabase, supabase
-from api.agentic_chat.analysis_cache import get_cached_analysis, set_cached_analysis
+from api.agentic_chat.analysis_cache import (
+    get_vip_analysis_cache,
+    set_vip_analysis_cache,
+    build_analysis_cache_key,
+    resolve_tool_call_to_cache_key,
+    get_cached_analysis,
+    set_cached_analysis,
+)
 
 logger = logging.getLogger("agentic_chat")
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
@@ -99,20 +106,25 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
 
 def parse_dsml_tool_calls(text: str) -> List[Dict[str, Any]]:
     """
-    Parse DeepSeek internal DSML tool invocations if leaked in message content:
-    <｜｜DSML｜｜ invoke name="get_stock">
-    <｜｜DSML｜｜ parameter name="symbol" string="true">AMES</｜｜DSML｜｜ parameter>
-    </｜｜DSML｜｜ invoke>
+    Parse DeepSeek internal DSML tool invocations if emitted in message content:
+    Handles all variants:
+    - Standard: <｜DSML｜invoke name="..."> ... </｜DSML｜invoke>
+    - Spaced & piped: <'DSML | | calls | | > ... <DSML | | invoke name="..." | | > ... </ | | DSML | | parameter | | >
+    - Minimal / tagless close: <DSML | | invoke | | >
     """
     if not text or ("DSML" not in text and "dsml" not in text):
         return []
     tool_calls = []
+
+    tag_prefix = r"<['\"]?\s*[|｜\s]*\s*(?:DSML)?\s*[|｜\s]*\s*"
+    close_prefix = r"<\/?\s*[|｜\s]*\s*(?:DSML)?\s*[|｜\s]*\s*"
+
     invoke_pattern = re.compile(
-        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+invoke\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?[^>]*>([\s\S]*?)<\/[｜|]{1,2}DSML[｜|]{1,2}\s+invoke>",
-        re.IGNORECASE,
+        rf"{tag_prefix}invoke\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?[^>]*>(.*?){close_prefix}invoke[^>]*>",
+        re.IGNORECASE | re.DOTALL,
     )
     param_pattern = re.compile(
-        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+parameter\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?(?:\s+string=[\"']?(true|false)[\"']?)?[^>]*>(.*?)<\/[｜|]{1,2}DSML[｜|]{1,2}\s+parameter>",
+        rf"{tag_prefix}parameter\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?(?:\s+string=[\"']?(true|false)[\"']?)?[^>]*>(.*?){close_prefix}parameter[^>]*>",
         re.IGNORECASE | re.DOTALL,
     )
 
@@ -308,40 +320,45 @@ async def run_agentic_chat_stream(
     tables_data: List[Any] = []
     recommendations_data: List[Any] = []
     tools_executed_count = 0
+    candidate_cache_key: Optional[str] = None
 
-    # 0. Check In-Memory Analysis Cache for Repeatable Canonical Queries (Zero-Token, Zero-Latency)
+    # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
     if not vision_data and (not images or len(images) == 0):
-        cached_hit = get_cached_analysis(message, images=images)
-        if cached_hit:
-            logger.info(f"[agentic_chat] Serving from In-Memory Analysis Cache: {cached_hit.get('key')}")
-            yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': 'تم استرجاع أحدث قراءة فنية موثقة من الذاكرة اللحظية...'}, ensure_ascii=False)}\n\n"
+        early_key = build_analysis_cache_key(message)
+        if early_key:
+            candidate_cache_key = early_key
+            cached_hit = get_vip_analysis_cache(early_key, user_id=user_id)
+            if cached_hit:
+                origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
+                logger.info(f"[agentic_chat] Serving from Early Two-Tier Cache: {early_key} ({cached_hit.get('origin')})")
+                yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
 
-            cached_reply = cached_hit["reply"]
-            words = cached_reply.split(" ")
-            chunk_size = 5
-            for i in range(0, len(words), chunk_size):
-                chunk = " ".join(words[i : i + chunk_size]) + " "
-                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.01)
+                cached_reply = cached_hit["reply"]
+                words = cached_reply.split(" ")
+                chunk_size = 5
+                for i in range(0, len(words), chunk_size):
+                    chunk = " ".join(words[i : i + chunk_size]) + " "
+                    yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)
 
-            total_lat = int((time.time() - start_time) * 1000)
-            suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
-            done_ev = {
-                "type": "done",
-                "reply": cached_reply,
-                "session_id": session_id,
-                "suggested_buttons": suggested_buttons,
-                "tables": cached_hit.get("tables") or [],
-                "recommendations": cached_hit.get("recommendations") or [],
-                "latency_ms": max(total_lat, 180),
-                "is_pro": is_pro,
-                "remaining_quota": remaining_quota,
-                "quota_limit": quota_limit,
-                "cached": True,
-            }
-            yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+                total_lat = int((time.time() - start_time) * 1000)
+                suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
+                done_ev = {
+                    "type": "done",
+                    "reply": cached_reply,
+                    "session_id": session_id,
+                    "suggested_buttons": suggested_buttons,
+                    "tables": cached_hit.get("tables") or [],
+                    "recommendations": cached_hit.get("recommendations") or [],
+                    "latency_ms": max(total_lat, 180),
+                    "is_pro": is_pro,
+                    "remaining_quota": remaining_quota,
+                    "quota_limit": quota_limit,
+                    "cached": True,
+                }
+                yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
     max_rounds = 3
     round_count = 0
@@ -414,6 +431,11 @@ async def run_agentic_chat_stream(
                         content = safe_image_evidence_reply(vision_data, message)
                     if content:
                         accumulated_reply = filter_output(content)
+                    
+                    if not accumulated_reply and content_raw and ("DSML" in content_raw or "dsml" in content_raw):
+                        accumulated_reply = "أهلاً بك! 👋 يرجى كتابة اسم أو كود السهم أو تحديد السؤال وسأقوم بجلبه وتحليله فوراً."
+
+                    if accumulated_reply:
                         # Stream the reply smoothly in natural word chunks
                         words = accumulated_reply.split(" ")
                         chunk_size = 4
@@ -422,6 +444,54 @@ async def run_agentic_chat_stream(
                             yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
                             await asyncio.sleep(0.015)
                     break
+
+                # -------------------------------------------------------------------
+                # Dynamic Model-Driven Cache Check (Zero-Regex Intent Resolution)
+                # When DeepSeek decides the tool call in Round 1, check if this canonical
+                # read query has already been analyzed and cached in Supabase market_cache / memory.
+                # -------------------------------------------------------------------
+                if round_count == 1 and len(tool_calls) == 1 and not vision_data and (not images or len(images) == 0):
+                    primary_call = tool_calls[0]
+                    p_name = primary_call.get("function", {}).get("name", "")
+                    try:
+                        p_args = json.loads(primary_call.get("function", {}).get("arguments", "{}"))
+                    except Exception:
+                        p_args = {}
+                    dynamic_key = resolve_tool_call_to_cache_key(p_name, p_args)
+                    if dynamic_key:
+                        candidate_cache_key = dynamic_key
+                        cached_hit = get_vip_analysis_cache(dynamic_key, user_id=user_id)
+                        if cached_hit and cached_hit.get("reply"):
+                            origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
+                            logger.info(f"[agentic_chat] Serving from Model-Driven Two-Tier Cache: {dynamic_key} ({cached_hit.get('origin')})")
+                            yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
+
+                            cached_reply = cached_hit["reply"]
+                            words = cached_reply.split(" ")
+                            chunk_size = 5
+                            for i in range(0, len(words), chunk_size):
+                                chunk = " ".join(words[i : i + chunk_size]) + " "
+                                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                                await asyncio.sleep(0.01)
+
+                            total_lat = int((time.time() - start_time) * 1000)
+                            suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
+                            done_ev = {
+                                "type": "done",
+                                "reply": cached_reply,
+                                "session_id": session_id,
+                                "suggested_buttons": suggested_buttons,
+                                "tables": cached_hit.get("tables") or [],
+                                "recommendations": cached_hit.get("recommendations") or [],
+                                "latency_ms": max(total_lat, 180),
+                                "is_pro": is_pro,
+                                "remaining_quota": remaining_quota,
+                                "quota_limit": quota_limit,
+                                "cached": True,
+                            }
+                            yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            return
 
                 # Tool calls requested:
                 tools_executed_count += len(tool_calls)
@@ -516,18 +586,20 @@ async def run_agentic_chat_stream(
     # Apply compliance filter on final reply
     accumulated_reply = filter_output(accumulated_reply)
 
-    # Cache repeatable public analyses in memory (0 tokens for subsequent queries)
+    # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
     if accumulated_reply and not vision_data and (not images or len(images) == 0):
-        try:
-            set_cached_analysis(
-                query=message,
-                reply=accumulated_reply,
-                tables=tables_data,
-                recommendations=recommendations_data,
-                images=images,
-            )
-        except Exception as cache_err:
-            logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
+        effective_key = candidate_cache_key or build_analysis_cache_key(message)
+        if effective_key:
+            try:
+                set_vip_analysis_cache(
+                    cache_key=effective_key,
+                    reply=accumulated_reply,
+                    tables=tables_data,
+                    recommendations=recommendations_data,
+                )
+                logger.info(f"[agentic_chat] Saved to Two-Tier Cache: {effective_key}")
+            except Exception as cache_err:
+                logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
 
     # Suggest dynamic follow-up buttons based on context
     if "تحليل سهم" in accumulated_reply or "الدعم" in accumulated_reply or "المقاومة" in accumulated_reply:

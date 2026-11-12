@@ -400,6 +400,14 @@ class ThreadLocalSupabaseProxy:
             raise RuntimeError("Supabase client is not initialized")
         setattr(client, name, value)
 
+    def __delattr__(self, name):
+        client = _get_thread_local_supabase()
+        if client and hasattr(client, name):
+            try:
+                delattr(client, name)
+            except Exception:
+                pass
+
     def __bool__(self):
         client = _get_thread_local_supabase()
         if client is None:

@@ -272,25 +272,32 @@ def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int,
 def strip_dsml(text: str) -> str:
     """
     Remove all DeepSeek internal DSML tool tags and invocations:
-    - Entire <｜｜DSML｜｜ calls> ... </｜｜DSML｜｜ calls> blocks
-    - Individual <｜｜DSML｜｜ invoke ... > ... </｜｜DSML｜｜ invoke> blocks
+    - Entire <'DSML | | calls | | > ... <DSML | | calls | | > blocks
+    - Entire <｜DSML｜tool_calls> ... </｜DSML｜tool_calls> blocks
+    - Individual <DSML | | invoke ... > ... <DSML | | invoke | | > blocks
     - Any stray DSML tokens
     """
     if not text or ("DSML" not in text and "dsml" not in text):
         return text
+    clean = text
+    # 1. Strip entire calls / tool_calls block (with any quotes, spaces, or pipes)
+    call_prefix = r"<['\"]?\s*[|｜\s]*\s*(?:DSML)?\s*[|｜\s]*\s*"
+    close_prefix = r"<\/?\s*[|｜\s]*\s*(?:DSML)?\s*[|｜\s]*\s*"
     clean = re.sub(
-        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+calls>[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}\s+calls>",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-    clean = re.sub(
-        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+invoke[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}\s+invoke>",
+        rf"{call_prefix}(?:calls|tool_calls)[^>]*>[\s\S]*?{close_prefix}(?:calls|tool_calls)[^>]*>",
         "",
         clean,
         flags=re.IGNORECASE,
     )
-    clean = re.sub(r"<\/?(?:[｜|]{1,2})?DSML(?:[｜|]{1,2})?[^>]*>", "", clean, flags=re.IGNORECASE)
+    # 2. Strip invoke blocks
+    clean = re.sub(
+        rf"{call_prefix}invoke[^>]*>[\s\S]*?{close_prefix}invoke[^>]*>",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    # 3. Strip any stray tags containing DSML
+    clean = re.sub(r"<['\"]?[^>]*DSML[^>]*>", "", clean, flags=re.IGNORECASE)
     return clean.strip()
 
 
