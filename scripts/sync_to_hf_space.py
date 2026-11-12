@@ -62,7 +62,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "Deploy Python Agentic Chatbot backend & loadtest benchmark guard"
+    commit_msg = "fix(agentic-chat): restore multi-round tool chaining, add DSML interception & sanitization, and fix raw DSML token leakage"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
