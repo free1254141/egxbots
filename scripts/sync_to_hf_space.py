@@ -34,6 +34,9 @@ FILES_TO_SYNC = [
     "api/cache_invalidation.py",
     "api/telegram_vip_chat.py",
     "api/native_telegram_vip_chat.py",
+    "api/support_chat.py",
+    "api/support_ai_agent.py",
+    "api/routers/support.py",
     "requirements.txt",
 ]
 
@@ -66,7 +69,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "fix(agentic-chat): add robust DSML parsing for spaced/piped tokens, eliminate cache lock deadlock, and support proxy unpatching"
+    commit_msg = "feat(support): add DeepSeek customer support agent with function calling and auto activation confirmation"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
