@@ -18,7 +18,7 @@ import pytz
 from api.agentic_chat.prompts import AGENTIC_SYSTEM_PROMPT
 from api.agentic_chat.tools_schema import AGENTIC_TOOLS_SCHEMA
 from api.agentic_chat.tools_execution import dispatch_tool
-from api.agentic_chat.auth_guard import filter_output
+from api.agentic_chat.auth_guard import filter_output, strip_dsml
 from api.agentic_chat.vision import (
     analyze_image,
     reconcile_vision_with_market,
@@ -95,6 +95,58 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
             hints.append({"name": tok, "symbols": [res]})
 
     return hints[:10]
+
+
+def parse_dsml_tool_calls(text: str) -> List[Dict[str, Any]]:
+    """
+    Parse DeepSeek internal DSML tool invocations if leaked in message content:
+    <｜｜DSML｜｜ invoke name="get_stock">
+    <｜｜DSML｜｜ parameter name="symbol" string="true">AMES</｜｜DSML｜｜ parameter>
+    </｜｜DSML｜｜ invoke>
+    """
+    if not text or ("DSML" not in text and "dsml" not in text):
+        return []
+    tool_calls = []
+    invoke_pattern = re.compile(
+        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+invoke\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?[^>]*>([\s\S]*?)<\/[｜|]{1,2}DSML[｜|]{1,2}\s+invoke>",
+        re.IGNORECASE,
+    )
+    param_pattern = re.compile(
+        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+parameter\s+name=[\"']?([a-zA-Z0-9_-]+)[\"']?(?:\s+string=[\"']?(true|false)[\"']?)?[^>]*>(.*?)<\/[｜|]{1,2}DSML[｜|]{1,2}\s+parameter>",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    for i, match in enumerate(invoke_pattern.finditer(text)):
+        fn_name = match.group(1).strip()
+        body = match.group(2)
+        args = {}
+        for pmatch in param_pattern.finditer(body):
+            pname = pmatch.group(1).strip()
+            is_str = (pmatch.group(2) or "").lower()
+            pval = pmatch.group(3).strip()
+            if is_str == "false":
+                if pval.lower() == "true":
+                    args[pname] = True
+                elif pval.lower() == "false":
+                    args[pname] = False
+                elif pval.isdigit():
+                    args[pname] = int(pval)
+                else:
+                    try:
+                        args[pname] = float(pval)
+                    except ValueError:
+                        args[pname] = pval
+            else:
+                args[pname] = pval
+        tool_calls.append({
+            "id": f"call_dsml_{int(time.time()*1000)}_{i}",
+            "type": "function",
+            "function": {
+                "name": fn_name,
+                "arguments": json.dumps(args, ensure_ascii=False),
+            },
+        })
+    return tool_calls
 
 
 async def run_agentic_chat_stream(
@@ -344,6 +396,17 @@ async def run_agentic_chat_stream(
                 assistant_msg = choice.get("message", {})
                 tool_calls = assistant_msg.get("tool_calls")
 
+                # Fallback: Intercept raw DSML markup in content if emitted instead of tool_calls
+                content_raw = assistant_msg.get("content", "")
+                if not tool_calls and content_raw and ("DSML" in content_raw or "dsml" in content_raw):
+                    dsml_calls = parse_dsml_tool_calls(content_raw)
+                    if dsml_calls:
+                        logger.info(f"[agentic_chat] Intercepted {len(dsml_calls)} tool calls from raw DSML markup in content")
+                        tool_calls = dsml_calls
+                        assistant_msg["tool_calls"] = tool_calls
+                        cleaned_content = strip_dsml(content_raw)
+                        assistant_msg["content"] = cleaned_content if cleaned_content else None
+
                 # If DeepSeek has NO more tool calls to make:
                 if not tool_calls:
                     content = assistant_msg.get("content", "")
@@ -381,7 +444,7 @@ async def run_agentic_chat_stream(
 
                 tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
                 t_tools = time.time() - t_tools_start
-                logger.info(f"[agentic_chat] Phase timing: Turn1={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
+                logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
                 for tc, result in zip(tool_calls, tool_results):
                     tc_id = tc.get("id", f"call_{int(time.time()*1000)}")
@@ -404,18 +467,17 @@ async def run_agentic_chat_stream(
                         "content": content_str,
                     })
 
-                # Once tools have been executed, break directly to the final streaming synthesis.
-                # This eliminates re-sending the 16 tools schema (saving ~2,000 tokens)
-                # and streams the response directly to the user in real time.
-                if tools_executed_count > 0 or round_count >= max_rounds:
+                # If reached max_rounds, break to final synthesis
+                if round_count >= max_rounds:
                     break
 
-            # If tools were executed and we need to stream the final synthesis:
+            # If all rounds were consumed by tool calls and no text reply was generated yet:
             if tools_executed_count > 0 and not accumulated_reply:
-                stream_payload = {
+                synthesis_payload = {
                     "model": "deepseek-chat",
                     "messages": formatted_messages,
-                    "stream": True,
+                    "tools": AGENTIC_TOOLS_SCHEMA,
+                    "tool_choice": "none",  # Forbid tools so DeepSeek produces only synthesis text
                     "temperature": 0.3,
                     "max_tokens": 4000,
                 }
@@ -423,37 +485,27 @@ async def run_agentic_chat_stream(
                 yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'جاري صياغة التقرير والتحليل الفني...'}, ensure_ascii=False)}\n\n"
 
                 t_turn2_start = time.time()
-                async with client.stream(
-                    "POST",
+                synth_resp = await client.post(
                     "https://api.deepseek.com/chat/completions",
                     headers=headers,
-                    json=stream_payload,
-                ) as stream_resp:
-                    if stream_resp.status_code != 200:
-                        logger.error(f"[agentic_chat] Stream error: HTTP {stream_resp.status_code}")
-                        yield f"data: {json.dumps({'type': 'error', 'detail': 'تعذر استكمال صياغة التحليل الفني، يرجى إعادة المحاولة.'}, ensure_ascii=False)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
-
-                    async for line in stream_resp.aiter_lines():
-                        if not line:
-                            continue
-                        line_str = line.strip()
-                        if line_str.startswith("data:"):
-                            chunk_data = line_str[5:].strip()
-                            if chunk_data == "[DONE]":
-                                break
-                            try:
-                                parsed_chunk = json.loads(chunk_data)
-                                delta = parsed_chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                                if delta:
-                                    accumulated_reply += delta
-                                    yield f"data: {json.dumps({'type': 'token', 'token': delta}, ensure_ascii=False)}\n\n"
-                            except Exception:
-                                continue
+                    json=synthesis_payload,
+                )
+                if synth_resp.status_code == 200:
+                    synth_json = synth_resp.json()
+                    synth_content = synth_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if synth_content:
+                        accumulated_reply = filter_output(synth_content)
+                        words = accumulated_reply.split(" ")
+                        chunk_size = 4
+                        for i in range(0, len(words), chunk_size):
+                            chunk = " ".join(words[i : i + chunk_size]) + " "
+                            yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.015)
+                else:
+                    logger.error(f"[agentic_chat] Synthesis error: HTTP {synth_resp.status_code}")
 
                 t_turn2 = time.time() - t_turn2_start
-                logger.info(f"[agentic_chat] Synthesis stream finished: Turn2={t_turn2:.2f}s, Total={time.time()-start_time:.2f}s")
+                logger.info(f"[agentic_chat] Synthesis finished: Turn2={t_turn2:.2f}s, Total={time.time()-start_time:.2f}s")
 
     except Exception as e:
         logger.exception(f"[agentic_chat] Unexpected exception in chat stream: {e}")

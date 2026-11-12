@@ -269,13 +269,40 @@ def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int,
         return 0, limit, limit
 
 
+def strip_dsml(text: str) -> str:
+    """
+    Remove all DeepSeek internal DSML tool tags and invocations:
+    - Entire <｜｜DSML｜｜ calls> ... </｜｜DSML｜｜ calls> blocks
+    - Individual <｜｜DSML｜｜ invoke ... > ... </｜｜DSML｜｜ invoke> blocks
+    - Any stray DSML tokens
+    """
+    if not text or ("DSML" not in text and "dsml" not in text):
+        return text
+    clean = re.sub(
+        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+calls>[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}\s+calls>",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    clean = re.sub(
+        r"<[｜|]{1,2}DSML[｜|]{1,2}\s+invoke[\s\S]*?<\/[｜|]{1,2}DSML[｜|]{1,2}\s+invoke>",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    clean = re.sub(r"<\/?(?:[｜|]{1,2})?DSML(?:[｜|]{1,2})?[^>]*>", "", clean, flags=re.IGNORECASE)
+    return clean.strip()
+
+
 def filter_output(response_text: str) -> str:
     """
     Clean output matching legacy Vercel pipeline:
     - Replace forced buy directives with compliant advisory language (never wipe out whole reply).
     - Remove leaked environment details.
+    - Remove raw DSML markup tags.
     """
     clean = response_text
+    clean = strip_dsml(clean)
     clean = re.sub(r"<environment_details>[\s\S]*?<\/environment_details>", "", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\[?\s*environment_details\s*\]?[\s\S]*$", "", clean, flags=re.IGNORECASE)
     clean = re.sub(r"Current time:\s*[^\n]+", "", clean, flags=re.IGNORECASE)

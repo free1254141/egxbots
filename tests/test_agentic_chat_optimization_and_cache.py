@@ -6,6 +6,7 @@ Verification suite for:
 3. Distributed atomic claim in scheduled_automations_worker.py.
 """
 
+import json
 import time
 from unittest.mock import MagicMock, patch
 import pytest
@@ -101,19 +102,17 @@ def test_scheduled_automations_atomic_claim_prevents_duplicate():
 
 
 @pytest.mark.anyio
-async def test_round2_tools_schema_elimination():
-    """Verify that after tools execute in round 1, round 2 streaming payload has NO 'tools' schema."""
+async def test_multi_round_tool_chaining_and_synthesis():
+    """Verify that multi-round tool chaining works and final synthesis completes cleanly without DSML."""
     from api.agentic_chat.pipeline import run_agentic_chat_stream
 
     captured_post_payloads = []
-    captured_stream_payloads = []
-
     mock_client = MagicMock()
 
-    # Round 1: mock post returns tool call for get_stock
-    mock_post_resp = MagicMock()
-    mock_post_resp.status_code = 200
-    mock_post_resp.json.return_value = {
+    # Turn 1: DeepSeek calls get_stock
+    resp_turn1 = MagicMock()
+    resp_turn1.status_code = 200
+    resp_turn1.json.return_value = {
         "choices": [
             {
                 "message": {
@@ -125,37 +124,41 @@ async def test_round2_tools_schema_elimination():
                             "type": "function",
                             "function": {
                                 "name": "get_stock",
-                                "arguments": '{"symbols": ["COMI"]}'
-                            }
+                                "arguments": '{"symbols": ["COMI"]}',
+                            },
                         }
-                    ]
+                    ],
                 }
             }
         ]
     }
 
+    # Turn 2: DeepSeek sees tool results and returns final technical analysis
+    resp_turn2 = MagicMock()
+    resp_turn2.status_code = 200
+    resp_turn2.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "سهم التجاري الدولي COMI يتداول بإيجابية عند مستوى 88.5 ج.م مع دعم عند 86.0 ج.م.",
+                    "tool_calls": None,
+                }
+            }
+        ]
+    }
+
+    turn_counter = 0
+
     async def fake_post(url, headers=None, json=None, timeout=None):
+        nonlocal turn_counter
         captured_post_payloads.append(json)
-        return mock_post_resp
+        turn_counter += 1
+        if turn_counter == 1:
+            return resp_turn1
+        return resp_turn2
 
     mock_client.post = fake_post
-
-    # Round 2: mock stream response
-    class FakeStreamResp:
-        status_code = 200
-        async def __aenter__(self):
-            return self
-        async def __aexit__(self, *args):
-            pass
-        async def aiter_lines(self):
-            yield 'data: {"choices": [{"delta": {"content": "تقرير سهم COMI"}}]}'
-            yield 'data: [DONE]'
-
-    def fake_stream(method, url, headers=None, json=None):
-        captured_stream_payloads.append(json)
-        return FakeStreamResp()
-
-    mock_client.stream = fake_stream
 
     with patch("httpx.AsyncClient") as mock_http_cls, \
          patch("api.agentic_chat.pipeline.dispatch_tool") as mock_dispatch:
@@ -163,8 +166,7 @@ async def test_round2_tools_schema_elimination():
         mock_http_cls.return_value.__aexit__.return_value = None
         mock_dispatch.return_value = {"status": "success", "stocks": [{"symbol": "COMI", "close": 88.5}]}
 
-        # Call with unique message to bypass cache
-        unique_msg = f"سؤال تجريبي مخصص لاختبار الراوند {int(time.time()*1000)}"
+        unique_msg = f"سؤال تجريبي مخصص لاختبار التشاينينج {int(time.time()*1000)}"
         events = []
         async for chunk in run_agentic_chat_stream(
             message=unique_msg,
@@ -173,15 +175,51 @@ async def test_round2_tools_schema_elimination():
         ):
             events.append(chunk)
 
-        # 1. Round 1 POST had tools schema
-        assert len(captured_post_payloads) == 1
+        # 1. Two turns executed: Turn 1 (tool call) and Turn 2 (synthesis)
+        assert len(captured_post_payloads) == 2
         assert "tools" in captured_post_payloads[0]
+        assert "tools" in captured_post_payloads[1]
 
-        # 2. Round 2 STREAM synthesis had NO tools schema (saving ~2,000 tokens)
-        assert len(captured_stream_payloads) == 1
-        assert "tools" not in captured_stream_payloads[0]
-        assert "tool_choice" not in captured_stream_payloads[0]
-        assert captured_stream_payloads[0]["stream"] is True
+        # 2. Verify events streamed final text
+        tokens = [json.loads(c[5:].strip()) for c in events if c.startswith("data:") and not c.startswith("data: [DONE]")]
+        token_texts = "".join(t.get("token", "") for t in tokens if t.get("type") == "token")
+        assert "التجاري الدولي" in token_texts
+        assert "DSML" not in token_texts
+
+
+def test_dsml_interception_and_sanitization():
+    """Verify that raw DSML markup is properly parsed into tool calls and sanitized from output."""
+    from api.agentic_chat.pipeline import parse_dsml_tool_calls
+    from api.agentic_chat.auth_guard import filter_output, strip_dsml
+
+    raw_dsml = """<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="get_stock_levels">
+<｜｜DSML｜｜ parameter name="symbol" string="true">MPCI</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+<｜｜DSML｜｜ invoke name="get_news">
+<｜｜DSML｜｜ parameter name="symbol" string="true">EGX</｜｜DSML｜｜ parameter>
+<｜｜DSML｜｜ parameter name="limit" string="false">15</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>"""
+
+    # 1. Test parser
+    calls = parse_dsml_tool_calls(raw_dsml)
+    assert len(calls) == 2
+    assert calls[0]["function"]["name"] == "get_stock_levels"
+    assert json.loads(calls[0]["function"]["arguments"]) == {"symbol": "MPCI"}
+    assert calls[1]["function"]["name"] == "get_news"
+    assert json.loads(calls[1]["function"]["arguments"]) == {"symbol": "EGX", "limit": 15}
+
+    # 2. Test stripper
+    mixed_text = f"أهلاً بك، إليك التحليل:\n{raw_dsml}\nبالتوفيق دائماً."
+    cleaned = strip_dsml(mixed_text)
+    assert "DSML" not in cleaned
+    assert "أهلاً بك" in cleaned
+    assert "بالتوفيق دائماً" in cleaned
+
+    # 3. Test filter_output
+    filtered = filter_output(mixed_text)
+    assert "DSML" not in filtered
 
 
 def test_multi_stock_get_stock_returns_all_symbols():
