@@ -233,13 +233,9 @@ def run_subscription_reminders(
         profile = profile_by_id.get(sub["user_id"], {})
         raw_chat_id = profile.get("telegram_chat_id")
         chat_id = parse_chat_id(raw_chat_id)
-        if not chat_id:
-            skipped += 1
-            print(f"[SUBSCRIPTION_REMINDERS] [skip] no linked private Telegram chat for user={sub['user_id']}")
-            continue
 
         if dry_run:
-            print(f"[SUBSCRIPTION_REMINDERS] [dry-run] would send stage={stage} to chat_id={chat_id}")
+            print(f"[SUBSCRIPTION_REMINDERS] [dry-run] would send stage={stage} to user={sub['user_id']} chat_id={chat_id}")
             continue
 
         period_end = end_dt.astimezone(timezone.utc).isoformat()
@@ -314,37 +310,59 @@ def run_subscription_reminders(
             print(f"[SUBSCRIPTION_REMINDERS] [error] log insert failed status={insert_res.status_code} body={insert_res.text[:200]}")
             continue
 
-        # Send Telegram notification
+        # Send Telegram notification (if user has linked Telegram)
         msg_text = message_for(stage, days_left, end_dt.astimezone(CAIRO).date().isoformat())
-        try:
-            tg_result = send_private_telegram(chat_id, msg_text, telegram_token)
-            requests.patch(
-                f"{rest}/telegram_subscription_reminder_log",
-                headers=headers,
-                params={"id": f"eq.{log_id}"},
-                json={
-                    "status": "sent",
-                    "telegram_message_id": tg_result.get("message_id"),
-                    "sent_at": datetime.now(timezone.utc).isoformat(),
-                    "error": None,
-                },
-                timeout=API_TIMEOUT,
-            )
-            sent += 1
-            print(f"[SUBSCRIPTION_REMINDERS] [sent] user={sub['user_id']} stage={stage} days_left={days_left}")
-        except Exception as send_err:
-            failed += 1
+        if chat_id:
             try:
+                tg_result = send_private_telegram(chat_id, msg_text, telegram_token)
                 requests.patch(
                     f"{rest}/telegram_subscription_reminder_log",
                     headers=headers,
                     params={"id": f"eq.{log_id}"},
-                    json={"status": "failed", "error": str(send_err)[:1000]},
+                    json={
+                        "status": "sent",
+                        "telegram_message_id": tg_result.get("message_id"),
+                        "sent_at": datetime.now(timezone.utc).isoformat(),
+                        "error": None,
+                    },
                     timeout=API_TIMEOUT,
                 )
-            except Exception as patch_err:
-                print(f"[SUBSCRIPTION_REMINDERS] [error] unable to update failure log: {patch_err}")
-            print(f"[SUBSCRIPTION_REMINDERS] [error] send failed user={sub['user_id']}: {send_err}")
+                sent += 1
+                print(f"[SUBSCRIPTION_REMINDERS] [sent] user={sub['user_id']} stage={stage} days_left={days_left}")
+            except Exception as send_err:
+                failed += 1
+                try:
+                    requests.patch(
+                        f"{rest}/telegram_subscription_reminder_log",
+                        headers=headers,
+                        params={"id": f"eq.{log_id}"},
+                        json={"status": "failed", "error": str(send_err)[:1000]},
+                        timeout=API_TIMEOUT,
+                    )
+                except Exception as patch_err:
+                    print(f"[SUBSCRIPTION_REMINDERS] [error] unable to update failure log: {patch_err}")
+                print(f"[SUBSCRIPTION_REMINDERS] [error] send failed user={sub['user_id']}: {send_err}")
+        else:
+            skipped += 1
+            print(f"[SUBSCRIPTION_REMINDERS] [skip_tg] no linked private Telegram chat for user={sub['user_id']}")
+
+        # Also deliver automated reminder into web customer support chat (support_messages)
+        try:
+            requests.post(
+                f"{rest}/support_messages",
+                headers=headers,
+                json={
+                    "session_id": sub["user_id"],
+                    "user_id": sub["user_id"],
+                    "sender": "admin",
+                    "content": msg_text,
+                    "user_name": "إدارة EGX BOTS"
+                },
+                timeout=API_TIMEOUT,
+            )
+            print(f"[SUBSCRIPTION_REMINDERS] [support_chat] delivered reminder to web chat user={sub['user_id']}")
+        except Exception as support_chat_err:
+            print(f"[SUBSCRIPTION_REMINDERS] [support_chat_warning] user={sub['user_id']}: {support_chat_err}")
 
         time.sleep(0.15)
 

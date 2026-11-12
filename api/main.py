@@ -365,11 +365,10 @@ async def startup_event():
     except Exception as e:
         print(f"DEBUG ERROR: Failed to start Scanner Alerts Scheduler: {e}")
 
-    # Facebook Social Media Scheduler — autonomous 3-slot daily publisher at peak hours
+    # Facebook Social Media Scheduler — autonomous 3-slot daily publisher at peak hours (only starts if enabled/configured)
     try:
         from api.social_scheduler import start_social_scheduler
         start_social_scheduler()
-        print("DEBUG: Facebook Social Scheduler started successfully.")
     except Exception as e:
         print(f"DEBUG ERROR: Failed to start Facebook Social Scheduler: {e}")
 

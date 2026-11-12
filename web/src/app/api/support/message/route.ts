@@ -51,60 +51,23 @@ export async function POST(req: Request) {
 
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 200 });
 
-    // Profile lookup and the auto-acknowledgment check are independent, so they
-    // share one round trip instead of two sequential ones.
-    const [profileRes, recentAdminRes] = await Promise.all([
-      (async () => {
-        try {
-          return await supabase
-            .from("profiles")
-            .select("whatsapp_number")
-            .eq("id", user.id)
-            .maybeSingle();
-        } catch {
-          return { data: null } as { data: null };
-        }
-      })(),
-      (async () => {
-        try {
-          return await supabase
-            .from("support_messages")
-            .select("id, created_at")
-            .eq("session_id", sessionId)
-            .eq("sender", "admin")
-            .order("created_at", { ascending: false })
-            .limit(1);
-        } catch {
-          return { data: null } as { data: null };
-        }
-      })(),
-    ]);
+    // Profile lookup for admin telegram notifications
+    const profileRes = await (async () => {
+      try {
+        return await supabase
+          .from("profiles")
+          .select("whatsapp_number")
+          .eq("id", user.id)
+          .maybeSingle();
+      } catch {
+        return { data: null } as { data: null };
+      }
+    })();
 
     let phoneLine = "";
     const profile = profileRes?.data;
     if (profile?.whatsapp_number) {
       phoneLine = `<b>واتساب / الموبايل:</b> <code>${profile.whatsapp_number}</code>\n`;
-    }
-
-    // Check if an automated acknowledgment should be inserted (if no admin message in last 15 min)
-    try {
-      const recentAdminMsgs = recentAdminRes?.data;
-
-      const lastAdminTime = recentAdminMsgs?.[0]?.created_at ? new Date(recentAdminMsgs[0].created_at).getTime() : 0;
-      const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
-
-      if (!recentAdminMsgs || recentAdminMsgs.length === 0 || lastAdminTime < fifteenMinutesAgo) {
-        const autoReply = "أهلاً بك يا فندم! 👑 تم استلام استفسارك وتوجيهه مباشرة لإدارة المنصة والدعم الفني، وجاري مراجعة طلبك والرد عليك هنا في أسرع وقت.";
-        await supabase.from("support_messages").insert({
-          session_id: sessionId,
-          user_id: user.id,
-          sender: "admin",
-          content: autoReply,
-          user_name: "الدعم الفني VIP",
-        });
-      }
-    } catch (ackErr) {
-      console.error("Failed to insert auto acknowledgment:", ackErr);
     }
 
     // Trigger DeepSeek Support AI Agent asynchronously in Python backend

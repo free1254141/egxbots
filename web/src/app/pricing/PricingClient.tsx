@@ -1999,35 +1999,78 @@ export default function PricingClient() {
         </div>
 
         {/* ── ROI & INVESTMENT VALUE EQUATION ── */}
-        <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-zinc-900/40 to-teal-950/20 p-6 sm:p-8 backdrop-blur-sm">
-          <div className="max-w-3xl mx-auto text-center space-y-4">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-black uppercase">
-              <Zap className="w-3.5 h-3.5" />
-              {isAr ? "معادلة العائد على الاستثمار" : "The Investment Equation"}
-            </span>
-            <h3 className="text-xl sm:text-2xl font-black text-white">
-              {isAr
-                ? "صفقة ناجحة واحدة بنسبة +5% تغطي اشتراكك السنوي بالكامل"
-                : "A single +5% trade covers your entire annual subscription"}
-            </h3>
-            <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-medium">
-              {isAr
-                ? "في محفظة قدرها 20,000 ج.م، ربح 5% في صفقة سوينج واحدة يعادل 1,000 ج.م — أي أكثر من قيمة اشتراك السنة الكاملة (900 ج.م). هذا بدون احتساب رأس المال الذي تحميه عبر الالتزام الصارم بوقف الخسارة (4%) وتجنب فخاخ التصريف."
-                : "On a 20,000 EGP portfolio, a 5% gain on a single swing trade generates 1,000 EGP — more than the entire annual plan (900 EGP). Plus, disciplined 4% stop-losses protect you from multi-thousand-pound drawdowns."}
-            </p>
-            <div className="pt-2 flex flex-wrap items-center justify-center gap-4 text-xs font-bold text-zinc-400">
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
-                {isAr ? "حماية رأس المال من الهبوط الحاد" : "Strict Drawdown Protection"}
+        <div className="rounded-3xl border-3 border-emerald-500 bg-white dark:bg-zinc-950 p-6 sm:p-10 shadow-[8px_8px_0px_#10b981] relative overflow-hidden transition-all">
+          {/* Decorative ambient backdrop */}
+          <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-0 -mb-8 -ml-8 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="max-w-4xl mx-auto space-y-6 relative">
+            {/* Header Badge */}
+            <div className="text-center space-y-2">
+              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500 text-black text-xs sm:text-sm font-black uppercase tracking-wider shadow-sm">
+                <Zap className="w-4 h-4 fill-black" />
+                {isAr ? "معادلة العائد على الاستثمار (ROI)" : "The Investment Equation (ROI)"}
               </span>
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
-                {isAr ? "إشارات مبكرة قبل تحرك السهم" : "Early Volume Breakouts"}
-              </span>
-              <span className="flex items-center gap-1.5 text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
-                {isAr ? "تنبيهات فورية على هاتفك" : "Instant Mobile Signals"}
-              </span>
+              <h3 className="text-2xl sm:text-4xl font-black text-zinc-950 dark:text-white tracking-tight pt-2">
+                {isAr
+                  ? "صفقة ناجحة واحدة بنسبة +5% تغطي اشتراكك السنوي بالكامل وزيادة!"
+                  : "A single +5% trade covers your entire annual subscription & more!"}
+              </h3>
+            </div>
+
+            {/* 3 Metric Comparison Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div className="rounded-2xl border-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 p-4 sm:p-5 text-center space-y-1">
+                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                  {isAr ? "محفظة تداول متوسطة" : "Example Portfolio"}
+                </span>
+                <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
+                  20,000 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م</span>
+                </div>
+                <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                  {isAr ? "رأس مال تجريبي للاحتساب" : "Baseline portfolio size"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 p-4 sm:p-5 text-center space-y-1 shadow-sm">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                  {isAr ? "ربح صفقة سوينج (+5%)" : "One +5% Swing Trade"}
+                </span>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-800 dark:text-emerald-300 font-mono">
+                  +1,000 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">ج.م صافي</span>
+                </div>
+                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                  {isAr ? "إشارة ذكاء اصطناعي واحدة" : "From single AI breakout signal"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 p-4 sm:p-5 text-center space-y-1">
+                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                  {isAr ? "تكلفة اشتراك السنة كلها" : "Full Annual Pro Cost"}
+                </span>
+                <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
+                  900 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م / سنة</span>
+                </div>
+                <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 font-bold">
+                  {isAr ? "أنت رابح 100 ج.م من أول صفقة!" : "Instant positive ROI on trade #1"}
+                </p>
+              </div>
+            </div>
+
+            {/* Value bullets */}
+            <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs sm:text-sm font-bold">
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                <span>{isAr ? "حماية رأس المال بوقف خسارة صارم (4%)" : "Strict 4% Stop-Loss Protection"}</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                <span>{isAr ? "اقتناص الاختراقات وتجميع الحيتان مبكراً" : "Early Smart Money Breakouts"}</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                <span>{isAr ? "تنبيهات فورية على تليجرام في ثوانٍ" : "Instant Mobile Telegram Alerts"}</span>
+              </div>
             </div>
           </div>
         </div>

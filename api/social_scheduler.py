@@ -296,8 +296,15 @@ def _scheduler_worker_loop():
 
 
 def start_social_scheduler():
-    """Start the background social scheduler thread if not already running."""
+    """Start the background social scheduler thread if enabled and credentials configured."""
     global _scheduler_thread, _stop_event
+
+    # Check master switch - default to disabled if no Facebook token or explicitly disabled
+    from api.social_facebook_publisher import get_facebook_credentials
+    if not get_facebook_credentials():
+        logger.info("[FB_SCHEDULER] Facebook publishing is disabled or token not configured. Scheduler will not start.")
+        return
+
     if _scheduler_thread and _scheduler_thread.is_alive():
         logger.info("[FB_SCHEDULER] Scheduler is already active.")
         return

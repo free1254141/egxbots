@@ -115,6 +115,8 @@ interface UserStats {
         count: number;
         proCount?: number;
         totalPro?: number;
+        localCount?: number;
+        totalLocal?: number;
         recommendationsCount?: number;
         egx30?: number | null;
     }[];
@@ -122,6 +124,7 @@ interface UserStats {
     totalRecommendations?: number;
     currentEgx30?: number | null;
     activeProUsers: number;
+    totalLocalCustomers?: number;
     activeTrialUsers?: number;
     totalTrialUsers?: number;
     convertedTrialUsers?: number;
@@ -218,6 +221,7 @@ export default function UsersTab() {
     const [showSignups, setShowSignups] = useState(true);
     const [showActiveUsers, setShowActiveUsers] = useState(true);
     const [showPro, setShowPro] = useState(true);
+    const [showLocal, setShowLocal] = useState(true);
     const [showEgx30, setShowEgx30] = useState(true);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showTrialModal, setShowTrialModal] = useState(false);
@@ -572,6 +576,19 @@ export default function UsersTab() {
                                 <span>{isAr ? `مشتركون Pro (${stats?.activeProUsers || 0})` : `New Pro (${stats?.activeProUsers || 0})`}</span>
                             </label>
 
+                            {/* Local Payments Checkbox */}
+                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showLocal ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={showLocal} 
+                                    onChange={(e) => setShowLocal(e.target.checked)} 
+                                    className="w-3.5 h-3.5 accent-emerald-600 cursor-pointer"
+                                />
+                                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 border border-black dark:border-white" />
+                                <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
+                                <span>{isAr ? `عملاء لوكال / كاش (${stats?.totalLocalCustomers || stats?.totalPaidOrders || 0})` : `Local Paid (${stats?.totalLocalCustomers || stats?.totalPaidOrders || 0})`}</span>
+                            </label>
+
                             {/* Recommendations Checkbox */}
                             <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showRecommendations ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
                                 <input 
@@ -614,6 +631,10 @@ export default function UsersTab() {
                                             <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
                                             <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
                                         </linearGradient>
+                                        <linearGradient id="colorLocal" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.45}/>
+                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                        </linearGradient>
                                         <linearGradient id="colorRecs" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35}/>
                                             <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
@@ -642,6 +663,8 @@ export default function UsersTab() {
                                             if (name === "activeUsers") return [markPartial(value), isAr ? "المستخدمون النشطون" : "Active users"];
                                             if (name === "proCount") return [value, isAr ? "مشتركون Pro جدد" : "New Pro"];
                                             if (name === "totalPro") return [value, isAr ? "إجمالي المشتركين Pro" : "Total Pro"];
+                                            if (name === "localCount") return [value, isAr ? "عملاء لوكال / كاش جدد" : "New Local Paid"];
+                                            if (name === "totalLocal") return [value, isAr ? "إجمالي عملاء لوكال" : "Total Local Paid"];
                                             if (name === "recommendationsCount") return [value, isAr ? "توصيات صادرة" : "Recommendations"];
                                             if (name === "egx30") return [value != null ? `${Number(value).toLocaleString("en-US")} ${isAr ? "نقطة" : "pts"}` : "—", isAr ? "مؤشر EGX 30" : "EGX 30 Index"];
                                             return [value, isAr ? "المسجلون الجدد" : "New Signups"];
@@ -652,6 +675,9 @@ export default function UsersTab() {
                                     )}
                                     {showPro && (
                                         <Area yAxisId="left" type="monotone" dataKey="proCount" name="proCount" stroke="#f59e0b" strokeWidth={2.5} fillOpacity={1} fill="url(#colorPro)" activeDot={{ r: 5, strokeWidth: 0, fill: '#f59e0b' }} />
+                                    )}
+                                    {showLocal && (
+                                        <Area yAxisId="left" type="monotone" dataKey="localCount" name="localCount" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorLocal)" activeDot={{ r: 5, strokeWidth: 0, fill: '#10b981' }} />
                                     )}
                                     {showRecommendations && (
                                         <Area yAxisId="left" type="monotone" dataKey="recommendationsCount" name="recommendationsCount" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#colorRecs)" activeDot={{ r: 5, strokeWidth: 0, fill: '#a855f7' }} />

@@ -310,15 +310,29 @@ export async function GET(req: NextRequest) {
     };
 
     const recsByDay: Record<string, number> = {};
+    const localOrdersByDay: Record<string, number> = {};
     for (let i = daysToLookBack; i >= 0; i -= 1) {
       const date = toCairoDate(now.getTime() - i * 24 * 60 * 60 * 1000);
       signupsByDay[date] = 0;
       proSignupsByDay[date] = 0;
       recsByDay[date] = 0;
+      localOrdersByDay[date] = 0;
     }
     nonAdminProfiles.forEach((profile: any) => {
       const date = toCairoDate(profile.created_at);
       if (date in signupsByDay) signupsByDay[date] += 1;
+    });
+
+    // Track Local payment orders approved per day
+    (paymentOrders || []).forEach((order: any) => {
+      if (adminUserIds.has(String(order.user_id))) return;
+      const status = String(order.status || "").toLowerCase().trim();
+      if (status !== "approved") return;
+      const orderDateStr = order.created_at;
+      if (orderDateStr) {
+        const date = toCairoDate(orderDateStr);
+        if (date in localOrdersByDay) localOrdersByDay[date] += 1;
+      }
     });
 
     // Track Pro subscription starts per day (excluding admin accounts and excluding trial/inactive subscriptions)
@@ -369,10 +383,13 @@ export async function GET(req: NextRequest) {
 
     // Build timeline with cumulative/daily Pro, recommendations and forward-filled EGX30
     let cumulativePro = 0;
+    let cumulativeLocal = 0;
     const growthTimeline = sortedTimelineDates.map((date) => {
       const count = signupsByDay[date] || 0;
       const newPro = proSignupsByDay[date] || 0;
+      const newLocal = localOrdersByDay[date] || 0;
       cumulativePro += newPro;
+      cumulativeLocal += newLocal;
       if (egxByDay[date] != null) {
         lastKnownEgx30 = egxByDay[date];
       }
@@ -382,6 +399,8 @@ export async function GET(req: NextRequest) {
         count, // new daily users
         proCount: newPro, // new daily pro subscribers
         totalPro: cumulativePro, // cumulative active pro subscribers
+        localCount: newLocal, // daily local payment customers approved
+        totalLocal: cumulativeLocal, // cumulative local payment customers
         recommendationsCount: recsByDay[date] || 0, // daily recommendations issued
         egx30: egxByDay[date] ?? lastKnownEgx30 ?? null, // EGX30 index closing level
       };
@@ -427,9 +446,14 @@ export async function GET(req: NextRequest) {
         }),
     ].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+    const totalLocalCustomers = (paymentOrders || []).filter(
+      (p: any) => String(p.status || "").toLowerCase() === "approved" && !adminUserIds.has(String(p.user_id || ""))
+    ).length;
+
     const planMap = analytics.plans;
     return NextResponse.json({
       approvedOrders,
+      totalLocalCustomers,
       totalUsers: Math.max(nonAdminProfiles.length, totalProfileCount - adminUserIds.size),
       totalRecommendations: scanResults.length,
       currentEgx30: lastKnownEgx30,

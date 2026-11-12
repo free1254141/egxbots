@@ -7,12 +7,13 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
     Globe, BarChart2, Brain, Activity, Menu, X, User, ChevronDown, BadgeDollarSign,
-    Search, Loader2, Sun, Moon, TrendingUp, Heart, Bot, FileText, Wallet
+    Search, Loader2, Sun, Moon, TrendingUp, Heart, Bot, FileText, Wallet, Sparkles, HelpCircle
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { searchSymbols } from "@/lib/api";
 import PortfolioHeaderChip from "@/components/PortfolioHeaderChip";
+import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
 
 const POPULAR_EGX_STOCKS = [
     { symbol: "COMI", name: "Commercial International Bank", exchange: "EGX", country: "Egypt" },
@@ -122,6 +123,7 @@ export default function Header() {
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [searching, setSearching] = useState(false);
     const [searchFocused, setSearchFocused] = useState(false);
+    const [profitGuideOpen, setProfitGuideOpen] = useState(false);
 
     const updateHeaderOffset = useCallback(() => {
         const shell = shellRef.current;
@@ -279,6 +281,7 @@ export default function Header() {
     }
 
     return (
+        <>
         <header ref={headerRef} className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
             <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-4 md:px-8 py-3 flex items-center justify-between gap-4">
                 {/* Brand */}
@@ -404,6 +407,16 @@ export default function Header() {
                             aria-label="Search"
                         >
                             <Search className="h-4 w-4" />
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setProfitGuideOpen(true)}
+                            className="hidden lg:flex items-center gap-1.5 h-9 px-3 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-yellow-400 text-black border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                            title={language === "ar" ? "دليل الربح في 60 ثانية" : "60s Profit Guide"}
+                        >
+                            <Sparkles className="h-3.5 w-3.5 fill-black shrink-0" />
+                            <span>{language === "ar" ? "كيف أربح؟" : "How to Profit?"}</span>
                         </button>
 
                         <button
@@ -616,5 +629,10 @@ export default function Header() {
                     </>
                 )}
         </header>
+        <QuickProfitGuideModal
+            isOpen={profitGuideOpen}
+            onClose={() => setProfitGuideOpen(false)}
+        />
+        </>
     );
 }
