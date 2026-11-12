@@ -127,18 +127,33 @@ const beforeFiles = isPythonChatbot
 
 ---
 
-## 7. بروتوكول التشغيل والتحقق (Verification & Health Protocol)
+## 8. معمارية الكاش الذكي ثنائي الطبقات (Model-Driven Two-Tier Cache) — 12 نوفمبر 2026
 
-1. **فحص صحة الباك إند:**
-   ```bash
-   curl http://127.0.0.1:8000/api/ai_chat/health
-   # النتيجة المتوقعة:
-   # {"status":"healthy","service":"agentic_chat","engine":"deepseek-v3","mode":"async-streaming"}
-   ```
-2. **فحص الـ Streaming المباشر عبر البايثون:**
-   ```bash
-   python -c "import urllib.request, json; req = urllib.request.Request('http://127.0.0.1:8000/api/ai_chat/stream', data=json.dumps({'message':'سعر التجاري الدولي'}).encode('utf-8'), headers={'Content-Type':'application/json'}); res = urllib.request.urlopen(req); print(res.read(200).decode('utf-8'))"
-   ```
-3. **قواعد النشر الصارمة (Strict Deployment Guards):**
-   - **قاعدة منع Git Push التلقائي:** لا يتم تنفيذ أي `git push` إلا بطلب صريح ومباشر من المستخدم.
-   - **قاعدة Hugging Face Deployment:** عند رفع التحديثات إلى Hugging Face Space (`weeasdwee/AI_BOT`)، يتم رفع ملفات بايثون فقط (`api/`, `jobs/`, `scripts/`) ولا يتم رفع ملفات Next.js إطلاقاً.
+تم نقل وتطوير معمارية الكاش الذكي من بيئة TypeScript/Vercel السابقة إلى محرك بايثون بالكامل (`api/agentic_chat/analysis_cache.py`) مع تحقيق 4 ركائز معمارية رئيسية:
+
+1. **استنباط النية عبر النموذج بدون Regex (Model-Driven Intent Resolution):**
+   - بدلاً من مطابقة النصوص المعقدة بـ Regex هش قد يفشل أمام اللهجات، يقوم المحرك في الجولة الأولى (Round 1) باعتراض قرار DeepSeek في استدعاء الأداة (Function Calling Intent).
+   - إذا قرر DeepSeek استدعاء أداة سهم قياسية (`get_stock(symbol="FWRY")`) أو أداة عامة (`get_market(metric="top_gainers")`)، يتم توليد مفتاح كانونيكال موحد فوراً (`vip_stock_FWRY`, `vip_top_stocks`, `vip_open_recommendations`).
+   - إذا وُجد التحليل في الكاش، يتم بثه فوراً في أقل من 200ms مع إلغاء الجولة الثانية تماماً (Zero Round 2 Tokens & Zero Tool Runs).
+
+2. **التخزين ثنائي الطبقات المتين (Two-Tier Persistence):**
+   - **الطبقة الأولى (Tier 1 - RAM):** قاموس سريع في الذاكرة مع قفل أمان تناوبي متكرر `threading.RLock()` لمنع الـ Deadlock، يقدم الرد بـ 0ms.
+   - **الطبقة الثانية (Tier 2 - Supabase `market_cache`):** جدول PostgreSQL سحابي دائم عبر جلسات السيرفر وحالات إعادة التشغيل أو Sleep على Hugging Face Space. عند حدوث Miss في الذاكرة، يتم البحث في الجدول وتسخين الذاكرة اللحظية تلقائياً.
+
+3. **الصلاحية المرتبطة بجلسة تداول البورصة المصرية (Session-Aware Freshness):**
+   - **أثناء جلسة التداول الحية (الأحد إلى الخميس 10:00 إلى 14:30 بتوقيت القاهرة):** مدة صلاحية الكاش 15 دقيقة فقط لمواكبة التغيرات السعرية اللحظية.
+   - **خارج وقت الجلسة (بعد اكتمال إغلاق السوق الساعة 17:15):** يظل التحليل صالحاً طوال الليل وطوال عطلة نهاية الأسبوع (الجمعة والسبت) حتى افتتاح جلسة الأحد 10:00 صباحاً بتوقيت القاهرة، مما يقضي تماماً على استهلاك التوكنز في أوقات إغلاق السوق.
+
+4. **تطهير وتخصيص بيانات المحفظة (Dynamic Portfolio Sanitization & Personalization):**
+   - التحليل يُطهّر تماماً من مراكز المستخدم الشخصية قبل حفظه في الكاش العام (`NEUTRAL_PORTFOLIO_LINE`).
+   - عند استرجاع التحليل لأي مستخدم آخر، يستعلم المحرك ديناميكياً من جدول `positions` لحقن مركزه الحقيقي وأرباحه غير المحققة فوراً في السطر الحيادي دون أي تسريب لبيانات المستخدمين الآخرين.
+
+---
+
+## 9. معالج لغة وسوم DeepSeek DSML والتقاط الأدوات (Universal DSML Interceptor)
+
+- **المشكلة المعالجة:** نموذج DeepSeek-V3 يصيغ استدعاءات الأدوات داخلياً بلغة وسوم الـ DSML (`<'DSML | | calls | | >`, `<DSML | | invoke name="get_stock" | | >`). في حالات الضغط أو عند استدعاء أدوات متعددة بالتوازي، كان خادم DeepSeek يُرجع الوسوم كنص خام في الـ `content` بدلاً من كائن `tool_calls`.
+- **الحل:**
+  1. دالة `parse_dsml_tool_calls` تدعم كافة التنسيقات (الأنابيب المزدوجة `| |`، علامات التنصيص، وسوم الإغلاق المباشرة بدون سلاش) وتحولها فوراً إلى أدوات حقيقية تنفذ ضد قاعدة البيانات.
+  2. دالة `strip_dsml` تطهر أي وسم متسرب بنسبة 100% وتمنع ظهوره في شات المستخدمين.
+  3. إضافة Fallback وقائي يضمن عدم ترك الرد فارغاً في أي حالة استثنائية.

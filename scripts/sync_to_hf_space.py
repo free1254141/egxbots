@@ -66,7 +66,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "fix: support 3-decimal precision for penny stocks across acceleration, stock_ai, and daily bot runs"
+    commit_msg = "fix(agentic-chat): add robust DSML parsing for spaced/piped tokens, eliminate cache lock deadlock, and support proxy unpatching"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
