@@ -24,6 +24,10 @@ FILES_TO_SYNC = [
     "api/agentic_chat/tools_schema.py",
     "api/agentic_chat/vision.py",
     "api/main.py",
+    "api/acceleration_score.py",
+    "api/daily_bot_run.py",
+    "api/stock_ai.py",
+    "api/routers/scan_ai_fast.py",
     "api/scheduled_automations_worker.py",
     "api/easykash_payments.py",
     "api/daily_report_dispatch.py",
@@ -62,7 +66,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "fix(agentic-chat): restore multi-round tool chaining, add DSML interception & sanitization, and fix raw DSML token leakage"
+    commit_msg = "fix: support 3-decimal precision for penny stocks across acceleration, stock_ai, and daily bot runs"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
