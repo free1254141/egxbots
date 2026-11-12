@@ -608,6 +608,7 @@ def _process_symbol(
                 sentiment_score = stock_ai.rescale_news_sentiment(float(news_sentiment.get("sentiment_score", 0.0)))
             ai_score = _calculate_ai_score(float(precision), buy_threshold)
             
+            price_dec = 3 if last_close < 2.0 else 2
             return {
                 "date": str(candidate.index[-1].date()) if hasattr(candidate.index, 'date') else str(pd.to_datetime(candidate.index[-1]).date()),
                 "symbol": sym,
@@ -616,8 +617,8 @@ def _process_symbol(
                 "precision": float(precision),
                 "ai_score": ai_score,
                 "last_close": last_close,
-                "target_price": round(tp, 2),
-                "stop_loss": round(sl, 2),
+                "target_price": round(tp, price_dec),
+                "stop_loss": round(sl, price_dec),
                 "signal": "BUY",
                 "top_reasons": get_top_reasons(model, available_predictors),
                 "features": features_list,

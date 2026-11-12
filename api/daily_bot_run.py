@@ -2189,15 +2189,16 @@ def generate_arabic_rationale(result: dict) -> dict:
     win_rate = f"{win_rate_val}%"
     
     # 6. Targets
+    p_dec = 3 if last_close < 2.0 else 2
     target_1 = result["target_price"]
-    target_2 = round(target_1 * 1.10, 2)
+    target_2 = round(target_1 * 1.10, p_dec)
     stop_loss = result["stop_loss"]
     
     # 7. Brief Rationale
     brief_rationale = (
         f"يُظهر سهم «{symbol}» فرصة مضاربية ممتازة بدعم من مؤشر القوة النسبية RSI ({rsi:.0f}) ومؤشر الاتجاه ADX ({adx:.0f}). "
-        f"تم تحديد سعر دخول مقترح حول {last_close:.2f} جنيه، مستهدفين هدفاً أولاً عند {target_1:.2f} جنيه وهدفاً ثانياً عند {target_2:.2f} جنيه، "
-        f"مع وضع وقف خسارة عند {stop_loss:.2f} جنيه لحماية المحفظة."
+        f"تم تحديد سعر دخول مقترح حول {last_close:.{p_dec}f} جنيه، مستهدفين هدفاً أولاً عند {target_1:.{p_dec}f} جنيه وهدفاً ثانياً عند {target_2:.{p_dec}f} جنيه، "
+        f"مع وضع وقف خسارة عند {stop_loss:.{p_dec}f} جنيه لحماية المحفظة."
     )
 
     # 7.5 Fetch real news headlines
@@ -2261,8 +2262,9 @@ def _build_daily_recommendations_message(
                 rich_details = json.loads(rich_details)
             except (TypeError, ValueError):
                 rich_details = None
+        p_dec = 3 if (entry_price > 0 and entry_price < 2.0) else 2
         stored_target_2 = rich_details.get("target_2") if isinstance(rich_details, dict) else None
-        target_2 = float(stored_target_2) if stored_target_2 is not None else round(target_price * 1.10, 2)
+        target_2 = float(stored_target_2) if stored_target_2 is not None else round(target_price * 1.10, p_dec)
         score = max(0, min(round(float(row.get("precision") or 0.5) * 10), 10))
         name = row.get("name") or symbol
 
@@ -2273,9 +2275,9 @@ def _build_daily_recommendations_message(
 
         msg_lines.append(
             f"🔥 *{idx+1}. {symbol}* — {name}\n"
-            f"💰 الدخول: `{entry_price:.2f}` EGP\n"
-            f"🎯 هدف 1: `{target_price:.2f}` (`{target_1_pct:+.1f}%`) ← 🚀 هدف 2: `{target_2:.2f}` (`{target_2_pct:+.1f}%`)\n"
-            f"🛑 الوقف: `{stop_loss:.2f}` (`{stop_pct:+.1f}%`)\n"
+            f"💰 الدخول: `{entry_price:.{p_dec}f}` EGP\n"
+            f"🎯 هدف 1: `{target_price:.{p_dec}f}` (`{target_1_pct:+.1f}%`) ← 🚀 هدف 2: `{target_2:.{p_dec}f}` (`{target_2_pct:+.1f}%`)\n"
+            f"🛑 الوقف: `{stop_loss:.{p_dec}f}` (`{stop_pct:+.1f}%`)\n"
             f"⭐ `{score_bar}` `{score}/10`\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )

@@ -156,6 +156,14 @@ interface RecommendationsTableProps {
     analyticsOnly?: boolean;
 }
 
+const fmtStockPrice = (val: number | null | undefined, referencePrice?: number | null): string => {
+    if (val === null || val === undefined || isNaN(Number(val))) return "—";
+    const num = Number(val);
+    const ref = (referencePrice != null && !isNaN(Number(referencePrice))) ? Number(referencePrice) : num;
+    const decimals = (ref > 0 && ref < 2.0) || (num > 0 && num < 2.0) ? 3 : 2;
+    return num.toFixed(decimals);
+};
+
 type SpotlightCardProps = {
     children: React.ReactNode;
     className?: string;
@@ -1366,8 +1374,8 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         <div className="flex items-baseline gap-3">
                                             <span className={`text-4xl sm:text-5xl font-black ${d("text-white", "text-zinc-900")}`}>
                                             {isClosed && row.exit_price 
-                                                ? `${Number(row.exit_price).toFixed(2)}` 
-                                                : (currentPrice ? `${currentPrice.toFixed(2)}` : "—")}
+                                                ? `${fmtStockPrice(row.exit_price, entryPrice)}` 
+                                                : (currentPrice ? `${fmtStockPrice(currentPrice, entryPrice)}` : "—")}
                                         </span>
                                         <span className={`text-sm font-bold ${d("text-zinc-400", "text-zinc-500")}`}>EGP</span>
                                     </div>
@@ -1405,16 +1413,16 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                 <div className={`flex flex-col gap-2 text-sm min-w-[140px]`}>
                                     <div className={`flex justify-between gap-4`}>
                                         <span className={`${d("text-zinc-400", "text-zinc-600")}`}>{isAr ? "الهدف" : "Target"}</span>
-                                        <span className={`font-black text-emerald-400`}>{targetPrice ? targetPrice.toFixed(2) : "—"}</span>
+                                        <span className={`font-black text-emerald-400`}>{targetPrice ? fmtStockPrice(targetPrice, entryPrice) : "—"}</span>
                                     </div>
                                     <div className={`flex justify-between gap-4`}>
                                         <span className={`${d("text-zinc-400", "text-zinc-600")}`}>{isTrailingStop ? (isAr ? "وقف الأرباح" : "Trailing Stop") : (isAr ? "وقف الخسارة" : "Stop Loss")}</span>
-                                        <span className={`font-black ${isTrailingStop ? "text-emerald-400" : "text-rose-400"}`}>{stopLoss ? stopLoss.toFixed(2) : "—"}</span>
+                                        <span className={`font-black ${isTrailingStop ? "text-emerald-400" : "text-rose-400"}`}>{stopLoss ? fmtStockPrice(stopLoss, entryPrice) : "—"}</span>
                                     </div>
                                     {hasTarget2 && (
                                         <div className="flex justify-between gap-4">
                                             <span className={`${d("text-zinc-400", "text-zinc-600")}`}>{isAr ? "الهدف 2" : "Target 2"}</span>
-                                            <span className={`font-black text-amber-400`}>{target2.toFixed(2)}</span>
+                                            <span className={`font-black text-amber-400`}>{fmtStockPrice(target2, entryPrice)}</span>
                                         </div>
                                     )}
                                 </div>
@@ -1598,29 +1606,29 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     {isAr ? "تفاصيل الصفقة" : "Trade Details"}
                                 </h4>
                                 {[
-                                    { label: isAr ? "سعر الدخول" : "Entry Price", value: entryPrice ? `${entryPrice.toFixed(2)} EGP` : "—", color: d("text-white", "text-zinc-900") },
+                                    { label: isAr ? "سعر الدخول" : "Entry Price", value: entryPrice ? `${fmtStockPrice(entryPrice)} EGP` : "—", color: d("text-white", "text-zinc-900") },
                                     { 
                                         label: isAr ? "الهدف الأول" : "Target 1", 
                                         subLabel: hasAtr ? (isAr ? "دخول + 2.0x ATR" : "Entry + 2.0x ATR") : undefined,
-                                        value: targetPrice ? `${targetPrice.toFixed(2)} EGP` : "—", 
+                                        value: targetPrice ? `${fmtStockPrice(targetPrice, entryPrice)} EGP` : "—", 
                                         color: "text-emerald-400" 
                                     },
                                     ...(hasTarget2 ? [{
                                         label: isAr ? "الهدف الثاني" : "Target 2",
                                         subLabel: isAr ? "هدف معزز (+10% للهدف 1)" : "Extended Target (+10% of T1)",
-                                        value: `${target2.toFixed(2)} EGP`,
+                                        value: `${fmtStockPrice(target2, entryPrice)} EGP`,
                                         color: "text-amber-400"
                                     }] : []),
                                     { 
                                         label: isTrailingStop ? (isAr ? "وقف حماية الأرباح" : "Trailing Stop") : (isAr ? "وقف الخسارة" : "Stop Loss"), 
                                         subLabel: isTrailingStop ? (isAr ? "مستوى لحماية الربح، التنفيذ غير مضمون" : "Profit protection level; fills are not guaranteed") : undefined,
-                                        value: stopLoss ? `${stopLoss.toFixed(2)} EGP` : "—", 
+                                        value: stopLoss ? `${fmtStockPrice(stopLoss, entryPrice)} EGP` : "—", 
                                         color: isTrailingStop ? "text-emerald-400" : "text-rose-400" 
                                     },
                                     ...(hasAtr ? [{
                                          label: isAr ? "متوسط المدى الحقيقي (ATR)" : "Average True Range (ATR)",
                                          subLabel: isAr ? "نطاق حركة السعر اليومية (14 يوم)" : "Daily volatility range (14d)",
-                                         value: `${atrValue.toFixed(2)} EGP`,
+                                         value: `${fmtStockPrice(atrValue, entryPrice)} EGP`,
                                          color: `${d("text-zinc-300", "text-zinc-600")} font-mono`
                                      }] : []),
                                     { label: isAr ? "نسبة المخاطرة/العائد" : "Risk/Reward", value: rrRatio !== null ? `1:${rrRatio.toFixed(2)}` : "—", color: "text-indigo-400" },
@@ -1635,7 +1643,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         value: row.updated_at ? formatDate(row.updated_at) : (row.created_at ? formatDate(row.created_at) : "—"),
                                         color: "text-amber-400"
                                     },
-                                    ...(isClosed && row.exit_price ? [{ label: isAr ? "سعر الخروج" : "Exit Price", value: `${row.exit_price.toFixed(2)} EGP`, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
+                                    ...(isClosed && row.exit_price ? [{ label: isAr ? "سعر الخروج" : "Exit Price", value: `${fmtStockPrice(row.exit_price, entryPrice)} EGP`, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
                                     ...(isClosed && exitReason ? [{ label: isAr ? "سبب الخروج" : "Exit Reason", value: exitReason, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
                                 ].map((item, idx) => (
                                     <div key={idx} className={`flex items-center justify-between py-2 border-b ${d("border-white/5", "border-zinc-200")} last:border-0`}>
@@ -1729,9 +1737,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             ? `🚨 توصية صفقة بالذكاء الاصطناعي - EGX BOTS 🚨\n\n` +
               `السهم: ${row.symbol} (${row.exchange})\n` +
               `الإشارة: ${signalUpper === "BUY" ? "شراء" : signalUpper === "SELL" ? "بيع" : "خروج"} ${signalEmoji}\n` +
-              `سعر الدخول المقترح: ${entryPrice.toFixed(2)} ج.م\n` +
-              `الهدف: ${targetPrice.toFixed(2)} ج.م\n` +
-              `وقف الخسارة: ${stopLoss.toFixed(2)} ج.م\n` +
+              `سعر الدخول المقترح: ${fmtStockPrice(entryPrice)} ج.م\n` +
+              `الهدف: ${fmtStockPrice(targetPrice, entryPrice)} ج.م\n` +
+              `وقف الخسارة: ${fmtStockPrice(stopLoss, entryPrice)} ج.م\n` +
               `تقييم الذكاء الاصطناعي: ${aiScoreNum}/10\n` +
               `القطاع: ${row.sector || "N/A"}\n` +
               `أداء الصفقة: ${tradeReturnText}\n` +
@@ -1740,9 +1748,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             : `🚨 EGX BOTS AI Trade Signal 🚨\n\n` +
               `Stock: ${row.symbol} (${row.exchange})\n` +
               `Signal: ${signalUpper} ${signalEmoji}\n` +
-              `Entry Price: ${entryPrice.toFixed(2)} EGP\n` +
-              `Target Price: ${targetPrice.toFixed(2)} EGP\n` +
-              `Stop Loss: ${stopLoss.toFixed(2)} EGP\n` +
+              `Entry Price: ${fmtStockPrice(entryPrice)} EGP\n` +
+              `Target Price: ${fmtStockPrice(targetPrice, entryPrice)} EGP\n` +
+              `Stop Loss: ${fmtStockPrice(stopLoss, entryPrice)} EGP\n` +
               `AI Score: ${aiScoreNum}/10\n` +
               `Sector: ${row.sector || "N/A"}\n` +
               `Trade Return: ${tradeReturnText}\n` +
@@ -1873,7 +1881,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareEntry")}
                                         </span>
                                         <span className="text-base font-black text-zinc-900 dark:text-white">
-                                            {entryPrice.toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
                                         </span>
                                     </div>
                                     <div>
@@ -1881,7 +1889,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareTarget")}
                                         </span>
                                         <span className="text-base font-black text-emerald-500 dark:text-emerald-400">
-                                            {targetPrice.toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(targetPrice, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
                                         </span>
                                     </div>
                                     <div>
@@ -1889,7 +1897,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareStop")}
                                         </span>
                                         <span className="text-base font-black text-rose-500 dark:text-rose-400">
-                                            {stopLoss.toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(stopLoss, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
                                         </span>
                                     </div>
                                     {isClosed && row.exit_price != null && (
@@ -1898,7 +1906,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 {translate("shareExit")}
                                             </span>
                                             <span className={`text-base font-black ${(row.status || '').toLowerCase() === 'win' ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
-                                                {Number(row.exit_price).toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                                {fmtStockPrice(row.exit_price, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
                                             </span>
                                         </div>
                                     )}
@@ -2905,25 +2913,25 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 <div>
                                                     <span className="text-[10px] text-zinc-500 block">{isAr ? "سعر الدخول:" : "Entry Price:"}</span>
                                                     <span className="font-mono font-black text-black dark:text-white">
-                                                        {row.entry_price != null ? `${Number(row.entry_price).toFixed(2)} ج.م` : (row.last_close != null ? `${Number(row.last_close).toFixed(2)} ج.م` : "—")}
+                                                        {row.entry_price != null ? `${fmtStockPrice(row.entry_price)} ج.م` : (row.last_close != null ? `${fmtStockPrice(row.last_close)} ج.م` : "—")}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-zinc-500 block">{isAr ? "السعر الحالي:" : "Current Price:"}</span>
                                                     <span className="font-mono font-black text-black dark:text-white">
-                                                        {row.current_price != null ? `${Number(row.current_price).toFixed(2)} ج.م` : (row.last_close != null ? `${Number(row.last_close).toFixed(2)} ج.م` : "—")}
+                                                        {row.current_price != null ? `${fmtStockPrice(row.current_price, row.entry_price)} ج.م` : (row.last_close != null ? `${fmtStockPrice(row.last_close, row.entry_price)} ج.م` : "—")}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">{isAr ? "المستهدف الفني:" : "Target 1:"}</span>
                                                     <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
-                                                        {row.target_price != null ? `${Number(row.target_price).toFixed(2)} ج.م` : "—"}
+                                                        {row.target_price != null ? `${fmtStockPrice(row.target_price, row.entry_price)} ج.م` : "—"}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-rose-500 block">{isAr ? "وقف الخسارة:" : "Stop Loss:"}</span>
                                                     <span className="font-mono font-black text-rose-500">
-                                                        {row.stop_loss != null ? `${Number(row.stop_loss).toFixed(2)} ج.م` : "—"}
+                                                        {row.stop_loss != null ? `${fmtStockPrice(row.stop_loss, row.entry_price)} ج.م` : "—"}
                                                     </span>
                                                 </div>
                                             </div>

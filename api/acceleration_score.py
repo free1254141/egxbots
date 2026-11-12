@@ -380,11 +380,12 @@ def calculate_dynamic_risk(
             sl_pct = min(0.15, atr_sl)  # Wide enough to avoid shakeouts, capped at 15%
 
     # ── Calculate prices ──
-    target_price = round(last_close * (1.0 + tp_pct), 2)
-    stop_loss = round(last_close * (1.0 - sl_pct), 2)
+    decimals = 3 if last_close < 2.0 else 2
+    target_price = round(last_close * (1.0 + tp_pct), decimals)
+    stop_loss = round(last_close * (1.0 - sl_pct), decimals)
 
     # Safety: stop_loss must be positive
-    stop_loss = max(stop_loss, round(last_close * 0.85, 2))  # Never more than 15% loss
+    stop_loss = max(stop_loss, round(last_close * 0.85, decimals))  # Never more than 15% loss
 
     return {
         "target_price": target_price,

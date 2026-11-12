@@ -2880,7 +2880,8 @@ def add_trade_levels(df: pd.DataFrame, risk_reward_ratio: float = 2.0, accelerat
     
     target_price = min(max_target, max(min_target, raw_target))
 
-    return round(float(target_price), 2), round(float(max(stop_loss, 0.01)), 2)
+    decimals = 3 if current_price < 2.0 else 2
+    return round(float(target_price), decimals), round(float(max(stop_loss, 0.001)), decimals)
 
 
 def prepare_for_ai(

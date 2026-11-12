@@ -1943,13 +1943,20 @@ export default function AIScannerPage() {
                                             const isActive    = tEntryDate === selEntryDateRaw && tEntryPrice === selEntryPrice;
                                             const size        = isActive ? 2.5 : 1.2;
 
+                                            const formatTradePrice = (val: any) => {
+                                                if (val === null || val === undefined || isNaN(Number(val))) return '—';
+                                                const n = Number(val);
+                                                const dec = (entryPrice && Number(entryPrice) < 2.0) || (n > 0 && n < 2.0) ? 3 : 2;
+                                                return n.toFixed(dec);
+                                            };
+
                                             if (entryTs) {
                                                 markers.push({
                                                     time: entryTs,
                                                     position: 'belowBar',
                                                     color: isActive ? '#10b981' : '#6ee7b7',
                                                     shape: 'arrowUp',
-                                                    text: isActive ? `BUY ${entryPrice != null ? Number(entryPrice).toFixed(2) : ''}` : '',
+                                                    text: isActive ? `BUY ${entryPrice != null ? formatTradePrice(entryPrice) : ''}` : '',
                                                     size,
                                                 });
                                             }
@@ -1959,7 +1966,7 @@ export default function AIScannerPage() {
                                                     position: 'aboveBar',
                                                     color: isWin ? (isActive ? '#10b981' : '#6ee7b7') : (isActive ? '#ef4444' : '#fca5a5'),
                                                     shape: 'arrowDown',
-                                                    text: isActive ? `SELL ${exitPrice != null ? Number(exitPrice).toFixed(2) : ''}` : '',
+                                                    text: isActive ? `SELL ${exitPrice != null ? formatTradePrice(exitPrice) : ''}` : '',
                                                     size,
                                                 });
                                             }
@@ -1981,25 +1988,39 @@ export default function AIScannerPage() {
 
                             {/* Main Stats Grid */}
                             <div className="grid grid-cols-2 gap-4 font-sans">
-                                <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/5 space-y-1">
-                                    <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">سعر الدخول</span>
-                                    <div className="text-sm font-mono font-black text-white">
-                                        {(selectedTrade.entry_price !== undefined ? selectedTrade.entry_price : selectedTrade.entry)?.toFixed(2) || '—'}
-                                    </div>
-                                    <span className="text-[8px] text-zinc-600 block">
-                                        التاريخ: {formatDate(selectedTrade.features?.entry_date || selectedTrade.features?.trade_date || selectedTrade.created_at || selectedTrade.date)}
-                                    </span>
-                                </div>
+                                {(() => {
+                                    const rawEntry = selectedTrade.entry_price !== undefined ? selectedTrade.entry_price : selectedTrade.entry;
+                                    const rawExit = selectedTrade.exit_price !== undefined ? selectedTrade.exit_price : selectedTrade.exit;
+                                    const fmtP = (v: any) => {
+                                        if (v === null || v === undefined || isNaN(Number(v))) return '—';
+                                        const n = Number(v);
+                                        const dec = (rawEntry && Number(rawEntry) < 2.0) || (n > 0 && n < 2.0) ? 3 : 2;
+                                        return n.toFixed(dec);
+                                    };
+                                    return (
+                                        <>
+                                            <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/5 space-y-1">
+                                                <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">سعر الدخول</span>
+                                                <div className="text-sm font-mono font-black text-white">
+                                                    {fmtP(rawEntry)}
+                                                </div>
+                                                <span className="text-[8px] text-zinc-600 block">
+                                                    التاريخ: {formatDate(selectedTrade.features?.entry_date || selectedTrade.features?.trade_date || selectedTrade.created_at || selectedTrade.date)}
+                                                </span>
+                                            </div>
 
-                                <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/5 space-y-1">
-                                    <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">سعر الخروج</span>
-                                    <div className="text-sm font-mono font-black text-white">
-                                        {(selectedTrade.exit_price !== undefined ? selectedTrade.exit_price : selectedTrade.exit)?.toFixed(2) || '—'}
-                                    </div>
-                                    <span className="text-[8px] text-zinc-600 block">
-                                        التاريخ: {formatDate(selectedTrade.features?.exit_date || selectedTrade.features?.trade_date || selectedTrade.created_at || selectedTrade.Exit_Date || selectedTrade.exit_date)}
-                                    </span>
-                                </div>
+                                            <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/5 space-y-1">
+                                                <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">سعر الخروج</span>
+                                                <div className="text-sm font-mono font-black text-white">
+                                                    {fmtP(rawExit)}
+                                                </div>
+                                                <span className="text-[8px] text-zinc-600 block">
+                                                    التاريخ: {formatDate(selectedTrade.features?.exit_date || selectedTrade.features?.trade_date || selectedTrade.created_at || selectedTrade.Exit_Date || selectedTrade.exit_date)}
+                                                </span>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
 
                                 <div className="p-3.5 rounded-2xl bg-zinc-900/40 border border-white/5 space-y-1">
                                     <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">نسبة الربح/الخسارة</span>
