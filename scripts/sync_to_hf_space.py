@@ -37,6 +37,8 @@ FILES_TO_SYNC = [
     "api/support_chat.py",
     "api/support_ai_agent.py",
     "api/routers/support.py",
+    "api/jobs/telegram_subscription_reminders.py",
+    "api/social_scheduler.py",
     "requirements.txt",
 ]
 
@@ -69,7 +71,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(support): add DeepSeek customer support agent with function calling and auto activation confirmation"
+    commit_msg = "feat(support): update support ai agent anti-fraud guard, scheduled reminders and backend updates"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
