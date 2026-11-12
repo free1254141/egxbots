@@ -654,9 +654,17 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
     mobile = "".join(ch for ch in str(mobile or "") if ch.isdigit() or ch == "+")
 
-    if not (mobile.startswith("01") and len(mobile) == 11 and mobile.isdigit()):
-
-        raise ValueError("Enter a valid Egyptian mobile number (010/011/012/015)")
+    # قبول أرقام مصرية (01XXXXXXXXX) أو دولية (+CCXXXXXXXXX)
+    _mobile_clean = mobile.lstrip("+")
+    _is_egyptian = mobile.startswith("01") and len(mobile) == 11 and mobile.isdigit()
+    _is_international = (
+        (mobile.startswith("+") and 8 <= len(mobile) <= 16 and _mobile_clean.isdigit())
+        or (not mobile.startswith("0") and 7 <= len(mobile) <= 15 and mobile.isdigit())
+    )
+    if not _is_egyptian and not _is_international:
+        raise ValueError(
+            "Enter a valid mobile number (Egyptian: 01XXXXXXXXX or international: +CC...)"
+        )
 
     _init_supabase()
 

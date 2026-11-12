@@ -266,8 +266,13 @@ export default function PricingClient() {
   const lifetimeRemaining: number = localConfig?.lifetime?.remaining ?? Math.max(0, lifetimeLimit - lifetimeCount);
   const lifetimeIsOpen: boolean = localConfig?.lifetime?.is_open ?? (lifetimeRemaining > 0);
 
-  const normalizedMobile = customerMobile.trim().replace(/[\s-]/g, "").replace(/^\+20/, "0").replace(/^0020/, "0");
-  const isMobileValid = /^01[0125]\d{8}$/.test(normalizedMobile);
+  const normalizedMobile = customerMobile.trim().replace(/[\s\-\(\)]/g, "");
+  const isEgyptianMobile =
+    /^(01[0125]\d{8}|00201[0125]\d{8}|\+201[0125]\d{8})$/.test(normalizedMobile);
+  const isInternationalMobile =
+    /^\+\d{7,15}$/.test(normalizedMobile) ||
+    (!normalizedMobile.startsWith("0") && /^\d{7,15}$/.test(normalizedMobile));
+  const isMobileValid = isEgyptianMobile || isInternationalMobile;
 
   useEffect(() => {
     if (step !== "submitted" || !localOrder) return;
@@ -566,7 +571,11 @@ export default function PricingClient() {
       return;
     }
     if (!isMobileValid) {
-      toast.error(isAr ? "أدخل رقم موبايل مصري صحيح من أي شبكة (010 / 011 / 012 / 015)" : "Enter a valid Egyptian mobile number");
+      toast.error(
+        isAr
+          ? "أدخل رقم موبايل صحيح (مصري مثل 01012345678 أو دولي مثل +966512345678)"
+          : "Enter a valid mobile number (Egyptian: 01... or international: +966...)"
+      );
       return;
     }
     setBusy(true);
@@ -1152,8 +1161,8 @@ export default function PricingClient() {
                   </h3>
                   <p className="text-xs font-semibold text-zinc-500 mt-1">
                     {isAr
-                      ? "رقم موبايل مصري لتلقي كود ورسالة التأكيد من بوابة الدفع."
-                      : "Egyptian mobile number to receive confirmation code."}
+                      ? "رقم موبايلك (مصري أو دولي) لتلقي رسالة التأكيد من بوابة الدفع."
+                      : "Your mobile number (Egyptian or international) to receive confirmation from the payment gateway."}
                   </p>
                 </div>
 
@@ -1166,7 +1175,7 @@ export default function PricingClient() {
 
                 <div className="space-y-1.5">
                   <label htmlFor="mobile-input" className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
-                    {isAr ? "رقم الموبايل المصري (11 رقم)" : "Egyptian Mobile (11 digits)"}
+                    {isAr ? "رقم الموبايل (مصري أو دولي)" : "Mobile Number (Egyptian or International)"}
                   </label>
                   <div className="flex items-center gap-3 border-3 border-black dark:border-white bg-white dark:bg-zinc-900 px-4 py-3 focus-within:ring-2 focus-within:ring-emerald-500">
                     <Smartphone className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -1175,7 +1184,7 @@ export default function PricingClient() {
                       type="tel"
                       value={customerMobile}
                       onChange={(e) => setCustomerMobile(e.target.value)}
-                      placeholder="01012345678"
+                      placeholder={isAr ? "01012345678 أو +966512345678" : "01012345678 or +966512345678"}
                       className="w-full bg-transparent font-mono text-base font-black outline-none placeholder:text-zinc-400 text-zinc-950 dark:text-white"
                       dir="ltr"
                     />
@@ -1183,11 +1192,11 @@ export default function PricingClient() {
                   <div className="flex items-center justify-between text-xs font-bold pt-0.5">
                     <span className={isMobileValid ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}>
                       {isMobileValid
-                        ? isAr ? "✓ رقم مصري صحيح" : "✓ Valid Egyptian number"
-                        : isAr ? "مقبول: 010 أو 011 أو 012 أو 015" : "Accepted: 010, 011, 012 or 015"}
+                        ? isAr ? "✓ رقم صحيح" : "✓ Valid number"
+                        : isAr ? "مصري: 01... | دولي: +966... | +971..." : "Egyptian: 01... | International: +966... | +971..."}
                     </span>
                     <span className="text-[10px] text-zinc-400 font-mono">
-                      {customerMobile.length > 0 ? `${customerMobile.length} / 11` : ""}
+                      {customerMobile.length > 0 ? `${customerMobile.length} chars` : ""}
                     </span>
                   </div>
                 </div>
