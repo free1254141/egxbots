@@ -274,18 +274,18 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
           </div>
           <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold leading-relaxed">
             {isAr
-              ? "تحكم في إشعارات التليجرام اللحظية، وانتقل مباشرة إلى لوحة إشارات الرصد اللحظي الموحدة بجانب إشارات المدى المتوسط والقصير."
-              : "Manage instant Telegram notifications and jump directly to the unified Intraday Fast Signals hub."}
+              ? "تحكم في إشعارات التليجرام الفورية، وانتقل مباشرة إلى لوحة إشارات المدى المتوسط المعتمدة وإشارات المدى القصير."
+              : "Manage instant Telegram notifications and jump directly to the verified Medium-Term Signals hub."}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/scanner/backtests?tab=fast_scanner"
-            className="h-8 sm:h-10 px-3 sm:px-4 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black bg-emerald-400 hover:bg-emerald-300 text-black font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
+            href="/scanner/backtests?tab=medium_swings"
+            className="h-8 sm:h-10 px-3 sm:px-4 flex items-center justify-center gap-1.5 border-2 sm:border-4 border-black bg-blue-500 hover:bg-blue-400 text-white font-black text-xs uppercase tracking-wider shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all"
           >
             <Target className="w-4 h-4" />
-            <span>{isAr ? "فتح لوحة إشارات الرصد اللحظي 🎯" : "Open Intraday Signals Hub 🎯"}</span>
+            <span>{isAr ? "فتح إشارات المدى المتوسط 📈" : "Open Medium-Term Signals 📈"}</span>
           </Link>
 
           <button
@@ -321,11 +321,11 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
               </p>
             </div>
             <Link
-              href="/scanner/backtests?tab=fast_scanner"
+              href="/scanner/backtests?tab=medium_swings"
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-black text-[#FFE600] hover:bg-zinc-800 border-2 border-black font-black text-xs uppercase shrink-0 shadow-[2px_2px_0px_#000]"
             >
               <Target className="w-4 h-4" />
-              <span>{isAr ? "الانتقال إلى إشارات الرصد اللحظي" : "Go to Intraday Signals"}</span>
+              <span>{isAr ? "الانتقال إلى إشارات المدى المتوسط" : "Go to Medium-Term Signals"}</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
           </div>

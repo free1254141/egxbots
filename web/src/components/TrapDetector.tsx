@@ -82,8 +82,8 @@ export default function TrapDetector() {
     };
   }, [supabase, user]);
 
+  // Fetch data for all users (free and Pro)
   useEffect(() => {
-    if (!pro) return;
     const controller = new AbortController();
 
     Promise.allSettled([
@@ -103,46 +103,7 @@ export default function TrapDetector() {
     });
 
     return () => controller.abort();
-  }, [pro]);
-
-  if (!pro) {
-    return (
-      <section
-        className="relative border-b-2 border-zinc-200 bg-zinc-50 px-3 py-4 text-zinc-950 dark:border-[#2a2e39] dark:bg-[#10151e] dark:text-white sm:px-6 sm:py-5 overflow-hidden"
-        aria-label={ar ? "كاشف المصائد والانعكاسات" : "Trap Detector"}
-        dir={ar ? "rtl" : "ltr"}
-      >
-        <div className="relative flex flex-col sm:flex-row items-center justify-between gap-4 py-2">
-          <div className="flex items-center gap-3 text-center sm:text-right">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-400/10">
-              <LockKeyhole className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div>
-              <h2 className="text-sm font-black text-zinc-950 dark:text-white flex items-center gap-2 justify-center sm:justify-start">
-                <span>🪤 {ar ? "كاشف المصائد والانعكاسات (Bull & Bear Traps)" : "Trap Detector (Bull & Bear Traps)"}</span>
-                <span className="border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-black text-emerald-500">
-                  PRO
-                </span>
-              </h2>
-              <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                {ar
-                  ? "يرصد الكسر الوهمي للتجميع (Wyckoff Spring) والاختراق الكاذب للتصريف (Upthrust) بعد اكتمال شمعة الإغلاق اليومي مع إحصائيات نجاح تاريخية موثقة."
-                  : "Detects Wyckoff Springs (Bear Traps) and Upthrusts (Bull Traps) after the daily closing candle settles with verified historical performance."}
-              </p>
-            </div>
-          </div>
-
-          <Link
-            href="/pricing"
-            className="shrink-0 inline-flex items-center gap-2 border-2 border-emerald-500 bg-emerald-500 px-4 py-2 text-[11px] font-black uppercase tracking-widest text-zinc-950 shadow-[3px_3px_0px_rgba(0,0,0,0.2)] transition-all hover:-translate-y-0.5 hover:bg-emerald-400"
-          >
-            <Rocket className="h-3.5 w-3.5" />
-            {ar ? "افتح كاشف المصائد (Pro)" : "Unlock Trap Detector"}
-          </Link>
-        </div>
-      </section>
-    );
-  }
+  }, []);
 
   const rows: TrapSignalRow[] =
     activeTab === "BEAR_TRAP" ? snapshot?.bearTraps || [] : snapshot?.bullTraps || [];

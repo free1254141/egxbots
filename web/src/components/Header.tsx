@@ -568,6 +568,17 @@ export default function Header() {
 
                             {/* Nav links */}
                             <div className="px-3 py-2 flex flex-col gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setMobileMenuOpen(false);
+                                        setProfitGuideOpen(true);
+                                    }}
+                                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-black tracking-wide bg-gradient-to-r from-amber-400 to-yellow-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:scale-95 transition-all text-right"
+                                >
+                                    <Sparkles className="w-4 h-4 fill-black shrink-0" />
+                                    <span>{language === "ar" ? "كيف أربح؟ (دليل 60 ثانية)" : "How to Profit? (60s Guide)"}</span>
+                                </button>
                                 {navItems.map((item) => {
                                     const isActive = checkActive(item.href, item.activePath);
                                     return (

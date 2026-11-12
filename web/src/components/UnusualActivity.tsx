@@ -59,9 +59,8 @@ export default function UnusualActivity() {
     };
   }, [supabase, user]);
 
-  // Only fetch data for Pro users to avoid wasting API calls
+  // Fetch data for all users (free and Pro) to inspect market volume spikes
   useEffect(() => {
-    if (!pro) return;
     const controller = new AbortController();
 
     Promise.allSettled([
@@ -76,79 +75,11 @@ export default function UnusualActivity() {
     });
 
     return () => controller.abort();
-  }, [pro]);
+  }, []);
 
   const visible = expanded ? snapshot?.rows : snapshot?.rows?.slice(0, 6);
 
-  // ── Pro-only lock screen for free / unauthenticated users ────────────────
-  if (!pro) {
-    return (
-      <section
-        className="relative border-y-2 border-zinc-200 bg-zinc-50 px-3 py-4 text-zinc-950 dark:border-[#2a2e39] dark:bg-[#10151e] dark:text-white sm:px-6 sm:py-5 overflow-hidden"
-        aria-label={ar ? "نشاط غير طبيعي" : "Unusual activity"}
-        dir={ar ? "rtl" : "ltr"}
-      >
-        {/* Blurred ghost cards behind the lock */}
-        <div
-          className="pointer-events-none absolute inset-0 flex flex-col gap-2 p-4 opacity-30 blur-sm select-none"
-          aria-hidden="true"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-4 w-4 rounded bg-amber-400/60" />
-            <div className="h-3 w-32 rounded bg-zinc-300 dark:bg-zinc-600" />
-            <div className="h-4 w-8 rounded bg-amber-200 dark:bg-amber-800/40 ms-1" />
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="border-2 border-zinc-200 bg-white dark:border-[#303744] dark:bg-[#171e29] p-3 rounded-sm"
-              >
-                <div className="flex justify-between mb-2">
-                  <div className="h-4 w-16 rounded bg-zinc-300 dark:bg-zinc-600" />
-                  <div className="h-3 w-3 rounded bg-zinc-200 dark:bg-zinc-700" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {[1, 2, 3, 4].map((j) => (
-                    <div key={j} className="h-3 rounded bg-zinc-200 dark:bg-zinc-700" />
-                  ))}
-                </div>
-                <div className="mt-2 h-3 w-full rounded bg-zinc-100 dark:bg-zinc-800" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Lock overlay */}
-        <div className="relative flex flex-col items-center justify-center gap-3 py-6 text-center">
-          <div className="flex h-12 w-12 items-center justify-center border-2 border-amber-500 bg-amber-50 dark:bg-amber-400/10">
-            <LockKeyhole className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-          </div>
-
-          <div className="space-y-1">
-            <h2 className="text-sm font-black text-zinc-950 dark:text-white">
-              {ar ? "النشاط غير الطبيعي والانفجار السعري — حصري Pro" : "Unusual Activity & Breakouts — Pro Exclusive"}
-            </h2>
-            <p className="max-w-xs text-[11px] font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-              {ar
-                ? "اكتشف الأسهم التي يتضاعف حجم تداولها مع احصائيات نجاح تاريخية موثقة ومراجعة يومية لنتائج إشارات الأمس."
-                : "Spot stocks with abnormal volume spikes with verified historical win rates and next-day signal tracking."}
-            </p>
-          </div>
-
-          <Link
-            href="/pricing"
-            className="inline-flex items-center gap-2 border-2 border-amber-500 bg-amber-500 px-4 py-2 text-[11px] font-black uppercase tracking-widest text-white shadow-[3px_3px_0px_rgba(0,0,0,0.2)] transition-all hover:-translate-y-0.5 hover:bg-amber-600 active:translate-y-0"
-          >
-            <Rocket className="h-3.5 w-3.5" />
-            {ar ? "اشترك في Pro للوصول" : "Upgrade to Pro"}
-          </Link>
-        </div>
-      </section>
-    );
-  }
-
-  // ── Full Pro view ─────────────────────────────────────────────────────────
+  // ── Full view (Free for all users) ─────────────────────────────────────────────────────────
   const reviewUnusual = perf?.review?.unusual || [];
   const topMover = perf?.review?.topMover;
 
