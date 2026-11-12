@@ -32,6 +32,8 @@ interface B2BLicense {
   order_id?: string;
   telegram_chat_id: number | null;
   group_title: string | null;
+  group_username?: string | null;
+  invite_link?: string | null;
   tier: "b2b_starter" | "b2b_pro" | "b2b_enterprise";
   daily_limit: number;
   daily_used: number;
@@ -462,13 +464,25 @@ export default function B2BTab() {
 
                   return (
                     <tr key={lic.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                      {/* Group Title & Chat ID */}
+                      {/* Group Title & Chat ID & Direct Link */}
                       <td className="p-3.5">
-                        <div className="font-black text-sm text-zinc-900 dark:text-white flex items-center gap-1.5">
+                        <div className="font-black text-sm text-zinc-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                           <Bot className="w-4 h-4 text-emerald-500 shrink-0" />
                           <span>{lic.group_title || "مجموعة غير مسماة"}</span>
+                          {lic.invite_link && (
+                            <a
+                              href={lic.invite_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-black hover:bg-emerald-100 transition-colors"
+                              title="فتح المجموعة / القناة في تليجرام"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>دخول الجروب</span>
+                            </a>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1 mt-1 text-[11px] font-mono text-zinc-500">
+                        <div className="flex items-center gap-2 mt-1 text-[11px] font-mono text-zinc-500 flex-wrap">
                           {lic.telegram_chat_id ? (
                             <>
                               <span>Chat ID: {lic.telegram_chat_id}</span>
@@ -479,6 +493,16 @@ export default function B2BTab() {
                               >
                                 <Copy className="w-3 h-3" />
                               </button>
+                              {lic.invite_link && (
+                                <button
+                                  onClick={() => copyToClipboard(lic.invite_link!, "رابط الجروب")}
+                                  className="text-emerald-600 hover:underline flex items-center gap-0.5 text-[10px]"
+                                  title="نسخ رابط الدعوة"
+                                >
+                                  <Copy className="w-2.5 h-2.5" />
+                                  <span>نسخ الرابط</span>
+                                </button>
+                              )}
                             </>
                           ) : (
                             <span className="text-amber-600 dark:text-amber-400 font-bold">

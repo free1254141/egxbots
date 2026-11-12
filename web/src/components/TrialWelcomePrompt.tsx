@@ -43,24 +43,63 @@ export default function TrialWelcomePrompt() {
       return;
     }
 
+    // ── SESSION CACHE ──────────────────────────────────────────────────────────
+    // Cache trial+quota check in sessionStorage for the full browser session.
+    // This cuts /api/subscription/trial & /api/user/quota calls from N (one per
+    // page navigation) down to 1 (once per tab open), saving ~95% of invocations
+    // and dramatically reducing Supabase Egress bandwidth.
+    const SESSION_KEY = "egxbots_trial_status_v2";
+    try {
+      const cached = sessionStorage.getItem(SESSION_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { eligible: boolean; telegramUnlinked: boolean; ts: number };
+        // Honour cache for up to 5 minutes (matches server-side Cache-Control max-age)
+        if (parsed.ts && Date.now() - parsed.ts < 5 * 60 * 1000) {
+          if (parsed.eligible) {
+            setEligible(true);
+            setDismissed(false);
+          } else if (parsed.telegramUnlinked) {
+            const tgDismissed = localStorage.getItem("egxbots_tg_prompt_dismissed_v1");
+            if (!tgDismissed || Number(tgDismissed) < Date.now()) {
+              setTelegramUnlinked(true);
+              setDismissed(false);
+            }
+          }
+          return;
+        }
+      }
+    } catch {
+      // sessionStorage blocked (e.g. private browsing) – fall through to fetch
+    }
+    // ── END SESSION CACHE ──────────────────────────────────────────────────────
+
     let active = true;
-    fetch("/api/subscription/trial", { cache: "no-store" })
+    // Remove cache: "no-store" so the browser can honour the server's
+    // Cache-Control: private, max-age=300 response header.
+    fetch("/api/subscription/trial")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!active) return;
         if (data?.eligible) {
           setEligible(true);
           setDismissed(false);
+          try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify({ eligible: true, telegramUnlinked: false, ts: Date.now() }));
+          } catch { /* ignore */ }
         } else {
           setEligible(false);
           // Check if active trial or Pro but telegram unlinked
-          fetch("/api/user/quota", { cache: "no-store" })
+          fetch("/api/user/quota")
             .then((r) => (r.ok ? r.json() : null))
             .then((quota) => {
               if (!active) return;
               const isProOrTrial = quota?.plan?.is_pro || quota?.plan?.is_trial;
               const tgLinked = quota?.plan?.telegram_linked;
-              if (isProOrTrial && !tgLinked) {
+              const tgUnlinked = !!(isProOrTrial && !tgLinked);
+              try {
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify({ eligible: false, telegramUnlinked: tgUnlinked, ts: Date.now() }));
+              } catch { /* ignore */ }
+              if (tgUnlinked) {
                 const tgDismissed = localStorage.getItem("egxbots_tg_prompt_dismissed_v1");
                 if (!tgDismissed || Number(tgDismissed) < Date.now()) {
                   setTelegramUnlinked(true);

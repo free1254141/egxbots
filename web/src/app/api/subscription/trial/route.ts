@@ -6,6 +6,12 @@ import { invalidateViewerPlanCache } from "@/lib/supabase/viewer-context";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Cache trial status per-user for 5 minutes (private = only browser, not CDN)
+// stale-while-revalidate=600 means serve stale for 10 more minutes while refreshing
+const TRIAL_CACHE_HEADERS = {
+  "Cache-Control": "private, max-age=300, stale-while-revalidate=600",
+};
+
 export async function GET() {
   try {
     const supabase = await createSupabaseServerClient();
@@ -35,14 +41,17 @@ export async function GET() {
 
     if (trialRow) {
       const isStillActive = trialRow.expires_at && new Date(trialRow.expires_at).getTime() > Date.now();
-      return NextResponse.json({
-        ok: true,
-        eligible: false,
-        has_used_trial: true,
-        is_active: isStillActive,
-        expires_at: trialRow.expires_at,
-        reason: isStillActive ? "فترتك التجريبية نشطة حالياً" : "لقد استخدمت الفترة التجريبية من قبل",
-      });
+      return NextResponse.json(
+        {
+          ok: true,
+          eligible: false,
+          has_used_trial: true,
+          is_active: isStillActive,
+          expires_at: trialRow.expires_at,
+          reason: isStillActive ? "فترتك التجريبية نشطة حالياً" : "لقد استخدمت الفترة التجريبية من قبل",
+        },
+        { headers: TRIAL_CACHE_HEADERS }
+      );
     }
 
     // Check active paid Pro subscription
@@ -60,12 +69,15 @@ export async function GET() {
     });
 
     if (hasActivePro) {
-      return NextResponse.json({
-        ok: true,
-        eligible: false,
-        has_used_trial: false,
-        reason: "لديك بالفعل اشتراك Pro نشط",
-      });
+      return NextResponse.json(
+        {
+          ok: true,
+          eligible: false,
+          has_used_trial: false,
+          reason: "لديك بالفعل اشتراك Pro نشط",
+        },
+        { headers: TRIAL_CACHE_HEADERS }
+      );
     }
 
     // Check if user previously had an approved paid subscription or is a founders offer member
@@ -84,19 +96,25 @@ export async function GET() {
     ]);
 
     if ((approvedOrders && approvedOrders.length > 0) || (founderMember && founderMember.length > 0)) {
-      return NextResponse.json({
-        ok: true,
-        eligible: false,
-        has_used_trial: false,
-        reason: "التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك",
-      });
+      return NextResponse.json(
+        {
+          ok: true,
+          eligible: false,
+          has_used_trial: false,
+          reason: "التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك",
+        },
+        { headers: TRIAL_CACHE_HEADERS }
+      );
     }
 
-    return NextResponse.json({
-      ok: true,
-      eligible: true,
-      has_used_trial: false,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        eligible: true,
+        has_used_trial: false,
+      },
+      { headers: TRIAL_CACHE_HEADERS }
+    );
   } catch (err: any) {
     console.error("[api/subscription/trial] GET error:", err);
     return NextResponse.json(

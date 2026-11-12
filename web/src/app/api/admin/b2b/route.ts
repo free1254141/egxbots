@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    // Attempt to enrich with owner emails if available
+    // Attempt to enrich with owner emails and Telegram invite links if available
     let enriched = licenses || [];
     try {
       const { data: usersData } = await supabase.auth.admin.listUsers({ perPage: 1000 });
@@ -37,6 +37,53 @@ export async function GET(request: Request) {
       }));
     } catch {
       // Fallback without user emails
+    }
+
+    // Enrich active licenses that have telegram_chat_id with live Telegram group links
+    const botToken = process.env.ARTORO_AI_BOT || "";
+    if (botToken) {
+      enriched = await Promise.all(
+        enriched.map(async (lic) => {
+          if (!lic.telegram_chat_id) return lic;
+          try {
+            const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: lic.telegram_chat_id }),
+              cache: "no-store",
+            });
+            const cdata = await resp.json();
+            if (cdata.ok && cdata.result) {
+              const res = cdata.result;
+              let link = res.invite_link || null;
+              if (res.username) {
+                link = `https://t.me/${res.username}`;
+              }
+              // If still no invite link, try exportChatInviteLink
+              if (!link) {
+                try {
+                  const expResp = await fetch(`https://api.telegram.org/bot${botToken}/exportChatInviteLink`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: lic.telegram_chat_id }),
+                  });
+                  const expData = await expResp.json();
+                  if (expData.ok && expData.result) {
+                    link = expData.result;
+                  }
+                } catch {}
+              }
+              return {
+                ...lic,
+                invite_link: link,
+                group_title: res.title || lic.group_title,
+                group_username: res.username || null,
+              };
+            }
+          } catch {}
+          return lic;
+        })
+      );
     }
 
     // Today's aggregate stats
