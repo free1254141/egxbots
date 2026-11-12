@@ -227,10 +227,36 @@ def quick_activate_pro(chat_id: int, target_email: str, duration_days: int = 30)
         except Exception as w_err:
             print(f"[SUPPORT_CHAT] send_pro_welcome warning: {w_err}")
 
+        # Send automated confirmation message to user's web support chat session
+        web_support_sent = False
+        try:
+            web_support_msg = (
+                f"أهلاً بك يا فندم! 👑 تم مراجعة طلبك وتفعيل اشتراكك في باقة Pro بنجاح.\n\n"
+                f"📅 مدة الاشتراك: {duration_days} يوماً (ساري حتى {sub_end_str}).\n"
+                f"💎 رابط قناة VIP الحصري على تليجرام:\n"
+                f"{invite_link or 'https://t.me/EGX_Bots'}\n\n"
+                f"نتمنى لك دائماً تداولات ناجحة وموفقة، وتحت أمرك في أي وقت! 🚀"
+            )
+            _supabase.table("support_messages").insert({
+                "session_id": user_id,
+                "sender": "admin",
+                "content": web_support_msg,
+                "user_name": "إدارة EGX BOTS",
+                "user_id": user_id,
+                "image_url": None,
+            }).execute()
+            web_support_sent = True
+        except Exception as s_err:
+            print(f"[SUPPORT_CHAT] web support notification warning: {s_err}")
+
         tg_status_note = (
             "📲 <b>تم إرسال رسالة ترحيبية ورابط قناة VIP للعميل على تليجرامه مباشرة!</b>"
             if welcomed else
             "ℹ️ <i>العميل لم يربط حسابه بتليجرام بعد — يمكنك نسخ رابط قناة VIP أدناه وإرساله له يدوياً.</i>"
+        )
+        web_status_note = (
+            "💬 <b>تم إرسال رسالة تأكيد فورية في شات الدعم الفني على الموقع للعميل!</b>"
+            if web_support_sent else ""
         )
 
         success_msg = (
@@ -243,6 +269,7 @@ def quick_activate_pro(chat_id: int, target_email: str, duration_days: int = 30)
             f"💎 <b>رابط قناة VIP الخاص بالعميل:</b>\n"
             f"{invite_link or 'https://t.me/EGX_Bots'}\n\n"
             f"{tg_status_note}\n"
+            f"{web_status_note}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
         send_telegram_message(chat_id, success_msg, reply_markup=ADMIN_REPLY_KEYBOARD)
@@ -386,7 +413,28 @@ def handle_customer_message(session_id: str, content: str, user_name: Optional[s
             f"💡 <i>اضغط Reply (رد) على الرسالة لإرسال ردك مباشرة للعميل.</i>"
         )
         send_telegram_message(admin_chat_id, tg_text)
-        
+
+    # Process with DeepSeek Support AI Agent in background
+    def _run_ai_agent():
+        try:
+            from api.support_ai_agent import process_support_message_with_deepseek, is_support_ai_enabled
+            if is_support_ai_enabled():
+                reply = process_support_message_with_deepseek(session_id, content, user_name)
+                if reply:
+                    _init_supabase()
+                    if _supabase:
+                        _supabase.table("support_messages").insert({
+                            "session_id": session_id,
+                            "user_id": session_id,
+                            "sender": "admin",
+                            "content": reply,
+                            "user_name": "المساعد الذكي (DeepSeek)"
+                        }).execute()
+        except Exception as ai_e:
+            print(f"[SUPPORT_CHAT] AI Agent background error: {ai_e}")
+
+    threading.Thread(target=_run_ai_agent, daemon=True).start()
+
     return saved_msg
 
 def handle_telegram_update(data: dict):
@@ -627,7 +675,24 @@ def handle_telegram_update(data: dict):
         send_telegram_message(chat_id, get_comprehensive_report(), reply_markup=ADMIN_INLINE_KEYBOARD)
         return
 
-    # Fallback for arbitrary messages when no active customer session exists (NO AI / NO LLM)
+    # If admin explicitly addresses AI with /ai or ذكاء or مساعد or asks AI assistant
+    if clean_cmd.startswith(("/ai", "ai ", "ذكاء", "مساعد", "بوت")):
+        try:
+            from api.support_ai_agent import process_support_message_with_deepseek, is_support_ai_enabled
+            if is_support_ai_enabled():
+                ai_query = re.sub(r'^(?:/ai|ai|ذكاء|مساعد|بوت)\s*', '', text, flags=re.IGNORECASE).strip()
+                ai_reply = process_support_message_with_deepseek(
+                    session_id=f"admin_{chat_id}",
+                    user_message=ai_query or text,
+                    user_name="Admin"
+                )
+                if ai_reply:
+                    send_telegram_message(chat_id, ai_reply, reply_markup=ADMIN_REPLY_KEYBOARD)
+                    return
+        except Exception as ai_err:
+            print(f"[SUPPORT_CHAT] Admin AI fallback warning: {ai_err}")
+
+    # Fallback for arbitrary messages when no active customer session exists
     guide_text = (
         "ℹ️ <b>لم يتم إرسال الرسالة لعدم وجود جلسة دعم فني نشطة حالياً.</b>\n\n"
         "للرد على عميل:\n"

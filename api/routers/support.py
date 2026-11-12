@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 from api.stock_ai import _init_supabase, supabase as _supabase
 from api.support_chat import handle_customer_message, handle_telegram_update, get_token
+from api.support_ai_agent import process_support_message_with_deepseek, is_support_ai_enabled
+import threading
 
 router = APIRouter()
 
@@ -21,6 +23,33 @@ async def send_customer_message(req: CustomerMessageRequest):
     if not msg:
         raise HTTPException(status_code=500, detail="Failed to save message")
     return {"ok": True, "message": msg}
+
+def _bg_process_ai_support(session_id: str, content: str, user_name: Optional[str]):
+    try:
+        reply = process_support_message_with_deepseek(session_id, content, user_name)
+        if reply:
+            _init_supabase()
+            if _supabase:
+                _supabase.table("support_messages").insert({
+                    "session_id": session_id,
+                    "user_id": session_id,
+                    "sender": "admin",
+                    "content": reply,
+                    "user_name": "المساعد الذكي (DeepSeek)"
+                }).execute()
+    except Exception as e:
+        print(f"[SUPPORT_ROUTER] Background AI support error: {e}")
+
+@router.post("/api/support/ai-process")
+@router.post("/support/ai-process")
+async def support_ai_process(req: CustomerMessageRequest):
+    """Processes customer query with DeepSeek in the background and saves response to support_messages."""
+    threading.Thread(
+        target=_bg_process_ai_support,
+        args=(req.session_id, req.content, req.user_name),
+        daemon=True
+    ).start()
+    return {"ok": True, "status": "processing"}
 
 @router.get("/support/messages")
 async def get_customer_messages(session_id: str):

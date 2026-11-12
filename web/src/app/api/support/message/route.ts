@@ -107,6 +107,30 @@ export async function POST(req: Request) {
       console.error("Failed to insert auto acknowledgment:", ackErr);
     }
 
+    // Trigger DeepSeek Support AI Agent asynchronously in Python backend
+    try {
+      const backendBase =
+        process.env.TRADING_SIGNALS_API_URL ||
+        process.env.PYTHON_BACKEND_URL ||
+        (process.env.NODE_ENV === "production"
+          ? "https://weeasdwee-ai-bot.hf.space"
+          : "http://127.0.0.1:8000");
+
+      fetch(`${backendBase.replace(/\/$/, "")}/api/support/ai-process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          content,
+          user_name: userName,
+        }),
+      }).catch((e) => {
+        console.warn("[SUPPORT_MSG] Backend AI trigger warning:", e?.message);
+      });
+    } catch (aiTriggerErr) {
+      console.warn("[SUPPORT_MSG] AI trigger failed:", aiTriggerErr);
+    }
+
     // Forward to admin on Telegram with Session ID for instant Reply
     try {
       const adminChatId = await getAdminChatId();

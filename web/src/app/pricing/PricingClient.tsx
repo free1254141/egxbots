@@ -1522,6 +1522,39 @@ export default function PricingClient() {
 
         {pricingCategory === "retail" ? (
           <>
+            {/* ── 3-DAY PRO FREE TRIAL HERO BANNER ── */}
+            {trialEligible && !isPro && (
+              <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/80 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/5 dark:from-emerald-950/50 dark:via-zinc-900 dark:to-teal-950/30 p-5 sm:p-6 shadow-xl shadow-emerald-500/10 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="space-y-1.5 text-center md:text-start">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500 text-black text-[10px] font-black uppercase">
+                    <Sparkles className="w-3 h-3 fill-black" />
+                    <span>{isAr ? "فرصة للمستخدمين الجدد · بدون أي بطاقة بنكية" : "Special Offer · Zero Card Required"}</span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
+                    {isAr ? "🎁 جرّب منصة EGX BOTS PRO بالكامل مجاناً لمدة 3 أيام" : "🎁 Try EGX BOTS PRO Free for 3 Full Days"}
+                  </h2>
+                  <p className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 max-w-2xl leading-relaxed">
+                    {isAr
+                      ? "افتح توصيات الخوارزميات، ورادار التجميع الذكي، وتنبيهات الإسكانر الفورية على تليجرام، وشات الذكاء الاصطناعي بدون أي قيود لمدة 3 أيام كاملة."
+                      : "Unlock quantitative swing signals, smart money accumulation scans, live Telegram alerts, and unlimited AI analysis for 3 days."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleStartTrial}
+                  disabled={trialLoading}
+                  className="shrink-0 w-full md:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-black text-xs sm:text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-transform cursor-pointer disabled:opacity-50"
+                >
+                  {trialLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 fill-black" />
+                  )}
+                  <span>{isAr ? "ابدأ التجربة المجانية 3 أيام الآن ⚡" : "Start 3-Day Free Trial Now ⚡"}</span>
+                </button>
+              </div>
+            )}
+
         <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/80 dark:border-zinc-800/80">
           <div className="text-center">
             <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
@@ -1961,6 +1994,40 @@ export default function PricingClient() {
                 <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                 <span>{isAr ? "صلاحية 36,500 يوم · بدون أي تجديد" : "36,500 days · Zero renewals"}</span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── ROI & INVESTMENT VALUE EQUATION ── */}
+        <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-zinc-900/40 to-teal-950/20 p-6 sm:p-8 backdrop-blur-sm">
+          <div className="max-w-3xl mx-auto text-center space-y-4">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-black uppercase">
+              <Zap className="w-3.5 h-3.5" />
+              {isAr ? "معادلة العائد على الاستثمار" : "The Investment Equation"}
+            </span>
+            <h3 className="text-xl sm:text-2xl font-black text-white">
+              {isAr
+                ? "صفقة ناجحة واحدة بنسبة +5% تغطي اشتراكك السنوي بالكامل"
+                : "A single +5% trade covers your entire annual subscription"}
+            </h3>
+            <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-medium">
+              {isAr
+                ? "في محفظة قدرها 20,000 ج.م، ربح 5% في صفقة سوينج واحدة يعادل 1,000 ج.م — أي أكثر من قيمة اشتراك السنة الكاملة (900 ج.م). هذا بدون احتساب رأس المال الذي تحميه عبر الالتزام الصارم بوقف الخسارة (4%) وتجنب فخاخ التصريف."
+                : "On a 20,000 EGP portfolio, a 5% gain on a single swing trade generates 1,000 EGP — more than the entire annual plan (900 EGP). Plus, disciplined 4% stop-losses protect you from multi-thousand-pound drawdowns."}
+            </p>
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-4 text-xs font-bold text-zinc-400">
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                {isAr ? "حماية رأس المال من الهبوط الحاد" : "Strict Drawdown Protection"}
+              </span>
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                {isAr ? "إشارات مبكرة قبل تحرك السهم" : "Early Volume Breakouts"}
+              </span>
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                {isAr ? "تنبيهات فورية على هاتفك" : "Instant Mobile Signals"}
+              </span>
             </div>
           </div>
         </div>
