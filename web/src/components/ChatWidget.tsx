@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter, usePathname } from "next/navigation";
 import NextImage from "next/image";
-import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Mic, MicOff } from "lucide-react";
+import { Send, X, Sparkles, User, Loader2, Lock, Maximize2, Minimize2, LogIn, UserPlus, ImagePlus, XCircle, Cpu, ChevronDown, ArrowDown, ArrowUp, Check, PanelLeft, Square, Download, ZoomIn, ExternalLink, Palette, Settings, Mic, MicOff, Plus } from "lucide-react";
 import { playConnectionChime, cleanVoiceTranscript } from "@/lib/voice-utils";
 import { VoiceNotePlayer, primeAudioCache } from "@/components/chat/VoiceNotePlayer";
 import { useActiveVoicePlayback, formatVoiceTime } from "@/components/chat/VoicePlaybackContext";
@@ -726,6 +726,22 @@ export default function ChatWidget() {
                         <span className="hidden sm:inline-flex rounded-md bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950 border border-amber-500/50 shadow-xs shrink-0">V3</span>
                     </div>
                     <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                        {user && !isInitializing && !accessError && (
+                            <button
+                                onClick={() => {
+                                    createNewSession();
+                                    if (typeof window !== "undefined" && window.innerWidth < 768 && isSidebarOpen) {
+                                        setIsSidebarOpen(false);
+                                    }
+                                }}
+                                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg border border-amber-500/50 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 text-zinc-950 text-[11px] sm:text-xs font-black shadow-xs hover:brightness-105 active:scale-95 transition-all cursor-pointer shrink-0"
+                                title="بدء محادثة جديدة"
+                                aria-label="بدء محادثة جديدة"
+                            >
+                                <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+                                <span className="hidden sm:inline">محادثة جديدة</span>
+                            </button>
+                        )}
                         {user && !isInitializing && !accessError && (
                             <div className="text-[9px] sm:text-[10px] font-extrabold px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-300 dark:bg-black dark:text-white dark:border-white/20 uppercase shadow-xs shrink-0 whitespace-nowrap">
                                 {quotaLimit >= 999 

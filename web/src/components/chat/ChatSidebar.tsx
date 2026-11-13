@@ -131,6 +131,7 @@ export function ChatSidebar({
                         sessions.map((s) => {
                             const isActive = s.id === activeSessionId;
                             const isEditing = editingId === s.id;
+                            const isTelegram = (s.title || "").includes("[تليجرام") || (s.title || "").startsWith("📢") || (s.title || "").startsWith("🔒 [بوت");
 
                             return (
                                 <div
@@ -148,7 +149,7 @@ export function ChatSidebar({
                                     }`}
                                 >
                                     <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                                        <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${isActive ? "text-sky-700 dark:text-[#FFE600]" : "text-slate-400"}`} />
+                                        <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${isActive ? "text-sky-700 dark:text-[#FFE600]" : isTelegram ? "text-sky-500 dark:text-sky-400" : "text-slate-400"}`} />
 
                                         {isEditing ? (
                                             <input
@@ -167,7 +168,14 @@ export function ChatSidebar({
                                                 autoFocus
                                             />
                                         ) : (
-                                            <span className="truncate">{s.title || "محادثة جديدة"}</span>
+                                            <div className="flex items-center gap-1.5 truncate flex-1 min-w-0">
+                                                {isTelegram && (
+                                                    <span className="text-[9px] bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-400/30 px-1 py-0.2 rounded font-black shrink-0">
+                                                        تليجرام
+                                                    </span>
+                                                )}
+                                                <span className="truncate">{s.title || "محادثة جديدة"}</span>
+                                            </div>
                                         )}
                                     </div>
 

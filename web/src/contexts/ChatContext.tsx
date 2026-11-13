@@ -177,6 +177,10 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 
 // Local Storage Persistence Helpers
+export function isTelegramSessionMeta(title?: string): boolean {
+    const t = title || "";
+    return t.includes("[تليجرام") || t.startsWith("📢") || t.startsWith("🔒 [بوت");
+}
 
 function getStoredSessions(): ChatSession[] {
 
@@ -936,19 +940,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 const activeId = activeSessionIdRef.current;
 
-                const activeExistsOnServer = !!activeId && data.sessions.some((s: ChatSession) => s.id === activeId);
+                const activeSessionObj = data.sessions.find((s: ChatSession) => s.id === activeId);
+
+                const activeExistsOnServer = !!activeId && !!activeSessionObj;
+
+                const activeIsTelegram = activeSessionObj ? isTelegramSessionMeta(activeSessionObj.title) : false;
 
                 const activeSessionIsSending = !!activeId && !!loadingSessionIds.current[activeId];
 
-                if (!activeExistsOnServer && !activeSessionIsSending) {
+                if ((!activeExistsOnServer || activeIsTelegram) && !activeSessionIsSending) {
 
-                    if (data.sessions.length === 0) {
+                    const webSessions = data.sessions.filter((s: ChatSession) => !isTelegramSessionMeta(s.title));
 
-                        // Clear a locally remembered room when this account has
+                    if (webSessions.length === 0) {
 
-                        // no server-side rooms. Do not leave another account's
-
-                        // cached conversation visible in an empty account.
+                        // Clear room or start fresh when this account has no web rooms.
 
                         setActiveSessionId(null);
 
@@ -956,15 +962,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     } else {
 
-                        const latestServerSession = [...data.sessions].sort(
+                        const latestWebSession = [...webSessions].sort(
 
                             (a: ChatSession, b: ChatSession) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
 
                         )[0];
 
-                        setActiveSessionId(latestServerSession.id);
+                        setActiveSessionId(latestWebSession.id);
 
-                        const localMessages = sessionMessagesCache.current[latestServerSession.id] || getStoredMessages(latestServerSession.id);
+                        const localMessages = sessionMessagesCache.current[latestWebSession.id] || getStoredMessages(latestWebSession.id);
 
                         if (localMessages.length > 0) {
 
@@ -978,7 +984,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                             }));
 
-                            sessionMessagesCache.current[latestServerSession.id] = sanitized;
+                            sessionMessagesCache.current[latestWebSession.id] = sanitized;
 
                             setMessages(sanitized);
 
@@ -988,7 +994,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                         }
 
-                        void fetchSessionMessages(latestServerSession.id);
+                        void fetchSessionMessages(latestWebSession.id);
 
                     }
 
@@ -1353,7 +1359,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         let currentSessionId = activeSessionIdRef.current;
 
-        if (!currentSessionId) {
+        const currentSessionObj = currentSessionId ? sessions.find(s => s.id === currentSessionId) : null;
+
+        const isCurrentTelegram = currentSessionObj ? isTelegramSessionMeta(currentSessionObj.title) : false;
+
+        if (!currentSessionId || isCurrentTelegram) {
 
             currentSessionId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "session-" + Date.now();
 
