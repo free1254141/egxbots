@@ -33,11 +33,13 @@ _run_history: List[Dict[str, Any]] = []
 _scheduler_lock = threading.RLock()
 _scheduler_thread = None
 _stop_event = threading.Event()
-_last_recommendation_retry_at = 0.0
-_last_vip_revocation_at = 0.0
-_last_subscription_reminders_at = 0.0
-_last_marketing_lifecycle_at = 0.0
-_last_short_swings_retry_at = 0.0
+_last_recommendation_retry_at = time.monotonic()
+_last_vip_revocation_at = time.monotonic()
+# Start each periodic worker on its interval, not at startup. A Space restart
+# used to trigger an immediate reminder/marketing pass every time.
+_last_subscription_reminders_at = time.monotonic()
+_last_marketing_lifecycle_at = time.monotonic()
+_last_short_swings_retry_at = time.monotonic()
 _last_phase_attempts = {}
 _completed_phases = set()
 _DEFAULT_STALE_RUN_MINUTES = 90

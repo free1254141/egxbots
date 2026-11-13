@@ -7,7 +7,7 @@ import { executionSupabase } from "./execution";
 import { executeChartStrategyTool, type ChartHistoryCache } from "./chart-strategy-tools";
 import { sanitizeNewsRows } from "./news-evidence";
 import { todayInCairo } from "./cairo-date";
-import { hasActiveProSubscription, paymentsEnabled, planLimits } from "./plan-gate";
+import { hasActiveProSubscription, planLimits } from "./plan-gate";
 import { isShariaCompliant, getShariaCompliantCount, SHARIA_COMPLIANT_EGX_SYMBOLS } from "@/lib/shariaStocks";
 import { getCanonicalStockName } from "./stock-names";
 import { calculateStockCompositeScore } from "./stock-scoring";
@@ -615,12 +615,42 @@ async function executeRawTool(
                 .eq("user_id", userId).eq("status", "open").limit(101);
             const positions = posRows || [];
             if (operation === "view") {
+                // One batched indicator read instead of one query per holding.
+                // Large portfolios used to issue 2 queries per position.
+                const viewSymbols = positions.slice(0, 100).map((p: any) => String(p.symbol || "")).filter(Boolean);
+                const indicatorBySymbol = new Map<string, any>();
+                if (viewSymbols.length) {
+                    try {
+                        const { data: latestDateRows } = await supabase.from("stock_technical_indicators")
+                            .select("date").eq("exchange", "EGX").order("date", { ascending: false }).limit(1);
+                        const latestIndicatorDate = latestDateRows?.[0]?.date;
+                        if (latestIndicatorDate) {
+                            const { data: sameDayRows } = await supabase.from("stock_technical_indicators")
+                                .select("symbol,close,change_pct,rsi_14,king_ai_score,egx_ai_score,date")
+                                .eq("exchange", "EGX").eq("date", latestIndicatorDate).in("symbol", viewSymbols);
+                            for (const row of sameDayRows || []) {
+                                indicatorBySymbol.set(normalizeSymbol(row.symbol), row);
+                            }
+                        }
+                        const missingSymbols = viewSymbols.filter((sym: string) => !indicatorBySymbol.has(normalizeSymbol(sym)));
+                        if (missingSymbols.length) {
+                            const { data: staleRows } = await supabase.from("stock_technical_indicators")
+                                .select("symbol,close,change_pct,rsi_14,king_ai_score,egx_ai_score,date")
+                                .eq("exchange", "EGX").in("symbol", missingSymbols)
+                                .order("date", { ascending: false }).limit(missingSymbols.length * 2);
+                            for (const row of staleRows || []) {
+                                const key = normalizeSymbol(row.symbol);
+                                if (!indicatorBySymbol.has(key)) indicatorBySymbol.set(key, row);
+                            }
+                        }
+                    } catch (indicatorErr) {
+                        console.warn("[manage_portfolio] batched indicator read failed:", indicatorErr);
+                    }
+                }
                 const enriched = [];
                 for (const p of positions.slice(0, 100)) {
-                    const { data: indRows } = await supabase.from("stock_technical_indicators")
-                        .select("close,change_pct,rsi_14,king_ai_score,egx_ai_score,date")
-                        .eq("exchange", "EGX").eq("symbol", p.symbol).order("date", { ascending: false }).limit(1);
-                    const quote = await reconcileStockQuote(supabase, p.symbol, indRows?.[0], { preferLive: false });
+                    const indicatorRow = indicatorBySymbol.get(normalizeSymbol(p.symbol));
+                    const quote = await reconcileStockQuote(supabase, p.symbol, indicatorRow, { preferLive: false });
                     const qty = finite(p.quantity), entry = finite(p.entry_price), latest = finite(quote?.close);
                     const cost = qty != null && entry != null ? qty * entry : null;
                     const value = qty != null && latest != null ? qty * latest : null;
@@ -630,16 +660,37 @@ async function executeRawTool(
                         availability: latest == null ? "missing" : "available", cost: round(cost), market_value: round(value),
                         profit_loss_val: cost != null && value != null ? round(value - cost) : null,
                         profit_loss_pct: entry != null && entry > 0 && latest != null ? round((latest-entry)/entry*100) : null,
-                        rsi: quote?.rsi_14 ?? null, king_ai: quote?.king_ai_score ?? indRows?.[0]?.king_ai_score ?? null, egx_ai: quote?.egx_ai_score ?? indRows?.[0]?.egx_ai_score ?? null });
+                        rsi: quote?.rsi_14 ?? null, king_ai: quote?.king_ai_score ?? indicatorRow?.king_ai_score ?? null, egx_ai: quote?.egx_ai_score ?? indicatorRow?.egx_ai_score ?? null });
                 }
                 const complete = positions.length <= 100 && enriched.every(p => p.cost != null && p.market_value != null);
                 const invested = enriched.every(p => p.cost != null) ? enriched.reduce((n,p) => n + p.cost!, 0) : null;
                 const market = complete ? enriched.reduce((n,p) => n + p.market_value!, 0) : null;
+                const pnlValue = market != null && invested != null ? round(market-invested) : null;
+                // Compact digest so the model does not have to reason over every
+                // raw row (large portfolios burned output tokens restating them).
+                const weighted = enriched
+                    .filter(p => p.market_value != null && market != null && market > 0)
+                    .map(p => ({ symbol: p.symbol, weight_pct: Math.round((p.market_value! / market!) * 10000) / 100 }))
+                    .sort((a, b) => b.weight_pct - a.weight_pct);
+                const ranked = enriched
+                    .filter(p => p.profit_loss_pct != null)
+                    .sort((a, b) => (a.profit_loss_pct! - b.profit_loss_pct!));
+                const portfolio_brief = {
+                    positions_count: enriched.length,
+                    top_weights: weighted.slice(0, 5),
+                    concentration_top1_pct: weighted[0]?.weight_pct ?? null,
+                    worst: ranked.slice(0, 3).map(p => ({ symbol: p.symbol, profit_loss_pct: p.profit_loss_pct, profit_loss_val: p.profit_loss_val })),
+                    best: ranked.slice(-3).reverse().map(p => ({ symbol: p.symbol, profit_loss_pct: p.profit_loss_pct, profit_loss_val: p.profit_loss_val })),
+                };
                 return { status: "success", operation, persisted: false, read_complete: true,
                     empty: positions.length === 0, saved_positions_found: positions.length > 0,
                     valuation_complete: complete, truncated: positions.length > 100, positions: enriched,
+                    portfolio_brief,
+                    reporting_guidance: enriched.length > 8
+                        ? "المحفظة كبيرة: ابدأ بالملخص الإجمالي ثم جدول مختصر (الرمز | الكمية | متوسط الشراء | آخر سعر | الربح/الخسارة %) لكل الأسهم، وبعده 3 ملاحظات كحد أقصى مبنية على portfolio_brief. ممنوع فقرة تفصيلية لكل سهم وممنوع تكرار الأرقام الإجمالية أو سرد البيانات الخام."
+                        : "اعرض المراكز بإيجاز واذكر أهم ملاحظتين فقط.",
                     summary: { positions_count: enriched.length, total_invested: invested,
-                        total_market_value: market, unrealized_pl_val: market != null && invested != null ? round(market-invested) : null,
+                        total_market_value: market, unrealized_pl_val: pnlValue,
                         unrealized_pl_pct: market != null && invested != null && invested > 0 ? round((market-invested)/invested*100) : null } };
             }
             if (positions.length > 100) return portfolioFailure(operation, "portfolio_too_large", "المحفظة أكبر من حد المعالجة الآمن؛ لم يتم تعديل أي مركز.");
@@ -647,10 +698,10 @@ async function executeRawTool(
             const existing = positions.find((p: any) => p.symbol === symbol);
             // Keep chatbot writes aligned with the profile's paid-plan capacity.
             // This is an entitlement check, never a classifier or text parser.
-            if (operation === "add" && !existing && paymentsEnabled()) {
+            if (operation === "add" && !existing) {
                 const { data: subscriptions } = await supabase.from("subscriptions")
                     .select("plan_id,status,current_period_end")
-                    .eq("user_id", userId).in("status", ["active", "trialing"]).limit(5);
+                    .eq("user_id", userId).limit(10);
                 const maxPositions = planLimits(hasActiveProSubscription(subscriptions || []) ? "pro" : "free").portfolio_stocks;
                 if (positions.length >= maxPositions) {
                     return portfolioFailure(operation, "portfolio_limit_reached", `وصلت المحفظة إلى حد ${maxPositions} مراكز لهذه الباقة؛ لم يتم استبدال أي مركز تلقائياً.`);

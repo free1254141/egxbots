@@ -42,7 +42,7 @@ export async function GET() {
         }
 
         return NextResponse.json(
-            { ...snapshot, market_symbols: marketSymbols, portfolio_limit: pro ? null : portfolioLimit, is_pro: pro },
+            { ...snapshot, market_symbols: marketSymbols, portfolio_limit: portfolioLimit, is_pro: pro },
             { headers: { "Cache-Control": "private, max-age=15, stale-while-revalidate=60" } },
         );
     } catch (e: any) {
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
                 const currentSymbols = new Set((existingRows || []).map((r: any) => String(r.symbol || "").toUpperCase()));
                 const newDistinctSymbols = new Set(preparedItems.map(p => p.symbol).filter(s => !currentSymbols.has(s)));
 
-                if (!pro && (currentSymbols.size + newDistinctSymbols.size) > limit) {
+                if ((currentSymbols.size + newDistinctSymbols.size) > limit) {
                     return NextResponse.json({
                         ok: false,
                         isQuotaReached: true,
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
                         currentCount: currentSymbols.size,
                         attemptedCount: newDistinctSymbols.size,
                         stocks: preparedItems,
-                        message: `الخطة المجانية تتيح حتى ${limit} أسهم في المحفظة (محفظتك الحالية بها ${currentSymbols.size} أسهم). قم بالترقية لباقة Pro لإدارة حتى 10 أسهم وتفعيل تنبيهات السوينج الحية!`,
+                        message: `الحد الأقصى لمحفظتك ${limit} سهم (محفظتك الحالية بها ${currentSymbols.size} أسهم).${pro ? "" : ` قم بالترقية لباقة Pro لإدارة حتى ${planLimits("pro").portfolio_stocks} سهم وتفعيل تنبيهات السوينج الحية!`}`,
                     });
                 }
 
@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
                     const pro = isPro(planRows || []);
                     const limit = planLimits(pro ? "pro" : "free").portfolio_stocks;
                     const currentSymbols = new Set((rows || []).map((row: any) => String(row.symbol || "").toUpperCase()));
-                    if (!pro && !currentSymbols.has(symbol) && currentSymbols.size >= limit) return NextResponse.json({ ok: false, message: `الخطة المجانية تسمح بحد أقصى ${limit} أسهم مختلفة في المحفظة. احذف مركزاً أو قم بالترقية لإضافة سهم آخر.` }, { status: 403 });
+                    if (!currentSymbols.has(symbol) && currentSymbols.size >= limit) return NextResponse.json({ ok: false, isQuotaReached: true, limit, message: `وصلت للحد الأقصى ${limit} أسهم مختلفة في المحفظة. احذف مركزاً أو قم بالترقية لإضافة سهم آخر.` }, { status: 403 });
                 }
                 result = await tools.addPortfolioPosition(supabase, user.id, symbol, quantity, price);
                 break;

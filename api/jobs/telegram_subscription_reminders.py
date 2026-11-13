@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,6 +34,28 @@ CAIRO = ZoneInfo("Africa/Cairo")
 SITE_URL = os.getenv("EGXBOTS_BILLING_URL", "https://egxbots.com/profile#subscription")
 API_TIMEOUT = 20
 LIFETIME_KEYWORDS = {"lifetime", "pro_lifetime", "lifetime_vip", "lifetime-vip", "lifetime-vip-pro"}
+
+# One reminder run at a time. The close job, the 12-hour worker and the admin
+# endpoint can fire concurrently; the durable log alone is not enough because
+# the first request may still be in flight when the second one reads it.
+_run_lock = threading.Lock()
+
+# Telegram errors that will never succeed on retry. Retrying them used to
+# resend the same web support message several times per day.
+_PERMANENT_TELEGRAM_ERRORS = (
+    "bot can't initiate conversation",
+    "bot was blocked",
+    "chat not found",
+    "user is deactivated",
+    "peer_id_invalid",
+    "chat_id is empty",
+)
+
+
+def _is_permanent_telegram_error(message: str) -> bool:
+    text = str(message or "").lower()
+    return any(marker in text for marker in _PERMANENT_TELEGRAM_ERRORS)
+
 
 
 def get_supabase_config() -> Tuple[str, str, Dict[str, str]]:
@@ -106,6 +129,73 @@ def send_private_telegram(chat_id: int, text: str, token: str) -> dict:
     raise last_exc or RuntimeError("Failed to send Telegram message to all endpoints")
 
 
+def _send_with_retry(chat_id: int, text: str, token: str, attempts: int = 2, delay: float = 3.0) -> dict:
+    """Retry transient network failures inside one run instead of across runs.
+
+    Cross-run retries were the reason a single failed delivery produced several
+    duplicate messages in the admin support chat.
+    """
+    last_error: Optional[Exception] = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return send_private_telegram(chat_id, text, token)
+        except Exception as exc:  # noqa: BLE001 - provider errors are opaque
+            last_error = exc
+            if _is_permanent_telegram_error(str(exc)):
+                raise
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    raise last_error or RuntimeError("Failed to send Telegram message")
+
+
+def _support_copy_already_delivered(rest: str, headers: Dict[str, str], user_id: str, text: str) -> bool:
+    """True when this exact reminder is already in the user's support thread."""
+    try:
+        res = requests.get(
+            f"{rest}/support_messages",
+            headers=headers,
+            params={
+                "select": "id,content",
+                "user_id": f"eq.{user_id}",
+                "sender": "eq.admin",
+                "order": "created_at.desc",
+                "limit": "50",
+            },
+            timeout=API_TIMEOUT,
+        )
+        if not res.ok:
+            return False
+        return any(str(row.get("content") or "").strip() == text.strip() for row in (res.json() or []))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SUBSCRIPTION_REMINDERS] [warning] support dedupe check failed user={user_id}: {exc}")
+        return False
+
+
+def _deliver_support_copy_once(rest: str, headers: Dict[str, str], user_id: str, text: str) -> bool:
+    """Insert the reminder into the web support thread at most once."""
+    if _support_copy_already_delivered(rest, headers, user_id, text):
+        print(f"[SUBSCRIPTION_REMINDERS] [support_chat] already delivered user={user_id}")
+        return False
+    try:
+        requests.post(
+            f"{rest}/support_messages",
+            headers=headers,
+            json={
+                "session_id": user_id,
+                "user_id": user_id,
+                "sender": "admin",
+                "content": text,
+                "user_name": "إدارة EGX BOTS",
+            },
+            timeout=API_TIMEOUT,
+        )
+        print(f"[SUBSCRIPTION_REMINDERS] [support_chat] delivered reminder to web chat user={user_id}")
+        return True
+    except Exception as support_chat_err:  # noqa: BLE001
+        print(f"[SUBSCRIPTION_REMINDERS] [support_chat_warning] user={user_id}: {support_chat_err}")
+        return False
+
+
 def message_for(stage: int, days_left: int, end_date: str) -> str:
     """Compose clear, actionable Arabic renewal reminder."""
     if stage == 7:
@@ -157,6 +247,26 @@ def is_lifetime_plan(plan_id: str) -> bool:
 
 
 def run_subscription_reminders(
+    now: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Run at most one reminder pass at a time.
+
+    The durable log keeps each (subscription, period_end, stage) reminder
+    unique. This lock only prevents two concurrent passes from racing before
+    the first one has persisted its result.
+    """
+    if not _run_lock.acquire(blocking=False):
+        print("[SUBSCRIPTION_REMINDERS] [skip] another reminder run is already in progress")
+        return {"status": "skipped", "sent": 0, "failed": 0, "skipped": 0, "eligible": 0,
+                "reason": "already_running"}
+    try:
+        return _execute_subscription_reminders(now=now, dry_run=dry_run)
+    finally:
+        _run_lock.release()
+
+
+def _execute_subscription_reminders(
     now: Optional[datetime] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
@@ -277,11 +387,19 @@ def run_subscription_reminders(
                 print(f"[SUBSCRIPTION_REMINDERS] [error] conflict but log row not found subscription={sub['id']}")
                 continue
             row = existing[0]
-            if row.get("status") == "sent":
-                print(f"[SUBSCRIPTION_REMINDERS] [skip] already sent subscription={sub['id']} stage={stage}")
+            previous_status = str(row.get("status") or "").lower()
+            if previous_status in {"sent", "blocked", "web_only"}:
+                print(f"[SUBSCRIPTION_REMINDERS] [skip] already delivered subscription={sub['id']} stage={stage} status={previous_status}")
+                continue
+            if previous_status == "failed":
+                # A failed attempt is terminal for this stage. Transient errors
+                # are retried inside the run (see _send_with_retry); retrying
+                # across runs is what duplicated the web support messages.
+                print(f"[SUBSCRIPTION_REMINDERS] [skip] previous attempt failed; no cross-run retry subscription={sub['id']}")
                 continue
 
-            # Retry only if previous pending/failed attempt is at least 20 minutes old
+            # Retry a still-pending row only when the previous attempt is at
+            # least 20 minutes old (covers a crash before the result was saved).
             try:
                 created_at = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
                 if (now - created_at).total_seconds() < 1200:
@@ -312,57 +430,59 @@ def run_subscription_reminders(
 
         # Send Telegram notification (if user has linked Telegram)
         msg_text = message_for(stage, days_left, end_dt.astimezone(CAIRO).date().isoformat())
-        if chat_id:
+
+        if not chat_id:
+            skipped += 1
+            print(f"[SUBSCRIPTION_REMINDERS] [skip_tg] no linked private Telegram chat for user={sub['user_id']}")
+            # The web support thread is the only delivery channel available,
+            # and it is inserted idempotently.
+            _deliver_support_copy_once(rest, headers, sub["user_id"], msg_text)
             try:
-                tg_result = send_private_telegram(chat_id, msg_text, telegram_token)
                 requests.patch(
                     f"{rest}/telegram_subscription_reminder_log",
                     headers=headers,
                     params={"id": f"eq.{log_id}"},
-                    json={
-                        "status": "sent",
-                        "telegram_message_id": tg_result.get("message_id"),
-                        "sent_at": datetime.now(timezone.utc).isoformat(),
-                        "error": None,
-                    },
+                    json={"status": "web_only", "error": "no linked private Telegram chat"},
                     timeout=API_TIMEOUT,
                 )
-                sent += 1
-                print(f"[SUBSCRIPTION_REMINDERS] [sent] user={sub['user_id']} stage={stage} days_left={days_left}")
-            except Exception as send_err:
-                failed += 1
-                try:
-                    requests.patch(
-                        f"{rest}/telegram_subscription_reminder_log",
-                        headers=headers,
-                        params={"id": f"eq.{log_id}"},
-                        json={"status": "failed", "error": str(send_err)[:1000]},
-                        timeout=API_TIMEOUT,
-                    )
-                except Exception as patch_err:
-                    print(f"[SUBSCRIPTION_REMINDERS] [error] unable to update failure log: {patch_err}")
-                print(f"[SUBSCRIPTION_REMINDERS] [error] send failed user={sub['user_id']}: {send_err}")
-        else:
-            skipped += 1
-            print(f"[SUBSCRIPTION_REMINDERS] [skip_tg] no linked private Telegram chat for user={sub['user_id']}")
+            except Exception as patch_err:  # noqa: BLE001
+                print(f"[SUBSCRIPTION_REMINDERS] [error] unable to mark web_only log: {patch_err}")
+            time.sleep(0.15)
+            continue
 
-        # Also deliver automated reminder into web customer support chat (support_messages)
         try:
-            requests.post(
-                f"{rest}/support_messages",
+            tg_result = _send_with_retry(chat_id, msg_text, telegram_token)
+            requests.patch(
+                f"{rest}/telegram_subscription_reminder_log",
                 headers=headers,
+                params={"id": f"eq.{log_id}"},
                 json={
-                    "session_id": sub["user_id"],
-                    "user_id": sub["user_id"],
-                    "sender": "admin",
-                    "content": msg_text,
-                    "user_name": "إدارة EGX BOTS"
+                    "status": "sent",
+                    "telegram_message_id": tg_result.get("message_id"),
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "error": None,
                 },
                 timeout=API_TIMEOUT,
             )
-            print(f"[SUBSCRIPTION_REMINDERS] [support_chat] delivered reminder to web chat user={sub['user_id']}")
-        except Exception as support_chat_err:
-            print(f"[SUBSCRIPTION_REMINDERS] [support_chat_warning] user={sub['user_id']}: {support_chat_err}")
+            sent += 1
+            print(f"[SUBSCRIPTION_REMINDERS] [sent] user={sub['user_id']} stage={stage} days_left={days_left}")
+            _deliver_support_copy_once(rest, headers, sub["user_id"], msg_text)
+        except Exception as send_err:  # noqa: BLE001
+            permanent = _is_permanent_telegram_error(str(send_err))
+            failed += 1
+            try:
+                requests.patch(
+                    f"{rest}/telegram_subscription_reminder_log",
+                    headers=headers,
+                    params={"id": f"eq.{log_id}"},
+                    json={"status": "blocked" if permanent else "failed", "error": str(send_err)[:1000]},
+                    timeout=API_TIMEOUT,
+                )
+            except Exception as patch_err:  # noqa: BLE001
+                print(f"[SUBSCRIPTION_REMINDERS] [error] unable to update failure log: {patch_err}")
+            # Never write to the web support thread on a failed delivery;
+            # that is what produced the duplicated reminders.
+            print(f"[SUBSCRIPTION_REMINDERS] [error] send failed user={sub['user_id']} permanent={permanent}: {send_err}")
 
         time.sleep(0.15)
 

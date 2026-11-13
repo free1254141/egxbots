@@ -39,7 +39,7 @@ const PRO: PlanLimits = {
   signal_delay_days: 0,
   chat_messages_daily: Number(process.env.PRO_CHAT_DAILY_MESSAGES || "350"),
   chat_messages_per_month: Number(process.env.PRO_CHAT_MESSAGES || "350"),
-  portfolio_stocks: Number(process.env.PRO_PORTFOLIO_STOCKS || "10"),
+  portfolio_stocks: Number(process.env.PRO_PORTFOLIO_STOCKS || "15"),
   price_egp: Number(process.env.NEXT_PUBLIC_PRO_PRICE_EGP || process.env.PRO_PRICE_EGP || "200"),
   billing: "enabled",
 };

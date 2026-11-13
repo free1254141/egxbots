@@ -1663,7 +1663,7 @@ export default function ChatWidget() {
                             </div>
                             <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-zinc-800 dark:text-zinc-200">
                                 <span className="h-5 w-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0">✓</span>
-                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام + حتى 10 أسهم في المحفظة</span>
+                                <span>رابط دخول فوري لقناة الـ VIP على تليجرام + حتى 15 سهماً في المحفظة</span>
                             </div>
                         </div>
 

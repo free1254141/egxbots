@@ -884,7 +884,7 @@ export default function PricingClient() {
       : 0;
   const proPrice = Math.max(20, baseProPrice - promoDiscountAmount);
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
-  const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 10 };
+  const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
   const freeFeatures = [
     { icon: <Zap className="w-4 h-4" />, text: isAr ? `تأخير الإشارات والتوصيات ${freeLimits.signal_delay_days} يوماً (أرشيف تاريخي فقط)` : `Trading signals delayed ${freeLimits.signal_delay_days} days (historical archive only)`, included: true },
     { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 استشارات شات بوت شهرياً (لتجربة التحليل الآلي)" : "10 AI chatbot consultations / month", included: true },
@@ -900,7 +900,7 @@ export default function PricingClient() {
     { icon: <MessageSquare className="w-4 h-4 text-sky-500" />, text: isAr ? "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم مصري على مدار 24/7" : "350 AI consultations / month — 24/7 comprehensive quantitative & technical stock analyses", included: true },
     { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من ثندر أو وسيطك واعرف المخاطر والدعوم فوراً" : "Vision AI Portfolio Analysis 📸 — upload broker/Thndr screenshots for instant asset & risk breakdown", included: true },
     { icon: <Clock className="w-4 h-4 text-indigo-500" />, text: isAr ? "أتمتة استشاراتك اليومية على تليجرام — حتى 5 استشارات مجدولة يومياً تُرسل لهاتفك في المواعيد التي تختارها" : "Daily Scheduled Telegram AI Automations — up to 5 scheduled alerts delivered daily at your chosen times", included: true },
-    { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? "محفظة تداول موسعة حتى 10 أسهم نشطة مع متابعة الأهداف والوقف" : "Expanded portfolio tracker up to 10 active stocks with target & stop tracking", included: true },
+    { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? `محفظة تداول موسعة حتى ${proLimits.portfolio_stocks} سهماً نشطاً مع متابعة الأهداف والوقف` : `Expanded portfolio tracker up to ${proLimits.portfolio_stocks} active stocks with target & stop tracking`, included: true },
   ];
 
   const lifetimeFeatures = [

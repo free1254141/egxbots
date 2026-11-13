@@ -372,7 +372,7 @@ export default function BillingTab() {
                             )}
                         </div>
                         <p className="text-xs font-bold text-zinc-600 dark:text-zinc-300">
-                            حدود المزايا المعروضة من إعدادات الخدمة: مجاني {planLimits.free?.signal_delay_days ?? 15} يوم تأخير، {planLimits.free?.chat_messages_per_month ?? 10} رسائل شهرياً و{planLimits.free?.portfolio_stocks ?? 5} أسهم؛ Pro {planLimits.pro?.chat_messages_per_month ?? 350} رسالة و{planLimits.pro?.portfolio_stocks ?? 10} أسهم.
+                            حدود المزايا المعروضة من إعدادات الخدمة: مجاني {planLimits.free?.signal_delay_days ?? 15} يوم تأخير، {planLimits.free?.chat_messages_per_month ?? 10} رسائل شهرياً و{planLimits.free?.portfolio_stocks ?? 5} أسهم؛ Pro {planLimits.pro?.chat_messages_per_month ?? 350} رسالة و{planLimits.pro?.portfolio_stocks ?? 15} أسهم.
                         </p>
 
                         {/* ── AFFILIATE & PROMO CODE SYSTEM ── */}

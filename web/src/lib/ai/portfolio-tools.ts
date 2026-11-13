@@ -62,8 +62,8 @@ export interface PortfolioSnapshot {
     };
 }
 
-const FREE_PORTFOLIO_LIMIT = 5;
-const PRO_PORTFOLIO_LIMIT = 10;
+const FREE_PORTFOLIO_LIMIT = Number(process.env.FREE_PORTFOLIO_STOCKS || "5");
+const PRO_PORTFOLIO_LIMIT = Number(process.env.PRO_PORTFOLIO_STOCKS || "15");
 
 async function hasActiveProPlan(supabase: any, userId: string): Promise<boolean> {
     if (!paymentsEnabled()) return true; // site free until PAYMENTS_ENABLED=true

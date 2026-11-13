@@ -3054,45 +3054,25 @@ describe("Agentic tool correctness and failure boundaries", () => {
         };
 
         // When a user asks "حلل دى" with a chart of EGX30 after previous conversation was about ABUK
-        const stream = runAgenticPipelineStream({
-            userMessage: "حلل دى",
-            images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
-            sessionState: {
+        const stream = runAgenticPipelineStream(
+            "حلل دى",
+            ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
+            {
                 last_symbols: ["ABUK"],
                 active_chart_id: null,
-            },
-            sessionSummary: {
+            } as any,
+            {
                 current_symbols: ["ABUK"],
                 last_topic: "تحليل سهم ABUK",
                 open_references: [],
                 last_image_symbols: [],
                 last_vision_context: null,
-            },
-            history: [
+            } as any,
+            [
                 { role: "user", content: "حلل سهم ABUK" },
                 { role: "assistant", content: "سهم أبو قير للأسمدة عند 92.01" },
             ],
-            toolsSchema: [
-                {
-                    type: "function",
-                    function: {
-                        name: "get_market",
-                        description: "Get EGX market overview and EGX30 data",
-                        parameters: { type: "object", properties: {} },
-                    },
-                },
-                {
-                    type: "function",
-                    function: {
-                        name: "get_stock",
-                        description: "Get stock indicators",
-                        parameters: { type: "object", properties: { symbols: { type: "array", items: { type: "string" } } } },
-                    },
-                },
-            ],
-            systemPrompt: "You are ARTORO.",
-            userId: "test-user-id",
-            supabase: {
+            {
                 from: () => ({
                     select: () => ({
                         eq: () => ({
@@ -3104,11 +3084,16 @@ describe("Agentic tool correctness and failure boundaries", () => {
                     }),
                 }),
             } as any,
-            options: {
+            [],
+            "test-user-id",
+            "test-session-id",
+            "test-message-id",
+            undefined,
+            {
                 mockVisionResult,
                 skipReview: true,
             },
-        });
+        );
 
         let planEmitted: any = null;
         for await (const event of stream) {

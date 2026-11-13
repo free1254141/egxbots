@@ -167,3 +167,75 @@ def test_api_jobs_package_import_equivalence():
     assert callable(api_run_subscription_reminders)
     assert callable(run_subscription_reminders)
     assert api_run_subscription_reminders.__name__ == run_subscription_reminders.__name__
+
+
+def test_permanent_telegram_errors_are_detected():
+    from api.jobs.telegram_subscription_reminders import _is_permanent_telegram_error
+
+    assert _is_permanent_telegram_error(
+        'Telegram API HTTP 403: {"ok":false,"error_code":403,"description":"Forbidden: bot can\'t initiate conversation with a user"}'
+    )
+    assert _is_permanent_telegram_error("Bad Request: chat not found")
+    assert _is_permanent_telegram_error("Forbidden: bot was blocked by the user")
+    # Transient failures stay retryable inside the same run.
+    assert not _is_permanent_telegram_error("HTTPSConnectionPool: Read timed out. (read timeout=20)")
+    assert not _is_permanent_telegram_error("Telegram API HTTP 502: Bad Gateway")
+
+
+def test_support_copy_dedupe_detects_existing_message():
+    from api.jobs.telegram_subscription_reminders import _support_copy_already_delivered
+
+    with patch("requests.get") as mock_get:
+        mock_res = MagicMock()
+        mock_res.ok = True
+        mock_res.json.return_value = [{"id": "m1", "content": "نفس نص التذكير"}]
+        mock_get.return_value = mock_res
+
+        assert _support_copy_already_delivered("https://x.supabase.co/rest/v1", {}, "u-1", "نفس نص التذكير") is True
+        assert _support_copy_already_delivered("https://x.supabase.co/rest/v1", {}, "u-1", "نص مختلف") is False
+
+
+def test_failed_reminder_is_not_resent_and_does_not_touch_support_chat():
+    """A previously failed delivery must not produce a second web support message."""
+    from datetime import datetime, timedelta, timezone
+    from api.jobs.telegram_subscription_reminders import run_subscription_reminders
+
+    now = datetime(2026, 11, 12, 9, 0, tzinfo=timezone.utc)
+    period_end = (now + timedelta(days=1)).isoformat()
+
+    def fake_get(url, *args, **kwargs):
+        res = MagicMock()
+        res.ok = True
+        res.status_code = 200
+        if url.endswith("/subscriptions"):
+            res.json.return_value = [
+                {"id": "sub-1", "user_id": "u-1", "plan_id": "pro", "status": "active",
+                 "current_period_end": period_end},
+            ]
+        elif url.endswith("/profiles"):
+            res.json.return_value = [{"id": "u-1", "telegram_chat_id": "123456"}]
+        elif "telegram_subscription_reminder_log" in url:
+            res.json.return_value = [{"id": "log-1", "status": "failed",
+                                      "created_at": "2026-11-12T08:00:00+00:00"}]
+        else:
+            res.json.return_value = []
+        return res
+
+    with patch.dict(os.environ, {
+        "SUPABASE_URL": "https://fake.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "fake_key",
+        "TELEGRAM_BOT_TOKEN": "fake_token",
+    }):
+        with patch("requests.get", side_effect=fake_get), patch("requests.post") as mock_post:
+            mock_post.return_value = MagicMock(ok=True, status_code=201, text="[]", json=lambda: [])
+
+            result = run_subscription_reminders(now=now)
+
+    assert result["sent"] == 0
+    assert result["failed"] == 0
+    # Only the idempotency insert is attempted; no Telegram send, no support copy.
+    assert mock_post.call_count == 1
+    posted_urls = [call.args[0] for call in mock_post.call_args_list]
+    assert all("support_messages" not in url for url in posted_urls)
+    assert all("sendMessage" not in url for url in posted_urls)
+
