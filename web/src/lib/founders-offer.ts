@@ -62,9 +62,10 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
     },
     plans: (config.plans || []).map((plan: any) => {
       if (plan.id === "pro") {
+        const regularAmount = plan.amount_egp != null ? Number(plan.amount_egp) : regularPrice;
         return {
           ...plan,
-          amount_egp: effectivePrice,
+          amount_egp: hasSpecialRate ? effectivePrice : regularAmount,
           is_grandfathered_renewal: isGrandfathered50,
           is_grandfathered_100: isGrandfathered100,
           discount: hasSpecialRate
@@ -84,13 +85,15 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
                 original_amount_egp: regularPrice,
                 ends_at: isOpen ? configEndsAt : null,
               }
-            : null,
+            : (plan.discount ?? null),
         };
       }
       if (plan.id === "pro_6m") {
+        const backend6m = plan.amount_egp != null ? Number(plan.amount_egp) : 1000;
+        const orig6m = Number(plan.discount?.original_amount_egp ?? (backend6m > 500 ? backend6m : 1000));
         return {
           ...plan,
-          amount_egp: hasSpecialRate ? 500 : 1000,
+          amount_egp: hasSpecialRate ? 500 : backend6m,
           founders_lock_rate: hasSpecialRate ? 100 : null,
           discount: hasSpecialRate
             ? {
@@ -98,16 +101,18 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
                 kind: "founders",
                 label_ar: "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
                 label_en: "Founders Offer 50% OFF (500 instead of 1,000 EGP + locks 100 EGP/mo for life) 🔥",
-                original_amount_egp: 1000,
+                original_amount_egp: orig6m,
                 ends_at: isOpen ? configEndsAt : null,
               }
-            : null,
+            : (plan.discount ?? null),
         };
       }
       if (plan.id === "pro_1y") {
+        const backend1y = plan.amount_egp != null ? Number(plan.amount_egp) : 1800;
+        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1850));
         return {
           ...plan,
-          amount_egp: hasSpecialRate ? 1000 : 1850,
+          amount_egp: hasSpecialRate ? 1000 : backend1y,
           founders_lock_rate: hasSpecialRate ? 100 : null,
           discount: hasSpecialRate
             ? {
@@ -115,10 +120,10 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
                 kind: "founders",
                 label_ar: "عرض المؤسسين (1,000 بدل 1,850 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
                 label_en: "Founders Offer (1,000 instead of 1,850 EGP + locks 100 EGP/mo for life) 🔥",
-                original_amount_egp: 1850,
+                original_amount_egp: orig1y,
                 ends_at: isOpen ? configEndsAt : null,
               }
-            : null,
+            : (plan.discount ?? null),
         };
       }
       return plan;

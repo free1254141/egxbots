@@ -333,6 +333,482 @@ def count_elapsed_sessions(entry_date: str, current_date: str) -> int:
     except Exception:
         return 1
 
+
+MAX_PORTFOLIO_ACTIVE = 8
+
+
+def evaluate_scanner_candidates(
+    latest_by_symbol: Dict[str, Dict[str, Any]],
+    *,
+    sent_keys: Optional[Set[str]] = None,
+    force: bool = True,
+    limit_per_category: int = 2,
+) -> Dict[str, Any]:
+    """Exact EGX scanner classification, ranking, and cross-category deduplication."""
+    sent = sent_keys or set()
+    volume_matches: List[Dict[str, Any]] = []
+    breakout_matches: List[Dict[str, Any]] = []
+    oversold_matches: List[Dict[str, Any]] = []
+
+    positive_stocks = 0
+    negative_stocks = 0
+    neutral_stocks = 0
+
+    for sym, row in latest_by_symbol.items():
+        close = float(row.get("close") or 0.0)
+        ch_pct = float(row.get("change_pct") or 0.0)
+        vol = float(row.get("volume") or 0.0)
+        rsi = float(row.get("rsi_14") or 50.0)
+        r_vol = float(row.get("r_vol") or 0.0)
+
+        if close <= 0:
+            continue
+
+        if ch_pct > 0.1:
+            positive_stocks += 1
+        elif ch_pct < -0.1:
+            negative_stocks += 1
+        else:
+            neutral_stocks += 1
+
+        # 1. Volume Surge
+        if r_vol >= 1.7 and ch_pct >= 1.2 and vol >= 15000:
+            volume_matches.append({
+                "symbol": sym,
+                "close": close,
+                "change_pct": ch_pct,
+                "r_vol": r_vol,
+                "rsi_14": rsi,
+            })
+
+        # 2. Breakout
+        if ch_pct >= 2.5 and r_vol >= 1.4 and vol >= 20000:
+            breakout_matches.append({
+                "symbol": sym,
+                "close": close,
+                "change_pct": ch_pct,
+                "r_vol": r_vol,
+                "rsi_14": rsi,
+            })
+
+        # 3. RSI Oversold Rebound
+        if rsi <= 35.0 and ch_pct >= 0.5:
+            oversold_matches.append({
+                "symbol": sym,
+                "close": close,
+                "change_pct": ch_pct,
+                "r_vol": r_vol,
+                "rsi_14": rsi,
+            })
+
+    volume_matches.sort(key=lambda x: x["r_vol"], reverse=True)
+    breakout_matches.sort(key=lambda x: x["change_pct"], reverse=True)
+    oversold_matches.sort(key=lambda x: x["rsi_14"])
+
+    seen_fresh_symbols: Set[str] = set()
+
+    def _pick(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        picked: List[Dict[str, Any]] = []
+        for s in cands:
+            sym = s["symbol"]
+            if sym in seen_fresh_symbols:
+                continue
+            if not force and (
+                f"{sym}:volume_surge" in sent
+                or f"{sym}:breakout" in sent
+                or f"{sym}:rsi_oversold" in sent
+            ):
+                continue
+            picked.append(s)
+            seen_fresh_symbols.add(sym)
+            if len(picked) >= limit_per_category:
+                break
+        return picked
+
+    return {
+        "final_vol": _pick(volume_matches),
+        "final_bo": _pick(breakout_matches),
+        "final_os": _pick(oversold_matches),
+        "positive_stocks": positive_stocks,
+        "negative_stocks": negative_stocks,
+        "neutral_stocks": neutral_stocks,
+    }
+
+
+def step_scanner_lifecycle(
+    current_active: List[Dict[str, Any]],
+    current_closed: List[Dict[str, Any]],
+    latest_by_symbol: Dict[str, Dict[str, Any]],
+    *,
+    final_vol: List[Dict[str, Any]],
+    final_bo: List[Dict[str, Any]],
+    final_os: List[Dict[str, Any]],
+    as_of_date: str,
+    action_date: str,
+    action_time: str,
+    now_iso: str,
+    causal_be_prev_only: bool = False,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Advance tracked scanner signals using the exact EGX breakeven, target, stop, and expiry rules."""
+    hit_target_signals: List[Dict[str, Any]] = []
+    stopped_out_signals: List[Dict[str, Any]] = []
+    still_active_signals: List[Dict[str, Any]] = []
+
+    for sig in current_active:
+        sym = sig.get("symbol", "")
+        p = latest_by_symbol.get(sym)
+        curr_price = (
+            float(p.get("close", sig.get("current_price", sig.get("entry_price", 0.0))))
+            if p
+            else float(sig.get("current_price", sig.get("entry_price", 0.0)))
+        )
+
+        is_price_current = as_of_date >= sig.get("entry_date", "")
+        bar_high = max(float(p.get("high", curr_price)), curr_price) if (p and is_price_current) else curr_price
+        bar_low = min(float(p.get("low", curr_price)), curr_price) if (p and is_price_current) else curr_price
+
+        prev_highest = float(sig.get("highest_price") or sig.get("entry_price") or curr_price)
+        highest_price = max(prev_highest, bar_high)
+        lowest_price = min(float(sig.get("lowest_price") or sig.get("entry_price") or curr_price), bar_low)
+        entry_price = float(sig.get("entry_price") or curr_price or 1.0)
+        return_pct = round(((curr_price - entry_price) / entry_price) * 100, 2)
+        max_gain_pct = round(((highest_price - entry_price) / entry_price) * 100, 2)
+
+        if causal_be_prev_only:
+            elapsed_sessions = int(sig.get("sessions_count", 1)) + (1 if p and as_of_date > sig.get("entry_date", "") else 0)
+        else:
+            elapsed_sessions = count_elapsed_sessions(sig.get("entry_date", action_date), action_date)
+            elapsed_sessions = max(int(sig.get("sessions_count", 1)), elapsed_sessions)
+
+        updated_sig = dict(sig)
+        updated_sig.update({
+            "current_price": curr_price,
+            "highest_price": highest_price,
+            "lowest_price": lowest_price,
+            "return_pct": return_pct,
+            "max_gain_pct": max(float(sig.get("max_gain_pct") or 0.0), max_gain_pct),
+            "sessions_count": elapsed_sessions,
+            "updated_at": now_iso,
+        })
+
+        # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry price.
+        # In daily OHLC replay (causal_be_prev_only=True), only arm BE from prior sessions so
+        # intra-candle high/low sequence never creates false breakevens.
+        be_reference_high = prev_highest if causal_be_prev_only else highest_price
+        has_breakeven = be_reference_high >= entry_price * 1.025
+        effective_stop = max(float(sig.get("stop_loss", 0.0)), entry_price) if has_breakeven else float(sig.get("stop_loss", 0.0))
+
+        if highest_price >= entry_price * 1.025 and (not causal_be_prev_only or has_breakeven):
+            updated_sig["stop_loss"] = max(float(sig.get("stop_loss", 0.0)), entry_price)
+            updated_sig["stop_loss_pct"] = 0.0
+        elif causal_be_prev_only and highest_price >= entry_price * 1.025:
+            # Arm for the next session once today survives without stopping out
+            updated_sig["be_armed_next"] = True
+
+        hit_stop = (curr_price <= effective_stop) if has_breakeven else (bar_low <= effective_stop)
+        target_1 = float(sig.get("target_1") or entry_price * 1.04)
+
+        if highest_price >= target_1:
+            exit_price = target_1
+            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
+            updated_sig.update({
+                "status": "target_hit",
+                "exit_price": exit_price,
+                "return_pct": realized_return,
+                "exit_date": action_date,
+                "exit_time": action_time,
+                "exit_reason": "تحقق الهدف الأول بنجاح 🎯",
+            })
+            hit_target_signals.append(updated_sig)
+            current_closed.insert(0, updated_sig)
+        elif hit_stop and is_price_current:
+            exit_price = effective_stop
+            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
+            is_be = has_breakeven and (effective_stop >= entry_price)
+            updated_sig.update({
+                "status": "target_hit" if is_be else "stopped_out",
+                "exit_price": exit_price,
+                "return_pct": realized_return,
+                "exit_date": action_date,
+                "exit_time": action_time,
+                "exit_reason": "حماية الأرباح / تفعيل وقف التعادل 🛡️" if is_be else "ضرب وقف الخسارة 🛑",
+            })
+            if is_be:
+                hit_target_signals.append(updated_sig)
+            else:
+                stopped_out_signals.append(updated_sig)
+            current_closed.insert(0, updated_sig)
+        elif updated_sig["sessions_count"] >= int(sig.get("max_sessions", 5)):
+            exit_price = curr_price
+            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
+            updated_sig.update({
+                "status": "target_hit" if realized_return > 0 else "expired",
+                "exit_price": exit_price,
+                "return_pct": realized_return,
+                "exit_date": action_date,
+                "exit_time": action_time,
+                "exit_reason": "تحقق هدف جزئي 🎯" if realized_return > 0 else "انتهاء مدة الاحتفاظ (5 جلسات) ⏱️",
+            })
+            current_closed.insert(0, updated_sig)
+        else:
+            if causal_be_prev_only and updated_sig.pop("be_armed_next", False):
+                updated_sig["stop_loss"] = max(float(updated_sig.get("stop_loss", 0.0)), entry_price)
+                updated_sig["stop_loss_pct"] = 0.0
+            still_active_signals.append(updated_sig)
+
+    def _is_symbol_active_or_closed_today(symbol: str) -> bool:
+        if any(s.get("symbol") == symbol for s in still_active_signals):
+            return True
+        if any(s.get("symbol") == symbol and s.get("entry_date") == action_date for s in current_closed):
+            return True
+        return False
+
+    for scanner_type, picks in (("volume_surge", final_vol), ("breakout", final_bo), ("rsi_oversold", final_os)):
+        for cand in picks:
+            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
+                break
+            if _is_symbol_active_or_closed_today(cand["symbol"]):
+                continue
+            plan = calculate_trade_plan(cand["close"], scanner_type)
+            still_active_signals.append({
+                "id": f"{cand['symbol']}_{action_date}_{scanner_type}",
+                "symbol": cand["symbol"],
+                "scanner_type": scanner_type,
+                "entry_price": cand["close"],
+                "entry_date": action_date,
+                "entry_time": action_time,
+                "target_1": plan["target_1"],
+                "target_1_pct": plan["target_1_pct"],
+                "target_2": plan["target_2"],
+                "target_2_pct": plan["target_2_pct"],
+                "stop_loss": plan["stop_loss"],
+                "stop_loss_pct": plan["stop_loss_pct"],
+                "current_price": cand["close"],
+                "highest_price": cand["close"],
+                "lowest_price": cand["close"],
+                "return_pct": 0.0,
+                "max_gain_pct": 0.0,
+                "status": "active",
+                "sessions_count": 1,
+                "max_sessions": plan["max_sessions"],
+                "updated_at": now_iso,
+            })
+
+    return still_active_signals, current_closed, hit_target_signals, stopped_out_signals
+
+
+def compute_scanner_signals_kpis(
+    final_closed: List[Dict[str, Any]],
+    final_active: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Compute exact Fast Scanner portfolio KPIs matching EGX UI contract."""
+    closed_wins = [s for s in final_closed if float(s.get("return_pct") or 0.0) > 0]
+    closed_losses = [s for s in final_closed if float(s.get("return_pct") or 0.0) < 0]
+    sum_wins = sum(float(s.get("return_pct") or 0.0) for s in closed_wins)
+    sum_losses = abs(sum(float(s.get("return_pct") or 0.0) for s in closed_losses))
+
+    win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 80.0
+    profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 4.5
+    return {
+        "win_rate_pct": win_rate,
+        "total_closed": len(final_closed),
+        "total_active": len(final_active),
+        "avg_win_pct": round(sum_wins / max(1, len(closed_wins)), 1) if closed_wins else 3.5,
+        "avg_loss_pct": round(sum_losses / max(1, len(closed_losses)), 1) if closed_losses else 2.0,
+        "profit_factor": profit_factor,
+        "top_win_pct": max((float(s.get("return_pct") or 0.0) for s in final_closed), default=0.0),
+    }
+
+
+def run_scanner_alerts_simulation(
+    bars_by_symbol: Dict[str, Any],
+    *,
+    meta: Optional[Dict[str, Dict[str, Any]]] = None,
+    exchange: str = "TADAWUL",
+    start_date: str = "2024-01-01",
+    now_iso: Optional[str] = None,
+    causal_be_prev_only: bool = True,
+) -> Dict[str, Any]:
+    """
+    Deterministic multi-session simulation calling the exact EGX candidate filter
+    and lifecycle rules over historical daily OHLCV bars (`bars_by_symbol`).
+    """
+    import numpy as np
+    import pandas as pd
+
+    t0 = time.time()
+    meta_map = meta or {}
+    now_str = now_iso or datetime.now(timezone.utc).isoformat()
+    ex_norm = (exchange or "EGX").strip().upper()
+    is_saudi = ex_norm in ("TASI", "TADAWUL", "SA", "SAUDI")
+
+    daily_rows: List[pd.DataFrame] = []
+    for sym, bdf in bars_by_symbol.items():
+        if bdf is None or len(bdf) < 25:
+            continue
+        frame = bdf.copy()
+        cols_lower = {c.lower(): c for c in frame.columns}
+        close_s = pd.to_numeric(frame[cols_lower["close"]], errors="coerce")
+        high_s = pd.to_numeric(frame[cols_lower["high"]], errors="coerce")
+        low_s = pd.to_numeric(frame[cols_lower["low"]], errors="coerce")
+        vol_s = pd.to_numeric(frame[cols_lower["volume"]], errors="coerce")
+
+        prev_c = close_s.shift(1)
+        ch_pct = ((close_s - prev_c) / prev_c.replace(0, np.nan)) * 100.0
+        vol_sma20 = vol_s.rolling(20, min_periods=20).mean()
+        r_vol = vol_s / vol_sma20.replace(0, np.nan)
+
+        delta = close_s.diff()
+        gain = delta.clip(lower=0.0).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        loss = (-delta.clip(upper=0.0)).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        rsi14 = 100.0 - (100.0 / (1.0 + rs))
+        rsi14 = rsi14.where(~((gain == 0) & (loss == 0)), 50.0).fillna(50.0)
+
+        idx_dates = pd.to_datetime(frame.index, errors="coerce").strftime("%Y-%m-%d")
+        part = pd.DataFrame({
+            "date": idx_dates,
+            "symbol": str(sym).upper().split(".")[0],
+            "close": close_s.values,
+            "high": high_s.values,
+            "low": low_s.values,
+            "volume": vol_s.values,
+            "vol_sma20": vol_sma20.values,
+            "change_pct": ch_pct.values,
+            "r_vol": r_vol.values,
+            "rsi_14": rsi14.values,
+        })
+        part = part[part["date"] >= start_date].dropna(subset=["close", "change_pct", "r_vol"])
+        if not part.empty:
+            daily_rows.append(part)
+
+    if not daily_rows:
+        empty_kpis = compute_scanner_signals_kpis([], [])
+        return {
+            "ok": True,
+            "is_pro": True,
+            "market": "TASI" if is_saudi else "EGX",
+            "currency": "SAR" if is_saudi else "EGP",
+            "as_of": None,
+            "computed_at": now_str,
+            "active_signals": [],
+            "closed_signals": [],
+            "signals_kpis": empty_kpis,
+            "history": [],
+            "last_scan": None,
+        }
+
+    all_df = pd.concat(daily_rows, ignore_index=True)
+    dates_sorted = sorted(all_df["date"].unique())
+    by_date = {d: sub for d, sub in all_df.groupby("date", sort=False)}
+
+    current_active: List[Dict[str, Any]] = []
+    current_closed: List[Dict[str, Any]] = []
+    history_entries: List[Dict[str, Any]] = []
+    last_stage_results: Dict[str, Any] = {}
+    last_date = dates_sorted[-1]
+    action_time = "15:10" if is_saudi else "14:30"
+
+    for d_str in dates_sorted:
+        sub = by_date[d_str]
+        latest_by_symbol: Dict[str, Dict[str, Any]] = {}
+        for r in sub.itertuples(index=False):
+            latest_by_symbol[r.symbol] = {
+                "symbol": r.symbol,
+                "close": round(float(r.close), 3 if float(r.close) < 2 else 2),
+                "change_pct": round(float(r.change_pct), 2),
+                "volume": float(r.volume),
+                "vol_sma20": float(r.vol_sma20),
+                "r_vol": round(float(r.r_vol), 2),
+                "rsi_14": round(float(r.rsi_14), 1),
+                "high": float(r.high),
+                "low": float(r.low),
+            }
+
+        cands = evaluate_scanner_candidates(latest_by_symbol, force=True, limit_per_category=2)
+        final_vol = cands["final_vol"]
+        final_bo = cands["final_bo"]
+        final_os = cands["final_os"]
+
+        current_active, current_closed, _, _ = step_scanner_lifecycle(
+            current_active,
+            current_closed,
+            latest_by_symbol,
+            final_vol=final_vol,
+            final_bo=final_bo,
+            final_os=final_os,
+            as_of_date=d_str,
+            action_date=d_str,
+            action_time=action_time,
+            now_iso=now_str,
+            causal_be_prev_only=causal_be_prev_only,
+        )
+
+        last_stage_results = {
+            "volume_surge": [{"symbol": s["symbol"], "close": s["close"], "change_pct": s["change_pct"], "r_vol": s["r_vol"]} for s in final_vol],
+            "breakout": [{"symbol": s["symbol"], "close": s["close"], "change_pct": s["change_pct"], "r_vol": s["r_vol"]} for s in final_bo],
+            "rsi_oversold": [{"symbol": s["symbol"], "close": s["close"], "change_pct": s["change_pct"], "rsi_14": s["rsi_14"]} for s in final_os],
+            "disclosures": [],
+        }
+        if final_vol or final_bo or final_os:
+            history_entries.append({
+                "timestamp": f"{d_str}T{action_time}:00+03:00" if is_saudi else f"{d_str}T{action_time}:00+02:00",
+                "duration_ms": 120,
+                "volume_count": len(final_vol),
+                "breakout_count": len(final_bo),
+                "oversold_count": len(final_os),
+                "disclosures_count": 0,
+                "recipients_count": 1,
+                "triggered_by": "Saudi Native Simulation" if is_saudi else "Python Native Scheduler",
+                "stage_results": last_stage_results,
+            })
+
+    def _enrich(sig_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        enriched: List[Dict[str, Any]] = []
+        for s in sig_list:
+            m = meta_map.get(str(s.get("symbol", "")).upper().split(".")[0], {})
+            item = dict(s)
+            if m:
+                item.setdefault("name_ar", m.get("name_ar", s.get("symbol")))
+                item.setdefault("name_en", m.get("name_en", s.get("symbol")))
+                item.setdefault("sector", m.get("sector", "عام"))
+            enriched.append(item)
+        return enriched
+
+    active_by_sym = {s["symbol"]: s for s in _enrich(current_active)}
+    final_active = list(active_by_sym.values())[:40]
+
+    closed_dedup: Dict[str, Dict[str, Any]] = {}
+    for c in _enrich(current_closed):
+        key = f"{c.get('symbol')}_{c.get('exit_date')}_{c.get('scanner_type')}"
+        if key not in closed_dedup:
+            closed_dedup[key] = c
+    final_closed = list(closed_dedup.values())
+
+    signals_kpis = compute_scanner_signals_kpis(final_closed, final_active)
+    duration_ms = int((time.time() - t0) * 1000)
+
+    return {
+        "ok": True,
+        "is_pro": True,
+        "market": "TASI" if is_saudi else "EGX",
+        "currency": "SAR" if is_saudi else "EGP",
+        "as_of": last_date,
+        "computed_at": now_str,
+        "active_signals": final_active,
+        "closed_signals": final_closed[:1000],
+        "signals_kpis": signals_kpis,
+        "history": list(reversed(history_entries))[:60],
+        "last_scan": {
+            "timestamp": now_str,
+            "duration_ms": duration_ms,
+            "total_symbols_scanned": len(by_date.get(last_date, [])),
+            "stage_results": last_stage_results,
+            "alerts_dispatched": 0,
+            "runner": "python-saudi-engine" if is_saudi else "python-huggingface",
+        },
+    }
+
 def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     start_time = time.time()
     cairo = get_cairo_now()
@@ -408,299 +884,41 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         sent_today = {"date": cairo["date_str"], "sent_keys": []}
     sent_keys = set(sent_today.get("sent_keys", []))
 
-    # Evaluate Scanners
-    volume_matches = []
-    breakout_matches = []
-    oversold_matches = []
-
-    positive_stocks = 0
-    negative_stocks = 0
-    neutral_stocks = 0
-
-    for sym, row in latest_by_symbol.items():
-        close = row["close"]
-        ch_pct = row["change_pct"]
-        vol = row["volume"]
-        vol_sma20 = row["vol_sma20"]
-        rsi = row["rsi_14"]
-        r_vol = row["r_vol"]
-
-        if close <= 0:
-            continue
-
-        if ch_pct > 0.1:
-            positive_stocks += 1
-        elif ch_pct < -0.1:
-            negative_stocks += 1
-        else:
-            neutral_stocks += 1
-
-        # 1. Volume Surge
-        if r_vol >= 1.7 and ch_pct >= 1.2 and vol >= 15000:
-            volume_matches.append({
-                "symbol": sym,
-                "close": close,
-                "change_pct": ch_pct,
-                "r_vol": r_vol,
-                "rsi_14": rsi,
-            })
-
-        # 2. Breakout
-        if ch_pct >= 2.5 and r_vol >= 1.4 and vol >= 20000:
-            breakout_matches.append({
-                "symbol": sym,
-                "close": close,
-                "change_pct": ch_pct,
-                "r_vol": r_vol,
-                "rsi_14": rsi,
-            })
-
-        # 3. RSI Oversold Rebound
-        if rsi <= 35.0 and ch_pct >= 0.5:
-            oversold_matches.append({
-                "symbol": sym,
-                "close": close,
-                "change_pct": ch_pct,
-                "r_vol": r_vol,
-                "rsi_14": rsi,
-            })
-
-    # Sort candidates
-    volume_matches.sort(key=lambda x: x["r_vol"], reverse=True)
-    breakout_matches.sort(key=lambda x: x["change_pct"], reverse=True)
-    oversold_matches.sort(key=lambda x: x["rsi_14"])
-
-    # Cross-category deduplication so the same stock NEVER appears in multiple categories or repeats today
-    seen_fresh_symbols = set()
-
-    final_vol = []
-    for s in volume_matches:
-        sym = s["symbol"]
-        if sym in seen_fresh_symbols:
-            continue
-        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
-            continue
-        final_vol.append(s)
-        seen_fresh_symbols.add(sym)
-        if len(final_vol) >= 2:
-            break
-
-    final_bo = []
-    for s in breakout_matches:
-        sym = s["symbol"]
-        if sym in seen_fresh_symbols:
-            continue
-        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
-            continue
-        final_bo.append(s)
-        seen_fresh_symbols.add(sym)
-        if len(final_bo) >= 2:
-            break
-
-    final_os = []
-    for s in oversold_matches:
-        sym = s["symbol"]
-        if sym in seen_fresh_symbols:
-            continue
-        if not force and (f"{sym}:volume_surge" in sent_keys or f"{sym}:breakout" in sent_keys or f"{sym}:rsi_oversold" in sent_keys):
-            continue
-        final_os.append(s)
-        seen_fresh_symbols.add(sym)
-        if len(final_os) >= 2:
-            break
+    # Evaluate Scanners via shared helper (exact EGX rules)
+    eval_res = evaluate_scanner_candidates(
+        latest_by_symbol,
+        sent_keys=sent_keys,
+        force=force,
+        limit_per_category=2,
+    )
+    final_vol = eval_res["final_vol"]
+    final_bo = eval_res["final_bo"]
+    final_os = eval_res["final_os"]
+    positive_stocks = eval_res["positive_stocks"]
+    negative_stocks = eval_res["negative_stocks"]
+    neutral_stocks = eval_res["neutral_stocks"]
 
     # ── Tracked Signals Lifecycle & Targets/Stop-Loss Management ──────
     current_active: List[Dict[str, Any]] = list(config.get("active_signals", []))
     current_closed: List[Dict[str, Any]] = list(config.get("closed_signals", []))
-    hit_target_signals: List[Dict[str, Any]] = []
-    stopped_out_signals: List[Dict[str, Any]] = []
-    still_active_signals: List[Dict[str, Any]] = []
-
-    for sig in current_active:
-        sym = sig.get("symbol", "")
-        p = latest_by_symbol.get(sym)
-        curr_price = float(p.get("close", sig.get("current_price", sig.get("entry_price", 0.0)))) if p else float(sig.get("current_price", sig.get("entry_price", 0.0)))
-
-        is_price_current = as_of_date >= sig.get("entry_date", "")
-        bar_high = max(float(p.get("high", curr_price)), curr_price) if (p and is_price_current) else curr_price
-        bar_low = min(float(p.get("low", curr_price)), curr_price) if (p and is_price_current) else curr_price
-
-        highest_price = max(float(sig.get("highest_price") or sig.get("entry_price") or curr_price), bar_high)
-        lowest_price = min(float(sig.get("lowest_price") or sig.get("entry_price") or curr_price), bar_low)
-        entry_price = float(sig.get("entry_price") or curr_price or 1.0)
-        return_pct = round(((curr_price - entry_price) / entry_price) * 100, 2)
-        max_gain_pct = round(((highest_price - entry_price) / entry_price) * 100, 2)
-
-        elapsed_sessions = count_elapsed_sessions(sig.get("entry_date", cairo["date_str"]), cairo["date_str"])
-        elapsed_sessions = max(int(sig.get("sessions_count", 1)), elapsed_sessions)
-
-        updated_sig = dict(sig)
-        updated_sig.update({
-            "current_price": curr_price,
-            "highest_price": highest_price,
-            "lowest_price": lowest_price,
-            "return_pct": return_pct,
-            "max_gain_pct": max(float(sig.get("max_gain_pct") or 0.0), max_gain_pct),
-            "sessions_count": elapsed_sessions,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
-
-        # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry price
-        has_breakeven = highest_price >= entry_price * 1.025
-        effective_stop = max(float(sig.get("stop_loss", 0.0)), entry_price) if has_breakeven else float(sig.get("stop_loss", 0.0))
-
-        if has_breakeven:
-            updated_sig["stop_loss"] = effective_stop
-            updated_sig["stop_loss_pct"] = 0.0
-
-        hit_stop = (curr_price <= effective_stop) if has_breakeven else (bar_low <= effective_stop)
-        target_1 = float(sig.get("target_1") or entry_price * 1.04)
-
-        if highest_price >= target_1:
-            exit_price = target_1
-            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            updated_sig.update({
-                "status": "target_hit",
-                "exit_price": exit_price,
-                "return_pct": realized_return,
-                "exit_date": cairo["date_str"],
-                "exit_time": cairo["time_str"],
-                "exit_reason": "تحقق الهدف الأول بنجاح 🎯",
-            })
-            hit_target_signals.append(updated_sig)
-            current_closed.insert(0, updated_sig)
-        elif hit_stop and is_price_current:
-            exit_price = effective_stop
-            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            is_be = has_breakeven and (effective_stop >= entry_price)
-            updated_sig.update({
-                "status": "target_hit" if is_be else "stopped_out",
-                "exit_price": exit_price,
-                "return_pct": realized_return,
-                "exit_date": cairo["date_str"],
-                "exit_time": cairo["time_str"],
-                "exit_reason": "حماية الأرباح / تفعيل وقف التعادل 🛡️" if is_be else "ضرب وقف الخسارة 🛑",
-            })
-            if is_be:
-                hit_target_signals.append(updated_sig)
-            else:
-                stopped_out_signals.append(updated_sig)
-            current_closed.insert(0, updated_sig)
-        elif updated_sig["sessions_count"] >= int(sig.get("max_sessions", 5)):
-            exit_price = curr_price
-            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            updated_sig.update({
-                "status": "target_hit" if realized_return > 0 else "expired",
-                "exit_price": exit_price,
-                "return_pct": realized_return,
-                "exit_date": cairo["date_str"],
-                "exit_time": cairo["time_str"],
-                "exit_reason": "تحقق هدف جزئي 🎯" if realized_return > 0 else "انتهاء مدة الاحتفاظ (5 جلسات) ⏱️",
-            })
-            current_closed.insert(0, updated_sig)
-        else:
-            still_active_signals.append(updated_sig)
-
-    MAX_PORTFOLIO_ACTIVE = 8
-
-    def is_symbol_active_or_closed_today(symbol: str) -> bool:
-        if any(s.get("symbol") == symbol for s in still_active_signals):
-            return True
-        if any(s.get("symbol") == symbol and s.get("entry_date") == cairo["date_str"] for s in current_closed):
-            return True
-        return False
-
-    # Add fresh signals to portfolio
-    if True:
-        for v in final_vol:
-            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-                break
-            if is_symbol_active_or_closed_today(v["symbol"]):
-                continue
-            plan = calculate_trade_plan(v["close"], "volume_surge")
-            still_active_signals.append({
-                "id": f"{v['symbol']}_{cairo['date_str']}_volume_surge",
-                "symbol": v["symbol"],
-                "scanner_type": "volume_surge",
-                "entry_price": v["close"],
-                "entry_date": cairo["date_str"],
-                "entry_time": cairo["time_str"],
-                "target_1": plan["target_1"],
-                "target_1_pct": plan["target_1_pct"],
-                "target_2": plan["target_2"],
-                "target_2_pct": plan["target_2_pct"],
-                "stop_loss": plan["stop_loss"],
-                "stop_loss_pct": plan["stop_loss_pct"],
-                "current_price": v["close"],
-                "highest_price": v["close"],
-                "lowest_price": v["close"],
-                "return_pct": 0.0,
-                "max_gain_pct": 0.0,
-                "status": "active",
-                "sessions_count": 1,
-                "max_sessions": plan["max_sessions"],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-
-        for b in final_bo:
-            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-                break
-            if is_symbol_active_or_closed_today(b["symbol"]):
-                continue
-            plan = calculate_trade_plan(b["close"], "breakout")
-            still_active_signals.append({
-                "id": f"{b['symbol']}_{cairo['date_str']}_breakout",
-                "symbol": b["symbol"],
-                "scanner_type": "breakout",
-                "entry_price": b["close"],
-                "entry_date": cairo["date_str"],
-                "entry_time": cairo["time_str"],
-                "target_1": plan["target_1"],
-                "target_1_pct": plan["target_1_pct"],
-                "target_2": plan["target_2"],
-                "target_2_pct": plan["target_2_pct"],
-                "stop_loss": plan["stop_loss"],
-                "stop_loss_pct": plan["stop_loss_pct"],
-                "current_price": b["close"],
-                "highest_price": b["close"],
-                "lowest_price": b["close"],
-                "return_pct": 0.0,
-                "max_gain_pct": 0.0,
-                "status": "active",
-                "sessions_count": 1,
-                "max_sessions": plan["max_sessions"],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-
-        for o in final_os:
-            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-                break
-            if is_symbol_active_or_closed_today(o["symbol"]):
-                continue
-            plan = calculate_trade_plan(o["close"], "rsi_oversold")
-            still_active_signals.append({
-                "id": f"{o['symbol']}_{cairo['date_str']}_rsi_oversold",
-                "symbol": o["symbol"],
-                "scanner_type": "rsi_oversold",
-                "entry_price": o["close"],
-                "entry_date": cairo["date_str"],
-                "entry_time": cairo["time_str"],
-                "target_1": plan["target_1"],
-                "target_1_pct": plan["target_1_pct"],
-                "target_2": plan["target_2"],
-                "target_2_pct": plan["target_2_pct"],
-                "stop_loss": plan["stop_loss"],
-                "stop_loss_pct": plan["stop_loss_pct"],
-                "current_price": o["close"],
-                "highest_price": o["close"],
-                "lowest_price": o["close"],
-                "return_pct": 0.0,
-                "max_gain_pct": 0.0,
-                "status": "active",
-                "sessions_count": 1,
-                "max_sessions": plan["max_sessions"],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
+    (
+        still_active_signals,
+        current_closed,
+        hit_target_signals,
+        stopped_out_signals,
+    ) = step_scanner_lifecycle(
+        current_active,
+        current_closed,
+        latest_by_symbol,
+        final_vol=final_vol,
+        final_bo=final_bo,
+        final_os=final_os,
+        as_of_date=as_of_date,
+        action_date=cairo["date_str"],
+        action_time=cairo["time_str"],
+        now_iso=datetime.now(timezone.utc).isoformat(),
+        causal_be_prev_only=False,
+    )
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)
     # Strictly filter hits so we ONLY alert if:
@@ -833,22 +1051,7 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     final_closed = list(closed_dedup.values())[:1000]
 
     # Calculate Signals KPIs
-    closed_wins = [s for s in final_closed if float(s.get("return_pct") or 0.0) > 0]
-    closed_losses = [s for s in final_closed if float(s.get("return_pct") or 0.0) < 0]
-    sum_wins = sum(float(s.get("return_pct") or 0.0) for s in closed_wins)
-    sum_losses = abs(sum(float(s.get("return_pct") or 0.0) for s in closed_losses))
-
-    win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 80.0
-    profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 4.5
-    signals_kpis = {
-        "win_rate_pct": win_rate,
-        "total_closed": len(final_closed),
-        "total_active": len(final_active),
-        "avg_win_pct": round(sum_wins / max(1, len(closed_wins)), 1) if closed_wins else 3.5,
-        "avg_loss_pct": round(sum_losses / max(1, len(closed_losses)), 1) if closed_losses else 2.0,
-        "profit_factor": profit_factor,
-        "top_win_pct": max((float(s.get("return_pct") or 0.0) for s in final_closed), default=0.0),
-    }
+    signals_kpis = compute_scanner_signals_kpis(final_closed, final_active)
 
     # Dispatch Fresh Signal Alerts to VIP
     alerts_dispatched = 0

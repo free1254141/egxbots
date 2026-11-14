@@ -38,13 +38,39 @@ CACHE_PATHS = [
     Path("scratch/short_swings_cache.json"),
 ]
 
+SAUDI_CACHE_PATHS = [
+    Path(__file__).parent / "data" / "saudi_short_swings_cache.json",
+    Path("api/data/saudi_short_swings_cache.json"),
+    Path("scratch/saudi_short_swings_cache.json"),
+]
+
+SAUDI_SHORT_SWINGS_CACHE_KEY = "saudi_short_swings_v1"
+SAUDI_HISTORY_CACHE_PATH = Path(__file__).parent / "data_cache" / "saudi_history_cache.pkl"
+
+# Saudi institutional calibration (mirrors EGX EGP floors scaled to SAR TADAWUL liquidity)
+SAUDI_BREADTH_MIN_TURNOVER = 2_000_000.0
+SAUDI_ENTRY_AVG_TURNOVER = 25_000_000.0
+SAUDI_ENTRY_MEDIAN_TURNOVER = 12_500_000.0
+SAUDI_ENTRY_CURRENT_TURNOVER = 6_250_000.0
+SAUDI_MIN_BREADTH = 0.65
+SAUDI_START_DATE = "2021-01-01"
+
 _SNAPSHOT_BOOTSTRAP_LOCK = threading.Lock()
 _SNAPSHOT_BOOTSTRAPPED = False
+_SAUDI_SNAPSHOT_BOOTSTRAPPED = False
 
 
-def _write_snapshot_files(result):
+def _normalize_exchange(exchange: Optional[str]) -> str:
+    raw = (exchange or "EGX").strip().upper()
+    if raw in ("TASI", "TADAWUL", "SA", "SAUDI"):
+        return "TADAWUL"
+    return raw or "EGX"
+
+
+def _write_snapshot_files(result, paths=None):
     """Write shared computed data, never rebuild history from a visitor request."""
-    for cp in CACHE_PATHS:
+    target_paths = paths or CACHE_PATHS
+    for cp in target_paths:
         try:
             cp.parent.mkdir(parents=True, exist_ok=True)
             tmp = cp.with_suffix(f".tmp.{os.getpid()}")
@@ -75,6 +101,66 @@ def _persist_saved_snapshot(client, result):
     if not replace_checkpoint(client, "short_swings_latest", {"swings": result}, old):
         raise RuntimeError("Cannot persist shared short-swings display snapshot")
     return True
+
+
+def _get_saudi_supabase_client():
+    """Initialize SAUDI_SUPABASE client safely if configured."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        load_dotenv(Path(__file__).parent / ".env")
+    except Exception:
+        pass
+    url = (os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or "").strip()
+    key = (
+        os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SAUDI_SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    if not url or not key:
+        return None
+    from supabase import create_client
+    return create_client(url, key)
+
+
+def _restore_saudi_snapshot():
+    """Read durable Saudi short swings payload from SAUDI_SUPABASE.market_cache."""
+    sb = _get_saudi_supabase_client()
+    if not sb:
+        return None
+    try:
+        res = (
+            sb.table("market_cache")
+            .select("payload")
+            .eq("cache_key", SAUDI_SHORT_SWINGS_CACHE_KEY)
+            .eq("country", "Saudi Arabia")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows and isinstance(rows[0].get("payload"), dict):
+            return rows[0]["payload"]
+    except Exception as exc:
+        print(f"[SHORT_SWINGS] Saudi snapshot restore failed: {type(exc).__name__}")
+    return None
+
+
+def _persist_saudi_snapshot(result: Dict[str, Any]) -> None:
+    """Persist Saudi short swings payload into SAUDI_SUPABASE.market_cache."""
+    sb = _get_saudi_supabase_client()
+    if not sb:
+        return
+    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+    sb.table("market_cache").upsert(
+        {
+            "cache_key": SAUDI_SHORT_SWINGS_CACHE_KEY,
+            "country": "Saudi Arabia",
+            "payload": result,
+            "computed_at": now_iso,
+        },
+        on_conflict="cache_key,country",
+    ).execute()
 
 EXIT_REASON_LABELS = {
     "ema10_break": "كسر متوسط EMA10 (حماية أرباح)",
@@ -200,9 +286,182 @@ def _resolve_archive_path() -> Optional[Path]:
     return None
 
 _METADATA_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+_SAUDI_METADATA_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
 
-def load_stock_metadata() -> Dict[str, Dict[str, Any]]:
+
+def _load_saudi_stock_metadata() -> Dict[str, Dict[str, Any]]:
+    """Load Saudi Tadawul Arabic names & sectors from aliases + SAUDI_SUPABASE.stocks."""
+    global _SAUDI_METADATA_CACHE
+    if _SAUDI_METADATA_CACHE is not None:
+        return _SAUDI_METADATA_CACHE
+
+    meta_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        from api.saudi_stock_aliases import SAUDI_STOCK_NAMES_AR
+        for sym, name_ar in (SAUDI_STOCK_NAMES_AR or {}).items():
+            ticker = str(sym).upper().split(".")[0]
+            if ticker:
+                meta_map[ticker] = {
+                    "name_ar": name_ar or ticker,
+                    "name_en": ticker,
+                    "sector": "عام",
+                    "logo": "",
+                }
+    except Exception as exc:
+        print(f"[SHORT_SWINGS] Warning loading Saudi aliases: {exc}")
+
+    try:
+        sb = _get_saudi_supabase_client()
+        if sb:
+            res = (
+                sb.table("stocks")
+                .select("symbol,name,name_ar,sector")
+                .eq("exchange", "TADAWUL")
+                .limit(500)
+                .execute()
+            )
+            for row in res.data or []:
+                ticker = str(row.get("symbol") or "").upper().split(".")[0]
+                if not ticker:
+                    continue
+                entry = meta_map.get(ticker, {"name_ar": ticker, "name_en": ticker, "sector": "عام", "logo": ""})
+                if row.get("name_ar"):
+                    entry["name_ar"] = row["name_ar"]
+                elif row.get("name") and entry["name_ar"] == ticker:
+                    entry["name_ar"] = row["name"]
+                if row.get("name"):
+                    entry["name_en"] = row["name"]
+                if row.get("sector"):
+                    entry["sector"] = row["sector"]
+                meta_map[ticker] = entry
+    except Exception as exc:
+        print(f"[SHORT_SWINGS] Warning enriching Saudi metadata from SAUDI_SUPABASE: {exc}")
+
+    _SAUDI_METADATA_CACHE = meta_map
+    return meta_map
+
+
+def _load_saudi_price_dataframe(start_date: str = SAUDI_START_DATE) -> pd.DataFrame:
+    """Load Saudi TADAWUL historical OHLCV from local pickle cache + live tail from SAUDI_SUPABASE."""
+    import pickle
+    from concurrent.futures import ThreadPoolExecutor
+
+    frames: List[pd.DataFrame] = []
+    max_cached_date: Optional[str] = None
+    candidates = [
+        SAUDI_HISTORY_CACHE_PATH,
+        Path("api/data_cache/saudi_history_cache.pkl"),
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                with open(p, "rb") as fp:
+                    payload = pickle.load(fp)
+                bars_map = payload.get("bars_by_symbol") or {}
+                for sym, bdf in bars_map.items():
+                    if bdf is None or bdf.empty:
+                        continue
+                    idx_dates = pd.to_datetime(bdf.index, errors="coerce").strftime("%Y-%m-%d")
+                    part = pd.DataFrame({
+                        "symbol": str(sym).upper().split(".")[0],
+                        "exchange": "TADAWUL",
+                        "date": idx_dates,
+                        "open": pd.to_numeric(bdf["Open"], errors="coerce").values,
+                        "high": pd.to_numeric(bdf["High"], errors="coerce").values,
+                        "low": pd.to_numeric(bdf["Low"], errors="coerce").values,
+                        "close": pd.to_numeric(bdf["Close"], errors="coerce").values,
+                        "volume": pd.to_numeric(bdf["Volume"], errors="coerce").values,
+                    })
+                    part = part[part["date"] >= start_date]
+                    if not part.empty:
+                        frames.append(part)
+                if frames:
+                    max_cached_date = str(payload.get("max_price_date") or "")[:10] or None
+                break
+            except Exception as exc:
+                print(f"[SHORT_SWINGS] Saudi pickle load warning ({p}): {exc}")
+
+    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    sb = _get_saudi_supabase_client()
+    if sb:
+        try:
+            tail_start = max_cached_date or start_date
+            if max_cached_date:
+                # Only fetch incremental tail rows newer/equal to max_cached_date
+                all_tail: List[Dict[str, Any]] = []
+                page = 0
+                page_size = 1000
+                while True:
+                    res = (
+                        sb.table("stock_prices")
+                        .select("symbol,exchange,date,open,high,low,close,volume")
+                        .eq("exchange", "TADAWUL")
+                        .gte("date", tail_start)
+                        .range(page * page_size, (page + 1) * page_size - 1)
+                        .execute()
+                    )
+                    rows = res.data or []
+                    all_tail.extend(rows)
+                    if len(rows) < page_size:
+                        break
+                    page += 1
+                if all_tail:
+                    df_tail = pd.DataFrame(all_tail)
+                    df = pd.concat([df, df_tail], ignore_index=True) if not df.empty else df_tail
+            else:
+                # Parallel per-symbol fetch when local pickle cache is absent
+                stocks_res = (
+                    sb.table("stocks")
+                    .select("symbol")
+                    .eq("exchange", "TADAWUL")
+                    .eq("is_active", True)
+                    .limit(500)
+                    .execute()
+                )
+                syms = sorted({
+                    str(r.get("symbol") or "").strip()
+                    for r in (stocks_res.data or [])
+                    if str(r.get("symbol") or "").strip()
+                })
+
+                def _fetch_sym(sym: str) -> List[Dict[str, Any]]:
+                    out: List[Dict[str, Any]] = []
+                    pg = 0
+                    while True:
+                        r = (
+                            sb.table("stock_prices")
+                            .select("symbol,exchange,date,open,high,low,close,volume")
+                            .eq("exchange", "TADAWUL")
+                            .eq("symbol", sym)
+                            .gte("date", start_date)
+                            .order("date", desc=False)
+                            .range(pg * 1000, (pg + 1) * 1000 - 1)
+                            .execute()
+                        )
+                        chunk = r.data or []
+                        out.extend(chunk)
+                        if len(chunk) < 1000:
+                            break
+                        pg += 1
+                    return out
+
+                sym_rows: List[Dict[str, Any]] = []
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    for chunk in pool.map(_fetch_sym, syms):
+                        sym_rows.extend(chunk)
+                if sym_rows:
+                    df = pd.DataFrame(sym_rows)
+        except Exception as exc:
+            print(f"[SHORT_SWINGS] Saudi Supabase price fetch warning: {exc}")
+
+    return df
+
+
+def load_stock_metadata(exchange: str = "EGX") -> Dict[str, Dict[str, Any]]:
     """Loads ticker names and sector metadata supporting case-insensitive schemas."""
+    if _normalize_exchange(exchange) == "TADAWUL":
+        return _load_saudi_stock_metadata()
+
     global _METADATA_CACHE
     if _METADATA_CACHE is not None:
         return _METADATA_CACHE
@@ -285,41 +544,62 @@ def _verified_intraday_quote(quote, now_cairo):
         return None
 
 
-def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str, Any]:
+def compute_short_swings(
+    *,
+    phase: str = None,
+    observed_quotes=None,
+    exchange: str = "EGX",
+    preloaded_df: Optional[pd.DataFrame] = None,
+    preloaded_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Generates the latest active and closed short swings with dynamic performance stats."""
     from zoneinfo import ZoneInfo
-    now_cairo = dt.datetime.now(ZoneInfo("Africa/Cairo"))
+
+    ex = _normalize_exchange(exchange)
+    is_saudi = ex == "TADAWUL"
+    tz_name = "Asia/Riyadh" if is_saudi else "Africa/Cairo"
+    now_cairo = dt.datetime.now(ZoneInfo(tz_name))
     if phase is None:
         minutes = now_cairo.hour * 60 + now_cairo.minute
-        phase = "midday" if 10 * 60 <= minutes < 14 * 60 + 30 else "close"
+        market_close_min = (15 * 60 + 10) if is_saudi else (14 * 60 + 30)
+        phase = "midday" if 10 * 60 <= minutes < market_close_min else "close"
     if phase not in {"midday", "close"}:
         raise ValueError("Invalid short-swings phase")
     session_date = now_cairo.date().isoformat()
     df = pd.DataFrame()
-    
-    # 1. Try standard history snapshot loader from api.hf_history_cache
-    try:
-        from api.hf_history_cache import load_history_snapshot
-        snapshot_df = load_history_snapshot("EGX")
-        if snapshot_df is not None and not snapshot_df.empty:
-            df = snapshot_df.copy()
-    except Exception as e:
-        print(f"[SHORT_SWINGS] Snapshot loader unavailable: {e}")
+    cache_paths = SAUDI_CACHE_PATHS if is_saudi else CACHE_PATHS
 
-    # 2. Fall back to resolved archive file
-    if df.empty:
-        archive_path = _resolve_archive_path()
-        if archive_path and archive_path.exists():
-            try:
-                with gzip.open(archive_path, "rt", encoding="utf-8") as f:
-                    raw = json.load(f)
-                df = pd.DataFrame(raw)
-            except Exception as e:
-                print(f"[SHORT_SWINGS] Failed reading archive {archive_path}: {e}")
+    if preloaded_df is not None and not preloaded_df.empty:
+        df = preloaded_df.copy()
+    elif is_saudi:
+        try:
+            df = _load_saudi_price_dataframe(SAUDI_START_DATE)
+        except Exception as e:
+            print(f"[SHORT_SWINGS] Saudi loader failed: {e}")
+    else:
+        # 1. Try standard history snapshot loader from api.hf_history_cache
+        try:
+            from api.hf_history_cache import load_history_snapshot
+            snapshot_df = load_history_snapshot("EGX")
+            if snapshot_df is not None and not snapshot_df.empty:
+                df = snapshot_df.copy()
+        except Exception as e:
+            print(f"[SHORT_SWINGS] Snapshot loader unavailable: {e}")
+
+        # 2. Fall back to resolved archive file
+        if df.empty:
+            archive_path = _resolve_archive_path()
+            if archive_path and archive_path.exists():
+                try:
+                    with gzip.open(archive_path, "rt", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    df = pd.DataFrame(raw)
+                except Exception as e:
+                    print(f"[SHORT_SWINGS] Failed reading archive {archive_path}: {e}")
 
     # If no data is available at all, return cached result if valid or explicit unavailable state
     if df.empty:
-        for cp in CACHE_PATHS:
+        for cp in cache_paths:
             if cp.exists():
                 try:
                     with open(cp, "r", encoding="utf-8") as fp:
@@ -328,7 +608,7 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
                             return cached
                 except Exception:
                     pass
-        return {
+        unavailable_payload = {
             "status": "unavailable",
             "kpis": compute_kpis_from_trades([]),
             "active_trades": [],
@@ -337,8 +617,11 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
             "total_closed": 0,
             "as_of": dt.date.today().isoformat()
         }
+        if is_saudi:
+            unavailable_payload.update({"market": "TASI", "currency": "SAR"})
+        return unavailable_payload
 
-    # Normalize columns and filter EGX valid prices
+    # Normalize columns and filter valid prices for target exchange
     # HF parquet/JSON snapshots expose pandas timestamps while Supabase rows
     # usually expose ISO strings.  Normalize both sources before comparing or
     # serializing dates; otherwise the standard loader crashes on Timestamp >=
@@ -357,61 +640,70 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         & (df["low"] <= df[["open", "close", "high"]].min(axis=1))
     )
     if "exchange" in df.columns:
-        valid_mask = valid_mask & (df["exchange"].astype(str).str.upper() == "EGX")
+        valid_mask = valid_mask & (df["exchange"].astype(str).str.upper() == ex)
         
+    min_date = SAUDI_START_DATE if is_saudi else "2024-01-01"
     df = df[valid_mask].sort_values(["symbol", "date"]).reset_index(drop=True)
-    df = df[df["date"] >= "2024-01-01"].reset_index(drop=True)
+    df = df[df["date"] >= min_date].drop_duplicates(subset=["symbol", "date"], keep="last").reset_index(drop=True)
 
-    # Augment with live prices from Supabase strictly for EGX exchange
-    max_archive_date = str(df["date"].max()) if not df.empty else "2024-01-01"
-    try:
-        from api.stock_ai import _init_supabase, supabase
-        _init_supabase()
-        if supabase:
-            all_new = []
-            page = 0
-            page_size = 1000
-            while True:
-                res = (
-                    supabase.table("stock_prices")
-                    .select("symbol,exchange,date,open,high,low,close,volume")
-                    .eq("exchange", "EGX")
-                    .gte("date", max_archive_date)
-                    .range(page * page_size, (page + 1) * page_size - 1)
-                    .execute()
-                )
-                rows = res.data or []
-                all_new.extend(rows)
-                if len(rows) < page_size:
-                    break
-                page += 1
-            if all_new:
-                df_new = pd.DataFrame(all_new)
-                df_new["date"] = df_new["date"].map(_price_date)
-                df_new = df_new.dropna(subset=["date"])
-                for col in ["open", "high", "low", "close", "volume"]:
-                    df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
-                df_new = df_new.dropna(subset=["open", "high", "low", "close", "volume"])
-                new_valid = (
-                    np.isfinite(df_new["open"]) & np.isfinite(df_new["high"]) & np.isfinite(df_new["low"]) & np.isfinite(df_new["close"]) & np.isfinite(df_new["volume"])
-                    & (df_new["open"] > 0) & (df_new["high"] > 0) & (df_new["low"] > 0) & (df_new["close"] > 0) & (df_new["volume"] >= 0)
-                    & (df_new["high"] >= df_new[["open", "close", "low"]].max(axis=1))
-                    & (df_new["low"] <= df_new[["open", "close", "high"]].min(axis=1))
-                )
-                df_new = df_new[new_valid]
-                if not df_new.empty:
-                    df = pd.concat([df, df_new], ignore_index=True)
-                    df = df.drop_duplicates(subset=["symbol", "date"], keep="last")
-                    df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
-                    print(f"[SHORT_SWINGS] Merged {len(df_new)} live rows from Supabase (EGX); latest date: {df['date'].max()}")
-    except Exception as merge_err:
-        print(f"[SHORT_SWINGS] Warning: failed to merge live Supabase prices: {merge_err}")
+    # Augment with live prices from Supabase strictly for EGX exchange when not preloaded
+    if not is_saudi and preloaded_df is None:
+        max_archive_date = str(df["date"].max()) if not df.empty else "2024-01-01"
+        try:
+            from api.stock_ai import _init_supabase, supabase
+            _init_supabase()
+            if supabase:
+                all_new = []
+                page = 0
+                page_size = 1000
+                while True:
+                    res = (
+                        supabase.table("stock_prices")
+                        .select("symbol,exchange,date,open,high,low,close,volume")
+                        .eq("exchange", "EGX")
+                        .gte("date", max_archive_date)
+                        .range(page * page_size, (page + 1) * page_size - 1)
+                        .execute()
+                    )
+                    rows = res.data or []
+                    all_new.extend(rows)
+                    if len(rows) < page_size:
+                        break
+                    page += 1
+                if all_new:
+                    df_new = pd.DataFrame(all_new)
+                    df_new["date"] = df_new["date"].map(_price_date)
+                    df_new = df_new.dropna(subset=["date"])
+                    for col in ["open", "high", "low", "close", "volume"]:
+                        df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
+                    df_new = df_new.dropna(subset=["open", "high", "low", "close", "volume"])
+                    new_valid = (
+                        np.isfinite(df_new["open"]) & np.isfinite(df_new["high"]) & np.isfinite(df_new["low"]) & np.isfinite(df_new["close"]) & np.isfinite(df_new["volume"])
+                        & (df_new["open"] > 0) & (df_new["high"] > 0) & (df_new["low"] > 0) & (df_new["close"] > 0) & (df_new["volume"] >= 0)
+                        & (df_new["high"] >= df_new[["open", "close", "low"]].max(axis=1))
+                        & (df_new["low"] <= df_new[["open", "close", "high"]].min(axis=1))
+                    )
+                    df_new = df_new[new_valid]
+                    if not df_new.empty:
+                        df = pd.concat([df, df_new], ignore_index=True)
+                        df = df.drop_duplicates(subset=["symbol", "date"], keep="last")
+                        df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
+                        print(f"[SHORT_SWINGS] Merged {len(df_new)} live rows from Supabase (EGX); latest date: {df['date'].max()}")
+        except Exception as merge_err:
+            print(f"[SHORT_SWINGS] Warning: failed to merge live Supabase prices: {merge_err}")
+    else:
+        supabase = None
 
     # Do not let an erroneous future candle enter the current-session replay.
     df = df[df["date"] <= session_date]
     if df.empty:
         return {"status": "unavailable", "as_of": None, "active_trades": [], "closed_trades": []}
-    meta = load_stock_metadata()
+    if preloaded_meta is not None:
+        meta = preloaded_meta
+    elif is_saudi:
+        meta = load_stock_metadata(exchange="TADAWUL")
+    else:
+        meta = load_stock_metadata()  # Keep 0-arg call untouched for EGX monkeypatches
     dates = sorted(df["date"].unique())
 
     # Build causal features per symbol
@@ -441,38 +733,57 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         g["high20"] = h.rolling(20).max().shift(1)
         g["ret20"] = c / c.shift(20) - 1.0
 
-        g["liquid"] = (
-            (np.arange(len(g)) >= 30)
-            & (g["turnover"] >= 1_000_000)
-            & (g["active_days"] >= 15)
-        )
-        # Preserve pre-rollout simulations and published history. New entry
-        # decisions require typical and current turnover, not a single spike.
-        policy_applies = g["date"].astype(str).str[:10] >= EFFECTIVE_DATE
-        g["entry_liquid"] = g["liquid"] & (g["turnover"] >= MIN_AVERAGE_TURNOVER) & (
-            g["median_turnover"] >= MIN_MEDIAN_TURNOVER) & (g["current_turnover"] >= MIN_CURRENT_TURNOVER) & (
-            g["active_days"] >= MIN_ACTIVE_SESSIONS)
-        calendar_rows = {r.date: {'date': r.date, 'close': r.close, 'volume': r.volume}
-                         for r in g[['date', 'close', 'volume']].itertuples(index=False)}
-        # Sparse histories must be measured over actual exchange sessions, not
-        # twenty trades spread over several months. Only prospective decisions
-        # use the stronger policy, so historical simulations are not rewritten.
-        for index in g.index[policy_applies]:
-            day = g.at[index, 'date']
-            recent = [calendar_rows[d] for d in recent_sessions(day) if d in calendar_rows]
-            g.at[index, 'entry_liquid'] = bool(g.at[index, 'liquid']) and assess_entry_liquidity(recent, day)['eligible']
-        g.loc[policy_applies, "liquid"] = g.loc[policy_applies, "entry_liquid"]
-        g["above_ema50"] = g["liquid"] & (c > g["ema50"])
+        if is_saudi:
+            # Saudi: measure market breadth across active liquid TADAWUL stocks (>=2M SAR),
+            # and restrict entry signals to institutional leaders (>=25M SAR avg, >=12.5M median, >=6.25M current).
+            g["breadth_liquid"] = (
+                (np.arange(len(g)) >= 30)
+                & (g["turnover"] >= SAUDI_BREADTH_MIN_TURNOVER)
+                & (g["active_days"] >= MIN_ACTIVE_SESSIONS)
+            )
+            g["liquid"] = (
+                (np.arange(len(g)) >= 30)
+                & (g["turnover"] >= SAUDI_ENTRY_AVG_TURNOVER)
+                & (g["median_turnover"] >= SAUDI_ENTRY_MEDIAN_TURNOVER)
+                & (g["current_turnover"] >= SAUDI_ENTRY_CURRENT_TURNOVER)
+                & (g["active_days"] >= MIN_ACTIVE_SESSIONS)
+            )
+            g["entry_liquid"] = g["liquid"]
+            g["above_ema50"] = g["breadth_liquid"] & (c > g["ema50"])
+        else:
+            g["liquid"] = (
+                (np.arange(len(g)) >= 30)
+                & (g["turnover"] >= 1_000_000)
+                & (g["active_days"] >= 15)
+            )
+            # Preserve pre-rollout simulations and published history. New entry
+            # decisions require typical and current turnover, not a single spike.
+            policy_applies = g["date"].astype(str).str[:10] >= EFFECTIVE_DATE
+            g["entry_liquid"] = g["liquid"] & (g["turnover"] >= MIN_AVERAGE_TURNOVER) & (
+                g["median_turnover"] >= MIN_MEDIAN_TURNOVER) & (g["current_turnover"] >= MIN_CURRENT_TURNOVER) & (
+                g["active_days"] >= MIN_ACTIVE_SESSIONS)
+            calendar_rows = {r.date: {'date': r.date, 'close': r.close, 'volume': r.volume}
+                             for r in g[['date', 'close', 'volume']].itertuples(index=False)}
+            # Sparse histories must be measured over actual exchange sessions, not
+            # twenty trades spread over several months. Only prospective decisions
+            # use the stronger policy, so historical simulations are not rewritten.
+            for index in g.index[policy_applies]:
+                day = g.at[index, 'date']
+                recent = [calendar_rows[d] for d in recent_sessions(day) if d in calendar_rows]
+                g.at[index, 'entry_liquid'] = bool(g.at[index, 'liquid']) and assess_entry_liquidity(recent, day)['eligible']
+            g.loc[policy_applies, "liquid"] = g.loc[policy_applies, "entry_liquid"]
+            g["above_ema50"] = g["liquid"] & (c > g["ema50"])
+            g["breadth_liquid"] = g["liquid"]
         groups.append(g)
 
     df = pd.concat(groups, ignore_index=True)
 
     # Market breadth (lagged 1 day)
-    breadth_raw = df[df["liquid"]].groupby("date")["above_ema50"].mean()
+    breadth_raw = df[df["breadth_liquid"]].groupby("date")["above_ema50"].mean()
     df = df.merge(breadth_raw.shift(1).rename("breadth"), on="date", how="left")
     df["breadth"] = df["breadth"].fillna(0.5)
 
-    mkt_ok = df["breadth"] >= 0.45
+    mkt_ok = df["breadth"] >= (SAUDI_MIN_BREADTH if is_saudi else 0.45)
     trend_aligned = (
         df["liquid"]
         & (df["close"] > df["ema10"])
@@ -506,30 +817,36 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         & (close_pos >= 0.75)
     )
 
-    # Defensive Relative Strength Leader (when broad breadth is below 45%):
-    sig_rs_leader = (
-        (~mkt_ok)
-        & trend_aligned
-        & (df["close"] >= df["high20"] * 0.985)
-        & (df["volume"] >= df["vol_ma20"] * 1.25)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.70)
-        & (df["ret20"] >= 0.07)
-    )
+    if is_saudi:
+        # On Tadawul, low-breadth defensive (~mkt_ok) counter-trend signals bleed during
+        # multi-quarter TASI downtrends (2022/2025-2026); confine entries to healthy bull breadth.
+        sig_rs_leader = pd.Series(False, index=df.index)
+        sig_defensive_pb = pd.Series(False, index=df.index)
+    else:
+        # Defensive Relative Strength Leader (when broad breadth is below 45%):
+        sig_rs_leader = (
+            (~mkt_ok)
+            & trend_aligned
+            & (df["close"] >= df["high20"] * 0.985)
+            & (df["volume"] >= df["vol_ma20"] * 1.25)
+            & (df["close"] > df["open"])
+            & (close_pos >= 0.70)
+            & (df["ret20"] >= 0.07)
+        )
 
-    # Defensive Momentum Pullback in low-breadth markets:
-    sig_defensive_pb = (
-        (~mkt_ok)
-        & df["liquid"]
-        & (df["close"] > df["ema20"])
-        & (df["ema20"] > df["ema50"])
-        & (df["ret20"] >= 0.02)
-        & (df["low"] <= df["ema10"] * 1.015)
-        & (df["close"] > df["ema10"])
-        & (df["volume"] >= df["vol_ma20"] * 1.1)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.65)
-    )
+        # Defensive Momentum Pullback in low-breadth markets:
+        sig_defensive_pb = (
+            (~mkt_ok)
+            & df["liquid"]
+            & (df["close"] > df["ema20"])
+            & (df["ema20"] > df["ema50"])
+            & (df["ret20"] >= 0.02)
+            & (df["low"] <= df["ema10"] * 1.015)
+            & (df["close"] > df["ema10"])
+            & (df["volume"] >= df["vol_ma20"] * 1.1)
+            & (df["close"] > df["open"])
+            & (close_pos >= 0.65)
+        )
 
     df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader | sig_defensive_pb
     df["sig_type"] = np.where(
@@ -930,11 +1247,12 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
             'signal': bool(row['signal']),
         })
 
+    closed_cutoff = "2025-01-01" if is_saudi else "2026-01-01"
     result = {
         "status": "ok",
         "kpis": kpis,
         "active_trades": active_output,
-        "closed_trades": [t for t in closed_trades if str(t.get("exit_date") or "") >= "2026-01-01"],
+        "closed_trades": [t for t in closed_trades if str(t.get("exit_date") or "") >= closed_cutoff],
         "total_active": len(active_output),
         "total_closed": len(closed_trades),
         "as_of": last_date,
@@ -943,18 +1261,22 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
         "computed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "signal_audit": signal_audit,
     }
+    if is_saudi:
+        result.update({"market": "TASI", "currency": "SAR", "exchange": "TADAWUL"})
 
     # Admin repair calculations must survive the next deployment too. Failed
     # persistence remains visible; the daily publisher retries it before sends.
     try:
-        if supabase:
+        if is_saudi:
+            _persist_saudi_snapshot(result)
+        elif supabase:
             _persist_saved_snapshot(supabase, result)
     except Exception as error:
         print(f"[SHORT_SWINGS] Durable snapshot save failed: {type(error).__name__}")
         result["snapshot_persistence_error"] = type(error).__name__
 
     # Atomic write to cache files
-    for cp in CACHE_PATHS:
+    for cp in cache_paths:
         try:
             cp.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = cp.with_suffix(f".tmp.{os.getpid()}")
@@ -968,17 +1290,23 @@ def compute_short_swings(*, phase: str = None, observed_quotes=None) -> Dict[str
 
     return result
 
-def get_cached_short_swings() -> Dict[str, Any]:
-    global _SNAPSHOT_BOOTSTRAPPED
+
+def get_cached_short_swings(exchange: str = "EGX") -> Dict[str, Any]:
+    global _SNAPSHOT_BOOTSTRAPPED, _SAUDI_SNAPSHOT_BOOTSTRAPPED
+    ex = _normalize_exchange(exchange)
+    is_saudi = ex == "TADAWUL"
+    target_paths = SAUDI_CACHE_PATHS if is_saudi else CACHE_PATHS
+
     # HF filesystems are ephemeral. A repository-shipped cache must not win
     # over the last successfully computed shared snapshot after a deployment.
     with _SNAPSHOT_BOOTSTRAP_LOCK:
-        if not _SNAPSHOT_BOOTSTRAPPED:
+        bootstrapped = _SAUDI_SNAPSHOT_BOOTSTRAPPED if is_saudi else _SNAPSHOT_BOOTSTRAPPED
+        if not bootstrapped:
             try:
-                saved = _restore_saved_snapshot()
+                saved = _restore_saudi_snapshot() if is_saudi else _restore_saved_snapshot()
                 if saved and saved.get("status") == "ok" and saved.get("as_of"):
                     local = []
-                    for cp in CACHE_PATHS:
+                    for cp in target_paths:
                         try:
                             with open(cp, encoding="utf-8") as stream:
                                 local.append(json.load(stream))
@@ -986,12 +1314,15 @@ def get_cached_short_swings() -> Dict[str, Any]:
                             pass
                     saved_version = (saved["as_of"], saved.get("computed_at") or "")
                     if not local or saved_version >= max((d.get("as_of") or "", d.get("computed_at") or "") for d in local):
-                        _write_snapshot_files(saved)
+                        _write_snapshot_files(saved, paths=target_paths)
             except Exception as error:
                 print(f"[SHORT_SWINGS] Durable snapshot restore failed: {type(error).__name__}")
             finally:
-                _SNAPSHOT_BOOTSTRAPPED = True
-    for cp in CACHE_PATHS:
+                if is_saudi:
+                    _SAUDI_SNAPSHOT_BOOTSTRAPPED = True
+                else:
+                    _SNAPSHOT_BOOTSTRAPPED = True
+    for cp in target_paths:
         if cp.exists():
             try:
                 with open(cp, "r", encoding="utf-8") as fp:
@@ -1000,8 +1331,11 @@ def get_cached_short_swings() -> Dict[str, Any]:
                         return data
             except Exception:
                 continue
-    return {"status": "unavailable", "as_of": None, "active_trades": [],
-            "closed_trades": [], "kpis": compute_kpis_from_trades([])}
+    fallback = {"status": "unavailable", "as_of": None, "active_trades": [],
+                "closed_trades": [], "kpis": compute_kpis_from_trades([])}
+    if is_saudi:
+        fallback.update({"market": "TASI", "currency": "SAR"})
+    return fallback
 
 if __name__ == "__main__":
     res = compute_short_swings()

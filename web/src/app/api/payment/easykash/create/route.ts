@@ -11,9 +11,22 @@ export async function POST(req: NextRequest) {
   const { data: { session } } = await auth.auth.getSession();
   if (!session?.access_token) return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const mobile = String(body?.mobile || "").replace(/[\s-]/g, "");
-  if (!/^01[0125]\d{8}$/.test(mobile)) {
-    return NextResponse.json({ detail: "أدخل رقم موبايل مصري صحيح من أي شبكة" }, { status: 400 });
+  const rawMobile = String(body?.mobile || "").trim().replace(/[\s\-()]/g, "");
+  // Accept Egyptian numbers (01XXXXXXXXX or +201XXXXXXXXX -> normalize to 01XXXXXXXXX)
+  // as well as international GCC/global E.164 numbers (+CCXXXXXXXXX).
+  let mobile = rawMobile;
+  if (/^\+?20(1[0125]\d{8})$/.test(rawMobile)) {
+    mobile = `0${rawMobile.replace(/^\+?20/, "")}`;
+  }
+  const isEgyptianMobile = /^01[0125]\d{8}$/.test(mobile);
+  const isInternationalMobile =
+    (/^\+[1-9]\d{6,14}$/.test(mobile)) ||
+    (!mobile.startsWith("0") && /^[1-9]\d{6,14}$/.test(mobile));
+  if (!isEgyptianMobile && !isInternationalMobile) {
+    return NextResponse.json(
+      { detail: "أدخل رقم موبايل صحيح (مصري 01XXXXXXXXX أو دولي بمفتاح الدولة مثل +9665XXXXXXXX)" },
+      { status: 400 }
+    );
   }
   const promoCode = typeof body?.promo_code === "string" ? body.promo_code.trim().toUpperCase().slice(0, 32) : "";
 

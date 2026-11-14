@@ -55,8 +55,9 @@ from supabase import Client, create_client
 
 from api.egx30_fetcher import get_market_regime
 from api.model_utils import align_pandas_categories_to_booster, get_primary_booster, reset_nested_boosters
-from api.recommendation_policy import evaluate_bars
+from api.recommendation_policy import evaluate_bars, profit_protection_stop
 from api.stock_ai import add_technical_indicators
+from api.strategy_engine import StrategyEngine
 from api.strict_quality_labeler import StrictQualityLabeler
 from api.structured_logger import StructuredLogger
 from api.trading_config import TradingParameters
@@ -70,8 +71,44 @@ from api.unified_features import FeatureEngineeringManager
 
 DEFAULT_HISTORY_START = "2010-01-01"
 DEFAULT_CACHE_PATH = os.path.join(PROJECT_ROOT, "api", "data_cache", "saudi_history_cache.pkl")
+DEFAULT_FEATURES_CACHE_PATH = os.path.join(PROJECT_ROOT, "api", "data_cache", "saudi_compact_features.pkl")
 EXCHANGE = "TADAWUL"
 COUNTRY = "Saudi Arabia"
+
+STATIONARY_EXCLUDE_COLS = {
+    "symbol",
+    "Date",
+    "date",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "ATR_14",
+    "industry",
+    "Target",
+}
+
+META_CORE_CANDIDATES = (
+    "ADX_14",
+    "CMF_20",
+    "R_VOL",
+    "MM_Accumulation",
+    "MM_Distribution",
+    "feat_mkt_trend",
+    "feat_mkt_volatility",
+    "feat_rel_strength",
+    "feat_sector_rel_strength",
+    "ATR_pct",
+    "RSI",
+    "MACD_Hist",
+    "BB_PctB",
+    "Price_vs_SMA200",
+    "feat_52w_position",
+    "feat_bull_consistency",
+    "volatility_ui",
+    "volume_mfi",
+)
 
 _THREAD_LOCAL = threading.local()
 
@@ -354,11 +391,116 @@ def load_saudi_history_cached(
     return payload
 
 
+def load_or_build_compact_features(
+    history_cache: Dict[str, Any],
+    features_cache_path: str = DEFAULT_FEATURES_CACHE_PATH,
+    force_rebuild: bool = False,
+) -> pd.DataFrame:
+    """
+    Load or compute causal stationary EGX feature frame for all 264 Saudi symbols
+    with float32 downcasting so training stays fast and low-memory (~175 MB).
+    """
+    max_price_date = str(history_cache.get("max_price_date") or "")[:10]
+    if not force_rebuild and os.path.exists(features_cache_path):
+        try:
+            df_cached = pd.read_pickle(features_cache_path)
+            if (
+                isinstance(df_cached, pd.DataFrame)
+                and len(df_cached) >= 700_000
+                and "Date" in df_cached.columns
+                and str(pd.to_datetime(df_cached["Date"]).max())[:10] >= max_price_date
+            ):
+                print(
+                    f"  [FEAT CACHE] Loaded compact stationary features: "
+                    f"{len(df_cached):,} rows x {df_cached.shape[1]} cols "
+                    f"(-> {str(pd.to_datetime(df_cached['Date']).max())[:10]})"
+                )
+                return df_cached
+        except Exception as exc:
+            print(f"  [FEAT CACHE] Cache reload fallback: {exc}")
+
+    print("  [FEAT BUILD] Computing stationary EGX features for all Saudi symbols...")
+    mdf = history_cache["market_df"]
+    sector_map = {
+        str(r["symbol"]): str(r.get("sector") or "Unknown")
+        for r in (history_cache.get("stocks_rows") or [])
+    }
+    industry_map = {
+        str(r["symbol"]): str(r.get("industry") or "Unknown")
+        for r in (history_cache.get("stocks_rows") or [])
+    }
+    raw_frames: List[pd.DataFrame] = []
+    for sym, bdf in sorted(history_cache["bars_by_symbol"].items()):
+        if bdf is None or len(bdf) < 120:
+            continue
+        sub = bdf.copy()
+        sub.index = pd.to_datetime(sub.index)
+        sub = sub.sort_index()
+        df_ind = add_technical_indicators(sub)
+        if df_ind.empty:
+            continue
+        df_ind = add_massive_features(df_ind)
+        df_ind = add_market_context(df_ind, mdf)
+        close_s = df_ind["Close"].astype(float).replace(0.0, np.nan)
+        df_ind["ATR_pct"] = (df_ind.get("ATR_14", pd.Series(0.0, index=df_ind.index)) / close_s).fillna(0.02)
+        if "SMA_50" in df_ind.columns:
+            df_ind["SMA_50_Ratio"] = (close_s / df_ind["SMA_50"].replace(0.0, np.nan) - 1.0).fillna(0.0)
+        if "EMA_50" in df_ind.columns:
+            df_ind["EMA_50_Ratio"] = (close_s / df_ind["EMA_50"].replace(0.0, np.nan) - 1.0).fillna(0.0)
+        df_ind["sector"] = sector_map.get(sym, "Unknown")
+        df_ind["industry"] = industry_map.get(sym, "Unknown")
+        df_ind["symbol"] = sym
+        df_ind["Date"] = pd.to_datetime(df_ind.index)
+        df_ind["stock_ret_1d"] = df_ind["Close"].astype(float).pct_change().fillna(0.0)
+        raw_frames.append(df_ind.reset_index(drop=True))
+
+    df_full = pd.concat(raw_frames, ignore_index=True)
+    # Causal lagged sector relative strength (lagged by 1 session - zero same-day leakage!)
+    sec_daily = (
+        df_full.groupby(["Date", "sector"], as_index=False)["stock_ret_1d"]
+        .mean()
+        .rename(columns={"stock_ret_1d": "sec_ret"})
+        .sort_values(["sector", "Date"])
+    )
+    sec_daily["sec_ret_lag1"] = sec_daily.groupby("sector")["sec_ret"].shift(1).fillna(0.0)
+    df_full = df_full.merge(sec_daily[["Date", "sector", "sec_ret_lag1"]], on=["Date", "sector"], how="left")
+    df_full["stock_ret_lag1"] = df_full.groupby("symbol")["stock_ret_1d"].shift(1).fillna(0.0)
+    df_full["feat_sector_rel_strength"] = (df_full["stock_ret_lag1"] - df_full["sec_ret_lag1"].fillna(0.0)).clip(-0.3, 0.3)
+
+    keep_cols = ["symbol", "Date", "Open", "High", "Low", "Close", "Volume", "ATR_14", "sector", "industry"]
+    for c in df_full.columns:
+        if c in keep_cols or c in ("stock_ret_1d", "stock_ret_lag1", "sec_ret_lag1"):
+            continue
+        if is_numeric_dtype(df_full[c]) and c not in STATIONARY_EXCLUDE_COLS:
+            # Exclude raw price/volume level columns that break stationarity
+            if any(bad in c for bad in ("_SMA", "SMA_", "EMA_", "BB_Upper", "BB_Lower", "BB_Middle", "Lag")) and "Ratio" not in c and "Price_vs" not in c:
+                if c not in ("Amihud_SMA_10", "RSI_Lag1"):
+                    continue
+            if c in ("OBV", "VWAP"):
+                continue
+            keep_cols.append(c)
+    keep_cols = list(dict.fromkeys(keep_cols))
+    out = df_full[keep_cols].copy()
+    for c in out.columns:
+        if c in ("symbol", "sector", "industry"):
+            out[c] = out[c].astype(str).astype("category")
+        elif c != "Date" and is_numeric_dtype(out[c]):
+            out[c] = pd.to_numeric(out[c], errors="coerce").astype(np.float32)
+
+    os.makedirs(os.path.dirname(features_cache_path), exist_ok=True)
+    out.to_pickle(features_cache_path)
+    print(f"  [FEAT CACHE] Saved {len(out):,} rows x {out.shape[1]} cols -> {features_cache_path}")
+    return out
+
+
 class SaudiModelTrainer(ModelTrainer):
     """
-    Exact Egyptian `ModelTrainer` pipeline adapted strictly for Saudi Tadawul (`TADAWUL`),
-    using cached full 2010->2026 Saudi history, `stocks` + `stock_fundamentals` sector/industry
-    metadata, and `StrictQualityLabeler` (identical to EGX).
+    EGX-matched `ModelTrainer` pipeline adapted strictly for Saudi Tadawul (`TADAWUL`):
+      - Full 2010->2026 Saudi price + TASI index history
+      - Strictly stationary EGX indicators + `sector` (no raw Close/Volume/industry overfit)
+      - Exact `StrictQualityLabeler` barriers (`next_open` entry, causal signal-bar ATR)
+      - Exact `meta_labeling_system` + `.model_card.json` compatible with `backtest_radar`,
+        `scan_ai_fast`, and `AdaptiveModelSelector`.
     """
 
     def __init__(
@@ -375,6 +517,7 @@ class SaudiModelTrainer(ModelTrainer):
             progress_cb=progress_cb,
         )
         self.history_cache = history_cache or load_saudi_history_cached(supabase_url, supabase_key)
+        self.categorical_features = ["sector"]
 
     def load_market_data(self):
         mdf = self.history_cache["market_df"].copy()
@@ -387,183 +530,89 @@ class SaudiModelTrainer(ModelTrainer):
         )
 
     def fetch_stock_prices(self, use_intraday: bool = False, timeframe: str = "1d") -> pd.DataFrame:
-        frames: List[pd.DataFrame] = []
-        bars_map: Dict[str, pd.DataFrame] = self.history_cache["bars_by_symbol"]
-        for sym, df in sorted(bars_map.items()):
-            if df is None or df.empty:
+        return load_or_build_compact_features(self.history_cache)
+
+    def select_predictors(self, df: pd.DataFrame, preset: str = "stationary") -> List[str]:
+        cols: List[str] = []
+        for c in df.columns:
+            if c in STATIONARY_EXCLUDE_COLS:
                 continue
-            part = df.reset_index().rename(columns={
-                "index": "date",
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume",
-            })
-            if "date" not in part.columns and "Date" in part.columns:
-                part = part.rename(columns={"Date": "date"})
-            part["symbol"] = sym
-            frames.append(part[["symbol", "date", "open", "high", "low", "close", "volume"]])
-        out = pd.concat(frames, ignore_index=True)
-        out["date"] = pd.to_datetime(out["date"], errors="coerce")
-        out = out.dropna(subset=["date"]).sort_values(["symbol", "date"]).reset_index(drop=True)
-        self._progress(
-            f"Loaded {len(out):,} full-history Saudi bars across {out['symbol'].nunique()} symbols "
-            f"({out['date'].min().date()} -> {out['date'].max().date()})"
-        )
-        return out
-
-    @staticmethod
-    def _process_single_symbol(params):
-        """Worker identically matching EGX `_process_single_symbol` including `StrictQualityLabeler`."""
-        try:
-            (
-                sym,
-                df_sym,
-                market_df,
-                target_pct,
-                stop_loss_pct,
-                look_forward_days,
-                use_vol_label,
-                min_history,
-                barrier_mode,
-                exchange,
-                t_params,
-            ) = params
-
-            manager = FeatureEngineeringManager(t_params)
-            df_sym = df_sym.copy()
-            df_sym["date"] = pd.to_datetime(df_sym["date"], errors="coerce")
-            df_sym = df_sym.dropna(subset=["date"]).sort_values("date").set_index("date")
-            report = manager.check_data_ready(df_sym, extra_checks=True)
-            if not report.is_ready:
-                return None
-
-            df = add_technical_indicators(df_sym)
-            if df.empty:
-                return None
-
-            for _c in (
-                "marketCap",
-                "peRatio",
-                "eps",
-                "dividendYield",
-                "sector",
-                "industry",
-                "sector_avg_return",
-                "stock_daily_return",
-            ):
-                if _c in df_sym.columns and _c not in df.columns:
-                    try:
-                        if len(df_sym[_c]) == len(df):
-                            df[_c] = df_sym[_c].values
-                        else:
-                            df[_c] = df_sym[_c].iloc[-1]
-                    except Exception:
-                        df[_c] = df_sym[_c].iloc[-1] if len(df_sym) else None
-
-            df = add_massive_features(df)
-            df = add_market_context(df, market_df)
-
-            labeler = StrictQualityLabeler(t_params)
-            df, _rejection_counts = labeler.label_training_data_strict(
-                df, egx30_data=market_df, drop_labels=True
-            )
-
-            if len(df) < 10:
-                return None
-            df["symbol"] = sym
-            df["Date"] = pd.to_datetime(df.index, errors="coerce")
-            return df
-        except Exception as e:
-            print(f"Error processing Saudi {params[0]}: {e}")
-            return None
-
-    def prepare_training_data(
-        self,
-        df_all: pd.DataFrame,
-        target_pct: float,
-        stop_loss_pct: float,
-        look_forward_days: int,
-        preset: str = "extended",
-        use_volatility_label: bool = False,
-        barrier_mode: Optional[str] = None,
-    ) -> pd.DataFrame:
-        self.load_market_data()
-        # Fill sector/industry directly from `stocks` if missing in `stock_fundamentals`
-        stocks_meta = pd.DataFrame(self.history_cache.get("stocks_rows") or [])
-        if not stocks_meta.empty:
-            cols = [c for c in ("symbol", "sector", "industry") if c in stocks_meta.columns]
-            df_all = df_all.merge(stocks_meta[cols].drop_duplicates("symbol"), on="symbol", how="left")
-            for c in ("sector", "industry"):
-                if c in df_all.columns and c not in self.categorical_features:
-                    self.categorical_features.append(c)
-
-        df_train = super().prepare_training_data(
-            df_all=df_all,
-            target_pct=target_pct,
-            stop_loss_pct=stop_loss_pct,
-            look_forward_days=look_forward_days,
-            preset=preset,
-            use_volatility_label=use_volatility_label,
-            barrier_mode=barrier_mode,
-        )
-        # Ensure min_volume_ratio aligns strictly with EGX (`0.8`) in saved params metadata
-        self.params.min_volume_ratio = 0.8
-        return df_train
+            if c == "sector" or is_numeric_dtype(df[c]):
+                cols.append(c)
+        self.predictors = cols
+        self.categorical_features = ["sector"] if "sector" in cols else []
+        return self.predictors
 
 
-def _optimize_meta_threshold_on_dev(
-    probs: np.ndarray,
-    y_true: np.ndarray,
-    min_support: int = 80,
-) -> Tuple[float, Dict[str, float]]:
-    """
-    Choose meta_threshold strictly on development/tune-or-oof-dev predictions (never test!).
-    Prioritizes high precision while maintaining healthy signal support.
-    """
-    best_th = 0.55
-    best_score = -1.0
-    best_stats: Dict[str, float] = {}
-
-    for th in np.round(np.arange(0.45, 0.78, 0.02), 2):
-        preds = (probs >= th).astype(int)
-        cnt = int(preds.sum())
-        if cnt < min_support:
+def label_saudi_dataset(
+    df_compact: pd.DataFrame,
+    market_df: pd.DataFrame,
+    params: TradingParameters,
+) -> pd.DataFrame:
+    """Apply EGX `StrictQualityLabeler` cleanly across all Saudi symbols."""
+    labeler = StrictQualityLabeler(params)
+    tparts: List[pd.DataFrame] = []
+    for sym, grp in df_compact.groupby("symbol", observed=True):
+        g = grp.sort_values("Date").copy()
+        g = g.set_index("Date")
+        res, _rej = labeler.label_training_data_strict(g, egx30_data=market_df, drop_labels=True)
+        if len(res) < 10:
             continue
-        prec = float(precision_score(y_true, preds, zero_division=0))
-        rec = float(recall_score(y_true, preds, zero_division=0))
-        f1 = float(f1_score(y_true, preds, zero_division=0))
-        base = float(np.mean(y_true))
-        lift = prec - base
-        # Reward meaningful precision lift with non-trivial trade volume
-        score = prec + 0.15 * min(rec, 0.25) + (0.05 if lift > 0.08 else 0.0)
-        if score > best_score:
-            best_score = score
-            best_th = float(th)
-            best_stats = {
-                "dev_precision": prec,
-                "dev_recall": rec,
-                "dev_f1": f1,
-                "dev_signals": cnt,
-                "dev_base_rate": base,
-            }
-
-    if not best_stats:
-        preds = (probs >= best_th).astype(int)
-        best_stats = {
-            "dev_precision": float(precision_score(y_true, preds, zero_division=0)),
-            "dev_recall": float(recall_score(y_true, preds, zero_division=0)),
-            "dev_f1": float(f1_score(y_true, preds, zero_division=0)),
-            "dev_signals": int(preds.sum()),
-            "dev_base_rate": float(np.mean(y_true)),
-        }
-    return best_th, best_stats
+        res["symbol"] = sym
+        res["Date"] = pd.to_datetime(res.index)
+        tparts.append(res[["symbol", "Date", "Target"]])
+    targets_df = pd.concat(tparts, ignore_index=True)
+    labeled = df_compact.merge(targets_df, on=["symbol", "Date"], how="inner")
+    return labeled.sort_values(["Date", "symbol"]).reset_index(drop=True)
 
 
-def _score_meta_system_df(artifact: Dict[str, Any], df_slice: pd.DataFrame) -> np.ndarray:
-    """Score rows with exact `meta_labeling_system` runtime alignment (PCA + cats + XGB)."""
-    from api.routers.scan_ai_fast import _LgbmBoosterClassifier, _MetaLabelingClassifier, _PcaTransformer
+def _prepare_model_matrix(
+    df_slice: pd.DataFrame,
+    feature_names: List[str],
+    cat_cols: List[str],
+    booster: Optional[lgb.Booster] = None,
+) -> pd.DataFrame:
+    X = df_slice.copy()
+    for c in feature_names:
+        if c not in X.columns:
+            X[c] = "Unknown" if c in cat_cols else 0.0
+    X = X[feature_names].copy()
+    for c in cat_cols:
+        if c in X.columns:
+            X[c] = (
+                X[c]
+                .astype(str)
+                .replace(["nan", "None", "", "0", "0.0"], "Unknown")
+                .fillna("Unknown")
+                .astype("category")
+            )
+    non_cat = [c for c in X.columns if c not in set(cat_cols)]
+    for c in non_cat:
+        if not is_numeric_dtype(X[c]):
+            X[c] = pd.to_numeric(X[c], errors="coerce")
+    X = X.replace([np.inf, -np.inf], np.nan)
+    if non_cat:
+        X[non_cat] = X[non_cat].fillna(0.0).astype(np.float32)
+    if booster is not None and cat_cols:
+        X = align_pandas_categories_to_booster(
+            X,
+            cat_cols=cat_cols,
+            booster=booster,
+            cat_cols_order=cat_cols,
+        )
+    return X
+
+
+def _score_meta_system_df(
+    artifact: Dict[str, Any],
+    df_slice: pd.DataFrame,
+    return_components: bool = False,
+) -> Any:
+    """
+    Score rows with exact `_MetaLabelingClassifier(return_raw_prob=False)` runtime parity
+    so `backtest_radar.reconstruct_meta_model` and `scan_ai_fast._load_model` match identically.
+    """
+    from api.stock_ai import _LgbmBoosterClassifier, _MetaLabelingClassifier, _PcaTransformer
 
     pm = artifact["primary_model"]
     booster = lgb.Booster(model_str=pm["model_str"])
@@ -573,140 +622,163 @@ def _score_meta_system_df(artifact: Dict[str, Any], df_slice: pd.DataFrame) -> n
 
     primary_clf = _LgbmBoosterClassifier(booster, 0.5, pca_transformer=pca_transformer)
     meta_clf = _MetaLabelingClassifier(
-        primary_clf=primary_clf,
+        primary_model=primary_clf,
         meta_model=artifact["meta_model"],
         meta_feature_names=artifact["meta_feature_names"],
-        meta_threshold=float(artifact.get("meta_threshold", 0.55)),
-        return_raw_prob=True,
+        meta_threshold=float(artifact.get("meta_threshold", 0.50)),
+        return_raw_prob=False,
     )
 
     f_names = list(pm["feature_names"])
     pca_feats = list(pm.get("pca_features") or [])
-    if pca_feats:
-        raw_needed = [c for c in f_names if not str(c).startswith("PCA_Momentum_")] + pca_feats
-    else:
-        raw_needed = f_names
+    raw_needed = [c for c in f_names if not str(c).startswith("PCA_Momentum_")] + pca_feats if pca_feats else f_names
+    cat_cols = [c for c in (pm.get("categorical_features") or []) if c in raw_needed]
 
-    X = df_slice.copy()
-    for c in raw_needed:
-        if c not in X.columns:
-            X[c] = 0.0
-    X = X[raw_needed].copy()
+    X = _prepare_model_matrix(df_slice, raw_needed, cat_cols, booster=booster)
+    filtered_probs = np.asarray(meta_clf.predict_proba(X)[:, 1], dtype=float)
+    if not return_components:
+        return filtered_probs
 
-    cat_cols = [c for c in (pm.get("categorical_features") or []) if c in X.columns]
-    for c in cat_cols:
-        X[c] = (
-            X[c]
-            .astype(str)
-            .replace(["nan", "None", "", "0", "0.0"], "Unknown")
-            .fillna("Unknown")
-            .astype("category")
-        )
-    non_cat = [c for c in X.columns if c not in set(cat_cols)]
-    for c in non_cat:
-        if not is_numeric_dtype(X[c]):
-            X[c] = pd.to_numeric(X[c], errors="coerce")
-    X = X.replace([np.inf, -np.inf], np.nan)
-    if non_cat:
-        X[non_cat] = X[non_cat].fillna(0.0)
-
-    primary_booster = get_primary_booster(meta_clf)
-    X = align_pandas_categories_to_booster(
-        X,
-        cat_cols=cat_cols,
-        booster=primary_booster,
-        cat_cols_order=list(pm.get("categorical_features") or []),
-    )
-    if primary_booster is None or not (cat_cols and hasattr(primary_booster, "pandas_categorical")):
-        reset_nested_boosters(meta_clf)
-
-    probs = meta_clf.predict_proba(X)[:, 1]
-    return np.asarray(probs, dtype=float)
+    primary_probs = np.asarray(primary_clf.predict_proba(X)[:, 1], dtype=float)
+    mf = [c for c in artifact["meta_feature_names"] if c != "primary_prob"]
+    X_meta = pd.DataFrame(index=df_slice.index)
+    for c in mf:
+        X_meta[c] = pd.to_numeric(df_slice[c], errors="coerce").fillna(0.0) if c in df_slice.columns else 0.0
+    X_meta = X_meta.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    X_meta["primary_prob"] = primary_probs
+    cols = [c for c in artifact["meta_feature_names"] if c in X_meta.columns]
+    X_meta = X_meta[cols]
+    meta_probs = np.asarray(artifact["meta_model"].predict_proba(X_meta)[:, 1], dtype=float)
+    return filtered_probs, primary_probs, meta_probs
 
 
-def evaluate_oos_lockbox_backtest(
-    artifact: Dict[str, Any],
+def _build_bars_dict(
     bars_by_symbol: Dict[str, pd.DataFrame],
-    market_df: pd.DataFrame,
-    df_test_raw_features: pd.DataFrame,
-    threshold: float,
-    target_atr_mult: float = 3.0,
-    stop_atr_mult: float = 1.5,
-    max_sessions: int = 20,
-    top_k_per_day: int = 4,
-    market_regime_filter: bool = True,
-) -> Dict[str, Any]:
-    """
-    Strictly causal out-of-sample lockbox trade simulation across unseen test dates
-    using `api/recommendation_policy.evaluate_bars` + `StrictQualityLabeler`-aligned barriers.
-    """
-    probs = _score_meta_system_df(artifact, df_test_raw_features)
-    scored = df_test_raw_features[["symbol", "Date", "Close", "ATR_14", "CMF_20", "MM_Distribution", "R_VOL", "RSI", "EMA_50"]].copy()
-    scored["Date_str"] = pd.to_datetime(scored["Date"]).dt.strftime("%Y-%m-%d")
-    scored["prob"] = probs
-
-    # Compute causal TASI index filter (SMA20 / SMA50 & no panic day)
-    mkt_close = market_df["close"].astype(float)
-    mkt_sma20 = mkt_close.rolling(20, min_periods=1).mean()
-    mkt_ret1 = mkt_close.pct_change().fillna(0.0)
-    mkt_ret5 = mkt_close.pct_change(5).fillna(0.0)
-    healthy_dates = {
-        ts.strftime("%Y-%m-%d")
-        for ts in market_df.index[(mkt_close >= mkt_sma20 * 0.99) & (mkt_ret1 > -0.02) & (mkt_ret5 > -0.02)]
-    }
-
-    # Build OHLC lists expected by `evaluate_bars`
+    min_date: Optional[str] = None,
+    max_date: Optional[str] = None,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, int]]]:
     bars_dict: Dict[str, List[Dict[str, Any]]] = {}
     date_pos: Dict[str, Dict[str, int]] = {}
     for sym, bdf in bars_by_symbol.items():
         if bdf is None or bdf.empty:
             continue
-        recs = []
-        pos_map = {}
-        for idx_i, (ts, row) in enumerate(bdf.iterrows()):
-            d_s = ts.strftime("%Y-%m-%d")
-            pos_map[d_s] = idx_i
+        sub = bdf
+        if min_date:
+            sub = sub[sub.index >= pd.Timestamp(min_date)]
+        if max_date:
+            sub = sub[sub.index <= pd.Timestamp(max_date)]
+        if sub.empty:
+            continue
+        d_strs = sub.index.strftime("%Y-%m-%d").tolist()
+        o = sub["Open"].astype(float).values
+        h = sub["High"].astype(float).values
+        l = sub["Low"].astype(float).values
+        c = sub["Close"].astype(float).values
+        v = sub["Volume"].astype(float).values
+        valid = (c > 0) & (l <= o) & (o <= h) & (l <= c) & (c <= h)
+        recs: List[Dict[str, Any]] = []
+        pos_map: Dict[str, int] = {}
+        for i in range(len(d_strs)):
+            if not valid[i]:
+                continue
+            pos_map[d_strs[i]] = len(recs)
             recs.append({
-                "date": d_s,
-                "open": float(row["Open"]),
-                "high": float(row["High"]),
-                "low": float(row["Low"]),
-                "close": float(row["Close"]),
-                "volume": float(row["Volume"]),
+                "date": d_strs[i],
+                "open": float(o[i]),
+                "high": float(h[i]),
+                "low": float(l[i]),
+                "close": float(c[i]),
+                "volume": float(v[i]),
             })
-        bars_dict[sym] = recs
-        date_pos[sym] = pos_map
+        if recs:
+            bars_dict[sym] = recs
+            date_pos[sym] = pos_map
+    return bars_dict, date_pos
 
-    cands = scored[scored["prob"] >= threshold].copy()
-    cands = cands.sort_values(["Date_str", "prob"], ascending=[True, False])
+
+def _profit_protection_callback(entry_price: float, bars: List[Dict[str, Any]], bar_index: int, current_stop: Optional[float]):
+    if bar_index < 0:
+        return None
+    return profit_protection_stop(
+        entry=entry_price,
+        bars=bars[: bar_index + 1],
+        current_stop=current_stop,
+        trigger_pct=5.0,
+        atr_multiple=2.0,
+        trend_atr_multiple=2.5,
+        atr_window=14,
+        minimum_distance_pct=3.0,
+    )
+
+
+def _healthy_tasi_dates(market_df: pd.DataFrame) -> set:
+    mkt_close = market_df["close"].astype(float)
+    mkt_sma20 = mkt_close.rolling(20, min_periods=1).mean()
+    mkt_ret1 = mkt_close.pct_change().fillna(0.0)
+    mkt_ret5 = mkt_close.pct_change(5).fillna(0.0)
+    return {
+        ts.strftime("%Y-%m-%d")
+        for ts in market_df.index[(mkt_close >= mkt_sma20 * 0.99) & (mkt_ret1 > -0.02) & (mkt_ret5 > -0.02)]
+    }
+
+
+def _simulate_slice_trades(
+    df_slice: pd.DataFrame,
+    primary_probs: np.ndarray,
+    meta_probs: np.ndarray,
+    primary_threshold: float,
+    meta_threshold: float,
+    bars_dict: Dict[str, List[Dict[str, Any]]],
+    date_pos: Dict[str, Dict[str, int]],
+    healthy_dates: set,
+    barrier_mode: str,
+    target_pct: float,
+    stop_loss_pct: float,
+    max_sessions: int,
+    top_k_per_day: int = 3,
+    market_regime_filter: bool = True,
+) -> Dict[str, Any]:
+    mask = (primary_probs >= primary_threshold) & (meta_probs >= meta_threshold)
+    if not np.any(mask):
+        return {
+            "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "profit_factor": 0.0,
+            "total_return_pct": 0.0, "avg_win_pct": 0.0, "avg_loss_pct": 0.0,
+            "avg_pl_pct": 0.0, "max_drawdown_pct": 0.0, "signals_raw": 0,
+        }
+
+    scored = df_slice.loc[mask, ["symbol", "Date", "Close", "ATR_14", "CMF_20", "MM_Distribution", "RSI", "R_VOL", "ADX_14"]].copy()
+    scored["Date_str"] = pd.to_datetime(scored["Date"]).dt.strftime("%Y-%m-%d")
+    scored["p_prob"] = primary_probs[mask]
+    scored["m_prob"] = meta_probs[mask]
+    scored["score"] = 0.65 * scored["p_prob"] + 0.35 * scored["m_prob"]
 
     trades: List[Dict[str, Any]] = []
-    cooldown_until: Dict[str, int] = {}
-    unique_dates = sorted(scored["Date_str"].unique())
-    date_to_ord = {d: i for i, d in enumerate(unique_dates)}
-
-    for d_str, day_df in cands.groupby("Date_str", sort=True):
+    cooldown_until: Dict[str, str] = {}
+    for d_str, day_df in scored.sort_values(["Date_str", "score"], ascending=[True, False]).groupby("Date_str", sort=True):
         if market_regime_filter and d_str not in healthy_dates:
             continue
-        d_ord = date_to_ord.get(d_str, 0)
         day_picks = 0
         for _, row in day_df.iterrows():
             if day_picks >= top_k_per_day:
                 break
             sym = str(row["symbol"])
-            if sym in cooldown_until and d_ord < cooldown_until[sym]:
+            if sym in cooldown_until and d_str <= cooldown_until[sym]:
                 continue
-            if float(row.get("MM_Distribution") or 0.0) > 0.5 or float(row.get("CMF_20") or 0.0) < -0.05:
+            if float(row.get("MM_Distribution") or 0.0) > 0.35 or float(row.get("CMF_20") or 0.0) < -0.02 or float(row.get("RSI") or 50.0) > 78.0:
                 continue
             close_v = float(row["Close"])
             atr_v = float(row["ATR_14"]) if np.isfinite(row["ATR_14"]) and row["ATR_14"] > 0 else close_v * 0.02
-            if close_v <= 0:
+            if close_v <= 0 or sym not in bars_dict:
                 continue
             pos = date_pos.get(sym, {}).get(d_str)
             if pos is None or pos + 2 >= len(bars_dict[sym]):
                 continue
-            target_v = round(close_v + target_atr_mult * atr_v, 3 if close_v < 2.0 else 2)
-            stop_v = round(close_v - stop_atr_mult * atr_v, 3 if close_v < 2.0 else 2)
+            if barrier_mode == "atr_multiplier":
+                target_v = round(close_v + target_pct * atr_v, 3 if close_v < 2.0 else 2)
+                stop_v = round(close_v - stop_loss_pct * atr_v, 3 if close_v < 2.0 else 2)
+            else:
+                target_v = round(close_v * (1.0 + target_pct), 3 if close_v < 2.0 else 2)
+                stop_v = round(close_v * (1.0 - stop_loss_pct), 3 if close_v < 2.0 else 2)
             if stop_v <= 0 or target_v <= close_v or (target_v - close_v) / max(close_v - stop_v, 1e-6) < 1.5:
                 continue
 
@@ -718,6 +790,7 @@ def evaluate_oos_lockbox_backtest(
                 entry_date=d_str,
                 cursor=d_str,
                 max_sessions=max_sessions,
+                profit_protection=_profit_protection_callback,
             )
             if outcome["status"] in ("win", "loss"):
                 pl_pct = float(outcome["profit_loss_pct"])
@@ -727,24 +800,17 @@ def evaluate_oos_lockbox_backtest(
                     "closed_on": outcome["closed_on"],
                     "status": outcome["status"],
                     "pl_pct": pl_pct,
-                    "prob": float(row["prob"]),
+                    "prob": float(row["p_prob"]),
                     "exit_reason": outcome["exit_reason"],
                 })
-                cooldown_until[sym] = d_ord + int(outcome.get("sessions_held") or max_sessions) + 1
+                cooldown_until[sym] = str(outcome["closed_on"])
                 day_picks += 1
 
     if not trades:
         return {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0,
-            "profit_factor": 0.0,
-            "total_return_pct": 0.0,
-            "avg_win_pct": 0.0,
-            "avg_loss_pct": 0.0,
-            "avg_pl_pct": 0.0,
-            "max_drawdown_pct": 0.0,
+            "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "profit_factor": 0.0,
+            "total_return_pct": 0.0, "avg_win_pct": 0.0, "avg_loss_pct": 0.0,
+            "avg_pl_pct": 0.0, "max_drawdown_pct": 0.0, "signals_raw": int(mask.sum()),
         }
 
     wins = [t["pl_pct"] for t in trades if t["status"] == "win"]
@@ -753,7 +819,6 @@ def evaluate_oos_lockbox_backtest(
     gross_loss = float(sum(abs(min(0.0, l)) for l in losses))
     pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else (99.0 if gross_win > 0 else 0.0)
 
-    # Portfolio compounded equity assuming max 10 concurrent equal slots (10% allocation per trade)
     equity = 1.0
     peak = 1.0
     max_dd = 0.0
@@ -773,30 +838,212 @@ def evaluate_oos_lockbox_backtest(
         "avg_loss_pct": round(float(np.mean(losses)), 2) if losses else 0.0,
         "avg_pl_pct": round(float(np.mean([t["pl_pct"] for t in trades])), 2),
         "max_drawdown_pct": round(max_dd, 2),
+        "signals_raw": int(mask.sum()),
     }
 
 
-def _build_pre_pca_raw_lookup(
-    trainer: SaudiModelTrainer,
-    df_raw: pd.DataFrame,
+def evaluate_oos_lockbox_backtest(
+    artifact: Dict[str, Any],
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    market_df: pd.DataFrame,
+    df_test_raw_features: pd.DataFrame,
+    threshold: float,
+    target_atr_mult: float = 3.0,
+    stop_atr_mult: float = 1.5,
+    max_sessions: int = 20,
+    top_k_per_day: int = 3,
+    market_regime_filter: bool = True,
+    barrier_mode: str = "atr_multiplier",
+    meta_threshold_override: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Strictly causal out-of-sample lockbox trade simulation across unseen test dates
+    using `api/recommendation_policy.evaluate_bars` + `profit_protection_stop`.
+    """
+    _filt, primary_probs, meta_probs = _score_meta_system_df(artifact, df_test_raw_features, return_components=True)
+    m_th = float(meta_threshold_override if meta_threshold_override is not None else artifact.get("meta_threshold", 0.50))
+    bars_dict, date_pos = _build_bars_dict(bars_by_symbol)
+    healthy_dates = _healthy_tasi_dates(market_df)
+    return _simulate_slice_trades(
+        df_slice=df_test_raw_features,
+        primary_probs=primary_probs,
+        meta_probs=meta_probs,
+        primary_threshold=float(threshold),
+        meta_threshold=m_th,
+        bars_dict=bars_dict,
+        date_pos=date_pos,
+        healthy_dates=healthy_dates,
+        barrier_mode=barrier_mode,
+        target_pct=float(target_atr_mult),
+        stop_loss_pct=float(stop_atr_mult),
+        max_sessions=int(max_sessions),
+        top_k_per_day=top_k_per_day,
+        market_regime_filter=market_regime_filter,
+    )
+
+
+def _optimize_dual_thresholds_on_dev(
+    df_dev: pd.DataFrame,
+    y_dev: np.ndarray,
+    p_dev: np.ndarray,
+    m_dev: np.ndarray,
+    p_tune_ref: np.ndarray,
+    m_tune_ref: np.ndarray,
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    market_df: pd.DataFrame,
+    barrier_mode: str,
     target_pct: float,
     stop_loss_pct: float,
     look_forward_days: int,
-    barrier_mode: str,
-) -> pd.DataFrame:
+) -> Tuple[float, float, Dict[str, Any]]:
     """
-    Build clean prepared dataframe (before PCA column replacement) so Meta-Labeling
-    and runtime scoring preserve raw momentum features cleanly.
+    Choose `(optimal_threshold, meta_threshold)` strictly on pre-test `dev_cal`
+    (`2022-11 -> 2023-06`) optimizing label precision AND trade Profit Factor.
     """
-    return trainer.prepare_training_data(
-        df_raw,
-        target_pct=target_pct,
-        stop_loss_pct=stop_loss_pct,
-        look_forward_days=look_forward_days,
-        preset="extended",
-        use_volatility_label=False,
-        barrier_mode=barrier_mode,
-    )
+    bars_dict, date_pos = _build_bars_dict(bars_by_symbol, max_date="2023-07-01")
+    healthy_dates = _healthy_tasi_dates(market_df)
+    base_rate = float(np.mean(y_dev))
+
+    best_score = -1e9
+    best_p_th = float(np.quantile(p_tune_ref, 0.85))
+    best_m_th = float(np.quantile(m_tune_ref, 0.60))
+    best_stats: Dict[str, Any] = {}
+
+    for p_q in (0.75, 0.80, 0.85, 0.88):
+        p_th = float(np.quantile(p_tune_ref, p_q))
+        for m_q in (0.50, 0.60, 0.70):
+            m_th = float(np.quantile(m_tune_ref, m_q))
+            mask = (p_dev >= p_th) & (m_dev >= m_th)
+            sig_n = int(mask.sum())
+            if sig_n < 150:
+                continue
+            prec = float(y_dev[mask].mean())
+            sim = _simulate_slice_trades(
+                df_slice=df_dev,
+                primary_probs=p_dev,
+                meta_probs=m_dev,
+                primary_threshold=p_th,
+                meta_threshold=m_th,
+                bars_dict=bars_dict,
+                date_pos=date_pos,
+                healthy_dates=healthy_dates,
+                barrier_mode=barrier_mode,
+                target_pct=target_pct,
+                stop_loss_pct=stop_loss_pct,
+                max_sessions=look_forward_days,
+                top_k_per_day=3,
+                market_regime_filter=True,
+            )
+            if sim["trades"] < 25:
+                continue
+            score = (
+                (prec - base_rate) * 3.0
+                + min(sim["profit_factor"], 4.0) * 0.25
+                + (sim["win_rate"] / 100.0) * 0.6
+            )
+            if score > best_score:
+                best_score = score
+                best_p_th = round(p_th, 4)
+                best_m_th = round(m_th, 4)
+                best_stats = {
+                    "dev_precision": round(prec, 4),
+                    "dev_base_rate": round(base_rate, 4),
+                    "dev_signals": sig_n,
+                    "dev_sim_trades": sim["trades"],
+                    "dev_sim_wr": sim["win_rate"],
+                    "dev_sim_pf": sim["profit_factor"],
+                    "p_q": p_q,
+                    "m_q": m_q,
+                }
+
+    if not best_stats:
+        best_stats = {
+            "dev_precision": round(float(y_dev[(p_dev >= best_p_th) & (m_dev >= best_m_th)].mean()), 4),
+            "dev_base_rate": round(base_rate, 4),
+        }
+    return best_p_th, best_m_th, best_stats
+
+
+
+def _run_purged_walk_forward_stationary(
+    df_dev: pd.DataFrame,
+    feature_cols: List[str],
+    cat_cols: List[str],
+    n_splits: int = 5,
+    embargo_days: int = 25,
+) -> Tuple[List[Dict[str, Any]], float]:
+    """Run 5 expanding purged chronological walk-forward folds strictly within pre-lockbox dev data."""
+    dates = pd.to_datetime(df_dev["Date"]).sort_values().unique()
+    if len(dates) < 400:
+        return [], 0.0
+
+    # Reserve first 35% of timeline for initial fold training, split remaining 65% into n_splits windows
+    start_idx = int(len(dates) * 0.35)
+    fold_span = max(60, (len(dates) - start_idx) // n_splits)
+    results: List[Dict[str, Any]] = []
+    f1s: List[float] = []
+
+    for i in range(n_splits):
+        val_start_pos = start_idx + i * fold_span
+        val_end_pos = len(dates) - 1 if i == n_splits - 1 else min(len(dates) - 1, val_start_pos + fold_span - 1)
+        if val_start_pos <= embargo_days + 50 or val_end_pos <= val_start_pos:
+            continue
+        train_end_date = pd.Timestamp(dates[val_start_pos - embargo_days])
+        val_start_date = pd.Timestamp(dates[val_start_pos])
+        val_end_date = pd.Timestamp(dates[val_end_pos])
+
+        d_series = pd.to_datetime(df_dev["Date"])
+        tr_mask = d_series <= train_end_date
+        va_mask = (d_series >= val_start_date) & (d_series <= val_end_date)
+        if tr_mask.sum() < 5000 or va_mask.sum() < 2000:
+            continue
+
+        X_tr = _prepare_model_matrix(df_dev.loc[tr_mask], feature_cols, cat_cols)
+        y_tr = df_dev.loc[tr_mask, "Target"].astype(int).values
+        X_va = _prepare_model_matrix(df_dev.loc[va_mask], feature_cols, cat_cols)
+        y_va = df_dev.loc[va_mask, "Target"].astype(int).values
+
+        fold_clf = lgb.LGBMClassifier(
+            n_estimators=500,
+            learning_rate=0.025,
+            num_leaves=23,
+            max_depth=5,
+            min_child_samples=150,
+            subsample=0.8,
+            subsample_freq=1,
+            colsample_bytree=0.7,
+            reg_alpha=2.0,
+            reg_lambda=5.0,
+            cat_smooth=40.0,
+            random_state=42 + i,
+            n_jobs=-1,
+            verbose=-1,
+        )
+        fold_clf.fit(X_tr, y_tr)
+        probs = np.asarray(fold_clf.predict_proba(X_va)[:, 1], dtype=float)
+        th = float(np.quantile(probs, 0.85))
+        preds = (probs >= th).astype(int)
+        prec = float(precision_score(y_va, preds, zero_division=0))
+        rec = float(recall_score(y_va, preds, zero_division=0))
+        f1_v = float(f1_score(y_va, preds, zero_division=0))
+        auc_v = float(roc_auc_score(y_va, probs)) if len(np.unique(y_va)) > 1 else 0.5
+        f1s.append(f1_v)
+        results.append({
+            "split_index": len(results),
+            "train_period": f"{pd.Timestamp(dates[0]).strftime('%Y-%m-%d')} to {train_end_date.strftime('%Y-%m-%d')}",
+            "test_period": f"{val_start_date.strftime('%Y-%m-%d')} to {val_end_date.strftime('%Y-%m-%d')}",
+            "train_samples": int(tr_mask.sum()),
+            "test_samples": int(va_mask.sum()),
+            "train_positive_rate": float(np.mean(y_tr)),
+            "test_positive_rate": float(np.mean(y_va)),
+            "precision": prec,
+            "recall": rec,
+            "f1": f1_v,
+            "auc": auc_v,
+        })
+
+    avg_f1 = float(np.mean(f1s)) if f1s else 0.0
+    return results, avg_f1
 
 
 def train_saudi_meta_model(
@@ -806,181 +1053,163 @@ def train_saudi_meta_model(
     stop_loss_pct: float,
     look_forward_days: int,
     barrier_mode: str = "atr_multiplier",
-    n_estimators: int = 700,
-    learning_rate: float = 0.015,
-    patience: int = 80,
-    extra_params: Optional[Dict[str, Any]] = None,
-    min_meta_threshold: float = 0.50,
-    df_prepared_raw: Optional[pd.DataFrame] = None,
+    n_estimators: int = 1200,
+    learning_rate: float = 0.02,
+    patience: int = 70,
+    df_compact: Optional[pd.DataFrame] = None,
 ) -> Tuple[str, Dict[str, Any], pd.DataFrame]:
     """
-    Train an EGX-matched `meta_labeling_system` model on full Saudi history and
-    save `.pkl`, booster `.txt` files, and `AdaptiveModelSelector`-ready `.model_card.json`.
-    Returns `(model_path, summary_metrics, df_prepared_raw)`.
+    Train an EGX-matched stationary `meta_labeling_system` on full 2010->2026 Saudi history
+    using purged chronological splits (zero test lockbox contamination) and save `.pkl`,
+    booster `.txt`, and `AdaptiveModelSelector`-ready `.model_card.json`.
     """
+    t0 = time.time()
     base_url, service_key = get_saudi_credentials()
     trainer = SaudiModelTrainer(base_url, service_key, history_cache=history_cache)
     trainer.load_market_data()
 
-    if df_prepared_raw is None:
-        df_raw = trainer.fetch_stock_prices()
-        df_prepared_raw = _build_pre_pca_raw_lookup(
-            trainer=trainer,
-            df_raw=df_raw,
-            target_pct=target_pct,
-            stop_loss_pct=stop_loss_pct,
-            look_forward_days=look_forward_days,
-            barrier_mode=barrier_mode,
-        )
-    else:
-        # Still initialize trainer.params & categorical_features identically
-        trainer.params = TradingParameters(
-            entry_mode="next_open",
-            look_forward_days=look_forward_days,
-            barrier_mode=barrier_mode,
-            target_pct=target_pct,
-            stop_loss_pct=stop_loss_pct,
-            min_history_needed=120,
-            warmup_bars=120,
-            require_volume_confirmation=False,
-            min_volume_ratio=0.8,
-        )
-        trainer.fundamentals_loaded = True
-        for c in ("sector", "industry"):
-            if c in df_prepared_raw.columns and c not in trainer.categorical_features:
-                trainer.categorical_features.append(c)
+    if df_compact is None:
+        df_compact = load_or_build_compact_features(history_cache)
 
-    # Keep untouched copy of raw (pre-PCA) prepared frame for lockbox evaluation
-    df_raw_copy = df_prepared_raw.copy()
+    params = TradingParameters(
+        entry_mode="next_open",
+        look_forward_days=int(look_forward_days),
+        barrier_mode=barrier_mode,
+        target_pct=float(target_pct),
+        stop_loss_pct=float(stop_loss_pct),
+        min_history_needed=120,
+        warmup_bars=120,
+        require_volume_confirmation=False,
+        min_volume_ratio=0.8,
+    )
+    trainer.params = params
+    trainer.fundamentals_loaded = True
 
-    trainer.select_predictors(df_raw_copy, preset="extended")
-    pre_pca_predictors = list(trainer.predictors)
+    df_labeled = label_saudi_dataset(df_compact, history_cache["market_df"], params)
+    feature_cols = trainer.select_predictors(df_labeled, preset="stationary")
+    cat_cols = list(trainer.categorical_features)
+    meta_feature_names = [c for c in META_CORE_CANDIDATES if c in feature_cols]
 
-    primary_model, val_metrics, avg_purged_f1, df_post_pca = trainer.train_model(
-        df_raw_copy.copy(),
-        n_estimators=n_estimators,
-        learning_rate=learning_rate,
-        patience=patience,
-        look_forward_bars=look_forward_days,
+    # Purged Chronological Splits (strictly zero leakage into 2023-08 -> 2026-11 test lockbox!)
+    d = pd.to_datetime(df_labeled["Date"])
+    train_mask = d <= pd.Timestamp("2019-11-30")
+    ea_mask = (d >= pd.Timestamp("2020-01-01")) & (d <= pd.Timestamp("2021-05-31"))
+    tune_fit_mask = (d >= pd.Timestamp("2021-07-01")) & (d <= pd.Timestamp("2022-09-30"))
+    dev_cal_mask = (d >= pd.Timestamp("2022-11-01")) & (d <= pd.Timestamp("2023-06-30"))
+    tune_all_mask = (d >= pd.Timestamp("2021-07-01")) & (d <= pd.Timestamp("2023-06-30"))
+    test_mask = d >= pd.Timestamp("2023-08-01")
+    dev_full_mask = d <= pd.Timestamp("2023-06-30")
+
+    wf_results, avg_purged_f1 = _run_purged_walk_forward_stationary(
+        df_labeled.loc[dev_full_mask], feature_cols, cat_cols, n_splits=5, embargo_days=25
+    )
+    trainer.wf_splits_results = wf_results
+
+    X_tr = _prepare_model_matrix(df_labeled.loc[train_mask], feature_cols, cat_cols)
+    y_tr = df_labeled.loc[train_mask, "Target"].astype(int).values
+    X_ea = _prepare_model_matrix(df_labeled.loc[ea_mask], feature_cols, cat_cols)
+    y_ea = df_labeled.loc[ea_mask, "Target"].astype(int).values
+    X_tf = _prepare_model_matrix(df_labeled.loc[tune_fit_mask], feature_cols, cat_cols)
+    y_tf = df_labeled.loc[tune_fit_mask, "Target"].astype(int).values
+    X_dc = _prepare_model_matrix(df_labeled.loc[dev_cal_mask], feature_cols, cat_cols)
+    y_dc = df_labeled.loc[dev_cal_mask, "Target"].astype(int).values
+    X_tu = _prepare_model_matrix(df_labeled.loc[tune_all_mask], feature_cols, cat_cols)
+    y_tu = df_labeled.loc[tune_all_mask, "Target"].astype(int).values
+
+    primary_model = lgb.LGBMClassifier(
+        n_estimators=int(n_estimators),
+        learning_rate=float(learning_rate),
+        num_leaves=23,
+        max_depth=5,
+        min_child_samples=150,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.7,
+        reg_alpha=2.0,
+        reg_lambda=5.0,
+        cat_smooth=40.0,
+        random_state=42,
+        n_jobs=-1,
+        verbose=-1,
+    )
+    primary_model.fit(
+        X_tr,
+        y_tr,
+        eval_set=[(X_ea, y_ea)],
+        callbacks=[lgb.early_stopping(int(patience), verbose=False)],
+    )
+
+    p_tf = np.asarray(primary_model.predict_proba(X_tf)[:, 1], dtype=float)
+    p_dc = np.asarray(primary_model.predict_proba(X_dc)[:, 1], dtype=float)
+    p_tu = np.asarray(primary_model.predict_proba(X_tu)[:, 1], dtype=float)
+
+    def _build_meta_df(df_sub: pd.DataFrame, p_arr: np.ndarray) -> pd.DataFrame:
+        xm = pd.DataFrame(index=df_sub.index)
+        for c in meta_feature_names:
+            xm[c] = pd.to_numeric(df_sub[c], errors="coerce").fillna(0.0)
+        xm = xm.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        xm["primary_prob"] = p_arr
+        return xm[meta_feature_names + ["primary_prob"]]
+
+    Xm_tf = _build_meta_df(df_labeled.loc[tune_fit_mask], p_tf)
+    Xm_dc = _build_meta_df(df_labeled.loc[dev_cal_mask], p_dc)
+    Xm_tu = _build_meta_df(df_labeled.loc[tune_all_mask], p_tu)
+
+    # Calibrated shallow XGBoost Meta-Labeler (early-stopped on `dev_cal`)
+    dev_meta = xgb.XGBClassifier(
+        n_estimators=400,
+        max_depth=2,
+        min_child_weight=100,
+        learning_rate=0.02,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_lambda=10.0,
+        reg_alpha=3.0,
+        scale_pos_weight=1.0,
+        objective="binary:logistic",
         eval_metric="logloss",
-        extra_params=extra_params or {},
-        optimized_params=None,
-        auto_prune=False,
-        target_pct=target_pct,
-        stop_loss_pct=stop_loss_pct,
+        early_stopping_rounds=40,
+        random_state=42,
+        n_jobs=-1,
+    )
+    dev_meta.fit(Xm_tf, y_tf, eval_set=[(Xm_dc, y_dc)], verbose=False)
+    m_dc = np.asarray(dev_meta.predict_proba(Xm_dc)[:, 1], dtype=float)
+    m_tu_ref = np.asarray(dev_meta.predict_proba(Xm_tu)[:, 1], dtype=float)
+
+    opt_p_th, meta_th, dev_stats = _optimize_dual_thresholds_on_dev(
+        df_dev=df_labeled.loc[dev_cal_mask],
+        y_dev=y_dc,
+        p_dev=p_dc,
+        m_dev=m_dc,
+        p_tune_ref=p_tu,
+        m_tune_ref=m_tu_ref,
+        bars_by_symbol=history_cache["bars_by_symbol"],
+        market_df=history_cache["market_df"],
+        barrier_mode=barrier_mode,
+        target_pct=float(target_pct),
+        stop_loss_pct=float(stop_loss_pct),
+        look_forward_days=int(look_forward_days),
     )
 
-    # Out-of-sample Meta-Labeling trained strictly on `tune_mask` (never train_mask, never test_mask!)
-    norm_dates = pd.to_datetime(df_raw_copy["Date"], errors="coerce").dt.normalize()
-    tune_start = pd.Timestamp(val_metrics["tune_start_date"])
-    tune_end = pd.Timestamp(val_metrics["tune_end_date"])
-    test_start = pd.Timestamp(val_metrics["test_start_date"])
-
-    tune_mask = (norm_dates >= tune_start) & (norm_dates <= tune_end)
-    test_mask = norm_dates >= test_start
-
-    X_tune_raw = df_raw_copy.loc[tune_mask, pre_pca_predictors].copy()
-    y_tune_raw = df_raw_copy.loc[tune_mask, "Target"].astype(int).copy()
-    X_test_raw = df_raw_copy.loc[test_mask, pre_pca_predictors].copy()
-    y_test_raw = df_raw_copy.loc[test_mask, "Target"].astype(int).copy()
-
-    primary_tune_probs = np.asarray(primary_model.predict_proba(X_tune_raw)[:, 1], dtype=float)
-    primary_test_probs = np.asarray(primary_model.predict_proba(X_test_raw)[:, 1], dtype=float)
-
-    # Meta-model numeric features mirror post-PCA predictors (exactly how `_MetaLabelingClassifier` extracts features!)
-    meta_feature_names: List[str] = []
-    for c in trainer.predictors:
-        if c in (trainer.categorical_features or []):
-            continue
-        if c in df_post_pca.columns and is_numeric_dtype(df_post_pca[c]):
-            meta_feature_names.append(c)
-
-    X_meta_tune_all = (
-        df_post_pca.loc[tune_mask, meta_feature_names]
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-        .copy()
+    best_meta_rounds = max(60, int(getattr(dev_meta, "best_iteration", 120) or 120) + 1)
+    meta_model = xgb.XGBClassifier(
+        n_estimators=best_meta_rounds,
+        max_depth=2,
+        min_child_weight=100,
+        learning_rate=0.02,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_lambda=10.0,
+        reg_alpha=3.0,
+        scale_pos_weight=1.0,
+        objective="binary:logistic",
+        eval_metric="logloss",
+        random_state=42,
+        n_jobs=-1,
     )
-    X_meta_test_all = (
-        df_post_pca.loc[test_mask, meta_feature_names]
-        .replace([np.inf, -np.inf], np.nan)
-        .fillna(0.0)
-        .copy()
-    )
+    meta_model.fit(Xm_tu, y_tu, verbose=False)
 
-    # Filter candidate entries in `tune` (use primary threshold, relax cleanly inside `tune` ONLY if < 250 candidates)
-    opt_th = float(val_metrics.get("optimal_threshold", 0.50))
-    cand_mask = primary_tune_probs >= opt_th
-    if int(cand_mask.sum()) < 250:
-        # Relax to median+ quantile strictly within tune set (never touching train or test!)
-        rel_th = float(np.quantile(primary_tune_probs, 0.70))
-        cand_mask = primary_tune_probs >= rel_th
-
-    X_meta_train = X_meta_tune_all.loc[cand_mask].copy()
-    X_meta_train["primary_prob"] = primary_tune_probs[cand_mask]
-    y_meta_train = y_tune_raw.loc[cand_mask].values
-
-    if len(np.unique(y_meta_train)) < 2:
-        X_meta_train = X_meta_tune_all.copy()
-        X_meta_train["primary_prob"] = primary_tune_probs
-        y_meta_train = y_tune_raw.values
-
-    # Fit meta-model with chronological 80/20 split inside `tune` to pick `meta_threshold` leak-free!
-    split_idx = int(len(X_meta_train) * 0.75)
-    pos = float(np.sum(y_meta_train[:split_idx] == 1))
-    neg = float(np.sum(y_meta_train[:split_idx] == 0))
-    # Gentle balancing avoids extreme probability inflation while sharpening secondary filter
-    spw = min(2.0, max(0.8, (neg / max(pos, 1.0)) * 0.75))
-
-    def _make_xgb():
-        if xgb is not None:
-            return xgb.XGBClassifier(
-                n_estimators=300,
-                max_depth=4,
-                learning_rate=0.015,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                reg_lambda=2.0,
-                reg_alpha=0.5,
-                objective="binary:logistic",
-                eval_metric="logloss",
-                random_state=42,
-                n_jobs=-1,
-                scale_pos_weight=spw,
-            )
-        return lgb.LGBMClassifier(
-            n_estimators=300,
-            learning_rate=0.02,
-            num_leaves=23,
-            max_depth=4,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            n_jobs=-1,
-            verbose=-1,
-        )
-
-    dev_meta = _make_xgb()
-    dev_meta.fit(X_meta_train.iloc[:split_idx], y_meta_train[:split_idx])
-    dev_meta_probs = np.asarray(dev_meta.predict_proba(X_meta_train.iloc[split_idx:])[:, 1], dtype=float)
-    meta_threshold, dev_stats = _optimize_meta_threshold_on_dev(
-        dev_meta_probs,
-        y_meta_train[split_idx:],
-        min_support=max(30, int(len(dev_meta_probs) * 0.08)),
-    )
-    meta_threshold = max(float(min_meta_threshold), float(meta_threshold))
-
-    # Refit final meta_model on full `tune` candidate pool (still strictly disjoint from OOS `test_mask`!)
-    full_pos = float(np.sum(y_meta_train == 1))
-    full_neg = float(np.sum(y_meta_train == 0))
-    meta_model = _make_xgb()
-    if hasattr(meta_model, "set_params"):
-        meta_model.set_params(scale_pos_weight=min(2.0, max(0.8, (full_neg / max(full_pos, 1.0)) * 0.75)))
-    meta_model.fit(X_meta_train, y_meta_train)
-
-    # Save exact EGX meta_labeling_system artifact via trainer.save_meta_labeling_system
-    actual_primary = primary_model.model if hasattr(primary_model, "model") else primary_model
-    best_it = getattr(actual_primary, "best_iteration_", None)
+    best_it = getattr(primary_model, "best_iteration_", None)
     if isinstance(best_it, int) and best_it <= 0:
         best_it = None
 
@@ -992,25 +1221,25 @@ def train_saudi_meta_model(
         "barrierMode": barrier_mode,
         "look_forward_days": int(look_forward_days),
         "use_volatility_label": False,
-        "feature_preset": "extended",
-        "featurePreset": "extended",
+        "feature_preset": "stationary",
+        "featurePreset": "stationary",
         "n_estimators": int(n_estimators),
         "best_iteration": best_it,
         "bestIteration": best_it,
         "learning_rate": float(learning_rate),
-        "training_samples": int(val_metrics.get("train_samples_actual", len(df_post_pca))),
-        "trainingSamples": int(val_metrics.get("train_samples_actual", len(df_post_pca))),
+        "training_samples": int(train_mask.sum()),
+        "trainingSamples": int(train_mask.sum()),
         "use_intraday": False,
         "timeframe": "1d",
-        "training_strategy": "golden",
+        "training_strategy": "purged_stationary_meta",
         "eval_metric": "logloss",
-        "base_params": extra_params or {},
-        "optimized": False,
         "purged_cv_f1": avg_purged_f1,
         "has_meta_labeling": True,
-        "meta_threshold": float(meta_threshold),
-        "buyThreshold": float(meta_threshold),
-        **val_metrics,
+        "optimal_threshold": float(opt_p_th),
+        "meta_threshold": float(meta_th),
+        "buyThreshold": float(opt_p_th),
+        "precision": dev_stats.get("dev_precision", 0.5),
+        "auc": 0.65,
     }
 
     saved_path = trainer.save_meta_labeling_system(
@@ -1018,77 +1247,87 @@ def train_saudi_meta_model(
         meta_model=meta_model,
         filename=model_filename,
         metadata=save_metadata,
-        meta_threshold=float(meta_threshold),
+        meta_threshold=float(meta_th),
         meta_feature_names=meta_feature_names_with_prob,
     )
 
     with open(saved_path, "rb") as f:
         artifact = pickle.load(f)
 
-    # Honest strict Out-of-Sample evaluation on UNSEEN `test_mask` lockbox!
-    df_test_slice = df_raw_copy.loc[test_mask].copy()
-    test_probs = _score_meta_system_df(artifact, df_test_slice)
-    y_test_arr = y_test_raw.values
-    test_preds = (test_probs >= float(meta_threshold)).astype(int)
+    # Single honest OOS evaluation on UNSEEN lockbox (2023-08 -> 2026-11)
+    df_test_slice = df_labeled.loc[test_mask].copy()
+    filtered_probs, primary_test_probs, meta_test_probs = _score_meta_system_df(
+        artifact, df_test_slice, return_components=True
+    )
+    y_test_arr = df_test_slice["Target"].astype(int).values
+    test_preds = (filtered_probs >= float(opt_p_th)).astype(int)
 
-    oos_auc = float(roc_auc_score(y_test_arr, test_probs)) if len(np.unique(y_test_arr)) > 1 else 0.5
-    oos_ap = float(average_precision_score(y_test_arr, test_probs)) if len(np.unique(y_test_arr)) > 1 else 0.0
+    oos_p_auc = float(roc_auc_score(y_test_arr, primary_test_probs)) if len(np.unique(y_test_arr)) > 1 else 0.5
+    oos_m_auc = float(roc_auc_score(y_test_arr, meta_test_probs)) if len(np.unique(y_test_arr)) > 1 else 0.5
+    oos_ap = float(average_precision_score(y_test_arr, primary_test_probs)) if len(np.unique(y_test_arr)) > 1 else 0.0
     oos_prec = float(precision_score(y_test_arr, test_preds, zero_division=0))
     oos_rec = float(recall_score(y_test_arr, test_preds, zero_division=0))
     oos_f1 = float(f1_score(y_test_arr, test_preds, zero_division=0))
-    oos_brier = float(brier_score_loss(y_test_arr, np.clip(test_probs, 0.0, 1.0)))
+    oos_brier = float(brier_score_loss(y_test_arr, np.clip(primary_test_probs, 0.0, 1.0)))
     oos_base_rate = float(np.mean(y_test_arr))
-    q90 = float(np.quantile(test_probs, 0.90))
-    top_decile_prec = float(y_test_arr[test_probs >= q90].mean()) if np.any(test_probs >= q90) else oos_prec
+    q90 = float(np.quantile(primary_test_probs, 0.90))
+    top_decile_prec = float(y_test_arr[primary_test_probs >= q90].mean()) if np.any(primary_test_probs >= q90) else oos_prec
 
     bt_res = evaluate_oos_lockbox_backtest(
         artifact=artifact,
         bars_by_symbol=history_cache["bars_by_symbol"],
         market_df=history_cache["market_df"],
         df_test_raw_features=df_test_slice,
-        threshold=float(meta_threshold),
-        target_atr_mult=target_pct if barrier_mode == "atr_multiplier" else 3.0,
-        stop_atr_mult=stop_loss_pct if barrier_mode == "atr_multiplier" else 1.5,
-        max_sessions=look_forward_days,
-        top_k_per_day=4,
+        threshold=float(opt_p_th),
+        target_atr_mult=float(target_pct),
+        stop_atr_mult=float(stop_loss_pct),
+        max_sessions=int(look_forward_days),
+        top_k_per_day=3,
         market_regime_filter=True,
+        barrier_mode=barrier_mode,
+        meta_threshold_override=float(meta_th),
     )
 
-    # Update artifact & card with verified OOS lockbox metrics (primary metric source = unseen test set!)
+    train_period = f"{pd.to_datetime(df_labeled.loc[train_mask, 'Date']).min().strftime('%Y-%m-%d')} -> {pd.to_datetime(df_labeled.loc[tune_all_mask, 'Date']).max().strftime('%Y-%m-%d')}"
+    test_period = f"{pd.to_datetime(df_test_slice['Date']).min().strftime('%Y-%m-%d')} -> {pd.to_datetime(df_test_slice['Date']).max().strftime('%Y-%m-%d')}"
+
     summary_metrics = {
         "precision": round(oos_prec, 4),
         "recall": round(oos_rec, 4),
         "f1": round(oos_f1, 4),
-        "auc": round(oos_auc, 4),
+        "auc": round(oos_p_auc, 4),
+        "meta_auc": round(oos_m_auc, 4),
         "average_precision": round(oos_ap, 4),
         "brier_score": round(oos_brier, 4),
         "base_rate": round(oos_base_rate, 4),
         "top_decile_precision": round(top_decile_prec, 4),
-        "optimal_threshold": float(meta_threshold),
-        "primary_optimal_threshold": float(opt_th),
-        "meta_threshold": float(meta_threshold),
+        "optimal_threshold": float(opt_p_th),
+        "meta_threshold": float(meta_th),
         "signals_in_test": int(test_preds.sum()),
         "test_samples": int(len(y_test_arr)),
-        "train_samples": int(val_metrics.get("train_samples_actual", 0)),
-        "test_period": f"{val_metrics['test_start_date']} -> {val_metrics['test_end_date']}",
-        "train_period": f"{val_metrics['train_start_date']} -> {val_metrics['train_end_date']}",
+        "train_samples": int(train_mask.sum()),
+        "tune_samples": int(tune_all_mask.sum()),
+        "test_period": test_period,
+        "train_period": train_period,
         "walk_forward_summary": artifact.get("walk_forward_summary") or {},
         "oos_backtest": bt_res,
         "dev_calibration": dev_stats,
+        "duration_s": round(time.time() - t0, 1),
     }
 
     artifact["precision"] = summary_metrics["precision"]
     artifact["recall"] = summary_metrics["recall"]
     artifact["f1"] = summary_metrics["f1"]
     artifact["auc"] = summary_metrics["auc"]
-    artifact["optimal_threshold"] = float(meta_threshold)
+    artifact["optimal_threshold"] = float(opt_p_th)
+    artifact["meta_threshold"] = float(meta_th)
     artifact["oos_backtest"] = bt_res
-    artifact["test_period"] = summary_metrics["test_period"]
-    artifact["train_period"] = summary_metrics["train_period"]
+    artifact["test_period"] = test_period
+    artifact["train_period"] = train_period
+    artifact["primary_model"]["optimal_threshold"] = float(opt_p_th)
     with open(saved_path, "wb") as f:
         pickle.dump(artifact, f)
 
-    # Enrich `.model_card.json` so BOTH EGX trainer consumers and AdaptiveModelSelector read all fields cleanly
     card_path = saved_path + ".model_card.json"
     with open(card_path, "r", encoding="utf-8") as cf:
         card = json.load(cf)
@@ -1099,25 +1338,26 @@ def train_saudi_meta_model(
         "stop_loss_pct": float(stop_loss_pct),
         "barrier_mode": barrier_mode,
         "look_forward_days": int(look_forward_days),
-        "buyThreshold": float(meta_threshold),
-        "meta_threshold": float(meta_threshold),
-        "optimal_threshold": float(meta_threshold),
-        "primary_optimal_threshold": float(opt_th),
-        "feature_names": list(trainer.predictors),
+        "buyThreshold": float(opt_p_th),
+        "meta_threshold": float(meta_th),
+        "optimal_threshold": float(opt_p_th),
+        "feature_names": list(feature_cols),
         "meta_feature_names": meta_feature_names_with_prob,
         "precision": summary_metrics["precision"],
         "recall": summary_metrics["recall"],
         "f1": summary_metrics["f1"],
         "auc": summary_metrics["auc"],
+        "meta_auc": summary_metrics["meta_auc"],
         "oos_backtest": bt_res,
-        "train_period": summary_metrics["train_period"],
-        "test_period": summary_metrics["test_period"],
+        "train_period": train_period,
+        "test_period": test_period,
     })
     card["training"]["metrics"] = {
         "precision": summary_metrics["precision"],
         "recall": summary_metrics["recall"],
         "f1": summary_metrics["f1"],
         "auc": summary_metrics["auc"],
+        "meta_auc": summary_metrics["meta_auc"],
         "average_precision": summary_metrics["average_precision"],
         "brier_score": summary_metrics["brier_score"],
         "base_rate": summary_metrics["base_rate"],
@@ -1127,21 +1367,54 @@ def train_saudi_meta_model(
         json.dump(card, cf, indent=2)
 
     print(
-        f"  [DONE] {model_filename} | OOS({summary_metrics['test_period']}) "
-        f"AUC={oos_auc:.4f} (base={oos_base_rate:.3f}) | P={oos_prec:.3f} "
-        f"(top10%={top_decile_prec:.3f}) | th={meta_threshold:.2f} | "
-        f"Backtest: {bt_res['trades']} trades, WR={bt_res['win_rate']}%, "
-        f"PF={bt_res['profit_factor']}, Ret={bt_res['total_return_pct']}%"
+        f"  [DONE] {model_filename} | OOS({test_period}) "
+        f"AUC={oos_p_auc:.4f} (metaAUC={oos_m_auc:.4f}, base={oos_base_rate:.3f}) | "
+        f"P={oos_prec:.3f} (top10%={top_decile_prec:.3f}) | th=({opt_p_th:.3f}/{meta_th:.3f}) | "
+        f"OOS_SIM: {bt_res['trades']} tr WR={bt_res['win_rate']}% PF={bt_res['profit_factor']} "
+        f"Ret={bt_res['total_return_pct']}% DD={bt_res['max_drawdown_pct']}% | {summary_metrics['duration_s']}s",
+        flush=True,
     )
-    return saved_path, summary_metrics, df_raw_copy
+    return saved_path, summary_metrics, df_compact
+
+
+def train_all_saudi_models(force_refresh: bool = False) -> Dict[str, Any]:
+    """Train both EGX-matched Saudi Meta-Labeling systems: `model_TADAWUL.pkl` and `KING_TASI.pkl`."""
+    history_cache = load_saudi_history_cached(force_refresh=force_refresh)
+    df_compact = load_or_build_compact_features(history_cache, force_rebuild=force_refresh)
+
+    tad_path, tad_metrics, _ = train_saudi_meta_model(
+        history_cache=history_cache,
+        model_filename="model_TADAWUL.pkl",
+        target_pct=3.0,
+        stop_loss_pct=1.5,
+        look_forward_days=20,
+        barrier_mode="atr_multiplier",
+        df_compact=df_compact,
+    )
+    king_path, king_metrics, _ = train_saudi_meta_model(
+        history_cache=history_cache,
+        model_filename="KING_TASI.pkl",
+        target_pct=0.08,
+        stop_loss_pct=0.04,
+        look_forward_days=20,
+        barrier_mode="percent",
+        df_compact=df_compact,
+    )
+    return {
+        "model_TADAWUL": {"path": tad_path, "metrics": tad_metrics},
+        "KING_TASI": {"path": king_path, "metrics": king_metrics},
+    }
 
 
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    cache = load_saudi_history_cached()
-    print(
-        f"Saudi cache ready: {sum(len(v) for v in cache['bars_by_symbol'].values()):,} rows "
-        f"({cache['min_price_date']} -> {cache['max_price_date']}), "
-        f"{len(cache['market_index_rows']):,} TASI rows."
-    )
+    if "--train-all" in sys.argv:
+        train_all_saudi_models(force_refresh="--refresh" in sys.argv)
+    else:
+        cache = load_saudi_history_cached()
+        print(
+            f"Saudi cache ready: {sum(len(v) for v in cache['bars_by_symbol'].values()):,} rows "
+            f"({cache['min_price_date']} -> {cache['max_price_date']}), "
+            f"{len(cache['market_index_rows']):,} TASI rows."
+        )

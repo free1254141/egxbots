@@ -47,10 +47,16 @@ export { broadcastEntitlements };
 type Step = "plans" | "payment" | "submitted";
 
 const SAR_EXCHANGE_MAP: Record<number, number> = {
+  50: 4,
+  100: 8,
   200: 16,
+  500: 40,
   1000: 79,
+  1500: 118,
+  1800: 141,
   1850: 145,
   2250: 176,
+  2500: 196,
 };
 
 /** Converts an internal EGP price to the active market's display currency (SAR for TASI, EGP for EGX). */
@@ -241,7 +247,20 @@ export default function PricingClient() {
           .eq("id", currentUserId)
           .maybeSingle();
         if (active && data?.whatsapp_number && typeof data.whatsapp_number === "string") {
-          setCustomerMobile(data.whatsapp_number);
+          const cleanSaved = data.whatsapp_number.trim().replace(/[\s\-()]/g, "");
+          const knownCodes = ["+966", "+971", "+965", "+974", "+973", "+968", "+962", "+961", "+249", "+218", "+216", "+212", "+20", "+44", "+1"];
+          const matchedCode = knownCodes.find((code) => cleanSaved.startsWith(code));
+          if (matchedCode) {
+            userPickedDialCodeRef.current = true;
+            setSelectedDialCode(matchedCode);
+            setCustomerMobile(cleanSaved.slice(matchedCode.length).replace(/^0+/, ""));
+          } else if (/^01[0125]\d{8}$/.test(cleanSaved)) {
+            userPickedDialCodeRef.current = true;
+            setSelectedDialCode("+20");
+            setCustomerMobile(cleanSaved.replace(/^0+/, ""));
+          } else {
+            setCustomerMobile(cleanSaved.replace(/^\+/, ""));
+          }
         }
       } catch {}
     }
@@ -319,24 +338,24 @@ export default function PricingClient() {
 
   const selectedCountry = DIAL_COUNTRIES.find((c) => c.code === selectedDialCode) ?? DIAL_COUNTRIES[0];
 
-  // بناء الرقم الكامل: مفتاح + الأرقام المحلية (بدون الصفر الأول)
-  const localDigits = customerMobile.trim().replace(/[\s\-\(\)]/g, "").replace(/^0+/, "");
+  // بناء الرقم الكامل: 01XXXXXXXXX لمصر (للتوافق مع محافظ EasyKash) أو +CCXXXXXXXXX للدولي
+  const localDigits = customerMobile.trim().replace(/[^\d]/g, "").replace(/^0+/, "");
   const fullMobileNumber =
     localDigits.length === 0
       ? ""
       : selectedDialCode === "+20"
-        ? `${selectedDialCode}${localDigits}`
+        ? `0${localDigits}`
         : `${selectedDialCode}${localDigits}`;
 
-  const normalizedMobile = fullMobileNumber || customerMobile.trim().replace(/[\s\-\(\)]/g, "");
+  const normalizedMobile = fullMobileNumber;
 
   const isEgyptianMobile =
     selectedDialCode === "+20" &&
-    /^\+?20[1][0125]\d{8}$/.test(normalizedMobile);
+    /^01[0125]\d{8}$/.test(normalizedMobile);
   const isInternationalMobile =
     selectedDialCode !== "+20" &&
-    /^\+\d{7,15}$/.test(normalizedMobile);
-  const isMobileValid = (isEgyptianMobile || isInternationalMobile) && localDigits.length >= 5;
+    /^\+[1-9]\d{6,14}$/.test(normalizedMobile);
+  const isMobileValid = (isEgyptianMobile || isInternationalMobile) && localDigits.length >= 7;
 
   useEffect(() => {
     if (step !== "submitted" || !localOrder) return;
@@ -765,32 +784,35 @@ export default function PricingClient() {
     },
   ].map((plan) => {
     const configured = localConfig?.plans?.find((item: any) => item.id === plan.id);
-    let amount = Number(configured?.amount_egp ?? plan.amount_egp);
+    const hasConfiguredAmount = configured?.amount_egp != null && Number.isFinite(Number(configured.amount_egp));
+    let amount = hasConfiguredAmount ? Number(configured.amount_egp) : plan.amount_egp;
     let originalAmount: number | null = configured?.discount?.original_amount_egp
       ? Number(configured.discount.original_amount_egp)
       : null;
-    if (plan.id === "pro") {
-      if (isGrandfathered) {
-        amount = 50;
-        originalAmount = monthlyPrice || 200;
-      } else if (isGrandfathered100) {
-        amount = 100;
-        originalAmount = monthlyPrice || 200;
-      } else if (!foundersIsOpen) {
-        amount = monthlyPrice || 200;
-        originalAmount = null;
-      } else {
-        amount = 100;
-        originalAmount = monthlyPrice || 200;
+    if (!hasConfiguredAmount) {
+      if (plan.id === "pro") {
+        if (isGrandfathered) {
+          amount = 50;
+          originalAmount = monthlyPrice || 200;
+        } else if (isGrandfathered100) {
+          amount = 100;
+          originalAmount = monthlyPrice || 200;
+        } else if (!foundersIsOpen) {
+          amount = monthlyPrice || 200;
+          originalAmount = null;
+        } else {
+          amount = 100;
+          originalAmount = monthlyPrice || 200;
+        }
+      } else if (plan.id === "pro_6m") {
+        const hasFounder6m = foundersIsOpen || isGrandfathered || isGrandfathered100;
+        amount = hasFounder6m ? 500 : 1000;
+        originalAmount = hasFounder6m ? 1000 : null;
+      } else if (plan.id === "pro_1y") {
+        const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
+        amount = hasFounder1y ? 1000 : 1800;
+        originalAmount = hasFounder1y ? 1850 : null;
       }
-    } else if (plan.id === "pro_6m") {
-      const hasFounder6m = foundersIsOpen || isGrandfathered || isGrandfathered100;
-      amount = hasFounder6m ? 500 : 1000;
-      originalAmount = hasFounder6m ? 1000 : null;
-    } else if (plan.id === "pro_1y") {
-      const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
-      amount = hasFounder1y ? 1000 : 1850;
-      originalAmount = hasFounder1y ? 1850 : null;
     }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
@@ -814,10 +836,11 @@ export default function PricingClient() {
   });
 
   const annualPlan = paidPlans.find((p) => p.id === "pro_1y");
-  const annualCostEgp = annualPlan?.amount_egp ?? 1850;
+  const annualCostEgp = annualPlan?.amount_egp ?? 1800;
   const roiPortfolioEgp = annualCostEgp > 1200 ? 40000 : 25000;
   const roiTradeProfitEgp = Math.round(roiPortfolioEgp * 0.05);
   const roiNetGainEgp = roiTradeProfitEgp - annualCostEgp;
+  const roiNetGainDisplay = displayAmount(roiTradeProfitEgp) - displayAmount(annualCostEgp);
 
   const b2bPlans = [
     {
@@ -908,7 +931,13 @@ export default function PricingClient() {
         { text: isAr ? "خط تواصل ودعم مباشر مخصص لكبار المحللين والمديرين" : "Direct VIP line for fund managers and analysts", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
       ],
     },
-  ];
+  ].map((plan) => {
+    const configured = localConfig?.b2b_plans?.find((item: any) => item.id === plan.id);
+    if (configured?.amount_egp != null && Number.isFinite(Number(configured.amount_egp))) {
+      return { ...plan, amount_egp: Number(configured.amount_egp), days: Number(configured.days ?? plan.days) };
+    }
+    return plan;
+  });
 
   const allAvailablePlans = [...paidPlans, ...b2bPlans];
   const selectedPlanDetails = allAvailablePlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
@@ -919,6 +948,7 @@ export default function PricingClient() {
       ? Math.min(Math.max(0, baseProPrice - 20), Math.round((baseProPrice * appliedPromo.discount_percent) / 100))
       : 0;
   const proPrice = Math.max(20, baseProPrice - promoDiscountAmount);
+  const promoDiscountDisplay = Math.max(0, displayAmount(baseProPrice) - displayAmount(proPrice));
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
   const freeFeatures = [
@@ -1452,8 +1482,8 @@ export default function PricingClient() {
                 {isSaudi && (
                   <p className="text-[11px] font-bold text-center text-zinc-600 dark:text-zinc-400">
                     {isAr
-                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س (تُعالج الفاتورة عبر بوابة الدفع المعتمدة مع التحويل التلقائي للعملة)`
-                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR (processed via certified gateway with automatic currency conversion)`}
+                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س — تُعالج الفاتورة على بوابة EasyKash بقيمة ${proPrice.toLocaleString()} ج.م ويتم التحويل تلقائياً من بطاقتك`
+                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR — EasyKash charges ${proPrice.toLocaleString()} EGP with automatic card conversion`}
                   </p>
                 )}
                 <div className="flex items-center justify-center gap-3 text-[11px] font-bold text-zinc-500">
@@ -1529,7 +1559,7 @@ export default function PricingClient() {
                     </div>
                     <div className="flex justify-between text-amber-400 font-black">
                       <span>{isAr ? `خصم كود (${appliedPromo.code} - ${appliedPromo.discount_percent}%):` : `Promo (${appliedPromo.code}):`}</span>
-                      <span>-{formatPrice(promoDiscountAmount)}</span>
+                      <span>-{promoDiscountDisplay.toLocaleString()} {currencyLabel}</span>
                     </div>
                   </div>
                 )}
@@ -1543,8 +1573,8 @@ export default function PricingClient() {
                 {isSaudi && (
                   <p className="text-[11px] font-semibold text-amber-300/90 leading-relaxed pt-1">
                     {isAr
-                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س (تُعالج الفاتورة عبر بوابة الدفع المعتمدة مع التحويل التلقائي للعملة)`
-                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR (processed via certified gateway with automatic currency conversion)`}
+                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س — قيمة الفاتورة الفعلية على بوابة EasyKash هي ${proPrice.toLocaleString()} ج.م (تحويل تلقائي بالبطاقة)`
+                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR — EasyKash processes ${proPrice.toLocaleString()} EGP (auto-converted by your card)`}
                   </p>
                 )}
               </div>
@@ -1789,8 +1819,8 @@ export default function PricingClient() {
                   id: "pro_1y" as const,
                   name_ar: "سنة كاملة",
                   name_en: "1 Year",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)} 💎 (تثبيت مدى الحياة)` : "أكبر توفير 💎",
-                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(1000)} (Locked for life) 💎` : "Save 46% 💎",
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)} 💎 (تثبيت مدى الحياة)` : `توفير ${annualPlan?.savingsPct || 25}% 💎`,
+                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(1000)} (Locked for life) 💎` : `Save ${annualPlan?.savingsPct || 25}% 💎`,
                   badgeBg: "bg-sky-400 text-black",
                 },
               ].map((tab) => {
@@ -2247,8 +2277,8 @@ export default function PricingClient() {
                 </div>
                 <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 font-bold">
                   {isAr
-                    ? `أنت رابح ${formatPrice(roiNetGainEgp)} من أول صفقة!`
-                    : `Instant +${formatPrice(roiNetGainEgp)} ROI on trade #1`}
+                    ? `أنت رابح ${roiNetGainDisplay.toLocaleString()} ${currencyLabel} من أول صفقة!`
+                    : `Instant +${roiNetGainDisplay.toLocaleString()} ${currencyLabel} ROI on trade #1`}
                 </p>
               </div>
             </div>
@@ -2465,7 +2495,7 @@ export default function PricingClient() {
                     {isAr ? "حدد توقيع قناتك المخصص" : "Set Custom Signature"}
                   </h4>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed font-semibold">
-                    {isAr ? "اكتب من لوحة تحكمك سطر التوقيع الذي تريده أسفل كل رد (مثلاً: «تحليلات قناة الأستاذ فلان بالتعاون مع EGX Bots»)." : "Set your custom branding footer that appears below every analysis in your group."}
+                    {isAr ? `اكتب من لوحة تحكمك سطر التوقيع الذي تريده أسفل كل رد (مثلاً: «تحليلات قناة الأستاذ فلان بالتعاون مع ${brandName}»).` : "Set your custom branding footer that appears below every analysis in your group."}
                   </p>
                 </div>
               </div>
@@ -2506,8 +2536,8 @@ export default function PricingClient() {
               </div>
               <p className="text-xs sm:text-[13px] font-medium text-zinc-800 dark:text-zinc-300 leading-relaxed">
                 {isAr
-                  ? "منصة EGX BOTS هي شركة وأداة برمجيات مالية (FinTech SaaS) وليست وسيط تداول أو مستشاراً مالياً معتمداً من الهيئة العامة للرقابة المالية (FRA). المنصة لا تدير أموالاً ولا تتلقى ودائع ولا تضمن أي أرباح. مخرجات الذكاء الاصطناعي والإشارات الفنية هي مؤشرات إحصائية مؤتمتة لأغراض البحث والدراسة الذاتية، وقرار التداول يقع على عاتق المستثمر وحده عبر وسيطه المرخص."
-                  : "EGX BOTS is a FinTech Software-as-a-Service (SaaS) provider and not a broker or financial advisor certified by the FRA. The platform does not manage funds, receive deposits, or guarantee returns. All algorithmic signals and technical indicators are statistical tools for educational and personal research purposes only."}
+                  ? `منصة ${brandName} هي شركة وأداة برمجيات مالية (FinTech SaaS) وليست وسيط تداول أو مستشاراً مالياً معتمداً من الهيئة العامة للرقابة المالية (FRA). المنصة لا تدير أموالاً ولا تتلقى ودائع ولا تضمن أي أرباح. مخرجات الذكاء الاصطناعي والإشارات الفنية هي مؤشرات إحصائية مؤتمتة لأغراض البحث والدراسة الذاتية، وقرار التداول يقع على عاتق المستثمر وحده عبر وسيطه المرخص.`
+                  : `${brandName} is a FinTech Software-as-a-Service (SaaS) provider and not a broker or financial advisor certified by the FRA. The platform does not manage funds, receive deposits, or guarantee returns. All algorithmic signals and technical indicators are statistical tools for educational and personal research purposes only.`}
               </p>
               <div className="pt-1">
                 <Link
@@ -2532,7 +2562,13 @@ export default function PricingClient() {
                 {isAr ? "دفع رسمي ومعتمد" : "Certified Gateway"}
               </h4>
               <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                {isAr ? "عبر بوابة EasyKash المشفرة برخصة البنك المركزي المصري" : "Licensed 256-bit encrypted checkout via Central Bank of Egypt"}
+                {isAr
+                  ? isSaudi
+                    ? "عبر بوابة EasyKash المشفرة — تدعم بطاقات Visa / Mastercard الدولية في السعودية والخليج"
+                    : "عبر بوابة EasyKash المشفرة برخصة البنك المركزي المصري"
+                  : isSaudi
+                  ? "Encrypted 256-bit checkout via EasyKash — supports international Visa & Mastercard in Saudi & GCC"
+                  : "Licensed 256-bit encrypted checkout via Central Bank of Egypt"}
               </p>
             </div>
 
@@ -2581,12 +2617,14 @@ export default function PricingClient() {
               <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
                 {isAr
                   ? "هل تدير قناة تليجرام، صفحة فيسبوك، أو منصة استثمارية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر، أو احجز مساحات رعاية إعلانية ذكية في تقاريرنا اليومية ورادار الأسهم."
+                  : isSaudi
+                  ? "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Saudi TASI investors."
                   : "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Egyptian market investors."}
               </p>
             </div>
             <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-auto shrink-0">
               <a
-                href="https://wa.me/201024359109?text=مرحباً، أود الاستفسار عن الشراكة الإعلانية وبرنامج الأفلييت مع EGX BOTS"
+                href={`https://wa.me/201024359109?text=${encodeURIComponent(`مرحباً، أود الاستفسار عن الشراكة الإعلانية وبرنامج الأفلييت مع ${brandName}`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-xl py-3.5 px-6 text-xs font-black uppercase tracking-wider bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 transition-all text-center"

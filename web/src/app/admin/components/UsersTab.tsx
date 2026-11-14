@@ -666,11 +666,11 @@ export default function UsersTab() {
                     </div>
 
                     {statsLoading ? (
-                        <div className="h-56 flex items-center justify-center text-xs font-bold text-zinc-400">Loading chart...</div>
+                        <div className="h-64 flex items-center justify-center text-xs font-bold text-zinc-400">Loading chart...</div>
                     ) : (
                         <div className="h-64 min-w-0 w-full pt-2" dir="ltr">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <ComposedChart data={growthChartData} margin={{ top: 10, right: chartTab === "market" ? 28 : 10, left: -20, bottom: 0 }}>
+                            <ResponsiveContainer width="100%" height={240}>
+                                <ComposedChart data={growthChartData} margin={{ top: 10, right: chartTab === "market" ? 16 : 12, left: -12, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.2} />
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} minTickGap={12} />
                                     <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} allowDecimals={false} />
@@ -700,22 +700,22 @@ export default function UsersTab() {
                                         }}
                                     />
                                     {chartTab === "growth" && (
-                                        <>
-                                            <Bar yAxisId="left" dataKey="count" name="count" fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={24} />
-                                            <Line yAxisId="left" type="monotone" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={{ r: 2.5, fill: '#06b6d4' }} connectNulls={false} activeDot={{ r: 5 }} isAnimationActive={false} />
-                                        </>
+                                        <Bar yAxisId="left" dataKey="count" name="count" fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+                                    )}
+                                    {chartTab === "growth" && (
+                                        <Line yAxisId="left" type="monotone" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={{ r: 2.5, fill: '#06b6d4' }} connectNulls={false} activeDot={{ r: 5 }} isAnimationActive={false} />
                                     )}
                                     {chartTab === "paid" && (
-                                        <>
-                                            <Bar yAxisId="left" stackId="paid" dataKey="gatewayPaidCount" name="gatewayPaidCount" fill="#f59e0b" radius={[0, 0, 0, 0]} maxBarSize={28} />
-                                            <Bar yAxisId="left" stackId="paid" dataKey="cashPaidCount" name="cashPaidCount" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                                        </>
+                                        <Bar yAxisId="left" stackId="paid" dataKey="gatewayPaidCount" name="gatewayPaidCount" fill="#f59e0b" radius={[0, 0, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+                                    )}
+                                    {chartTab === "paid" && (
+                                        <Bar yAxisId="left" stackId="paid" dataKey="cashPaidCount" name="cashPaidCount" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} isAnimationActive={false} />
                                     )}
                                     {chartTab === "market" && (
-                                        <>
-                                            <Bar yAxisId="left" dataKey="recommendationsCount" name="recommendationsCount" fill="#a855f7" radius={[3, 3, 0, 0]} maxBarSize={24} />
-                                            <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 5, fill: '#10b981' }} />
-                                        </>
+                                        <Bar yAxisId="left" dataKey="recommendationsCount" name="recommendationsCount" fill="#a855f7" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+                                    )}
+                                    {chartTab === "market" && (
+                                        <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 5, fill: '#10b981' }} isAnimationActive={false} />
                                     )}
                                 </ComposedChart>
                             </ResponsiveContainer>
