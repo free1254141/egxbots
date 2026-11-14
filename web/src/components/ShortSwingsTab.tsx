@@ -47,6 +47,7 @@ import { formatShortSwingReturn, shortSwingQuote } from "@/lib/short-swings-view
 import { isShariaCompliant } from "@/lib/shariaStocks";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useMarket } from "@/contexts/MarketContext";
 
 export interface ShortSwingTrade {
   symbol: string;
@@ -130,6 +131,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   const { language } = useLanguage();
   const isAr = language === "ar";
   const { theme } = useTheme();
+  const { market, currencyLabel } = useMarket();
 
   const [data, setData] = useState<ShortSwingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -234,7 +236,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
 
-      const response = await requestShortSwings(viewerKey, isRefresh);
+      const response = await requestShortSwings(viewerKey, isRefresh, market);
       if (version !== requestVersion.current) return;
       const json = { ...response, active_trades: (response.active_trades || []).map((trade: ShortSwingTrade) => {
         if (trade.is_pending_entry) return trade;
@@ -252,10 +254,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
         setRefreshing(false);
       }
     }
-  }, [viewerKey]);
+  }, [viewerKey, market]);
 
   useEffect(() => {
     if (!viewerReady) return;
+    setData(null);
     loadData();
 
     // Listen to entitlement changes to unmask immediately on subscription
@@ -263,7 +266,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       if (entitlementRefresh.current) return;
       entitlementRefresh.current = true;
       setData(null);
-      invalidateShortSwingsRequest(viewerKey);
+      invalidateShortSwingsRequest(viewerKey, market);
       void loadData().finally(() => { entitlementRefresh.current = false; });
     };
     const handleStorage = (event: StorageEvent) => {
@@ -277,7 +280,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       window.removeEventListener("egx:entitlements-updated", handleEntitlements);
       window.removeEventListener("storage", handleStorage);
     };
-  }, [loadData, viewerKey, viewerReady]);
+  }, [loadData, viewerKey, viewerReady, market]);
 
   const kpis = useMemo(() => {
     const raw = data?.kpis;
@@ -1496,7 +1499,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                               <div className="text-right text-xs font-mono">
                                 <span className="text-zinc-500 block text-[10px]">سعر الدخول / اللحظي</span>
                                 <span>
-                                  {t.is_locked ? "🔒" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} → ${t.current_price != null ? safeNum(t.current_price).toFixed(2) : "—"} ج.م`}
+                                  {t.is_locked ? "🔒" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} → ${t.current_price != null ? safeNum(t.current_price).toFixed(2) : "—"} ${currencyLabel}`}
                                 </span>
                               </div>
 
@@ -1547,7 +1550,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         <div className="flex items-center gap-4">
                           <div className="text-right text-xs font-mono">
                             <span className="text-zinc-500 block text-[10px]">الدخول / الخروج</span>
-                            <span>{t.is_locked ? "🔒" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} → ${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ج.م`}</span>
+                            <span>{t.is_locked ? "🔒" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} → ${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ${currencyLabel}`}</span>
                           </div>
 
                           <div dir="ltr">
@@ -1762,8 +1765,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                           </span>
                           <span className="font-mono font-black text-black dark:text-white">
                             {trade.is_pending_entry
-                              ? `${trade.reference_close != null ? safeNum(trade.reference_close).toFixed(2) : (trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—")} ج.م`
-                              : `${trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—"} ج.م`}
+                              ? `${trade.reference_close != null ? safeNum(trade.reference_close).toFixed(2) : (trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—")} ${currencyLabel}`
+                              : `${trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                           </span>
                         </div>
                         <div>
@@ -1771,7 +1774,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                             {trade.is_pending_entry ? "التنفيذ المقترح:" : "السعر الحالي:"}
                           </span>
                           <span className="font-black text-black dark:text-white text-[11px]">
-                            {trade.is_pending_entry ? "مع افتتاح الغد" : `${trade.current_price != null ? safeNum(trade.current_price).toFixed(2) : "—"} ج.م`}
+                            {trade.is_pending_entry ? "مع افتتاح الغد" : `${trade.current_price != null ? safeNum(trade.current_price).toFixed(2) : "—"} ${currencyLabel}`}
                           </span>
                         </div>
                         <div>
@@ -1779,7 +1782,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                             {trade.is_pending_entry ? "الوقف المبدئي (-4%):" : "الوقف المتحرك (EMA10):"}
                           </span>
                           <span className="font-mono font-black text-amber-600 dark:text-amber-400">
-                            {trade.trailing_stop != null ? safeNum(trade.trailing_stop).toFixed(2) : "—"} ج.م
+                            {trade.trailing_stop != null ? safeNum(trade.trailing_stop).toFixed(2) : "—"} {currencyLabel}
                           </span>
                         </div>
                         <div>
@@ -1964,18 +1967,18 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                                 <span className="text-[10px] text-zinc-500 font-normal">مرجعي: {safeNum(trade.reference_close || trade.entry_price).toFixed(2)}</span>
                               </div>
                             ) : (
-                              `${trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—"} ج.م`
+                              `${trade.entry_price != null ? safeNum(trade.entry_price).toFixed(2) : "—"} ${currencyLabel}`
                             )}
                           </td>
 
                           {/* Current Price */}
                           <td className="px-4 py-4 text-center font-mono font-black border-l border-zinc-200 dark:border-zinc-800">
-                            {trade.is_locked ? "🔒" : `${trade.current_price != null ? safeNum(trade.current_price).toFixed(2) : "—"} ج.م`}
+                            {trade.is_locked ? "🔒" : `${trade.current_price != null ? safeNum(trade.current_price).toFixed(2) : "—"} ${currencyLabel}`}
                           </td>
 
                           {/* Trailing Stop EMA10 */}
                           <td className="px-4 py-4 text-center font-mono font-black text-amber-600 dark:text-amber-400 border-l border-zinc-200 dark:border-zinc-800">
-                            {trade.is_locked ? "🔒" : `${trade.trailing_stop != null ? safeNum(trade.trailing_stop).toFixed(2) : "—"} ج.م`}
+                            {trade.is_locked ? "🔒" : `${trade.trailing_stop != null ? safeNum(trade.trailing_stop).toFixed(2) : "—"} ${currencyLabel}`}
                           </td>
 
                           {/* Current Return */}
@@ -2285,10 +2288,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       <td className="p-3 font-mono text-zinc-600 dark:text-zinc-400">{t.entry_date}</td>
                       <td className="p-3 font-mono text-zinc-600 dark:text-zinc-400">{t.exit_date}</td>
                       <td className="p-3 font-mono">
-                        {t.is_locked ? "—" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
+                        {t.is_locked ? "—" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                       </td>
                       <td className="p-3 font-mono">
-                        {t.is_locked ? "—" : `${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ج.م`}
+                        {t.is_locked ? "—" : `${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ${currencyLabel}`}
                       </td>
                       <td className="p-3 font-mono">{t.sessions ? `${t.sessions} جلسات` : "—"}</td>
                       <td className="p-3 font-mono font-black">
@@ -2618,10 +2621,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         {t.is_active ? "مستمرة ⚡" : t.exit_date}
                       </td>
                       <td className="p-3 font-mono">
-                        {t.is_locked ? "—" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
+                        {t.is_locked ? "—" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                       </td>
                       <td className="p-3 font-mono">
-                        {t.is_locked ? "—" : `${(t.is_active ? t.current_price : t.exit_price) != null ? safeNum(t.is_active ? t.current_price : t.exit_price).toFixed(2) : "—"} ج.م`}
+                        {t.is_locked ? "—" : `${(t.is_active ? t.current_price : t.exit_price) != null ? safeNum(t.is_active ? t.current_price : t.exit_price).toFixed(2) : "—"} ${currencyLabel}`}
                       </td>
                       <td className="p-3 font-mono">{t.sessions ? `${t.sessions} جلسات` : "—"}</td>
                       <td className="p-3 font-mono font-black">
@@ -2813,19 +2816,19 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         <div>
                           <span className="text-zinc-500 text-[10px] block">سعر الدخول</span>
                           <span className="font-mono text-black dark:text-white">
-                            {t.is_locked ? "🔒 مشفر" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
+                            {t.is_locked ? "🔒 مشفر" : `${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                           </span>
                         </div>
                         <div>
                           <span className="text-zinc-500 text-[10px] block">السعر الحالي</span>
                           <span className="font-mono text-black dark:text-white">
-                            {t.is_locked ? "🔒 مشفر" : `${t.current_price != null ? safeNum(t.current_price).toFixed(2) : "—"} ج.م`}
+                            {t.is_locked ? "🔒 مشفر" : `${t.current_price != null ? safeNum(t.current_price).toFixed(2) : "—"} ${currencyLabel}`}
                           </span>
                         </div>
                         <div>
                           <span className="text-zinc-500 text-[10px] block">وقف الخسارة</span>
                           <span className="font-mono text-rose-600 dark:text-rose-400">
-                            {t.is_locked ? "🔒 مشفر" : `${t.stop_loss != null ? safeNum(t.stop_loss).toFixed(2) : "—"} ج.م`}
+                            {t.is_locked ? "🔒 مشفر" : `${t.stop_loss != null ? safeNum(t.stop_loss).toFixed(2) : "—"} ${currencyLabel}`}
                           </span>
                         </div>
                         <div>
@@ -2882,13 +2885,13 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                           <div>
                             <span className="text-zinc-500 text-[10px] block">تاريخ وسعر الدخول</span>
                             <span className="font-mono text-black dark:text-white">
-                              {t.is_locked ? "🔒 مشفر" : `${t.entry_date || t.signal_date ? `${t.entry_date || t.signal_date} • ` : ""}${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ج.م`}
+                              {t.is_locked ? "🔒 مشفر" : `${t.entry_date || t.signal_date ? `${t.entry_date || t.signal_date} • ` : ""}${t.entry_price != null ? safeNum(t.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                             </span>
                           </div>
                           <div>
                             <span className="text-zinc-500 text-[10px] block">تاريخ وسعر الخروج</span>
                             <span className="font-mono text-black dark:text-white">
-                              {t.is_locked ? "🔒 مشفر" : `${t.exit_date ? `${t.exit_date} • ` : ""}${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ج.م`}
+                              {t.is_locked ? "🔒 مشفر" : `${t.exit_date ? `${t.exit_date} • ` : ""}${t.exit_price != null ? safeNum(t.exit_price).toFixed(2) : "—"} ${currencyLabel}`}
                             </span>
                           </div>
                           <div>
@@ -3012,7 +3015,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <span className="text-base font-black font-mono mt-0.5 block">
                       {selectedActiveTrade.is_pending_entry
                         ? "افتتاح الغد"
-                        : `${selectedActiveTrade.entry_price != null ? safeNum(selectedActiveTrade.entry_price).toFixed(2) : "—"} ج.م`}
+                        : `${selectedActiveTrade.entry_price != null ? safeNum(selectedActiveTrade.entry_price).toFixed(2) : "—"} ${currencyLabel}`}
                     </span>
                   </div>
 
@@ -3022,10 +3025,10 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     </span>
                     <span className="text-base font-black font-mono mt-0.5 block">
                       {selectedActiveTrade.exit_date
-                        ? `${selectedActiveTrade.exit_price != null ? safeNum(selectedActiveTrade.exit_price).toFixed(2) : "—"} ج.م`
+                        ? `${selectedActiveTrade.exit_price != null ? safeNum(selectedActiveTrade.exit_price).toFixed(2) : "—"} ${currencyLabel}`
                         : selectedActiveTrade.is_pending_entry
-                        ? `${selectedActiveTrade.reference_close != null ? safeNum(selectedActiveTrade.reference_close).toFixed(2) : safeNum(selectedActiveTrade.current_price).toFixed(2)} ج.م`
-                        : `${selectedActiveTrade.current_price != null ? safeNum(selectedActiveTrade.current_price).toFixed(2) : "—"} ج.م`}
+                        ? `${selectedActiveTrade.reference_close != null ? safeNum(selectedActiveTrade.reference_close).toFixed(2) : safeNum(selectedActiveTrade.current_price).toFixed(2)} ${currencyLabel}`
+                        : `${selectedActiveTrade.current_price != null ? safeNum(selectedActiveTrade.current_price).toFixed(2) : "—"} ${currencyLabel}`}
                     </span>
                   </div>
 
@@ -3034,7 +3037,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       {selectedActiveTrade.is_pending_entry ? "الوقف المبدئي (-4%)" : "الوقف المتحرك (EMA10)"}
                     </span>
                     <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400 mt-0.5 block">
-                      {selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} ج.م
+                      {selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}
                     </span>
                   </div>
 
@@ -3068,11 +3071,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed">
                       {selectedActiveTrade.is_pending_entry ? (
                         <span>
-                          تحققت إشارة الشراء الفنية مع إغلاق اليوم بناءً على اختراق قمة تماسك 20 جلسة تداول مع تدفق سيولة مؤسسية تجاوزت <strong>140%</strong>. التنفيذ المقترح مع <strong>افتتاح جلسة الغد</strong> (سعر الإغلاق المرجعي: <strong>{safeNum(selectedActiveTrade.reference_close || selectedActiveTrade.current_price).toFixed(2)} ج.م</strong>) بشرط ألا يتجاوز الافتتاح فجوة سعرية صاعدة أعلى من <strong>+2.0%</strong>.
+                          تحققت إشارة الشراء الفنية مع إغلاق اليوم بناءً على اختراق قمة تماسك 20 جلسة تداول مع تدفق سيولة مؤسسية تجاوزت <strong>140%</strong>. التنفيذ المقترح مع <strong>افتتاح جلسة الغد</strong> (سعر الإغلاق المرجعي: <strong>{safeNum(selectedActiveTrade.reference_close || selectedActiveTrade.current_price).toFixed(2)} {currencyLabel}</strong>) بشرط ألا يتجاوز الافتتاح فجوة سعرية صاعدة أعلى من <strong>+2.0%</strong>.
                         </span>
                       ) : (
                         <span>
-                          دخل السهم بتاريخ <strong>{selectedActiveTrade.entry_date}</strong> بسعر <strong>{selectedActiveTrade.entry_price != null ? safeNum(selectedActiveTrade.entry_price).toFixed(2) : "—"} ج.م</strong> بناءً على إشارة فنية رقمية صارمة: اختراق قمة تماسك 20 جلسة تداول مع تدفق سيولة مؤسسية تجاوزت <strong>140%</strong> من متوسط التداول اليومي.
+                          دخل السهم بتاريخ <strong>{selectedActiveTrade.entry_date}</strong> بسعر <strong>{selectedActiveTrade.entry_price != null ? safeNum(selectedActiveTrade.entry_price).toFixed(2) : "—"} {currencyLabel}</strong> بناءً على إشارة فنية رقمية صارمة: اختراق قمة تماسك 20 جلسة تداول مع تدفق سيولة مؤسسية تجاوزت <strong>140%</strong> من متوسط التداول اليومي.
                         </span>
                       )}
                     </p>
@@ -3089,11 +3092,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed">
                       {selectedActiveTrade.is_pending_entry ? (
                         <span>
-                          مستوى الوقف المبدئي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} ج.م</strong> (-4% من السعر المرجعي). بعد التنفيذ وتأمين الصفقة عند +4.5%، يبدأ رفع الوقف آلياً مع متوسط EMA10 لحجز الأرباح.
+                          مستوى الوقف المبدئي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> (-4% من السعر المرجعي). بعد التنفيذ وتأمين الصفقة عند +4.5%، يبدأ رفع الوقف آلياً مع متوسط EMA10 لحجز الأرباح.
                         </span>
                       ) : (
                         <span>
-                          الاستراتيجية تتبع قاعدة <strong>ركوب الاتجاه دون سقف للأرباح (Run Winners)</strong>. مستوى الوقف المتحرك الحالي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} ج.م</strong> ويتبع يومياً المتوسط المتحرك الأسي 10 أيام (EMA10). أمر الخروج الرقمي ينفذ فقط عند أول إغلاق مؤكد أسفل هذا المتوسط.
+                          الاستراتيجية تتبع قاعدة <strong>ركوب الاتجاه دون سقف للأرباح (Run Winners)</strong>. مستوى الوقف المتحرك الحالي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> ويتبع يومياً المتوسط المتحرك الأسي 10 أيام (EMA10). أمر الخروج الرقمي ينفذ فقط عند أول إغلاق مؤكد أسفل هذا المتوسط.
                         </span>
                       )}
                     </p>

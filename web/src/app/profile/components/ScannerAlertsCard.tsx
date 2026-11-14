@@ -19,7 +19,9 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
+import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 
 interface ScannerPreferences {
   volume_surge: boolean;
@@ -43,6 +45,9 @@ interface ScannerAlertsCardProps {
 
 export default function ScannerAlertsCard({ initialTelegramLinked = false }: ScannerAlertsCardProps) {
   const { language } = useLanguage();
+  const { market, isSaudi } = useMarket();
+  const SCANNER_ALERTS_CACHE_KEY = "egx_scanner_alerts_cache_v2";
+  const cacheKey = `${SCANNER_ALERTS_CACHE_KEY}_${market}`;
   const { invite: proInvite, loading: proInviteLoading, refresh: refreshProInvite } = useTelegramPro();
   const isAr = language === "ar";
 
@@ -75,7 +80,9 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     });
   };
 
-  const vipChannelUrl = proInvite.is_pro && proInvite.invite_link ? proInvite.invite_link : "";
+  const vipChannelUrl = proInvite.is_pro
+    ? (isSaudi ? (proInvite.saudi_invite_link || SAUDI_VIP_TELEGRAM_WEB_URL) : (proInvite.invite_link || ""))
+    : "";
 
   useEffect(() => {
     if (initialTelegramLinked) {
@@ -100,13 +107,11 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
     return () => window.removeEventListener("hashchange", checkHash);
   }, []);
 
-  const SCANNER_ALERTS_CACHE_KEY = "egx_scanner_alerts_cache_v2";
-
   useEffect(() => {
     let active = true;
 
     try {
-      const cachedRaw = localStorage.getItem(SCANNER_ALERTS_CACHE_KEY);
+      const cachedRaw = localStorage.getItem(cacheKey);
       if (cachedRaw) {
         const cached = JSON.parse(cachedRaw);
         if (cached && cached.ok && active) {
@@ -124,7 +129,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
 
     async function fetchPrefs() {
       try {
-        const res = await fetch("/api/user/scanner-alerts", {
+        const res = await fetch(`/api/user/scanner-alerts?market=${market}`, {
           cache: "no-store",
         });
         if (!active) return;
@@ -140,7 +145,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
             if (Array.isArray(data.closed_signals)) setClosedSignals(data.closed_signals);
             if (data.signals_kpis) setSignalsKpis(data.signals_kpis);
             try {
-              localStorage.setItem(SCANNER_ALERTS_CACHE_KEY, JSON.stringify(data));
+              localStorage.setItem(cacheKey, JSON.stringify(data));
             } catch {}
           }
         }
@@ -158,7 +163,7 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
       window.removeEventListener("egx:entitlements-updated", handleUpdated);
       window.removeEventListener("storage", handleUpdated);
     };
-  }, []);
+  }, [market, cacheKey]);
 
   const handleToggle = async (key: keyof ScannerPreferences) => {
     if (!isPro) {
@@ -360,7 +365,9 @@ export default function ScannerAlertsCard({ initialTelegramLinked = false }: Sca
                       className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-black text-[#FFE600] hover:bg-zinc-800 border-4 border-black font-black text-xs uppercase tracking-wider shadow-[3px_3px_0px_rgba(0,0,0,1)] transition-all w-full sm:w-auto"
                     >
                       <Send className="w-4 h-4" />
-                      {isAr ? "فتح قناة VIP" : "Open VIP Channel"}
+                      {isSaudi
+                        ? (isAr ? "فتح قناة VIP السعودية" : "Open Saudi VIP Channel")
+                        : (isAr ? "فتح قناة VIP" : "Open VIP Channel")}
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                     <button

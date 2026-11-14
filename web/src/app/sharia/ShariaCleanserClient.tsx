@@ -19,38 +19,47 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import {
-  SHARIA_COMPLIANT_EGX_SYMBOLS,
   isShariaCompliant,
   getStockPurificationMeta,
-  type ShariaStockMeta,
 } from "@/lib/shariaStocks";
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
+import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR } from "@/lib/saudi-stocks";
 import type { FairValueReport, FairValueStockItem } from "@/lib/market/fair-value";
 
 const SECTOR_PURIFICATION_RATES: Record<string, number> = {
   "اتصالات": 2.8,
+  "اتصالات وتكنولوجيا": 1.1,
   "تكنولوجيا مالية": 2.2,
-  "تكنولوجيا ومدفوعات رقمية": 2.2,
+  "تكنولوجيا ومدفوعات رقمية": 1.2,
   "عقارات": 3.5,
-  "عقارات وإنشاءات": 3.5,
+  "عقارات وإنشاءات": 2.5,
   "كيماويات وأسمدة": 2.4,
   "أسمدة وكيماويات": 2.4,
-  "كيماويات وبتروكيماويات": 2.5,
+  "كيماويات وبتروكيماويات": 1.5,
+  "بتروكيماويات وكيماويات": 1.4,
+  "مواد أساسية وبتروكيماويات": 1.3,
   "صناعي وهندسي": 2.9,
-  "صناعات هندسية وكهربائية": 2.9,
-  "رعاية صحية وأدوية": 1.8,
-  "أغذية ومشروبات": 2.1,
+  "صناعات هندسية وكهربائية": 2.2,
+  "رعاية صحية وأدوية": 1.2,
+  "أغذية ومشروبات": 1.5,
   "أغذية ودواجن": 1.9,
-  "طاقة وبترول": 2.6,
+  "طاقة وبترول": 1.8,
+  "بترول وطاقة": 1.2,
+  "طاقة ومرافق": 1.5,
+  "مواد بناء وأسمنت": 0.8,
+  "تجارة وتجزئة": 0.6,
+  "بنوك": 0.0,
 };
 
 function getDefaultPurificationRate(sectorAr?: string): number {
-  if (!sectorAr) return 2.5;
-  return SECTOR_PURIFICATION_RATES[sectorAr] ?? 2.5;
+  if (!sectorAr) return 2.0;
+  return SECTOR_PURIFICATION_RATES[sectorAr] ?? 2.0;
 }
 
-const POPULAR_SHARIA_SYMBOLS = ["ABUK", "FAIT", "SWDY", "ORWE", "MASR", "MFPC", "RACC", "IFAP"];
+const EGX_POPULAR_SHARIA_SYMBOLS = ["ABUK", "FAIT", "SWDY", "ORWE", "MASR", "MFPC", "RACC", "IFAP"];
+const TASI_POPULAR_SHARIA_SYMBOLS = ["1120", "1150", "1140", "2222", "7010", "2010", "2280", "4013"];
 
 export default function ShariaCleanserClient({
   initialReport = null,
@@ -59,28 +68,45 @@ export default function ShariaCleanserClient({
 }) {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { market, isSaudi, currencyLabel, currencyCode } = useMarket();
+  const curr = isAr ? currencyLabel : currencyCode;
+  const popularShariaSymbols = isSaudi ? TASI_POPULAR_SHARIA_SYMBOLS : EGX_POPULAR_SHARIA_SYMBOLS;
 
   const [report, setReport] = useState<FairValueReport | null>(initialReport);
   const [loading, setLoading] = useState(!initialReport);
   const [search, setSearch] = useState("");
 
   // Calculator State
-  const [selectedSymbol, setSelectedSymbol] = useState<string>("ABUK");
+  const defaultSymbol = isSaudi ? "1120" : "ABUK";
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(defaultSymbol);
   const [sharesCount, setSharesCount] = useState<string>("1000");
   const [couponPerShare, setCouponPerShare] = useState<string>("5.00");
   const [purificationRate, setPurificationRate] = useState<string>(() => {
-    const meta = getStockPurificationMeta("ABUK");
+    const meta = getStockPurificationMeta(defaultSymbol, market);
     return meta ? meta.purificationRatePct.toString() : "0.9";
   });
   const [calcMode, setCalcMode] = useState<"dividend" | "zakat">("dividend");
 
+  // Sync default selected symbol & rate when market switches
   useEffect(() => {
-    if (initialReport) return;
+    const nextSym = isSaudi ? "1120" : "ABUK";
+    setSelectedSymbol(nextSym);
+    setSearch("");
+    const meta = getStockPurificationMeta(nextSym, market);
+    setPurificationRate(meta ? meta.purificationRatePct.toString() : isSaudi ? "0.0" : "0.9");
+  }, [isSaudi, market]);
+
+  useEffect(() => {
+    if (initialReport && (initialReport.market ?? "egx") === market) {
+      setReport(initialReport);
+      setLoading(false);
+      return;
+    }
     let active = true;
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch("/api/market/fair-value");
+        const res = await fetch(`/api/market/fair-value?market=${market}`);
         if (res.ok) {
           const data: FairValueReport = await res.json();
           if (active) setReport(data);
@@ -95,11 +121,54 @@ export default function ShariaCleanserClient({
     return () => {
       active = false;
     };
-  }, [initialReport]);
+  }, [initialReport, market]);
 
   const allStocks = useMemo<FairValueStockItem[]>(() => {
-    if (report?.stocks?.length) {
+    if (report?.stocks?.length && (report.market ?? "egx") === market) {
       return report.stocks;
+    }
+    if (isSaudi) {
+      const popularBySym = new Map(POPULAR_TASI_STOCKS.map((s) => [s.symbol, s]));
+      const symbols = Array.from(
+        new Set([...Object.keys(SAUDI_STOCK_NAMES_AR), ...POPULAR_TASI_STOCKS.map((s) => s.symbol)])
+      );
+      return symbols.map((sym) => {
+        const pop = popularBySym.get(sym);
+        const nameAr = SAUDI_STOCK_NAMES_AR[sym] || pop?.name_ar || sym;
+        const nameEn = pop?.name || sym;
+        return {
+          symbol: sym,
+          nameAr,
+          nameEn,
+          sectorAr: isAr ? "السوق السعودي (تاسي)" : "TASI Market",
+          logoUrl: null,
+          currentPrice: 0,
+          changePct: null,
+          fairValue: 0,
+          grahamValue: null,
+          upsidePct: 0,
+          status: "fair",
+          modelType: "quant_vwap",
+          modelLabelAr: isAr ? "التوازن الكمي" : "Quant Equilibrium",
+          formulaEquationAr: "",
+          formulaSubstitutionAr: "",
+          formulaStepsAr: [],
+          peRatio: null,
+          pbRatio: null,
+          eps: null,
+          bvps: null,
+          sectorMedianPe: 0,
+          sectorMedianPb: 0,
+          dividendYield: null,
+          roe: null,
+          marketCap: null,
+          rsi14: null,
+          ema200: null,
+          vwap20: null,
+          isSharia: isShariaCompliant(sym, "tasi"),
+          date: null,
+        } as FairValueStockItem;
+      });
     }
     return Object.keys(CANONICAL_STOCK_NAMES).map((sym) => {
       const info = CANONICAL_STOCK_NAMES[sym];
@@ -132,35 +201,43 @@ export default function ShariaCleanserClient({
         rsi14: null,
         ema200: null,
         vwap20: null,
-        isSharia: isShariaCompliant(sym),
+        isSharia: isShariaCompliant(sym, "egx"),
         date: null,
       } as FairValueStockItem;
     });
-  }, [report, isAr]);
+  }, [report, market, isSaudi, isAr]);
 
   const selectedStock = useMemo(() => {
-    return (
-      allStocks.find((s) => s.symbol === selectedSymbol) || {
-        symbol: selectedSymbol,
-        nameAr: CANONICAL_STOCK_NAMES[selectedSymbol]?.name_ar || selectedSymbol,
-        nameEn: CANONICAL_STOCK_NAMES[selectedSymbol]?.name_en || selectedSymbol,
-        sectorAr: CANONICAL_STOCK_NAMES[selectedSymbol]?.sector || "صناعة",
-        currentPrice: 60.0,
-        fairValue: 84.55,
-        upsidePct: 40.9,
-        isSharia: isShariaCompliant(selectedSymbol),
-      }
-    );
-  }, [allStocks, selectedSymbol]);
+    const found = allStocks.find((s) => s.symbol === selectedSymbol);
+    if (found) return found;
+    const pop = isSaudi ? POPULAR_TASI_STOCKS.find((s) => s.symbol === selectedSymbol) : undefined;
+    return {
+      symbol: selectedSymbol,
+      nameAr:
+        (isSaudi ? SAUDI_STOCK_NAMES_AR[selectedSymbol] : CANONICAL_STOCK_NAMES[selectedSymbol]?.name_ar) ||
+        pop?.name_ar ||
+        selectedSymbol,
+      nameEn:
+        (isSaudi ? pop?.name : CANONICAL_STOCK_NAMES[selectedSymbol]?.name_en) ||
+        selectedSymbol,
+      sectorAr: isSaudi
+        ? isAr ? "السوق السعودي (تاسي)" : "TASI Market"
+        : CANONICAL_STOCK_NAMES[selectedSymbol]?.sector || "صناعة",
+      currentPrice: 0,
+      fairValue: 0,
+      upsidePct: 0,
+      isSharia: isShariaCompliant(selectedSymbol, market),
+    };
+  }, [allStocks, selectedSymbol, isSaudi, isAr, market]);
 
   const currentMeta = useMemo(() => {
-    return getStockPurificationMeta(selectedSymbol);
-  }, [selectedSymbol]);
+    return getStockPurificationMeta(selectedSymbol, market);
+  }, [selectedSymbol, market]);
 
   // When selected symbol changes, update default purification rate
   const onSelectStock = (sym: string) => {
     setSelectedSymbol(sym);
-    const meta = getStockPurificationMeta(sym);
+    const meta = getStockPurificationMeta(sym, market);
     if (meta) {
       setPurificationRate(meta.purificationRatePct.toString());
     } else {
@@ -212,13 +289,19 @@ export default function ShariaCleanserClient({
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-black">
                 <ShieldCheck className="w-4 h-4" />
                 <span>
-                  {isAr
+                  {isSaudi
+                    ? isAr
+                      ? "أداة مجانية · الأسهم السعودية الشرعية (تاسي TASI) وحاسبة التطهير والزكاة"
+                      : "Free Tool · TASI Saudi Sharia Stocks & Dividend Cleanser Calculator"
+                    : isAr
                     ? "أداة مجانية · قائمة مؤشر الشريعة EGX33 وحاسبة تطهير الكوبونات والزكاة"
                     : "Free Tool · Official EGX33 Sharia Index & Dividend Cleanser Calculator"}
                 </span>
               </div>
               <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-zinc-950 dark:text-white">
-                {isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia Cleanser & Zakat Calculator"}{" "}
+                {isAr
+                  ? `حاسبة التوافق الشرعي وتطهير ${isSaudi ? "التوزيعات" : "الكوبونات"}`
+                  : "Sharia Cleanser & Zakat Calculator"}{" "}
                 <span className="text-emerald-600 dark:text-emerald-400 font-mono text-xl sm:text-3xl">
                   (Sharia Cleanser)
                 </span>
@@ -226,14 +309,17 @@ export default function ShariaCleanserClient({
               <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-300 leading-relaxed">
                 {isAr ? (
                   <>
-                    دليلك المتكامل للأسهم المتوافقة مع معايير الشريعة الإسلامية في البورصة المصرية، مع حاسبة فورية لحساب{" "}
-                    <strong className="text-zinc-950 dark:text-white">مبلغ تطهير التوزيعات النقدية (الكوبونات)</strong>{" "}
-                    من عوائد أذون الخزانة والفوائد العرضية، وحاسبة{" "}
+                    دليلك المتكامل للأسهم المتوافقة مع معايير الشريعة الإسلامية في{" "}
+                    {isSaudi ? "السوق السعودي (تاسي TASI)" : "البورصة المصرية"}، مع حاسبة فورية لحساب{" "}
+                    <strong className="text-zinc-950 dark:text-white">
+                      {isSaudi ? "مبلغ تطهير التوزيعات النقدية" : "مبلغ تطهير التوزيعات النقدية (الكوبونات)"}
+                    </strong>{" "}
+                    من {isSaudi ? "العوائد غير التشغيلية والفوائد العرضية" : "عوائد أذون الخزانة والفوائد العرضية"}، وحاسبة{" "}
                     <strong className="text-zinc-950 dark:text-white">زكاة الأسهم (2.5%)</strong>.
                   </>
                 ) : (
                   <>
-                    Your complete guide to Sharia-compliant EGX33 stocks, featuring an instant calculator for{" "}
+                    Your complete guide to Sharia-compliant {isSaudi ? "Saudi TASI" : "EGX33"} stocks, featuring an instant calculator for{" "}
                     <strong className="text-zinc-950 dark:text-white">Dividend Purification Amounts</strong>{" "}
                     and <strong className="text-zinc-950 dark:text-white">Stock Zakat (2.5%)</strong>.
                   </>
@@ -262,7 +348,11 @@ export default function ShariaCleanserClient({
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={
                   isAr
-                    ? "ابحث عن أي سهم في البورصة المصرية لفحص شرعيته وتطهيره... (مثال: أبو قير، ABUK، موبكو، السويدي، فوري)"
+                    ? isSaudi
+                      ? "ابحث عن أي سهم في السوق السعودي لفحص شرعيته وتطهيره... (مثال: الراجحي، 1120، أرامكو، 2222، سابك، stc)"
+                      : "ابحث عن أي سهم في البورصة المصرية لفحص شرعيته وتطهيره... (مثال: أبو قير، ABUK، موبكو، السويدي، فوري)"
+                    : isSaudi
+                    ? "Search any TASI stock to check Sharia status, purification & Zakat... (e.g. 1120, 2222, 2010, 7010)"
                     : "Search any EGX stock to check Sharia status, purification & Zakat... (e.g. ABUK, MFPC, SWDY, FWRY)"
                 }
                 className={`w-full h-13 ${isAr ? "pr-12 pl-12" : "pl-12 pr-12"} rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400 font-bold text-sm sm:text-base focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-400 shadow-sm transition-all`}
@@ -283,7 +373,7 @@ export default function ShariaCleanserClient({
               <span className="text-zinc-500 dark:text-zinc-400 font-bold shrink-0">
                 {isAr ? "⚡ أسهم شرعية بارزة:" : "⚡ Popular Sharia:"}
               </span>
-              {POPULAR_SHARIA_SYMBOLS.map((sym) => (
+              {popularShariaSymbols.map((sym) => (
                 <button
                   key={sym}
                   type="button"
@@ -357,12 +447,20 @@ export default function ShariaCleanserClient({
                   {selectedStock.isSharia ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{isAr ? "متوافق مع EGX33 ✅" : "EGX33 Compliant ✅"}</span>
+                      <span>
+                        {isSaudi
+                          ? isAr ? "متوافق شرعاً (تاسي) ✅" : "TASI Sharia Compliant ✅"
+                          : isAr ? "متوافق مع EGX33 ✅" : "EGX33 Compliant ✅"}
+                      </span>
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs font-bold">
                       <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>{isAr ? "غير مدرج بمؤشر الشريعة" : "Not in EGX33"}</span>
+                      <span>
+                        {isSaudi
+                          ? isAr ? "غير مدرج بالقائمة الشرعية" : "Not in TASI Sharia List"
+                          : isAr ? "غير مدرج بمؤشر الشريعة" : "Not in EGX33"}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -379,11 +477,11 @@ export default function ShariaCleanserClient({
                   {isAr ? "السعر الحالي" : "Current"}
                 </div>
                 <div className="text-base font-black font-mono text-zinc-950 dark:text-white">
-                  {currentPrice.toFixed(2)} {isAr ? "ج.م" : "EGP"}
+                  {currentPrice.toFixed(2)} {curr}
                 </div>
                 {selectedStock.fairValue > 0 && (
                   <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
-                    {isAr ? "العادل:" : "Fair:"} {selectedStock.fairValue.toFixed(2)} ج.م
+                    {isAr ? "العادل:" : "Fair:"} {selectedStock.fairValue.toFixed(2)} {curr}
                   </div>
                 )}
               </div>
@@ -430,7 +528,9 @@ export default function ShariaCleanserClient({
                 {/* 3. Coupon per share */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    {isAr ? "3. قيمة الكوبون النقدي الموزع للسهم (بالجنيه):" : "3. Cash Dividend Per Share (EGP):"}
+                    {isAr
+                      ? `3. قيمة الكوبون النقدي الموزع للسهم (${isSaudi ? "بالريال" : "بالجنيه"}):`
+                      : `3. Cash Dividend Per Share (${currencyCode}):`}
                   </label>
                   <input
                     type="number"
@@ -506,7 +606,7 @@ export default function ShariaCleanserClient({
                       {isAr ? "إجمالي الكوبون المستلم:" : "Total Dividend Received:"}
                     </span>
                     <span className="font-mono font-black text-sm text-zinc-900 dark:text-white">
-                      {totalDividend.toLocaleString("en-US", { minimumFractionDigits: 2 })} {isAr ? "ج.م" : "EGP"}
+                      {totalDividend.toLocaleString("en-US", { minimumFractionDigits: 2 })} {curr}
                     </span>
                   </div>
 
@@ -516,7 +616,7 @@ export default function ShariaCleanserClient({
                       <span>{isAr ? "مبلغ التطهير الواجب إخراجه:" : "Required Purification Charity:"}</span>
                     </span>
                     <span className="font-mono text-xl text-rose-600 dark:text-rose-400">
-                      {purificationAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} {isAr ? "ج.م" : "EGP"}
+                      {purificationAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} {curr}
                     </span>
                   </div>
 
@@ -525,7 +625,7 @@ export default function ShariaCleanserClient({
                       {isAr ? "صافي الربح الحلال المصفى:" : "Net Halal Cleansed Dividend:"}
                     </span>
                     <span className="font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
-                      {netHalalDividend.toLocaleString("en-US", { minimumFractionDigits: 2 })} {isAr ? "ج.م" : "EGP"}
+                      {netHalalDividend.toLocaleString("en-US", { minimumFractionDigits: 2 })} {curr}
                     </span>
                   </div>
                 </div>
@@ -539,7 +639,7 @@ export default function ShariaCleanserClient({
                       {isAr ? "إجمالي القيمة السوقية للأسهم:" : "Total Market Value of Shares:"}
                     </span>
                     <span className="font-mono font-black text-sm text-zinc-900 dark:text-white">
-                      {totalMarketValue.toLocaleString("en-US", { minimumFractionDigits: 2 })} {isAr ? "ج.م" : "EGP"}
+                      {totalMarketValue.toLocaleString("en-US", { minimumFractionDigits: 2 })} {curr}
                     </span>
                   </div>
 
@@ -549,7 +649,7 @@ export default function ShariaCleanserClient({
                       <span>{isAr ? "مقدار زكاة عروض التجارة والمضاربة (2.5%):" : "Zakat Due on Speculation (2.5%):"}</span>
                     </span>
                     <span className="font-mono text-xl text-indigo-600 dark:text-indigo-400">
-                      {zakatAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} {isAr ? "ج.م" : "EGP"}
+                      {zakatAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} {curr}
                     </span>
                   </div>
 
@@ -583,7 +683,7 @@ export default function ShariaCleanserClient({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {filteredStocks.map((stock) => {
               const isSelected = selectedSymbol === stock.symbol;
-              const meta = getStockPurificationMeta(stock.symbol);
+              const meta = getStockPurificationMeta(stock.symbol, market);
               const rate = meta ? meta.purificationRatePct : getDefaultPurificationRate(stock.sectorAr);
               return (
                 <div
@@ -621,11 +721,11 @@ export default function ShariaCleanserClient({
 
                     <div className="text-end shrink-0">
                       <div className="font-mono font-black text-sm text-zinc-950 dark:text-white">
-                        {stock.currentPrice > 0 ? `${stock.currentPrice.toFixed(2)} ج.م` : "—"}
+                        {stock.currentPrice > 0 ? `${stock.currentPrice.toFixed(2)} ${curr}` : "—"}
                       </div>
                       {stock.fairValue > 0 && (
                         <div className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                          {isAr ? "العادل:" : "Fair:"} {stock.fairValue.toFixed(2)} ج.م
+                          {isAr ? "العادل:" : "Fair:"} {stock.fairValue.toFixed(2)} {curr}
                         </div>
                       )}
                     </div>
@@ -683,7 +783,11 @@ export default function ShariaCleanserClient({
               </h2>
               <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
                 {isAr
-                  ? "توضيح الفوارق الفقهية والمحاسبية بين المعيار 21 للأيوفي والمنهجيات الأخرى في البورصة المصرية"
+                  ? isSaudi
+                    ? "توضيح ضوابط الهيئات الشرعية في السوق السعودي (الراجحي، الإنماء، البلاد) ومعيار 21 للأيوفي"
+                    : "توضيح الفوارق الفقهية والمحاسبية بين المعيار 21 للأيوفي والمنهجيات الأخرى في البورصة المصرية"
+                  : isSaudi
+                  ? "Clarification of Saudi Shariah boards (Al Rajhi, Alinma, Albilad) and AAOIFI 21 purification standards"
                   : "Clarification of accounting and Sharia differences between AAOIFI 21 and other methodologies"}
               </p>
             </div>
@@ -709,7 +813,11 @@ export default function ShariaCleanserClient({
               </div>
               <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
                 {isAr
-                  ? "كل شركة تختلف نسبة الفوائد الدائنة في قوائمها المالية (مثلاً أبو قير 0.9%، موبكو 0.4%، السويدي 1.2%، طلعت مصطفى 3.2%). أما البنوك الإسلامية النقية (بنك فيصل ومصرف أبوظبي الإسلامي) فنصيبها 0.0% ولا تتطلب أي تطهير."
+                  ? isSaudi
+                    ? "كل شركة تختلف نسبة العوائد البنكية في قوائمها المالية (مثلاً أرامكو 0.6%، سابك 1.4%، stc 1.1%، المراعي 0.5%). أما المصارف الإسلامية النقية (الراجحي 1120، الإنماء 1150، البلاد 1140، الجزيرة 1020) فنسبتها 0.0% ولا تتطلب أي تطهير."
+                    : "كل شركة تختلف نسبة الفوائد الدائنة في قوائمها المالية (مثلاً أبو قير 0.9%، موبكو 0.4%، السويدي 1.2%، طلعت مصطفى 3.2%). أما البنوك الإسلامية النقية (بنك فيصل ومصرف أبوظبي الإسلامي) فنصيبها 0.0% ولا تتطلب أي تطهير."
+                  : isSaudi
+                  ? "Each Saudi company has distinct incidental interest income in its financial statements (e.g. Aramco 0.6%, SABIC 1.4%, stc 1.1%). Pure Islamic banks (Al Rajhi 1120, Alinma 1150, Albilad 1140, AlJazira 1020) are 0.0% pure with zero cleansing."
                   : "Each company has distinct incidental interest income in its financial statements (e.g. ABUK 0.9%, MFPC 0.4%, SWDY 1.2%, TMGH 3.2%). Pure Islamic banks (FAIT, ADIB) are 0.0% pure with zero cleansing."}
               </p>
             </div>

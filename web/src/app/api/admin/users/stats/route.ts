@@ -311,27 +311,50 @@ export async function GET(req: NextRequest) {
 
     const recsByDay: Record<string, number> = {};
     const localOrdersByDay: Record<string, number> = {};
+    const gatewayOrdersByDay: Record<string, number> = {};
+    const cashOrdersByDay: Record<string, number> = {};
     for (let i = daysToLookBack; i >= 0; i -= 1) {
       const date = toCairoDate(now.getTime() - i * 24 * 60 * 60 * 1000);
       signupsByDay[date] = 0;
       proSignupsByDay[date] = 0;
       recsByDay[date] = 0;
       localOrdersByDay[date] = 0;
+      gatewayOrdersByDay[date] = 0;
+      cashOrdersByDay[date] = 0;
     }
     nonAdminProfiles.forEach((profile: any) => {
       const date = toCairoDate(profile.created_at);
       if (date in signupsByDay) signupsByDay[date] += 1;
     });
 
-    // Track Local payment orders approved per day
+    // Track Local & Gateway payment orders approved per day (mutually exclusive: gateway vs manual cash)
+    let totalGatewayCustomers = 0;
+    let totalCashCustomers = 0;
     (paymentOrders || []).forEach((order: any) => {
       if (adminUserIds.has(String(order.user_id))) return;
       const status = String(order.status || "").toLowerCase().trim();
       if (status !== "approved") return;
+      const prov = String(order.provider || "").toLowerCase().trim();
+      const isGateway = prov === "easykash" || prov === "kashier";
+      if (isGateway) totalGatewayCustomers += 1;
+      else totalCashCustomers += 1;
+
       const orderDateStr = order.created_at;
       if (orderDateStr) {
         const date = toCairoDate(orderDateStr);
         if (date in localOrdersByDay) localOrdersByDay[date] += 1;
+        if (isGateway && date in gatewayOrdersByDay) gatewayOrdersByDay[date] += 1;
+        if (!isGateway && date in cashOrdersByDay) cashOrdersByDay[date] += 1;
+      }
+    });
+
+    (kashierPayments || []).forEach((kp: any) => {
+      if (adminUserIds.has(String(kp.user_id))) return;
+      if (String(kp.status || "").toLowerCase().trim() !== "success") return;
+      totalGatewayCustomers += 1;
+      if (kp.created_at) {
+        const date = toCairoDate(kp.created_at);
+        if (date in gatewayOrdersByDay) gatewayOrdersByDay[date] += 1;
       }
     });
 
@@ -388,6 +411,8 @@ export async function GET(req: NextRequest) {
       const count = signupsByDay[date] || 0;
       const newPro = proSignupsByDay[date] || 0;
       const newLocal = localOrdersByDay[date] || 0;
+      const gatewayPaidCount = gatewayOrdersByDay[date] || 0;
+      const cashPaidCount = cashOrdersByDay[date] || 0;
       cumulativePro += newPro;
       cumulativeLocal += newLocal;
       if (egxByDay[date] != null) {
@@ -401,6 +426,8 @@ export async function GET(req: NextRequest) {
         totalPro: cumulativePro, // cumulative active pro subscribers
         localCount: newLocal, // daily local payment customers approved
         totalLocal: cumulativeLocal, // cumulative local payment customers
+        gatewayPaidCount, // daily payment gateway (EasyKash / Kashier)
+        cashPaidCount, // daily manual cash (Vodafone / InstaPay / Telegram)
         recommendationsCount: recsByDay[date] || 0, // daily recommendations issued
         egx30: egxByDay[date] ?? lastKnownEgx30 ?? null, // EGX30 index closing level
       };
@@ -454,6 +481,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       approvedOrders,
       totalLocalCustomers,
+      totalGatewayCustomers,
+      totalCashCustomers,
       totalUsers: Math.max(nonAdminProfiles.length, totalProfileCount - adminUserIds.size),
       totalRecommendations: scanResults.length,
       currentEgx30: lastKnownEgx30,

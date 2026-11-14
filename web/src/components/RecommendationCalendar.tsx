@@ -29,8 +29,10 @@ import {
 } from "lucide-react";
 import StockLogo from "./StockLogo";
 import { isShariaCompliant } from "@/lib/shariaStocks";
+import { isSaudiSymbol } from "@/lib/saudi-stocks";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useRealtimeRefresh } from "@/hooks/useRealtimeRefresh";
 
 interface RecommendationCalendarProps {
@@ -60,6 +62,7 @@ export default function RecommendationCalendar({
     const isAr = language === "ar";
     const { theme } = useTheme();
     const isDark = theme === "dark";
+    const { market, isSaudi, currencyLabel } = useMarket();
     const delayedCutoff = useMemo(() => {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - 15);
@@ -94,8 +97,14 @@ export default function RecommendationCalendar({
     const [eventsUnavailable, setEventsUnavailable] = useState(false);
 
     const loadSentEvents = useCallback(async (signal?: AbortSignal) => {
+        if (isSaudi) {
+            setSentEvents([]);
+            setTrackedRecommendationIds([]);
+            setEventsUnavailable(false);
+            return;
+        }
         try {
-        const response = await fetch("/api/recommendations/events?limit=150", {
+        const response = await fetch(`/api/recommendations/events?limit=150&market=${market}`, {
                 signal,
             });
             if (response.status === 401 || response.status === 403) {
@@ -114,19 +123,19 @@ export default function RecommendationCalendar({
         } catch (error: any) {
             if (error?.name !== "AbortError") setEventsUnavailable(true);
         }
-    }, []);
+    }, [market, isSaudi]);
 
     useEffect(() => {
-        if (!isPro) {
+        if (!isPro || isSaudi) {
             setSentEvents([]);
             setTrackedRecommendationIds([]);
-            setEventsUnavailable(true);
+            setEventsUnavailable(!isPro);
             return;
         }
         const controller = new AbortController();
         void loadSentEvents(controller.signal);
         return () => controller.abort();
-    }, [loadSentEvents, refreshToken, isPro]);
+    }, [loadSentEvents, refreshToken, isPro, isSaudi]);
 
     useRealtimeRefresh(
         [
@@ -134,7 +143,7 @@ export default function RecommendationCalendar({
             { table: "scan_results", filter: "is_public=eq.true" },
         ],
         () => loadSentEvents(),
-        { enabled: Boolean(isPro), debounceMs: 500 },
+        { enabled: Boolean(isPro) && !isSaudi, debounceMs: 500 },
     );
 
     // View Mode: Calendar vs Agenda List
@@ -213,21 +222,28 @@ export default function RecommendationCalendar({
     const currentMonthName = isAr ? monthNamesAr[month] : monthNamesEn[month];
     const currentDaysOfWeek = isAr ? daysOfWeekAr : daysOfWeekEn;
 
-    // Filter base recommendations by Sharia if toggled. Locked placeholders
-    // (fresh signals hidden from Free users) must never enter the statistics.
+    // Filter base recommendations strictly by active market (and Sharia if toggled).
+    // Locked placeholders (fresh signals hidden from Free users) must never enter the statistics.
     const filteredBaseRecs = useMemo(() => {
-        const usable = recommendations.filter(r => r.locked !== true);
+        const usable = recommendations.filter(r => {
+            if (!r || r.locked === true) return false;
+            const ex = String(r.exchange || "").toUpperCase();
+            const cur = String(r.currency || "").toUpperCase();
+            const rowIsSaudi = cur === "SAR" || ex === "TADAWUL" || ex === "TASI" || (isSaudiSymbol(String(r.symbol || "")) && cur !== "EGP" && ex !== "EGX");
+            return isSaudi ? rowIsSaudi : !rowIsSaudi;
+        });
         if (shariaOnly) {
-            return usable.filter(r => isShariaCompliant(r.symbol));
+            return usable.filter(r => isShariaCompliant(r.symbol, market));
         }
         return usable;
-    }, [recommendations, shariaOnly]);
+    }, [recommendations, shariaOnly, isSaudi, market]);
 
     const filteredSentEvents = useMemo(
         () => {
-            return shariaOnly ? sentEvents.filter(event => isShariaCompliant(event.symbol)) : sentEvents;
+            if (isSaudi) return [];
+            return shariaOnly ? sentEvents.filter(event => isShariaCompliant(event.symbol, market)) : sentEvents;
         },
-        [sentEvents, shariaOnly],
+        [sentEvents, shariaOnly, isSaudi, market],
     );
 
     const closureTimeline = useMemo(() => {

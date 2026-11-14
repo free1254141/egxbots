@@ -1,6 +1,6 @@
 import { MetadataRoute } from 'next'
 import { getPublicMarketClient } from '@/lib/supabase/route-data'
-import { getPublicStockDirectory } from '@/lib/seo/stock-directory'
+import { getPublicStockDirectory, getPublicTasiStockDirectory } from '@/lib/seo/stock-directory'
 import { canonicalSitemap, publishedBlogEntries, validLastModified } from '@/lib/seo/sitemap-entries'
 import { getPublicReports, reportUrl } from '@/lib/social/public-reports'
 
@@ -132,17 +132,28 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }));
   staticPages.push({ url: baseUrl + '/reports', changeFrequency: 'daily', priority: 0.8 });
 
-  const stocks = await getPublicStockDirectory();
-  const stockPages: MetadataRoute.Sitemap = stocks.map(stock => ({
+  const saudiLandingPages: MetadataRoute.Sitemap = [
+    { url: `${baseUrl}/stocks?market=tasi`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/scanner/ai?market=tasi`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/scanner/technical?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
+    { url: `${baseUrl}/scanner/market?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
+    { url: `${baseUrl}/scanner/backtests?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
+  ];
+
+  const [stocks, tasiStocks] = await Promise.all([
+    getPublicStockDirectory(),
+    getPublicTasiStockDirectory().catch(() => []),
+  ]);
+  const stockPages: MetadataRoute.Sitemap = [...stocks, ...tasiStocks].map(stock => ({
     url: `${baseUrl}/stocks/${stock.symbol.toLowerCase()}`,
     // This is the persisted fundamentals update, not fetch time or a claim
     // about today's close. Do not manufacture timestamps for unknown updates.
-    lastModified: validLastModified(stock.updatedAt), changeFrequency: 'daily', priority: .7,
+    lastModified: validLastModified('updatedAt' in stock ? stock.updatedAt : undefined), changeFrequency: 'daily', priority: .7,
   }));
   const { data: posts, error, count } = await getPublicMarketClient().from('shared_chat_posts')
     .select('slug,is_published,updated_at,created_at', { count: 'exact' }).eq('is_published', true)
     .order('slug', { ascending: true }).limit(2001);
   if (error || !Array.isArray(posts) || posts.length > 2000 || typeof count === 'number' && count > posts.length)
     throw new Error('Unable to load complete published blog sitemap');
-  return canonicalSitemap([...staticPages, ...stockPages, ...publishedBlogEntries(posts, baseUrl), ...reportPages]);
+  return canonicalSitemap([...staticPages, ...saudiLandingPages, ...stockPages, ...publishedBlogEntries(posts, baseUrl), ...reportPages]);
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
+import { getMarketSupabaseClient, getSupabaseServiceClient, resolveRequestMarket } from "@/lib/supabase/route-data";
 import { hasActiveProSubscription } from "@/lib/ai/plan-gate";
 
 export const runtime = "nodejs";
@@ -23,8 +23,9 @@ const DEFAULT_PREFERENCES: ScannerPreferences = {
   disclosures: true,
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const market = resolveRequestMarket(request);
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
@@ -85,18 +86,32 @@ export async function GET() {
     let signalsKpis: any = null;
 
     try {
-      const { data: botState } = await client
-        .from("bot_states")
-        .select("state")
-        .eq("bot_id", "scanner_alerts")
-        .maybeSingle();
-      if (botState?.state) {
-        scannerHistory = botState.state.history || [];
-        lastScanData = botState.state.last_scan || null;
-        if (botState.state.active_signals && botState.state.active_signals.length > 0) {
-          activeSignals = botState.state.active_signals;
-          closedSignals = botState.state.closed_signals || [];
-          signalsKpis = botState.state.signals_kpis || null;
+      let stateData: any = null;
+      if (market === "tasi") {
+        const saudiClient = getMarketSupabaseClient("tasi");
+        const { data: cacheRow } = await saudiClient
+          .from("market_cache")
+          .select("payload")
+          .eq("cache_key", "saudi_scanner_alerts_v1")
+          .maybeSingle();
+        const rawPayload = cacheRow?.payload;
+        stateData = typeof rawPayload === "string" ? JSON.parse(rawPayload) : (rawPayload || null);
+      } else {
+        const { data: botState } = await client
+          .from("bot_states")
+          .select("state")
+          .eq("bot_id", "scanner_alerts")
+          .maybeSingle();
+        stateData = botState?.state || null;
+      }
+
+      if (stateData) {
+        scannerHistory = stateData.history || [];
+        lastScanData = stateData.last_scan || null;
+        if (stateData.active_signals && stateData.active_signals.length > 0) {
+          activeSignals = stateData.active_signals;
+          closedSignals = stateData.closed_signals || [];
+          signalsKpis = stateData.signals_kpis || null;
         } else {
           const { deriveTrackedSignalsFromHistory } = await import("@/lib/scannerTradePlan");
           const derived = deriveTrackedSignalsFromHistory(scannerHistory, lastScanData);

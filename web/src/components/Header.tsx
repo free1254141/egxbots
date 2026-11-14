@@ -16,6 +16,7 @@ import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/
 import { searchSymbols } from "@/lib/api";
 import PortfolioHeaderChip from "@/components/PortfolioHeaderChip";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
+import { EgyptFlag, SaudiFlag } from "@/components/MarketFlag";
 
 type SearchResult = {
     symbol: string;
@@ -102,33 +103,36 @@ function MarketSwitcher({
                 <div
                     role="group"
                     aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
-                    className="grid grid-cols-2 gap-1.5 p-1 rounded-xl border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900"
+                    className="grid grid-cols-2 gap-1.5 p-1 rounded-xl border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.2)]"
                 >
                     <button
                         type="button"
                         onClick={() => setMarket("egx")}
                         aria-pressed={!isSaudi}
-                        className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-black transition-all ${
+                        className={`flex items-center justify-center gap-2 py-2.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                             !isSaudi
-                                ? "bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                                : "text-zinc-600 dark:text-zinc-300 border-2 border-transparent hover:text-black dark:hover:text-white"
+                                ? "bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ring-2 ring-[#FFE600]/45"
+                                : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
                         }`}
                     >
-                        <span aria-hidden="true">🇪🇬</span>
-                        <span>{language === "ar" ? "مصر (EGX)" : "Egypt (EGX)"}</span>
+                        <EgyptFlag className="w-5 h-3.5" />
+                        <span>{language === "ar" ? "مصر EGX" : "Egypt EGX"}</span>
                     </button>
                     <button
                         type="button"
                         onClick={() => setMarket("tasi")}
                         aria-pressed={isSaudi}
-                        className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-black transition-all ${
+                        className={`flex items-center justify-center gap-2 py-2.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                             isSaudi
-                                ? "bg-emerald-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                                : "text-zinc-600 dark:text-zinc-300 border-2 border-transparent hover:text-black dark:hover:text-white"
+                                ? "bg-emerald-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ring-2 ring-emerald-400/45"
+                                : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
                         }`}
                     >
-                        <span aria-hidden="true">🇸🇦</span>
-                        <span>{language === "ar" ? "السعودية (TASI)" : "Saudi (TASI)"}</span>
+                        <SaudiFlag className="w-5 h-3.5" />
+                        <span>{language === "ar" ? "السعودية TASI" : "Saudi TASI"}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-black text-[#FFE600] text-[9px] font-black leading-none uppercase tracking-wider">
+                            BETA
+                        </span>
                     </button>
                 </div>
             </div>
@@ -139,41 +143,44 @@ function MarketSwitcher({
         <div
             role="group"
             aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
-            className="inline-flex items-center p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.3)] shrink-0"
+            className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.3)] shrink-0"
         >
             <button
                 type="button"
                 onClick={() => setMarket("egx")}
                 aria-pressed={!isSaudi}
                 title={language === "ar" ? "السوق المصري (EGX)" : "Egyptian Market (EGX)"}
-                className={`flex items-center gap-1 h-7 px-1.5 sm:px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11px] font-black tracking-tight transition-all cursor-pointer whitespace-nowrap ${
                     !isSaudi
-                        ? "bg-[#FFE600] text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
-                        : "text-zinc-600 dark:text-zinc-400 border-2 border-transparent hover:text-black dark:hover:text-white"
+                        ? "bg-[#FFE600] text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] ring-2 ring-[#FFE600]/45"
+                        : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
                 }`}
             >
-                <span aria-hidden="true">🇪🇬</span>
-                <span className="hidden 2xl:inline">
-                    {language === "ar" ? "مصر (EGX)" : "EGX"}
+                <EgyptFlag className="w-4 h-3" />
+                <span className="hidden xl:inline">
+                    {language === "ar" ? "مصر EGX" : "Egypt EGX"}
                 </span>
-                <span className="2xl:hidden">EGX</span>
+                <span className="xl:hidden">EGX</span>
             </button>
             <button
                 type="button"
                 onClick={() => setMarket("tasi")}
                 aria-pressed={isSaudi}
                 title={language === "ar" ? "السوق السعودي (تاسي TASI)" : "Saudi Market (Tadawul TASI)"}
-                className={`flex items-center gap-1 h-7 px-1.5 sm:px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11px] font-black tracking-tight transition-all cursor-pointer whitespace-nowrap ${
                     isSaudi
-                        ? "bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
-                        : "text-zinc-600 dark:text-zinc-400 border-2 border-transparent hover:text-black dark:hover:text-white"
+                        ? "bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] ring-2 ring-emerald-400/45"
+                        : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
                 }`}
             >
-                <span aria-hidden="true">🇸🇦</span>
-                <span className="hidden 2xl:inline">
-                    {language === "ar" ? "السعودية (TASI)" : "TASI"}
+                <SaudiFlag className="w-4 h-3" />
+                <span className="hidden xl:inline">
+                    {language === "ar" ? "السعودية TASI" : "Saudi TASI"}
                 </span>
-                <span className="2xl:hidden">TASI</span>
+                <span className="xl:hidden">TASI</span>
+                <span className="px-1 py-0.5 rounded bg-black text-[#FFE600] text-[8px] font-black leading-none uppercase tracking-wider">
+                    BETA
+                </span>
             </button>
         </div>
     );
@@ -267,12 +274,11 @@ export default function Header() {
     const shellRef = useRef<HTMLDivElement>(null);
     const headerRef = useRef<HTMLElement>(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-    const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+    const [searchModalOpen, setSearchModalOpen] = useState(false);
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
     const [searching, setSearching] = useState(false);
-    const [searchFocused, setSearchFocused] = useState(false);
     const [profitGuideOpen, setProfitGuideOpen] = useState(false);
 
     const updateHeaderOffset = useCallback(() => {
@@ -292,7 +298,7 @@ export default function Header() {
 
     useEffect(() => {
         setMobileMenuOpen(false);
-        setMobileSearchOpen(false);
+        setSearchModalOpen(false);
         setAccountMenuOpen(false);
     }, [pathname]);
 
@@ -303,7 +309,6 @@ export default function Header() {
 
         const handleResize = () => {
             if (window.innerWidth >= 768) {
-                setMobileSearchOpen(false);
                 setMobileMenuOpen(false);
             }
             updateHeaderOffset();
@@ -361,68 +366,39 @@ export default function Header() {
     }, [searchQuery, country, exchange]);
 
     useEffect(() => {
+        const openSearchModal = () => {
+            setMobileMenuOpen(false);
+            setSearchModalOpen(true);
+            setTimeout(() => document.getElementById("global-stock-search-input")?.focus(), 40);
+        };
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
                 e.preventDefault();
-                if (window.innerWidth < 640) {
-                    setMobileSearchOpen(true);
-                    setMobileMenuOpen(false);
-                    setTimeout(() => document.getElementById("header-search-input-mobile")?.focus(), 50);
-                } else {
-                    document.getElementById("header-search-input")?.focus();
-                }
+                openSearchModal();
             } else if (e.key === "/") {
                 const active = document.activeElement?.tagName.toLowerCase();
                 if (active !== "input" && active !== "textarea") {
                     e.preventDefault();
-                    if (window.innerWidth < 640) {
-                        setMobileSearchOpen(true);
-                        setMobileMenuOpen(false);
-                        setTimeout(() => document.getElementById("header-search-input-mobile")?.focus(), 50);
-                    } else {
-                        document.getElementById("header-search-input")?.focus();
-                    }
+                    openSearchModal();
                 }
             } else if (e.key === "Escape") {
-                setSearchFocused(false);
+                setSearchModalOpen(false);
                 setSearchQuery("");
-                setMobileSearchOpen(false);
             }
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
 
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            const target = e.target as Node;
-            const container = document.getElementById("header-search-container");
-            if (container && !container.contains(target)) {
-                setSearchFocused(false);
-            }
-            const mobilePanel = document.getElementById("header-mobile-search-panel");
-            const mobileSearchBtn = document.getElementById("header-mobile-search-btn");
-            if (
-                mobilePanel &&
-                !mobilePanel.contains(target) &&
-                mobileSearchBtn &&
-                !mobileSearchBtn.contains(target)
-            ) {
-                setMobileSearchOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
-    const navItems = [
+    const allNavItems = [
         { href: "/scanner/backtests?tab=bots", label: t("nav.scanner.ai_trading"), icon: <Brain className="w-4 h-4 shrink-0" />, activePath: "/scanner/backtests" },
-        { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
+        { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI", egxOnly: true },
         { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
         { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
         { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
         { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
     ];
+    const navItems = isSaudi ? allNavItems.filter((item) => !item.egxOnly) : allNavItems;
 
     const checkActive = (href: string, activePath: string | null) => {
         if (href.includes("?tab=backtests")) {
@@ -439,8 +415,7 @@ export default function Header() {
 
     const handleSymbolSelect = (symbol: string) => {
         setSearchQuery("");
-        setSearchFocused(false);
-        setMobileSearchOpen(false);
+        setSearchModalOpen(false);
         setMobileMenuOpen(false);
         const baseSym = symbol.split('.')[0].toLowerCase();
         router.push(`/stocks/${baseSym}`);
@@ -453,9 +428,9 @@ export default function Header() {
     return (
         <>
         <header ref={headerRef} className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
-            <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-3 sm:px-4 md:px-8 py-3 flex items-center justify-between gap-2 md:gap-4">
+            <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-3 sm:px-4 md:px-6 py-2.5 flex items-center justify-between gap-2 md:gap-3">
                 {/* Brand */}
-                <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                     {/* Hanging Palestine Watermelon Pennant next to site logo */}
                     <div
                         title={language === "ar" ? "في القلب يا فلسطين" : "Standing with Palestine"}
@@ -481,7 +456,7 @@ export default function Header() {
                                     priority
                                 />
                             </div>
-                            <div className="hidden min-[420px]:flex flex-col min-w-0 header-title max-w-[120px] sm:max-w-none">
+                            <div className="hidden min-[420px]:flex flex-col shrink-0 header-title">
                                 <span className="text-sm sm:text-base font-black tracking-tight text-black dark:text-white leading-tight truncate uppercase animate-in slide-in-from-left-2 duration-700">
                                     {t("app.title")}
                                 </span>
@@ -492,50 +467,8 @@ export default function Header() {
                         </Link>
                     </div>
 
-                    {/* Center: search + nav */}
-                    <div className="header-center min-w-0">
-                        <div
-                            id="header-search-container"
-                            className={`relative min-w-0 hidden md:flex ${searchFocused ? "flex-1 max-w-md lg:max-w-lg" : "w-full max-w-[9rem] md:max-w-[11rem] lg:max-w-[14rem] xl:max-w-xs"} transition-all duration-300 animate-in fade-in duration-700 delay-100`}
-                        >
-                            <div className="relative flex items-center w-full">
-                                <Search className="absolute left-3 w-4 h-4 text-black/60 dark:text-white/60 pointer-events-none z-10" />
-                                <input
-                                    id="header-search-input"
-                                    type="text"
-                                    placeholder={
-                                        language === "ar"
-                                            ? isSaudi
-                                                ? "ابحث عن سهم سعودي (2222)..."
-                                                : "ابحث عن سهم مصري..."
-                                            : isSaudi
-                                              ? "Search TASI (2222)..."
-                                              : "Search EGX..."
-                                    }
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onFocus={() => setSearchFocused(true)}
-                                    className="h-9 w-full rounded-none pl-9 pr-8 text-xs font-black outline-none border-3 border-black bg-white dark:bg-zinc-900 text-black dark:text-white placeholder-black/50 dark:placeholder-white/50 focus:bg-[#FFE600] focus:text-black transition-none"
-                                />
-                                <kbd className="absolute right-3 px-1.5 py-0.5 rounded text-[9px] font-mono pointer-events-none uppercase hidden md:inline bg-black/10 dark:bg-white/10 text-black dark:text-white font-black border-2 border-black/20 dark:border-white/20">
-                                    /
-                                </kbd>
-                            </div>
-
-                            {searchFocused && (
-                                <div className="absolute top-11 left-0 right-0 max-h-72 overflow-y-auto rounded-none p-0 z-50 animate-in fade-in slide-in-from-top-1 duration-200 custom-scrollbar bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_#FFE600]">
-                                    <SearchDropdown
-                                        language={language}
-                                        isSaudi={isSaudi}
-                                        searchQuery={searchQuery}
-                                        searching={searching}
-                                        searchResults={searchResults}
-                                        onSelect={handleSymbolSelect}
-                                    />
-                                </div>
-                            )}
-                        </div>
-
+                    {/* Center: nav */}
+                    <div className="flex-1 min-w-0 flex items-center justify-center overflow-x-auto no-scrollbar px-1">
                         <nav className="hidden md:flex items-center gap-1 py-1 px-1 rounded-xl shrink-0 animate-in fade-in duration-700 delay-200">
                             {navItems.map((item, idx) => {
                                 const isActive = checkActive(item.href, item.activePath);
@@ -555,7 +488,7 @@ export default function Header() {
                                         }}
                                     >
                                         {item.icon}
-                                        <span className="hidden xl:inline-flex items-center gap-1.5">
+                                        <span className="hidden 2xl:inline-flex items-center gap-1.5">
                                             {item.label}
                                             {item.badge && (
                                                 <span className="px-1 py-0.5 rounded-[4px] bg-[#ff6b6b] text-white text-[8px] font-black uppercase tracking-normal border-2 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
@@ -582,18 +515,24 @@ export default function Header() {
                         />
 
                         <button
-                            id="header-mobile-search-btn"
+                            id="header-global-search-btn"
+                            type="button"
                             onClick={() => {
-                                setMobileSearchOpen((v) => !v);
-                                if (!mobileSearchOpen) {
-                                    setMobileMenuOpen(false);
-                                    setTimeout(() => document.getElementById("header-search-input-mobile")?.focus(), 50);
-                                }
+                                setMobileMenuOpen(false);
+                                setSearchModalOpen(true);
+                                setTimeout(() => document.getElementById("global-stock-search-input")?.focus(), 40);
                             }}
-                            className="md:hidden h-9 w-9 flex items-center justify-center rounded-xl bg-white dark:bg-zinc-900 border-3 border-black dark:border-white text-black dark:text-white hover:scale-110 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)] transition-all duration-200"
-                            aria-label="Search"
+                            className="h-9 px-2.5 flex items-center justify-center gap-1.5 rounded-xl bg-white dark:bg-zinc-900 border-3 border-black dark:border-white text-black dark:text-white hover:bg-[#FFE600] hover:text-black hover:scale-105 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all duration-200 cursor-pointer shrink-0"
+                            aria-label={language === "ar" ? "بحث عن سهم" : "Search stocks"}
+                            title={language === "ar" ? "ابحث عن أي سهم (اختصار /)" : "Search stocks (Press /)"}
                         >
-                            <Search className="h-4 w-4" />
+                            <Search className="h-4 w-4 shrink-0" />
+                            <span className="hidden xl:inline text-[11px] font-black">
+                                {language === "ar" ? "بحث" : "Search"}
+                            </span>
+                            <kbd className="hidden xl:inline px-1 py-0.2 rounded text-[9px] font-mono bg-black/10 dark:bg-white/10 border border-black/20 dark:border-white/20">
+                                /
+                            </kbd>
                         </button>
 
                         <button
@@ -681,7 +620,7 @@ export default function Header() {
                             onClick={() => {
                                 setMobileMenuOpen(!mobileMenuOpen);
                                 if (!mobileMenuOpen) {
-                                    setMobileSearchOpen(false);
+                                    setSearchModalOpen(false);
                                 }
                             }}
                             className="app-icon-button md:hidden h-9 w-9 flex items-center justify-center rounded-xl hover:bg-white/10 transition-all"
@@ -693,49 +632,79 @@ export default function Header() {
 
             </div>
 
-            {/* Mobile search dropdown bar */}
-            {mobileSearchOpen && (
-                <div id="header-mobile-search-panel" className="md:hidden w-full border-t-2 border-black dark:border-white bg-white dark:bg-zinc-950 px-4 py-2.5 shadow-[0_6px_0px_0px_#FFE600] animate-in slide-in-from-top-1 duration-200" dir={language === "ar" ? "rtl" : "ltr"}>
-                    <div id="header-search-container-mobile" className="relative max-w-xl mx-auto">
-                        <div className="relative flex items-center">
-                            <Search className={`absolute ${language === "ar" ? "right-3" : "left-3"} w-4 h-4 text-zinc-500`} />
-                            <input
-                                id="header-search-input-mobile"
-                                type="text"
-                                placeholder={
-                                    language === "ar"
-                                        ? isSaudi
-                                            ? "ابحث عن سهم سعودي (2222)..."
-                                            : "ابحث عن سهم مصري..."
-                                        : isSaudi
-                                          ? "Search TASI symbol..."
-                                          : "Search EGX symbol..."
-                                }
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                onFocus={() => setSearchFocused(true)}
-                                className={`h-11 w-full rounded-none ${language === "ar" ? "pr-9 pl-9" : "pl-9 pr-9"} text-sm font-black outline-none border-3 border-black bg-white text-black dark:bg-zinc-900 dark:text-white dark:border-white focus:bg-[#FFE600] focus:text-black transition-none`}
-                                autoFocus
-                            />
-                            {searchQuery && (
-                                <button
-                                    type="button"
-                                    onClick={() => setSearchQuery("")}
-                                    className={`absolute ${language === "ar" ? "left-3" : "right-3"} p-1 text-zinc-500 hover:text-black dark:hover:text-white`}
-                                >
-                                    <X className="w-4 h-4" />
-                                </button>
-                            )}
+            {/* Global Stock Search Dialog (Centered above page, never squished inside header) */}
+            {searchModalOpen && (
+                <div
+                    className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-start justify-center pt-16 sm:pt-24 px-4"
+                    onClick={() => setSearchModalOpen(false)}
+                    dir={language === "ar" ? "rtl" : "ltr"}
+                >
+                    <div
+                        className="w-full max-w-xl bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[8px_8px_0px_0px_#FFE600] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-black text-white border-b-2 border-black dark:border-white/20">
+                            <span className="text-xs font-black uppercase tracking-wider flex items-center gap-2 text-[#FFE600]">
+                                <Search className="w-4 h-4" />
+                                {language === "ar"
+                                    ? isSaudi
+                                        ? "البحث السريع في أسهم تداول السعودي"
+                                        : "البحث السريع في أسهم البورصة المصرية"
+                                    : isSaudi
+                                      ? "Quick Search • TASI"
+                                      : "Quick Search • EGX"}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setSearchModalOpen(false)}
+                                className="p-1 text-zinc-300 hover:text-[#FFE600] cursor-pointer"
+                                aria-label="Close search"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
                         </div>
-                        <div className="mt-2 max-h-72 overflow-y-auto custom-scrollbar">
-                            <SearchDropdown
-                                language={language}
-                                isSaudi={isSaudi}
-                                searchQuery={searchQuery}
-                                searching={searching}
-                                searchResults={searchResults}
-                                onSelect={handleSymbolSelect}
-                            />
+
+                        <div className="p-3 sm:p-4">
+                            <div className="relative flex items-center">
+                                <Search className={`absolute ${language === "ar" ? "right-3.5" : "left-3.5"} w-4 h-4 text-zinc-500 pointer-events-none`} />
+                                <input
+                                    id="global-stock-search-input"
+                                    type="text"
+                                    placeholder={
+                                        language === "ar"
+                                            ? isSaudi
+                                                ? "اكتب اسم الشركة أو رمز السهم السعودي (مثل 2222 أو الراجحي)..."
+                                                : "اكتب اسم الشركة أو كود السهم المصري (مثل COMI أو فوري)..."
+                                            : isSaudi
+                                              ? "Type TASI symbol or company name (e.g. 2222)..."
+                                              : "Type EGX symbol or company name (e.g. COMI, FWRY)..."
+                                    }
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className={`h-12 w-full rounded-none ${language === "ar" ? "pr-10 pl-10" : "pl-10 pr-10"} text-sm font-black outline-none border-3 border-black bg-zinc-50 text-black dark:bg-zinc-900 dark:text-white dark:border-white focus:bg-[#FFE600] focus:text-black transition-none`}
+                                    autoFocus
+                                />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchQuery("")}
+                                        className={`absolute ${language === "ar" ? "left-3" : "right-3"} p-1 text-zinc-500 hover:text-black dark:hover:text-white cursor-pointer`}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="mt-3 max-h-[55vh] overflow-y-auto custom-scrollbar border border-black/15 dark:border-white/15">
+                                <SearchDropdown
+                                    language={language}
+                                    isSaudi={isSaudi}
+                                    searchQuery={searchQuery}
+                                    searching={searching}
+                                    searchResults={searchResults}
+                                    onSelect={handleSymbolSelect}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import {
@@ -45,9 +46,28 @@ export { broadcastEntitlements };
 
 type Step = "plans" | "payment" | "submitted";
 
+const SAR_EXCHANGE_MAP: Record<number, number> = {
+  200: 16,
+  1000: 79,
+  1850: 145,
+  2250: 176,
+};
+
+/** Converts an internal EGP price to the active market's display currency (SAR for TASI, EGP for EGX). */
+function toDisplayAmount(amountEgp: number, isSaudi: boolean): number {
+  if (!isSaudi) return amountEgp;
+  const rounded = Math.round(amountEgp);
+  if (SAR_EXCHANGE_MAP[rounded] !== undefined) return SAR_EXCHANGE_MAP[rounded];
+  return Math.max(1, Math.round(amountEgp / 12.75));
+}
+
 export default function PricingClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { market, isSaudi, currencyLabel, currencyCode } = useMarket();
+  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
+  const displayAmount = (egp: number) => toDisplayAmount(egp, isSaudi);
+  const formatPrice = (egp: number) => `${displayAmount(egp).toLocaleString()} ${currencyLabel}`;
   const { user } = useAuth();
   const router = useRouter();
 
@@ -57,6 +77,7 @@ export default function PricingClient() {
   const [localOrder, setLocalOrder] = useState<string | null>(null);
   const [customerMobile, setCustomerMobile] = useState("");
   const [selectedDialCode, setSelectedDialCode] = useState("+20");
+  const userPickedDialCodeRef = useRef(false);
   const [dialDropdownOpen, setDialDropdownOpen] = useState(false);
   const [step, setStep] = useState<Step>("plans");
   const [b2bTrialModal, setB2bTrialModal] = useState<{
@@ -198,6 +219,13 @@ export default function PricingClient() {
       }
     }
   }, []);
+
+  // Default dial code to Saudi Arabia (+966) when TASI market is active and phone is empty
+  useEffect(() => {
+    if (!userPickedDialCodeRef.current && !customerMobile.trim()) {
+      setSelectedDialCode(isSaudi ? "+966" : "+20");
+    }
+  }, [isSaudi, customerMobile]);
 
   // Pre-fill customer mobile from their saved profile if available
   useEffect(() => {
@@ -439,8 +467,8 @@ export default function PricingClient() {
 
   // Funnel step 1 of 3 (GTM): the visitor reached pricing.
   useEffect(() => {
-    trackEvent("pricing_view", { signed_in: Boolean(user?.id) });
-  }, [user?.id]);
+    trackEvent("pricing_view", { signed_in: Boolean(user?.id), market });
+  }, [user?.id, market]);
 
   useEffect(() => {
     if (!user) {
@@ -678,7 +706,7 @@ export default function PricingClient() {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center py-12 px-4 text-center space-y-4">
         <h1 className="text-2xl sm:text-4xl font-black text-zinc-950 dark:text-white tracking-tight">
-          {isAr ? "خطط وأسعار باقات EGX BOTS" : "EGX BOTS Subscription Plans & Pricing"}
+          {isAr ? `خطط وأسعار باقات ${brandName}` : `${brandName} Subscription Plans & Pricing`}
         </h1>
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
       </div>
@@ -689,7 +717,7 @@ export default function PricingClient() {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-4 font-bold text-zinc-900 dark:text-white">
         <h1 className="text-xl sm:text-2xl font-black">
-          {isAr ? "خطط وأسعار باقات EGX BOTS" : "EGX BOTS Subscription Plans & Pricing"}
+          {isAr ? `خطط وأسعار باقات ${brandName}` : `${brandName} Subscription Plans & Pricing`}
         </h1>
         <p>{isAr ? "تعذر تحميل الخطط الآن. أعد تحميل الصفحة للمحاولة مجددًا." : "Plans are temporarily unavailable. Please reload and try again."}</p>
       </div>
@@ -817,7 +845,7 @@ export default function PricingClient() {
         { text: isAr ? "ترخيص وربط جروب تليجرام واحد" : "License 1 Telegram VIP Group", icon: <Check className="w-3.5 h-3.5" /> },
         { text: isAr ? "كوتة 50 استفسار يومياً (~1,100 استفسار شهرياً)" : "50 queries daily (~1,100/mo)", icon: <Zap className="w-3.5 h-3.5 text-emerald-500" /> },
         { text: isAr ? "توقيع مخصص باسم قناتك ومجتمعك أسفل كل تحليل" : "Custom signature footer on every bot reply", icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" /> },
-        { text: isAr ? "تحليل فني ومالي لجميع أسهم البورصة المصرية بلحظة" : "Instant AI analysis for all 280+ EGX stocks", icon: <BarChart3 className="w-3.5 h-3.5" /> },
+        { text: isAr ? (isSaudi ? "تحليل فني ومالي لجميع أسهم السوق السعودي (تداول TASI) بلحظة" : "تحليل فني ومالي لجميع أسهم البورصة المصرية بلحظة") : (isSaudi ? "Instant AI analysis for all Saudi TASI stocks" : "Instant AI analysis for all 280+ EGX stocks"), icon: <BarChart3 className="w-3.5 h-3.5" /> },
         { text: isAr ? "مانع التكرار والسبام الذكي (كولد داون 90 ثانية للعضو)" : "Anti-spam protection & 90s member cooldown", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
         { text: isAr ? "لوحة تحكم لمتابعة الاستهلاك وتعديل التوقيع" : "Dashboard for usage tracking & signature editing", icon: <Check className="w-3.5 h-3.5" /> },
       ],
@@ -903,18 +931,78 @@ export default function PricingClient() {
   ];
 
   const proFeatures = [
-    { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "الصفقات القصيرة والتوصيات اللحظية ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح بدون تشفير" : "Real-time Short Swings & Entry Signals — momentum runners, tight 4% stop, and live profit trailing", included: true },
-    { icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />, text: isAr ? "رادار وقناة تليجرام الفورية — تنبيهات اختراقات السيولة، تجميع كبار الملاك والحيتان، وإفصاحات السوق لحظة بلحظة" : "Live Telegram VIP Channel & Alerts — volume breakouts, smart money accumulation, and real-time disclosures", included: true },
-    { icon: <MessageSquare className="w-4 h-4 text-sky-500" />, text: isAr ? "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم مصري على مدار 24/7" : "350 AI consultations / month — 24/7 comprehensive quantitative & technical stock analyses", included: true },
-    { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من ثندر أو وسيطك واعرف المخاطر والدعوم فوراً" : "Vision AI Portfolio Analysis 📸 — upload broker/Thndr screenshots for instant asset & risk breakdown", included: true },
+    {
+      icon: <Zap className="w-4 h-4 text-emerald-500" />,
+      text: isAr
+        ? isSaudi
+          ? "إشارات أنظمة التداول الثلاثة والتوصيات اللحظية ⚡ PRO — صفقات زخم للسوق السعودي، وقف صارم، وتتبع أرباح بدون تشفير"
+          : "الصفقات القصيرة والتوصيات اللحظية ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح بدون تشفير"
+        : isSaudi
+        ? "3-Trading-Systems Signals & Real-time Swings — Saudi TASI momentum runners, tight stop-loss, and live profit trailing"
+        : "Real-time Short Swings & Entry Signals — momentum runners, tight 4% stop, and live profit trailing",
+      included: true,
+    },
+    {
+      icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />,
+      text: isAr
+        ? isSaudi
+          ? "قناة التليجرام VIP للسوق السعودي ورادار السيولة — تنبيهات اختراقات السيولة، تجميع كبار الملاك، وإفصاحات تداول لحظة بلحظة"
+          : "رادار وقناة تليجرام الفورية — تنبيهات اختراقات السيولة، تجميع كبار الملاك والحيتان، وإفصاحات السوق لحظة بلحظة"
+        : isSaudi
+        ? "Saudi TASI VIP Telegram Channel & Alerts — volume breakouts, smart money accumulation, and Tadawul disclosures"
+        : "Live Telegram VIP Channel & Alerts — volume breakouts, smart money accumulation, and real-time disclosures",
+      included: true,
+    },
+    {
+      icon: <MessageSquare className="w-4 h-4 text-sky-500" />,
+      text: isAr
+        ? isSaudi
+          ? "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم سعودي في تداول (TASI) على مدار 24/7"
+          : "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم مصري على مدار 24/7"
+        : isSaudi
+        ? "350 AI consultations / month — 24/7 comprehensive quantitative & technical analysis for any Saudi TASI stock"
+        : "350 AI consultations / month — 24/7 comprehensive quantitative & technical stock analyses",
+      included: true,
+    },
+    {
+      icon: <Sparkles className="w-4 h-4 text-amber-500" />,
+      text: isAr
+        ? isSaudi
+          ? "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من وسيطك واعرف المخاطر والدعوم فوراً"
+          : "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من ثندر أو وسيطك واعرف المخاطر والدعوم فوراً"
+        : isSaudi
+        ? "Vision AI Portfolio Analysis 📸 — upload your broker screenshots for instant asset & risk breakdown"
+        : "Vision AI Portfolio Analysis 📸 — upload broker/Thndr screenshots for instant asset & risk breakdown",
+      included: true,
+    },
     { icon: <Clock className="w-4 h-4 text-indigo-500" />, text: isAr ? "أتمتة استشاراتك اليومية على تليجرام — حتى 5 استشارات مجدولة يومياً تُرسل لهاتفك في المواعيد التي تختارها" : "Daily Scheduled Telegram AI Automations — up to 5 scheduled alerts delivered daily at your chosen times", included: true },
     { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? `محفظة تداول موسعة حتى ${proLimits.portfolio_stocks} سهماً نشطاً مع متابعة الأهداف والوقف` : `Expanded portfolio tracker up to ${proLimits.portfolio_stocks} active stocks with target & stop tracking`, included: true },
   ];
 
   const lifetimeFeatures = [
     { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (never expires, zero recurring renewals)", included: true },
-    { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? "كافة توصيات الصفقات القصيرة ورادار الإسكانر الفوري للأبد" : "Full Short Swings & Live Scanner Signals forever", included: true },
-    { icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />, text: isAr ? "قناة ورادار تليجرام الفوري بكافة مراحله للأبد" : "Live Telegram Channel & Alerts forever", included: true },
+    {
+      icon: <Zap className="w-4 h-4 text-emerald-500" />,
+      text: isAr
+        ? isSaudi
+          ? "كافة توصيات أنظمة التداول الثلاثة ورادار السوق السعودي الفوري للأبد"
+          : "كافة توصيات الصفقات القصيرة ورادار الإسكانر الفوري للأبد"
+        : isSaudi
+        ? "Full 3-Trading-Systems & Live TASI Scanner Signals forever"
+        : "Full Short Swings & Live Scanner Signals forever",
+      included: true,
+    },
+    {
+      icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />,
+      text: isAr
+        ? isSaudi
+          ? "قناة التليجرام VIP للسوق السعودي ورادار التداول الفوري للأبد"
+          : "قناة ورادار تليجرام الفوري بكافة مراحله للأبد"
+        : isSaudi
+        ? "Saudi TASI VIP Telegram Channel & Alerts forever"
+        : "Live Telegram Channel & Alerts forever",
+      included: true,
+    },
     { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? "350 استشارة شات بوت شهرياً تتجدد تلقائياً للأبد" : "350 AI chat messages refreshed monthly for life", included: true },
     { icon: <Sparkles className="w-4 h-4 text-emerald-500" />, text: isAr ? "تحليل صور المحفظة والشارت (Vision AI) 📸 + أتمتة تليجرام اليومية للأبد" : "Vision AI Screenshot Analysis 📸 + Scheduled Telegram Automations for life", included: true },
     { icon: <Sparkles className="w-4 h-4 text-yellow-500" />, text: isAr ? "أولوية قصوى ودخول مجاني لكافة التحديثات والميزات المستقبلية" : "VIP priority for all future updates and releases", included: true },
@@ -972,8 +1060,8 @@ export default function PricingClient() {
                 ? isAr ? "لم تكتمل عملية الدفع" : "Payment was not completed"
                 : orderStatus === "approved"
                 ? selectedPlanDetails?.id === "lifetime"
-                  ? isAr ? "أهلاً بك في نخبة EGX BOTS مدى الحياة! 👑🎉" : "Welcome to EGX BOTS Lifetime VIP! 👑🎉"
-                  : isAr ? "أهلاً بك في EGX BOTS Pro! 🎉" : "Welcome to EGX BOTS Pro! 🎉"
+                  ? isAr ? `أهلاً بك في نخبة ${brandName} مدى الحياة! 👑🎉` : `Welcome to ${brandName} Lifetime VIP! 👑🎉`
+                  : isAr ? `أهلاً بك في ${brandName} Pro! 🎉` : `Welcome to ${brandName} Pro! 🎉`
                 : isAr ? "في انتظار إشعار تأكيد الدفع ⏳" : "Awaiting payment confirmation ⏳"}
             </h1>
             <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300 leading-relaxed max-w-md mx-auto">
@@ -1133,7 +1221,7 @@ export default function PricingClient() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-4 sm:p-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="shrink-0 border-2 border-black dark:border-white bg-white p-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)]">
-                <Image src="/favicon_io/apple-touch-icon.png" alt="EGX Bots" width={36} height={36} className="h-8 w-8 object-contain" />
+                <Image src="/favicon_io/apple-touch-icon.png" alt={brandName} width={36} height={36} className="h-8 w-8 object-contain" />
               </div>
               <div>
                 <span className="inline-block border-2 border-black bg-amber-300 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-black">
@@ -1244,6 +1332,7 @@ export default function PricingClient() {
                               key={country.code}
                               type="button"
                               onClick={() => {
+                                userPickedDialCodeRef.current = true;
                                 setSelectedDialCode(country.code);
                                 setDialDropdownOpen(false);
                               }}
@@ -1356,10 +1445,17 @@ export default function PricingClient() {
                         ? isAr ? "سجّل الدخول للمتابعة" : "Sign in to Continue"
                         : selectedPlan === "lifetime" && !lifetimeIsOpen
                         ? isAr ? "عذراً، اكتملت جميع مقاعد باقة مدى الحياة (20/20)" : "Lifetime Deal is Sold Out"
-                        : isAr ? `المتابعة للدفع الآمن (${proPrice.toLocaleString()} ج.م) 🔒` : `Proceed to Secure Checkout (${proPrice.toLocaleString()} EGP) 🔒`}
+                        : isAr ? `المتابعة للدفع الآمن (${formatPrice(proPrice)}) 🔒` : `Proceed to Secure Checkout (${formatPrice(proPrice)}) 🔒`}
                     </>
                   )}
                 </button>
+                {isSaudi && (
+                  <p className="text-[11px] font-bold text-center text-zinc-600 dark:text-zinc-400">
+                    {isAr
+                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س (تُعالج الفاتورة عبر بوابة الدفع المعتمدة مع التحويل التلقائي للعملة)`
+                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR (processed via certified gateway with automatic currency conversion)`}
+                  </p>
+                )}
                 <div className="flex items-center justify-center gap-3 text-[11px] font-bold text-zinc-500">
                   <span className="flex items-center gap-1">
                     <Shield className="w-3.5 h-3.5 text-emerald-500" />
@@ -1381,7 +1477,7 @@ export default function PricingClient() {
                 </span>
                 <h3 className="text-2xl font-black flex items-center gap-2">
                   {selectedPlanDetails.isLifetime && <Crown className="w-6 h-6 text-yellow-400" />}
-                  {selectedPlanDetails.isLifetime ? "EGX BOTS Lifetime VIP" : "EGX BOTS Pro"}
+                  {selectedPlanDetails.isLifetime ? `${brandName} Lifetime VIP` : `${brandName} Pro`}
                 </h3>
                 <p className="text-xs font-semibold text-zinc-400 mt-1">
                   {isAr ? selectedPlanDetails.name_ar : selectedPlanDetails.name_en}
@@ -1429,21 +1525,28 @@ export default function PricingClient() {
                   <div className="space-y-1 text-xs font-bold">
                     <div className="flex justify-between text-zinc-400">
                       <span>{isAr ? "السعر قبل كود الخصم:" : "Subtotal:"}</span>
-                      <span className="line-through">{baseProPrice.toLocaleString()} ج.م</span>
+                      <span className="line-through">{formatPrice(baseProPrice)}</span>
                     </div>
                     <div className="flex justify-between text-amber-400 font-black">
                       <span>{isAr ? `خصم كود (${appliedPromo.code} - ${appliedPromo.discount_percent}%):` : `Promo (${appliedPromo.code}):`}</span>
-                      <span>-{promoDiscountAmount.toLocaleString()} ج.م</span>
+                      <span>-{formatPrice(promoDiscountAmount)}</span>
                     </div>
                   </div>
                 )}
                 <div className="flex items-baseline justify-between">
                   <span className="text-sm font-black">{isAr ? "المبلغ الإجمالي:" : "Total Amount:"}</span>
                   <div className="text-end">
-                    <span className="text-3xl font-black text-emerald-400">{proPrice.toLocaleString()}</span>
-                    <span className="text-xs font-bold text-zinc-400 ms-1">ج.م</span>
+                    <span className="text-3xl font-black text-emerald-400">{displayAmount(proPrice).toLocaleString()}</span>
+                    <span className="text-xs font-bold text-zinc-400 ms-1">{currencyLabel}</span>
                   </div>
                 </div>
+                {isSaudi && (
+                  <p className="text-[11px] font-semibold text-amber-300/90 leading-relaxed pt-1">
+                    {isAr
+                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س (تُعالج الفاتورة عبر بوابة الدفع المعتمدة مع التحويل التلقائي للعملة)`
+                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR (processed via certified gateway with automatic currency conversion)`}
+                  </p>
+                )}
               </div>
 
               {/* Included Benefits List */}
@@ -1526,14 +1629,20 @@ export default function PricingClient() {
         {/* Main Header */}
         <div className="text-center space-y-3">
           <span className="inline-block border-2 border-black dark:border-white bg-amber-300 px-3 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0px_rgba(0,0,0,1)]">
-            EGX BOTS PRO · خطط واشتراكات
+            {isSaudi
+              ? (isAr ? "TASI BOTS PRO · باقات السوق السعودي (تداول TASI)" : "TASI BOTS PRO · SAUDI TADAWUL PLANS")
+              : "EGX BOTS PRO · خطط واشتراكات"}
           </span>
           <h1 className="text-3xl sm:text-5xl font-black text-zinc-950 dark:text-white tracking-tight">
             {isAr ? "اختر باقة الاشتراك البرمجي" : "Choose Your Software Plan"}
           </h1>
           <p className="text-sm sm:text-base font-bold text-zinc-600 dark:text-zinc-300 max-w-2xl mx-auto leading-relaxed">
             {isAr
-              ? "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة البورصة المصرية."
+              ? isSaudi
+                ? "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة السوق السعودي (تداول TASI)."
+                : "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة البورصة المصرية."
+              : isSaudi
+              ? "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Saudi Stock Exchange (Tadawul / TASI)."
               : "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Egyptian Stock Exchange."}
           </p>
         </div>
@@ -1614,7 +1723,7 @@ export default function PricingClient() {
                     <span>{isAr ? "فرصة للمستخدمين الجدد · بدون أي بطاقة بنكية" : "Special Offer · Zero Card Required"}</span>
                   </div>
                   <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
-                    {isAr ? "🎁 جرّب منصة EGX BOTS PRO بالكامل مجاناً لمدة 3 أيام" : "🎁 Try EGX BOTS PRO Free for 3 Full Days"}
+                    {isAr ? `🎁 جرّب منصة ${brandName} PRO بالكامل مجاناً لمدة 3 أيام` : `🎁 Try ${brandName} PRO Free for 3 Full Days`}
                   </h2>
                   <p className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 max-w-2xl leading-relaxed">
                     {isAr
@@ -1641,7 +1750,7 @@ export default function PricingClient() {
         <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/80 dark:border-zinc-800/80">
           <div className="text-center">
             <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
-              {isAr ? "اختر مدة اشتراك باقة EGX BOTS PRO:" : "SELECT PRO BILLING CYCLE:"}
+              {isAr ? `اختر مدة اشتراك باقة ${brandName} PRO:` : "SELECT PRO BILLING CYCLE:"}
             </span>
           </div>
 
@@ -1653,35 +1762,35 @@ export default function PricingClient() {
                   name_ar: "شهر واحد",
                   name_en: "1 Month",
                   badge_ar: isGrandfathered
-                    ? "50 ج.م (تجديد حصري مدى الحياة) ⚡"
+                    ? `${formatPrice(50)} (تجديد حصري مدى الحياة) ⚡`
                     : isGrandfathered100 && !foundersIsOpen
-                    ? "100 ج.م (تجديد المؤسسين مدى الحياة) ⚡"
+                    ? `${formatPrice(100)} (تجديد المؤسسين مدى الحياة) ⚡`
                     : foundersIsOpen
-                    ? (foundersCountdown ? `100 ج.م ⏰ ${foundersCountdown} (تثبيت مدى الحياة)` : "100 ج.م مدى الحياة 🔥")
-                    : `${monthlyPrice || 200} ج.م / شهر`,
+                    ? (foundersCountdown ? `${formatPrice(100)} ⏰ ${foundersCountdown} (تثبيت مدى الحياة)` : `${formatPrice(100)} مدى الحياة 🔥`)
+                    : `${formatPrice(monthlyPrice || 200)} / شهر`,
                   badge_en: isGrandfathered
-                    ? "50 EGP (Renewal for life) ⚡"
+                    ? `${formatPrice(50)} (Renewal for life) ⚡`
                     : isGrandfathered100 && !foundersIsOpen
-                    ? "100 EGP (Renewal for life) ⚡"
+                    ? `${formatPrice(100)} (Renewal for life) ⚡`
                     : foundersIsOpen
-                    ? "100 EGP (Locked for life) 🔥"
-                    : `${monthlyPrice || 200} EGP / mo`,
+                    ? `${formatPrice(100)} (Locked for life) 🔥`
+                    : `${formatPrice(monthlyPrice || 200)} / mo`,
                   badgeBg: "bg-amber-400 text-black",
                 },
                 {
                   id: "pro_6m" as const,
                   name_ar: "6 شهور",
                   name_en: "6 Months",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "500 بدل 1,000 ج.م ⭐ (تثبيت مدى الحياة)" : "الأكثر طلباً ⭐",
-                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "500 EGP (Locked for life) ⭐" : "Most Popular ⭐",
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(500).toLocaleString()} بدل ${formatPrice(1000)} ⭐ (تثبيت مدى الحياة)` : "الأكثر طلباً ⭐",
+                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(500)} (Locked for life) ⭐` : "Most Popular ⭐",
                   badgeBg: "bg-emerald-400 text-black",
                 },
                 {
                   id: "pro_1y" as const,
                   name_ar: "سنة كاملة",
                   name_en: "1 Year",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "1,000 بدل 1,850 ج.م 💎 (تثبيت مدى الحياة)" : "أكبر توفير 💎",
-                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? "1,000 EGP (Locked for life) 💎" : "Save 46% 💎",
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)} 💎 (تثبيت مدى الحياة)` : "أكبر توفير 💎",
+                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(1000)} (Locked for life) 💎` : "Save 46% 💎",
                   badgeBg: "bg-sky-400 text-black",
                 },
               ].map((tab) => {
@@ -1732,7 +1841,7 @@ export default function PricingClient() {
               <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                 <div className="flex items-baseline gap-1">
                   <span className="text-5xl font-black text-zinc-950 dark:text-white">0</span>
-                  <span className="text-sm font-bold text-zinc-500">ج.م / للأبد</span>
+                  <span className="text-sm font-bold text-zinc-500">{currencyLabel} / {isAr ? "للأبد" : "forever"}</span>
                 </div>
                 <p className="text-xs font-medium text-zinc-500 mt-1">
                   {isAr ? "بدون أي بطاقة بنكية أو رسوم خفية" : "No credit card required"}
@@ -1812,8 +1921,8 @@ export default function PricingClient() {
                     active: true,
                     original_amount_egp: activeProDetails.original_amount_egp,
                     label_ar: isFeatured
-                      ? "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م) ⭐"
-                      : "عرض المؤسسين (1,000 بدل 1,850 ج.م) 💎",
+                      ? `عرض المؤسسين خصم 50% (${displayAmount(500).toLocaleString()} بدل ${formatPrice(1000)}) ⭐`
+                      : `عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)}) 💎`,
                   }
                 : null;
 
@@ -1828,8 +1937,8 @@ export default function PricingClient() {
                   <span className="rounded-full bg-emerald-500 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
                     {isMonthly && planDiscount ? (
                       foundersCountdown
-                        ? `عرض المؤسسين 100 ج.م شهرياً (ينتهي خلال ⏰ ${foundersCountdown})`
-                        : (planDiscount.label_ar || "عرض المؤسسين (100 ج.م شهرياً مدى الحياة) 🔥")
+                        ? `عرض المؤسسين ${formatPrice(100)} شهرياً (ينتهي خلال ⏰ ${foundersCountdown})`
+                        : (!isSaudi && planDiscount.label_ar ? planDiscount.label_ar : `عرض المؤسسين (${formatPrice(100)} شهرياً مدى الحياة) 🔥`)
                     ) : isMonthly ? (
                       isAr ? "⚡ باقة التداول الاحترافي" : "⚡ Monthly Pro Plan"
                     ) : isFeatured ? (
@@ -1838,7 +1947,7 @@ export default function PricingClient() {
                         : (isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular")
                     ) : (
                       foundersIsOpen
-                        ? (isAr ? "💎 أكبر توفير · عرض المؤسسين (1,000 بدل 1,850 ج.م)" : "💎 Max Value · Founders Offer")
+                        ? (isAr ? `💎 أكبر توفير · عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)})` : "💎 Max Value · Founders Offer")
                         : (isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value")
                     )}
                   </span>
@@ -1849,7 +1958,7 @@ export default function PricingClient() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
-                        EGX BOTS Pro
+                        {brandName} Pro
                       </h3>
                       <span className="text-xs font-bold text-zinc-500 block mt-0.5">
                         {isAr ? activeProDetails.name_ar : activeProDetails.name_en} · {activeProDetails.days} {isAr ? "يوماً" : "days"}
@@ -1864,20 +1973,22 @@ export default function PricingClient() {
                   <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                     <div className="flex items-baseline gap-2">
                       <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
-                        {activeProDetails.amount_egp.toLocaleString()}
+                        {displayAmount(activeProDetails.amount_egp).toLocaleString()}
                       </span>
-                      <span className="text-sm font-bold text-zinc-500">ج.م</span>
+                      <span className="text-sm font-bold text-zinc-500">{currencyLabel}</span>
                       {planDiscount && (
                         <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
                           {isAr ? "بدل " : "was "}
-                          {Number(planDiscount.original_amount_egp).toLocaleString()} {isAr ? "ج.م" : "EGP"}
+                          {formatPrice(Number(planDiscount.original_amount_egp))}
                         </span>
                       )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                        {isAr ? `ما يعادل ${activeProDetails.monthlyEquivalent} ج.م / شهر` : `EGP ${activeProDetails.monthlyEquivalent}/mo`}
+                        {isAr
+                          ? `ما يعادل ${formatPrice(activeProDetails.monthlyEquivalent ?? 0)} / شهر`
+                          : `${currencyCode} ${displayAmount(activeProDetails.monthlyEquivalent ?? 0).toLocaleString()}/mo`}
                       </span>
                       {activeProDetails.savingsPct > 0 && (
                         <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
@@ -1897,23 +2008,23 @@ export default function PricingClient() {
                       <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-300">
                         {isFeatured
                           ? (isAr
-                            ? "باشتراكك في باقة الـ 6 شهور (500 ج.م بدلاً من 1,000 ج.م — أي 83 ج.م/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر 100 ج.م (أو 500 ج.م للـ 6 شهور) للأبد حتى بعد عودة السعر الأساسي إلى 200 ج.م."
-                            : "Subscribing to the 6-Month plan (500 EGP instead of 1,000 EGP — 83 EGP/mo) locks your Founding Member status for life at the 100 EGP/mo (or 500 EGP/6m) rate upon renewal!")
+                            ? `باشتراكك في باقة الـ 6 شهور (${formatPrice(500)} بدلاً من ${formatPrice(1000)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(500)} للـ 6 شهور) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
+                            : `Subscribing to the 6-Month plan (${formatPrice(500)} instead of ${formatPrice(1000)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(500)}/6m) rate upon renewal!`)
                           : isAnnual
                           ? (isAr
-                            ? "باشتراكك في باقة السنة الكاملة (1,000 ج.م بدلاً من 1,850 ج.م — أي 83 ج.م/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر 100 ج.م (أو 1,000 ج.م للسنة) للأبد حتى بعد عودة السعر الأساسي إلى 200 ج.م."
-                            : "Subscribing to the 1-Year plan (1,000 EGP instead of 1,850 EGP — 83 EGP/mo) locks your Founding Member status for life at the 100 EGP/mo (or 1,000 EGP/yr) rate upon renewal!")
+                            ? `باشتراكك في باقة السنة الكاملة (${formatPrice(1000)} بدلاً من ${formatPrice(1850)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(1000)} للسنة) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
+                            : `Subscribing to the 1-Year plan (${formatPrice(1000)} instead of ${formatPrice(1850)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(1000)}/yr) rate upon renewal!`)
                           : isGrandfathered
                           ? (isAr
-                            ? "50 ج.م شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة)."
-                            : "50 EGP/mo grandfathered founders rate active for your account as long as renewed.")
+                            ? `${formatPrice(50)} شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة).`
+                            : `${formatPrice(50)}/mo grandfathered founders rate active for your account as long as renewed.`)
                           : isGrandfathered100 && !foundersIsOpen
                           ? (isAr
-                            ? "100 ج.م شهرياً (سعر المؤسسين المثبت لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة)."
-                            : "100 EGP/mo grandfathered founders rate active for your account as long as renewed.")
+                            ? `${formatPrice(100)} شهرياً (سعر المؤسسين المثبت لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة).`
+                            : `${formatPrice(100)}/mo grandfathered founders rate active for your account as long as renewed.`)
                           : (isAr
-                            ? "100 ج.م شهرياً عرض باقة المؤسسين (بدلاً من 200 ج.م) — يثبّت سعرك بـ 100 ج.م مدى الحياة طول ما بتجدد (أو 500 ج.م للـ 6 شهور / 1,000 ج.م للسنة)، مع مهلة سماح 72 ساعة عند كل تجديد."
-                            : "100 EGP/mo limited founders offer (instead of 200 EGP) — locks your 100 EGP/mo rate for life as long as renewed, with 72h renewal grace period.")}
+                            ? `${formatPrice(100)} شهرياً عرض باقة المؤسسين (بدلاً من ${formatPrice(200)}) — يثبّت سعرك بـ ${formatPrice(100)} مدى الحياة طول ما بتجدد (أو ${formatPrice(500)} للـ 6 شهور / ${formatPrice(1000)} للسنة)، مع مهلة سماح 72 ساعة عند كل تجديد.`
+                            : `${formatPrice(100)}/mo limited founders offer (instead of ${formatPrice(200)}) — locks your ${formatPrice(100)}/mo rate for life as long as renewed, with 72h renewal grace period.`)}
                       </p>
                     </div>
                   )}
@@ -1943,8 +2054,8 @@ export default function PricingClient() {
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
                     {isPro
-                      ? (isAr ? `تجديد باقة Pro (${activeProDetails.amount_egp.toLocaleString()} ج.م)` : `Renew Pro (${activeProDetails.amount_egp} EGP)`)
-                      : (isAr ? `اشترك في Pro (${activeProDetails.amount_egp.toLocaleString()} ج.م)` : `Subscribe to Pro (${activeProDetails.amount_egp} EGP)`)}
+                      ? (isAr ? `تجديد باقة Pro (${formatPrice(activeProDetails.amount_egp)})` : `Renew Pro (${formatPrice(activeProDetails.amount_egp)})`)
+                      : (isAr ? `اشترك في Pro (${formatPrice(activeProDetails.amount_egp)})` : `Subscribe to Pro (${formatPrice(activeProDetails.amount_egp)})`)}
                   </button>
                   <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -1987,8 +2098,8 @@ export default function PricingClient() {
               {/* Price Section */}
               <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">2,250</span>
-                  <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">ج.م</span>
+                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{displayAmount(2250).toLocaleString()}</span>
+                  <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">{currencyLabel}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
                   <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1 bg-amber-100/90 dark:bg-amber-500/10 border border-amber-300/80 dark:border-amber-500/20 rounded-md px-2 py-0.5">
@@ -2009,8 +2120,8 @@ export default function PricingClient() {
                 </div>
                 <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
                   {isAr
-                    ? "سعر الباقة (2,250 ج.م) يعادل اشتراك 22.5 شهر فقط في باقة Pro — أي بعد أقل من عامين تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!"
-                    : "At 2,250 EGP, this equals just ~22 months of Pro. After less than 2 years, all platform AI models, alerts, and updates are 100% free forever!"}
+                    ? `سعر الباقة (${formatPrice(2250)}) تعود قيمته بعد 22.5 شهر فقط في باقة Pro — أي بعد أقل من عامين تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!`
+                    : `At ${formatPrice(2250)}, this breaks even in just ~22 months of Pro. After less than 2 years, all platform AI models, alerts, and updates are 100% free forever!`}
                 </p>
               </div>
 
@@ -2069,8 +2180,8 @@ export default function PricingClient() {
                 <Crown className="w-4 h-4 fill-current" />
                 {lifetimeIsOpen
                   ? isPro
-                    ? (isAr ? "ترقية لحساب مدى الحياة (2,250 ج.م)" : "Upgrade to Lifetime")
-                    : (isAr ? "احجز مقعدك مدى الحياة الآن (2,250 ج.م) 👑" : "Get Lifetime Deal 👑")
+                    ? (isAr ? `ترقية لحساب مدى الحياة (${formatPrice(2250)})` : `Upgrade to Lifetime (${formatPrice(2250)})`)
+                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${formatPrice(2250)}) 👑` : `Get Lifetime Deal (${formatPrice(2250)}) 👑`)
                   : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
               </button>
               <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
@@ -2108,7 +2219,7 @@ export default function PricingClient() {
                   {isAr ? "محفظة تداول متوسطة" : "Example Portfolio"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  {roiPortfolioEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م</span>
+                  {displayAmount(roiPortfolioEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{currencyLabel}</span>
                 </div>
                 <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                   {isAr ? "رأس مال تجريبي للاحتساب" : "Baseline portfolio size"}
@@ -2120,7 +2231,7 @@ export default function PricingClient() {
                   {isAr ? "ربح صفقة سوينج (+5%)" : "One +5% Swing Trade"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-emerald-800 dark:text-emerald-300 font-mono">
-                  +{roiTradeProfitEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">ج.م صافي</span>
+                  +{displayAmount(roiTradeProfitEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">{currencyLabel} {isAr ? "صافي" : "net"}</span>
                 </div>
                 <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                   {isAr ? "إشارة ذكاء اصطناعي واحدة" : "From single AI breakout signal"}
@@ -2132,12 +2243,12 @@ export default function PricingClient() {
                   {isAr ? "تكلفة اشتراك السنة كلها" : "Full Annual Pro Cost"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  {annualCostEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م / سنة</span>
+                  {displayAmount(annualCostEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{currencyLabel} / {isAr ? "سنة" : "yr"}</span>
                 </div>
                 <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 font-bold">
                   {isAr
-                    ? `أنت رابح ${roiNetGainEgp.toLocaleString("en-US")} ج.م من أول صفقة!`
-                    : `Instant +${roiNetGainEgp.toLocaleString("en-US")} EGP ROI on trade #1`}
+                    ? `أنت رابح ${formatPrice(roiNetGainEgp)} من أول صفقة!`
+                    : `Instant +${formatPrice(roiNetGainEgp)} ROI on trade #1`}
                 </p>
               </div>
             </div>
@@ -2171,7 +2282,7 @@ export default function PricingClient() {
                 <span>{isAr ? "حلول الذكاء الاصطناعي للمجتمعات وقنوات التوصيات (B2B)" : "Enterprise AI for Trading Channels & Communities"}</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                {isAr ? "🤖 إيجار بوت التليجرام الذكي لقناتك أو مجموعتك المدفوعة" : "License EGX BOTS Inside Your Telegram Group"}
+                {isAr ? "🤖 إيجار بوت التليجرام الذكي لقناتك أو مجموعتك المدفوعة" : `License ${brandName} Inside Your Telegram Group`}
               </h2>
               <p className="text-xs sm:text-sm text-zinc-300 font-semibold max-w-3xl leading-relaxed">
                 {isAr
@@ -2188,7 +2299,7 @@ export default function PricingClient() {
                   <span>{isAr ? "تفعيل تلقائي بدون دفع مليم وبدون بطاقة" : "Instant Auto-Linking · Zero Card Required"}</span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
-                  {isAr ? "🎁 جرّب بوت EGX BOTS في قناتك أو مجموعتك مجاناً لمدة 3 أيام" : "🎁 Try the Bot in Your Channel or Group Free for 3 Days"}
+                  {isAr ? `🎁 جرّب بوت ${brandName} في قناتك أو مجموعتك مجاناً لمدة 3 أيام` : "🎁 Try the Bot in Your Channel or Group Free for 3 Days"}
                 </h3>
                 <p className="text-xs font-bold text-zinc-800 dark:text-zinc-300 max-w-2xl leading-relaxed">
                   {isAr
@@ -2255,9 +2366,9 @@ export default function PricingClient() {
                       <div className="border-b-2 border-zinc-200 dark:border-zinc-800 pb-5">
                         <div className="flex items-baseline gap-2">
                           <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
-                            {plan.amount_egp.toLocaleString()}
+                            {displayAmount(plan.amount_egp).toLocaleString()}
                           </span>
-                          <span className="text-sm font-bold text-zinc-500">{isAr ? "ج.م / شهرياً" : "EGP / mo"}</span>
+                          <span className="text-sm font-bold text-zinc-500">{isAr ? `${currencyLabel} / شهرياً` : `${currencyCode} / mo`}</span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -2291,7 +2402,7 @@ export default function PricingClient() {
                         className={`w-full flex items-center justify-center gap-2 border-4 border-black dark:border-white py-4 px-4 text-xs font-black uppercase tracking-wider shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer ${plan.btn_class}`}
                       >
                         <Rocket className="w-4 h-4 shrink-0" />
-                        <span>{isAr ? `اشترك في ${plan.name_ar} (${plan.amount_egp.toLocaleString()} ج.م)` : `Subscribe to ${plan.name_en}`}</span>
+                        <span>{isAr ? `اشترك في ${plan.name_ar} (${formatPrice(plan.amount_egp)})` : `Subscribe to ${plan.name_en} (${formatPrice(plan.amount_egp)})`}</span>
                       </button>
                       <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -2459,7 +2570,13 @@ export default function PricingClient() {
                 <span>{isAr ? "برنامج الشركاء والرعاية الإعلانية" : "Affiliate & Media Partnerships"}</span>
               </div>
               <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
-                {isAr ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في البورصة المصرية" : "Earn 25% Recurring Cash or Advertise to Thousands of Active EGX Traders"}
+                {isAr
+                  ? isSaudi
+                    ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في السوق السعودي (تداول)"
+                    : "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في البورصة المصرية"
+                  : isSaudi
+                  ? "Earn 25% Recurring Cash or Advertise to Thousands of Active Saudi TASI Traders"
+                  : "Earn 25% Recurring Cash or Advertise to Thousands of Active EGX Traders"}
               </h3>
               <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
                 {isAr

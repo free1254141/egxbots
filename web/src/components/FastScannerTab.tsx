@@ -40,6 +40,7 @@ import { isShariaCompliant } from "@/lib/shariaStocks";
 import { TrackedScannerSignal, ScannerSignalsKPIs, ScannerType } from "@/lib/scannerTradePlan";
 import ScannerDefinitionsGuide from "@/app/profile/components/ScannerDefinitionsGuide";
 import ScannerIntradayChartModal, { prefetchIntradaySession } from "@/app/profile/components/ScannerIntradayChartModal";
+import { useMarket } from "@/contexts/MarketContext";
 
 interface FastScannerTabProps {
   isAr?: boolean;
@@ -49,6 +50,8 @@ interface FastScannerTabProps {
 const SCANNER_ALERTS_CACHE_KEY = "egx_scanner_alerts_cache_v2";
 
 export default function FastScannerTab({ isAr = true, isPro = false }: FastScannerTabProps) {
+  const { market, currencyLabel } = useMarket();
+  const cacheKey = `${SCANNER_ALERTS_CACHE_KEY}_${market}`;
   const [viewMode, setViewMode] = useState<"active" | "closed" | "all" | "calendar">("active");
   const [isGuideOpen, setIsGuideOpen] = useState(false);
 
@@ -145,7 +148,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       setRefreshing(true);
     } else {
       try {
-        const cachedRaw = localStorage.getItem(SCANNER_ALERTS_CACHE_KEY);
+        const cachedRaw = localStorage.getItem(cacheKey);
         if (cachedRaw) {
           const cached = JSON.parse(cachedRaw);
           if (cached && cached.ok) {
@@ -162,7 +165,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
     }
 
     try {
-      const res = await fetch("/api/user/scanner-alerts", {
+      const res = await fetch(`/api/user/scanner-alerts?market=${market}`, {
         cache: "no-store",
       });
       if (res.ok) {
@@ -173,7 +176,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
           if (Array.isArray(data.closed_signals)) setClosedSignals(data.closed_signals);
           if (data.signals_kpis) setSignalsKpis(data.signals_kpis);
           try {
-            localStorage.setItem(SCANNER_ALERTS_CACHE_KEY, JSON.stringify(data));
+            localStorage.setItem(cacheKey, JSON.stringify(data));
           } catch {
             // ignore quota errors
           }
@@ -185,9 +188,13 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [market, cacheKey]);
 
   useEffect(() => {
+    setActiveSignals([]);
+    setClosedSignals([]);
+    setSignalsKpis(null);
+    setLoading(true);
     void loadData(false);
   }, [loadData]);
 
@@ -553,9 +560,9 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
       `🎯 إشارة رصد فني لحظي — EGX BOTS AI`,
       `💎 السهم: #${sig.symbol} (${badge.label})`,
       `📅 تاريخ الرصد: ${sig.entry_date} (${sig.entry_time})`,
-      `📍 مستوى الرصد: ${sig.entry_price?.toFixed(2)} ج.م`,
-      `🎯 المستهدف الفني الأول: ${sig.target_1?.toFixed(2)} ج.م (+${sig.target_1_pct}%)`,
-      `🛡️ مستوى إيقاف الخسارة: ${sig.stop_loss?.toFixed(2)} ج.م`,
+      `📍 مستوى الرصد: ${sig.entry_price?.toFixed(2)} ${currencyLabel}`,
+      `🎯 المستهدف الفني الأول: ${sig.target_1?.toFixed(2)} ${currencyLabel} (+${sig.target_1_pct}%)`,
+      `🛡️ مستوى إيقاف الخسارة: ${sig.stop_loss?.toFixed(2)} ${currencyLabel}`,
       `📊 الأداء الحالي/المحقق: ${retStr}`,
       `⚠️ مخرجات تحليل فني خوارزمي لأغراض البحث والدراسة وليست نصيحة استثمارية.`,
       `🔗 https://egxbots.com/scanner/backtests?tab=fast_scanner`,
@@ -1048,7 +1055,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                           <div>
                             <span className="text-[10px] text-zinc-500 block">سعر الرصد:</span>
                             <span className="font-mono font-black text-black dark:text-white">
-                              {isLocked ? "•••" : `${sig.entry_price?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : `${sig.entry_price?.toFixed(2)} ${currencyLabel}`}
                             </span>
                           </div>
                           <div>
@@ -1056,19 +1063,19 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                               {sig.status === "active" ? "السعر الحالي:" : "سعر الإغلاق:"}
                             </span>
                             <span className="font-mono font-black text-black dark:text-white">
-                              {isLocked ? "•••" : `${(sig.exit_price ?? sig.current_price)?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : `${(sig.exit_price ?? sig.current_price)?.toFixed(2)} ${currencyLabel}`}
                             </span>
                           </div>
                           <div>
                             <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">المستهدف الفني:</span>
                             <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
-                              {isLocked ? "•••" : `${sig.target_1?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : `${sig.target_1?.toFixed(2)} ${currencyLabel}`}
                             </span>
                           </div>
                           <div>
                             <span className="text-[10px] text-rose-500 block">وقف الخسارة:</span>
                             <span className="font-mono font-black text-rose-500">
-                              {isLocked ? "•••" : `${sig.stop_loss?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : `${sig.stop_loss?.toFixed(2)} ${currencyLabel}`}
                             </span>
                           </div>
                         </div>
@@ -1285,7 +1292,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
 
                             {/* Entry Price */}
                             <td className="px-4 py-4 text-center font-mono font-black text-black dark:text-white border-r border-zinc-200 dark:border-zinc-800">
-                              {isLocked ? "•••" : `${sig.entry_price?.toFixed(2)} ج.م`}
+                              {isLocked ? "•••" : `${sig.entry_price?.toFixed(2)} ${currencyLabel}`}
                             </td>
 
                             {/* Target 1 */}
@@ -1321,7 +1328,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                             <td className="px-4 py-4 text-center font-mono font-black text-black dark:text-white border-r border-zinc-200 dark:border-zinc-800">
                               {isLocked ? "•••" : (
                                 <>
-                                  <span>{(sig.exit_price || sig.current_price)?.toFixed(2)} ج.م</span>
+                                  <span>{(sig.exit_price || sig.current_price)?.toFixed(2)} {currencyLabel}</span>
                                   {sig.exit_date && (
                                     <span className="block text-[10px] text-zinc-500 font-bold">
                                       {sig.exit_date} ({sig.exit_time || "14:15"})
@@ -1992,7 +1999,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                                 {s.entry_date} ({s.entry_time})
                               </span>
                               <span className="font-mono text-zinc-600 dark:text-zinc-400 text-[10px] block">
-                                عند {s.entry_price?.toFixed(2)} ج.م
+                                عند {s.entry_price?.toFixed(2)} {currencyLabel}
                               </span>
                             </div>
                             <div>
@@ -2001,7 +2008,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                                 {s.exit_date} ({s.exit_time || "14:15"})
                               </span>
                               <span className="font-mono text-zinc-600 dark:text-zinc-400 text-[10px] block">
-                                عند {(s.exit_price || s.current_price)?.toFixed(2)} ج.م
+                                عند {(s.exit_price || s.current_price)?.toFixed(2)} {currencyLabel}
                               </span>
                             </div>
                             <div>
@@ -2108,7 +2115,7 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
                             <div>
                               <span className="text-[10px] text-zinc-500 block">وقت وسعر الرصد</span>
                               <span className="font-mono text-black dark:text-white text-[11px]">
-                                {s.entry_time} • {s.entry_price?.toFixed(2)} ج.م
+                                {s.entry_time} • {s.entry_price?.toFixed(2)} {currencyLabel}
                               </span>
                             </div>
                             <div>

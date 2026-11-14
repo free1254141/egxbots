@@ -1,4 +1,5 @@
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
+import { SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
 import { isShariaCompliant } from "@/lib/shariaStocks";
 
 export type FairValueModelType =
@@ -43,6 +44,8 @@ export interface FairValueStockItem {
 }
 
 export interface FairValueReport {
+  market?: "egx" | "tasi";
+  currencyCode?: "EGP" | "SAR";
   updatedAt: string;
   latestSessionDate: string | null;
   summary: {
@@ -83,6 +86,20 @@ const SECTOR_AR_MAP: Record<string, string> = {
   "distribution services": "تجارة وتوزيع",
   "retail trade": "تجارة وتجزئة",
   "consumer durables": "سلع معمرة وعقارات",
+  utilities: "طاقة ومرافق",
+  "electric utilities": "طاقة ومرافق",
+  energy: "بترول وطاقة",
+  "integrated oil": "بترول وطاقة",
+  banks: "بنوك",
+  "major banks": "بنوك",
+  materials: "مواد أساسية وبتروكيماويات",
+  "health care": "رعاية صحية وأدوية",
+  "real estate": "عقارات وإنشاءات",
+  "telecommunication services": "اتصالات وتكنولوجيا",
+  "information technology": "تكنولوجيا ومدفوعات رقمية",
+  industrials: "صناعات هندسية وكهربائية",
+  "consumer staples": "أغذية ومشروبات",
+  "consumer discretionary": "تجارة وتجزئة",
 };
 
 export function resolveSectorAr(
@@ -127,9 +144,15 @@ export function computeSingleStockFairValue(params: {
   latestTech?: Record<string, any> | null;
   sectorMedianPe?: number;
   sectorMedianPb?: number;
+  market?: "egx" | "tasi";
 }): FairValueStockItem {
   const sym = String(params.symbol || "").trim().toUpperCase();
   const close = Number(params.close || 0);
+  const isSaudi = params.market === "tasi" || isSaudiSymbol(sym);
+  const currencyAr = isSaudi ? "ر.س" : "ج.م";
+  const currencyShort = isSaudi ? "ر" : "ج";
+  const marketTitleLabel = isSaudi ? "السعودي" : "المصري";
+  const marketGrahamLabel = isSaudi ? "للسوق السعودي" : "للبورصة المصرية";
   const fundRow = params.fundRow || {};
   const data =
     params.fundData && typeof params.fundData === "object"
@@ -140,10 +163,12 @@ export function computeSingleStockFairValue(params: {
   const ind = params.latestTech || {};
 
   const canonical = CANONICAL_STOCK_NAMES[sym];
+  const saudiNameAr = isSaudi ? SAUDI_STOCK_NAMES_AR[sym] : undefined;
   const nameAr =
     canonical?.name_ar ||
     fundRow?.name_ar ||
     data.name_ar ||
+    saudiNameAr ||
     fundRow?.name ||
     data.name ||
     sym;
@@ -220,11 +245,11 @@ export function computeSingleStockFairValue(params: {
       modelLabelAr = "مضاعفات القطاع المالي (P/E + P/B)";
       formulaEquationAr =
         "السعر العادل = (55% × هدف مكرر ربحية القطاع) + (45% × هدف القيمة الدفترية للقطاع)";
-      formulaSubstitutionAr = `(0.55 × ${peFair}) + (0.45 × ${pbFair}) = ${fairValue} ج.م`;
+      formulaSubstitutionAr = `(0.55 × ${peFair}) + (0.45 × ${pbFair}) = ${fairValue} ${currencyAr}`;
       formulaStepsAr = [
-        `1️⃣ تقييم مضاعف ربحية القطاع (${sectorAr}): ربحية السهم (${epsRound} ج) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ج.م (وزن 55%)`,
-        `2️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية (${bvpsRound} ج) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ج.م (وزن 45%)`,
-        `✅ السعر العادل المعتمد = ${fairValue} ج.م (تقييم مؤسسي متوازن للقطاع المالي بدون تضخيم).`,
+        `1️⃣ تقييم مضاعف ربحية القطاع (${sectorAr}): ربحية السهم (${epsRound} ${currencyShort}) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ${currencyAr} (وزن 55%)`,
+        `2️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية (${bvpsRound} ${currencyShort}) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ${currencyAr} (وزن 45%)`,
+        `✅ السعر العادل المعتمد = ${fairValue} ${currencyAr} (تقييم مؤسسي متوازن للقطاع المالي بدون تضخيم).`,
       ];
     } else if (isTechGrowth) {
       // Tech / Fintech / Telecom: High-growth scalable digital models.
@@ -236,14 +261,14 @@ export function computeSingleStockFairValue(params: {
       modelLabelAr = "مضاعفات قطاع التكنولوجيا والنمو الرقمي (P/E + P/B)";
       formulaEquationAr =
         "السعر العادل = (70% × هدف مكرر ربحية قطاع التكنولوجيا) + (30% × هدف مضاعف القيمة الدفترية)";
-      formulaSubstitutionAr = `(0.70 × ${peFair}) + (0.30 × ${pbFair}) = ${fairValue} ج.م`;
+      formulaSubstitutionAr = `(0.70 × ${peFair}) + (0.30 × ${pbFair}) = ${fairValue} ${currencyAr}`;
       formulaStepsAr = [
-        `1️⃣ تقييم مضاعف ربحية قطاع التكنولوجيا (${sectorAr}): ربحية السهم (${epsRound} ج) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ج.م (وزن 70% للنمو الرقمي)`,
-        `2️⃣ تقييم مضاعف القيمة الدفترية: القيمة الدفترية (${bvpsRound} ج) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ج.م (وزن 30%)`,
-        `✅ السعر العادل المعتمد = ${fairValue} ج.م (تقييم متزن لشركات التكنولوجيا والنمو بدون خفضها ظلماً بنماذج الأصول المادية).`,
+        `1️⃣ تقييم مضاعف ربحية قطاع التكنولوجيا (${sectorAr}): ربحية السهم (${epsRound} ${currencyShort}) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ${currencyAr} (وزن 70% للنمو الرقمي)`,
+        `2️⃣ تقييم مضاعف القيمة الدفترية: القيمة الدفترية (${bvpsRound} ${currencyShort}) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ${currencyAr} (وزن 30%)`,
+        `✅ السعر العادل المعتمد = ${fairValue} ${currencyAr} (تقييم متزن لشركات التكنولوجيا والنمو بدون خفضها ظلماً بنماذج الأصول المادية).`,
       ];
     } else {
-      // Non-financial: EGX-calibrated Graham benchmark based on Egyptian market realities (8.0 - 14.0)
+      // Non-financial: Market-calibrated Graham benchmark (8.0 - 14.0)
       const egxGrahamMult = Number(clamp(sectorMedianPe * sectorMedianPb, 8.0, 14.0).toFixed(2));
       const rawGraham = Math.sqrt(egxGrahamMult * eps * bvps);
       grahamValue = Number(rawGraham.toFixed(2));
@@ -251,15 +276,15 @@ export function computeSingleStockFairValue(params: {
       fairValue = clamp(blended, close * 0.55, close * 1.65);
       fairValue = Number(fairValue.toFixed(2));
       modelType = "graham_fundamental";
-      modelLabelAr = "نموذج جراهام المصري + مضاعف القطاع";
+      modelLabelAr = `نموذج جراهام ${marketTitleLabel} + مضاعف القطاع`;
       formulaEquationAr =
         "السعر العادل = (40% × قيمة جراهام المعدلة) + (35% × هدف مكرر ربحية القطاع) + (25% × هدف القيمة الدفترية للقطاع)";
-      formulaSubstitutionAr = `(0.40 × ${grahamValue}) + (0.35 × ${peFair}) + (0.25 × ${pbFair}) = ${fairValue} ج.م`;
+      formulaSubstitutionAr = `(0.40 × ${grahamValue}) + (0.35 × ${peFair}) + (0.25 × ${pbFair}) = ${fairValue} ${currencyAr}`;
       formulaStepsAr = [
-        `1️⃣ معادلة بنجامين جراهام المعدلة للبورصة المصرية: √(مضاعف السوق ${egxGrahamMult} × ربحية السهم ${epsRound} × القيمة الدفترية ${bvpsRound}) = ${grahamValue} ج.م (وزن 40%)`,
-        `2️⃣ تقييم مضاعف ربحية القطاع (${sectorAr}): ربحية السهم (${epsRound}) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ج.م (وزن 35%)`,
-        `3️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية (${bvpsRound}) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ج.م (وزن 25%)`,
-        `✅ السعر العادل المرجح للسهم = ${fairValue} ج.م (مع صمام أمان سعري للمحافظة على واقعية ومصداقية التقييم).`,
+        `1️⃣ معادلة بنجامين جراهام المعدلة ${marketGrahamLabel}: √(مضاعف السوق ${egxGrahamMult} × ربحية السهم ${epsRound} × القيمة الدفترية ${bvpsRound}) = ${grahamValue} ${currencyAr} (وزن 40%)`,
+        `2️⃣ تقييم مضاعف ربحية القطاع (${sectorAr}): ربحية السهم (${epsRound}) × وسيط مكرر القطاع (${sectorMedianPe}x) = ${peFair} ${currencyAr} (وزن 35%)`,
+        `3️⃣ تقييم مضاعف القيمة الدفترية للقطاع: القيمة الدفترية (${bvpsRound}) × وسيط مضاعف القطاع (${sectorMedianPb}x) = ${pbFair} ${currencyAr} (وزن 25%)`,
+        `✅ السعر العادل المرجح للسهم = ${fairValue} ${currencyAr} (مع صمام أمان سعري للمحافظة على واقعية ومصداقية التقييم).`,
       ];
     }
   } else if (eps !== null && eps > 0) {
@@ -270,11 +295,11 @@ export function computeSingleStockFairValue(params: {
     modelType = "pe_multiple";
     modelLabelAr = "مضاعف الربحية القطاعي (P/E)";
     formulaEquationAr = "السعر العادل = ربحية السهم (EPS) × وسيط مضاعف ربحية القطاع (Sector P/E)";
-    formulaSubstitutionAr = `${epsRound} × ${sectorMedianPe} = ${fairValue} ج.م`;
+    formulaSubstitutionAr = `${epsRound} × ${sectorMedianPe} = ${fairValue} ${currencyAr}`;
     formulaStepsAr = [
-      `1️⃣ ربحية السهم السنوية المحققة (EPS) = ${epsRound} ج.م`,
+      `1️⃣ ربحية السهم السنوية المحققة (EPS) = ${epsRound} ${currencyAr}`,
       `2️⃣ وسيط مضاعف الربحية لقطاع (${sectorAr}) = ${sectorMedianPe} مرة`,
-      `✅ السعر العادل = ${epsRound} × ${sectorMedianPe} = ${peFair} ج.م -> المعتمد ${fairValue} ج.م.`,
+      `✅ السعر العادل = ${epsRound} × ${sectorMedianPe} = ${peFair} ${currencyAr} -> المعتمد ${fairValue} ${currencyAr}.`,
     ];
   } else if (bvps !== null && bvps > 0) {
     const bvpsRound = Number(bvps.toFixed(2));
@@ -284,11 +309,11 @@ export function computeSingleStockFairValue(params: {
     modelType = "pb_multiple";
     modelLabelAr = "مضاعف القيمة الدفترية (P/B)";
     formulaEquationAr = "السعر العادل = القيمة الدفترية للسهم (BVPS) × وسيط مضاعف القيمة الدفترية للقطاع (Sector P/B)";
-    formulaSubstitutionAr = `${bvpsRound} × ${sectorMedianPb} = ${fairValue} ج.م`;
+    formulaSubstitutionAr = `${bvpsRound} × ${sectorMedianPb} = ${fairValue} ${currencyAr}`;
     formulaStepsAr = [
-      `1️⃣ القيمة الدفترية للسهم من حقوق الملكية (BVPS) = ${bvpsRound} ج.م`,
+      `1️⃣ القيمة الدفترية للسهم من حقوق الملكية (BVPS) = ${bvpsRound} ${currencyAr}`,
       `2️⃣ وسيط مضاعف القيمة الدفترية لقطاع (${sectorAr}) = ${sectorMedianPb} مرة`,
-      `✅ السعر العادل = ${bvpsRound} × ${sectorMedianPb} = ${pbFair} ج.م -> المعتمد ${fairValue} ج.م.`,
+      `✅ السعر العادل = ${bvpsRound} × ${sectorMedianPb} = ${pbFair} ${currencyAr} -> المعتمد ${fairValue} ${currencyAr}.`,
     ];
   } else {
     const ema200 = Number((ema200Val ?? close).toFixed(2));
@@ -299,11 +324,11 @@ export function computeSingleStockFairValue(params: {
     modelType = "quant_vwap";
     modelLabelAr = "التوازن الكمي (VWAP + EMA200)";
     formulaEquationAr = "السعر العادل الكمي = (60% × المتوسط الأسي EMA200) + (40% × متوسط التكلفة المرجح بالسيولة VWAP20)";
-    formulaSubstitutionAr = `(0.60 × ${ema200}) + (0.40 × ${vwap20}) = ${fairValue} ج.م`;
+    formulaSubstitutionAr = `(0.60 × ${ema200}) + (0.40 × ${vwap20}) = ${fairValue} ${currencyAr}`;
     formulaStepsAr = [
-      `1️⃣ متوسط التوازن السعري طويل الأجل (EMA 200) = ${ema200} ج.م (وزن 60%)`,
-      `2️⃣ متوسط سعر التكلفة المرجح بالسيولة لآخر 20 جلسة (VWAP 20) = ${vwap20} ج.م (وزن 40%)`,
-      `✅ السعر العادل التوازني = (0.60 × ${ema200}) + (0.40 × ${vwap20}) = ${fairValue} ج.م.`,
+      `1️⃣ متوسط التوازن السعري طويل الأجل (EMA 200) = ${ema200} ${currencyAr} (وزن 60%)`,
+      `2️⃣ متوسط سعر التكلفة المرجح بالسيولة لآخر 20 جلسة (VWAP 20) = ${vwap20} ${currencyAr} (وزن 40%)`,
+      `✅ السعر العادل التوازني = (0.60 × ${ema200}) + (0.40 × ${vwap20}) = ${fairValue} ${currencyAr}.`,
     ];
   }
 
@@ -359,14 +384,15 @@ export function computeSingleStockFairValue(params: {
         : null,
     ema200: ema200Val !== null ? Number(ema200Val.toFixed(2)) : null,
     vwap20: vwap20Val !== null ? Number(vwap20Val.toFixed(2)) : null,
-    isSharia: isShariaCompliant(sym),
+    isSharia: isShariaCompliant(sym, isSaudi ? "tasi" : "egx"),
     date: rowDate,
   };
 }
 
 export function computeFairValueReport(
   fundamentalsRows: Array<Record<string, any>>,
-  indicatorRows: Array<Record<string, any>>
+  indicatorRows: Array<Record<string, any>>,
+  market: "egx" | "tasi" = "egx"
 ): FairValueReport {
   const fundMap = new Map<string, Record<string, any>>();
   for (const row of fundamentalsRows || []) {
@@ -467,6 +493,7 @@ export function computeFairValueReport(
         latestTech: ind,
         sectorMedianPe,
         sectorMedianPb,
+        market,
       })
     );
   }
@@ -488,6 +515,8 @@ export function computeFairValueReport(
   );
 
   return {
+    market,
+    currencyCode: market === "tasi" ? "SAR" : "EGP",
     updatedAt: new Date().toISOString(),
     latestSessionDate,
     summary: {

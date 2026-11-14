@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { ShieldCheck, Lock, Smartphone, ExternalLink, Download } from "lucide-react";
 
 export default function Footer() {
   const { t, language } = useLanguage();
+  const { isSaudi } = useMarket();
   const isAr = language === "ar";
   const pathname = usePathname();
 
@@ -167,7 +169,15 @@ export default function Footer() {
             <div className="pt-1 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>{isAr ? "مدفوعات مشفرة ومعتمدة عبر EasyKash" : "Secured by EasyKash Payment Gateway"}</span>
+                <span>
+                  {isSaudi
+                    ? isAr
+                      ? "مدفوعات مشفرة ومعتمدة عبر PayPal و EasyKash"
+                      : "Secured by PayPal & EasyKash"
+                    : isAr
+                      ? "مدفوعات مشفرة ومعتمدة عبر EasyKash"
+                      : "Secured by EasyKash Payment Gateway"}
+                </span>
               </span>
 
               <a
@@ -244,14 +254,16 @@ export default function Footer() {
                   {isAr ? "النماذج الفنية المتكررة (شبه ده)" : "Historical Pattern Similarity"}
                 </Link>
               </li>
-              <li>
-                <Link
-                  href="/disclosures"
-                  className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
-                >
-                  {isAr ? "رادار إفصاحات البورصة المصرية (PDF)" : "EGX Disclosures Radar (PDF)"}
-                </Link>
-              </li>
+              {!isSaudi && (
+                <li>
+                  <Link
+                    href="/disclosures"
+                    className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
+                  >
+                    {isAr ? "رادار إفصاحات البورصة المصرية (PDF)" : "EGX Disclosures Radar (PDF)"}
+                  </Link>
+                </li>
+              )}
               <li>
                 <a
                   href="/artoro.apk"
@@ -278,7 +290,9 @@ export default function Footer() {
                   {t("footer.blogs")}
                 </Link>
               </li>
-              <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
+              {!isSaudi && (
+                <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
+              )}
               <li><Link href="/fair-value" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">💎 {isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value Screener"}</Link></li>
               <li><Link href="/sharia" className="text-sm font-bold text-emerald-500 hover:text-emerald-400 transition-colors">⚖️ {isAr ? "حاسبة التوافق الشرعي وتطهير الكوبونات" : "Sharia & Dividend Cleanser"}</Link></li>
               <li><Link href="/profile" className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition-colors">🔄 {isAr ? "إعادة تدوير المحفظة الذكي (AI)" : "AI Portfolio Rebalancer"}</Link></li>
@@ -352,12 +366,12 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href="https://web.telegram.org/a/#-1002083067817_153"
+                  href={isSaudi ? "https://web.telegram.org/a/#-1004397045436" : "https://web.telegram.org/a/#-1002083067817_153"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
                 >
-                  {t("footer.telegram")}
+                  {isSaudi ? (isAr ? "قناة تليجرام VIP (السعودية)" : "Saudi VIP Telegram") : t("footer.telegram")}
                 </a>
               </li>
               <li>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
 import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
+import { getMarketSupabaseClient, resolveRequestMarket } from "@/lib/supabase/route-data";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,8 @@ export async function GET(req: NextRequest) {
       isPro = false;
     }
 
+    const market = resolveRequestMarket(req);
+
     // 2. Refresh parameter: only allowed for verified admins to prevent abuse/DoS
     const url = new URL(req.url);
     const wantsRefresh = url.searchParams.get("refresh") === "true";
@@ -78,36 +81,58 @@ export async function GET(req: NextRequest) {
     }
     const passRefresh = wantsRefresh && isAdmin;
 
-    // 3. Fetch shared daily dataset from backend with internal secret
-    const adminKey = process.env.ADMIN_SECRET_KEY || "";
-    const fetchHeaders: Record<string, string> = {};
-    if (adminKey) {
-      fetchHeaders["x-admin-key"] = adminKey;
+    let data: any = {};
+
+    if (market === "tasi") {
+      const saudiClient = getMarketSupabaseClient("tasi");
+      const { data: cacheRow, error: cacheError } = await saudiClient
+        .from("market_cache")
+        .select("payload")
+        .eq("cache_key", "saudi_short_swings_v1")
+        .maybeSingle();
+
+      if (cacheError) {
+        console.error("Error fetching saudi_short_swings_v1:", cacheError);
+        return NextResponse.json(
+          { error: "Failed to fetch Saudi short swings", is_pro: isPro, active_trades: [], closed_trades: [] },
+          { status: 500 }
+        );
+      }
+
+      const rawPayload = cacheRow?.payload;
+      data = typeof rawPayload === "string" ? JSON.parse(rawPayload) : (rawPayload || {});
+    } else {
+      // 3. Fetch shared daily dataset from backend with internal secret
+      const adminKey = process.env.ADMIN_SECRET_KEY || "";
+      const fetchHeaders: Record<string, string> = {};
+      if (adminKey) {
+        fetchHeaders["x-admin-key"] = adminKey;
+      }
+
+      const fetchUrl = `${backendUrl}/api/short-swings?is_pro=true${passRefresh ? "&refresh=true" : ""}`;
+      
+      // Cache the upstream dataset with Next.js daily tag unless refreshing
+      const fetchOptions: RequestInit = passRefresh
+        ? { cache: "no-store", headers: fetchHeaders }
+        : {
+            headers: fetchHeaders,
+            next: {
+              tags: [DAILY_CACHE_TAGS.shortSwings],
+              revalidate: 86400,
+            },
+          };
+
+      const response = await fetch(fetchUrl, fetchOptions);
+
+      if (!response.ok) {
+        return NextResponse.json(
+          { error: "Failed to fetch short swings from backend", is_pro: isPro, active_trades: [], closed_trades: [] },
+          { status: response.status }
+        );
+      }
+
+      data = await response.json();
     }
-
-    const fetchUrl = `${backendUrl}/api/short-swings?is_pro=true${passRefresh ? "&refresh=true" : ""}`;
-    
-    // Cache the upstream dataset with Next.js daily tag unless refreshing
-    const fetchOptions: RequestInit = passRefresh
-      ? { cache: "no-store", headers: fetchHeaders }
-      : {
-          headers: fetchHeaders,
-          next: {
-            tags: [DAILY_CACHE_TAGS.shortSwings],
-            revalidate: 86400,
-          },
-        };
-
-    const response = await fetch(fetchUrl, fetchOptions);
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch short swings from backend", is_pro: isPro, active_trades: [], closed_trades: [] },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
 
     // 4. Calculate 15-day freshness window for masking
     const cutoff = new Date();

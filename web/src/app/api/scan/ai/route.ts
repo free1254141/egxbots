@@ -1,20 +1,25 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient, toNumber } from "@/lib/supabase/route-data";
+import {
+  resolveRequestMarket,
+  getMarketExchange,
+  getMarketSupabaseClient,
+  toNumber,
+} from "@/lib/supabase/route-data";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
     const incomingUrl = new URL(req.url);
-    const country = incomingUrl.searchParams.get("country") || "Egypt";
+    const body = await req.json().catch(() => ({}));
+    const market = resolveRequestMarket(req, body);
+    const exchange = getMarketExchange(market);
     const limit = parseInt(incomingUrl.searchParams.get("limit") || "50");
     const minPrecision = parseFloat(incomingUrl.searchParams.get("min_precision") || "0.6");
 
-    const body = await req.json().catch(() => ({}));
+    const supabase = getMarketSupabaseClient(market);
 
-    const supabase = getSupabaseClient();
-
-    // Get AI scan results from Supabase
+    // Get AI scan results from Supabase scoped to the active exchange
     const { data: scanResults, error } = await supabase
       .from('scan_results')
       .select(`
@@ -28,6 +33,7 @@ export async function POST(req: Request) {
         council_score,
         consensus_ratio
       `)
+      .eq('exchange', exchange)
       .gte('precision', minPrecision)
       .order('precision', { ascending: false })
       .limit(limit);

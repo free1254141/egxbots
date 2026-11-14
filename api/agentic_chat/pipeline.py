@@ -338,11 +338,18 @@ async def _run_agentic_chat_stream_impl(
         if ui_label == "TASI"
         else "البورصة المصرية (EGX — ج.م)"
     )
+    telegram_channel_guidance = (
+        "السوق النشط الآن هو السعودي TASI: عند الإشارة لقناة تليجرام اذكر قناة VIP السعودية فقط "
+        "(https://web.telegram.org/a/#-1004397045436 ورابطها في /profile#telegram) ولا تذكر القناة المصرية المجانية (t.me/egxbots) لأن السوق السعودي لا يملك قناة مجانية."
+        if ui_label == "TASI"
+        else "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
+    )
     date_context = (
         f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:%M:%S')} | "
         f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:%M:%S')}. "
         f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
         "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة أسهم واستفسارات EGX و TASI معاً). "
+        f"{telegram_channel_guidance} "
         "التزم بدقة بالعملة: ج.م (EGP) للأسهم المصرية و ر.س (SAR) للأسهم السعودية. "
         f"وضع التوصيات الحرة: {'مفعل' if autonomous_recommendations else 'غير مفعل'}."
     )

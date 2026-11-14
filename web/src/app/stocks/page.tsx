@@ -5,17 +5,22 @@ import StocksClient from "./StocksClient";
 export const revalidate = 86400; // Cache for 24 hours (daily market job cadence)
 
 export const metadata: Metadata = {
-  title: "دليل أسهم البورصة المصرية وتحليل الشركات",
-  description: "تصفح أسهم البورصة المصرية وأسعارها المحفوظة وتقييمات الذكاء الاصطناعي والمؤشرات الفنية. راجع تاريخ البيانات وتغطية كل سهم قبل المقارنة.",
+  title: "دليل أسهم البورصة المصرية والسعودية (EGX & TASI) وتحليل الشركات",
+  description: "تصفح أسهم البورصة المصرية (EGX) والسوق السعودي تداول (تاسي TASI) وأسعارها المحفوظة وتقييمات الذكاء الاصطناعي والمؤشرات الفنية. راجع تاريخ البيانات وتغطية كل سهم قبل المقارنة.",
   keywords: [
     "دليل أسهم البورصة المصرية",
-    "قائمة شركات البورصة المصرية",
+    "دليل الأسهم السعودية تاسي",
+    "قائمة شركات البورصة المصرية وتداول",
     "أسهم البورصة المصرية",
+    "الأسهم السعودية TASI",
     "تحليل الأسهم المصرية بالذكاء الاصطناعي",
+    "تحليل الأسهم السعودية بالذكاء الاصطناعي",
     "مؤشر EGX30",
-    "مؤشر EGX70",
+    "مؤشر TASI",
+    "سهم أرامكو 2222",
+    "سهم الراجحي 1120",
     "أسهم CIB وبلتون وطلعت مصطفى",
-    "EGX Directory",
+    "EGX & TASI Directory",
     "EGX BOTS",
     "egxbots"
   ],
@@ -23,8 +28,8 @@ export const metadata: Metadata = {
     canonical: "https://egxbots.com/stocks",
   },
   openGraph: {
-    title: "دليل أسهم البورصة المصرية | EGX BOTS",
-    description: "تصفح أسهم البورصة المصرية مع تقييمات الذكاء الاصطناعي والمؤشرات الفنية وفق آخر بيانات محفوظة وتاريخ تحديثها.",
+    title: "دليل أسهم البورصة المصرية والسعودية (EGX & TASI) | EGX BOTS",
+    description: "تصفح أسهم البورصة المصرية والسوق السعودي تداول مع تقييمات الذكاء الاصطناعي والمؤشرات الفنية وفق آخر بيانات محفوظة وتاريخ تحديثها.",
     type: "website",
     url: "https://egxbots.com/stocks",
     images: [
@@ -32,14 +37,14 @@ export const metadata: Metadata = {
         url: "https://egxbots.com/dashboard_preview.png",
         width: 1200,
         height: 630,
-        alt: "EGX Bots Stocks Directory",
+        alt: "EGX & TASI Bots Stocks Directory",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Egyptian Exchange Stocks Directory | EGX BOTS",
-    description: "Complete directory of EGX listed companies with AI scores and technical analysis.",
+    title: "EGX & Saudi TASI Stocks Directory | EGX BOTS",
+    description: "Complete directory of Egyptian Exchange (EGX) and Saudi Tadawul (TASI) listed companies with AI scores and technical analysis.",
     images: ["https://egxbots.com/dashboard_preview.png"],
   },
 };

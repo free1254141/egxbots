@@ -8,6 +8,7 @@ import ChatWidget from "@/components/ChatWidget";
 import SupportChatWidget from "@/components/SupportChatWidget";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import TrialWelcomePrompt from "@/components/TrialWelcomePrompt";
+import MarketWelcomeDialog from "@/components/MarketWelcomeDialog";
 import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
 
@@ -24,10 +25,10 @@ export const metadata: Metadata = {
     canonical: 'https://egxbots.com',
   },
   title: {
-    default: "EGX BOTS | تحليل البورصة المصرية بالذكاء الاصطناعي",
+    default: "EGX BOTS | تحليل الأسهم المصرية والسعودية (EGX & TASI) بالذكاء الاصطناعي",
     template: "%s | EGX BOTS"
   },
-  description: "EGX BOTS منصة لتحليل أسهم البورصة المصرية: تقييمات ذكاء اصطناعي يومية، ماسح فني، نتائج تاريخية، ومساعد تفاعلي عربي وإنجليزي.",
+  description: "EGX BOTS منصة تحليل الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) بالذكاء الاصطناعي: تقييمات AI يومية، ماسح فني، اختبارات تاريخية، ومساعد تفاعلي عربي وإنجليزي.",
   keywords: [
     "EGX BOTS",
     "egxbots",
@@ -36,15 +37,22 @@ export const metadata: Metadata = {
     "egx ai analyzer",
     "تحليل الأسهم المصرية بالذكاء الاصطناعي",
     "محلل الأسهم المصرية بالذكاء الاصطناعي",
-    "أفضل برنامج تحليل الأسهم المصرية",
+    "تحليل الأسهم السعودية بالذكاء الاصطناعي",
+    "توصيات تاسي",
+    "سهم أرامكو 2222",
+    "سهم الراجحي 1120",
+    "تداول السعودية",
+    "السوق السعودي تاسي TASI",
+    "أفضل برنامج تحليل الأسهم المصرية والسعودية",
     "بوت تحليل الاسهم",
     "إي جي إكس بوتس",
     "البورصة المصرية",
     "EGX",
+    "TASI",
     "ذكاء اصطناعي",
     "تحليل أسهم",
-    "ماسح البورصة المصرية",
-    "مؤشرات البورصة المصرية",
+    "ماسح البورصة المصرية والسعودية",
+    "مؤشرات البورصة المصرية وتاسي",
     "تداول آلي",
     "إشارات تداول",
     "شات بوت ذكي",
@@ -57,8 +65,8 @@ export const metadata: Metadata = {
     type: "website",
     locale: "ar_EG",
     url: "https://egxbots.com",
-    title: "EGX BOTS | منصة تحليل البورصة المصرية بالذكاء الاصطناعي",
-    description: "منصة EGX BOTS لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي: رادار الصفقات اللحظية، تقييمات AI Score، المحاكاة التاريخية، ومستويات الدعم والمقاومة اليومية.",
+    title: "EGX BOTS | تحليل الأسهم المصرية والسعودية (EGX & TASI) بالذكاء الاصطناعي",
+    description: "منصة EGX BOTS لتحليل أسهم البورصة المصرية (EGX) والسوق السعودي تداول (TASI) بالذكاء الاصطناعي: رادار الصفقات، تقييمات AI Score، المحاكاة التاريخية، ومستويات الدعم والمقاومة.",
     siteName: "EGX BOTS",
     images: [
       {
@@ -67,14 +75,14 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         type: "image/png",
-        alt: "EGX BOTS - منصة تحليل البورصة المصرية بالذكاء الاصطناعي",
+        alt: "EGX BOTS - منصة تحليل الأسهم المصرية والسعودية بالذكاء الاصطناعي",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "EGX BOTS | EGX AI Stock Analyzer | محلل البورصة المصرية",
-    description: "Advanced AI Stock Analyzer for the Egyptian Exchange (EGX) with technical scanning, daily AI scores, backtests, and AI chatbot.",
+    title: "EGX BOTS | EGX & Saudi TASI AI Stock Analyzer | محلل الأسهم المصرية والسعودية",
+    description: "Advanced AI Stock Analyzer for the Egyptian Exchange (EGX) and Saudi Tadawul (TASI) with technical scanning, daily AI scores, backtests, and AI chatbot.",
     images: ["https://egxbots.com/dashboard_preview.png"],
   },
   manifest: "/manifest.json",
@@ -140,8 +148,8 @@ export default function RootLayout({
                   "@id": "https://egxbots.com/#website",
                   "url": "https://egxbots.com",
                   "name": "EGX BOTS",
-                  "alternateName": ["ARTORO", "ARTORO AI", "EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية بالذكاء الاصطناعي"],
-                  "description": "منصة تحليل الأسهم المصرية بتقييمات يومية، ماسح فني، ونتائج تاريخية.",
+                  "alternateName": ["ARTORO", "ARTORO AI", "EGX AI Analyzer", "egxbots", "محلل الأسهم المصرية والسعودية بالذكاء الاصطناعي"],
+                  "description": "منصة تحليل الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) بتقييمات يومية، ماسح فني، ونتائج تاريخية.",
                   "inLanguage": "ar-EG",
                   "publisher": { "@id": "https://egxbots.com/#organization" },
                   "potentialAction": {
@@ -157,7 +165,7 @@ export default function RootLayout({
                   "url": "https://egxbots.com",
                   "logo": "https://egxbots.com/favicon_io/android-chrome-512x512.png",
                   "image": "https://egxbots.com/dashboard_preview.png",
-                  "description": "منصة لتحليل بيانات البورصة المصرية باستخدام نماذج كمية وماسح فني ونتائج تاريخية.",
+                  "description": "منصة لتحليل بيانات البورصة المصرية (EGX) والسوق السعودي تداول (TASI) باستخدام نماذج كمية وماسح فني ونتائج تاريخية.",
                   "sameAs": [
                     "https://t.me/egxbots",
                     "https://www.facebook.com/egxbots"
@@ -174,7 +182,7 @@ export default function RootLayout({
                   "alternateName": ["ARTORO", "ARTORO AI", "egx ai analyzer", "محلل الأسهم المصرية"],
                   "operatingSystem": "Web",
                   "applicationCategory": "FinanceApplication",
-                  "description": "EGX BOTS (egxbots) is an advanced AI-driven stock analyzer for the Egyptian Exchange (EGX) featuring daily AI scores, quantitative scanners, and market chatbot.",
+                  "description": "EGX BOTS (egxbots) is an advanced AI-driven stock analyzer for the Egyptian Exchange (EGX) and Saudi Tadawul (TASI) featuring daily AI scores, quantitative scanners, and market chatbot.",
                   "offers": {
                     "@type": "Offer",
                     "price": "0",
@@ -228,6 +236,7 @@ export default function RootLayout({
           <SupportChatWidget />
           <PwaInstallPrompt />
           <TrialWelcomePrompt />
+          <MarketWelcomeDialog />
           <Analytics />
         </Providers>
       </body>

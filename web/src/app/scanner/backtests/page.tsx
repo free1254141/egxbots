@@ -5,16 +5,19 @@ import BrandedPageHeader from "@/components/BrandedPageHeader";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "تقييم الأسهم المصرية والاختبارات التاريخية",
-  description: "راجع تقييم الأسهم المصرية والحالات التاريخية المشابهة ونتائجها بعد 5 و10 و20 جلسة، مع حجم العينة وسجل التوصيات. الأداء السابق لا يضمن عائدًا.",
+  title: "تقييم الأسهم المصرية والسعودية (EGX & TASI) والاختبارات التاريخية",
+  description: "راجع تقييم الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) والحالات التاريخية المشابهة ونتائجها بعد 5 و10 و20 جلسة، مع حجم العينة وسجل التوصيات. الأداء السابق لا يضمن عائدًا.",
   keywords: [
     "بوتات التداول الآلي",
     "تداول آلي بالذكاء الاصطناعي",
     "بوت تحليل الاسهم",
     "إشارات البورصة المصرية",
+    "توصيات تاسي",
     "تحليل الأسهم المصرية بالذكاء الاصطناعي",
-    "توصيات البورصة المصرية",
-    "EGX Trading Bots",
+    "تحليل الأسهم السعودية بالذكاء الاصطناعي",
+    "اختبار استراتيجيات تداول السعودية",
+    "توصيات البورصة المصرية والسعودية",
+    "EGX & TASI Trading Bots",
     "EGX BOTS",
     "egxbots"
   ],
@@ -22,8 +25,8 @@ export const metadata: Metadata = {
     canonical: "https://egxbots.com/scanner/backtests",
   },
   openGraph: {
-    title: "اختبار استراتيجيات التداول والباك تيست | AI Backtests | EGX BOTS",
-    description: "نتائج الاختبارات التاريخية (Backtests) ونسب النجاح لاستراتيجيات تداول الأسهم المصرية بالذكاء الاصطناعي.",
+    title: "اختبار استراتيجيات التداول والباك تيست (EGX & TASI) | AI Backtests | EGX BOTS",
+    description: "نتائج الاختبارات التاريخية (Backtests) ونسب النجاح لاستراتيجيات تداول الأسهم المصرية والسعودية (تاسي) بالذكاء الاصطناعي.",
     type: "website",
     url: "https://egxbots.com/scanner/backtests",
     images: [
@@ -31,14 +34,14 @@ export const metadata: Metadata = {
         url: "https://egxbots.com/dashboard_preview.png",
         width: 1200,
         height: 630,
-        alt: "EGX Bots Backtest Dashboard",
+        alt: "EGX & TASI Bots Backtest Dashboard",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AI Trading Bots & Backtests | EGX BOTS",
-    description: "Explore historical backtests, win rates, and simulation statistics for EGX AI trading tools.",
+    title: "AI Trading Bots & Backtests (EGX & TASI) | EGX BOTS",
+    description: "Explore historical backtests, win rates, and simulation statistics for EGX and Saudi TASI AI trading tools.",
     images: ["https://egxbots.com/dashboard_preview.png"],
   },
 };

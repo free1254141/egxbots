@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { TelegramProInvite } from "@/contexts/TelegramProContext";
+import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 
 interface Props {
   isOpen: boolean;
@@ -140,6 +141,7 @@ export default function PaymentWelcomeModal({
     proInvite.invite_link ||
     orderData?.telegram_pro_url ||
     "";
+  const saudiVipLink = proInvite.saudi_invite_link || SAUDI_VIP_TELEGRAM_WEB_URL;
 
   const isBotActive = telegramLinked || Boolean(proInvite.bot_active) || Boolean(proInvite.telegram_chat_id);
   const botAppUrl = userId ? `https://t.me/egxbots_bot?start=${userId}` : "https://t.me/egxbots_bot";
@@ -405,6 +407,16 @@ export default function PaymentWelcomeModal({
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
                     >
                       <span>{isAr ? "الانضمام لقناة VIP الآن 🚀" : "Join VIP Channel Now 🚀"}</span>
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+
+                    <a
+                      href={saudiVipLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                    >
+                      <span>{isAr ? "قناة VIP للسوق السعودي (تاسي) 🇸🇦" : "Saudi Market (TASI) VIP Channel 🇸🇦"}</span>
                       <ExternalLink className="w-4 h-4" />
                     </a>
                   </div>

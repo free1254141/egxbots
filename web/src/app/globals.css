@@ -445,7 +445,7 @@ body::before {
 
   @media (min-width: 1024px) {
     .header-title {
-      min-width: 180px;
+      min-width: 0;
     }
   }
 

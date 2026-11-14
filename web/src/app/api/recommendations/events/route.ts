@@ -19,6 +19,14 @@ function numeric(value: unknown): number | null {
 }
 
 export async function GET(request: NextRequest) {
+  const rawMarket = (request.nextUrl.searchParams.get("market") || "").trim().toLowerCase();
+  if (rawMarket === "tasi" || rawMarket === "tadawul" || rawMarket === "saudi" || rawMarket === "sa") {
+    return NextResponse.json(
+      { events: [], tracked_recommendation_ids: [] },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+
   const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 100);
   const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 1), 300);
   const monthParam = request.nextUrl.searchParams.get("month") || "";

@@ -16,12 +16,36 @@ def _is_internal_authorized(x_admin_key: Optional[str]) -> bool:
     return bool(secret and x_admin_key and hmac.compare_digest(x_admin_key.strip(), secret))
 
 
+def _get_saudi_short_swings() -> dict:
+    """Read precomputed saudi_short_swings_v1 payload from SAUDI_SUPABASE.market_cache."""
+    from supabase import create_client
+    url = (os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or "").strip()
+    key = (
+        os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SAUDI_SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    if not url or not key:
+        return {"status": "unavailable", "kpis": {}, "active_trades": [], "closed_trades": [], "market": "TASI", "currency": "SAR"}
+    try:
+        sb = create_client(url, key)
+        res = sb.table("market_cache").select("payload").eq("cache_key", "saudi_short_swings_v1").limit(1).execute()
+        rows = res.data or []
+        if rows and isinstance(rows[0].get("payload"), dict):
+            return rows[0]["payload"]
+    except Exception as exc:
+        print(f"[SHORT_SWINGS] Saudi market_cache read error: {exc}")
+    return {"status": "unavailable", "kpis": {}, "active_trades": [], "closed_trades": [], "market": "TASI", "currency": "SAR"}
+
+
 @router.get("")
 @router.get("/")
 def get_short_swings(
     request: Request,
     is_pro: bool = Query(False, description="Whether the requesting user has an active PRO subscription"),
     refresh: bool = Query(False, description="Force recompute signals"),
+    market: Optional[str] = Query("egx", description="Target market: egx or tasi/tadawul"),
     x_admin_key: Optional[str] = Header(None, alias="x-admin-key"),
 ):
     """
@@ -40,7 +64,11 @@ def get_short_swings(
         is_pro = False
         refresh = False
 
-    data = compute_short_swings() if refresh else get_cached_short_swings()
+    mkt_norm = (market or "egx").strip().lower()
+    if mkt_norm in ("tasi", "tadawul", "sa", "saudi"):
+        data = _get_saudi_short_swings()
+    else:
+        data = compute_short_swings() if refresh else get_cached_short_swings()
     cutoff_date = (dt.date.today() - dt.timedelta(days=15)).strftime("%Y-%m-%d")
 
     if not is_pro:

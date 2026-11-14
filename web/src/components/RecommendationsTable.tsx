@@ -300,8 +300,12 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         [isAr, isRowSaudi]
     );
 
-    // Use AIScannerContext for caching data
-    const { recommendations, recsLoading, recsError, loadRecommendations } = useAIScanner();
+    // Use AIScannerContext for caching data and strictly isolate rows to the active market
+    const { recommendations: contextRecommendations, recsLoading, recsError, loadRecommendations } = useAIScanner();
+    const recommendations = useMemo(
+        () => contextRecommendations.filter((row: any) => row?.locked === true || (isSaudi ? isRowSaudi(row) : !isRowSaudi(row))),
+        [contextRecommendations, isSaudi, isRowSaudi],
+    );
 
     // Outdated warning retry state
     const [isOutdated, setIsOutdated] = useState(false);
@@ -380,10 +384,10 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         const changed = previousPlanRef.current !== null && previousPlanRef.current !== hasProAccess;
         previousPlanRef.current = hasProAccess;
         if (changed) {
-            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined);
+            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
             setCalendarRefreshToken(value => value + 1);
         }
-    }, [user?.id, hasProAccess, isLandingPage, limit, loadRecommendations]);
+    }, [user?.id, hasProAccess, isLandingPage, limit, loadRecommendations, market]);
     useEffect(() => {
         if (!user || !hasProAccess || !hasEncryptedRecommendations) {
             proRefreshViewerRef.current = null;
@@ -391,9 +395,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         }
         if (proRefreshViewerRef.current !== user.id) {
             proRefreshViewerRef.current = user.id;
-            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined);
+            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
         }
-    }, [user?.id, hasProAccess, hasEncryptedRecommendations, isLandingPage, limit, loadRecommendations]);
+    }, [user?.id, hasProAccess, hasEncryptedRecommendations, isLandingPage, limit, loadRecommendations, market]);
 
     // Interactive Filters (Scanner or Authenticated Landing Page)
     const [searchTerm, setSearchTerm] = useState("");
@@ -527,13 +531,13 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     // 5-minute window plus visibility refresh, so opening a tab does not fire a
     // request on every switch.
     useEffect(() => {
-        loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined);
+        loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined, market);
     }, [loadRecommendations, isLandingPage, limit, market]);
 
     const refreshRecommendationData = useCallback(async () => {
-        await loadRecommendations(isLandingPage, true);
+        await loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
         setCalendarRefreshToken(value => value + 1);
-    }, [loadRecommendations, isLandingPage]);
+    }, [loadRecommendations, isLandingPage, limit, market]);
 
     // Outdated warning state on error
     useEffect(() => {

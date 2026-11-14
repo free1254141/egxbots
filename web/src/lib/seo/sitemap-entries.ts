@@ -30,7 +30,7 @@ export function canonicalSitemap(entries: MetadataRoute.Sitemap): MetadataRoute.
     for (const entry of entries) {
         let url: URL;
         try { url = new URL(entry.url); } catch { continue; }
-        if (url.origin !== 'https://egxbots.com' || url.search || url.hash) continue;
+        if (url.origin !== 'https://egxbots.com' || (url.search && url.search !== '?market=tasi') || url.hash) continue;
         const previous = pages.get(entry.url);
         if (!previous) pages.set(entry.url, entry);
         else if (entry.lastModified && (!previous.lastModified || new Date(entry.lastModified) > new Date(previous.lastModified)))

@@ -243,7 +243,13 @@ def _run_saudi_daily_refresh():
         sys.path.insert(0, repo_root)
     from scripts.saudi_pipeline_bootstrap import main as run_saudi_pipeline
 
-    return run_saudi_pipeline(reuse_models=True)
+    res = run_saudi_pipeline(reuse_models=True)
+    try:
+        from scripts.saudi_backtest_and_systems import main as run_saudi_systems
+        run_saudi_systems()
+    except Exception as sys_exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi 3-systems refresh failed (non-fatal): {sys_exc}")
+    return res
 
 
 def _execute_phase(phase, source):

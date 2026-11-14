@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
+import { ComposedChart, Bar, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import {
     Users as UsersIcon,
     Search,
@@ -117,6 +117,8 @@ interface UserStats {
         totalPro?: number;
         localCount?: number;
         totalLocal?: number;
+        gatewayPaidCount?: number;
+        cashPaidCount?: number;
         recommendationsCount?: number;
         egx30?: number | null;
     }[];
@@ -125,6 +127,8 @@ interface UserStats {
     currentEgx30?: number | null;
     activeProUsers: number;
     totalLocalCustomers?: number;
+    totalGatewayCustomers?: number;
+    totalCashCustomers?: number;
     activeTrialUsers?: number;
     totalTrialUsers?: number;
     convertedTrialUsers?: number;
@@ -217,15 +221,11 @@ export default function UsersTab() {
     const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
     const [portfolioLoading, setPortfolioLoading] = useState(false);
 
-    // Chart Series Visibility Toggles
-    const [showSignups, setShowSignups] = useState(true);
-    const [showActiveUsers, setShowActiveUsers] = useState(true);
-    const [showPro, setShowPro] = useState(true);
-    const [showLocal, setShowLocal] = useState(true);
-    const [showEgx30, setShowEgx30] = useState(true);
+    // Clean Tabbed Chart Mode & Range
+    const [chartTab, setChartTab] = useState<"growth" | "paid" | "market">("growth");
+    const [chartDays, setChartDays] = useState<14 | 30 | 90>(30);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showTrialModal, setShowTrialModal] = useState(false);
-    const [showRecommendations, setShowRecommendations] = useState(true);
 
     // Modal States
     const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
@@ -405,7 +405,8 @@ export default function UsersTab() {
     const filteredUsers = users;
 
     const totalPages = Math.ceil(total / pageSize);
-    const growthChartData = withDailyActiveUsers(stats?.signupGrowth || [], stats?.dailyActiveUsage || []);
+    const fullGrowthChartData = withDailyActiveUsers(stats?.signupGrowth || [], stats?.dailyActiveUsage || []);
+    const growthChartData = fullGrowthChartData.slice(-chartDays);
 
 
 
@@ -530,163 +531,191 @@ export default function UsersTab() {
                     </div>
                 </div>
 
-                {/* Growth Chart with Users, Pro Subscribers, EGX 30, and Recommendations */}
+                {/* Clean Tabbed Analytics Chart (No overlapping clutter) */}
                 <div className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 p-4 mb-6 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
-                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
                         <div>
-                            <h3 className="font-black text-xs uppercase tracking-widest flex items-center gap-2 text-black dark:text-white">
+                            <h3 className="font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2 text-black dark:text-white">
                                 <Activity className="w-4 h-4 text-blue-500" />
-                                {isAr ? "النشاط والنمو ومؤشر السوق والتوصيات" : "ACTIVITY, GROWTH, MARKET & RECOMMENDATIONS"}
+                                {chartTab === "growth"
+                                    ? (isAr ? "النمو والنشاط اليومي" : "Daily Growth & Active Users")
+                                    : chartTab === "paid"
+                                    ? (isAr ? "الاشتراكات المدفوعة (بوابة الدفع مقابل الكاش اليدوي)" : "Paid Subscriptions (Gateway vs Manual Cash)")
+                                    : (isAr ? "التوصيات الصادرة ومؤشر EGX 30" : "Signals Issued & EGX 30 Index")}
                             </h3>
-                            <p className="text-[10px] text-zinc-500 font-bold mt-0.5">
-                                {isAr ? "مقارنة النشطين يوميًا بالتسجيلات ومشتركي Pro ومؤشر EGX 30 والتوصيات؛ النشط هو من فتح صفحة أو أرسل رسالة، مع استبعاد الأدمن." : "Compare daily active users (page views or messages, excluding admins), signups, Pro subscriptions, EGX 30, and recommendations"}
+                            <p className="text-[11px] text-zinc-500 font-bold mt-0.5">
+                                {chartTab === "growth"
+                                    ? (isAr ? "مقارنة المسجلين الجدد يومياً بالمستخدمين النشطين (مع استبعاد الأدمن)." : "Daily new signups vs active users (excluding admins).")
+                                    : chartTab === "paid"
+                                    ? (isAr ? "فصل واضح بدون تكرار: مدفوعات البوابة (EasyKash / Kashier) مقابل الكاش اليدوي (فودافون كاش / إنستاباي / تليجرام)." : "Mutually exclusive paid orders: Payment Gateway vs Manual Cash.")
+                                    : (isAr ? "حجم التوصيات اليومية مقارنة بأداء مؤشر البورصة المصرية EGX 30." : "Daily issued recommendations compared against EGX 30 closing index.")}
                             </p>
                         </div>
 
-                        {/* Interactive Series Toggles / Checkboxes */}
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-black">
-                            {/* Signups Checkbox */}
-                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showSignups ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={showSignups} 
-                                    onChange={(e) => setShowSignups(e.target.checked)} 
-                                    className="w-3.5 h-3.5 accent-blue-600 cursor-pointer"
-                                />
-                                <span className="w-2.5 h-2.5 rounded-xs bg-blue-500 border border-black dark:border-white" />
-                                <span>{isAr ? "المسجلون الجدد" : "New Signups"}</span>
-                            </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Focused Chart Mode Tabs */}
+                            <div className="flex border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-0.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setChartTab("growth")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        chartTab === "growth"
+                                            ? "bg-blue-600 text-white"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <UsersIcon className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "النمو والنشاط" : "Growth"}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setChartTab("paid")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        chartTab === "paid"
+                                            ? "bg-amber-500 text-black"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <Crown className="w-3.5 h-3.5" />
+                                    <span>
+                                        {isAr
+                                            ? `المدفوع (${(stats?.totalGatewayCustomers ?? 0) + (stats?.totalCashCustomers ?? 0) || stats?.totalLocalCustomers || 0})`
+                                            : `Paid (${(stats?.totalGatewayCustomers ?? 0) + (stats?.totalCashCustomers ?? 0) || stats?.totalLocalCustomers || 0})`}
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setChartTab("market")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        chartTab === "market"
+                                            ? "bg-emerald-500 text-black"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <TrendingUp className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "السوق والتوصيات" : "Market"}</span>
+                                </button>
+                            </div>
 
-                            <label className="flex min-h-11 items-center gap-2 cursor-pointer px-2.5 py-1 border-2 border-black dark:border-white text-cyan-700 dark:text-cyan-400">
-                                <input type="checkbox" checked={showActiveUsers} onChange={(event) => setShowActiveUsers(event.target.checked)} className="w-4 h-4 accent-cyan-500" />
-                                <Activity className="w-4 h-4" />
-                                <span>{isAr ? "المستخدمون النشطون يوميًا" : "Daily active users"}</span>
-                            </label>
-
-                            {/* Pro Checkbox */}
-                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showPro ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={showPro} 
-                                    onChange={(e) => setShowPro(e.target.checked)} 
-                                    className="w-3.5 h-3.5 accent-amber-500 cursor-pointer"
-                                />
-                                <span className="w-2.5 h-2.5 rounded-xs bg-amber-400 border border-black dark:border-white" />
-                                <Crown className="w-3.5 h-3.5 text-amber-500" />
-                                <span>{isAr ? `مشتركون Pro (${stats?.activeProUsers || 0})` : `New Pro (${stats?.activeProUsers || 0})`}</span>
-                            </label>
-
-                            {/* Local Payments Checkbox */}
-                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showLocal ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={showLocal} 
-                                    onChange={(e) => setShowLocal(e.target.checked)} 
-                                    className="w-3.5 h-3.5 accent-emerald-600 cursor-pointer"
-                                />
-                                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 border border-black dark:border-white" />
-                                <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>{isAr ? `عملاء لوكال / كاش (${stats?.totalLocalCustomers || stats?.totalPaidOrders || 0})` : `Local Paid (${stats?.totalLocalCustomers || stats?.totalPaidOrders || 0})`}</span>
-                            </label>
-
-                            {/* Recommendations Checkbox */}
-                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showRecommendations ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={showRecommendations} 
-                                    onChange={(e) => setShowRecommendations(e.target.checked)} 
-                                    className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
-                                />
-                                <span className="w-2.5 h-2.5 rounded-xs bg-purple-500 border border-black dark:border-white" />
-                                <Target className="w-3.5 h-3.5 text-purple-500" />
-                                <span>{isAr ? `التوصيات (${stats?.totalRecommendations ?? (stats?.signupGrowth?.reduce((acc, row) => acc + (row.recommendationsCount || 0), 0) || 0)})` : `Signals (${stats?.totalRecommendations ?? (stats?.signupGrowth?.reduce((acc, row) => acc + (row.recommendationsCount || 0), 0) || 0)})`}</span>
-                            </label>
-
-                            {/* EGX30 Index Checkbox */}
-                            <label className={`flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-xs border-2 border-black dark:border-white select-none transition-all ${showEgx30 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 opacity-60'}`}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={showEgx30} 
-                                    onChange={(e) => setShowEgx30(e.target.checked)} 
-                                    className="w-3.5 h-3.5 accent-emerald-600 cursor-pointer"
-                                />
-                                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 border border-black dark:border-white" />
-                                <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>{isAr ? `مؤشر EGX 30${stats?.currentEgx30 ? ` (${Number(stats.currentEgx30).toLocaleString("en-US")})` : ""}` : `EGX 30${stats?.currentEgx30 ? ` (${Number(stats.currentEgx30).toLocaleString("en-US")})` : ""}`}</span>
-                            </label>
+                            {/* Timeframe Selector */}
+                            <div className="flex border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-0.5">
+                                {([14, 30, 90] as const).map((days) => (
+                                    <button
+                                        key={days}
+                                        type="button"
+                                        onClick={() => setChartDays(days)}
+                                        className={`px-2 py-1 text-[11px] font-black cursor-pointer ${
+                                            chartDays === days
+                                                ? "bg-black text-white dark:bg-white dark:text-black"
+                                                : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        {days === 90 ? (isAr ? "90 يوم" : "90d") : isAr ? `${days} يوم` : `${days}d`}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
+
+                    {/* Clean Legend Strip for the Active Tab */}
+                    <div className="flex flex-wrap items-center gap-4 mb-3 px-2 py-1.5 bg-white dark:bg-zinc-950 border border-black/15 dark:border-white/15 text-[11px] font-black">
+                        {chartTab === "growth" && (
+                            <>
+                                <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                                    <span className="w-3 h-3 bg-blue-500 inline-block" />
+                                    {isAr ? "المسجلون الجدد (أعمدة)" : "New Signups (Bars)"}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400">
+                                    <span className="w-4 h-0.5 bg-cyan-400 inline-block" />
+                                    {isAr ? "المستخدمون النشطون يومياً (خط)" : "Daily Active Users (Line)"}
+                                </span>
+                            </>
+                        )}
+                        {chartTab === "paid" && (
+                            <>
+                                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                                    <span className="w-3 h-3 bg-amber-400 inline-block" />
+                                    {isAr
+                                        ? `بوابة الدفع EasyKash / Kashier (${stats?.totalGatewayCustomers ?? 0})`
+                                        : `Payment Gateway (${stats?.totalGatewayCustomers ?? 0})`}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                                    <span className="w-3 h-3 bg-emerald-500 inline-block" />
+                                    {isAr
+                                        ? `كاش يدوي فودافون / إنستاباي / تليجرام (${stats?.totalCashCustomers ?? 0})`
+                                        : `Manual Cash (${stats?.totalCashCustomers ?? 0})`}
+                                </span>
+                            </>
+                        )}
+                        {chartTab === "market" && (
+                            <>
+                                <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
+                                    <span className="w-3 h-3 bg-purple-500 inline-block" />
+                                    {isAr
+                                        ? `التوصيات الصادرة (${stats?.totalRecommendations ?? 0})`
+                                        : `Signals (${stats?.totalRecommendations ?? 0})`}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                                    <span className="w-4 h-0.5 bg-emerald-500 inline-block" />
+                                    {isAr
+                                        ? `مؤشر EGX 30${stats?.currentEgx30 ? ` (${Number(stats.currentEgx30).toLocaleString("en-US")})` : ""}`
+                                        : `EGX 30${stats?.currentEgx30 ? ` (${Number(stats.currentEgx30).toLocaleString("en-US")})` : ""}`}
+                                </span>
+                            </>
+                        )}
+                    </div>
+
                     {statsLoading ? (
                         <div className="h-56 flex items-center justify-center text-xs font-bold text-zinc-400">Loading chart...</div>
                     ) : (
-                        <div className="h-64 sm:h-56 min-w-0 w-full pt-2" dir="ltr">
+                        <div className="h-64 min-w-0 w-full pt-2" dir="ltr">
                             <ResponsiveContainer width="100%" height="100%">
-                                <ComposedChart data={growthChartData} margin={{ top: 10, right: showEgx30 ? 25 : 10, left: -20, bottom: 0 }}>
-                                    <defs>
-                                        <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
-                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                        </linearGradient>
-                                        <linearGradient id="colorPro" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
-                                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                                        </linearGradient>
-                                        <linearGradient id="colorLocal" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.45}/>
-                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                                        </linearGradient>
-                                        <linearGradient id="colorRecs" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35}/>
-                                            <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                                        </linearGradient>
-                                    </defs>
+                                <ComposedChart data={growthChartData} margin={{ top: 10, right: chartTab === "market" ? 28 : 10, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.2} />
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} minTickGap={15} />
+                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} minTickGap={12} />
                                     <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} allowDecimals={false} />
-                                    {showEgx30 && (
-                                        <YAxis 
-                                            yAxisId="right" 
-                                            orientation="right" 
-                                            axisLine={false} 
-                                            tickLine={false} 
-                                            tick={{ fontSize: 10, fill: '#10b981' }} 
-                                            domain={['dataMin - 1000', 'dataMax + 1000']} 
-                                            tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} 
+                                    {chartTab === "market" && (
+                                        <YAxis
+                                            yAxisId="right"
+                                            orientation="right"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fontSize: 10, fill: '#10b981' }}
+                                            domain={['dataMin - 1000', 'dataMax + 1000']}
+                                            tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
                                         />
                                     )}
-                                    <RechartsTooltip 
-                                        contentStyle={{ backgroundColor: '#000', border: '2px solid #fff', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }} 
-                                        itemStyle={{ color: '#fff' }} 
-                                        labelStyle={{ color: '#fbbf24', marginBottom: '4px' }} 
-                                        cursor={{ stroke: '#52525b', strokeWidth: 1, strokeDasharray: '3 3' }}
+                                    <RechartsTooltip
+                                        contentStyle={{ backgroundColor: '#000', border: '2px solid #fff', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}
+                                        itemStyle={{ color: '#fff' }}
+                                        labelStyle={{ color: '#fbbf24', marginBottom: '4px' }}
+                                        cursor={{ fill: 'rgba(255,255,255,0.06)' }}
                                         formatter={(value: any, name: any) => {
-                                            if (name === "activeUsers") return [markPartial(value), isAr ? "المستخدمون النشطون" : "Active users"];
-                                            if (name === "proCount") return [value, isAr ? "مشتركون Pro جدد" : "New Pro"];
-                                            if (name === "totalPro") return [value, isAr ? "إجمالي المشتركين Pro" : "Total Pro"];
-                                            if (name === "localCount") return [value, isAr ? "عملاء لوكال / كاش جدد" : "New Local Paid"];
-                                            if (name === "totalLocal") return [value, isAr ? "إجمالي عملاء لوكال" : "Total Local Paid"];
+                                            if (name === "activeUsers") return [markPartial(value), isAr ? "المستخدمون النشطون" : "Active Users"];
+                                            if (name === "gatewayPaidCount") return [value, isAr ? "اشتراك بوابة الدفع" : "Gateway Paid"];
+                                            if (name === "cashPaidCount") return [value, isAr ? "اشتراك كاش يدوي" : "Manual Cash"];
                                             if (name === "recommendationsCount") return [value, isAr ? "توصيات صادرة" : "Recommendations"];
                                             if (name === "egx30") return [value != null ? `${Number(value).toLocaleString("en-US")} ${isAr ? "نقطة" : "pts"}` : "—", isAr ? "مؤشر EGX 30" : "EGX 30 Index"];
                                             return [value, isAr ? "المسجلون الجدد" : "New Signups"];
                                         }}
                                     />
-                                    {showSignups && (
-                                        <Area yAxisId="left" type="monotone" dataKey="count" name="count" stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#colorCount)" activeDot={{ r: 5, strokeWidth: 0, fill: '#fff' }} />
+                                    {chartTab === "growth" && (
+                                        <>
+                                            <Bar yAxisId="left" dataKey="count" name="count" fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={24} />
+                                            <Line yAxisId="left" type="monotone" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={{ r: 2.5, fill: '#06b6d4' }} connectNulls={false} activeDot={{ r: 5 }} isAnimationActive={false} />
+                                        </>
                                     )}
-                                    {showPro && (
-                                        <Area yAxisId="left" type="monotone" dataKey="proCount" name="proCount" stroke="#f59e0b" strokeWidth={2.5} fillOpacity={1} fill="url(#colorPro)" activeDot={{ r: 5, strokeWidth: 0, fill: '#f59e0b' }} />
+                                    {chartTab === "paid" && (
+                                        <>
+                                            <Bar yAxisId="left" stackId="paid" dataKey="gatewayPaidCount" name="gatewayPaidCount" fill="#f59e0b" radius={[0, 0, 0, 0]} maxBarSize={28} />
+                                            <Bar yAxisId="left" stackId="paid" dataKey="cashPaidCount" name="cashPaidCount" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                                        </>
                                     )}
-                                    {showLocal && (
-                                        <Area yAxisId="left" type="monotone" dataKey="localCount" name="localCount" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorLocal)" activeDot={{ r: 5, strokeWidth: 0, fill: '#10b981' }} />
-                                    )}
-                                    {showRecommendations && (
-                                        <Area yAxisId="left" type="monotone" dataKey="recommendationsCount" name="recommendationsCount" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#colorRecs)" activeDot={{ r: 5, strokeWidth: 0, fill: '#a855f7' }} />
-                                    )}
-                                    {showActiveUsers && (
-                                        <Line yAxisId="left" type="linear" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={false} connectNulls={false} activeDot={{ r: 4 }} isAnimationActive={false} />
-                                    )}
-                                    {showEgx30 && (
-                                        <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 4, strokeWidth: 0, fill: '#10b981' }} />
+                                    {chartTab === "market" && (
+                                        <>
+                                            <Bar yAxisId="left" dataKey="recommendationsCount" name="recommendationsCount" fill="#a855f7" radius={[3, 3, 0, 0]} maxBarSize={24} />
+                                            <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 5, fill: '#10b981' }} />
+                                        </>
                                     )}
                                 </ComposedChart>
                             </ResponsiveContainer>

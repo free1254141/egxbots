@@ -11,7 +11,7 @@ import StockLogo from "@/components/StockLogo";
 import HistoricalSimilarity from "@/components/HistoricalSimilarity";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { TradeTimeline } from "@/app/admin/components/TradeTimeline";
 import TradingViewChart from "@/components/TradingViewChartDynamic";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -19,6 +19,9 @@ import RecommendationsTable from "@/components/RecommendationsTable";
 import { requestShortSwings } from "@/lib/short-swings-client";
 import TelegramServiceToggle from "@/components/TelegramServiceToggle";
 import { useNotification } from "@/contexts/NotificationContext";
+import { useMarket } from "@/contexts/MarketContext";
+import { useTelegramPro } from "@/contexts/TelegramProContext";
+import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 import { 
     ResponsiveContainer, 
     LineChart as RechartsLineChart, 
@@ -40,10 +43,15 @@ import {
 
 // Helper component to fetch and display EGX30 comparison
 const Egx30Comparison = ({ start, end, botReturn }: { start: string, end: string, botReturn: number }) => {
+    const { isSaudi } = useMarket();
     const [egxReturn, setEgxReturn] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (isSaudi) {
+            setLoading(false);
+            return;
+        }
         let isMounted = true;
         setLoading(true);
         fetch(`/api/egx30/range?start=${start}&end=${end}`)
@@ -57,8 +65,9 @@ const Egx30Comparison = ({ start, end, botReturn }: { start: string, end: string
             .finally(() => { if (isMounted) setLoading(false); });
         
         return () => { isMounted = false; };
-    }, [start, end]);
+    }, [start, end, isSaudi]);
 
+    if (isSaudi) return null;
     if (loading) return <span className="text-zinc-600 animate-pulse">vs EGX30: ...</span>;
     if (egxReturn === null) return null;
 
@@ -309,6 +318,9 @@ const getBacktestSettings = (bt: Backtest) => {
 function TelegramNotificationCard() {
     const { language } = useLanguage();
     const isAr = language === "ar";
+    const { isSaudi } = useMarket();
+    const { invite: proInvite } = useTelegramPro();
+    const router = useRouter();
     const {
         telegramLinked,
         loading,
@@ -324,8 +336,38 @@ function TelegramNotificationCard() {
 
 
     const joinChannel = () => {
+        if (isSaudi) {
+            if (proInvite.is_pro) {
+                window.open(proInvite.saudi_invite_link || SAUDI_VIP_TELEGRAM_WEB_URL, "_blank");
+            } else {
+                router.push("/pricing");
+            }
+            return;
+        }
         window.open("https://t.me/egxbots/153", "_blank");
     };
+
+    const cardTitle = isSaudi
+        ? (isAr ? "قناة تليجرام VIP للسوق السعودي (تاسي)" : "Saudi Market (TASI) VIP Telegram Channel")
+        : (isAr ? "تابع الإشارات الفنية والتقارير على تليجرام" : "Follow technical signals & reports on Telegram");
+
+    const cardDescription = isSaudi
+        ? (proInvite.is_pro
+            ? (isAr
+                ? "تنبيهات السوق السعودي الفورية وتوصيات النماذج متاحة حصرياً لمشتركي باقة PRO عبر قناة VIP السعودية"
+                : "Instant Saudi market alerts and model signals are available exclusively for PRO subscribers in the Saudi VIP channel")
+            : (isAr
+                ? "السوق السعودي متاح عبر قناة VIP الخاصة بمشتركي PRO فقط (لا توجد قناة مجانية لتاسي) — اشترك الآن للانضمام"
+                : "Saudi market signals are only available in the PRO VIP channel (no free TASI channel) — upgrade to join"))
+        : (isAr
+            ? "اشترك في القناة الرسمية لتلقي التنبيهات الفنية ومؤشرات النماذج والتقارير الإحصائية فور صدورها"
+            : "Join our official channel to receive daily algorithmic signals, alerts, and market reports instantly");
+
+    const buttonLabel = isSaudi
+        ? (proInvite.is_pro
+            ? (isAr ? "دخول قناة VIP السعودية" : "Open Saudi VIP Channel")
+            : (isAr ? "ترقية إلى PRO للانضمام" : "Upgrade to PRO to Join"))
+        : (isAr ? "الانضمام للقناة" : "Join Channel");
 
     return (
         <div className="border-4 border-black dark:border-white bg-zinc-950 p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
@@ -338,12 +380,10 @@ function TelegramNotificationCard() {
                     </div>
                     <div className="min-w-0">
                         <h3 className="text-sm font-black text-white uppercase tracking-tight">
-                            {isAr ? "تابع الإشارات الفنية والتقارير على تليجرام" : "Follow technical signals & reports on Telegram"}
+                            {cardTitle}
                         </h3>
                         <p className="mt-1 text-[10px] text-zinc-400 font-medium leading-relaxed">
-                            {isAr
-                                ? "اشترك في القناة الرسمية لتلقي التنبيهات الفنية ومؤشرات النماذج والتقارير الإحصائية فور صدورها"
-                                : "Join our official channel to receive daily algorithmic signals, alerts, and market reports instantly"}
+                            {cardDescription}
                         </p>
                     </div>
                 </div>
@@ -352,7 +392,7 @@ function TelegramNotificationCard() {
                     onClick={joinChannel}
                     className="inline-flex h-10 w-full items-center justify-center gap-2 border-2 border-amber-400 bg-amber-400 text-black font-black uppercase text-xs shadow-[2px_2px_0px_rgba(0,0,0,1)] hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[3px_3px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all duration-100"
                 >
-                    <span>{isAr ? "الانضمام للقناة" : "Join Channel"}</span>
+                    <span>{buttonLabel}</span>
                 </button>
             </div>
 
@@ -363,6 +403,7 @@ function TelegramNotificationCard() {
 export default function AIScannerPage() {
     const { user, loading: authLoading } = useAuth();
     const { t, language } = useLanguage();
+    const { market, isSaudi } = useMarket();
     const searchParams = useSearchParams();
 
     const tabParam = searchParams.get("tab");
@@ -371,9 +412,9 @@ export default function AIScannerPage() {
     // Start the selected short-trades request alongside page initialization.
     useEffect(() => {
         if (tabParam === "short_swings" && !authLoading) {
-            void requestShortSwings(user?.id || "anonymous").catch(() => {});
+            void requestShortSwings(user?.id || "anonymous", false, market).catch(() => {});
         }
-    }, [tabParam, authLoading, user?.id]);
+    }, [tabParam, authLoading, user?.id, market]);
 
     // SaaS Subscription State
     const [isPro, setIsPro] = useState(false);
@@ -621,6 +662,31 @@ export default function AIScannerPage() {
         setModelsLoading(true);
         setModelsError(null);
         try {
+            if (isSaudi) {
+                const res = await fetch("/api/saudi/backtests");
+                if (!res.ok) throw new Error("Failed to load Saudi model cards");
+                const payload = await res.json();
+                const saudiModels = (payload?.models || []).map((row: any) => {
+                    const meta = row.metadata || {};
+                    const name = row.name || row.model_name || "";
+                    return {
+                        ...row,
+                        name,
+                        model_name: name,
+                        exchange: row.exchange || "TADAWUL",
+                        accuracy: row.accuracy,
+                        ...meta,
+                    };
+                }).filter((m: any) => {
+                    const name = (m.name || m.model_name || "").toUpperCase();
+                    if (name.includes("CRYPTO") || name.includes("COUNCIL") || name.includes("VALIDATOR") || name.includes("ADVISOR")) return false;
+                    if (m.model_type === "council_validator") return false;
+                    return true;
+                });
+                setModelCards(saudiModels as unknown as LocalModel[]);
+                return;
+            }
+
             const { data, error } = await supabase
                 .from("model_metadata")
                 .select("name, exchange, accuracy, metadata")
@@ -663,6 +729,13 @@ export default function AIScannerPage() {
         setBacktestsLoading(true);
         setBacktestsError(null);
         try {
+            if (isSaudi) {
+                const res = await fetch("/api/saudi/backtests");
+                if (!res.ok) throw new Error("Failed to load Saudi backtests");
+                const payload = await res.json();
+                setBacktests(payload?.backtests || []);
+                return;
+            }
             const data = await getBacktests();
             setBacktests(data || []);
         } catch (err: any) {
@@ -684,18 +757,20 @@ export default function AIScannerPage() {
     }, [activeTab, user?.id]);
 
     useEffect(() => {
-        if ((activeTab === "bots" || activeTab === "backtests") && modelsFetchedForUser.current !== (user?.id ?? null)) {
-            modelsFetchedForUser.current = user?.id ?? null;
+        const key = `${user?.id ?? "anon"}:${market}`;
+        if ((activeTab === "bots" || activeTab === "backtests") && modelsFetchedForUser.current !== key) {
+            modelsFetchedForUser.current = key;
             fetchModelCards();
         }
-    }, [activeTab, user?.id]);
+    }, [activeTab, user?.id, market]);
 
     useEffect(() => {
-        if (activeTab === "backtests" && backtestsFetchedForUser.current !== (user?.id ?? null)) {
-            backtestsFetchedForUser.current = user?.id ?? null;
+        const key = `${user?.id ?? "anon"}:${market}`;
+        if (activeTab === "backtests" && backtestsFetchedForUser.current !== key) {
+            backtestsFetchedForUser.current = key;
             fetchBacktestsList();
         }
-    }, [activeTab, user?.id]);
+    }, [activeTab, user?.id, market]);
 
     // Handle Subscribe
     const handleSubscribe = async (botId: string) => {
@@ -747,25 +822,29 @@ export default function AIScannerPage() {
         }
     };
 
-    // Unique model names in Egypt backtests for the filter dropdown
+    // Unique model names in current market backtests for the filter dropdown
     const uniqueBacktestModels = useMemo(() => {
         const models = new Set<string>();
         backtests.forEach(b => {
             const ex = b.exchange?.toUpperCase();
-            const isEgypt = (b.is_public === true) && (ex === "EGX" || ex === "EG" || ex === "CA");
-            if (isEgypt && b.model_name) {
+            const matchesMarket = isSaudi
+                ? (b.is_public !== false) && (!ex || ex === "TADAWUL" || ex === "TASI" || ex === "SA" || ex === "SAUDI")
+                : (b.is_public === true) && (ex === "EGX" || ex === "EG" || ex === "CA");
+            if (matchesMarket && b.model_name) {
                 models.add(b.model_name.replace(".pkl", ""));
             }
         });
         return Array.from(models).sort();
-    }, [backtests]);
+    }, [backtests, isSaudi]);
 
-    // Filtered and Sorted Backtests - ONLY Egypt (EGX)
+    // Filtered and Sorted Backtests for current market
     const egxBacktests = useMemo(() => {
         let list = backtests.filter(b => {
             const ex = b.exchange?.toUpperCase();
-            const isEgypt = (b.is_public === true) && (ex === "EGX" || ex === "EG" || ex === "CA");
-            if (!isEgypt) return false;
+            const matchesMarket = isSaudi
+                ? (b.is_public !== false) && (!ex || ex === "TADAWUL" || ex === "TASI" || ex === "SA" || ex === "SAUDI")
+                : (b.is_public === true) && (ex === "EGX" || ex === "EG" || ex === "CA");
+            if (!matchesMarket) return false;
 
             // Model Filter
             if (backtestModelFilter !== "All") {

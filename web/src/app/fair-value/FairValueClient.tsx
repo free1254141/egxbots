@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import type {
   FairValueReport,
   FairValueStockItem,
@@ -36,7 +37,8 @@ type QuickPreset =
   | "graham_only"
   | "low_rsi_undervalued";
 
-const POPULAR_SEARCH_SYMBOLS = ["COMI", "TMGH", "SWDY", "FWRY", "ABUK", "FAIT", "EKHO", "ORHD"];
+const EGX_POPULAR_SEARCH_SYMBOLS = ["COMI", "TMGH", "SWDY", "FWRY", "ABUK", "FAIT", "EKHO", "ORHD"];
+const TASI_POPULAR_SEARCH_SYMBOLS = ["2222", "1120", "2010", "7010", "1180", "1211", "4013", "2082"];
 
 export default function FairValueClient({
   initialReport = null,
@@ -45,6 +47,9 @@ export default function FairValueClient({
 }) {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { market, isSaudi, currencyLabel, currencyCode } = useMarket();
+  const curr = isAr ? currencyLabel : currencyCode;
+  const popularSearchSymbols = isSaudi ? TASI_POPULAR_SEARCH_SYMBOLS : EGX_POPULAR_SEARCH_SYMBOLS;
 
   const [report, setReport] = useState<FairValueReport | null>(initialReport);
   const [loading, setLoading] = useState(!initialReport);
@@ -65,9 +70,15 @@ export default function FairValueClient({
   const [showAllRows, setShowAllRows] = useState(false);
 
   useEffect(() => {
-    if (initialReport) {
+    if (initialReport && (initialReport.market ?? "egx") === market) {
+      setReport(initialReport);
+      setError(null);
+      setLoading(false);
+      setSectorFilter("all");
       if (initialReport.stocks?.length) {
         setSelectedChartStock(initialReport.stocks[0]);
+      } else {
+        setSelectedChartStock(null);
       }
       return;
     }
@@ -75,14 +86,14 @@ export default function FairValueClient({
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch("/api/market/fair-value");
+        setError(null);
+        const res = await fetch(`/api/market/fair-value?market=${market}`);
         if (!res.ok) throw new Error(isAr ? "تعذر تحميل بيانات السعر العادل" : "Failed to load fair value data");
         const data: FairValueReport = await res.json();
         if (active) {
           setReport(data);
-          if (data.stocks?.length) {
-            setSelectedChartStock(data.stocks[0]);
-          }
+          setSectorFilter("all");
+          setSelectedChartStock(data.stocks?.[0] ?? null);
         }
       } catch (err: any) {
         if (active) setError(err?.message || (isAr ? "حدث خطأ غير متوقع" : "Unexpected error occurred"));
@@ -94,7 +105,7 @@ export default function FairValueClient({
     return () => {
       active = false;
     };
-  }, [initialReport, isAr]);
+  }, [initialReport, market, isAr]);
 
   const valuationZones = useMemo(() => {
     const stocks = report?.stocks || [];
@@ -295,12 +306,14 @@ export default function FairValueClient({
                 <Scale className="w-3.5 h-3.5" />
                 <span>
                   {isAr
-                    ? "محرك التقييم المالي والكمي (3-Tier Engine) — تحديث يومي بعد إغلاق الجلسة"
-                    : "3-Tier Valuation Engine (Graham & Multiples) — Updated Daily Post-Close"}
+                    ? `محرك التقييم المالي والكمي (${isSaudi ? "تاسي TASI" : "EGX"}) — تحديث يومي بعد إغلاق الجلسة`
+                    : `3-Tier Valuation Engine (${isSaudi ? "TASI" : "EGX"}) — Updated Daily Post-Close`}
                 </span>
               </div>
               <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-zinc-950 dark:text-white">
-                {isAr ? "محدد السعر العادل ومؤشر الرخص" : "Fair Value Screener & Margin of Safety"}{" "}
+                {isAr
+                  ? `محدد السعر العادل ومؤشر الرخص ${isSaudi ? "للسوق السعودي" : ""}`
+                  : `Fair Value Screener & Margin of Safety ${isSaudi ? "(TASI)" : ""}`}{" "}
                 <span className="text-emerald-600 dark:text-emerald-400 font-mono text-xl sm:text-3xl">
                   (Fair Value Screener)
                 </span>
@@ -308,7 +321,7 @@ export default function FairValueClient({
               <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-300 leading-relaxed">
                 {isAr ? (
                   <>
-                    تقييم شامل لجميع أسهم البورصة المصرية النشطة يدمج{" "}
+                    تقييم شامل لجميع أسهم {isSaudi ? "السوق السعودي (تاسي TASI)" : "البورصة المصرية"} النشطة يدمج{" "}
                     <strong className="text-zinc-950 dark:text-white">معادلة بنجامين جراهام</strong>{" "}
                     مع{" "}
                     <strong className="text-zinc-950 dark:text-white">
@@ -318,7 +331,7 @@ export default function FairValueClient({
                   </>
                 ) : (
                   <>
-                    Comprehensive valuation of all active EGX stocks blending{" "}
+                    Comprehensive valuation of all active {isSaudi ? "Saudi TASI" : "EGX"} stocks blending{" "}
                     <strong className="text-zinc-950 dark:text-white">Benjamin Graham Formula</strong>{" "}
                     with{" "}
                     <strong className="text-zinc-950 dark:text-white">Sector P/E & P/B Multiples</strong>{" "}
@@ -368,7 +381,11 @@ export default function FairValueClient({
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={
                   isAr
-                    ? "ابحث باسم الشركة أو الرمز... (مثال: طلعت مصطفى، TMGH، السويدي، SWDY، فوري، أبو قير)"
+                    ? isSaudi
+                      ? "ابحث باسم الشركة أو الرمز... (مثال: أرامكو، 2222، الراجحي، 1120، سابك، 2010، stc)"
+                      : "ابحث باسم الشركة أو الرمز... (مثال: طلعت مصطفى، TMGH، السويدي، SWDY، فوري، أبو قير)"
+                    : isSaudi
+                    ? "Search by company name or ticker... (e.g. 2222, 1120, 2010, 7010, Aramco, Al Rajhi)"
                     : "Search by company name or ticker... (e.g. TMGH, SWDY, FWRY, COMI, ABUK)"
                 }
                 className={`w-full h-13 ${isAr ? "pr-12 pl-12" : "pl-12 pr-12"} rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400 font-bold text-sm sm:text-base focus:outline-none focus:border-emerald-500 dark:focus:border-emerald-400 shadow-sm transition-all`}
@@ -390,7 +407,7 @@ export default function FairValueClient({
               <span className="text-zinc-500 dark:text-zinc-400 font-bold shrink-0">
                 {isAr ? "⚡ بحث سريع:" : "⚡ Popular:"}
               </span>
-              {POPULAR_SEARCH_SYMBOLS.map((sym) => (
+              {popularSearchSymbols.map((sym) => (
                 <button
                   key={sym}
                   type="button"
@@ -504,7 +521,11 @@ export default function FairValueClient({
                 </h3>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   {isAr
-                    ? "دليل توضيحي يفسر سبب اختلاف الأرقام المحافظة عن تقارير بلتون، هيرميس، وسي آي كابيتال"
+                    ? isSaudi
+                      ? "دليل توضيحي يفسر سبب اختلاف الأرقام المحافظة عن تقارير بيوت الخبرة (الراجحي المالية، الأهلي المالية، الجزيرة كابيتال)"
+                      : "دليل توضيحي يفسر سبب اختلاف الأرقام المحافظة عن تقارير بلتون، هيرميس، وسي آي كابيتال"
+                    : isSaudi
+                    ? "Why our valuation numbers differ from broker reports (Al Rajhi Capital, SNB Capital, AlJazira Capital)"
                     : "Why our valuation numbers differ from broker reports (Beltone, Hermes, CI Capital)"}
                 </p>
               </div>
@@ -535,7 +556,11 @@ export default function FairValueClient({
               </div>
               <p>
                 {isAr
-                  ? "تعتمد على نماذج التدفقات النقدية المستقبلية (DCF) لـ 5 إلى 10 سنوات قادمة وتفترض إدراج صفقات وتوسعات كبرى لم تتحقق بعد (مثل مشروع رأس الحكمة لطلعت مصطفى، وتوسعات مراكز البيانات للسويدي)، وتختلف بيوت البحوث نفسها اختلافا شاسعاً فيما بينها."
+                  ? isSaudi
+                    ? "تعتمد على نماذج التدفقات النقدية المستقبلية (DCF) لـ 5 إلى 10 سنوات قادمة وتفترض إدراج عقود ومشاريع كبرى لم تتحقق بعد (مثل توسعات رؤية 2030 ومشاريع الطاقة العملاقة)، وتختلف بيوت البحوث نفسها اختلافاً شاسعاً فيما بينها."
+                    : "تعتمد على نماذج التدفقات النقدية المستقبلية (DCF) لـ 5 إلى 10 سنوات قادمة وتفترض إدراج صفقات وتوسعات كبرى لم تتحقق بعد (مثل مشروع رأس الحكمة لطلعت مصطفى، وتوسعات مراكز البيانات للسويدي)، وتختلف بيوت البحوث نفسها اختلافا شاسعاً فيما بينها."
+                  : isSaudi
+                  ? "Broker targets (Al Rajhi Capital, SNB Capital) use forward DCF models for 5-10 years projecting future expansion cash flows. Broker houses also frequently diverge significantly among themselves."
                   : "Broker targets (Beltone, Hermes, CI Capital) use forward DCF models for 5-10 years projecting future expansion cash flows (e.g. Ras El Hekma for TMGH). Broker houses also frequently diverge significantly among themselves."}
               </p>
             </div>
@@ -552,8 +577,8 @@ export default function FairValueClient({
               </div>
               <h2 className="text-lg sm:text-2xl font-black text-zinc-950 dark:text-white">
                 {isAr
-                  ? "الشارت التفاعلي لخريطة السعر العادل في البورصة المصرية"
-                  : "Interactive EGX Fair Value Map & Valuation Inspector"}
+                  ? `الشارت التفاعلي لخريطة السعر العادل في ${isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية"}`
+                  : `Interactive ${isSaudi ? "TASI" : "EGX"} Fair Value Map & Valuation Inspector`}
               </h2>
               <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                 {isAr
@@ -584,7 +609,9 @@ export default function FairValueClient({
                     : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
                 }`}
               >
-                {isAr ? "📊 توزيع شرائح السوق (254 سهم)" : "📊 Market Spectrum (254 Stocks)"}
+                {isAr
+                  ? `📊 توزيع شرائح السوق (${report?.summary?.totalEvaluated ?? 0} سهم)`
+                  : `📊 Market Spectrum (${report?.summary?.totalEvaluated ?? 0} Stocks)`}
               </button>
             </div>
           </div>
@@ -596,15 +623,15 @@ export default function FairValueClient({
                 <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-700 pb-3">
                   <div className="flex items-center gap-2">
                     <span className="px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 font-mono text-xs font-black text-zinc-900 dark:text-white">
-                      {selectedChartStock?.symbol || "COMI"}
+                      {selectedChartStock?.symbol || (isSaudi ? "2222" : "COMI")}
                     </span>
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {isAr ? selectedChartStock?.sectorAr : selectedChartStock?.sectorAr}
+                      {selectedChartStock?.sectorAr}
                     </span>
                   </div>
                   <Link
                     prefetch={false}
-                    href={`/stocks/${(selectedChartStock?.symbol || "COMI").toLowerCase()}`}
+                    href={`/stocks/${(selectedChartStock?.symbol || (isSaudi ? "2222" : "COMI")).toLowerCase()}`}
                     className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline"
                   >
                     <span>{isAr ? "صفحة السهم" : "View Stock"}</span>
@@ -627,7 +654,7 @@ export default function FairValueClient({
                       {isAr ? "سعر الإغلاق الحالي" : "Current Price"}
                     </div>
                     <div className="text-xl font-black font-mono text-zinc-950 dark:text-white mt-0.5">
-                      {selectedChartStock?.currentPrice.toFixed(2)} {isAr ? "ج.م" : "EGP"}
+                      {selectedChartStock?.currentPrice.toFixed(2)} {curr}
                     </div>
                   </div>
 
@@ -636,7 +663,7 @@ export default function FairValueClient({
                       {isAr ? "السعر العادل المحسوب" : "Calculated Fair Value"}
                     </div>
                     <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      {selectedChartStock?.fairValue.toFixed(2)} {isAr ? "ج.م" : "EGP"}
+                      {selectedChartStock?.fairValue.toFixed(2)} {curr}
                     </div>
                   </div>
                 </div>
@@ -735,9 +762,9 @@ export default function FairValueClient({
                           </div>
 
                           <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-mono">
-                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} ج.م</span>
+                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {curr}</span>
                             <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} ج.م
+                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {curr}
                             </span>
                           </div>
                         </div>
@@ -795,9 +822,9 @@ export default function FairValueClient({
                           </div>
 
                           <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-mono">
-                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} ج.م</span>
+                            <span>{isAr ? "الحالي:" : "Cur:"} {s.currentPrice.toFixed(2)} {curr}</span>
                             <span className="text-rose-600 dark:text-rose-400 font-bold">
-                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} ج.م
+                              {isAr ? "العادل:" : "Fair:"} {s.fairValue.toFixed(2)} {curr}
                             </span>
                           </div>
                         </div>
@@ -813,7 +840,11 @@ export default function FairValueClient({
               {/* Stacked Spectrum Bar */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs font-bold text-zinc-500 dark:text-zinc-400">
-                  <span>{isAr ? "طيف توزيع أسهم البورصة المصرية الكامل (254 سهماً):" : "Full EGX Valuation Distribution Spectrum (254 Stocks):"}</span>
+                  <span>
+                    {isAr
+                      ? `طيف توزيع أسهم ${isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية"} الكامل (${report?.summary?.totalEvaluated ?? 0} سهماً):`
+                      : `Full ${isSaudi ? "TASI" : "EGX"} Valuation Distribution Spectrum (${report?.summary?.totalEvaluated ?? 0} Stocks):`}
+                  </span>
                   <span>{isAr ? "اضغط على أي شريحة لتطبيق الفلتر فوراً" : "Click any segment to filter list"}</span>
                 </div>
                 <div className="h-6 rounded-xl overflow-hidden flex bg-zinc-200 dark:bg-zinc-800 p-0.5 border border-zinc-300 dark:border-zinc-700 gap-0.5">
@@ -878,7 +909,9 @@ export default function FairValueClient({
                     : "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-zinc-400"
                 }`}
               >
-                {isAr ? "الكل (254 سهم)" : "All (254 Stocks)"}
+                {isAr
+                  ? `الكل (${report?.summary?.totalEvaluated ?? 0} سهم)`
+                  : `All (${report?.summary?.totalEvaluated ?? 0} Stocks)`}
               </button>
 
               <button
@@ -939,7 +972,15 @@ export default function FairValueClient({
                 }`}
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{isAr ? "أسهم الشريعة (EGX33)" : "EGX33 Sharia Only"}</span>
+                <span>
+                  {isSaudi
+                    ? isAr
+                      ? "أسهم الشريعة (تاسي)"
+                      : "TASI Sharia Only"
+                    : isAr
+                    ? "أسهم الشريعة (EGX33)"
+                    : "EGX33 Sharia Only"}
+                </span>
               </button>
             </div>
 
@@ -996,7 +1037,13 @@ export default function FairValueClient({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {displayedStocks.map((stock) => (
-              <StockValuationCard key={stock.symbol} stock={stock} isAr={isAr} />
+              <StockValuationCard
+                key={stock.symbol}
+                stock={stock}
+                isAr={isAr}
+                isSaudi={isSaudi}
+                curr={curr}
+              />
             ))}
           </div>
 
@@ -1038,7 +1085,7 @@ export default function FairValueClient({
             <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1">
               {isAr
                 ? "كيف يتم استخراج السعر العادل لكل سهم من بيانات القوائم المالية والتداول اليومية؟"
-                : "How is the fair value calculated for each Egyptian stock from financial statements?"}
+                : `How is the fair value calculated for each ${isSaudi ? "Saudi TASI" : "Egyptian"} stock from financial statements?`}
             </p>
           </div>
 
@@ -1072,8 +1119,8 @@ export default function FairValueClient({
               </p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
                 {isAr
-                  ? "للشركات في مرحلة نمو أو إعادة هيكلة، نقارن ربحية السهم أو قيمته الدفترية بوسيط القطاع الفعلي في البورصة المصرية (بنوك، عقارات، كيماويات)."
-                  : "Benchmark against actual EGX sector medians for companies with single positive metrics."}
+                  ? `للشركات في مرحلة نمو أو إعادة هيكلة، نقارن ربحية السهم أو قيمته الدفترية بوسيط القطاع الفعلي في ${isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية"} (بنوك، بتروكيماويات، عقارات).`
+                  : `Benchmark against actual ${isSaudi ? "TASI" : "EGX"} sector medians for companies with single positive metrics.`}
               </p>
             </div>
 
@@ -1103,9 +1150,13 @@ export default function FairValueClient({
 function StockValuationCard({
   stock,
   isAr,
+  isSaudi,
+  curr,
 }: {
   stock: FairValueStockItem;
   isAr: boolean;
+  isSaudi: boolean;
+  curr: string;
 }) {
   const [openFormula, setOpenFormula] = useState(false);
 
@@ -1125,7 +1176,7 @@ function StockValuationCard({
             {stock.isSharia && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold">
                 <ShieldCheck className="w-3 h-3" />
-                <span>EGX33</span>
+                <span>{isSaudi ? (isAr ? "شرعي" : "Sharia") : "EGX33"}</span>
               </span>
             )}
             <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -1160,7 +1211,7 @@ function StockValuationCard({
             {isAr ? "السعر الحالي" : "Current Price"}
           </div>
           <div className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-0.5">
-            {stock.currentPrice.toFixed(2)} {isAr ? "ج.م" : "EGP"}
+            {stock.currentPrice.toFixed(2)} {curr}
           </div>
         </div>
 
@@ -1169,7 +1220,7 @@ function StockValuationCard({
             {isAr ? "السعر العادل" : "Fair Value Target"}
           </div>
           <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-            {stock.fairValue.toFixed(2)} {isAr ? "ج.م" : "EGP"}
+            {stock.fairValue.toFixed(2)} {curr}
           </div>
         </div>
       </div>

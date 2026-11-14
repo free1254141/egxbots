@@ -8030,6 +8030,7 @@ def get_scanner_intraday_session(
 
     return JSONResponse(content=payload)
 
+
     # 2. Check Supabase market_cache
 
     if not is_today:
@@ -8181,5 +8182,33 @@ def get_scanner_intraday_session(
     threading.Thread(target=_save_cache, daemon=True).start()
 
     return JSONResponse(content=payload)
+
+
+@app.get("/api/saudi/backtests")
+def get_saudi_backtests():
+    """Return precomputed Saudi TASI backtests and model metadata from SAUDI_SUPABASE.market_cache."""
+    from supabase import create_client
+
+    url = (os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or "").strip()
+    key = (
+        os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SAUDI_SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    if not url or not key:
+        raise HTTPException(status_code=503, detail="Saudi Supabase is not configured")
+
+    try:
+        sb = create_client(url, key)
+        res = sb.table("market_cache").select("payload").eq("cache_key", "saudi_backtests_v1").limit(1).execute()
+        rows = res.data or []
+        if rows and isinstance(rows[0].get("payload"), dict):
+            return JSONResponse(content=rows[0]["payload"])
+        return JSONResponse(content={"backtests": [], "models": [], "market": "TASI", "currency": "SAR"})
+    except Exception as exc:
+        logging.warning(f"[SAUDI_BACKTESTS] Read error: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load Saudi backtests")
+
 
 

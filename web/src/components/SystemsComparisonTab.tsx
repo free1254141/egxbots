@@ -79,21 +79,9 @@ export default function SystemsComparisonTab({
       }
       try {
         const shouldFetchMed = matchingInitialRecs.length === 0;
-        if (isSaudi) {
-          if (shouldFetchMed) {
-            const medRes = await fetch(`/api/ai_bot/recommendations?status=all&limit=200&market=${market}`, {
-              cache: "no-store",
-            }).then((r) => (r.ok ? r.json() : null));
-            if (!cancelled && Array.isArray(medRes)) {
-              setMediumRows(medRes);
-            }
-          }
-          return;
-        }
-
         const promises: Promise<any>[] = [
-          fetch("/api/short-swings", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
-          fetch("/api/user/scanner-alerts", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/short-swings?market=${market}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+          fetch(`/api/user/scanner-alerts?market=${market}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
         ];
 
         // If medium recommendations were not passed from parent, fetch them
@@ -205,17 +193,6 @@ export default function SystemsComparisonTab({
 
     // ── Helper 2: Calculate Short Swings Metrics ──
     const calcShort = (period: "august" | "september" | "full_year"): SystemMetric => {
-      if (isSaudi) {
-        return {
-          tradeCount: 0,
-          winRate: 0,
-          totalReturn: 0,
-          profitFactor: 0,
-          avgHolding: "—",
-          bestTrade: isAr ? "خاص بالسوق المصري (EGX)" : "EGX-only system",
-          summaryAr: "نظام إشارات المدى القصير (Short Swings) مخصص حالياً للسوق المصري فقط، بينما تتوفر إشارات المدى المتوسط لسوق تاسي.",
-        };
-      }
       const filtered = shortTrades.filter((t) => {
         if (period === "full_year") return true;
         const d = String(t.exit_date || t.entry_date || "");
@@ -223,6 +200,17 @@ export default function SystemsComparisonTab({
       });
 
       const trades = filtered.length > 0 ? filtered : (period === "full_year" ? shortTrades : []);
+      if (isSaudi && trades.length === 0) {
+        return {
+          tradeCount: 0,
+          winRate: 0,
+          totalReturn: 0,
+          profitFactor: 0,
+          avgHolding: "—",
+          bestTrade: isAr ? "لا توجد صفقات مسجلة بهذه الفترة في تاسي" : "No TASI trades in this period",
+          summaryAr: `إحصائيات ملاحقة التريند قصير المدى في تاسي (${currencyLabel}) تُحتسب حياً من السجل الفعلي دون خلط بيانات المصرية.`,
+        };
+      }
       const wins = trades.filter((t) => (t.status || "").toLowerCase() === "win" || (t.return_pct || 0) > 0);
       const losses = trades.filter((t) => (t.status || "").toLowerCase() === "loss" || (t.return_pct || 0) < 0);
       const winRate = trades.length > 0 ? (wins.length / trades.length) * 100 : (period === "august" ? 60.3 : period === "september" ? 49.1 : 55.8);
@@ -230,6 +218,10 @@ export default function SystemsComparisonTab({
       const grossWin = wins.reduce((sum, t) => sum + Math.max(0, t.return_pct || 0), 0);
       const grossLoss = Math.abs(losses.reduce((sum, t) => sum + Math.min(0, t.return_pct || 0), 0));
       const pf = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? (period === "august" ? 4.20 : 2.92) : 1.0);
+      const holdingSamples = trades.map((t) => Number(t.sessions_held ?? t.holding_days)).filter((v) => Number.isFinite(v) && v > 0);
+      const avgHoldingComputed = holdingSamples.length > 0
+        ? `${(holdingSamples.reduce((a, b) => a + b, 0) / holdingSamples.length).toFixed(1)} ${isAr ? "جلسات" : "sessions"}`
+        : (period === "august" ? "3.8 جلسات" : period === "september" ? "3.5 جلسات" : "4.9 جلسات");
 
       let bestTradeStr = period === "september" ? "OFH +33.8%" : "BIOC +131.6%";
       if (trades.length > 0) {
@@ -247,18 +239,24 @@ export default function SystemsComparisonTab({
         }
       }
 
-      const summaries = {
-        august: "كثافة عالية في رصد الزخم المؤسسي الصاعد؛ حقق النظام +489.2% عبر 58 إشارة مع صفقات مدوية مثل BIOC (+131.6%) عبر مسار EMA10.",
-        september: "حماية فائقة لرأس المال أثناء الهبوط؛ حد النظام من التراجعات عبر الوقف الصارم (-4%) وحقق +72.9% عبر ركوب موجات الارتداد السريع.",
-        full_year: "محرك زخم فني عالي الكفاءة يضاعف سرعة دوران السيولة (360 صفقة حية) محققاً +1410.4% مع أفق متابعة سريع (4.9 جلسات).",
-      };
+      const summaries = isSaudi
+        ? {
+            august: `نتائج ملاحقة التريند الفعلية لأسهم تاسي في أغسطس (${trades.length} صفقة · ${currencyLabel}) بنفس محرك EMA10 والوقف الصارم.`,
+            september: `أداء ملاحقة التريند في تاسي خلال سبتمبر (${trades.length} صفقة · ${currencyLabel}) مع حماية التعادل ووقف الخسارة الآلي.`,
+            full_year: `ملخص الأداء التراكمي لمحرك ملاحقة التريند في السوق السعودي تاسي (${trades.length} صفقة مغلقة بنسبة نجاح ${winRate.toFixed(1)}% وعائد تراكمي ${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(1)}%).`,
+          }
+        : {
+            august: "كثافة عالية في رصد الزخم المؤسسي الصاعد؛ حقق النظام +489.2% عبر 58 إشارة مع صفقات مدوية مثل BIOC (+131.6%) عبر مسار EMA10.",
+            september: "حماية فائقة لرأس المال أثناء الهبوط؛ حد النظام من التراجعات عبر الوقف الصارم (-4%) وحقق +72.9% عبر ركوب موجات الارتداد السريع.",
+            full_year: "محرك زخم فني عالي الكفاءة يضاعف سرعة دوران السيولة (360 صفقة حية) محققاً +1410.4% مع أفق متابعة سريع (4.9 جلسات).",
+          };
 
       return {
         tradeCount: trades.length > 0 ? trades.length : (period === "august" ? 58 : period === "september" ? 55 : 360),
         winRate: Number(winRate.toFixed(1)),
         totalReturn: Number((trades.length > 0 ? totalReturn : (period === "august" ? 489.2 : period === "september" ? 72.9 : 1410.4)).toFixed(1)),
         profitFactor: Number((pf > 0 ? pf : (period === "august" ? 4.20 : period === "september" ? 1.56 : 2.92)).toFixed(2)),
-        avgHolding: period === "august" ? "3.8 جلسات" : period === "september" ? "3.5 جلسات" : "4.9 جلسات",
+        avgHolding: avgHoldingComputed,
         bestTrade: bestTradeStr,
         summaryAr: summaries[period],
       };
@@ -266,17 +264,6 @@ export default function SystemsComparisonTab({
 
     // ── Helper 3: Calculate Fast Scanner Metrics ──
     const calcFast = (period: "august" | "september" | "full_year"): SystemMetric => {
-      if (isSaudi) {
-        return {
-          tradeCount: 0,
-          winRate: 0,
-          totalReturn: 0,
-          profitFactor: 0,
-          avgHolding: "—",
-          bestTrade: isAr ? "خاص بالسوق المصري (EGX)" : "EGX-only system",
-          summaryAr: "رادار الرصد اللحظي (15 دقيقة) يعمل حالياً على الأسهم المصرية فقط ولا يعرض صفقات غير حقيقية في وضع تاسي.",
-        };
-      }
       const getRet = (s: any) => {
         if (typeof s.return_pct === "number") return s.return_pct;
         const ex = s.exit_price ?? s.current_price;
@@ -292,8 +279,22 @@ export default function SystemsComparisonTab({
         return period === "august" ? d.includes("2026-08") : d.includes("2026-09");
       });
 
-      // If period has no intraday trades (scanner was launched in Q4), fall back to live sample proportionally
-      const trades = filtered.length > 0 ? filtered : fastSignals;
+      const trades = isSaudi
+        ? (filtered.length > 0 ? filtered : (period === "full_year" ? fastSignals : []))
+        : (filtered.length > 0 ? filtered : fastSignals);
+
+      if (isSaudi && trades.length === 0) {
+        return {
+          tradeCount: 0,
+          winRate: 0,
+          totalReturn: 0,
+          profitFactor: 0,
+          avgHolding: "—",
+          bestTrade: isAr ? "لا توجد إشارات مسجلة بهذه الفترة في تاسي" : "No TASI scanner alerts in this period",
+          summaryAr: `إشارات الرصد السريع للسوق السعودي تاسي (${currencyLabel}) تُعرض فقط من السجل الفعلي دون بيانات تقديرية.`,
+        };
+      }
+
       const wins = trades.filter((s) => getRet(s) > 0 || s.status === "target_hit");
       const losses = trades.filter((s) => getRet(s) < 0 || s.status === "stop_loss");
       const winRate = trades.length > 0 ? (wins.length / trades.length) * 100 : 61.9;
@@ -318,15 +319,25 @@ export default function SystemsComparisonTab({
         }
       }
 
-      const summaries = {
-        august: "رصد لحظي فائق الدقة على فريم 15 دقيقة؛ اقتنص موجات السيولة الصاعدة بنسبة نجاح تفوق 61.9% وتأمين فوري للتعادل عند +2.5%.",
-        september: "صلابة دفاعية نادرة أثناء هبوط السوق؛ قفل الأرباح السريعة وتأمين التعادل الآلي حمى المحفظة من أي تراجعات قاسية.",
-        full_year: "رادار لحظي على فريم 15 دقيقة يفحص السوق كل 5 دقائق؛ سجل 97 إشارة حية بنسبة نجاح 61.9% وعامل ربح 1.68x بفضل تأمين التعادل الآلي.",
-      };
+      const summaries = isSaudi
+        ? {
+            august: `إشارات الرصد السريع في تاسي خلال أغسطس (${trades.length} إشارة · ${currencyLabel}) بنفس معايير الزخم والاختراق المصرية.`,
+            september: `أداء الرصد السريع في تاسي خلال سبتمبر (${trades.length} إشارة · ${currencyLabel}) مع تأمين التعادل عند +2.5%.`,
+            full_year: `الأداء الحي للرصد السريع في السوق السعودي تاسي (${trades.length} إشارة مغلقة بنسبة نجاح ${winRate.toFixed(1)}% وعامل ربح ${pf.toFixed(2)}x).`,
+          }
+        : {
+            august: "رصد لحظي فائق الدقة على فريم 15 دقيقة؛ اقتنص موجات السيولة الصاعدة بنسبة نجاح تفوق 61.9% وتأمين فوري للتعادل عند +2.5%.",
+            september: "صلابة دفاعية نادرة أثناء هبوط السوق؛ قفل الأرباح السريعة وتأمين التعادل الآلي حمى المحفظة من أي تراجعات قاسية.",
+            full_year: "رادار لحظي على فريم 15 دقيقة يفحص السوق كل 5 دقائق؛ سجل 97 إشارة حية بنسبة نجاح 61.9% وعامل ربح 1.68x بفضل تأمين التعادل الآلي.",
+          };
 
       const scale = period === "august" ? 0.5 : period === "september" ? 0.35 : 1.0;
-      const computedTradeCount = filtered.length > 0 ? filtered.length : Math.round(97 * scale);
-      const computedReturn = filtered.length > 0 ? totalReturn : Number((71.1 * scale).toFixed(1));
+      const computedTradeCount = isSaudi
+        ? trades.length
+        : (filtered.length > 0 ? filtered.length : Math.round(97 * scale));
+      const computedReturn = isSaudi
+        ? totalReturn
+        : (filtered.length > 0 ? totalReturn : Number((71.1 * scale).toFixed(1)));
 
       return {
         tradeCount: computedTradeCount,
@@ -416,10 +427,15 @@ export default function SystemsComparisonTab({
       </div>
 
       {isSaudi && (
-        <div className="border-3 border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 p-3 sm:p-4 text-xs font-bold text-emerald-950 dark:text-emerald-200">
-          {isAr
-            ? `🇸🇦 وضع السوق السعودي (تاسي · ${currencyLabel}): يتم عرض إحصائيات صفقات المدى المتوسط المسجلة في تاسي فقط. أنظمة المدى القصير والرادار اللحظي (15 دقيقة) تعمل حالياً في وضع البورصة المصرية.`
-            : `🇸🇦 Saudi Market Mode (TASI · ${currencyLabel}): Showing verified Tadawul Medium-Term recommendation stats only. Short-Swings and 15m Intraday Fast Radar are currently active for EGX.`}
+        <div className="border-3 border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 p-3 sm:p-4 text-xs font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-2 flex-wrap">
+          <span className="px-1.5 py-0.5 rounded bg-black text-[#FFE600] text-[10px] font-black uppercase tracking-wider">
+            BETA
+          </span>
+          <span>
+            {isAr
+              ? `🇸🇦 وضع السوق السعودي (تاسي · ${currencyLabel}): يتم عرض الإحصائيات الحية الفعلية لجميع الأنظمة الثلاثة (المدى المتوسط، ملاحقة التريند قصير المدى، والرصد السريع) في تاسي دون خلط بيانات السوق المصري.`
+              : `🇸🇦 Saudi Market Mode (TASI · ${currencyLabel}): Showing live empirical Tadawul stats across all 3 trading systems (Medium-Term, Short-Swings Momentum, and Fast Radar) isolated cleanly from EGX.`}
+          </span>
         </div>
       )}
 

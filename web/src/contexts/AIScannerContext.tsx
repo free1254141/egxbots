@@ -1,6 +1,8 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 import { scanAiFastWithParams, evaluateScan, getPublicScanSettings, type ScanAiParams, type ScanResult } from "@/lib/api";
 import type { PredictResponse } from "@/lib/types";
 import { createSupabaseBrowserClient, createMarketSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -131,7 +133,7 @@ interface AIScannerContextType {
     recommendations: any[];
     recsLoading: boolean;
     recsError: string | null;
-    loadRecommendations: (isLandingPage?: boolean, force?: boolean, requestedLimit?: number) => Promise<void>;
+    loadRecommendations: (isLandingPage?: boolean, force?: boolean, requestedLimit?: number, explicitMarket?: ActiveMarket) => Promise<void>;
 }
 
 const DEFAULT_STATE: AiScannerState = {
@@ -902,8 +904,25 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         });
     }, []);
 
-    const loadRecommendations = useCallback(async (isLandingPage: boolean = false, force: boolean = false, requestedLimit?: number) => {
-        const currentMarket = activeMarketRef.current;
+    const rowMatchesMarket = (row: any, targetMarket: ActiveMarket): boolean => {
+        if (!row || row.locked === true) return true;
+        const ex = String(row.exchange || "").toUpperCase();
+        const cur = String(row.currency || "").toUpperCase();
+        const sym = String(row.symbol || "").trim().toUpperCase().split(".")[0];
+        const rowIsSaudi = cur === "SAR" || ex === "TADAWUL" || ex === "TASI" || (/^\d{4}$/.test(sym) && cur !== "EGP" && ex !== "EGX");
+        return targetMarket === "tasi" ? rowIsSaudi : !rowIsSaudi;
+    };
+
+    const loadRecommendations = useCallback(async (isLandingPage: boolean = false, force: boolean = false, requestedLimit?: number, explicitMarket?: ActiveMarket) => {
+        const currentMarket = explicitMarket ?? activeMarketRef.current ?? readStoredMarket();
+        if (explicitMarket && explicitMarket !== activeMarketRef.current) {
+            activeMarketRef.current = explicitMarket;
+            setActiveMarket(explicitMarket);
+            recommendationsReqVersionRef.current += 1;
+            recommendationsInFlightRef.current = null;
+            setRecommendations([]);
+            setRecsError(null);
+        }
         const userId = user?.id ?? null;
         const sameViewer = recommendationsUserRef.current === userId;
         const sameMarket = recommendationsMarketRef.current === currentMarket;
@@ -911,14 +930,15 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return;
         }
         const isPublicScope = !userId || isLandingPage;
-        const recsSessionKey = `egxbots_ai_recs_v3:${currentMarket}:${isPublicScope ? "pub" : userId}:${isLandingPage ? "landing" : "full"}:${requestedLimit ?? "default"}`;
+        const recsSessionKey = `egxbots_ai_recs_v4:${currentMarket}:${isPublicScope ? "pub" : userId}:${isLandingPage ? "landing" : "full"}:${requestedLimit ?? "default"}`;
         if (!force && typeof window !== "undefined") {
             try {
                 const rawCached = window.sessionStorage.getItem(recsSessionKey);
                 if (rawCached) {
                     const parsed = JSON.parse(rawCached) as { ts: number; data: any[] };
                     if (parsed?.ts && Date.now() - parsed.ts < RECOMMENDATIONS_FRESH_MS && Array.isArray(parsed.data)) {
-                        setRecommendations(parsed.data);
+                        const marketScopedCache = parsed.data.filter((row: any) => rowMatchesMarket(row, currentMarket));
+                        setRecommendations(marketScopedCache);
                         recommendationsUserRef.current = userId;
                         recommendationsMarketRef.current = currentMarket;
                         loadedLandingRef.current = isLandingPage;
@@ -1175,9 +1195,10 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     );
                 }
             }
-            // Strict Deduplication Guard
+            // Strict Deduplication & Market Isolation Guard
             const seenRecKeys = new Set<string>();
             const dedupedRecommendations = visibleRecommendations.filter((row: any) => {
+                if (!rowMatchesMarket(row, currentMarket)) return false;
                 const key = row.id || `${row.symbol}_${row.created_at}_${row.status}`;
                 if (seenRecKeys.has(key)) return false;
                 seenRecKeys.add(key);
@@ -1216,8 +1237,8 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         return runPromise;
     }, [supabase, user?.id, setRecommendations]);
 
-    // React to global market switcher events from Header/Navbar.
-    useEffect(() => {
+    // React to global market switcher events from Header/Navbar before child effects run.
+    useIsomorphicLayoutEffect(() => {
         if (typeof window === "undefined") return;
 
         const applyMarketSwitch = (nextMarket: ActiveMarket) => {

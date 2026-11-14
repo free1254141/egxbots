@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient";
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
+import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
 export const revalidate = 86400; // 24-hour cache (until next trading day run)
 
@@ -134,12 +135,14 @@ export default async function DisclosuresPage() {
   const { items, allPool, stats, analytics, priceMap } = await getInitialDisclosuresData();
 
   return (
-    <DisclosuresClient
-      initialDisclosures={items}
-      initialPool={allPool}
-      initialStats={stats}
-      initialAnalytics={analytics}
-      priceMap={priceMap}
-    />
+    <EgxOnlyGuard sectionNameAr="رادار إفصاحات البورصة المصرية" sectionNameEn="EGX Disclosures Radar">
+      <DisclosuresClient
+        initialDisclosures={items}
+        initialPool={allPool}
+        initialStats={stats}
+        initialAnalytics={analytics}
+        priceMap={priceMap}
+      />
+    </EgxOnlyGuard>
   );
 }
