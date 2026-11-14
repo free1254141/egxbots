@@ -280,8 +280,6 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if not query and not images:
         return {"ok": False, "error": "Empty message"}
-    if not query and images:
-        query = "حلل محفظتي الاستثمارية بناءً على الصورة المرفقة واستخرج الأسهم والأسعار والكميات وقدم خطة دعم ومقاومة وهدف ووقف خسارة لكل سهم"
 
     audit_user_id = user_info["linked_user_id"] or deterministic_session_uuid(f"tg-user-{tg_user_id}")
     session_id = deterministic_session_uuid(f"tg-{chat_source}-{audit_user_id}")
@@ -292,7 +290,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         room_prefix = "📢 [تليجرام التوبيك العام]"
     img_tag = "📸 [صورة] " if images else ""
-    session_title = f"{room_prefix} {img_tag}{query[:24]}"
+    title_text = query[:24] if query else ("صورة مرفقة" if images else "محادثة جديدة")
+    session_title = f"{room_prefix} {img_tag}{title_text}"
 
     if not bypass_quota and not user_info["is_admin"] and user_info["remaining"] <= 0:
         return {

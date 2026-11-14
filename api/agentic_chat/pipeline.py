@@ -445,7 +445,12 @@ async def _run_agentic_chat_stream_impl(
         vision_context_str = format_vision_context_for_prompt(vision_data)
         formatted_messages.append({"role": "system", "content": vision_context_str})
 
-        clean_user_text = message.strip() if message and message.strip() else "قم بتحليل محفظتي / الصورة المرفقة وقارنها بأسعار السوق اليوم ومستويات الدعم والمقاومة."
+        if message and message.strip():
+            clean_user_text = message.strip()
+        elif vision_symbols or vision_data.get("image_type") in ("portfolio", "chart", "table", "market_depth"):
+            clean_user_text = "تم إرفاق صورة مالية (محفظة / شارت / جدول أسعار). قم بقراءتها وتحليل البيانات الظاهرة فيها."
+        else:
+            clean_user_text = "تم إرفاق صورة."
         formatted_messages.append({"role": "user", "content": clean_user_text})
 
         if vision_symbols:

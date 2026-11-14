@@ -18,6 +18,29 @@ serve(async (req: Request) => {
         });
     }
 
+    // Binary file download relay: /file/bot<TOKEN>/<file_path>
+    const fileBotIndex = path.indexOf("/file/bot");
+    if (fileBotIndex !== -1) {
+        const filePath = path.substring(fileBotIndex);
+        const telegramFileUrl = `https://api.telegram.org${filePath}${url.search}`;
+        try {
+            const resp = await fetch(telegramFileUrl);
+            const buf = await resp.arrayBuffer();
+            return new Response(buf, {
+                status: resp.status,
+                headers: {
+                    "Content-Type": resp.headers.get("content-type") || "application/octet-stream",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            });
+        } catch (err: any) {
+            return new Response(
+                JSON.stringify({ ok: false, error: err?.message || String(err) }),
+                { status: 502, headers: { "Content-Type": "application/json" } }
+            );
+        }
+    }
+
     // Extract everything from /bot onwards
     // e.g. /functions/v1/dynamic-handler/bot123:ABC/sendMessage → /bot123:ABC/sendMessage
     const botIndex = path.indexOf("/bot");

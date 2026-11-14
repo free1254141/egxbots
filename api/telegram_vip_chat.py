@@ -1337,32 +1337,42 @@ _VIP_WORKER_SLOTS = threading.BoundedSemaphore(int(os.getenv("TELEGRAM_VIP_MAX_C
 
 def _download_telegram_file(bot_token: str, file_id: str) -> Optional[Tuple[str, str, bytes]]:
     """
-    Download a photo/document from Telegram via getFile and return (data_uri, file_path, raw_bytes).
+    Download a photo/document from Telegram via getFile (using TELEGRAM_RELAY_URL first to bypass HF firewall)
+    and return (data_uri, file_path, raw_bytes).
     """
     if not bot_token or not file_id:
         return None
     try:
-        url = f"https://api.telegram.org/bot{bot_token}/getFile"
-        resp = requests.post(url, json={"file_id": file_id}, timeout=12)
-        if resp.status_code != 200:
+        data = _call_telegram_api(bot_token, "getFile", {"file_id": file_id}, timeout=15)
+        if not data or not data.get("ok"):
+            print(f"[TELEGRAM_VIP_CHAT] getFile failed: {data}")
             return None
-        data = resp.json()
-        if not data.get("ok"):
-            return None
-        file_path = data.get("result", {}).get("file_path")
+        file_path = (data.get("result") or {}).get("file_path")
         if not file_path:
             return None
 
-        dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
-        dl_resp = requests.get(dl_url, timeout=30)
-        if dl_resp.status_code != 200:
+        relay = os.getenv("TELEGRAM_RELAY_URL", "https://api.telegram.org").strip().rstrip("/")
+        bases = [relay, "https://api.telegram.org"] if relay and relay != "https://api.telegram.org" else ["https://api.telegram.org"]
+
+        raw_bytes: Optional[bytes] = None
+        for base in bases:
+            try:
+                dl_url = f"{base}/file/bot{bot_token}/{file_path}"
+                dl_resp = requests.get(dl_url, timeout=30)
+                if dl_resp.status_code == 200 and dl_resp.content:
+                    raw_bytes = dl_resp.content
+                    break
+            except Exception as dl_err:
+                print(f"[TELEGRAM_VIP_CHAT] file download via {base[:35]} failed: {dl_err}")
+                continue
+
+        if not raw_bytes:
             return None
 
-        raw_bytes = dl_resp.content
         import base64
         b64 = base64.b64encode(raw_bytes).decode("utf-8")
         ext = file_path.lower().split(".")[-1] if "." in file_path else "jpg"
-        mime = "image/png" if ext == "png" else "image/jpeg"
+        mime = "image/png" if ext == "png" else ("image/webp" if ext == "webp" else "image/jpeg")
         data_uri = f"data:{mime};base64,{b64}"
         return data_uri, file_path, raw_bytes
     except Exception as exc:
@@ -1373,24 +1383,45 @@ def _download_telegram_file(bot_token: str, file_id: str) -> Optional[Tuple[str,
 def _upload_telegram_image_to_storage(raw_bytes: bytes, file_path: str) -> Optional[str]:
     """
     Upload image bytes to Supabase Storage bucket 'chat-images' and return public URL.
+    Uses direct REST upload with SDK fallback for 100% reliability on Hugging Face Space.
     """
     if not raw_bytes:
         return None
     try:
+        from datetime import datetime
+        ext = "png" if file_path.lower().endswith(".png") else ("webp" if file_path.lower().endswith(".webp") else "jpg")
+        mime = "image/png" if ext == "png" else ("image/webp" if ext == "webp" else "image/jpeg")
+        base_name = re.sub(r"[^a-zA-Z0-9._-]", "_", os.path.basename(file_path)) or f"img.{ext}"
+        filename = f"telegram/{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{base_name}"
+
+        sb_url = (os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or "").rstrip("/")
+        sb_key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY") or "").strip()
+
+        if sb_url and sb_key:
+            upload_url = f"{sb_url}/storage/v1/object/chat-images/{filename}"
+            resp = requests.post(
+                upload_url,
+                data=raw_bytes,
+                headers={
+                    "apikey": sb_key,
+                    "Authorization": f"Bearer {sb_key}",
+                    "Content-Type": mime,
+                    "x-upsert": "true",
+                },
+                timeout=20,
+            )
+            if resp.status_code in (200, 201):
+                return f"{sb_url}/storage/v1/object/public/chat-images/{filename}"
+
         from api.stock_ai import _init_supabase, supabase
         _init_supabase()
-        from datetime import datetime
-        ext = "png" if file_path.lower().endswith(".png") else "jpg"
-        mime = "image/png" if ext == "png" else "image/jpeg"
-        base_name = os.path.basename(file_path)
-        filename = f"telegram/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{base_name}"
         supabase.storage.from_("chat-images").upload(
             filename,
             raw_bytes,
             {"content-type": mime, "upsert": "true"}
         )
         pub_url = supabase.storage.from_("chat-images").get_public_url(filename)
-        return pub_url
+        return str(pub_url).rstrip("?") if pub_url else None
     except Exception as exc:
         print(f"[TELEGRAM_VIP_CHAT] Supabase storage upload warning: {exc}")
         return None
@@ -1447,8 +1478,7 @@ def _execute_and_reply_vip_chat_inner(
     safe_query = html.escape(query_text[:120])
     if file_id or processed_images:
         wait_text = (
-            f"📸 <b>استلمت صورة المحفظة / الشارت يا <a href=\"tg://user?id={tg_user_id}\">{safe_user}</a>!</b>\n"
-            f"🔍 <i>جاري فحص الأسهم وحساب نقاط الدعم والمقاومة والأهداف بالذكاء الاصطناعي...</i>"
+            f"⏳ <b>جاري قراءة ومعالجة الصورة المرفقة يا <a href=\"tg://user?id={tg_user_id}\">{safe_user}</a>...</b>"
         )
     else:
         wait_text = (
@@ -1900,9 +1930,6 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     if not chat_id or (not text and not has_photo):
         return False
 
-    if has_photo and not text:
-        text = "حلل محفظتي الاستثمارية بناءً على الصورة المرفقة واستخرج الأسهم والأسعار والكميات وقدم خطة دعم ومقاومة وهدف ووقف خسارة لكل سهم"
-
     tg_user_id, user_name = _extract_user_info(from_obj)
     if not tg_user_id:
         return False
@@ -1912,7 +1939,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     if msg_id and not _mark_event_processed(f"msg:{chat_id}:{msg_id}"):
         return True
 
-    clean_lower = text.lower().split("@")[0].split()[0]
+    clean_lower = text.lower().split("@")[0].split()[0] if text else ""
 
     # Quick Quota Simulation Commands for Testing (/test_limit, /test_free, /test_normal)
     if clean_lower in ("/test_limit", "/test_free", "/test_normal"):
@@ -2062,12 +2089,14 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
                     query_text = cleaned_input
         else:
             # In the Public Group Topic (1680), intelligently detect query intent!
-            detected = detect_topic_query_intent(text)
-            if not detected:
-                # Pure casual member-to-member banter in the group without any stock query -> ignore
-                return True
-            det_mode, det_query = detected
-            query_text = det_query
+            if has_photo and not text:
+                query_text = ""
+            else:
+                detected = detect_topic_query_intent(text)
+                if not detected and not has_photo:
+                    # Pure casual member-to-member banter in the group without any stock query -> ignore
+                    return True
+                query_text = detected[1] if detected else text
 
     threading.Thread(
         target=_execute_and_reply_vip_chat,

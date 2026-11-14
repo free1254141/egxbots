@@ -63,4 +63,4 @@ def test_handle_vip_chat_update_routes_photo_to_worker(mock_worker):
     assert mock_worker.called
     call_kwargs = mock_worker.call_args[1]
     assert call_kwargs["file_id"] == "high_999"
-    assert "محفظتي" in call_kwargs["query_text"]
+    assert call_kwargs["query_text"] == ""
