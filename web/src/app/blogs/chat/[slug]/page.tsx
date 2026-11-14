@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
 export const revalidate = 86400; // 24h ISR: caches on Edge CDN, zero Vercel Lambda CPU and zero Supabase reads
 
@@ -69,6 +70,7 @@ export default async function SharedChatPage({ params }: { params: Promise<{ slu
     };
 
     return (
+        <EgxOnlyGuard sectionNameAr="تحليلات الشات المنشورة" sectionNameEn="Shared AI Chat Analysis">
         <main dir="rtl" className="min-h-screen bg-[#FFE600] dark:bg-zinc-950 px-4 py-10 text-black dark:text-zinc-100">
             <script
                 type="application/ld+json"
@@ -93,5 +95,6 @@ export default async function SharedChatPage({ params }: { params: Promise<{ slu
                 </footer>
             </article>
         </main>
+        </EgxOnlyGuard>
     );
 }

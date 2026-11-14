@@ -393,12 +393,28 @@ export default function Header() {
     const allNavItems = [
         { href: "/scanner/backtests?tab=bots", label: t("nav.scanner.ai_trading"), icon: <Brain className="w-4 h-4 shrink-0" />, activePath: "/scanner/backtests" },
         { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI", egxOnly: true },
-        { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
+        { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW", egxOnly: true },
         { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
         { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
         { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
     ];
     const navItems = isSaudi ? allNavItems.filter((item) => !item.egxOnly) : allNavItems;
+
+    // Auto-redirect away from EGX-only routes when Saudi (TASI) market is selected
+    useEffect(() => {
+        if (!isSaudi || !pathname) return;
+        const isEgxOnlyRoute =
+            pathname === "/news" ||
+            pathname === "/disclosures" ||
+            pathname === "/reports" ||
+            pathname.startsWith("/reports/") ||
+            pathname === "/blogs" ||
+            pathname.startsWith("/blogs/") ||
+            (pathname === "/scanner/backtests" && currentTab === "similarity");
+        if (isEgxOnlyRoute) {
+            router.replace("/scanner/backtests?tab=bots");
+        }
+    }, [isSaudi, pathname, currentTab, router]);
 
     const checkActive = (href: string, activePath: string | null) => {
         if (href.includes("?tab=backtests")) {

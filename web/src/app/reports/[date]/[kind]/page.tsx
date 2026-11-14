@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import BrandedPageHeader from '@/components/BrandedPageHeader';
 import { getPublicReports, reportNames, reportUrl, type PublicReport } from '@/lib/social/public-reports';
+import { EgxOnlyGuard } from '@/contexts/MarketContext';
 
 export const revalidate = 604800;
 // Generate on first request, then serve the entire HTML route from ISR.
@@ -44,7 +45,7 @@ export default async function ReportPage({ params }: Props) {
   const schema = { '@context': 'https://schema.org', '@type': 'Article', headline: title,
     datePublished: r.created_at, dateModified: r.updated_at, inLanguage: 'ar',
     mainEntityOfPage: `https://egxbots.com${reportUrl(r)}`, author: { '@type': 'Organization', name: 'EGX BOTS' } };
-  return <main dir="rtl" className="mx-auto max-w-5xl px-4 py-8 text-zinc-950 dark:text-white">
+  return <EgxOnlyGuard sectionNameAr="التقارير اليومية الآلية" sectionNameEn="Daily Automated Reports"><main dir="rtl" className="mx-auto max-w-5xl px-4 py-8 text-zinc-950 dark:text-white">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema).replace(/</g, '\\u003c') }} />
     <Link href="/reports" prefetch={false} className="mb-5 inline-block text-sm underline">كل التقارير اليومية</Link>
     <BrandedPageHeader eyebrow="EGX BOTS RESEARCH" title={title} description="تحليل آلي تعليمي مبني على البيانات المحفوظة للجلسة؛ ليس توصية شراء أو بيع." />
@@ -58,5 +59,5 @@ export default async function ReportPage({ params }: Props) {
         <Link prefetch={false} className="underline" href={r.kind === 'market' ? '/scanner/market' : '/scanner/technical'}>فتح أداة التحليل</Link>
       </section>
     </article>
-  </main>;
+  </main></EgxOnlyGuard>;
 }

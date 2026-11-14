@@ -19,7 +19,7 @@
     {
       "symbol": "1050",
       "name_ar": "البنك السعودي الفرنسي",
-      "name_en": "1050",
+      "name_en": "Banque Saudi Fransi",
       "sector": "Financial Services",
       "entry_date": "2026-09-01",
       "exit_date": "2026-09-20",
@@ -38,7 +38,7 @@
     {
       "symbol": "1180",
       "name_ar": "البنك الأهلي السعودي",
-      "name_en": "1180",
+      "name_en": "The Saudi National Bank",
       "sector": "Financial Services",
       "entry_date": "2026-09-01",
       "exit_date": "2026-09-13",
@@ -57,7 +57,7 @@
     {
       "symbol": "6015",
       "name_ar": "أمريكانا للمطاعم العالمية",
-      "name_en": "6015",
+      "name_en": "Americana Restaurants International PLC",
       "sector": "Consumer Cyclical",
       "entry_date": "2026-09-01",
       "exit_date": "2026-09-13",
@@ -76,7 +76,7 @@
     {
       "symbol": "2280",
       "name_ar": "شركة المراعي",
-      "name_en": "2280",
+      "name_en": "Almarai Company",
       "sector": "Consumer Defensive",
       "entry_date": "2026-08-30",
       "exit_date": "2026-09-02",
@@ -95,7 +95,7 @@
     {
       "symbol": "2083",
       "name_ar": "مرافق الكهرباء والمياه بالجبيل وينبع",
-      "name_en": "2083",
+      "name_en": "Power and Water Utility Company for Jubail and Yanbu",
       "sector": "Utilities",
       "entry_date": "2026-04-19",
       "exit_date": "2026-05-17",
@@ -114,7 +114,7 @@
     {
       "symbol": "4190",
       "name_ar": "جرير للتسويق",
-      "name_en": "4190",
+      "name_en": "Jarir Marketing Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2026-04-19",
       "exit_date": "2026-05-17",
@@ -133,7 +133,7 @@
     {
       "symbol": "1020",
       "name_ar": "بنك الجزيرة",
-      "name_en": "1020",
+      "name_en": "aljazira bank",
       "sector": "Financial Services",
       "entry_date": "2026-04-16",
       "exit_date": "2026-05-05",
@@ -152,7 +152,7 @@
     {
       "symbol": "4009",
       "name_ar": "المستشفى السعودي الألماني (الشرق الأوسط للرعاية الصحية)",
-      "name_en": "4009",
+      "name_en": "Middle East Healthcare Company",
       "sector": "Healthcare",
       "entry_date": "2026-04-20",
       "exit_date": "2026-04-28",
@@ -171,7 +171,7 @@
     {
       "symbol": "2200",
       "name_ar": "العربية للأنابيب",
-      "name_en": "2200",
+      "name_en": "Arabian Pipes Company",
       "sector": "Basic Materials",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-26",
@@ -190,7 +190,7 @@
     {
       "symbol": "2382",
       "name_ar": "أديس القابضة",
-      "name_en": "2382",
+      "name_en": "ADES Holding Company",
       "sector": "Energy",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-26",
@@ -209,7 +209,7 @@
     {
       "symbol": "1303",
       "name_ar": "شركة الصناعات الكهربائية",
-      "name_en": "1303",
+      "name_en": "Electrical Industries Company",
       "sector": "Industrials",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-23",
@@ -228,7 +228,7 @@
     {
       "symbol": "8313",
       "name_ar": "رسن لتقنية المعلومات",
-      "name_en": "8313",
+      "name_en": "Rasan Information Technology Company",
       "sector": "Financial Services",
       "entry_date": "2026-04-19",
       "exit_date": "2026-04-23",
@@ -247,7 +247,7 @@
     {
       "symbol": "1150",
       "name_ar": "مصرف الإنماء",
-      "name_en": "1150",
+      "name_en": "Alinma Bank",
       "sector": "Financial Services",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-22",
@@ -266,7 +266,7 @@
     {
       "symbol": "8230",
       "name_ar": "تكافل الراجحي",
-      "name_en": "8230",
+      "name_en": "Al Rajhi Company for Cooperative Insurance",
       "sector": "Financial Services",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-22",
@@ -285,7 +285,7 @@
     {
       "symbol": "1320",
       "name_ar": "السعودية لأنابيب الصلب",
-      "name_en": "1320",
+      "name_en": "Saudi Steel Pipes Company",
       "sector": "Basic Materials",
       "entry_date": "2026-04-16",
       "exit_date": "2026-04-20",
@@ -304,7 +304,7 @@
     {
       "symbol": "2230",
       "name_ar": "الكيميائية السعودية القابضة",
-      "name_en": "2230",
+      "name_en": "Saudi Chemical Holding Company",
       "sector": "Healthcare",
       "entry_date": "2026-04-19",
       "exit_date": "2026-04-20",
@@ -323,7 +323,7 @@
     {
       "symbol": "4190",
       "name_ar": "جرير للتسويق",
-      "name_en": "4190",
+      "name_en": "Jarir Marketing Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-15",
       "exit_date": "2025-11-12",
@@ -342,7 +342,7 @@
     {
       "symbol": "2020",
       "name_ar": "سابك للمغذيات الزراعية",
-      "name_en": "2020",
+      "name_en": "SABIC Agri-Nutrients Company",
       "sector": "Basic Materials",
       "entry_date": "2025-10-19",
       "exit_date": "2025-11-09",
@@ -361,7 +361,7 @@
     {
       "symbol": "1810",
       "name_ar": "مجموعة سيرا القابضة",
-      "name_en": "1810",
+      "name_en": "Seera Holding Group",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-13",
       "exit_date": "2025-11-05",
@@ -380,7 +380,7 @@
     {
       "symbol": "4071",
       "name_ar": "العربية للتعهدات الفنية",
-      "name_en": "4071",
+      "name_en": "Arabian Contracting Services Company",
       "sector": "Communication Services",
       "entry_date": "2025-10-06",
       "exit_date": "2025-11-03",
@@ -399,7 +399,7 @@
     {
       "symbol": "4191",
       "name_ar": "أبو معطي للمكتبات",
-      "name_en": "4191",
+      "name_en": "Abdullah Saad Mohammed Abo Moati for Bookstores Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-15",
       "exit_date": "2025-10-29",
@@ -418,7 +418,7 @@
     {
       "symbol": "1120",
       "name_ar": "مصرف الراجحي",
-      "name_en": "1120",
+      "name_en": "Al Rajhi Banking and Investment Corporation",
       "sector": "Financial Services",
       "entry_date": "2025-09-30",
       "exit_date": "2025-10-28",
@@ -437,7 +437,7 @@
     {
       "symbol": "4002",
       "name_ar": "المواساة للخدمات الطبية",
-      "name_en": "4002",
+      "name_en": "Mouwasat Medical Services Company",
       "sector": "Healthcare",
       "entry_date": "2025-10-15",
       "exit_date": "2025-10-27",
@@ -456,7 +456,7 @@
     {
       "symbol": "1321",
       "name_ar": "أنابيب الشرق المتكاملة للصناعة",
-      "name_en": "1321",
+      "name_en": "East Pipes Integrated Company for Industry",
       "sector": "Basic Materials",
       "entry_date": "2025-10-08",
       "exit_date": "2025-10-23",
@@ -475,7 +475,7 @@
     {
       "symbol": "1211",
       "name_ar": "شركة التعدين العربية السعودية (معادن)",
-      "name_en": "1211",
+      "name_en": "Saudi Arabian Mining Company (Maaden)",
       "sector": "Basic Materials",
       "entry_date": "2025-09-30",
       "exit_date": "2025-10-22",
@@ -494,7 +494,7 @@
     {
       "symbol": "1322",
       "name_ar": "المصانع الكبرى للتعدين (أماك)",
-      "name_en": "1322",
+      "name_en": "Al Masane Al Kobra Mining Company",
       "sector": "Basic Materials",
       "entry_date": "2025-10-07",
       "exit_date": "2025-10-22",
@@ -513,7 +513,7 @@
     {
       "symbol": "4200",
       "name_ar": "الدريس للخدمات البترولية والنقليات",
-      "name_en": "4200",
+      "name_en": "Aldrees Petroleum and Transport Services Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-07",
       "exit_date": "2025-10-21",
@@ -532,7 +532,7 @@
     {
       "symbol": "4003",
       "name_ar": "إكسترا (المتحدة للإلكترونيات)",
-      "name_en": "4003",
+      "name_en": "United Electronics Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-08",
       "exit_date": "2025-10-21",
@@ -551,7 +551,7 @@
     {
       "symbol": "4050",
       "name_ar": "ساسكو (خدمات السيارات والمعدات)",
-      "name_en": "4050",
+      "name_en": "Saudi Automotive Services Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-10-13",
       "exit_date": "2025-10-21",
@@ -570,7 +570,7 @@
     {
       "symbol": "2230",
       "name_ar": "الكيميائية السعودية القابضة",
-      "name_en": "2230",
+      "name_en": "Saudi Chemical Holding Company",
       "sector": "Healthcare",
       "entry_date": "2025-10-19",
       "exit_date": "2025-10-21",
@@ -589,7 +589,7 @@
     {
       "symbol": "2350",
       "name_ar": "كيان السعودية للبتروكيماويات",
-      "name_en": "2350",
+      "name_en": "Saudi Kayan Petrochemical Company",
       "sector": "Basic Materials",
       "entry_date": "2025-10-01",
       "exit_date": "2025-10-20",
@@ -608,7 +608,7 @@
     {
       "symbol": "2060",
       "name_ar": "التصنيع الوطنية",
-      "name_en": "2060",
+      "name_en": "National Industrialization Company",
       "sector": "Basic Materials",
       "entry_date": "2025-10-07",
       "exit_date": "2025-10-12",
@@ -627,7 +627,7 @@
     {
       "symbol": "8313",
       "name_ar": "رسن لتقنية المعلومات",
-      "name_en": "8313",
+      "name_en": "Rasan Information Technology Company",
       "sector": "Financial Services",
       "entry_date": "2025-10-08",
       "exit_date": "2025-10-12",
@@ -646,7 +646,7 @@
     {
       "symbol": "8200",
       "name_ar": "الإعادة السعودية (السعودية لإعادة التأمين)",
-      "name_en": "8200",
+      "name_en": "Saudi Reinsurance Company",
       "sector": "Financial Services",
       "entry_date": "2025-10-07",
       "exit_date": "2025-10-08",
@@ -665,7 +665,7 @@
     {
       "symbol": "1303",
       "name_ar": "شركة الصناعات الكهربائية",
-      "name_en": "1303",
+      "name_en": "Electrical Industries Company",
       "sector": "Industrials",
       "entry_date": "2025-07-13",
       "exit_date": "2025-08-10",
@@ -684,7 +684,7 @@
     {
       "symbol": "4321",
       "name_ar": "المراكز العربية (سينومي سنترز)",
-      "name_en": "4321",
+      "name_en": "Arabian Centres Company",
       "sector": "Real Estate",
       "entry_date": "2025-07-09",
       "exit_date": "2025-07-22",
@@ -703,7 +703,7 @@
     {
       "symbol": "8313",
       "name_ar": "رسن لتقنية المعلومات",
-      "name_en": "8313",
+      "name_en": "Rasan Information Technology Company",
       "sector": "Financial Services",
       "entry_date": "2025-07-13",
       "exit_date": "2025-07-15",
@@ -722,7 +722,7 @@
     {
       "symbol": "4230",
       "name_ar": "البحر الأحمر العالمية",
-      "name_en": "4230",
+      "name_en": "Red Sea International Company",
       "sector": "Real Estate",
       "entry_date": "2025-07-09",
       "exit_date": "2025-07-10",
@@ -741,7 +741,7 @@
     {
       "symbol": "1120",
       "name_ar": "مصرف الراجحي",
-      "name_en": "1120",
+      "name_en": "Al Rajhi Banking and Investment Corporation",
       "sector": "Financial Services",
       "entry_date": "2025-02-05",
       "exit_date": "2025-03-06",
@@ -760,7 +760,7 @@
     {
       "symbol": "7010",
       "name_ar": "الاتصالات السعودية (إس تي سي)",
-      "name_en": "7010",
+      "name_en": "Saudi Telecom Company",
       "sector": "Communication Services",
       "entry_date": "2025-02-05",
       "exit_date": "2025-03-06",
@@ -779,7 +779,7 @@
     {
       "symbol": "4250",
       "name_ar": "جبل عمر للتطوير",
-      "name_en": "4250",
+      "name_en": "Jabal Omar Development Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-02-06",
       "exit_date": "2025-03-06",
@@ -798,7 +798,7 @@
     {
       "symbol": "2020",
       "name_ar": "سابك للمغذيات الزراعية",
-      "name_en": "2020",
+      "name_en": "SABIC Agri-Nutrients Company",
       "sector": "Basic Materials",
       "entry_date": "2025-02-12",
       "exit_date": "2025-02-26",
@@ -817,7 +817,7 @@
     {
       "symbol": "1810",
       "name_ar": "مجموعة سيرا القابضة",
-      "name_en": "1810",
+      "name_en": "Seera Holding Group",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-02-05",
       "exit_date": "2025-02-25",
@@ -836,7 +836,7 @@
     {
       "symbol": "6010",
       "name_ar": "الوطنية للتنمية الزراعية (نادك)",
-      "name_en": "6010",
+      "name_en": "The National Agricultural Development Company",
       "sector": "Consumer Defensive",
       "entry_date": "2025-02-10",
       "exit_date": "2025-02-24",
@@ -855,7 +855,7 @@
     {
       "symbol": "4300",
       "name_ar": "دار الأركان للتطوير العقاري",
-      "name_en": "4300",
+      "name_en": "Dar Al Arkan Real Estate Development Company",
       "sector": "Real Estate",
       "entry_date": "2025-02-02",
       "exit_date": "2025-02-18",
@@ -874,7 +874,7 @@
     {
       "symbol": "4200",
       "name_ar": "الدريس للخدمات البترولية والنقليات",
-      "name_en": "4200",
+      "name_en": "Aldrees Petroleum and Transport Services Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-02-05",
       "exit_date": "2025-02-18",
@@ -893,7 +893,7 @@
     {
       "symbol": "1010",
       "name_ar": "بنك الرياض",
-      "name_en": "1010",
+      "name_en": "Riyad Bank",
       "sector": "Financial Services",
       "entry_date": "2025-01-22",
       "exit_date": "2025-02-18",
@@ -912,7 +912,7 @@
     {
       "symbol": "4031",
       "name_ar": "الخدمات الأرضية",
-      "name_en": "4031",
+      "name_en": "Saudi Ground Services Company",
       "sector": "Industrials",
       "entry_date": "2025-01-23",
       "exit_date": "2025-02-17",
@@ -931,7 +931,7 @@
     {
       "symbol": "1180",
       "name_ar": "البنك الأهلي السعودي",
-      "name_en": "1180",
+      "name_en": "The Saudi National Bank",
       "sector": "Financial Services",
       "entry_date": "2025-01-19",
       "exit_date": "2025-02-16",
@@ -950,7 +950,7 @@
     {
       "symbol": "1060",
       "name_ar": "البنك السعودي الأول",
-      "name_en": "1060",
+      "name_en": "Saudi Awwal Bank",
       "sector": "Financial Services",
       "entry_date": "2025-01-16",
       "exit_date": "2025-02-13",
@@ -969,7 +969,7 @@
     {
       "symbol": "2200",
       "name_ar": "العربية للأنابيب",
-      "name_en": "2200",
+      "name_en": "Arabian Pipes Company",
       "sector": "Basic Materials",
       "entry_date": "2025-02-03",
       "exit_date": "2025-02-13",
@@ -988,7 +988,7 @@
     {
       "symbol": "2110",
       "name_ar": "الكابلات السعودية",
-      "name_en": "2110",
+      "name_en": "Saudi Cable Company",
       "sector": "Industrials",
       "entry_date": "2025-01-20",
       "exit_date": "2025-02-12",
@@ -1007,7 +1007,7 @@
     {
       "symbol": "6004",
       "name_ar": "كاتريون للتموين القابضة",
-      "name_en": "6004",
+      "name_en": "CATRION Catering Holding Company",
       "sector": "Industrials",
       "entry_date": "2025-01-23",
       "exit_date": "2025-02-12",
@@ -1026,7 +1026,7 @@
     {
       "symbol": "4072",
       "name_ar": "مجموعة إم بي سي",
-      "name_en": "4072",
+      "name_en": "MBC Group",
       "sector": "Communication Services",
       "entry_date": "2025-02-05",
       "exit_date": "2025-02-11",
@@ -1045,7 +1045,7 @@
     {
       "symbol": "7202",
       "name_ar": "العربية لخدمات الإنترنت والاتصالات (سلوشنز)",
-      "name_en": "7202",
+      "name_en": "Arabian Internet and Communication Services Company",
       "sector": "Communication Services",
       "entry_date": "2025-01-22",
       "exit_date": "2025-02-09",
@@ -1064,7 +1064,7 @@
     {
       "symbol": "4200",
       "name_ar": "الدريس للخدمات البترولية والنقليات",
-      "name_en": "4200",
+      "name_en": "Aldrees Petroleum and Transport Services Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-01-26",
       "exit_date": "2025-02-03",
@@ -1083,7 +1083,7 @@
     {
       "symbol": "7020",
       "name_ar": "اتحاد اتصالات (موبايلي)",
-      "name_en": "7020",
+      "name_en": "Etihad Etisalat Company",
       "sector": "Communication Services",
       "entry_date": "2025-01-16",
       "exit_date": "2025-02-02",
@@ -1102,7 +1102,7 @@
     {
       "symbol": "8010",
       "name_ar": "التعاونية للتأمين",
-      "name_en": "8010",
+      "name_en": "The Company for Cooperative Insurance",
       "sector": "Financial Services",
       "entry_date": "2025-01-22",
       "exit_date": "2025-01-30",
@@ -1121,7 +1121,7 @@
     {
       "symbol": "1213",
       "name_ar": "نسيج العالمية التجارية",
-      "name_en": "1213",
+      "name_en": "Naseej International Trading Company",
       "sector": "Consumer Cyclical",
       "entry_date": "2025-01-23",
       "exit_date": "2025-01-30",
@@ -1140,7 +1140,7 @@
     {
       "symbol": "8313",
       "name_ar": "رسن لتقنية المعلومات",
-      "name_en": "8313",
+      "name_en": "Rasan Information Technology Company",
       "sector": "Financial Services",
       "entry_date": "2025-01-22",
       "exit_date": "2025-01-23",
@@ -1159,7 +1159,7 @@
     {
       "symbol": "7203",
       "name_ar": "شركة علم",
-      "name_en": "7203",
+      "name_en": "Elm Company",
       "sector": "Technology",
       "entry_date": "2025-01-20",
       "exit_date": "2025-01-22",
@@ -1181,7 +1181,7 @@
   "as_of": "2026-11-12",
   "phase": "close",
   "session_complete": true,
-  "computed_at": "2026-11-14T13:39:47.097842+00:00",
+  "computed_at": "2026-11-14T14:04:20.592019+00:00",
   "signal_audit": [
     {
       "symbol": "2222",
@@ -2626,6 +2626,5 @@
   ],
   "market": "TASI",
   "currency": "SAR",
-  "exchange": "TADAWUL",
-  "snapshot_persistence_error": "APIError"
+  "exchange": "TADAWUL"
 }

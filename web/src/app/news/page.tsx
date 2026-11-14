@@ -18,6 +18,7 @@ import {
     ExternalLink
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket, EgxOnlyGuard } from "@/contexts/MarketContext";
 import StockLogo from "@/components/StockLogo";
 import NewsStats from "@/components/NewsStats";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
@@ -37,6 +38,7 @@ interface NewsItem {
 
 export default function NewsPage() {
     const { language } = useLanguage();
+    const { isSaudi } = useMarket();
     const isAr = language === "ar";
 
     // State
@@ -114,10 +116,14 @@ export default function NewsPage() {
 
     // Trigger fetch when fetchNews callback changes
     useEffect(() => {
+        if (isSaudi) {
+            setLoading(false);
+            return;
+        }
         const controller = new AbortController();
         void fetchNews(controller.signal);
         return () => controller.abort();
-    }, [fetchNews]);
+    }, [fetchNews, isSaudi]);
 
     const handleSentimentFilter = (val: string) => {
         setSentiment(val);
@@ -202,6 +208,7 @@ export default function NewsPage() {
     };
 
     return (
+        <EgxOnlyGuard sectionNameAr="رادار الأخبار وتحليل المشاعر" sectionNameEn="AI News & Sentiment Radar">
         <div className="w-full pt-5 sm:pt-7" dir={isAr ? "rtl" : "ltr"}>
             <BrandedPageHeader
                 eyebrow={isAr ? "أخبار وذكاء السوق" : "AI NEWS & INTELLIGENCE"}
@@ -487,5 +494,6 @@ export default function NewsPage() {
                 </div>
             )}
         </div>
+        </EgxOnlyGuard>
     );
 }

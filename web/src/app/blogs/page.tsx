@@ -1,5 +1,6 @@
 import { Metadata } from "next";
 import BlogsClient from "./BlogsClient";
+import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
 export const metadata: Metadata = {
   title: "مدونة وتحليلات البورصة المصرية بالذكاء الاصطناعي",
@@ -25,5 +26,9 @@ export const metadata: Metadata = {
 };
 
 export default function BlogsPage() {
-  return <BlogsClient />;
+  return (
+    <EgxOnlyGuard sectionNameAr="المدونة والأدلة التعليمية" sectionNameEn="Blog & Educational Guides">
+      <BlogsClient />
+    </EgxOnlyGuard>
+  );
 }

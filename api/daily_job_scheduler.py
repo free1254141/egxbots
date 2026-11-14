@@ -249,6 +249,11 @@ def _run_saudi_daily_refresh():
         run_saudi_systems()
     except Exception as sys_exc:
         print(f"[DAILY-JOB-SCHEDULER] Saudi 3-systems refresh failed (non-fatal): {sys_exc}")
+    try:
+        from api.saudi_telegram_dispatch import dispatch_saudi_open_recommendations
+        dispatch_saudi_open_recommendations()
+    except Exception as tg_exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi Telegram dispatch failed (non-fatal): {tg_exc}")
     return res
 
 

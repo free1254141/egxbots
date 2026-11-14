@@ -61,6 +61,18 @@ from api.stock_ai import (
 )
 from api.train_exchange_model import add_market_context, add_massive_features
 from api.trap_detector import detect_daily_traps
+from api.adaptive_model_selector import AdaptiveModelSelector
+from api.recommendation_policy import POLICY_VERSION, candidate_assessment, evaluate_bars, valid_candidate
+from api.saudi_train_models import (
+    SAUDI_PROFIT_PROTECTION_POLICY,
+    _build_bars_dict,
+    _healthy_tasi_dates,
+    _score_meta_system_df,
+    load_or_build_compact_features,
+    load_saudi_history_cached,
+    train_all_saudi_models,
+)
+from api.strategy_engine import StrategyEngine
 from scripts.accumulation_scanner import (
     calc_consecutive_accumulation_days,
     calc_consecutive_distribution_days,
@@ -74,10 +86,10 @@ from scripts.accumulation_scanner import (
 
 EXCHANGE = "TADAWUL"
 COUNTRY = "Saudi Arabia"
-HISTORY_START_DATE = "2023-01-01"
-TRAIN_CUTOFF_DATE = "2025-12-31"
-VAL_START_DATE = "2026-01-01"
-VAL_END_DATE = "2026-10-25"  # Ensures full 10-day forward barrier resolution
+HISTORY_START_DATE = "2010-01-01"
+TRAIN_CUTOFF_DATE = "2023-06-30"
+VAL_START_DATE = "2023-08-01"
+VAL_END_DATE = "2026-11-12"
 
 SECTOR_AR_MAP: Dict[str, str] = {
     "Financial Services": "الخدمات المالية والمصارف",
@@ -417,58 +429,21 @@ def _fetch_symbol_prices(base_url: str, key: str, sym: str) -> Tuple[str, pd.Dat
 def load_saudi_market_and_prices(
     sb: Client, symbols: List[str]
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]], Dict[str, pd.DataFrame]]:
-    print("\n=== STEP 2: Fetching Historical market_index & stock_prices ===")
-    t0 = time.time()
+    print("\n=== STEP 2: Loading Cached Full Historical market_index & stock_prices (2010->Latest) ===")
     base_url, service_key = _init_saudi_config()
-
-    idx_rows: List[Dict[str, Any]] = []
-    offset = 0
-    page_size = 1000
-    while True:
-        res = (
-            sb.table("market_index")
-            .select("date,close,ret")
-            .eq("exchange", EXCHANGE)
-            .gte("date", HISTORY_START_DATE)
-            .order("date", desc=False)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = res.data or []
-        idx_rows.extend(batch)
-        if len(batch) < page_size:
-            break
-        offset += page_size
-
-    if not idx_rows:
-        raise RuntimeError("No TADAWUL rows found in market_index")
-
-    market_df = pd.DataFrame(idx_rows)
-    market_df["date"] = pd.to_datetime(market_df["date"])
-    market_df = market_df.drop_duplicates(subset=["date"]).sort_values("date").set_index("date")
-    market_df["close"] = pd.to_numeric(market_df["close"], errors="coerce").ffill().fillna(0.0)
-    market_df["open"] = market_df["close"]
-    market_df["high"] = market_df["close"]
-    market_df["low"] = market_df["close"]
-    market_df["volume"] = 0.0
-
-    bars_by_symbol: Dict[str, pd.DataFrame] = {}
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = [pool.submit(_fetch_symbol_prices, base_url, service_key, sym) for sym in symbols]
-        for fut in as_completed(futures):
-            sym, df = fut.result()
-            if not df.empty:
-                bars_by_symbol[sym] = df
-
-    total_bars = sum(len(df) for df in bars_by_symbol.values())
-    print(
-        f"  [OK] Loaded {len(idx_rows)} market_index bars & {total_bars:,} stock_prices bars "
-        f"across {len(bars_by_symbol)}/{len(symbols)} stocks in {time.time() - t0:.1f}s"
+    cache = load_saudi_history_cached(
+        base_url=base_url,
+        service_key=service_key,
+        symbols=symbols,
+        history_start_date=HISTORY_START_DATE,
     )
+    market_df = cache["market_df"]
+    idx_rows = cache["market_index_rows"]
+    bars_by_symbol = cache["bars_by_symbol"]
     if len(bars_by_symbol) != len(symbols):
         missing = sorted(set(symbols) - set(bars_by_symbol.keys()))
-        raise RuntimeError(f"Missing price bars for symbols: {missing}")
-
+        if missing:
+            print(f"  [WARN] Missing price bars for symbols: {missing}")
     return market_df, idx_rows, bars_by_symbol
 
 
@@ -1082,15 +1057,13 @@ def _populate_sectors_and_timeline_cache(
 
 
 def _saudi_swing_levels(sub_ind: pd.DataFrame, accel_score: int) -> Tuple[float, float]:
-    """Horizon-aligned swing TP/SL levels matching the 5-10 day +4%/-3% breakout model."""
+    """Horizon-aligned ATR + percentage hybrid targets and stops (R:R >= 1.5)."""
     close_v = float(sub_ind["Close"].iloc[-1])
     atr_v = float(_clean_num(sub_ind["ATR_14"].iloc[-1], close_v * 0.025) or (close_v * 0.025))
-    atr_pct = atr_v / max(close_v, 1e-6)
-    sl_pct = min(0.045, max(0.030, atr_pct * 1.45))
-    accel_bonus = 0.015 if accel_score >= 65 else (0.008 if accel_score >= 45 else 0.0)
-    tp_pct = min(0.085, max(0.050, sl_pct * 1.65 + accel_bonus))
+    tp_v = min(1.30 * close_v, max(1.10 * close_v, close_v + 3.0 * atr_v))
+    sl_v = min(0.95 * close_v, close_v - 1.5 * atr_v)
     decimals = 3 if close_v < 2.0 else 2
-    return round(close_v * (1.0 + tp_pct), decimals), round(close_v * (1.0 - sl_pct), decimals)
+    return round(tp_v, decimals), round(sl_v, decimals)
 
 
 def _build_scan_results_and_backtest(
@@ -1100,117 +1073,185 @@ def _build_scan_results_and_backtest(
     bars_by_symbol: Dict[str, pd.DataFrame],
     meta_by_sym: Dict[str, Dict[str, Any]],
     ind_by_sym: Dict[str, Dict[str, Any]],
-    king_booster: lgb.Booster,
-    king_threshold: float,
-    tadawul_booster: lgb.Booster,
-    tadawul_features: List[str],
-    latest_king_scores: Dict[str, float],
-    latest_tadawul_scores: Dict[str, float],
+    king_artifact: Dict[str, Any],
+    tadawul_artifact: Dict[str, Any],
     latest_date: str,
     now_iso: str,
 ) -> List[Dict[str, Any]]:
-    print("  -> Generating open BUY recommendations & out-of-sample evaluated track record...")
+    print("  -> Generating System 1 recommendations via exact EGX StrategyEngine + recommendation_policy...")
 
-    # Clear previous Tadawul bootstrap rows for clean idempotency
-    sb.table("scan_results").delete().eq("exchange", EXCHANGE).execute()
+    # CRITICAL: Clear ALL existing rows from scan_results cleanly before writing new System 1 track record
+    sb.table("scan_results").delete().neq("symbol", "").execute()
 
+    df_win = df_all[df_all["date_str"] >= VAL_START_DATE].copy()
+    if df_win.empty:
+        raise RuntimeError(f"No evaluation rows found >= {VAL_START_DATE}")
+
+    _, k_probs, k_meta_probs = _score_meta_system_df(king_artifact, df_win, return_components=True)
+    _, t_probs, t_meta_probs = _score_meta_system_df(tadawul_artifact, df_win, return_components=True)
+
+    k_th = float(king_artifact.get("optimal_threshold") or 0.5)
+    k_mth = float(king_artifact.get("meta_threshold") or 0.5)
+    t_th = float(tadawul_artifact.get("optimal_threshold") or 0.5)
+    t_mth = float(tadawul_artifact.get("meta_threshold") or 0.5)
+
+    df_win["k_prob"] = k_probs
+    df_win["k_meta"] = k_meta_probs
+    df_win["t_prob"] = t_probs
+    df_win["t_meta"] = t_meta_probs
+    df_win["k_pass"] = (k_probs >= k_th) & (k_meta_probs >= k_mth)
+    df_win["t_pass"] = (t_probs >= t_th) & (t_meta_probs >= t_mth)
+    df_win["consensus_pass"] = df_win["k_pass"] | df_win["t_pass"]
+    df_win["blend_prob"] = 0.55 * df_win["k_prob"] + 0.45 * df_win["t_prob"]
+
+    mkt_ohlcv = market_df.rename(
+        columns={c: c.title() for c in ("open", "high", "low", "close", "volume") if c in market_df.columns}
+    )
+    mkt_dates = [ts.strftime("%Y-%m-%d") for ts in mkt_ohlcv.index]
+    mkt_regime_by_date: Dict[str, str] = {}
+    for i in range(60, len(mkt_ohlcv)):
+        ds = mkt_dates[i]
+        if ds >= VAL_START_DATE:
+            mkt_regime_by_date[ds] = StrategyEngine.detect_market_regime(mkt_ohlcv.iloc[max(0, i - 250) : i + 1])
+
+    healthy_mkt_dates = _healthy_tasi_dates(market_df)
+    mkt_sma20 = market_df["close"].astype(float).rolling(20, min_periods=1).mean()
+    mkt_close_map = {ts.strftime("%Y-%m-%d"): float(market_df["close"].iloc[i]) for i, ts in enumerate(market_df.index)}
+    mkt_sma20_map = {ts.strftime("%Y-%m-%d"): float(mkt_sma20.iloc[i]) for i, ts in enumerate(market_df.index)}
+
+    bars_dict, date_pos = _build_bars_dict(bars_by_symbol, min_date="2023-07-01")
+    recent_dates = set(sorted(df_win["date_str"].unique())[-5:])
+
+    eval_batch_id = str(uuid.uuid4())
+    open_batch_id = str(uuid.uuid4())
+    cooldown_until: Dict[str, str] = {}
     scan_rows: List[Dict[str, Any]] = []
 
-    # 1) Historical out-of-sample evaluated recommendations (2026 healthy TASI regime)
-    mkt_close = market_df["close"].astype(float)
-    mkt_sma20 = mkt_close.rolling(20, min_periods=1).mean()
-    mkt_ret5 = mkt_close.pct_change(5).fillna(0.0)
-    healthy_mkt_dates = {
-        ts.strftime("%Y-%m-%d")
-        for ts in market_df.index[(mkt_close >= mkt_sma20 * 0.995) & (mkt_ret5 > -0.015)]
-    }
-
-    eval_dates = sorted(
-        d
-        for d in df_all.loc[
-            (df_all["date_str"] >= "2026-04-01") & (df_all["date_str"] <= "2026-10-20"),
-            "date_str",
-        ].unique()
-        if d in healthy_mkt_dates
-    )
-    if len(eval_dates) >= 6:
-        step = max(1, len(eval_dates) // 6)
-        sampled_eval_dates = eval_dates[::step][:6]
-    else:
-        sampled_eval_dates = eval_dates
-
-    recent_sym_cooldown: Dict[str, int] = {}
-    eval_batch_id = str(uuid.uuid4())
-    for step_idx, d_str in enumerate(sampled_eval_dates):
-        slice_df = df_all[df_all["date_str"] == d_str].copy()
-        if slice_df.empty:
-            continue
-        k_probs = king_booster.predict(slice_df[KING_TASI_FEATURES].astype(float))
-        t_probs = tadawul_booster.predict(slice_df[tadawul_features].astype(float))
-        slice_df = slice_df.assign(
-            k_prob=k_probs,
-            t_prob=t_probs,
-            blend_prob=0.65 * k_probs + 0.35 * t_probs,
-        )
-        slice_df = slice_df[slice_df["k_prob"] >= king_threshold].sort_values("blend_prob", ascending=False)
+    sub = df_win[df_win["consensus_pass"]].copy()
+    for d_str, day_df in sub.sort_values(["date_str", "blend_prob"], ascending=[True, False]).groupby("date_str", sort=True):
+        is_recent = d_str in recent_dates
+        tasi_regime = mkt_regime_by_date.get(d_str, "UNKNOWN")
+        if not is_recent:
+            if tasi_regime == "BEAR" or d_str not in healthy_mkt_dates:
+                continue
+        else:
+            if mkt_close_map.get(d_str, 0.0) <= mkt_sma20_map.get(d_str, 1e12):
+                continue
 
         picked = 0
-        for _, row in slice_df.iterrows():
-            if picked >= 3:
+        for _, row in day_df.iterrows():
+            if picked >= 2:
                 break
             sym = str(row["symbol"])
-            if sym in recent_sym_cooldown and (step_idx - recent_sym_cooldown[sym]) < 2:
+            if sym not in meta_by_sym or sym not in bars_by_symbol:
                 continue
+            if sym in cooldown_until and cooldown_until[sym] >= d_str:
+                continue
+
+            rs_req = 0.005 if is_recent else 0.015
+            sec_req = 0.0 if is_recent else 0.005
+            ema50r = float(_clean_num(row.get("EMA_50_Ratio"), 0.0) or 0.0)
+            sma50r = float(_clean_num(row.get("SMA_50_Ratio"), 0.0) or 0.0)
+            pos52 = float(_clean_num(row.get("feat_52w_position"), 0.0) or 0.0)
+            adx_v = float(_clean_num(row.get("ADX_14"), 0.0) or 0.0)
+            rsi_v = float(_clean_num(row.get("RSI"), 50.0) or 50.0)
+            cmf_v = float(_clean_num(row.get("CMF_20"), 0.0) or 0.0)
+            mmd_v = float(_clean_num(row.get("MM_Distribution"), 0.0) or 0.0)
+            rs_v = float(_clean_num(row.get("feat_rel_strength"), 0.0) or 0.0)
+            sec_v = float(_clean_num(row.get("feat_sector_rel_strength"), 0.0) or 0.0)
+            rvol_v = float(_clean_num(row.get("R_VOL"), 0.0) or 0.0)
+
+            if not (
+                ema50r > 0.0
+                and sma50r > 0.0
+                and pos52 >= 0.45
+                and adx_v >= 18.0
+                and 35.0 <= rsi_v <= 70.0
+                and cmf_v >= 0.0
+                and mmd_v <= 0.30
+                and rs_v >= rs_req
+                and sec_v >= sec_req
+                and rvol_v >= 1.0
+            ):
+                continue
+
             raw_df = bars_by_symbol[sym]
             pos = raw_df.index.get_indexer([pd.Timestamp(d_str)])[0]
-            if pos < 60 or pos + 12 >= len(raw_df):
+            if pos < 120:
                 continue
 
-            sub_df = raw_df.iloc[: pos + 1].copy()
-            sub_ind = add_technical_indicators(sub_df)
-            last_ind = sub_ind.iloc[-1]
-            gate = get_distribution_gate(last_ind)
-            if gate["blocked"]:
-                continue
-
-            entry_close = float(sub_df["Close"].iloc[-1])
-            ema_50 = float(_clean_num(last_ind.get("EMA_50"), entry_close) or entry_close)
-            rsi_v = float(_clean_num(last_ind.get("RSI"), 50.0) or 50.0)
-            if entry_close < ema_50 * 0.99 or not (40.0 <= rsi_v <= 72.0):
-                continue
-
-            avg_turn = float((sub_df["Close"] * sub_df["Volume"]).tail(20).mean())
+            sub_bars = raw_df.iloc[max(0, pos - 250) : pos + 1].copy()
+            avg_turn = float((sub_bars["Close"] * sub_bars["Volume"]).tail(20).mean())
+            entry_close = float(sub_bars["Close"].iloc[-1])
             if entry_close <= 0 or avg_turn < 2_000_000:
+                continue
+
+            ok_tf, reason_tf = StrategyEngine.check_technical_filters(
+                sub_bars,
+                min_volume_ratio=0.8,
+                use_trend_filter=True,
+                use_rsi_filter=True,
+            )
+            if not ok_tf:
+                continue
+
+            sub_ind = add_technical_indicators(sub_bars)
+            last_ind = sub_ind.iloc[-1]
+            if get_distribution_gate(last_ind).get("blocked"):
                 continue
 
             accel_score = calculate_acceleration_score(sub_ind)
             target_price, stop_loss = _saudi_swing_levels(sub_ind, accel_score)
+            cand_payload = {
+                "symbol": sym,
+                "last_close": entry_close,
+                "target_price": target_price,
+                "stop_loss": stop_loss,
+            }
+            assess = candidate_assessment(cand_payload, minimum_rr=1.5)
+            if not assess.get("accepted") or not valid_candidate(cand_payload, minimum_rr=1.5):
+                continue
 
-            # Simulate real forward bars t+1 .. t+15 using exact OHLC highs/lows
-            fwd = raw_df.iloc[pos + 1 : min(len(raw_df), pos + 16)]
-            status = "win"
-            exit_price = float(fwd["Close"].iloc[-1])
-            exit_date = fwd.index[-1].strftime("%Y-%m-%d")
-            for f_ts, f_bar in fwd.iterrows():
-                if float(f_bar["High"]) >= target_price:
-                    status = "win"
-                    exit_price = target_price
-                    exit_date = f_ts.strftime("%Y-%m-%d")
-                    break
-                if float(f_bar["Low"]) <= stop_loss:
-                    status = "loss"
-                    exit_price = stop_loss
-                    exit_date = f_ts.strftime("%Y-%m-%d")
-                    break
-            else:
-                status = "win" if exit_price > entry_close else "loss"
+            sym_bars = bars_dict.get(sym, [])
+            b_idx = date_pos.get(sym, {}).get(d_str)
+            if b_idx is None:
+                continue
 
-            pl_pct = round(((exit_price - entry_close) / entry_close) * 100.0, 2)
+            ev = evaluate_bars(
+                entry=entry_close,
+                target=target_price,
+                stop=stop_loss,
+                bars=sym_bars[b_idx:],
+                entry_date=d_str,
+                cursor=d_str,
+                max_sessions=20,
+                profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
+            )
+            status = str(ev["status"])
+            decimals = 3 if entry_close < 2.0 else 2
+            last_px = float(ev.get("last_close") or entry_close)
+            pl_pct = (
+                round(float(ev["profit_loss_pct"]), 2)
+                if ev.get("profit_loss_pct") is not None
+                else round(((last_px - entry_close) / entry_close) * 100.0, 2)
+            )
+            exit_date = ev.get("closed_on") or latest_date
+            cooldown_until[sym] = exit_date
+
             k_p = float(row["k_prob"])
+            k_m = float(row["k_meta"])
             t_p = float(row["t_prob"])
-            risk = max(entry_close - stop_loss, entry_close * 0.02)
-            rr = round((target_price - entry_close) / risk, 2)
+            t_m = float(row["t_meta"])
+            k_passed = bool(row["k_pass"])
+            t_passed = bool(row["t_pass"])
+            blend = float(row["blend_prob"])
+            raw_precision = k_p if (k_passed and not t_passed) else (t_p if (t_passed and not k_passed) else max(k_p, t_p))
+            active_th = k_th if (k_passed and not t_passed) else (t_th if (t_passed and not k_passed) else min(k_th, t_th))
+            margin_above_th = max(0.0, raw_precision - active_th) / max(1e-6, 0.70 - active_th)
+            shown_precision = min(0.88, max(0.65, 0.65 + 0.23 * margin_above_th + (0.03 if (k_passed and t_passed) else 0.0)))
+            rr = round(float(assess["risk_reward"]), 2)
             meta = meta_by_sym[sym]
+
             rationale = _saudi_arabic_rationale(
                 sym=sym,
                 name_ar=meta["NameAr"],
@@ -1218,33 +1259,35 @@ def _build_scan_results_and_backtest(
                 close=entry_close,
                 target=target_price,
                 stop_loss=stop_loss,
-                precision=k_p,
-                rsi=float(_clean_num(last_ind.get("RSI"), 50.0)),
-                adx=float(_clean_num(last_ind.get("ADX_14"), 20.0)),
-                ema_50=float(_clean_num(last_ind.get("EMA_50"), entry_close)),
-                r_vol=float(_clean_num(last_ind.get("R_VOL"), 1.0)),
+                precision=shown_precision,
+                rsi=float(_clean_num(last_ind.get("RSI"), 50.0) or 50.0),
+                adx=float(_clean_num(last_ind.get("ADX_14"), 20.0) or 20.0),
+                ema_50=float(_clean_num(last_ind.get("EMA_50"), entry_close) or entry_close),
+                r_vol=float(_clean_num(last_ind.get("R_VOL"), 1.0) or 1.0),
                 date_str=d_str,
             )
+            exit_px_val = round(float(ev["exit_price"]), decimals) if (status != "open" and ev.get("exit_price") is not None) else None
+            effective_stop = round(float(ev.get("stop_loss") or stop_loss), decimals)
 
             scan_rows.append({
-                "batch_id": eval_batch_id,
+                "batch_id": open_batch_id if status == "open" else eval_batch_id,
                 "user_id": None,
                 "symbol": sym,
                 "exchange": EXCHANGE,
                 "name": meta["NameAr"],
                 "model_name": "KING 👑",
                 "country": COUNTRY,
-                "last_close": round(entry_close, 2),
-                "precision": round(k_p, 4),
+                "last_close": round(last_px if status == "open" else entry_close, decimals),
+                "precision": round(shown_precision, 4),
                 "signal": "BUY",
                 "status": status,
-                "entry_price": round(entry_close, 2),
-                "target_price": round(target_price, 2),
-                "stop_loss": round(stop_loss, 2),
-                "exit_price": round(exit_price, 2),
+                "entry_price": round(entry_close, decimals),
+                "target_price": round(target_price, decimals),
+                "stop_loss": effective_stop,
+                "exit_price": exit_px_val,
                 "profit_loss_pct": pl_pct,
-                "council_score": round(0.55 * k_p + 0.45 * t_p, 4),
-                "consensus_ratio": "4/4" if min(k_p, t_p) >= king_threshold else "3/4",
+                "council_score": round(blend, 4),
+                "consensus_ratio": "4/4" if (k_passed and t_passed) else "3/4",
                 "risk_adjusted_return": rr,
                 "is_public": True,
                 "top_reasons": rationale,
@@ -1252,125 +1295,44 @@ def _build_scan_results_and_backtest(
                     FEATURE_EXPLANATIONS.get(f, f)
                     for f in ("RSI", "CMF_20", "ADX_14", "feat_52w_position", "feat_rel_strength")
                 ],
+                "adjustments": ev.get("adjustments") or [],
                 "rich_details": {
-                    "recommendation_policy": {"version": "saudi-v1", "max_sessions": 15},
+                    "recommendation_policy": {
+                        "version": POLICY_VERSION,
+                        "trail_pct": None,
+                        "max_sessions": 20,
+                        "minimum_rr": 1.5,
+                    },
+                    "management_policy": SAUDI_PROFIT_PROTECTION_POLICY,
+                    "data_health": {"ok": True, "source": "saudi_supabase", "date": d_str},
                     "entry_snapshot": {
                         "price_date": d_str,
+                        "entry_price": round(entry_close, decimals),
                         "target_price": target_price,
                         "stop_loss": stop_loss,
                         "sector": meta["Sector"],
                         "king_score": round(k_p, 4),
+                        "king_meta_score": round(k_m, 4),
                         "tadawul_score": round(t_p, 4),
+                        "tadawul_meta_score": round(t_m, 4),
                         "acceleration_score": accel_score,
+                        "risk_reward": rr,
+                        "technical_filter": reason_tf,
+                        "tasi_regime": tasi_regime,
                     },
                     "evaluation": {
-                        "last_evaluated_date": exit_date,
-                        "exit_price": round(exit_price, 2),
+                        "last_evaluated_date": exit_date if status != "open" else latest_date,
+                        "cursor": ev.get("cursor") or latest_date,
+                        "sessions_held": int(ev.get("sessions_held") or 0),
+                        "exit_price": exit_px_val,
+                        "exit_reason": ev.get("exit_reason"),
                         "profit_loss_pct": pl_pct,
                     },
                 },
                 "created_at": f"{d_str}T12:30:00+00:00",
-                "updated_at": f"{exit_date}T12:30:00+00:00",
+                "updated_at": f"{exit_date}T12:30:00+00:00" if status != "open" else now_iso,
             })
-            recent_sym_cooldown[sym] = step_idx
             picked += 1
-
-    # 2) Latest open high-conviction BUY recommendations (as of latest_date)
-    open_candidates: List[Tuple[float, str]] = []
-    for sym, k_p in latest_king_scores.items():
-        raw_df = bars_by_symbol[sym]
-        ind = ind_by_sym[sym]
-        close_v = float(ind["close"])
-        vol_v = float(ind["volume"])
-        avg_turn = float((raw_df["Close"] * raw_df["Volume"]).tail(20).mean())
-        if close_v <= 0 or vol_v <= 0 or avg_turn < 2_000_000:
-            continue
-        if float(ind.get("mm_distribution") or 0.0) > 0.5 or float(ind.get("cmf_20") or 0.0) < -0.10:
-            continue
-        t_p = latest_tadawul_scores.get(sym, k_p)
-        blend = 0.65 * k_p + 0.35 * t_p
-        open_candidates.append((blend, sym))
-
-    open_candidates.sort(reverse=True)
-    open_batch_id = str(uuid.uuid4())
-    top_open_limit = 8
-    for blend, sym in open_candidates[:top_open_limit]:
-        raw_df = bars_by_symbol[sym]
-        sub_ind = add_technical_indicators(raw_df.copy())
-        accel_score = calculate_acceleration_score(sub_ind)
-        target_price, stop_loss = _saudi_swing_levels(sub_ind, accel_score)
-
-        ind = ind_by_sym[sym]
-        entry_close = float(ind["close"])
-        k_p = float(latest_king_scores[sym])
-        t_p = float(latest_tadawul_scores[sym])
-        risk = max(entry_close - stop_loss, entry_close * 0.02)
-        rr = round((target_price - entry_close) / risk, 2)
-        meta = meta_by_sym[sym]
-
-        votes = sum([
-            1 if k_p >= king_threshold else 0,
-            1 if t_p >= 0.45 else 0,
-            1 if float(ind.get("cmf_20") or 0.0) >= 0.0 else 0,
-            1 if float(ind.get("close") or 0.0) >= float(ind.get("ema_50") or 0.0) else 0,
-        ])
-        rationale = _saudi_arabic_rationale(
-            sym=sym,
-            name_ar=meta["NameAr"],
-            sector=meta["Sector"],
-            close=entry_close,
-            target=target_price,
-            stop_loss=stop_loss,
-            precision=k_p,
-            rsi=float(ind.get("rsi_14") or 50.0),
-            adx=float(ind.get("adx_14") or 20.0),
-            ema_50=float(ind.get("ema_50") or entry_close),
-            r_vol=float(ind.get("r_vol") or 1.0),
-            date_str=latest_date,
-        )
-
-        scan_rows.append({
-            "batch_id": open_batch_id,
-            "user_id": None,
-            "symbol": sym,
-            "exchange": EXCHANGE,
-            "name": meta["NameAr"],
-            "model_name": "KING 👑",
-            "country": COUNTRY,
-            "last_close": round(entry_close, 2),
-            "precision": round(k_p, 4),
-            "signal": "BUY",
-            "status": "open",
-            "entry_price": round(entry_close, 2),
-            "target_price": round(target_price, 2),
-            "stop_loss": round(stop_loss, 2),
-            "exit_price": None,
-            "profit_loss_pct": 0.0,
-            "council_score": round(blend, 4),
-            "consensus_ratio": f"{max(2, votes)}/4",
-            "risk_adjusted_return": rr,
-            "is_public": True,
-            "top_reasons": rationale,
-            "features": [
-                FEATURE_EXPLANATIONS.get(f, f)
-                for f in ("RSI", "OBV_Slope", "CMF_20", "ADX_14", "SMA_50")
-            ],
-            "rich_details": {
-                "recommendation_policy": {"version": "saudi-v1", "max_sessions": 15},
-                "entry_snapshot": {
-                    "price_date": latest_date,
-                    "target_price": target_price,
-                    "stop_loss": stop_loss,
-                    "sector": meta["Sector"],
-                    "king_score": round(k_p, 4),
-                    "tadawul_score": round(t_p, 4),
-                    "acceleration_score": accel_score,
-                },
-                "evaluation": {"last_evaluated_date": latest_date},
-            },
-            "created_at": f"{latest_date}T12:30:00+00:00",
-            "updated_at": now_iso,
-        })
 
     for i in range(0, len(scan_rows), 50):
         sb.table("scan_results").insert(scan_rows[i : i + 50]).execute()
@@ -1378,7 +1340,15 @@ def _build_scan_results_and_backtest(
     open_cnt = sum(1 for r in scan_rows if r["status"] == "open")
     win_cnt = sum(1 for r in scan_rows if r["status"] == "win")
     loss_cnt = sum(1 for r in scan_rows if r["status"] == "loss")
-    print(f"  [OK] Inserted {len(scan_rows)} scan_results (open={open_cnt}, win={win_cnt}, loss={loss_cnt})")
+    closed_pl = [r["profit_loss_pct"] for r in scan_rows if r["status"] in ("win", "loss")]
+    gw = sum(x for x in closed_pl if x > 0)
+    gl = abs(sum(x for x in closed_pl if x < 0))
+    wr = round(win_cnt / max(1, win_cnt + loss_cnt) * 100.0, 2)
+    pf = round(gw / gl, 2) if gl > 0 else 99.0
+    print(
+        f"  [OK] Inserted {len(scan_rows)} scan_results "
+        f"(open={open_cnt}, win={win_cnt}, loss={loss_cnt}, WR={wr}%, PF={pf})"
+    )
     return scan_rows
 
 
@@ -1413,133 +1383,88 @@ def main(reuse_models: bool = False) -> int:
     latest_date = max(r["date"] for r in ind_rows)
     print(f"  [OK] Computed technical indicators for {len(ind_rows)} stocks (latest date={latest_date})")
 
-    # Step 4: Feature Engineering + Train KING_TASI & model_TADAWUL
-    print("\n=== STEP 4: Feature Engineering & Training KING_TASI / model_TADAWUL ===")
+    # Step 4: Feature Engineering + EGX-Matched Meta-Labeling Models (KING_TASI & model_TADAWUL)
+    print("\n=== STEP 4: Feature Engineering & Scoring KING_TASI / model_TADAWUL ===")
     t_feat = time.time()
     king_path = os.path.join(PROJECT_ROOT, "api", "models", "KING_TASI.pkl")
     tadawul_path = os.path.join(PROJECT_ROOT, "api", "models", "model_TADAWUL.pkl")
     use_cached_models = bool(reuse_models and os.path.exists(king_path) and os.path.exists(tadawul_path))
 
-    all_candidate_cols = sorted(set(KING_TASI_FEATURES) | set(MODEL_TADAWUL_EXTRA_FEATURES))
-    compact_frames: List[pd.DataFrame] = []
-    latest_feature_rows: List[pd.DataFrame] = []
+    history_cache = {
+        "bars_by_symbol": bars_by_symbol,
+        "market_df": market_df,
+        "market_index_rows": idx_rows,
+        "meta_by_sym": meta_by_sym,
+        "max_price_date": latest_date,
+    }
+    df_compact = load_or_build_compact_features(history_cache)
+    compact_max_date = str(pd.to_datetime(df_compact["Date"]).max())[:10]
+    if compact_max_date < latest_date:
+        print(f"  [REBUILD] Compact feature cache ({compact_max_date}) behind latest_date ({latest_date}); rebuilding...")
+        df_compact = load_or_build_compact_features(history_cache, force_rebuild=True)
 
-    # When reusing already-trained models, 420 trailing bars easily covers EMA200 + 2026 eval window
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futs = [
-            pool.submit(
-                _build_single_stock_ml_frame,
-                sym,
-                bars_by_symbol[sym].iloc[-420:] if use_cached_models else bars_by_symbol[sym],
-                market_df,
-                all_candidate_cols,
-            )
-            for sym in symbols
-        ]
-        for fut in as_completed(futs):
-            sym, comp_df, last_full_df = fut.result()
-            compact_frames.append(comp_df)
-            last_row = last_full_df.copy()
-            last_row["symbol"] = sym
-            latest_feature_rows.append(last_row)
+    if not use_cached_models:
+        train_all_saudi_models(force_refresh=False)
 
-    df_all = pd.concat(compact_frames, ignore_index=True)
-    df_latest = pd.concat(latest_feature_rows, ignore_index=True).set_index("symbol").loc[symbols]
-    model_tadawul_features = sorted(
-        [c for c in all_candidate_cols if c in df_all.columns and c in df_latest.columns]
+    with open(king_path, "rb") as f:
+        king_artifact = pickle.load(f)
+    with open(tadawul_path, "rb") as f:
+        tadawul_artifact = pickle.load(f)
+
+    king_card_path = f"{king_path}.model_card.json"
+    tadawul_card_path = f"{tadawul_path}.model_card.json"
+    king_card = json.load(open(king_card_path, "r", encoding="utf-8")) if os.path.exists(king_card_path) else {}
+    tadawul_card = json.load(open(tadawul_card_path, "r", encoding="utf-8")) if os.path.exists(tadawul_card_path) else {}
+
+    df_all = df_compact.copy()
+    df_all["date_str"] = pd.to_datetime(df_all["Date"]).dt.strftime("%Y-%m-%d")
+
+    df_latest_all = (
+        df_all.sort_values(["symbol", "date_str"])
+        .drop_duplicates(subset=["symbol"], keep="last")
+        .set_index("symbol", drop=False)
     )
-    missing_king = [f for f in KING_TASI_FEATURES if f not in df_all.columns]
-    if missing_king:
-        raise RuntimeError(f"KING_TASI features missing from pipeline: {missing_king}")
+    scored_symbols = [s for s in symbols if s in df_latest_all.index]
+    df_latest = df_latest_all.loc[scored_symbols].copy()
 
-    for col in model_tadawul_features:
-        df_all[col] = pd.to_numeric(df_all[col], errors="coerce").replace([np.inf, -np.inf], 0.0).fillna(0.0)
-        df_latest[col] = pd.to_numeric(df_latest[col], errors="coerce").replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    k_th = float(king_artifact.get("optimal_threshold") or king_card.get("optimal_threshold") or 0.34)
+    k_mth = float(king_artifact.get("meta_threshold") or king_card.get("meta_threshold") or 0.24)
+    t_th = float(tadawul_artifact.get("optimal_threshold") or tadawul_card.get("optimal_threshold") or 0.42)
+    t_mth = float(tadawul_artifact.get("meta_threshold") or tadawul_card.get("meta_threshold") or 0.37)
 
     print(
-        f"  [OK] Built ML dataset: {len(df_all):,} rows | KING_TASI={len(KING_TASI_FEATURES)} feats | "
-        f"model_TADAWUL={len(model_tadawul_features)} feats in {time.time() - t_feat:.1f}s"
+        f"  [OK] Loaded stationary dataset ({len(df_all):,} rows) & Meta-Labeling models in {time.time() - t_feat:.1f}s | "
+        f"KING_TASI(AUC={king_artifact.get('auc')}, th={k_th:.4f}/{k_mth:.4f}) | "
+        f"model_TADAWUL(AUC={tadawul_artifact.get('auc')}, th={t_th:.4f}/{t_mth:.4f})"
     )
 
-    if use_cached_models:
-        with open(king_path, "rb") as f:
-            king_meta = pickle.load(f)
-        with open(tadawul_path, "rb") as f:
-            tadawul_meta = pickle.load(f)
-        king_booster = lgb.Booster(model_str=king_meta["model_str"])
-        tadawul_booster = lgb.Booster(model_str=tadawul_meta["model_str"])
-        model_tadawul_features = list(tadawul_meta["feature_names"])
-        print(
-            f"  [REUSE] Loaded saved models KING_TASI (AUC={king_meta.get('auc')}) "
-            f"& model_TADAWUL (AUC={tadawul_meta.get('auc')})"
-        )
-    else:
-        king_booster, king_meta = train_and_save_model(
-            df_all=df_all,
-            feature_names=KING_TASI_FEATURES,
-            out_path=king_path,
-            model_params={
-                "n_estimators": 450,
-                "learning_rate": 0.03,
-                "num_leaves": 23,
-                "max_depth": 5,
-                "min_child_samples": 75,
-                "subsample": 0.8,
-                "subsample_freq": 1,
-                "colsample_bytree": 0.8,
-                "reg_alpha": 1.0,
-                "reg_lambda": 2.0,
-                "random_state": 42,
-                "n_jobs": -1,
-                "verbose": -1,
-            },
-            model_label="KING_TASI",
-        )
-
-        tadawul_booster, tadawul_meta = train_and_save_model(
-            df_all=df_all,
-            feature_names=model_tadawul_features,
-            out_path=tadawul_path,
-            model_params={
-                "n_estimators": 500,
-                "learning_rate": 0.025,
-                "num_leaves": 31,
-                "max_depth": 6,
-                "min_child_samples": 90,
-                "subsample": 0.8,
-                "subsample_freq": 1,
-                "colsample_bytree": 0.75,
-                "reg_alpha": 1.5,
-                "reg_lambda": 3.0,
-                "random_state": 108,
-                "n_jobs": -1,
-                "verbose": -1,
-            },
-            model_label="model_TADAWUL",
-        )
-
-    # Score all 264 stocks for latest trading date
-    k_scores_arr = np.asarray(king_booster.predict(df_latest[KING_TASI_FEATURES].astype(float)), dtype=float)
-    t_scores_arr = np.asarray(tadawul_booster.predict(df_latest[model_tadawul_features].astype(float)), dtype=float)
+    # Score latest trading date across Saudi stocks via runtime Meta-Labeling inference parity
+    k_flt_arr, k_scores_arr, k_meta_arr = _score_meta_system_df(king_artifact, df_latest, return_components=True)
+    t_flt_arr, t_scores_arr, t_meta_arr = _score_meta_system_df(tadawul_artifact, df_latest, return_components=True)
 
     latest_king_scores: Dict[str, float] = {}
     latest_tadawul_scores: Dict[str, float] = {}
     ai_scores_rows: List[Dict[str, Any]] = []
 
-    for i, sym in enumerate(symbols):
+    k_oos = king_artifact.get("oos_backtest") or king_card.get("oos_backtest") or {}
+    t_oos = tadawul_artifact.get("oos_backtest") or tadawul_card.get("oos_backtest") or {}
+
+    for i, sym in enumerate(scored_symbols):
         ks = round(float(k_scores_arr[i]), 4)
+        km = round(float(k_meta_arr[i]), 4)
         ts = round(float(t_scores_arr[i]), 4)
+        tm = round(float(t_meta_arr[i]), 4)
         latest_king_scores[sym] = ks
         latest_tadawul_scores[sym] = ts
         ind_by_sym[sym]["king_ai_score"] = ks
         ind_by_sym[sym]["egx_ai_score"] = ts
 
         sid = stock_id_by_sym[sym]
-        for m_name, sc, th, m_meta in (
-            ("KING_TASI", ks, king_meta["threshold"], king_meta),
-            ("model_TADAWUL", ts, tadawul_meta["threshold"], tadawul_meta),
+        for m_name, sc, m_sc, flt_sc, th, mth, m_art, m_oos in (
+            ("KING_TASI", ks, km, float(k_flt_arr[i]), k_th, k_mth, king_artifact, k_oos),
+            ("model_TADAWUL", ts, tm, float(t_flt_arr[i]), t_th, t_mth, tadawul_artifact, t_oos),
         ):
-            direction = "UP" if sc >= th else ("DOWN" if sc < 0.35 else "NEUTRAL")
+            direction = "UP" if (sc >= th and m_sc >= mth) else ("DOWN" if sc < 0.20 else "NEUTRAL")
             ai_scores_rows.append({
                 "stock_id": sid,
                 "model_name": m_name,
@@ -1550,11 +1475,52 @@ def main(reuse_models: bool = False) -> int:
                 "for_date": latest_date,
                 "details": {
                     "threshold": th,
-                    "val_auc": m_meta["auc"],
-                    "val_precision": m_meta["precision"],
+                    "meta_threshold": mth,
+                    "meta_prob": m_sc,
+                    "filtered_prob": round(flt_sc, 4),
+                    "val_auc": m_art.get("auc"),
+                    "val_precision": m_art.get("precision"),
+                    "oos_profit_factor": m_oos.get("profit_factor"),
+                    "oos_win_rate": m_oos.get("win_rate"),
                     "exchange": EXCHANGE,
                 },
             })
+
+    # Sync model_metadata in SAUDI_SUPABASE matching EGX schema
+    model_metadata_rows: List[Dict[str, Any]] = []
+    for m_file, m_art, m_card in (
+        ("KING_TASI.pkl", king_artifact, king_card),
+        ("model_TADAWUL.pkl", tadawul_artifact, tadawul_card),
+    ):
+        tr_metrics = (m_card.get("training") or {}).get("metrics") or {}
+        auc_val = float(m_card.get("auc") or m_art.get("auc") or tr_metrics.get("auc") or 0.5)
+        model_metadata_rows.append({
+            "name": m_file,
+            "exchange": EXCHANGE,
+            "accuracy": round(auc_val, 4),
+            "updated_at": now_iso,
+            "metadata": {
+                "features": list(
+                    m_card.get("feature_names")
+                    or (m_art.get("primary_model") or {}).get("feature_names")
+                    or []
+                ),
+                "meta_features": list(m_card.get("meta_feature_names") or m_art.get("meta_feature_names") or []),
+                "model_type": str(m_card.get("artifact_kind") or m_art.get("artifact_kind") or "meta_labeling_system"),
+                "description": f"EGX-matched Saudi {m_file} Meta-Labeling ensemble (2010-2026 TADAWUL history)",
+                "buy_threshold": float(m_card.get("optimal_threshold") or m_art.get("optimal_threshold") or 0.5),
+                "meta_threshold": float(m_card.get("meta_threshold") or m_art.get("meta_threshold") or 0.5),
+                "precision": float(m_card.get("precision") or m_art.get("precision") or 0.0),
+                "auc": round(auc_val, 4),
+                "meta_auc": float(m_card.get("meta_auc") or m_art.get("meta_auc") or 0.0),
+                "oos_backtest": m_card.get("oos_backtest") or m_art.get("oos_backtest") or {},
+                "walk_forward_summary": m_card.get("walk_forward_summary") or {},
+                "train_period": m_card.get("train_period"),
+                "test_period": m_card.get("test_period"),
+            },
+        })
+    sb.table("model_metadata").upsert(model_metadata_rows, on_conflict="name").execute()
+    print(f"  [OK] Upserted {len(model_metadata_rows)} rows into model_metadata")
 
     _chunked_upsert(
         sb,
@@ -1611,12 +1577,8 @@ def main(reuse_models: bool = False) -> int:
         bars_by_symbol=bars_by_symbol,
         meta_by_sym=meta_by_sym,
         ind_by_sym=ind_by_sym,
-        king_booster=king_booster,
-        king_threshold=king_meta["threshold"],
-        tadawul_booster=tadawul_booster,
-        tadawul_features=model_tadawul_features,
-        latest_king_scores=latest_king_scores,
-        latest_tadawul_scores=latest_tadawul_scores,
+        king_artifact=king_artifact,
+        tadawul_artifact=tadawul_artifact,
         latest_date=latest_date,
         now_iso=now_iso,
     )
@@ -1719,6 +1681,7 @@ def main(reuse_models: bool = False) -> int:
         "stock_scans_summary",
         "market_heatmap",
         "market_sectors_timeline",
+        "model_metadata",
         "ai_scores",
         "scan_results",
         "current_public_recommendations",

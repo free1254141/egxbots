@@ -19,7 +19,7 @@ import RecommendationsTable from "@/components/RecommendationsTable";
 import { requestShortSwings } from "@/lib/short-swings-client";
 import TelegramServiceToggle from "@/components/TelegramServiceToggle";
 import { useNotification } from "@/contexts/NotificationContext";
-import { useMarket } from "@/contexts/MarketContext";
+import { useMarket, EgxOnlyGuard } from "@/contexts/MarketContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
 import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 import { 
@@ -1052,7 +1052,11 @@ export default function AIScannerPage() {
 
 
             {/* TAB CONTENT: HISTORICAL SIMILARITY */}
-            {activeTab === "similarity" && <HistoricalSimilarity />}
+            {activeTab === "similarity" && (
+                <EgxOnlyGuard sectionNameAr="النماذج الفنية المتكررة (شبه ده)" sectionNameEn="Historical Pattern Similarity">
+                    <HistoricalSimilarity />
+                </EgxOnlyGuard>
+            )}
 
             {/* TAB CONTENT: BACKTESTS */}
             {activeTab === "backtests" && (

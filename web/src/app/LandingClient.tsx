@@ -143,6 +143,10 @@ export default function LandingClient() {
     };
 
     useEffect(() => {
+        if (isSaudi) {
+            setNewsLoading(false);
+            return;
+        }
         setNewsLoading(true);
         fetchLandingCachedJson("news_3", "/api/scan/news?limit=3")
             .then(data => {
@@ -152,9 +156,10 @@ export default function LandingClient() {
             })
             .catch(err => console.error("Error fetching homepage news:", err))
             .finally(() => setNewsLoading(false));
-    }, []);
+    }, [isSaudi]);
 
     useEffect(() => {
+        if (isSaudi) return;
         fetchLandingCachedJson("similarity_6", "/api/scan/similarity/published?limit=6")
             .then(data => {
                 if (data?.scans && data.scans.length > 0) {
@@ -181,7 +186,7 @@ export default function LandingClient() {
                 }
             })
             .catch(() => {});
-    }, []);
+    }, [isSaudi]);
 
     const getMarketStats = (points: any[]) => {
         if (!points || points.length < 2) return { last: 0, change: 0, changePct: 0 };
@@ -290,11 +295,14 @@ export default function LandingClient() {
                 const plan = (planConfig.plans || []).find((p: any) => p?.id === id);
                 if (!plan) return null;
                 const meta = PRO_PLAN_META[id];
+                const rawEgp = Number(plan.amount_egp || 0);
+                const sarMap: Record<number, number> = { 50: 4, 100: 8, 200: 16, 500: 40, 1000: 79, 1500: 118, 1800: 141, 1850: 145, 2250: 176, 2500: 196 };
+                const displayAmt = isSaudi ? (sarMap[Math.round(rawEgp)] ?? Math.max(1, Math.round(rawEgp / 12.75))) : rawEgp;
                 return {
                     id,
                     label: isAr ? meta.labelAr : meta.labelEn,
                     period: isAr ? meta.periodAr : meta.periodEn,
-                    price: Number(plan.amount_egp || 0).toLocaleString("en-US"),
+                    price: displayAmt.toLocaleString("en-US"),
                     badge: plan.discount?.active ? (isAr ? "عرض المؤسسين" : "Founders offer") : null,
                 };
             })
@@ -305,17 +313,25 @@ export default function LandingClient() {
         {
             n: 1,
             title: isAr ? "نحدّث بيانات السوق بعد الإغلاق" : "Data Refresh After the Close",
-            desc: isAr
-                ? "بعد إغلاق جلسة البورصة المصرية نسحب أسعار الإغلاق والأحجام ونعيد حساب المؤشرات الفنية لكل الأسهم."
-                : "After the EGX session closes we pull closing prices and volumes, then recalculate technical indicators for every stock.",
+            desc: isSaudi
+                ? (isAr
+                    ? "بعد إغلاق جلسة السوق السعودي (تداول تاسي) نسحب أسعار الإغلاق والأحجام ونعيد حساب المؤشرات الفنية لكل الأسهم."
+                    : "After the Saudi TASI session closes we pull closing prices and volumes, then recalculate technical indicators for every stock.")
+                : (isAr
+                    ? "بعد إغلاق جلسة البورصة المصرية نسحب أسعار الإغلاق والأحجام ونعيد حساب المؤشرات الفنية لكل الأسهم."
+                    : "After the EGX session closes we pull closing prices and volumes, then recalculate technical indicators for every stock."),
             colorClass: "neobrutal-bg-yellow",
         },
         {
             n: 2,
             title: isAr ? "النماذج ترتّب الفرص" : "Models Rank the Opportunities",
-            desc: isAr
-                ? "نماذج تعلّم آلي مدرَّبة على بيانات السوق المصري تمنح كل سهم تقييماً من 1 إلى 10، وتحدد مستويات الدخول والهدف ووقف الخسارة."
-                : "Machine-learning models trained on Egyptian market data score every stock from 1 to 10 and set entry, target and stop levels.",
+            desc: isSaudi
+                ? (isAr
+                    ? "نماذج تعلّم آلي مدرَّبة على بيانات السوق السعودي (KING_TASI و TADAWUL) تمنح كل سهم تقييماً من 1 إلى 10، وتحدد مستويات الدخول والهدف ووقف الخسارة."
+                    : "Machine-learning models trained on Saudi TASI data score every stock from 1 to 10 and set entry, target and stop levels.")
+                : (isAr
+                    ? "نماذج تعلّم آلي مدرَّبة على بيانات السوق المصري تمنح كل سهم تقييماً من 1 إلى 10، وتحدد مستويات الدخول والهدف ووقف الخسارة."
+                    : "Machine-learning models trained on Egyptian market data score every stock from 1 to 10 and set entry, target and stop levels."),
             colorClass: "neobrutal-bg-pink",
         },
         {
@@ -356,9 +372,13 @@ export default function LandingClient() {
         {
             icon: Brain,
             title: isAr ? "نماذج AI متقدمة" : "Advanced AI Models",
-            desc: isAr
-                ? "نماذج تعلّم آلي مدرَّبة على بيانات البورصة المصرية ترتّب الفرص بتقييم من 1 إلى 10."
-                : "A 1-to-10 AI score used to rank stock opportunities.",
+            desc: isSaudi
+                ? (isAr
+                    ? "نماذج تعلّم آلي مدرَّبة على بيانات السوق السعودي (تاسي) ترتّب الفرص بتقييم من 1 إلى 10."
+                    : "A 1-to-10 AI score trained on Saudi TASI data to rank stock opportunities.")
+                : (isAr
+                    ? "نماذج تعلّم آلي مدرَّبة على بيانات البورصة المصرية ترتّب الفرص بتقييم من 1 إلى 10."
+                    : "A 1-to-10 AI score used to rank stock opportunities."),
             colorClass: "neobrutal-bg-yellow",
         },
         {
@@ -468,7 +488,7 @@ export default function LandingClient() {
                             />
                         </div>
                         <h1 className="text-4xl sm:text-6xl md:text-8xl font-black tracking-tighter text-black dark:text-white uppercase drop-shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:drop-shadow-[4px_4px_0px_rgba(255,255,255,0.15)]">
-                            EGX BOTS
+                            {isSaudi ? "TASI BOTS" : "EGX BOTS"}
                         </h1>
                     </div>
 
@@ -493,9 +513,13 @@ export default function LandingClient() {
 
                     {/* Intro Description */}
                     <p className="landing-fade-up landing-delay-3 text-base sm:text-lg md:text-xl text-zinc-800 dark:text-zinc-200 max-w-3xl mx-auto mb-7 leading-relaxed px-4 font-bold">
-                        {isAr
-                            ? "منصة واحدة لفهم السوق المصري: تقييم يومي للفرص، ماسح فني قابل للتخصيص، ونتائج تاريخية تساعدك على اتخاذ قرار واعٍ."
-                            : "One place to understand the Egyptian market: daily opportunity rankings, a configurable technical scanner, and historical results for more informed decisions."}
+                        {isSaudi
+                            ? (isAr
+                                ? "منصة واحدة لفهم السوق السعودي (تداول تاسي): تقييم يومي للفرص، ماسح فني قابل للتخصيص، ونتائج تاريخية تساعدك على اتخاذ قرار واعٍ."
+                                : "One place to understand the Saudi market (Tadawul TASI): daily opportunity rankings, a configurable technical scanner, and historical results for more informed decisions.")
+                            : (isAr
+                                ? "منصة واحدة لفهم السوق المصري: تقييم يومي للفرص، ماسح فني قابل للتخصيص، ونتائج تاريخية تساعدك على اتخاذ قرار واعٍ."
+                                : "One place to understand the Egyptian market: daily opportunity rankings, a configurable technical scanner, and historical results for more informed decisions.")}
                     </p>
 
                     <div className="landing-fade-up landing-delay-4 mb-12 flex flex-wrap items-center justify-center gap-2.5 px-4 text-xs sm:text-sm font-black text-black">
@@ -567,12 +591,18 @@ export default function LandingClient() {
                                     {isAr ? "الميزة الاستثنائية: شات بوت محادثة 24/7" : "Exclusive Feature: 24/7 Interactive AI Chatbot"}
                                 </div>
                                 <h3 className="text-2xl sm:text-4xl font-black text-black tracking-tight leading-tight">
-                                    {isAr ? "🤖 شات بوت تفاعلي حقيقي للبورصة المصرية (وليس إشارات جافة فقط)" : "🤖 Real Interactive AI Chatbot (Not Just Static Signals)"}
+                                    {isSaudi
+                                        ? (isAr ? "🤖 شات بوت تفاعلي حقيقي للسوق السعودي (وليس إشارات جافة فقط)" : "🤖 Real Interactive AI Chatbot for Saudi TASI (Not Just Static Signals)")
+                                        : (isAr ? "🤖 شات بوت تفاعلي حقيقي للبورصة المصرية (وليس إشارات جافة فقط)" : "🤖 Real Interactive AI Chatbot (Not Just Static Signals)")}
                                 </h3>
                                 <p className="text-sm sm:text-base font-bold text-zinc-900 leading-relaxed">
-                                    {isAr
-                                        ? "على عكس المنصات التي تكتفي بإرسال إشارات أوتوماتيكية جافة، يتيح لك EGX Bots شات بوت محادثة ذكي يمكنك التحدث معه بالعربية والإنجليزي، رفع صورة/سكرين شوت لمحفظتك لتحليلها بالرؤية الحسابية، وسؤاله عن نقاط الدعم والمقاومة وتوزيع السيولة."
-                                        : "Unlike basic signal-only platforms, EGX Bots features a full interactive AI Chatbot where you can chat naturally, upload portfolio screenshots for instant Vision AI analysis, and discuss key technical levels in real time."}
+                                    {isSaudi
+                                        ? (isAr
+                                            ? "على عكس المنصات التي تكتفي بإرسال إشارات أوتوماتيكية جافة، يتيح لك TASI Bots شات بوت محادثة ذكي مخصص للسوق السعودي يمكنك التحدث معه بالعربية والإنجليزي، رفع صورة/سكرين شوت لمحفظتك لتحليلها بالرؤية الحسابية، وسؤاله عن نقاط الدعم والمقاومة والتوافق الشرعي لأسهم تداول."
+                                            : "Unlike basic signal-only platforms, TASI Bots features a full interactive AI Chatbot dedicated to the Saudi market where you can chat naturally, upload portfolio screenshots for instant Vision AI analysis, and discuss key technical levels in real time.")
+                                        : (isAr
+                                            ? "على عكس المنصات التي تكتفي بإرسال إشارات أوتوماتيكية جافة، يتيح لك EGX Bots شات بوت محادثة ذكي يمكنك التحدث معه بالعربية والإنجليزي، رفع صورة/سكرين شوت لمحفظتك لتحليلها بالرؤية الحسابية، وسؤاله عن نقاط الدعم والمقاومة وتوزيع السيولة."
+                                            : "Unlike basic signal-only platforms, EGX Bots features a full interactive AI Chatbot where you can chat naturally, upload portfolio screenshots for instant Vision AI analysis, and discuss key technical levels in real time.")}
                                 </p>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
                                     <div className="flex items-center gap-2 text-xs font-black bg-white/90 border-2 border-black p-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] text-black">
@@ -731,13 +761,14 @@ export default function LandingClient() {
                             href="/scanner/backtests"
                             className="inline-flex items-center gap-3 px-8 py-5 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-lg uppercase shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all duration-100 cursor-pointer"
                         >
-                            {isAr ? "عرض الترتيب الكامل للأسهم ←" : "See the full US & EGX Stocks ranking →"}
+                            {isAr ? "عرض الترتيب الكامل للأسهم ←" : (isSaudi ? "See the full Saudi TASI Stocks ranking →" : "See the full EGX Stocks ranking →")}
                         </Link>
                     </div>
                 </div>
             </section>
 
-            {/* ====== HISTORICAL SIMILARITY SECTION ====== */}
+            {/* ====== HISTORICAL SIMILARITY SECTION (EGX Only) ====== */}
+            {!isSaudi && (
             <section id="similarity" className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-950 dark:text-white">
                 <div className="max-w-6xl mx-auto">
 
@@ -942,6 +973,7 @@ export default function LandingClient() {
                     </p>
                 </div>
             </section>
+            )}
 
             {/* Use Cases & Performance Proof (danelfin inspired with pure neobrutalist CSS/SVG charts) */}
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">
@@ -1022,7 +1054,9 @@ export default function LandingClient() {
                                 <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed mb-6 font-bold">
                                     {isAr
                                         ? "قمنا بمحاكاة واختبار استراتيجية الأسهم المختارة بالذكاء الاصطناعي (تقييم 8 أو أعلى) ضد مؤشر السوق التاريخي لإظهار الفارق الحقيقي في الأداء."
-                                        : "We backtested our AI-powered Best Stocks strategy (stocks with AI score >= 8) against the benchmark EGX 30 index to demonstrate predictive capabilities."}
+                                        : (isSaudi
+                                            ? "We backtested our AI-powered Best Stocks strategy (stocks with AI score >= 8) against the benchmark TASI index to demonstrate predictive capabilities."
+                                            : "We backtested our AI-powered Best Stocks strategy (stocks with AI score >= 8) against the benchmark EGX 30 index to demonstrate predictive capabilities.")}
                                 </p>
                             </div>
 
@@ -1062,7 +1096,9 @@ export default function LandingClient() {
                                         {isAr ? "استراتيجية الذكاء الاصطناعي (+284%)" : "AI Strategy (+284%)"}
                                     </text>
                                     <text x="25" y="140" className="text-[10px] font-black fill-zinc-500 font-mono">
-                                        {isAr ? "مؤشر السوق EGX 30 (+112%)" : "EGX 30 Benchmark (+112%)"}
+                                        {isSaudi
+                                            ? (isAr ? "مؤشر السوق TASI (+38%)" : "TASI Benchmark (+38%)")
+                                            : (isAr ? "مؤشر السوق EGX 30 (+112%)" : "EGX 30 Benchmark (+112%)")}
                                     </text>
                                 </svg>
                             </div>
@@ -1079,7 +1115,8 @@ export default function LandingClient() {
                 </div>
             </section>
 
-            {/* AI News Section */}
+            {/* AI News Section (EGX Only) */}
+            {!isSaudi && (
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">
                 <div className="max-w-6xl mx-auto">
                     <div className="text-center mb-16">
@@ -1162,6 +1199,7 @@ export default function LandingClient() {
                     </div>
                 </div>
             </section>
+            )}
 
             {/* Market Analysis Section */}
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">
@@ -1520,7 +1558,7 @@ export default function LandingClient() {
                             100% FREE
                         </div>
                         <div className="absolute bottom-6 left-6 border-4 border-black px-4 py-1.5 neobrutal-bg-cyan font-black text-[11px] uppercase tracking-widest -rotate-6 hidden sm:block shadow-[3px_3px_0px_rgba(0,0,0,1)]">
-                            EGX SIGNALS
+                            {isSaudi ? "TASI SIGNALS" : "EGX SIGNALS"}
                         </div>
 
                         <div className="w-16 h-16 border-4 border-black neobrutal-bg-yellow flex items-center justify-center mx-auto mb-6 shadow-[4px_4px_0px_rgba(0,0,0,1)]">
@@ -1533,8 +1571,8 @@ export default function LandingClient() {
                         
                         <p className="text-sm sm:text-lg text-black font-extrabold mb-10 max-w-xl mx-auto leading-relaxed">
                             {isAr
-                                ? "انضم الآن إلى منصة EGX BOTS واستفد من التقييمات الفنية وإشارات الذكاء الاصطناعي مجاناً."
-                                : "Join EGX BOTS platform now and leverage technical scanners and AI-powered signals for free today."}
+                                ? `انضم الآن إلى منصة ${isSaudi ? "TASI BOTS" : "EGX BOTS"} واستفد من التقييمات الفنية وإشارات الذكاء الاصطناعي مجاناً.`
+                                : `Join ${isSaudi ? "TASI BOTS" : "EGX BOTS"} platform now and leverage technical scanners and AI-powered signals for free today.`}
                         </p>
 
                         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">

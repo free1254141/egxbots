@@ -657,10 +657,11 @@ def compute_short_swings(
                 page = 0
                 page_size = 1000
                 while True:
+                    q = supabase.table("stock_prices").select("symbol,exchange,date,open,high,low,close,volume")
+                    if q is None or not hasattr(q, "eq"):
+                        break
                     res = (
-                        supabase.table("stock_prices")
-                        .select("symbol,exchange,date,open,high,low,close,volume")
-                        .eq("exchange", "EGX")
+                        q.eq("exchange", "EGX")
                         .gte("date", max_archive_date)
                         .range(page * page_size, (page + 1) * page_size - 1)
                         .execute()
@@ -1011,7 +1012,7 @@ def compute_short_swings(
             preserved_observed = s.get('published') and s.get('entry_kind') == 'intraday_observed'
             if not preserved_observed and (not b or b.volume <= 0 or (b.high == b.low and s.get('entry_kind') != 'intraday_observed')):
                 continue
-            if str(day)[:10] >= EFFECTIVE_DATE and not b.entry_liquid:
+            if not preserved_observed and str(day)[:10] >= EFFECTIVE_DATE and not b.entry_liquid:
                 continue
 
             limit_price = s["close"]
@@ -1180,14 +1181,14 @@ def compute_short_swings(
     # 6. Active running positions (Strict separation from pending entries)
     for sym, p in positions.items():
         b = market.get((sym, last_date))
-        if not b:
+        if not b and not p.get("published"):
             continue
-        curr_price = b.close
+        curr_price = b.close if b else p["entry_price"]
         if phase == 'midday' and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
             quotes = observed_quotes or {}
             current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo)
             curr_price = current_observation['entry_price'] if current_observation else p['entry_price']
-        curr_gain = (curr_price / p["entry_price"] - 1) * 100
+        curr_gain = ((curr_price / p["entry_price"] - 1) * 100) if b else 0.0
         active_stop = p["sl_price"]
         m_info = meta.get(sym.upper().split(".")[0], {})
         

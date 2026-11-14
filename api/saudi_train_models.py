@@ -55,7 +55,7 @@ from supabase import Client, create_client
 
 from api.egx30_fetcher import get_market_regime
 from api.model_utils import align_pandas_categories_to_booster, get_primary_booster, reset_nested_boosters
-from api.recommendation_policy import evaluate_bars, profit_protection_stop
+from api.recommendation_policy import candidate_assessment, evaluate_bars, profit_protection_stop
 from api.stock_ai import add_technical_indicators
 from api.strategy_engine import StrategyEngine
 from api.strict_quality_labeler import StrictQualityLabeler
@@ -87,6 +87,17 @@ STATIONARY_EXCLUDE_COLS = {
     "ATR_14",
     "industry",
     "Target",
+    "Momentum",
+    "MACD",
+    "MACD_Signal",
+    "MACD_Hist",
+    "momentum_ao",
+    "Amihud_Illiquidity",
+    "Amihud_SMA_10",
+    "Day_Of_Week",
+    "Day_Of_Month",
+    "feat_mkt_volatility",
+    "feat_mkt_trend",
 }
 
 META_CORE_CANDIDATES = (
@@ -696,29 +707,29 @@ def _build_bars_dict(
     return bars_dict, date_pos
 
 
-def _profit_protection_callback(entry_price: float, bars: List[Dict[str, Any]], bar_index: int, current_stop: Optional[float]):
-    if bar_index < 0:
-        return None
-    return profit_protection_stop(
-        entry=entry_price,
-        bars=bars[: bar_index + 1],
-        current_stop=current_stop,
-        trigger_pct=5.0,
-        atr_multiple=2.0,
-        trend_atr_multiple=2.5,
-        atr_window=14,
-        minimum_distance_pct=3.0,
-    )
+SAUDI_PROFIT_PROTECTION_POLICY: Dict[str, Any] = {
+    "version": "atr_profit_protection_v1",
+    "atr_window": 14,
+    "trigger_pct": 5.0,
+    "atr_multiple": 2.0,
+    "trend_atr_multiple": 2.5,
+    "minimum_distance_pct": 3.0,
+    "effective_from": "2010-01-01",
+}
 
 
 def _healthy_tasi_dates(market_df: pd.DataFrame) -> set:
     mkt_close = market_df["close"].astype(float)
     mkt_sma20 = mkt_close.rolling(20, min_periods=1).mean()
-    mkt_ret1 = mkt_close.pct_change().fillna(0.0)
-    mkt_ret5 = mkt_close.pct_change(5).fillna(0.0)
+    mkt_sma50 = mkt_close.rolling(50, min_periods=1).mean()
+    mkt_ret20 = mkt_close.pct_change(20).fillna(0.0)
     return {
         ts.strftime("%Y-%m-%d")
-        for ts in market_df.index[(mkt_close >= mkt_sma20 * 0.99) & (mkt_ret1 > -0.02) & (mkt_ret5 > -0.02)]
+        for ts in market_df.index[
+            (mkt_close > mkt_sma20)
+            & (mkt_close > mkt_sma50)
+            & (mkt_ret20 > -0.01)
+        ]
     }
 
 
@@ -737,6 +748,13 @@ def _simulate_slice_trades(
     max_sessions: int,
     top_k_per_day: int = 3,
     market_regime_filter: bool = True,
+    min_rel_strength: float = 0.01,
+    min_sector_rs: float = 0.0,
+    min_rvol: float = 1.0,
+    exec_tp_pct: float = 0.10,
+    exec_sl_pct: float = 0.05,
+    exec_atr_tp_mult: float = 3.0,
+    exec_atr_sl_mult: float = 1.5,
 ) -> Dict[str, Any]:
     mask = (primary_probs >= primary_threshold) & (meta_probs >= meta_threshold)
     if not np.any(mask):
@@ -746,7 +764,15 @@ def _simulate_slice_trades(
             "avg_pl_pct": 0.0, "max_drawdown_pct": 0.0, "signals_raw": 0,
         }
 
-    scored = df_slice.loc[mask, ["symbol", "Date", "Close", "ATR_14", "CMF_20", "MM_Distribution", "RSI", "R_VOL", "ADX_14"]].copy()
+    keep_cols = [
+        c for c in (
+            "symbol", "Date", "Close", "ATR_14", "CMF_20", "MM_Distribution",
+            "RSI", "R_VOL", "ADX_14", "EMA_50_Ratio", "SMA_50_Ratio",
+            "feat_52w_position", "feat_rel_strength", "feat_sector_rel_strength",
+        )
+        if c in df_slice.columns
+    ]
+    scored = df_slice.loc[mask, keep_cols].copy()
     scored["Date_str"] = pd.to_datetime(scored["Date"]).dt.strftime("%Y-%m-%d")
     scored["p_prob"] = primary_probs[mask]
     scored["m_prob"] = meta_probs[mask]
@@ -764,7 +790,23 @@ def _simulate_slice_trades(
             sym = str(row["symbol"])
             if sym in cooldown_until and d_str <= cooldown_until[sym]:
                 continue
-            if float(row.get("MM_Distribution") or 0.0) > 0.35 or float(row.get("CMF_20") or 0.0) < -0.02 or float(row.get("RSI") or 50.0) > 78.0:
+            if (
+                float(row.get("EMA_50_Ratio") or 0.0) <= 0.0
+                or float(row.get("SMA_50_Ratio") or 0.0) <= 0.0
+                or float(row.get("feat_52w_position") or 0.0) < 0.45
+            ):
+                continue
+            rsi_v = float(row.get("RSI") or 50.0)
+            if (
+                float(row.get("MM_Distribution") or 0.0) > 0.30
+                or float(row.get("CMF_20") or 0.0) < 0.0
+                or rsi_v > 70.0
+                or rsi_v < 35.0
+                or float(row.get("ADX_14") or 0.0) < 18.0
+                or float(row.get("R_VOL") or 0.0) < min_rvol
+                or float(row.get("feat_rel_strength") or 0.0) < min_rel_strength
+                or float(row.get("feat_sector_rel_strength") or 0.0) < min_sector_rs
+            ):
                 continue
             close_v = float(row["Close"])
             atr_v = float(row["ATR_14"]) if np.isfinite(row["ATR_14"]) and row["ATR_14"] > 0 else close_v * 0.02
@@ -773,24 +815,22 @@ def _simulate_slice_trades(
             pos = date_pos.get(sym, {}).get(d_str)
             if pos is None or pos + 2 >= len(bars_dict[sym]):
                 continue
-            if barrier_mode == "atr_multiplier":
-                target_v = round(close_v + target_pct * atr_v, 3 if close_v < 2.0 else 2)
-                stop_v = round(close_v - stop_loss_pct * atr_v, 3 if close_v < 2.0 else 2)
-            else:
-                target_v = round(close_v * (1.0 + target_pct), 3 if close_v < 2.0 else 2)
-                stop_v = round(close_v * (1.0 - stop_loss_pct), 3 if close_v < 2.0 else 2)
-            if stop_v <= 0 or target_v <= close_v or (target_v - close_v) / max(close_v - stop_v, 1e-6) < 1.5:
+            dec = 3 if close_v < 2.0 else 2
+            target_v = round(min(close_v * 1.30, max(close_v * (1.0 + exec_tp_pct), close_v + exec_atr_tp_mult * atr_v)), dec)
+            stop_v = round(min(close_v * (1.0 - exec_sl_pct), close_v - exec_atr_sl_mult * atr_v), dec)
+            if not candidate_assessment({"symbol": sym, "last_close": close_v, "target_price": target_v, "stop_loss": stop_v}, minimum_rr=1.5)["accepted"]:
                 continue
 
+            bars_win = bars_dict[sym][max(0, pos - 35) : pos + max_sessions + 35]
             outcome = evaluate_bars(
                 entry=close_v,
                 target=target_v,
                 stop=stop_v,
-                bars=bars_dict[sym],
+                bars=bars_win,
                 entry_date=d_str,
                 cursor=d_str,
                 max_sessions=max_sessions,
-                profit_protection=_profit_protection_callback,
+                profit_protection=SAUDI_PROFIT_PROTECTION_POLICY,
             )
             if outcome["status"] in ("win", "loss"):
                 pl_pct = float(outcome["profit_loss_pct"])
@@ -862,7 +902,7 @@ def evaluate_oos_lockbox_backtest(
     """
     _filt, primary_probs, meta_probs = _score_meta_system_df(artifact, df_test_raw_features, return_components=True)
     m_th = float(meta_threshold_override if meta_threshold_override is not None else artifact.get("meta_threshold", 0.50))
-    bars_dict, date_pos = _build_bars_dict(bars_by_symbol)
+    bars_dict, date_pos = _build_bars_dict(bars_by_symbol, min_date="2023-01-01")
     healthy_dates = _healthy_tasi_dates(market_df)
     return _simulate_slice_trades(
         df_slice=df_test_raw_features,
@@ -900,22 +940,22 @@ def _optimize_dual_thresholds_on_dev(
     Choose `(optimal_threshold, meta_threshold)` strictly on pre-test `dev_cal`
     (`2022-11 -> 2023-06`) optimizing label precision AND trade Profit Factor.
     """
-    bars_dict, date_pos = _build_bars_dict(bars_by_symbol, max_date="2023-07-01")
+    bars_dict, date_pos = _build_bars_dict(bars_by_symbol, min_date="2023-06-01", max_date="2024-07-31")
     healthy_dates = _healthy_tasi_dates(market_df)
     base_rate = float(np.mean(y_dev))
 
     best_score = -1e9
-    best_p_th = float(np.quantile(p_tune_ref, 0.85))
-    best_m_th = float(np.quantile(m_tune_ref, 0.60))
+    best_p_th = float(np.quantile(p_tune_ref, 0.92))
+    best_m_th = float(np.quantile(m_tune_ref, 0.50))
     best_stats: Dict[str, Any] = {}
 
-    for p_q in (0.75, 0.80, 0.85, 0.88):
+    for p_q in (0.90, 0.92, 0.93):
         p_th = float(np.quantile(p_tune_ref, p_q))
-        for m_q in (0.50, 0.60, 0.70):
+        for m_q in (0.45, 0.55, 0.65):
             m_th = float(np.quantile(m_tune_ref, m_q))
             mask = (p_dev >= p_th) & (m_dev >= m_th)
             sig_n = int(mask.sum())
-            if sig_n < 150:
+            if sig_n < 80:
                 continue
             prec = float(y_dev[mask].mean())
             sim = _simulate_slice_trades(
@@ -934,12 +974,12 @@ def _optimize_dual_thresholds_on_dev(
                 top_k_per_day=3,
                 market_regime_filter=True,
             )
-            if sim["trades"] < 25:
+            if sim["trades"] < 5:
                 continue
             score = (
                 (prec - base_rate) * 3.0
-                + min(sim["profit_factor"], 4.0) * 0.25
-                + (sim["win_rate"] / 100.0) * 0.6
+                + min(sim["profit_factor"], 4.0) * 0.30
+                + (sim["win_rate"] / 100.0) * 0.70
             )
             if score > best_score:
                 best_score = score
@@ -1090,15 +1130,15 @@ def train_saudi_meta_model(
     cat_cols = list(trainer.categorical_features)
     meta_feature_names = [c for c in META_CORE_CANDIDATES if c in feature_cols]
 
-    # Purged Chronological Splits (strictly zero leakage into 2023-08 -> 2026-11 test lockbox!)
+    # Purged 60/10/10/20 Chronological Splits matching EGX `get_walk_forward_splits`
     d = pd.to_datetime(df_labeled["Date"])
-    train_mask = d <= pd.Timestamp("2019-11-30")
-    ea_mask = (d >= pd.Timestamp("2020-01-01")) & (d <= pd.Timestamp("2021-05-31"))
-    tune_fit_mask = (d >= pd.Timestamp("2021-07-01")) & (d <= pd.Timestamp("2022-09-30"))
-    dev_cal_mask = (d >= pd.Timestamp("2022-11-01")) & (d <= pd.Timestamp("2023-06-30"))
-    tune_all_mask = (d >= pd.Timestamp("2021-07-01")) & (d <= pd.Timestamp("2023-06-30"))
-    test_mask = d >= pd.Timestamp("2023-08-01")
-    dev_full_mask = d <= pd.Timestamp("2023-06-30")
+    train_mask = d <= pd.Timestamp("2020-12-31")
+    ea_mask = (d >= pd.Timestamp("2021-02-01")) & (d <= pd.Timestamp("2022-09-30"))
+    tune_fit_mask = (d >= pd.Timestamp("2022-11-01")) & (d <= pd.Timestamp("2023-10-31"))
+    dev_cal_mask = (d >= pd.Timestamp("2023-12-01")) & (d <= pd.Timestamp("2024-06-30"))
+    tune_all_mask = (d >= pd.Timestamp("2022-11-01")) & (d <= pd.Timestamp("2024-06-30"))
+    test_mask = d >= pd.Timestamp("2024-08-01")
+    dev_full_mask = d <= pd.Timestamp("2024-06-30")
 
     wf_results, avg_purged_f1 = _run_purged_walk_forward_stationary(
         df_labeled.loc[dev_full_mask], feature_cols, cat_cols, n_splits=5, embargo_days=25
@@ -1385,10 +1425,10 @@ def train_all_saudi_models(force_refresh: bool = False) -> Dict[str, Any]:
     tad_path, tad_metrics, _ = train_saudi_meta_model(
         history_cache=history_cache,
         model_filename="model_TADAWUL.pkl",
-        target_pct=3.0,
-        stop_loss_pct=1.5,
+        target_pct=0.06,
+        stop_loss_pct=0.035,
         look_forward_days=20,
-        barrier_mode="atr_multiplier",
+        barrier_mode="percent",
         df_compact=df_compact,
     )
     king_path, king_metrics, _ = train_saudi_meta_model(

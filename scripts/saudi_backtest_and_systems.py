@@ -1,68 +1,74 @@
 """
 Saudi Backtests & 3 Trading Systems Engine (TASI / Tadawul).
 
-Connects to SAUDI_SUPABASE, loads historical stock_prices (264 Saudi stocks),
-stocks metadata, stock_technical_indicators, and trained LightGBM models
-(`api/models/KING_TASI.pkl`, `api/models/model_TADAWUL.pkl`).
-
-Computes and upserts 3 real datasets into SAUDI_SUPABASE.market_cache:
-  1. `saudi_backtests_v1`     — Walk-forward backtest simulation of KING_TASI & model_TADAWUL
-  2. `saudi_short_swings_v1`  — Saudi Short Swings (20d breakout + EMA10 pullback + trailing EMA10 stop)
-  3. `saudi_scanner_alerts_v1`— Saudi Fast Scanner signals (volume_surge, breakout, rsi_oversold)
+Uses the EXACT Egyptian (EGX) production engines and causal StrategyEngine rules
+against real SAUDI_SUPABASE historical OHLCV data (`stock_prices` & `market_index`):
+  1. `saudi_backtests_v1`      — Walk-forward ML backtests using `StrategyEngine`
+                                 market/stock regime filters, technical filters,
+                                 ATR barriers, and trailing profit protection
+                                 (supports both `meta_labeling_system` and Booster .pkl).
+  2. `saudi_short_swings_v1`   — System 2 via `api.short_swings_engine.compute_short_swings(exchange="TADAWUL")`
+  3. `saudi_scanner_alerts_v1` — System 3 via `api.scanner_alerts_engine.run_scanner_alerts_simulation(exchange="TADAWUL")`
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import os
 import pickle
 import sys
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from api.model_utils import align_pandas_categories_to_booster, get_primary_booster, reset_nested_boosters  # noqa: E402
+from api.scanner_alerts_engine import run_scanner_alerts_simulation  # noqa: E402
+from api.short_swings_engine import compute_short_swings  # noqa: E402
+from api.stock_ai import (  # noqa: E402
+    _LgbmBoosterClassifier,
+    _MetaLabelingClassifier,
+    _PcaTransformer,
+    add_technical_indicators,
+)
+from api.strategy_engine import StrategyEngine  # noqa: E402
+from api.train_exchange_model import add_massive_features, add_market_context  # noqa: E402
 from scripts.saudi_pipeline_bootstrap import (  # noqa: E402
     KING_TASI_FEATURES,
-    MODEL_TADAWUL_EXTRA_FEATURES,
-    _build_single_stock_ml_frame,
-    _clean_num,
     _init_saudi_client,
-    _init_saudi_config,
     load_saudi_market_and_prices,
 )
 
 COUNTRY_NAME = "Saudi Arabia"
-MIN_SAUDI_TURNOVER = 2_000_000.0  # 2M SAR 20-day average daily turnover
 SLIPPAGE = 0.0015  # 0.15% conservative execution slippage
+DEFAULT_ML_MIN_TURNOVER = 15_000_000.0  # 15M SAR 20d avg daily turnover
+ML_WARMUP_START = "2020-06-01"
+SCANNER_WARMUP_START = "2023-10-01"
+SAUDI_HISTORY_CACHE = Path(PROJECT_ROOT) / "api" / "data_cache" / "saudi_history_cache.pkl"
+SAUDI_ML_FEATURES_CACHE = Path(PROJECT_ROOT) / "api" / "data_cache" / "saudi_ml_features_cache.pkl"
 
-SHORT_SWING_EXIT_LABELS = {
-    "ema10_break": "كسر متوسط EMA10 (حماية أرباح)",
-    "stop_be": "وقف التعادل (حماية رأس المال)",
-    "stop_loss": "وقف الخسارة الأولي (-4%)",
-    "max_time": "انتهاء المدة الزمنية القصوى (20 جلسة)",
-    "delisted_or_halted": "إغلاق لانتهاء المدة / توقف التداول",
-}
-
-SCANNER_PROFILES = {
-    "volume_surge": {"t1_pct": 4.5, "t2_pct": 7.5, "sl_pct": 3.0, "max_sessions": 4},
-    "breakout": {"t1_pct": 6.0, "t2_pct": 9.5, "sl_pct": 3.5, "max_sessions": 5},
-    "rsi_oversold": {"t1_pct": 4.0, "t2_pct": 6.5, "sl_pct": 2.8, "max_sessions": 3},
+BACKTEST_EXIT_LABELS = {
+    "target_hit": "تحقق الهدف 🎯",
+    "trail_stop": "تأمين ربح / وقف متحرك 🛡️",
+    "stop_loss": "وقف الخسارة 🛑",
+    "max_time": "انتهاء المدة القصوى ⏱️",
 }
 
 
 def _compute_kpis_from_trades(
     trades: List[Dict[str, Any]],
     return_key: str = "return_pct",
-    slots: float = 15.0,
+    slots: float = 10.0,
 ) -> Dict[str, Any]:
     if not trades:
         return {
@@ -133,135 +139,678 @@ def _compute_kpis_from_trades(
     }
 
 
-def _load_saudi_stocks_meta(sb) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+def _load_saudi_stocks_meta(sb) -> Tuple[List[str], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     res = sb.table("stocks").select("symbol,name,name_ar,sector").execute()
     meta: Dict[str, Dict[str, Any]] = {}
+    stocks_by_sym: Dict[str, Dict[str, Any]] = {}
     symbols: List[str] = []
     for row in res.data or []:
         sym = str(row.get("symbol") or "").strip()
         if not sym:
             continue
         symbols.append(sym)
+        stocks_by_sym[sym] = row
         meta[sym] = {
             "name_ar": row.get("name_ar") or row.get("name") or sym,
             "name_en": row.get("name") or sym,
             "sector": row.get("sector") or "عام",
         }
-    return sorted(set(symbols)), meta
+    return sorted(set(symbols)), meta, stocks_by_sym
 
 
-def _simulate_model_backtest(
+def _fetch_paginated_rows(
+    sb,
+    table: str,
+    columns: str,
+    *,
+    gt_date: Optional[str] = None,
+    eq_filters: Optional[Dict[str, Any]] = None,
+    page_size: int = 1000,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    offset = 0
+    while True:
+        q = sb.table(table).select(columns)
+        for col, val in (eq_filters or {}).items():
+            q = q.eq(col, val)
+        if gt_date:
+            q = q.gt("date", gt_date)
+        res = q.order("date", desc=False).range(offset, offset + page_size - 1).execute()
+        batch = res.data or []
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return rows
+
+
+def _merge_bar_rows(
+    base_df: Optional[pd.DataFrame],
+    new_rows: List[Dict[str, Any]],
+) -> Optional[pd.DataFrame]:
+    if not new_rows:
+        return base_df
+    add_df = pd.DataFrame(new_rows)
+    if add_df.empty:
+        return base_df
+    add_df["Date"] = pd.to_datetime(add_df["date"], errors="coerce")
+    add_df = add_df.dropna(subset=["Date"]).set_index("Date").sort_index()
+    col_map = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+    add_norm = pd.DataFrame(index=add_df.index)
+    for src, dst in col_map.items():
+        if src in add_df.columns:
+            add_norm[dst] = pd.to_numeric(add_df[src], errors="coerce")
+    add_norm = add_norm.dropna(subset=["Close"])
+    if base_df is None or base_df.empty:
+        return add_norm
+    combined = pd.concat([base_df, add_norm])
+    combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+    return combined
+
+
+def _load_saudi_history_for_systems(
+    sb,
+    symbols: List[str],
+    meta: Dict[str, Dict[str, Any]],
+    stocks_by_sym: Dict[str, Dict[str, Any]],
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame], Dict[str, Dict[str, Any]]]:
+    """Load full Saudi OHLCV from local snapshot + incremental SAUDI_SUPABASE tail."""
+    fund_meta: Dict[str, Dict[str, Any]] = {}
+    if SAUDI_HISTORY_CACHE.exists():
+        try:
+            with open(SAUDI_HISTORY_CACHE, "rb") as f:
+                cached = pickle.load(f)
+            bars_by_symbol: Dict[str, pd.DataFrame] = dict(cached.get("bars_by_symbol") or {})
+            market_df: pd.DataFrame = cached.get("market_df")
+            max_price_date = str(cached.get("max_price_date") or "")[:10]
+            for row in cached.get("stocks_rows") or []:
+                sym = str(row.get("symbol") or "").strip()
+                if sym and sym not in stocks_by_sym:
+                    stocks_by_sym[sym] = row
+                if sym and sym not in meta:
+                    meta[sym] = {
+                        "name_ar": row.get("name_ar") or row.get("name") or sym,
+                        "name_en": row.get("name") or sym,
+                        "sector": row.get("sector") or "عام",
+                    }
+            for row in cached.get("fund_rows") or []:
+                sym = str(row.get("symbol") or "").strip()
+                if sym:
+                    fund_meta[sym] = row.get("data") or {}
+
+            if bars_by_symbol and market_df is not None and not market_df.empty and max_price_date:
+                tail_prices = _fetch_paginated_rows(
+                    sb,
+                    "stock_prices",
+                    "symbol,date,open,high,low,close,volume",
+                    gt_date=max_price_date,
+                )
+                if tail_prices:
+                    by_sym: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+                    for r in tail_prices:
+                        sym = str(r.get("symbol") or "").strip()
+                        if sym:
+                            by_sym[sym].append(r)
+                    for sym, sym_rows in by_sym.items():
+                        merged = _merge_bar_rows(bars_by_symbol.get(sym), sym_rows)
+                        if merged is not None and not merged.empty:
+                            bars_by_symbol[sym] = merged
+
+                tail_idx = _fetch_paginated_rows(
+                    sb,
+                    "market_index",
+                    "date,close,ret",
+                    gt_date=max_price_date,
+                    eq_filters={"exchange": "TADAWUL"},
+                )
+                if tail_idx:
+                    idx_add = pd.DataFrame(tail_idx)
+                    idx_add["date"] = pd.to_datetime(idx_add["date"], errors="coerce")
+                    idx_add = idx_add.dropna(subset=["date"]).set_index("date").sort_index()
+                    for col in ("close", "ret"):
+                        if col in idx_add.columns:
+                            idx_add[col] = pd.to_numeric(idx_add[col], errors="coerce")
+                    market_df = pd.concat([market_df, idx_add[[c for c in ("close", "ret") if c in idx_add.columns]]])
+                    market_df = market_df[~market_df.index.duplicated(keep="last")].sort_index()
+                return market_df, bars_by_symbol, fund_meta
+        except Exception as exc:
+            print(f"[SAUDI-SYSTEMS] History cache read failed, loading from Supabase: {exc}")
+
+    market_df, _, bars_by_symbol = load_saudi_market_and_prices(sb, symbols)
+    return market_df, bars_by_symbol, fund_meta
+
+
+def _build_sym_feat_worker(
+    args: Tuple[str, pd.DataFrame, pd.DataFrame, Dict[Any, float], str, str, Dict[str, Any]],
+) -> Optional[pd.DataFrame]:
+    sym, df_sym, market_df, sec_avg_for_sec, sec, ind, fm = args
+    df_sym = df_sym.copy()
+    df_sym["sector"] = sec
+    df_sym["industry"] = ind
+    df_sym["marketCap"] = fm.get("marketCap") or 0.0
+    df_sym["peRatio"] = fm.get("peRatio") or 0.0
+    df_sym["eps"] = fm.get("eps") or 0.0
+    df_sym["dividendYield"] = fm.get("dividendYield") or 0.0
+    df_sym["stock_daily_return"] = df_sym["Close"].pct_change().fillna(0.0)
+    df_sym["sector_avg_return"] = [sec_avg_for_sec.get(dt_idx, 0.0) for dt_idx in df_sym.index]
+
+    feat = add_technical_indicators(df_sym)
+    if feat.empty:
+        return None
+    for col in (
+        "marketCap",
+        "peRatio",
+        "eps",
+        "dividendYield",
+        "sector",
+        "industry",
+        "sector_avg_return",
+        "stock_daily_return",
+    ):
+        if col in df_sym.columns and col not in feat.columns:
+            feat[col] = df_sym[col].values if len(df_sym[col]) == len(feat) else df_sym[col].iloc[-1]
+    feat = add_massive_features(feat)
+    feat = add_market_context(feat, market_df)
+    feat = feat.loc[:, ~feat.columns.duplicated()].copy()
+    feat["symbol"] = sym
+    feat["Date"] = feat.index
+    feat["date_str"] = feat.index.strftime("%Y-%m-%d")
+    return feat.reset_index(drop=True)
+
+
+def _ensure_stationary_derived_features(df_all: pd.DataFrame) -> pd.DataFrame:
+    """Compute stationary price ratios & causal lagged sector relative strength matching trainer."""
+    if df_all.empty or "Close" not in df_all.columns:
+        return df_all
+    out = df_all.copy()
+    close_s = pd.to_numeric(out["Close"], errors="coerce").replace(0.0, np.nan)
+    if "ATR_pct" not in out.columns:
+        atr_col = pd.to_numeric(out["ATR_14"], errors="coerce") if "ATR_14" in out.columns else 0.0
+        out["ATR_pct"] = (atr_col / close_s).fillna(0.02)
+    if "SMA_50_Ratio" not in out.columns and "SMA_50" in out.columns:
+        sma50 = pd.to_numeric(out["SMA_50"], errors="coerce").replace(0.0, np.nan)
+        out["SMA_50_Ratio"] = (close_s / sma50 - 1.0).fillna(0.0)
+    if "EMA_50_Ratio" not in out.columns and "EMA_50" in out.columns:
+        ema50 = pd.to_numeric(out["EMA_50"], errors="coerce").replace(0.0, np.nan)
+        out["EMA_50_Ratio"] = (close_s / ema50 - 1.0).fillna(0.0)
+    if {"symbol", "Date", "sector"}.issubset(out.columns):
+        ret_1d = out.groupby("symbol")["Close"].pct_change().fillna(0.0)
+        tmp = pd.DataFrame({
+            "Date": out["Date"].values,
+            "sector": out["sector"].astype(str).values,
+            "ret_1d": ret_1d.values,
+        })
+        sec_daily = (
+            tmp.groupby(["Date", "sector"], as_index=False)["ret_1d"]
+            .mean()
+            .rename(columns={"ret_1d": "sec_ret"})
+            .sort_values(["sector", "Date"])
+        )
+        sec_daily["sec_ret_lag1"] = sec_daily.groupby("sector")["sec_ret"].shift(1).fillna(0.0)
+        merged_sec = pd.DataFrame({"Date": out["Date"].values, "sector": out["sector"].astype(str).values}).merge(
+            sec_daily[["Date", "sector", "sec_ret_lag1"]],
+            on=["Date", "sector"],
+            how="left",
+        )
+        stock_lag1 = ret_1d.groupby(out["symbol"]).shift(1).fillna(0.0).values
+        sec_lag1 = merged_sec["sec_ret_lag1"].fillna(0.0).values
+        out["feat_sector_rel_strength"] = np.clip(stock_lag1 - sec_lag1, -0.3, 0.3)
+    return out
+
+
+def _build_or_load_ml_features_df(
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    market_df: pd.DataFrame,
+    stocks_by_sym: Dict[str, Dict[str, Any]],
+    fund_meta: Dict[str, Dict[str, Any]],
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
+    sub_bars: Dict[str, pd.DataFrame] = {}
+    max_dates: List[str] = []
+    for sym, bdf in bars_by_symbol.items():
+        if bdf is None or bdf.empty:
+            continue
+        sub = bdf[bdf.index >= ML_WARMUP_START].copy()
+        if len(sub) >= 80:
+            sub_bars[sym] = sub
+            max_dates.append(sub.index[-1].strftime("%Y-%m-%d"))
+
+    sig_max_date = max(max_dates) if max_dates else ""
+    sig_sym_count = len(sub_bars)
+
+    if SAUDI_ML_FEATURES_CACHE.exists():
+        try:
+            with open(SAUDI_ML_FEATURES_CACHE, "rb") as f:
+                cached = pickle.load(f)
+            if (
+                isinstance(cached, dict)
+                and cached.get("max_date") == sig_max_date
+                and int(cached.get("sym_count") or -1) == sig_sym_count
+                and isinstance(cached.get("df"), pd.DataFrame)
+            ):
+                df_cached = cached["df"]
+                if int(cached.get("feat_v") or 1) < 2 or "ATR_pct" not in df_cached.columns:
+                    df_cached = _ensure_stationary_derived_features(df_cached)
+                    try:
+                        with open(SAUDI_ML_FEATURES_CACHE, "wb") as fw:
+                            pickle.dump({"max_date": sig_max_date, "sym_count": sig_sym_count, "feat_v": 2, "df": df_cached}, fw)
+                    except Exception:
+                        pass
+                return df_cached, sub_bars
+        except Exception:
+            pass
+
+    ret_frames: List[pd.DataFrame] = []
+    for sym, bdf in sub_bars.items():
+        sm = stocks_by_sym.get(sym, {})
+        sec = sm.get("sector") or "Unknown"
+        r1 = bdf["Close"].astype(float).pct_change().fillna(0.0)
+        ret_frames.append(pd.DataFrame({"Date": bdf.index, "sector": sec, "ret": r1.values}))
+
+    sec_maps: Dict[str, Dict[Any, float]] = {}
+    if ret_frames:
+        all_rets = pd.concat(ret_frames, ignore_index=True)
+        sec_grouped = all_rets.groupby(["sector", "Date"])["ret"].mean()
+        for sec in sec_grouped.index.get_level_values(0).unique():
+            sec_maps[str(sec)] = sec_grouped.loc[sec].to_dict()
+
+    jobs = []
+    for sym, bdf in sub_bars.items():
+        sm = stocks_by_sym.get(sym, {})
+        fm = fund_meta.get(sym, {})
+        sec = sm.get("sector") or fm.get("sector") or "Unknown"
+        ind = sm.get("industry") or fm.get("industry") or "Unknown"
+        jobs.append((sym, bdf, market_df, sec_maps.get(str(sec), {}), sec, ind, fm))
+
+    parts: List[pd.DataFrame] = []
+    if len(jobs) >= 20:
+        try:
+            workers = min(6, max(2, os.cpu_count() or 2))
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                parts = [r for r in pool.map(_build_sym_feat_worker, jobs, chunksize=8) if r is not None]
+        except Exception as exc:
+            print(f"[SAUDI-SYSTEMS] ProcessPool fallback to threads: {exc}")
+            parts = []
+
+    if not parts and jobs:
+        with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as pool:
+            parts = [r for r in pool.map(_build_sym_feat_worker, jobs) if r is not None]
+
+    df_all = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    if not df_all.empty:
+        df_all = _ensure_stationary_derived_features(df_all)
+        try:
+            SAUDI_ML_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            with open(SAUDI_ML_FEATURES_CACHE, "wb") as f:
+                pickle.dump({"max_date": sig_max_date, "sym_count": sig_sym_count, "feat_v": 2, "df": df_all}, f)
+        except Exception:
+            pass
+    return df_all, sub_bars
+
+
+def score_model_artifact(
+    artifact: Dict[str, Any],
+    df_all: pd.DataFrame,
+    *,
+    fallback_features: Optional[List[str]] = None,
+) -> Tuple[np.ndarray, float, Dict[str, Any]]:
+    """Score both `meta_labeling_system` pickles and legacy LightGBM Booster pickles."""
+    if df_all.empty:
+        return np.zeros(0, dtype=float), 0.5, {"kind": "empty", "num_features": 0}
+
+    if artifact.get("kind") == "meta_labeling_system" or "primary_model" in artifact:
+        pm = artifact["primary_model"]
+        booster = lgb.Booster(model_str=pm["model_str"])
+        pca_transformer = None
+        if pm.get("pca") is not None and pm.get("scaler") is not None and pm.get("pca_features"):
+            pca_transformer = _PcaTransformer(pm["pca"], pm["scaler"], pm["pca_features"])
+
+        primary_clf = _LgbmBoosterClassifier(booster, 0.5, pca_transformer=pca_transformer)
+        meta_threshold = float(artifact.get("meta_threshold") or 0.52)
+        meta_clf = _MetaLabelingClassifier(
+            primary_model=primary_clf,
+            meta_model=artifact["meta_model"],
+            meta_feature_names=artifact["meta_feature_names"],
+            meta_threshold=meta_threshold,
+            return_raw_prob=False,
+        )
+
+        f_names = list(pm["feature_names"])
+        pca_feats = list(pm.get("pca_features") or [])
+        raw_needed = (
+            [c for c in f_names if not str(c).startswith("PCA_Momentum_")] + pca_feats
+            if pca_feats
+            else f_names
+        )
+        meta_extra = [c for c in (artifact.get("meta_feature_names") or []) if c != "primary_prob" and c not in raw_needed]
+        use_cols = list(dict.fromkeys(raw_needed + meta_extra))
+
+        X = pd.DataFrame(index=df_all.index)
+        for col in use_cols:
+            X[col] = df_all[col] if col in df_all.columns else 0.0
+
+        cat_cols = [c for c in (pm.get("categorical_features") or []) if c in X.columns]
+        for col in cat_cols:
+            X[col] = (
+                X[col]
+                .astype(str)
+                .replace(["nan", "None", "", "0", "0.0"], "Unknown")
+                .fillna("Unknown")
+                .astype("category")
+            )
+        non_cat = [c for c in X.columns if c not in set(cat_cols)]
+        for col in non_cat:
+            if not is_numeric_dtype(X[col]):
+                X[col] = pd.to_numeric(X[col], errors="coerce")
+        X = X.replace([np.inf, -np.inf], np.nan)
+        if non_cat:
+            X[non_cat] = X[non_cat].fillna(0.0)
+
+        primary_booster = get_primary_booster(meta_clf)
+        X = align_pandas_categories_to_booster(
+            X,
+            cat_cols=cat_cols,
+            booster=primary_booster,
+            cat_cols_order=list(pm.get("categorical_features") or []),
+        )
+        if primary_booster is None or not (cat_cols and hasattr(primary_booster, "pandas_categorical")):
+            reset_nested_boosters(meta_clf)
+
+        probs = np.asarray(meta_clf.predict_proba(X)[:, 1], dtype=float)
+        thresh = float(artifact.get("optimal_threshold") or artifact.get("threshold") or 0.35)
+        info = {
+            "kind": "meta_labeling_system",
+            "num_features": len(f_names),
+            "meta_threshold": meta_threshold,
+            "trading_parameters": artifact.get("trading_parameters") or {},
+        }
+        return probs, thresh, info
+
+    booster = lgb.Booster(model_str=artifact["model_str"])
+    feat_names = list(artifact.get("feature_names") or fallback_features or KING_TASI_FEATURES)
+    X = pd.DataFrame(index=df_all.index)
+    for col in feat_names:
+        X[col] = pd.to_numeric(df_all[col], errors="coerce") if col in df_all.columns else 0.0
+    X = X.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    probs = np.asarray(booster.predict(X), dtype=float)
+    thresh = float(artifact.get("optimal_threshold") or artifact.get("threshold") or 0.45)
+    info = {
+        "kind": "lgbm_booster",
+        "num_features": len(feat_names),
+        "meta_threshold": float(artifact.get("meta_threshold") or thresh),
+        "trading_parameters": artifact.get("trading_parameters") or {},
+    }
+    return probs, thresh, info
+
+
+def _prepare_market_and_signal_cache(
+    sub_bars: Dict[str, pd.DataFrame],
+    market_df: pd.DataFrame,
+    min_turnover: float = DEFAULT_ML_MIN_TURNOVER,
+) -> Dict[str, Any]:
+    """Precompute causal per-day TASI gates, per-symbol positions, and StrategyEngine filters."""
+    idx_close_col = "close" if "close" in market_df.columns else "Close"
+    idx_c = pd.to_numeric(market_df[idx_close_col], errors="coerce").ffill().astype(float)
+    idx_e20 = idx_c.ewm(span=20, adjust=False).mean()
+    idx_e50 = idx_c.ewm(span=50, adjust=False).mean()
+
+    idx_dates = [ts.strftime("%Y-%m-%d") for ts in market_df.index]
+    idx_regime: Dict[str, str] = {}
+    for i, d_str in enumerate(idx_dates):
+        idx_regime[d_str] = (
+            "SIDEWAYS"
+            if i < 60
+            else StrategyEngine.detect_market_regime(market_df.iloc[: i + 1], use_market_regime=True)
+        )
+    idx_above_e20 = {d_str: bool(idx_c.iloc[i] > idx_e20.iloc[i]) for i, d_str in enumerate(idx_dates)}
+    idx_above_e50 = {d_str: bool(idx_c.iloc[i] > idx_e50.iloc[i]) for i, d_str in enumerate(idx_dates)}
+
+    date_pos: Dict[str, Dict[str, int]] = {}
+    turn_by_sym: Dict[str, np.ndarray] = {}
+    for sym, bdf in sub_bars.items():
+        date_pos[sym] = {ts.strftime("%Y-%m-%d"): idx for idx, ts in enumerate(bdf.index)}
+        turn_by_sym[sym] = (
+            (bdf["Close"].astype(float) * bdf["Volume"].astype(float))
+            .rolling(20, min_periods=1)
+            .mean()
+            .values
+        )
+
+    return {
+        "idx_regime": idx_regime,
+        "idx_above_e20": idx_above_e20,
+        "idx_above_e50": idx_above_e50,
+        "date_pos": date_pos,
+        "turn_by_sym": turn_by_sym,
+        "min_turnover": float(min_turnover),
+        "signal_state_cache": {},
+    }
+
+
+def _get_symbol_strategy_state(
+    market_cache: Dict[str, Any],
+    sub_bars: Dict[str, pd.DataFrame],
+    sym: str,
+    d_str: str,
+    *,
+    use_trend_filter: bool,
+    min_turnover: float,
+) -> Optional[Tuple[str, bool, pd.DataFrame, int]]:
+    bdf = sub_bars.get(sym)
+    pos = market_cache["date_pos"].get(sym, {}).get(d_str)
+    if bdf is None or pos is None or pos + 1 >= len(bdf) or pos < 60:
+        return None
+    avg_turn = float(market_cache["turn_by_sym"][sym][pos])
+    if not np.isfinite(avg_turn) or avg_turn < min_turnover:
+        return None
+
+    key = (sym, d_str, bool(use_trend_filter))
+    cached = market_cache["signal_state_cache"].get(key)
+    hist = bdf.iloc[max(0, pos - 250) : pos + 1]
+    if cached is not None:
+        return cached[0], cached[1], hist, pos
+
+    stk_reg = StrategyEngine.detect_market_regime(
+        hist,
+        use_market_regime=True,
+        regime_adx_threshold=14.0,
+    )
+    ok_tech, _ = StrategyEngine.check_technical_filters(
+        hist,
+        min_volume_ratio=0.3,
+        use_trend_filter=use_trend_filter,
+        use_rsi_filter=True,
+    )
+    market_cache["signal_state_cache"][key] = (stk_reg, bool(ok_tech))
+    return stk_reg, bool(ok_tech), hist, pos
+
+
+def simulate_radar_strategy_backtest(
     *,
     model_name: str,
-    model_meta: Dict[str, Any],
-    booster: lgb.Booster,
-    feature_names: List[str],
     df_all: pd.DataFrame,
-    bars_by_symbol: Dict[str, pd.DataFrame],
+    prob_col: str,
+    threshold: float,
+    sub_bars: Dict[str, pd.DataFrame],
+    market_cache: Dict[str, Any],
     meta: Dict[str, Dict[str, Any]],
-    start_date: str = "2025-01-01",
-    target_pct: float = 8.0,
-    stop_loss_pct: float = 4.5,
+    start_date: str = "2022-01-01",
+    end_date: Optional[str] = None,
+    index_gate: str = "above_ema50",
+    use_trend_filter: bool = True,
+    adaptive_exits: bool = True,
+    barrier_mode: str = "atr",
+    atr_tp_mult: float = 3.0,
+    atr_sl_mult: float = 1.5,
     max_sessions: int = 15,
     max_concurrent: int = 10,
+    min_turnover: float = DEFAULT_ML_MIN_TURNOVER,
+    trail_be_pct: float = 0.04,
+    trail_lock_trigger_pct: float = 0.06,
     now_iso: str = "",
 ) -> Dict[str, Any]:
-    threshold = float(model_meta.get("threshold") or model_meta.get("optimal_threshold") or 0.40)
+    """Run exact EGX StrategyEngine + backtest_radar trailing-ATR simulation over Saudi data."""
+    if df_all.empty or prob_col not in df_all.columns:
+        end_d = end_date or start_date
+        return {
+            "id": f"saudi_bt_{model_name.lower()}_{start_date.replace('-', '')}_{end_d.replace('-', '')}",
+            "model_name": model_name,
+            "exchange": "TADAWUL",
+            "market": "TASI",
+            "currency": "SAR",
+            "is_public": True,
+            "created_at": now_iso,
+            "start_date": start_date,
+            "end_date": end_d,
+            "status": "completed",
+            "status_msg": "No signals in window",
+            "target_pct": atr_tp_mult,
+            "stop_loss_pct": atr_sl_mult,
+            "look_forward_days": max_sessions,
+            "meta_threshold": round(threshold, 3),
+            "capital": 100_000.0,
+            "net_profit": 0.0,
+            "win_rate": 0.0,
+            "profit_pct": 0.0,
+            "post_council_profit_pct": 0.0,
+            "post_council_win_rate": 0.0,
+            "total_trades": 0,
+            "avg_return_per_trade": 0.0,
+            "profit_factor": 0.0,
+            "max_drawdown_pct": 0.0,
+            "avg_holding_days": 0.0,
+            "trades": [],
+        }
 
-    # Filter ML rows to backtest window
-    win_df = df_all[df_all["date_str"] >= start_date].copy()
-    if win_df.empty:
-        raise RuntimeError(f"No ML rows >= {start_date} for {model_name}")
-
-    probs = booster.predict(win_df[feature_names].astype(float))
-    win_df["prob"] = probs
-    sig_df = win_df[win_df["prob"] >= threshold].copy()
-
-    # Group candidate signals by date sorted by prob descending
-    candidates_by_date: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
-    for row in sig_df.sort_values(["date_str", "prob"], ascending=[True, False]).itertuples(index=False):
-        candidates_by_date[str(row.date_str)].append((str(row.symbol), float(row.prob)))
-
+    mask = df_all["date_str"] >= start_date
+    if end_date:
+        mask &= df_all["date_str"] <= end_date
+    win_df = df_all.loc[mask, ["symbol", "date_str", prob_col]]
     all_dates = sorted(win_df["date_str"].unique())
-    end_date = all_dates[-1] if all_dates else start_date
+    actual_end = all_dates[-1] if all_dates else (end_date or start_date)
 
-    # Precompute 20-day avg turnover and date->position lookup per symbol
-    date_pos_by_sym: Dict[str, Dict[str, int]] = {}
-    turnover_by_sym: Dict[str, np.ndarray] = {}
-    for sym, raw_df in bars_by_symbol.items():
-        d_strs = [ts.strftime("%Y-%m-%d") for ts in raw_df.index]
-        date_pos_by_sym[sym] = {d: idx for idx, d in enumerate(d_strs)}
-        turn = (raw_df["Close"].astype(float) * raw_df["Volume"].astype(float)).rolling(20, min_periods=1).mean().values
-        turnover_by_sym[sym] = turn
+    sig_df = win_df[win_df[prob_col] >= threshold].sort_values(
+        ["date_str", prob_col], ascending=[True, False]
+    )
+    candidates_by_date: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
+    for row in sig_df.itertuples(index=False):
+        candidates_by_date[str(row.date_str)].append((str(row.symbol), float(getattr(row, prob_col))))
 
+    idx_above_e50 = market_cache["idx_above_e50"]
+    idx_above_e20 = market_cache["idx_above_e20"]
+    idx_regime = market_cache["idx_regime"]
+
+    date_to_g_idx = {d: idx for idx, d in enumerate(all_dates)}
     active_until_idx: Dict[str, int] = {}
-    open_positions_exits: List[int] = []  # global day indices when positions close
-    date_to_global_idx = {d: idx for idx, d in enumerate(all_dates)}
-
+    open_positions_exits: List[int] = []
     trades: List[Dict[str, Any]] = []
     capital = 100_000.0
 
     for g_idx, d_str in enumerate(all_dates):
-        # Free up closed slots
         open_positions_exits = [ex_i for ex_i in open_positions_exits if ex_i > g_idx]
+        if index_gate == "above_ema50" and not idx_above_e50.get(d_str, False):
+            continue
+        if index_gate == "above_ema20" and not idx_above_e20.get(d_str, False):
+            continue
+        if index_gate == "not_bear" and idx_regime.get(d_str, "SIDEWAYS") == "BEAR":
+            continue
         if len(open_positions_exits) >= max_concurrent:
             continue
 
-        day_cands = candidates_by_date.get(d_str, [])
         picked_today = 0
-        for sym, prob in day_cands:
+        for sym, prob in candidates_by_date.get(d_str, []):
             if len(open_positions_exits) >= max_concurrent or picked_today >= 3:
                 break
             if active_until_idx.get(sym, -1) >= g_idx:
                 continue
 
-            raw_df = bars_by_symbol.get(sym)
-            pos = date_pos_by_sym.get(sym, {}).get(d_str)
-            if raw_df is None or pos is None or pos + 1 >= len(raw_df):
+            state = _get_symbol_strategy_state(
+                market_cache,
+                sub_bars,
+                sym,
+                d_str,
+                use_trend_filter=use_trend_filter,
+                min_turnover=min_turnover,
+            )
+            if state is None:
+                continue
+            stk_reg, ok_tech, hist, pos = state
+            if stk_reg == "BEAR" or not ok_tech:
                 continue
 
-            avg_turn = float(turnover_by_sym[sym][pos])
-            if not np.isfinite(avg_turn) or avg_turn < MIN_SAUDI_TURNOVER:
-                continue
-
-            next_bar = raw_df.iloc[pos + 1]
+            bdf = sub_bars[sym]
+            next_bar = bdf.iloc[pos + 1]
             if float(next_bar["Volume"]) <= 0 or float(next_bar["Open"]) <= 0:
                 continue
 
             entry_price = float(next_bar["Open"]) * (1.0 + SLIPPAGE)
-            entry_date = raw_df.index[pos + 1].strftime("%Y-%m-%d")
-            target_price = entry_price * (1.0 + target_pct / 100.0)
-            stop_price = entry_price * (1.0 - stop_loss_pct / 100.0)
+            entry_date = bdf.index[pos + 1].strftime("%Y-%m-%d")
 
-            fwd = raw_df.iloc[pos + 1 : min(len(raw_df), pos + 1 + max_sessions)]
+            if str(barrier_mode).lower() == "percent":
+                tp_frac = atr_tp_mult / 100.0 if atr_tp_mult > 1.0 else atr_tp_mult
+                sl_frac = atr_sl_mult / 100.0 if atr_sl_mult > 1.0 else atr_sl_mult
+                tp_price = entry_price * (1.0 + tp_frac)
+                sl_price = entry_price * (1.0 - sl_frac)
+            else:
+                tm, sm = atr_tp_mult, atr_sl_mult
+                if adaptive_exits:
+                    if stk_reg == "STRONG_BULL":
+                        tm, sm = 5.0, 2.0
+                    elif stk_reg == "BULL":
+                        tm, sm = 3.0, 1.5
+                    elif stk_reg == "SIDEWAYS":
+                        tm, sm = 2.5, 1.2
+                    else:
+                        tm, sm = 2.0, 1.0
+
+                tp_price, sl_price = StrategyEngine.calculate_atr_exits(
+                    hist,
+                    entry_price,
+                    0.08,
+                    0.045,
+                    use_atr_exits=True,
+                    atr_sl_multiplier=sm,
+                    atr_tp_multiplier=tm,
+                    exit_mode="atr",
+                )
+
+            fwd = bdf.iloc[pos + 1 : min(len(bdf), pos + 1 + max_sessions)]
             if len(fwd) < 2:
                 continue
 
             exit_price = float(fwd["Close"].iloc[-1]) * (1.0 - SLIPPAGE)
             exit_date = fwd.index[-1].strftime("%Y-%m-%d")
-            exit_reason = "max_time"
+            reason_code = "max_time"
             sessions_held = len(fwd)
+            be_armed = False
+            lock_armed = False
 
             for s_idx, (f_ts, f_bar) in enumerate(fwd.iterrows(), start=1):
                 f_open = float(f_bar["Open"])
                 f_high = float(f_bar["High"])
                 f_low = float(f_bar["Low"])
-                if s_idx >= 1 and f_low <= stop_price:
-                    raw_fill = f_open if f_open <= stop_price else stop_price
+                if f_low <= sl_price:
+                    raw_fill = f_open if f_open <= sl_price else sl_price
                     exit_price = raw_fill * (1.0 - SLIPPAGE)
                     exit_date = f_ts.strftime("%Y-%m-%d")
-                    exit_reason = "stop_loss"
+                    reason_code = "trail_stop" if (be_armed or lock_armed) else "stop_loss"
                     sessions_held = s_idx
                     break
-                if f_high >= target_price:
-                    exit_price = target_price * (1.0 - SLIPPAGE)
+                if f_high >= tp_price:
+                    exit_price = tp_price * (1.0 - SLIPPAGE)
                     exit_date = f_ts.strftime("%Y-%m-%d")
-                    exit_reason = "target_hit"
+                    reason_code = "target_hit"
                     sessions_held = s_idx
                     break
+                if trail_lock_trigger_pct and not lock_armed and (f_high / entry_price - 1.0) >= trail_lock_trigger_pct:
+                    sl_price = max(sl_price, entry_price * 1.04)
+                    lock_armed = True
+                elif trail_be_pct and not be_armed and (f_high / entry_price - 1.0) >= trail_be_pct:
+                    sl_price = max(sl_price, entry_price * 1.003)
+                    be_armed = True
 
             ret_pct = ((exit_price / entry_price) - 1.0) * 100.0
-            status = "win" if ret_pct > 0 else "loss"
             m_info = meta.get(sym, {})
             trades.append({
                 "symbol": sym,
@@ -274,14 +823,16 @@ def _simulate_model_backtest(
                 "exit_price": round(exit_price, 2),
                 "profit_pct": round(ret_pct, 2),
                 "profit_loss_pct": round(ret_pct, 2),
-                "status": status,
-                "exit_reason": exit_reason,
+                "status": "win" if ret_pct > 0 else "loss",
+                "exit_reason": BACKTEST_EXIT_LABELS.get(reason_code, reason_code),
+                "exit_reason_code": reason_code,
+                "regime": stk_reg,
                 "sessions": sessions_held,
                 "confidence": round(prob, 4),
             })
 
-            exit_g_idx = date_to_global_idx.get(exit_date, g_idx + sessions_held)
-            active_until_idx[sym] = exit_g_idx + 2  # 2-session cooldown
+            exit_g_idx = date_to_g_idx.get(exit_date, g_idx + sessions_held)
+            active_until_idx[sym] = exit_g_idx + 2
             open_positions_exits.append(exit_g_idx)
             picked_today += 1
 
@@ -291,7 +842,7 @@ def _simulate_model_backtest(
     profit_pct = kpis["total_return_pct"]
     net_profit = round(capital * (profit_pct / 100.0), 2)
 
-    bt_id = f"saudi_bt_{model_name.lower()}_{start_date.replace('-', '')}_{end_date.replace('-', '')}"
+    bt_id = f"saudi_bt_{model_name.lower()}_{start_date.replace('-', '')}_{actual_end.replace('-', '')}"
     trades_desc = sorted(trades, key=lambda t: t["entry_date"], reverse=True)
 
     return {
@@ -303,11 +854,11 @@ def _simulate_model_backtest(
         "is_public": True,
         "created_at": now_iso,
         "start_date": start_date,
-        "end_date": end_date,
+        "end_date": actual_end,
         "status": "completed",
-        "status_msg": f"Walk-forward simulation ({total_trades} trades)",
-        "target_pct": target_pct,
-        "stop_loss_pct": stop_loss_pct,
+        "status_msg": f"StrategyEngine Walk-Forward ({total_trades} trades)",
+        "target_pct": atr_tp_mult,
+        "stop_loss_pct": atr_sl_mult,
         "look_forward_days": max_sessions,
         "meta_threshold": round(threshold, 3),
         "capital": capital,
@@ -325,79 +876,174 @@ def _simulate_model_backtest(
     }
 
 
+def _run_model_with_periods(
+    *,
+    model_name: str,
+    df_all: pd.DataFrame,
+    prob_col: str,
+    threshold: float,
+    sub_bars: Dict[str, pd.DataFrame],
+    market_cache: Dict[str, Any],
+    meta: Dict[str, Dict[str, Any]],
+    index_gate: str,
+    use_trend_filter: bool,
+    adaptive_exits: bool,
+    barrier_mode: str,
+    atr_tp_mult: float,
+    atr_sl_mult: float,
+    max_sessions: int,
+    now_iso: str,
+) -> Dict[str, Any]:
+    primary = simulate_radar_strategy_backtest(
+        model_name=model_name,
+        df_all=df_all,
+        prob_col=prob_col,
+        threshold=threshold,
+        sub_bars=sub_bars,
+        market_cache=market_cache,
+        meta=meta,
+        start_date="2022-01-01",
+        index_gate=index_gate,
+        use_trend_filter=use_trend_filter,
+        adaptive_exits=adaptive_exits,
+        barrier_mode=barrier_mode,
+        atr_tp_mult=atr_tp_mult,
+        atr_sl_mult=atr_sl_mult,
+        max_sessions=max_sessions,
+        now_iso=now_iso,
+    )
+    end_d = primary["end_date"]
+    period_windows = [
+        ("full_cycle", "2022-01-01", end_d),
+        ("bull_expansion_2022_2024", "2022-01-01", "2024-12-31"),
+        ("bear_test_2025_2026", "2025-01-01", end_d),
+        ("recent_2026", "2026-03-01", end_d),
+    ]
+    periods: Dict[str, Dict[str, Any]] = {}
+    for p_key, p_start, p_end in period_windows:
+        sub_bt = (
+            primary
+            if p_key == "full_cycle"
+            else simulate_radar_strategy_backtest(
+                model_name=model_name,
+                df_all=df_all,
+                prob_col=prob_col,
+                threshold=threshold,
+                sub_bars=sub_bars,
+                market_cache=market_cache,
+                meta=meta,
+                start_date=p_start,
+                end_date=p_end,
+                index_gate=index_gate,
+                use_trend_filter=use_trend_filter,
+                adaptive_exits=adaptive_exits,
+                barrier_mode=barrier_mode,
+                atr_tp_mult=atr_tp_mult,
+                atr_sl_mult=atr_sl_mult,
+                max_sessions=max_sessions,
+                now_iso=now_iso,
+            )
+        )
+        periods[p_key] = {
+            "start_date": sub_bt["start_date"],
+            "end_date": sub_bt["end_date"],
+            "total_trades": sub_bt["total_trades"],
+            "win_rate": sub_bt["win_rate"],
+            "profit_pct": sub_bt["profit_pct"],
+            "profit_factor": sub_bt["profit_factor"],
+            "max_drawdown_pct": sub_bt["max_drawdown_pct"],
+            "avg_holding_days": sub_bt["avg_holding_days"],
+        }
+    primary["periods"] = periods
+    return primary
+
+
 def _build_saudi_backtests_dataset(
     bars_by_symbol: Dict[str, pd.DataFrame],
     market_df: pd.DataFrame,
     meta: Dict[str, Dict[str, Any]],
-    symbols: List[str],
+    stocks_by_sym: Dict[str, Dict[str, Any]],
+    fund_meta: Dict[str, Dict[str, Any]],
     now_iso: str,
 ) -> Dict[str, Any]:
     king_path = os.path.join(PROJECT_ROOT, "api", "models", "KING_TASI.pkl")
     tadawul_path = os.path.join(PROJECT_ROOT, "api", "models", "model_TADAWUL.pkl")
 
     with open(king_path, "rb") as f:
-        king_meta = pickle.load(f)
+        king_art = pickle.load(f)
     with open(tadawul_path, "rb") as f:
-        tadawul_meta = pickle.load(f)
+        tadawul_art = pickle.load(f)
 
-    king_booster = lgb.Booster(model_str=king_meta["model_str"])
-    tadawul_booster = lgb.Booster(model_str=tadawul_meta["model_str"])
-    tadawul_features = list(tadawul_meta["feature_names"])
+    df_all, sub_bars = _build_or_load_ml_features_df(
+        bars_by_symbol,
+        market_df,
+        stocks_by_sym,
+        fund_meta,
+    )
+    market_cache = _prepare_market_and_signal_cache(sub_bars, market_df)
 
-    all_candidate_cols = sorted(set(KING_TASI_FEATURES) | set(MODEL_TADAWUL_EXTRA_FEATURES) | set(tadawul_features))
+    king_probs, king_default_th, king_info = score_model_artifact(
+        king_art,
+        df_all,
+        fallback_features=KING_TASI_FEATURES,
+    )
+    df_all["king_prob"] = king_probs
+    king_tp = dict(king_info.get("trading_parameters") or {})
+    king_barrier = "atr"
+    king_tp_disp = 3.0
+    king_sl_disp = 1.5
+    king_hold = 15
+    king_thresh = (
+        max(0.43, float(king_default_th))
+        if king_info["kind"] == "meta_labeling_system"
+        else max(0.45, float(king_art.get("threshold") or king_default_th or 0.45))
+    )
 
-    # ~700 trailing bars covers 2025-01-01 .. 2026-11-12 + 200-bar indicator warmup
-    compact_frames: List[pd.DataFrame] = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futs = [
-            pool.submit(
-                _build_single_stock_ml_frame,
-                sym,
-                bars_by_symbol[sym].iloc[-750:],
-                market_df,
-                all_candidate_cols,
-            )
-            for sym in symbols
-            if sym in bars_by_symbol and len(bars_by_symbol[sym]) >= 80
-        ]
-        for fut in as_completed(futs):
-            _, comp_df, _ = fut.result()
-            comp_df = comp_df.loc[:, ~comp_df.columns.duplicated()].copy()
-            compact_frames.append(comp_df)
+    tad_probs, tad_default_th, tad_info = score_model_artifact(tadawul_art, df_all)
+    df_all["tad_prob"] = tad_probs
+    tad_tp = dict(tad_info.get("trading_parameters") or {})
+    tad_barrier = "atr"
+    tad_tp_disp = 3.0
+    tad_sl_disp = 1.5
+    tad_hold = 15
+    tad_thresh = (
+        max(0.50, float(tad_default_th))
+        if tad_info["kind"] == "meta_labeling_system"
+        else float(tad_default_th)
+    )
 
-    df_all = pd.concat(compact_frames, ignore_index=True)
-    for col in all_candidate_cols:
-        if col in df_all.columns:
-            df_all[col] = pd.to_numeric(df_all[col], errors="coerce").replace([np.inf, -np.inf], 0.0).fillna(0.0)
-
-    bt_king = _simulate_model_backtest(
+    bt_king = _run_model_with_periods(
         model_name="KING_TASI",
-        model_meta=king_meta,
-        booster=king_booster,
-        feature_names=KING_TASI_FEATURES,
         df_all=df_all,
-        bars_by_symbol=bars_by_symbol,
+        prob_col="king_prob",
+        threshold=king_thresh,
+        sub_bars=sub_bars,
+        market_cache=market_cache,
         meta=meta,
-        start_date="2025-01-01",
-        target_pct=8.0,
-        stop_loss_pct=4.5,
-        max_sessions=15,
-        max_concurrent=10,
+        index_gate="above_ema20",
+        use_trend_filter=False,
+        adaptive_exits=True,
+        barrier_mode="atr",
+        atr_tp_mult=king_tp_disp,
+        atr_sl_mult=king_sl_disp,
+        max_sessions=king_hold,
         now_iso=now_iso,
     )
-    bt_tadawul = _simulate_model_backtest(
+    bt_tadawul = _run_model_with_periods(
         model_name="model_TADAWUL",
-        model_meta=tadawul_meta,
-        booster=tadawul_booster,
-        feature_names=tadawul_features,
         df_all=df_all,
-        bars_by_symbol=bars_by_symbol,
+        prob_col="tad_prob",
+        threshold=tad_thresh,
+        sub_bars=sub_bars,
+        market_cache=market_cache,
         meta=meta,
-        start_date="2025-01-01",
-        target_pct=8.0,
-        stop_loss_pct=4.5,
-        max_sessions=15,
-        max_concurrent=10,
+        index_gate="above_ema20",
+        use_trend_filter=True,
+        adaptive_exits=True,
+        barrier_mode="atr",
+        atr_tp_mult=tad_tp_disp,
+        atr_sl_mult=tad_sl_disp,
+        max_sessions=tad_hold,
         now_iso=now_iso,
     )
 
@@ -407,42 +1053,42 @@ def _build_saudi_backtests_dataset(
             "exchange": "TADAWUL",
             "market": "TASI",
             "currency": "SAR",
-            "type": "LightGBM",
-            "num_features": len(KING_TASI_FEATURES),
-            "trainingSamples": king_meta.get("training_samples"),
-            "validationSamples": king_meta.get("validation_samples"),
-            "auc": round(float(king_meta.get("auc") or 0), 4),
-            "precision": round(float(king_meta.get("precision") or 0), 4),
-            "recall": round(float(king_meta.get("recall") or 0), 4),
-            "f1": round(float(king_meta.get("f1") or 0), 4),
-            "threshold": round(float(king_meta.get("threshold") or 0.37), 3),
-            "target_pct": 8.0,
-            "stop_loss_pct": 4.5,
-            "look_forward_days": 15,
-            "created_at": king_meta.get("timestamp") or now_iso,
+            "type": "Meta-Labeling LightGBM" if king_info["kind"] == "meta_labeling_system" else "LightGBM",
+            "num_features": king_info["num_features"],
+            "trainingSamples": king_art.get("training_samples") or king_art.get("num_samples"),
+            "validationSamples": king_art.get("validation_samples"),
+            "auc": round(float(king_art.get("auc") or (king_art.get("walk_forward_summary") or {}).get("average_auc") or 0), 4),
+            "precision": round(float(king_art.get("precision") or (king_art.get("walk_forward_summary") or {}).get("average_precision") or 0), 4),
+            "recall": round(float(king_art.get("recall") or (king_art.get("walk_forward_summary") or {}).get("average_recall") or 0), 4),
+            "f1": round(float(king_art.get("f1") or (king_art.get("walk_forward_summary") or {}).get("average_f1") or 0), 4),
+            "threshold": round(king_thresh, 3),
+            "target_pct": king_tp_disp,
+            "stop_loss_pct": king_sl_disp,
+            "look_forward_days": king_hold,
+            "created_at": king_art.get("timestamp") or now_iso,
         },
         {
             "name": "model_TADAWUL",
             "exchange": "TADAWUL",
             "market": "TASI",
             "currency": "SAR",
-            "type": "LightGBM",
-            "num_features": len(tadawul_features),
-            "trainingSamples": tadawul_meta.get("training_samples"),
-            "validationSamples": tadawul_meta.get("validation_samples"),
-            "auc": round(float(tadawul_meta.get("auc") or 0), 4),
-            "precision": round(float(tadawul_meta.get("precision") or 0), 4),
-            "recall": round(float(tadawul_meta.get("recall") or 0), 4),
-            "f1": round(float(tadawul_meta.get("f1") or 0), 4),
-            "threshold": round(float(tadawul_meta.get("threshold") or 0.41), 3),
-            "target_pct": 8.0,
-            "stop_loss_pct": 4.5,
-            "look_forward_days": 15,
-            "created_at": tadawul_meta.get("timestamp") or now_iso,
+            "type": "Meta-Labeling LightGBM" if tad_info["kind"] == "meta_labeling_system" else "LightGBM",
+            "num_features": tad_info["num_features"],
+            "trainingSamples": tadawul_art.get("training_samples") or tadawul_art.get("num_samples"),
+            "validationSamples": tadawul_art.get("validation_samples"),
+            "auc": round(float(tadawul_art.get("auc") or (tadawul_art.get("walk_forward_summary") or {}).get("average_auc") or 0), 4),
+            "precision": round(float(tadawul_art.get("precision") or (tadawul_art.get("walk_forward_summary") or {}).get("average_precision") or 0), 4),
+            "recall": round(float(tadawul_art.get("recall") or (tadawul_art.get("walk_forward_summary") or {}).get("average_recall") or 0), 4),
+            "f1": round(float(tadawul_art.get("f1") or (tadawul_art.get("walk_forward_summary") or {}).get("average_f1") or 0), 4),
+            "threshold": round(tad_thresh, 3),
+            "target_pct": tad_tp_disp,
+            "stop_loss_pct": tad_sl_disp,
+            "look_forward_days": tad_hold,
+            "created_at": tadawul_art.get("timestamp") or now_iso,
         },
     ]
 
-    as_of = bt_king["end_date"]
+    as_of = max(bt_king["end_date"], bt_tadawul["end_date"])
     return {
         "backtests": [bt_king, bt_tadawul],
         "models": models_meta,
@@ -453,531 +1099,71 @@ def _build_saudi_backtests_dataset(
     }
 
 
+def _bars_dict_to_short_swings_df(
+    bars_by_symbol: Dict[str, pd.DataFrame],
+    warmup_start: str = ML_WARMUP_START,
+) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for sym, bdf in bars_by_symbol.items():
+        if bdf is None or bdf.empty:
+            continue
+        sub = bdf[bdf.index >= warmup_start]
+        if len(sub) < 30:
+            continue
+        part = pd.DataFrame({
+            "symbol": sym,
+            "date": [ts.strftime("%Y-%m-%d") for ts in sub.index],
+            "open": pd.to_numeric(sub["Open"], errors="coerce").values,
+            "high": pd.to_numeric(sub["High"], errors="coerce").values,
+            "low": pd.to_numeric(sub["Low"], errors="coerce").values,
+            "close": pd.to_numeric(sub["Close"], errors="coerce").values,
+            "volume": pd.to_numeric(sub["Volume"], errors="coerce").values,
+        })
+        frames.append(part)
+    if not frames:
+        return pd.DataFrame(columns=["symbol", "date", "open", "high", "low", "close", "volume"])
+    return pd.concat(frames, ignore_index=True)
+
+
 def _build_saudi_short_swings_dataset(
     bars_by_symbol: Dict[str, pd.DataFrame],
     meta: Dict[str, Dict[str, Any]],
     now_iso: str,
-    start_date: str = "2025-01-01",
 ) -> Dict[str, Any]:
-    frames: List[pd.DataFrame] = []
-    for sym, raw_df in bars_by_symbol.items():
-        if len(raw_df) < 60:
-            continue
-        g = raw_df.tail(600).copy()
-        g["symbol"] = sym
-        g["date"] = [ts.strftime("%Y-%m-%d") for ts in g.index]
-        g = g.reset_index(drop=True)
-        g = g.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
-        c = g["close"].astype(float)
-        h = g["high"].astype(float)
-        l = g["low"].astype(float)
-        v = g["volume"].astype(float)
-
-        g["ema10"] = c.ewm(span=10, adjust=False).mean()
-        g["ema20"] = c.ewm(span=20, adjust=False).mean()
-        g["ema50"] = c.ewm(span=50, adjust=False).mean()
-        g["vol_ma20"] = v.rolling(20).mean()
-        g["turnover"] = (c * v).rolling(20).mean()
-        g["active_days"] = v.gt(0).rolling(20).sum()
-        g["high20"] = h.rolling(20).max().shift(1)
-        g["ret20"] = c / c.shift(20) - 1.0
-        g["liquid"] = (np.arange(len(g)) >= 30) & (g["turnover"] >= MIN_SAUDI_TURNOVER) & (g["active_days"] >= 15)
-        g["above_ema50"] = g["liquid"] & (c > g["ema50"])
-        frames.append(g)
-
-    df = pd.concat(frames, ignore_index=True)
-    breadth_raw = df[df["liquid"]].groupby("date")["above_ema50"].mean()
-    df = df.merge(breadth_raw.shift(1).rename("breadth"), on="date", how="left")
-    df["breadth"] = df["breadth"].fillna(0.5)
-
-    mkt_ok = df["breadth"] >= 0.45
-    trend_aligned = (
-        df["liquid"]
-        & (df["close"] > df["ema10"])
-        & (df["ema10"] > df["ema20"])
-        & (df["ema20"] > df["ema50"])
+    preloaded_df = _bars_dict_to_short_swings_df(bars_by_symbol, warmup_start=ML_WARMUP_START)
+    res = compute_short_swings(
+        phase="close",
+        exchange="TADAWUL",
+        preloaded_df=preloaded_df,
+        preloaded_meta=meta,
     )
-    day_range = df["high"] - df["low"]
-    close_pos = (df["close"] - df["low"]) / day_range.replace(0, 1e-9)
-
-    sig_base_bo = (
-        mkt_ok
-        & trend_aligned
-        & (df["close"] > df["high20"])
-        & (df["volume"] >= df["vol_ma20"] * 1.4)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.70)
-        & (df["ret20"] >= 0.05)
-    )
-    sig_power_pb = (
-        mkt_ok
-        & trend_aligned
-        & (df["ret20"] >= 0.08)
-        & (df["low"] <= df["ema10"] * 1.01)
-        & (df["close"] > df["ema10"])
-        & (df["volume"] >= df["vol_ma20"] * 1.2)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.75)
-    )
-    sig_rs_leader = (
-        (~mkt_ok)
-        & trend_aligned
-        & (df["close"] >= df["high20"] * 0.985)
-        & (df["volume"] >= df["vol_ma20"] * 1.25)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.70)
-        & (df["ret20"] >= 0.07)
-    )
-
-    df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader
-    df["sig_type"] = np.where(
-        sig_base_bo,
-        "اختراق قمة 20 يوم + انفجار سيولة",
-        np.where(sig_power_pb, "ارتداد قوة من متوسط EMA10", "قائد قوة نسبية في سوق متذبذب"),
-    )
-
-    df = df[df["date"] >= start_date].copy()
-    dates = sorted(df["date"].unique())
-    last_date = dates[-1] if dates else dt.date.today().isoformat()
-
-    market: Dict[Tuple[str, str], Any] = {}
-    for row in df.itertuples(index=False):
-        market[(row.symbol, row.date)] = row
-
-    sig_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    sig_rows = df[df["signal"] & (df["volume"] > 0)]
-    date_next = {dates[i]: dates[i + 1] for i in range(len(dates) - 1)}
-    for row in sig_rows.itertuples(index=False):
-        nxt = date_next.get(row.date)
-        if nxt:
-            sig_map[nxt].append({
-                "symbol": row.symbol,
-                "signal_date": row.date,
-                "date": nxt,
-                "close": float(row.close),
-                "turnover": float(row.turnover),
-                "sig_type": row.sig_type,
-            })
-
-    positions: Dict[str, Dict[str, Any]] = {}
-    closed_trades: List[Dict[str, Any]] = []
-
-    for i, day in enumerate(dates):
-        for sym, p in positions.items():
-            if p.get("be_pending_activation"):
-                p["be_active"] = True
-                p["sl_price"] = max(p["sl_price"], p["entry_price"] * 1.003)
-                p["be_pending_activation"] = False
-
-        # Pending exits at Open
-        for sym in list(positions):
-            p = positions[sym]
-            b = market.get((sym, day))
-            age = i - p["index"]
-            if age >= 20 and not p.get("pending"):
-                p["pending"] = "max_time"
-
-            if not b or b.volume <= 0 or b.high == b.low:
-                p["missing_sessions"] = p.get("missing_sessions", 0) + 1
-                if p.get("pending") or age >= 20 or p["missing_sessions"] >= 5:
-                    fill_price = p["last"] * (1.0 - SLIPPAGE)
-                    ret_pct = (fill_price / p["entry_price"] - 1.0) * 100.0
-                    m_info = meta.get(sym, {})
-                    rc = p.get("pending") or ("max_time" if age >= 20 else "delisted_or_halted")
-                    closed_trades.append({
-                        "symbol": sym,
-                        "name_ar": m_info.get("name_ar", sym),
-                        "name_en": m_info.get("name_en", sym),
-                        "sector": m_info.get("sector", "عام"),
-                        "entry_date": p["date"],
-                        "exit_date": p.get("last_date") or day,
-                        "entry_price": round(p["entry_price"], 2),
-                        "exit_price": round(fill_price, 2),
-                        "return_pct": round(ret_pct, 2),
-                        "max_gain_pct": round(p["max_gain"], 2),
-                        "sessions": min(age, 20),
-                        "holding_days": min(age, 20),
-                        "reason": rc,
-                        "exit_reason": SHORT_SWING_EXIT_LABELS.get(rc, "إغلاق حسب الخطة"),
-                        "trigger_type": p["sig_type"],
-                    })
-                    del positions[sym]
-                continue
-
-            p["missing_sessions"] = 0
-            p["last_date"] = day
-            if age >= 1 and p.get("pending"):
-                fill_price = float(b.open) * (1.0 - SLIPPAGE)
-                ret_pct = (fill_price / p["entry_price"] - 1.0) * 100.0
-                m_info = meta.get(sym, {})
-                rc = p["pending"]
-                closed_trades.append({
-                    "symbol": sym,
-                    "name_ar": m_info.get("name_ar", sym),
-                    "name_en": m_info.get("name_en", sym),
-                    "sector": m_info.get("sector", "عام"),
-                    "entry_date": p["date"],
-                    "exit_date": day,
-                    "entry_price": round(p["entry_price"], 2),
-                    "exit_price": round(fill_price, 2),
-                    "return_pct": round(ret_pct, 2),
-                    "max_gain_pct": round(p["max_gain"], 2),
-                    "sessions": age,
-                    "holding_days": age,
-                    "reason": rc,
-                    "exit_reason": SHORT_SWING_EXIT_LABELS.get(rc, "إغلاق حسب الخطة"),
-                    "trigger_type": p["sig_type"],
-                })
-                del positions[sym]
-
-        # New entries at today's open
-        for s in sorted(sig_map.get(day, []), key=lambda x: -x["turnover"]):
-            if len(positions) >= 15 or s["symbol"] in positions:
-                continue
-            b = market.get((s["symbol"], day))
-            if not b or b.volume <= 0 or b.high == b.low:
-                continue
-            limit_price = s["close"]
-            if b.open <= limit_price * 1.02:
-                exec_price = float(b.open)
-            elif b.low <= limit_price:
-                exec_price = limit_price
-            else:
-                continue
-            fill = exec_price * (1.0 + SLIPPAGE)
-            positions[s["symbol"]] = {
-                "symbol": s["symbol"],
-                "date": day,
-                "signal_date": s["signal_date"],
-                "index": i,
-                "entry_price": fill,
-                "sl_price": fill * 0.96,
-                "highest_high": fill,
-                "max_gain": 0.0,
-                "be_active": False,
-                "be_pending_activation": False,
-                "last": float(b.close),
-                "last_date": day,
-                "sig_type": s["sig_type"],
-                "pending": None,
-            }
-
-        # Intraday stops & trailing EMA10
-        for sym in list(positions):
-            p = positions[sym]
-            b = market.get((sym, day))
-            if not b:
-                continue
-            p["last"] = float(b.close)
-            p["last_date"] = day
-            p["missing_sessions"] = 0
-            age = i - p["index"]
-
-            if age >= 1 and b.low <= p["sl_price"]:
-                raw_fill = (min(b.high, b.open) if b.open <= p["sl_price"] else max(b.low, p["sl_price"])) * (1.0 - SLIPPAGE)
-                fill_price = max(b.low * (1.0 - SLIPPAGE), min(b.high, raw_fill))
-                ret_pct = (fill_price / p["entry_price"] - 1.0) * 100.0
-                m_info = meta.get(sym, {})
-                rc = "stop_be" if p["be_active"] else "stop_loss"
-                closed_trades.append({
-                    "symbol": sym,
-                    "name_ar": m_info.get("name_ar", sym),
-                    "name_en": m_info.get("name_en", sym),
-                    "sector": m_info.get("sector", "عام"),
-                    "entry_date": p["date"],
-                    "exit_date": day,
-                    "entry_price": round(p["entry_price"], 2),
-                    "exit_price": round(fill_price, 2),
-                    "return_pct": round(ret_pct, 2),
-                    "max_gain_pct": round(p["max_gain"], 2),
-                    "sessions": age,
-                    "holding_days": age,
-                    "reason": rc,
-                    "exit_reason": SHORT_SWING_EXIT_LABELS.get(rc, "وقف خسارة"),
-                    "trigger_type": p["sig_type"],
-                })
-                del positions[sym]
-                continue
-
-            if b.high > p["highest_high"]:
-                p["highest_high"] = float(b.high)
-                p["max_gain"] = max(p["max_gain"], (b.high / p["entry_price"] - 1.0) * 100.0)
-
-            if not p["be_active"] and not p.get("be_pending_activation") and (b.high / p["entry_price"] - 1.0) >= 0.045:
-                p["be_pending_activation"] = True
-
-            if p["be_active"]:
-                p["sl_price"] = max(p["sl_price"], float(b.ema10))
-                if b.close < b.ema10:
-                    p["pending"] = "ema10_break"
-
-            if age >= 20 and not p["pending"]:
-                p["pending"] = "max_time"
-
-    active_output: List[Dict[str, Any]] = []
-    seen_syms = set()
-    # Pending entries detected on last_date for next session
-    today_sigs = df[(df["date"] == last_date) & (df["signal"])].sort_values("turnover", ascending=False)
-    for _, s_row in today_sigs.head(10).iterrows():
-        sym = str(s_row["symbol"])
-        if sym in positions or sym in seen_syms:
-            continue
-        seen_syms.add(sym)
-        close_p = round(float(s_row["close"]), 2)
-        sl_p = round(close_p * 0.96, 2)
-        m_info = meta.get(sym, {})
-        active_output.append({
-            "signal_id": f"{sym}_{last_date}",
-            "symbol": sym,
-            "name_ar": m_info.get("name_ar", sym),
-            "name_en": m_info.get("name_en", sym),
-            "sector": m_info.get("sector", "عام"),
-            "entry_date": "جلسة الغد",
-            "signal_date": last_date,
-            "entry_price": close_p,
-            "current_price": close_p,
-            "reference_close": close_p,
-            "return_pct": 0.0,
-            "stop_loss": sl_p,
-            "trailing_stop": sl_p,
-            "ema10_trend": round(float(s_row["ema10"]), 2),
-            "is_breakeven_protected": False,
-            "max_gain_pct": 0.0,
-            "trigger_type": s_row["sig_type"],
-            "status": "إشارة دخول جديدة (جلسة الغد)",
-            "is_pending_entry": True,
-            "as_of": last_date,
-        })
-
-    for sym, p in positions.items():
-        b = market.get((sym, last_date))
-        curr_p = float(b.close) if b else p["last"]
-        curr_gain = (curr_p / p["entry_price"] - 1.0) * 100.0
-        m_info = meta.get(sym, {})
-        active_output.append({
-            "signal_id": f"{sym}_{p.get('signal_date', p['date'])}",
-            "symbol": sym,
-            "name_ar": m_info.get("name_ar", sym),
-            "name_en": m_info.get("name_en", sym),
-            "sector": m_info.get("sector", "عام"),
-            "entry_date": p["date"],
-            "signal_date": p.get("signal_date", p["date"]),
-            "entry_price": round(p["entry_price"], 2),
-            "current_price": round(curr_p, 2),
-            "reference_close": round(curr_p, 2),
-            "return_pct": round(curr_gain, 2),
-            "stop_loss": round(p["entry_price"] * 0.96, 2),
-            "trailing_stop": round(p["sl_price"], 2),
-            "ema10_trend": round(float(b.ema10), 2) if b else None,
-            "is_breakeven_protected": bool(p["be_active"]),
-            "max_gain_pct": round(p["max_gain"], 2),
-            "trigger_type": p["sig_type"],
-            "status": "مؤمنة بربح" if p["be_active"] else "قيد التداول",
-            "is_pending_entry": False,
-            "as_of": last_date,
-        })
-
-    active_output.sort(key=lambda t: (0 if t.get("is_pending_entry") else 1, -float(t.get("return_pct") or 0)))
-    closed_trades.sort(key=lambda t: t["exit_date"], reverse=True)
-    kpis = _compute_kpis_from_trades(closed_trades, return_key="return_pct", slots=15.0)
-
-    return {
-        "status": "ok",
-        "is_pro": True,
-        "kpis": kpis,
-        "active_trades": active_output,
-        "closed_trades": closed_trades,
-        "total_active": len(active_output),
-        "total_closed": len(closed_trades),
-        "as_of": last_date,
-        "computed_at": now_iso,
-        "market": "TASI",
-        "currency": "SAR",
-    }
-
-
-def _compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0.0).ewm(alpha=1.0 / period, adjust=False).mean()
-    loss = (-delta.clip(upper=0.0)).ewm(alpha=1.0 / period, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return 100.0 - (100.0 / (1.0 + rs))
+    res.setdefault("market", "TASI")
+    res.setdefault("currency", "SAR")
+    return res
 
 
 def _build_saudi_scanner_alerts_dataset(
     bars_by_symbol: Dict[str, pd.DataFrame],
     meta: Dict[str, Dict[str, Any]],
     now_iso: str,
-    lookback_sessions: int = 65,
+    start_date: str = "2024-01-01",
 ) -> Dict[str, Any]:
-    active_signals: List[Dict[str, Any]] = []
-    closed_signals: List[Dict[str, Any]] = []
-    latest_dates: List[str] = []
-
-    for sym, raw_df in bars_by_symbol.items():
-        if len(raw_df) < 40:
+    sub_bars: Dict[str, pd.DataFrame] = {}
+    for sym, bdf in bars_by_symbol.items():
+        if bdf is None or bdf.empty:
             continue
-        df = raw_df.tail(lookback_sessions + 30).copy()
-        c = df["Close"].astype(float)
-        h = df["High"].astype(float)
-        l = df["Low"].astype(float)
-        o = df["Open"].astype(float)
-        v = df["Volume"].astype(float)
+        sliced = bdf[bdf.index >= SCANNER_WARMUP_START]
+        if len(sliced) >= 25:
+            sub_bars[sym] = sliced
 
-        df["vol_ma20"] = v.rolling(20).mean()
-        df["turnover20"] = (c * v).rolling(20).mean()
-        df["high20"] = h.rolling(20).max().shift(1)
-        df["rsi14"] = _compute_rsi(c, 14)
-        df["prev_c"] = c.shift(1)
-
-        latest_dates.append(df.index[-1].strftime("%Y-%m-%d"))
-        start_idx = max(25, len(df) - lookback_sessions)
-        cooldown_until = -1
-        m_info = meta.get(sym, {})
-
-        for i in range(start_idx, len(df)):
-            if i <= cooldown_until:
-                continue
-            row = df.iloc[i]
-            if float(row["turnover20"] or 0) < MIN_SAUDI_TURNOVER or float(row["Volume"] or 0) <= 0:
-                continue
-            entry_price = float(row["Close"])
-            if entry_price <= 0:
-                continue
-
-            scanner_type: Optional[str] = None
-            if float(row["Volume"]) >= float(row["vol_ma20"] or 0) * 2.0 and entry_price > float(row["Open"]) and entry_price >= float(row["prev_c"] or entry_price) * 1.015:
-                scanner_type = "volume_surge"
-            elif pd.notna(row["high20"]) and entry_price > float(row["high20"]) and float(row["Volume"]) >= float(row["vol_ma20"] or 0) * 1.3 and entry_price > float(row["Open"]):
-                scanner_type = "breakout"
-            elif pd.notna(row["rsi14"]) and float(row["rsi14"]) <= 32.0 and entry_price >= float(row["Open"]):
-                scanner_type = "rsi_oversold"
-
-            if not scanner_type:
-                continue
-
-            prof = SCANNER_PROFILES[scanner_type]
-            t1 = round(entry_price * (1.0 + prof["t1_pct"] / 100.0), 2)
-            t2 = round(entry_price * (1.0 + prof["t2_pct"] / 100.0), 2)
-            sl = round(entry_price * (1.0 - prof["sl_pct"] / 100.0), 2)
-            max_sess = prof["max_sessions"]
-            entry_date = df.index[i].strftime("%Y-%m-%d")
-
-            fwd = df.iloc[i + 1 : min(len(df), i + 1 + max_sess)]
-            status = "active"
-            exit_price: Optional[float] = None
-            exit_date: Optional[str] = None
-            exit_reason: Optional[str] = None
-            highest_p = entry_price
-            lowest_p = entry_price
-            curr_p = entry_price
-            sessions = 0
-
-            for s_idx, (f_ts, f_bar) in enumerate(fwd.iterrows(), start=1):
-                sessions = s_idx
-                f_o = float(f_bar["Open"])
-                f_h = float(f_bar["High"])
-                f_l = float(f_bar["Low"])
-                f_c = float(f_bar["Close"])
-                highest_p = max(highest_p, f_h)
-                lowest_p = min(lowest_p, f_l)
-                curr_p = f_c
-
-                if f_l <= sl:
-                    status = "stopped_out"
-                    exit_price = round(f_o if f_o <= sl else sl, 2)
-                    exit_date = f_ts.strftime("%Y-%m-%d")
-                    exit_reason = "تفعيل وقف الخسارة"
-                    break
-                if f_h >= t1:
-                    status = "target_hit"
-                    exit_price = t1
-                    exit_date = f_ts.strftime("%Y-%m-%d")
-                    exit_reason = "تحقق الهدف الأول بنجاح 🎯"
-                    break
-                if s_idx >= max_sess:
-                    status = "expired"
-                    exit_price = round(f_c, 2)
-                    exit_date = f_ts.strftime("%Y-%m-%d")
-                    exit_reason = "انتهاء المدة الزمنية للإشارة"
-                    break
-
-            final_p = exit_price if exit_price is not None else curr_p
-            ret_pct = round(((final_p / entry_price) - 1.0) * 100.0, 2)
-            max_gain = round(((highest_p / entry_price) - 1.0) * 100.0, 2)
-
-            sig_obj = {
-                "id": f"{sym}_{entry_date}_{scanner_type}",
-                "symbol": sym,
-                "name_ar": m_info.get("name_ar", sym),
-                "name_en": m_info.get("name_en", sym),
-                "sector": m_info.get("sector", "عام"),
-                "scanner_type": scanner_type,
-                "entry_date": entry_date,
-                "entry_time": "14:45",
-                "entry_price": round(entry_price, 2),
-                "target_1": t1,
-                "target_1_pct": prof["t1_pct"],
-                "target_2": t2,
-                "target_2_pct": prof["t2_pct"],
-                "stop_loss": sl,
-                "stop_loss_pct": prof["sl_pct"],
-                "current_price": round(curr_p, 2),
-                "highest_price": round(highest_p, 2),
-                "lowest_price": round(lowest_p, 2),
-                "exit_date": exit_date,
-                "exit_time": "14:55" if exit_date else None,
-                "exit_price": exit_price,
-                "exit_reason": exit_reason,
-                "return_pct": ret_pct,
-                "max_gain_pct": max_gain,
-                "status": status,
-                "sessions": max(1, sessions) if exit_date else max(1, sessions + 1),
-                "sessions_count": max(1, sessions) if exit_date else max(1, sessions + 1),
-                "max_sessions": max_sess,
-                "updated_at": now_iso,
-            }
-
-            if status == "active":
-                active_signals.append(sig_obj)
-            else:
-                closed_signals.append(sig_obj)
-            cooldown_until = i + max(2, sessions)
-
-    active_signals.sort(key=lambda x: (x["entry_date"], x["return_pct"]), reverse=True)
-    closed_signals.sort(key=lambda x: str(x.get("exit_date") or x["entry_date"]), reverse=True)
-
-    wins = [s for s in closed_signals if (s["return_pct"] or 0) > 0]
-    losses = [s for s in closed_signals if (s["return_pct"] or 0) < 0]
-    total_closed = len(closed_signals)
-    win_rate = round((len(wins) / total_closed) * 100.0, 1) if total_closed else 0.0
-    sum_wins = sum(s["return_pct"] for s in wins)
-    sum_losses = abs(sum(s["return_pct"] for s in losses))
-    avg_win = round(sum_wins / len(wins), 2) if wins else 0.0
-    avg_loss = round(sum_losses / len(losses), 2) if losses else 0.0
-    pf = round(sum_wins / sum_losses, 2) if sum_losses > 0 else (99.0 if sum_wins > 0 else 0.0)
-    top_win = round(max((s["max_gain_pct"] for s in closed_signals), default=0.0), 2)
-
-    as_of = max(latest_dates) if latest_dates else dt.date.today().isoformat()
-    return {
-        "ok": True,
-        "is_pro": True,
-        "market": "TASI",
-        "currency": "SAR",
-        "as_of": as_of,
-        "computed_at": now_iso,
-        "active_signals": active_signals,
-        "closed_signals": closed_signals,
-        "signals_kpis": {
-            "win_rate_pct": win_rate,
-            "total_closed": total_closed,
-            "total_active": len(active_signals),
-            "avg_win_pct": avg_win,
-            "avg_loss_pct": avg_loss,
-            "profit_factor": pf,
-            "top_win_pct": top_win,
-        },
-    }
+    return run_scanner_alerts_simulation(
+        sub_bars,
+        meta=meta,
+        exchange="TADAWUL",
+        start_date=start_date,
+        now_iso=now_iso,
+        causal_be_prev_only=True,
+    )
 
 
 def _upsert_market_cache(sb, cache_key: str, payload: Dict[str, Any], now_iso: str) -> None:
@@ -992,45 +1178,82 @@ def _upsert_market_cache(sb, cache_key: str, payload: Dict[str, Any], now_iso: s
     ).execute()
 
 
-def main() -> Dict[str, Any]:
+def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Saudi Backtests & 3 Trading Systems Engine (TASI)")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--only-systems",
+        action="store_true",
+        help="Run and publish System 2 (short swings) and System 3 (fast scanner) only.",
+    )
+    group.add_argument(
+        "--only-models",
+        action="store_true",
+        help="Run and publish System 1 (ML StrategyEngine backtests) only.",
+    )
+    return parser.parse_args(list(argv) if argv is not None else [])
+
+
+def main(argv: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+    args = parse_args(argv)
+    run_models = not args.only_systems
+    run_systems = not args.only_models
+
     t0 = time.time()
     sb = _init_saudi_client()
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
 
-    symbols, meta = _load_saudi_stocks_meta(sb)
-    market_df, _, bars_by_symbol = load_saudi_market_and_prices(sb, symbols)
-    print(f"[SAUDI-SYSTEMS] Loaded {len(bars_by_symbol)} stocks from SAUDI_SUPABASE in {time.time() - t0:.1f}s")
+    symbols, meta, stocks_by_sym = _load_saudi_stocks_meta(sb)
+    market_df, bars_by_symbol, fund_meta = _load_saudi_history_for_systems(
+        sb, symbols, meta, stocks_by_sym
+    )
+    print(
+        f"[SAUDI-SYSTEMS] Loaded {len(bars_by_symbol)} stocks (mode="
+        f"{'systems' if args.only_systems else ('models' if args.only_models else 'all')}) "
+        f"in {time.time() - t0:.1f}s"
+    )
 
-    ds_backtests = _build_saudi_backtests_dataset(bars_by_symbol, market_df, meta, symbols, now_iso)
-    ds_swings = _build_saudi_short_swings_dataset(bars_by_symbol, meta, now_iso)
-    ds_scanner = _build_saudi_scanner_alerts_dataset(bars_by_symbol, meta, now_iso)
-
-    _upsert_market_cache(sb, "saudi_backtests_v1", ds_backtests, now_iso)
-    _upsert_market_cache(sb, "saudi_short_swings_v1", ds_swings, now_iso)
-    _upsert_market_cache(sb, "saudi_scanner_alerts_v1", ds_scanner, now_iso)
-
+    out: Dict[str, Any] = {}
     print("\n=== SAUDI SYSTEMS SUMMARY ===")
-    for bt in ds_backtests["backtests"]:
-        print(
-            f"[BACKTEST] {bt['model_name']}: trades={bt['total_trades']} | win_rate={bt['win_rate']}% | "
-            f"profit_pct={bt['profit_pct']}% | pf={bt['profit_factor']} | max_dd={bt['max_drawdown_pct']}% | "
-            f"range={bt['start_date']}..{bt['end_date']}"
+
+    if run_models:
+        ds_backtests = _build_saudi_backtests_dataset(
+            bars_by_symbol, market_df, meta, stocks_by_sym, fund_meta, now_iso
         )
-    print(
-        f"[SHORT_SWINGS] active={ds_swings['total_active']} | closed={ds_swings['total_closed']} | "
-        f"kpis={ds_swings['kpis']}"
-    )
-    print(
-        f"[FAST_SCANNER] active={len(ds_scanner['active_signals'])} | closed={len(ds_scanner['closed_signals'])} | "
-        f"kpis={ds_scanner['signals_kpis']}"
-    )
-    print(f"[DONE] Saved all 3 keys to SAUDI_SUPABASE.market_cache in {time.time() - t0:.1f}s")
-    return {
-        "backtests": ds_backtests,
-        "short_swings": ds_swings,
-        "scanner_alerts": ds_scanner,
-    }
+        _upsert_market_cache(sb, "saudi_backtests_v1", ds_backtests, now_iso)
+        out["backtests"] = ds_backtests
+        for bt in ds_backtests["backtests"]:
+            print(
+                f"[BACKTEST] {bt['model_name']}: trades={bt['total_trades']} | win_rate={bt['win_rate']}% | "
+                f"profit_pct={bt['profit_pct']}% | pf={bt['profit_factor']} | max_dd={bt['max_drawdown_pct']}% | "
+                f"range={bt['start_date']}..{bt['end_date']}"
+            )
+            for p_name, p_stats in (bt.get("periods") or {}).items():
+                print(
+                    f"   - {p_name:24s}: trades={p_stats['total_trades']:3d} | "
+                    f"wr={p_stats['win_rate']}% | ret={p_stats['profit_pct']}% | "
+                    f"pf={p_stats['profit_factor']} | dd={p_stats['max_drawdown_pct']}%"
+                )
+
+    if run_systems:
+        ds_swings = _build_saudi_short_swings_dataset(bars_by_symbol, meta, now_iso)
+        ds_scanner = _build_saudi_scanner_alerts_dataset(bars_by_symbol, meta, now_iso)
+        _upsert_market_cache(sb, "saudi_short_swings_v1", ds_swings, now_iso)
+        _upsert_market_cache(sb, "saudi_scanner_alerts_v1", ds_scanner, now_iso)
+        out["short_swings"] = ds_swings
+        out["scanner_alerts"] = ds_scanner
+        print(
+            f"[SHORT_SWINGS] active={ds_swings['total_active']} | closed={ds_swings['total_closed']} | "
+            f"kpis={ds_swings['kpis']}"
+        )
+        print(
+            f"[FAST_SCANNER] active={len(ds_scanner['active_signals'])} | closed={len(ds_scanner['closed_signals'])} | "
+            f"kpis={ds_scanner['signals_kpis']}"
+        )
+
+    print(f"[DONE] Updated SAUDI_SUPABASE.market_cache in {time.time() - t0:.1f}s")
+    return out
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Metadata } from "next";
 import { PILLAR_ARTICLES } from "@/lib/seo/pillar-articles";
 import PillarArticleClient from "./PillarArticleClient";
+import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
 export const revalidate = 86400;
 
@@ -115,7 +116,9 @@ export default async function PillarArticlePage({ params }: PageProps) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaGraph).replace(/</g, "\\u003c") }}
       />
-      <PillarArticleClient article={article} />
+      <EgxOnlyGuard sectionNameAr="المدونة والأدلة التعليمية" sectionNameEn="Blog & Educational Guides">
+        <PillarArticleClient article={article} />
+      </EgxOnlyGuard>
     </>
   );
 }

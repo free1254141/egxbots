@@ -214,14 +214,16 @@ export default function Footer() {
                   {t("nav.scanner.ai")}
                 </Link>
               </li>
-              <li>
-                <Link
-                  href="/news"
-                  className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors font-bold text-indigo-400/80 dark:text-indigo-400/80 light:text-indigo-600/80"
-                >
-                  {t("nav.scanner.news")}
-                </Link>
-              </li>
+              {!isSaudi && (
+                <li>
+                  <Link
+                    href="/news"
+                    className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors font-bold text-indigo-400/80 dark:text-indigo-400/80 light:text-indigo-600/80"
+                  >
+                    {t("nav.scanner.news")}
+                  </Link>
+                </li>
+              )}
               <li>
                 <Link
                   href="/scanner/technical"
@@ -246,14 +248,16 @@ export default function Footer() {
                   {isAr ? "بوتات التداول اليومية (AI)" : "AI Trading Bots"}
                 </Link>
               </li>
-              <li>
-                <Link
-                  href="/scanner/backtests?tab=similarity"
-                  className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
-                >
-                  {isAr ? "النماذج الفنية المتكررة (شبه ده)" : "Historical Pattern Similarity"}
-                </Link>
-              </li>
+              {!isSaudi && (
+                <li>
+                  <Link
+                    href="/scanner/backtests?tab=similarity"
+                    className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  >
+                    {isAr ? "النماذج الفنية المتكررة (شبه ده)" : "Historical Pattern Similarity"}
+                  </Link>
+                </li>
+              )}
               {!isSaudi && (
                 <li>
                   <Link
@@ -282,14 +286,16 @@ export default function Footer() {
               {t("footer.resources")}
             </h4>
             <ul className="space-y-2">
-              <li>
-                <Link
-                  href="/blogs"
-                  className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
-                >
-                  {t("footer.blogs")}
-                </Link>
-              </li>
+              {!isSaudi && (
+                <li>
+                  <Link
+                    href="/blogs"
+                    className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                  >
+                    {t("footer.blogs")}
+                  </Link>
+                </li>
+              )}
               {!isSaudi && (
                 <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
               )}
@@ -425,7 +431,8 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* ── Our Ecosystem Products (منظومة منتجاتنا الذكية) ── */}
+        {/* ── Our Ecosystem Products (منظومة منتجاتنا الذكية - EGX Only) ── */}
+        {!isSaudi && (
         <div className="border-2 border-black/15 dark:border-white/15 bg-gradient-to-r from-emerald-500/10 via-amber-500/5 to-indigo-500/10 dark:from-emerald-950/30 dark:via-zinc-900/40 dark:to-indigo-950/30 p-5 sm:p-6 mb-8 shadow-xs">
           <div className="flex flex-col lg:flex-row items-center justify-between gap-5">
             <div className="space-y-1.5 text-center lg:text-start">
@@ -476,16 +483,30 @@ export default function Footer() {
             </div>
           </div>
         </div>
+        )}
 
-        {/* ── SEO Internal Linking Hub: Top EGX Stocks & Pillar Guides (Light/Dark + AR/EN) ── */}
+        {/* ── SEO Internal Linking Hub: Top Stocks & Pillar Guides (Market-Aware) ── */}
         <div className="border-2 border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/50 p-5 sm:p-6 mb-8 shadow-xs">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className={`grid grid-cols-1 ${!isSaudi ? "md:grid-cols-2" : ""} gap-6`}>
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
-                {isAr ? "📊 أبرز أسهم البورصة المصرية (تحليل فني و AI)" : "📊 Most Searched EGX Stocks (AI & Technical Analysis)"}
+                {isSaudi
+                  ? (isAr ? "📊 أبرز أسهم السوق السعودي تاسي (تحليل فني و AI)" : "📊 Most Searched Saudi TASI Stocks (AI & Technical Analysis)")
+                  : (isAr ? "📊 أبرز أسهم البورصة المصرية (تحليل فني و AI)" : "📊 Most Searched EGX Stocks (AI & Technical Analysis)")}
               </h4>
               <div className="flex flex-wrap gap-2">
-                {[
+                {(isSaudi ? [
+                  { sym: "2222", ar: "أرامكو السعودية 2222", en: "Saudi Aramco (2222)" },
+                  { sym: "1120", ar: "مصرف الراجحي 1120", en: "Al Rajhi Bank (1120)" },
+                  { sym: "2010", ar: "سابك 2010", en: "SABIC (2010)" },
+                  { sym: "7010", ar: "إس تي سي STC 7010", en: "stc (7010)" },
+                  { sym: "1180", ar: "البنك الأهلي SNB 1180", en: "SNB Bank (1180)" },
+                  { sym: "1211", ar: "معادن 1211", en: "Maaden (1211)" },
+                  { sym: "2082", ar: "أكوا باور 2082", en: "ACWA Power (2082)" },
+                  { sym: "1150", ar: "مصرف الإنماء 1150", en: "Alinma Bank (1150)" },
+                  { sym: "2280", ar: "المراعي 2280", en: "Almarai (2280)" },
+                  { sym: "4030", ar: "البحري 4030", en: "Bahri (4030)" },
+                ] : [
                   { sym: "comi", ar: "البنك التجاري الدولي COMI", en: "CIB Bank (COMI)" },
                   { sym: "fwry", ar: "فوري FWRY", en: "Fawry (FWRY)" },
                   { sym: "tmgh", ar: "طلعت مصطفى TMGH", en: "Talaat Moustafa (TMGH)" },
@@ -496,7 +517,7 @@ export default function Footer() {
                   { sym: "hrho", ar: "إي إف جي القابضة HRHO", en: "EFG Holding (HRHO)" },
                   { sym: "amoc", ar: "أموك AMOC", en: "AMOC" },
                   { sym: "btfh", ar: "بلتون القابضة BTFH", en: "Beltone (BTFH)" },
-                ].map((s) => (
+                ]).map((s) => (
                   <Link
                     key={s.sym}
                     href={`/stocks/${s.sym}`}
@@ -509,6 +530,7 @@ export default function Footer() {
               </div>
             </div>
 
+            {!isSaudi && (
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
                 {isAr ? "📚 الأدلة المرجعية لتحليل السوق المصري" : "📚 Comprehensive EGX Quantitative Guides"}
@@ -573,6 +595,7 @@ export default function Footer() {
 
               </ul>
             </div>
+            )}
           </div>
         </div>
 
