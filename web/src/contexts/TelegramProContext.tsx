@@ -17,6 +17,8 @@ export type TelegramProInvite = {
   is_pro: boolean;
   current_period_end?: string | null;
   invite_link?: string;
+  saudi_invite_link?: string;
+  saudi_vip_web_url?: string;
   invite_expires_at?: string | null;
   invite_status?: "ready" | "unavailable";
   bot_active?: boolean;

@@ -12,6 +12,7 @@ import { withFoundersOffer } from "@/lib/founders-offer";
  * private route once a user is signed in.
  */
 export const runtime = "nodejs";
+export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 const BACKEND_URL = (
@@ -21,13 +22,13 @@ const BACKEND_URL = (
 ).replace(/\/$/, "");
 
 const PUBLIC_CONFIG_HEADERS = {
-  "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-  "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+  "Cache-Control": "public, max-age=3600, s-maxage=604800, stale-while-revalidate=2592000",
+  "Vercel-CDN-Cache-Control": "public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000",
 };
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_URL}/payment/easykash/config`, { cache: "no-store" });
+    const response = await fetch(`${BACKEND_URL}/payment/easykash/config`, { next: { revalidate: 86400 } });
     const config = await response.json().catch(() => ({ enabled: false }));
     const finalConfig = response.ok ? await withFoundersOffer(config) : config;
 

@@ -6,7 +6,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAIScanner } from "@/contexts/AIScannerContext";
+import { isSaudiSymbol } from "@/lib/saudi-stocks";
 import { percentageChangeSinceEntry } from "@/lib/recommendationMetrics";
 import StockLogo from "./StockLogo";
 import SignalExplanation from "./SignalExplanation";
@@ -28,8 +30,9 @@ import {
 import { isShariaCompliant } from "@/lib/shariaStocks";
 import { toPng } from "html-to-image";
 import { getPublicMarketOverview, predictStock } from "@/lib/api";
+import { fetchUserQuotaCached } from "@/lib/user-quota-client";
 
-function translateRationaleText(text: string, type: "brief" | "tech" | "fund", symbol: string = ""): string {
+function translateRationaleText(text: string, type: "brief" | "tech" | "fund", symbol: string = "", currencyCode: string = "EGP"): string {
     if (!text) return "";
     
     // Helper to translate sector
@@ -69,7 +72,7 @@ function translateRationaleText(text: string, type: "brief" | "tech" | "fund", s
             return text;
         }
 
-        return `Stock "${symbol}" shows an excellent speculative opportunity supported by RSI (${rsi}) and ADX (${adx}) trend indicator. A suggested entry price has been set around ${entry} EGP, targeting a first target at ${t1} EGP and a second target at ${t2} EGP, with a stop loss placed at ${sl} EGP to protect the portfolio.`;
+        return `Stock "${symbol}" shows an excellent speculative opportunity supported by RSI (${rsi}) and ADX (${adx}) trend indicator. A suggested entry price has been set around ${entry} ${currencyCode}, targeting a first target at ${t1} ${currencyCode} and a second target at ${t2} ${currencyCode}, with a stop loss placed at ${sl} ${currencyCode} to protect the portfolio.`;
     }
 
     if (type === "tech") {
@@ -104,9 +107,9 @@ function translateRationaleText(text: string, type: "brief" | "tech" | "fund", s
         if (emaMatch) {
             const ema = emaMatch[1];
             if (text.includes("فوق المتوسط")) {
-                translatedSentences.push(`The stock price remains above the 50-day moving average (${ema} EGP), providing a positive signal in the short term.`);
+                translatedSentences.push(`The stock price remains above the 50-day moving average (${ema} ${currencyCode}), providing a positive signal in the short term.`);
             } else {
-                translatedSentences.push(`The stock is trading near a key technical support level, with expectations of a bullish rebound above the 50-day moving average (${ema} EGP).`);
+                translatedSentences.push(`The stock is trading near a key technical support level, with expectations of a bullish rebound above the 50-day moving average (${ema} ${currencyCode}).`);
             }
         } else if (text.includes("المتوسط 50 يوم") || text.includes("المتوسط المتحرك")) {
             translatedSentences.push(`The stock is trading near a key technical support level, with expectations of a bullish rebound above the 50-day moving average.`);
@@ -139,7 +142,7 @@ function translateRationaleText(text: string, type: "brief" | "tech" | "fund", s
         const epsMatch = text.match(/EPS.*?(\d+(?:\.\d+)?)/i) || text.match(/ربحية سهم.*?(\d+(?:\.\d+)?)/);
         if (epsMatch) {
             const eps = epsMatch[1];
-            translatedSentences.push(`The company recorded Earnings Per Share (EPS) of ${eps} EGP, supporting future operational growth.`);
+            translatedSentences.push(`The company recorded Earnings Per Share (EPS) of ${eps} ${currencyCode}, supporting future operational growth.`);
         }
 
         if (translatedSentences.length === 0) return text;
@@ -211,14 +214,16 @@ function SpotlightCard({ children, className = "", glowColor, radius = 250 }: Sp
 }
 
 function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => void }) {
+    const { market, isSaudi } = useMarket();
     const [overview, setOverview] = useState<{ status: any; breadth: any } | null>(null);
     useEffect(() => {
         const controller = new AbortController();
+        setOverview(null);
         getPublicMarketOverview(controller.signal)
             .then(setOverview)
             .catch(() => { if (!controller.signal.aborted) setOverview(null); });
         return () => controller.abort();
-    }, []);
+    }, [market]);
 
     const changePct = (rows: any[] | undefined) => {
         if (!rows || rows.length < 2) return null;
@@ -229,6 +234,7 @@ function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => 
     };
     const egx30Change = changePct(overview?.status?.egx30);
     const egx100Change = changePct(overview?.status?.egx100);
+    const tasiChange = changePct(overview?.status?.tasi);
     const breadth = overview?.breadth;
     const regime = String(overview?.status?.regime || "").toLowerCase();
     const regimeLabel = isAr
@@ -236,6 +242,16 @@ function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => 
         : regime.replaceAll("_", " ") || "Unavailable";
     const fmtPct = (value: number | null) => value == null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
     const pctClass = (value: number | null) => value == null ? "text-zinc-400" : value >= 0 ? "text-emerald-500" : "text-rose-500";
+
+    const indexCards = isSaudi
+        ? [
+            { label: "TASI", value: fmtPct(tasiChange), cls: pctClass(tasiChange) },
+            { label: isAr ? "السوق" : "Exchange", value: "TADAWUL", cls: "text-emerald-500" },
+        ]
+        : [
+            { label: "EGX30", value: fmtPct(egx30Change), cls: pctClass(egx30Change) },
+            { label: "EGX100", value: fmtPct(egx100Change), cls: pctClass(egx100Change) },
+        ];
 
     return (
         <section className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-3 sm:p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,0.15)] space-y-3" dir={isAr ? "rtl" : "ltr"}>
@@ -251,8 +267,7 @@ function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => 
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 {[
                     { label: isAr ? "حالة السوق" : "Market regime", value: regimeLabel, cls: regime === "panic" || regime.includes("down") || regime === "bear" ? "text-rose-500" : "text-sky-500" },
-                    { label: "EGX30", value: fmtPct(egx30Change), cls: pctClass(egx30Change) },
-                    { label: "EGX100", value: fmtPct(egx100Change), cls: pctClass(egx100Change) },
+                    ...indexCards,
                     { label: isAr ? "أسهم صاعدة / هابطة" : "Advancing / declining", value: breadth ? `${breadth.advancing ?? "—"} / ${breadth.declining ?? "—"}` : "—", cls: "text-zinc-900 dark:text-white" },
                     { label: isAr ? "متوسط نسبة السيولة" : "Avg. volume ratio", value: breadth?.volume_ratio == null ? "—" : `${Number(breadth.volume_ratio).toFixed(2)}×`, cls: "text-zinc-900 dark:text-white" },
                 ].map((item) => <div key={item.label} className="min-w-0 border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-zinc-900/50 p-2.5">
@@ -267,11 +282,23 @@ function MarketOverviewSummary({ isAr, onOpen }: { isAr: boolean; onOpen: () => 
 function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, hideTelegramToggle = false, analyticsOnly = false }: RecommendationsTableProps) {
     const { user, loading: authLoading } = useAuth();
     const { language } = useLanguage();
+    const { market, isSaudi } = useMarket();
     const { theme } = useTheme();
     const router = useRouter();
     const searchParams = useSearchParams();
     const tabParam = searchParams.get("tab");
     const isAr = language === "ar";
+
+    const isRowSaudi = useCallback((row: any): boolean => {
+        if (row?.currency === "SAR" || row?.exchange === "TADAWUL" || isSaudiSymbol(String(row?.symbol || ""))) return true;
+        if (row?.currency === "EGP" || row?.exchange === "EGX") return false;
+        return isSaudi;
+    }, [isSaudi]);
+    const getRowCurrencyCode = useCallback((row: any): "SAR" | "EGP" => (isRowSaudi(row) ? "SAR" : "EGP"), [isRowSaudi]);
+    const getRowCurrencyLabel = useCallback(
+        (row: any): string => (isRowSaudi(row) ? (isAr ? "ر.س" : "SAR") : (isAr ? "ج.م" : "EGP")),
+        [isAr, isRowSaudi]
+    );
 
     // Use AIScannerContext for caching data
     const { recommendations, recsLoading, recsError, loadRecommendations } = useAIScanner();
@@ -295,34 +322,14 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             setHasProAccess(false);
             return () => { active = false; };
         }
-        const cacheKey = `egxbots_support_pro_v1:${user.id}`;
         let checking = false;
         const checkPlan = async (forceRefresh = false) => {
-            if (!forceRefresh) {
-                try {
-                    const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
-                    if (cached && typeof cached.pro === "boolean" && Date.now() - cached.at < 5 * 60 * 1000) {
-                        if (active) setHasProAccess(cached.pro);
-                        return;
-                    }
-                } catch {
-                    // ignore storage errors
-                }
-            }
             if (checking) return;
             checking = true;
             try {
-                const response = await fetch("/api/user/quota");
-                const payload = response.ok ? await response.json() : null;
+                const payload = await fetchUserQuotaCached(user.id, { force: forceRefresh });
                 const pro = payload?.plan?.is_pro === true;
                 if (active) setHasProAccess(pro);
-                if (payload?.ok) {
-                    try {
-                        sessionStorage.setItem(cacheKey, JSON.stringify({ pro, at: Date.now() }));
-                    } catch {
-                        // storage unavailable
-                    }
-                }
             } catch {
                 if (active) setHasProAccess(false);
             } finally {
@@ -444,7 +451,14 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     // Translations
     const tDict = {
         title: { en: "Top Stocks Ranked by ML AI", ar: "أفضل الأسهم مرتبة بالذكاء الاصطناعي" },
-        subtitle: { en: "Universe: EGX stocks evaluated by quantitative AI models. Stocks are ranked according to their AI Score, which rates the probability of beating the market in the next 30 days.", ar: "النطاق: أسهم البورصة المصرية مقيمة بنماذج كمية للذكاء الاصطناعي. يتم ترتيب الأسهم بناءً على تقييم الذكاء الاصطناعي الذي يحدد احتمالية التفوق على السوق خلال الـ 30 يوماً القادمة." },
+        subtitle: {
+            en: isSaudi
+                ? "Universe: Saudi Tadawul (TASI) stocks evaluated by quantitative AI models. Stocks are ranked according to their AI Score, which rates the probability of beating the market in the next 30 days."
+                : "Universe: EGX stocks evaluated by quantitative AI models. Stocks are ranked according to their AI Score, which rates the probability of beating the market in the next 30 days.",
+            ar: isSaudi
+                ? "النطاق: أسهم السوق السعودي (تداول / تاسي) مقيمة بنماذج كمية للذكاء الاصطناعي. يتم ترتيب الأسهم بناءً على تقييم الذكاء الاصطناعي الذي يحدد احتمالية التفوق على السوق خلال الـ 30 يوماً القادمة."
+                : "النطاق: أسهم البورصة المصرية مقيمة بنماذج كمية للذكاء الاصطناعي. يتم ترتيب الأسهم بناءً على تقييم الذكاء الاصطناعي الذي يحدد احتمالية التفوق على السوق خلال الـ 30 يوماً القادمة.",
+        },
         rank: { en: "Rank", ar: "الترتيب" },
         stockName: { en: "Company / Symbol", ar: "الشركة / الرمز" },
         country: { en: "Country", ar: "البلد" },
@@ -472,7 +486,14 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         status: { en: "Status", ar: "الحالة" },
         return: { en: "Return", ar: "العائد" },
         shariaOnly: { en: "Sharia-Compliant Only", ar: "المتوافقة شرعياً فقط" },
-        shariaHint: { en: "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork).", ar: "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)." },
+        shariaHint: {
+            en: isSaudi
+                ? "Show only Saudi Tadawul stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol, tobacco & pork)."
+                : "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork).",
+            ar: isSaudi
+                ? "عرض أسهم السوق السعودي المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ ولحم الخنزير)."
+                : "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير).",
+        },
         halal: { en: "Halal", ar: "حلال" },
         shareTrade: { en: "Share Trade", ar: "مشاركة الصفقة" },
         shareCardTitle: { en: "Trade Signal Card", ar: "بطاقة الإشارة الفنية" },
@@ -507,7 +528,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     // request on every switch.
     useEffect(() => {
         loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined);
-    }, [loadRecommendations, isLandingPage, limit]);
+    }, [loadRecommendations, isLandingPage, limit, market]);
 
     const refreshRecommendationData = useCallback(async () => {
         await loadRecommendations(isLandingPage, true);
@@ -540,8 +561,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             setLoadingCandles(true);
             try {
                 const symbolBase = shareRow.symbol.split('.')[0];
-                const exchange = shareRow.exchange || "EGX";
-                const res = await fetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbolBase)}&exchange=${exchange}&limit=120`);
+                const rowIsSaudi = isRowSaudi(shareRow);
+                const exchange = shareRow.exchange || (rowIsSaudi ? "TADAWUL" : "EGX");
+                const res = await fetch(`/api/ai_bot/candles?symbol=${encodeURIComponent(symbolBase)}&exchange=${encodeURIComponent(exchange)}&market=${rowIsSaudi ? "tasi" : "egx"}&limit=120`);
                 if (!res.ok) throw new Error(`Candles fetch failed: ${res.status}`);
                 const data = await res.json();
                 const candles = (data?.candles || []).map((c: any) => ({
@@ -575,7 +597,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             }
         };
         fetchShareCandles();
-    }, [shareRow]);
+    }, [shareRow, isRowSaudi]);
 
     // Handle Landing Page Clicks Redirection for unauthenticated users
     const handleLandingClick = (e: React.MouseEvent) => {
@@ -909,6 +931,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
 
     const getCountryFlag = (country: string | undefined | null, ex: string | undefined | null) => {
         const normEx = (ex || "").toLowerCase();
+        if (normEx === "tadawul" || normEx === "tasi" || normEx === "sa" || normEx === "saudi") {
+            return { flag: "🇸🇦", name: isAr ? "السعودية" : "Saudi Arabia" };
+        }
         if (normEx === "egx" || normEx === "eg" || normEx === "ca") {
             return { flag: "🇪🇬", name: isAr ? "مصر" : "Egypt" };
         }
@@ -1194,6 +1219,8 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         const legacyReasons = Array.isArray(row.top_reasons) ? row.top_reasons : [];
         const aiScoreNum = Math.round((row.precision || 0) * 10);
         const cInfo = getCountryFlag(null, row.exchange);
+        const rowCurrencyCode = getRowCurrencyCode(row);
+        const rowCurrencyLabel = getRowCurrencyLabel(row);
 
         // ── Computed values ──
         const plPct = isAnonymousView ? null : (row.profit_loss_pct ?? null);
@@ -1377,7 +1404,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 ? `${fmtStockPrice(row.exit_price, entryPrice)}` 
                                                 : (currentPrice ? `${fmtStockPrice(currentPrice, entryPrice)}` : "—")}
                                         </span>
-                                        <span className={`text-sm font-bold ${d("text-zinc-400", "text-zinc-500")}`}>EGP</span>
+                                        <span className={`text-sm font-bold ${d("text-zinc-400", "text-zinc-500")}`}>{rowCurrencyLabel}</span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                                         {plPct != null && (
@@ -1490,7 +1517,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {isAr ? "تفسير النموذج وقت إصدار الإشارة" : "Model rationale at signal issuance"}
                                         </h3>
                                         <p className="text-sm sm:text-base text-zinc-800 dark:text-zinc-200 leading-relaxed font-medium" dir={isAr ? "rtl" : "ltr"}>
-                                            {isAr ? richDetails.brief_rationale : translateRationaleText(richDetails.brief_rationale, "brief", row.symbol)}
+                                            {isAr ? richDetails.brief_rationale : translateRationaleText(richDetails.brief_rationale, "brief", row.symbol, rowCurrencyCode)}
                                         </p>
                                     </div>
                                 )}
@@ -1501,7 +1528,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {isAr ? "التحليل الفني" : "Technical Analysis"}
                                         </h4>
                                         <p className={`text-sm ${d("text-zinc-300", "text-zinc-700")} leading-relaxed`} dir={isAr ? "rtl" : "ltr"}>
-                                            {isAr ? richDetails.technical_rationale : translateRationaleText(richDetails.technical_rationale, "tech", row.symbol)}
+                                            {isAr ? richDetails.technical_rationale : translateRationaleText(richDetails.technical_rationale, "tech", row.symbol, rowCurrencyCode)}
                                         </p>
                                     </div>
                                 )}
@@ -1512,7 +1539,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {isAr ? "التحليل الأساسي" : "Fundamental Analysis"}
                                         </h4>
                                         <p className={`text-sm ${d("text-zinc-300", "text-zinc-700")} leading-relaxed`} dir={isAr ? "rtl" : "ltr"}>
-                                            {isAr ? richDetails.fundamental_rationale : translateRationaleText(richDetails.fundamental_rationale, "fund", row.symbol)}
+                                            {isAr ? richDetails.fundamental_rationale : translateRationaleText(richDetails.fundamental_rationale, "fund", row.symbol, rowCurrencyCode)}
                                         </p>
                                     </div>
                                 )}
@@ -1606,29 +1633,29 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     {isAr ? "تفاصيل الصفقة" : "Trade Details"}
                                 </h4>
                                 {[
-                                    { label: isAr ? "سعر الدخول" : "Entry Price", value: entryPrice ? `${fmtStockPrice(entryPrice)} EGP` : "—", color: d("text-white", "text-zinc-900") },
+                                    { label: isAr ? "سعر الدخول" : "Entry Price", value: entryPrice ? `${fmtStockPrice(entryPrice)} ${rowCurrencyLabel}` : "—", color: d("text-white", "text-zinc-900") },
                                     { 
                                         label: isAr ? "الهدف الأول" : "Target 1", 
                                         subLabel: hasAtr ? (isAr ? "دخول + 2.0x ATR" : "Entry + 2.0x ATR") : undefined,
-                                        value: targetPrice ? `${fmtStockPrice(targetPrice, entryPrice)} EGP` : "—", 
+                                        value: targetPrice ? `${fmtStockPrice(targetPrice, entryPrice)} ${rowCurrencyLabel}` : "—", 
                                         color: "text-emerald-400" 
                                     },
                                     ...(hasTarget2 ? [{
                                         label: isAr ? "الهدف الثاني" : "Target 2",
                                         subLabel: isAr ? "هدف معزز (+10% للهدف 1)" : "Extended Target (+10% of T1)",
-                                        value: `${fmtStockPrice(target2, entryPrice)} EGP`,
+                                        value: `${fmtStockPrice(target2, entryPrice)} ${rowCurrencyLabel}`,
                                         color: "text-amber-400"
                                     }] : []),
                                     { 
                                         label: isTrailingStop ? (isAr ? "وقف حماية الأرباح" : "Trailing Stop") : (isAr ? "وقف الخسارة" : "Stop Loss"), 
                                         subLabel: isTrailingStop ? (isAr ? "مستوى لحماية الربح، التنفيذ غير مضمون" : "Profit protection level; fills are not guaranteed") : undefined,
-                                        value: stopLoss ? `${fmtStockPrice(stopLoss, entryPrice)} EGP` : "—", 
+                                        value: stopLoss ? `${fmtStockPrice(stopLoss, entryPrice)} ${rowCurrencyLabel}` : "—", 
                                         color: isTrailingStop ? "text-emerald-400" : "text-rose-400" 
                                     },
                                     ...(hasAtr ? [{
                                          label: isAr ? "متوسط المدى الحقيقي (ATR)" : "Average True Range (ATR)",
                                          subLabel: isAr ? "نطاق حركة السعر اليومية (14 يوم)" : "Daily volatility range (14d)",
-                                         value: `${fmtStockPrice(atrValue, entryPrice)} EGP`,
+                                         value: `${fmtStockPrice(atrValue, entryPrice)} ${rowCurrencyLabel}`,
                                          color: `${d("text-zinc-300", "text-zinc-600")} font-mono`
                                      }] : []),
                                     { label: isAr ? "نسبة المخاطرة/العائد" : "Risk/Reward", value: rrRatio !== null ? `1:${rrRatio.toFixed(2)}` : "—", color: "text-indigo-400" },
@@ -1643,7 +1670,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         value: row.updated_at ? formatDate(row.updated_at) : (row.created_at ? formatDate(row.created_at) : "—"),
                                         color: "text-amber-400"
                                     },
-                                    ...(isClosed && row.exit_price ? [{ label: isAr ? "سعر الخروج" : "Exit Price", value: `${fmtStockPrice(row.exit_price, entryPrice)} EGP`, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
+                                    ...(isClosed && row.exit_price ? [{ label: isAr ? "سعر الخروج" : "Exit Price", value: `${fmtStockPrice(row.exit_price, entryPrice)} ${rowCurrencyLabel}`, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
                                     ...(isClosed && exitReason ? [{ label: isAr ? "سبب الخروج" : "Exit Reason", value: exitReason, color: isWin ? "text-emerald-400" : "text-rose-400" }] : []),
                                 ].map((item, idx) => (
                                     <div key={idx} className={`flex items-center justify-between py-2 border-b ${d("border-white/5", "border-zinc-200")} last:border-0`}>
@@ -1732,14 +1759,15 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         const tradeReturnText = pctChangeSinceRec == null
             ? (isAr ? "غير متاح" : "N/A")
             : `${pctChangeSinceRec >= 0 ? "+" : ""}${pctChangeSinceRec.toFixed(2)}%`;
+        const rowCurrencyLabel = getRowCurrencyLabel(row);
 
         const shareText = isAr 
             ? `🚨 توصية صفقة بالذكاء الاصطناعي - EGX BOTS 🚨\n\n` +
               `السهم: ${row.symbol} (${row.exchange})\n` +
               `الإشارة: ${signalUpper === "BUY" ? "شراء" : signalUpper === "SELL" ? "بيع" : "خروج"} ${signalEmoji}\n` +
-              `سعر الدخول المقترح: ${fmtStockPrice(entryPrice)} ج.م\n` +
-              `الهدف: ${fmtStockPrice(targetPrice, entryPrice)} ج.م\n` +
-              `وقف الخسارة: ${fmtStockPrice(stopLoss, entryPrice)} ج.م\n` +
+              `سعر الدخول المقترح: ${fmtStockPrice(entryPrice)} ${rowCurrencyLabel}\n` +
+              `الهدف: ${fmtStockPrice(targetPrice, entryPrice)} ${rowCurrencyLabel}\n` +
+              `وقف الخسارة: ${fmtStockPrice(stopLoss, entryPrice)} ${rowCurrencyLabel}\n` +
               `تقييم الذكاء الاصطناعي: ${aiScoreNum}/10\n` +
               `القطاع: ${row.sector || "N/A"}\n` +
               `أداء الصفقة: ${tradeReturnText}\n` +
@@ -1748,9 +1776,9 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
             : `🚨 EGX BOTS AI Trade Signal 🚨\n\n` +
               `Stock: ${row.symbol} (${row.exchange})\n` +
               `Signal: ${signalUpper} ${signalEmoji}\n` +
-              `Entry Price: ${fmtStockPrice(entryPrice)} EGP\n` +
-              `Target Price: ${fmtStockPrice(targetPrice, entryPrice)} EGP\n` +
-              `Stop Loss: ${fmtStockPrice(stopLoss, entryPrice)} EGP\n` +
+              `Entry Price: ${fmtStockPrice(entryPrice)} ${rowCurrencyLabel}\n` +
+              `Target Price: ${fmtStockPrice(targetPrice, entryPrice)} ${rowCurrencyLabel}\n` +
+              `Stop Loss: ${fmtStockPrice(stopLoss, entryPrice)} ${rowCurrencyLabel}\n` +
               `AI Score: ${aiScoreNum}/10\n` +
               `Sector: ${row.sector || "N/A"}\n` +
               `Trade Return: ${tradeReturnText}\n` +
@@ -1881,7 +1909,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareEntry")}
                                         </span>
                                         <span className="text-base font-black text-zinc-900 dark:text-white">
-                                            {fmtStockPrice(entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(entryPrice)} <span className="text-[10px] font-bold text-zinc-400">{rowCurrencyLabel}</span>
                                         </span>
                                     </div>
                                     <div>
@@ -1889,7 +1917,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareTarget")}
                                         </span>
                                         <span className="text-base font-black text-emerald-500 dark:text-emerald-400">
-                                            {fmtStockPrice(targetPrice, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(targetPrice, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">{rowCurrencyLabel}</span>
                                         </span>
                                     </div>
                                     <div>
@@ -1897,7 +1925,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                             {translate("shareStop")}
                                         </span>
                                         <span className="text-base font-black text-rose-500 dark:text-rose-400">
-                                            {fmtStockPrice(stopLoss, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                            {fmtStockPrice(stopLoss, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">{rowCurrencyLabel}</span>
                                         </span>
                                     </div>
                                     {isClosed && row.exit_price != null && (
@@ -1906,7 +1934,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 {translate("shareExit")}
                                             </span>
                                             <span className={`text-base font-black ${(row.status || '').toLowerCase() === 'win' ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
-                                                {fmtStockPrice(row.exit_price, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                                {fmtStockPrice(row.exit_price, entryPrice)} <span className="text-[10px] font-bold text-zinc-400">{rowCurrencyLabel}</span>
                                             </span>
                                         </div>
                                     )}
@@ -1939,7 +1967,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                                 {translate("shareExit")}
                                             </span>
                                             <span className={`text-base font-black ${(row.status || '').toLowerCase() === 'win' ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
-                                                {Number(row.exit_price).toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">EGP</span>
+                                                {Number(row.exit_price).toFixed(2)} <span className="text-[10px] font-bold text-zinc-400">{rowCurrencyLabel}</span>
                                             </span>
                                         </div>
                                     )}
@@ -2356,8 +2384,12 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     {!isMediumGuideOpen && (
                                         <p className="text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed max-w-3xl">
                                             {isAr
-                                                ? "استراتيجية فنية واستثمارية تراكمية تفحص أسهم البورصة المصرية لرصد نماذج القيعان والتجميع وموجات الصعود على مدى 2 إلى 6 أسابيع مع تقييم كمي شامل."
-                                                : "Algorithmic technical and investment strategy scanning EGX stocks to spot accumulation bases, bottoming patterns, and trend breakouts over 2–6 weeks."}
+                                                ? isSaudi
+                                                    ? "استراتيجية فنية واستثمارية تراكمية تفحص أسهم السوق السعودي (تاسي) لرصد نماذج القيعان والتجميع وموجات الصعود على مدى 2 إلى 6 أسابيع مع تقييم كمي شامل."
+                                                    : "استراتيجية فنية واستثمارية تراكمية تفحص أسهم البورصة المصرية لرصد نماذج القيعان والتجميع وموجات الصعود على مدى 2 إلى 6 أسابيع مع تقييم كمي شامل."
+                                                : isSaudi
+                                                    ? "Algorithmic technical and investment strategy scanning Saudi Tadawul (TASI) stocks to spot accumulation bases, bottoming patterns, and trend breakouts over 2–6 weeks."
+                                                    : "Algorithmic technical and investment strategy scanning EGX stocks to spot accumulation bases, bottoming patterns, and trend breakouts over 2–6 weeks."}
                                         </p>
                                     )}
                                 </div>
@@ -2908,34 +2940,37 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                         </div>
 
                                         {/* Financial Metric Grid on Mobile */}
-                                        {!locked && (
+                                        {!locked && (() => {
+                                            const mobCurrency = getRowCurrencyLabel(row);
+                                            return (
                                             <div className="grid grid-cols-2 gap-2 p-2.5 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/60 text-xs font-bold">
                                                 <div>
                                                     <span className="text-[10px] text-zinc-500 block">{isAr ? "سعر الدخول:" : "Entry Price:"}</span>
                                                     <span className="font-mono font-black text-black dark:text-white">
-                                                        {row.entry_price != null ? `${fmtStockPrice(row.entry_price)} ج.م` : (row.last_close != null ? `${fmtStockPrice(row.last_close)} ج.م` : "—")}
+                                                        {row.entry_price != null ? `${fmtStockPrice(row.entry_price)} ${mobCurrency}` : (row.last_close != null ? `${fmtStockPrice(row.last_close)} ${mobCurrency}` : "—")}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-zinc-500 block">{isAr ? "السعر الحالي:" : "Current Price:"}</span>
                                                     <span className="font-mono font-black text-black dark:text-white">
-                                                        {row.current_price != null ? `${fmtStockPrice(row.current_price, row.entry_price)} ج.م` : (row.last_close != null ? `${fmtStockPrice(row.last_close, row.entry_price)} ج.م` : "—")}
+                                                        {row.current_price != null ? `${fmtStockPrice(row.current_price, row.entry_price)} ${mobCurrency}` : (row.last_close != null ? `${fmtStockPrice(row.last_close, row.entry_price)} ${mobCurrency}` : "—")}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">{isAr ? "المستهدف الفني:" : "Target 1:"}</span>
                                                     <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
-                                                        {row.target_price != null ? `${fmtStockPrice(row.target_price, row.entry_price)} ج.م` : "—"}
+                                                        {row.target_price != null ? `${fmtStockPrice(row.target_price, row.entry_price)} ${mobCurrency}` : "—"}
                                                     </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-[10px] text-rose-500 block">{isAr ? "وقف الخسارة:" : "Stop Loss:"}</span>
                                                     <span className="font-mono font-black text-rose-500">
-                                                        {row.stop_loss != null ? `${fmtStockPrice(row.stop_loss, row.entry_price)} ج.م` : "—"}
+                                                        {row.stop_loss != null ? `${fmtStockPrice(row.stop_loss, row.entry_price)} ${mobCurrency}` : "—"}
                                                     </span>
                                                 </div>
                                             </div>
-                                        )}
+                                            );
+                                        })()}
 
                                         {(user || locked) && (
                                             <div className="flex items-center justify-between pt-3 border-t border-zinc-200 dark:border-zinc-800">

@@ -13,8 +13,8 @@ export const DAILY_CACHE_TAG_VALUES = Object.values(DAILY_CACHE_TAGS);
 
 export function dailyCacheHeaders(tag: string): Record<string, string> {
   return {
-    "Cache-Control": "public, max-age=300",
-    "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400, stale-if-error=86400",
+    "Cache-Control": "public, max-age=3600, s-maxage=604800, stale-while-revalidate=2592000",
+    "Vercel-CDN-Cache-Control": "public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000",
     "Vercel-Cache-Tag": tag,
   };
 }

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { fetchUnusualActivity, type UnusualActivitySnapshot } from "@/lib/api";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isPro } from "@/lib/ai/plan-gate";
@@ -24,6 +25,7 @@ import type { SignalPerformancePayload } from "@/app/api/scan/signal-performance
 
 export default function UnusualActivity() {
   const { language } = useLanguage();
+  const { market, isSaudi, currencyLabel } = useMarket();
   const { user } = useAuth();
   const ar = language === "ar";
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -62,20 +64,36 @@ export default function UnusualActivity() {
   // Fetch data for all users (free and Pro) to inspect market volume spikes
   useEffect(() => {
     const controller = new AbortController();
+    setSnapshot(null);
+    setError(false);
+    setShowReview(false);
+    setExpanded(false);
 
-    Promise.allSettled([
-      fetchUnusualActivity(controller.signal).then(setSnapshot),
-      fetch("/api/scan/signal-performance", { signal: controller.signal })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data?.ok) setPerf(data);
+    const requests: Promise<unknown>[] = [
+      fetchUnusualActivity(controller.signal, market)
+        .then(setSnapshot)
+        .catch((cause) => {
+          if (cause?.name !== "AbortError") setError(true);
         }),
-    ]).catch((cause) => {
-      if (cause?.name !== "AbortError") setError(true);
-    });
+    ];
+
+    if (isSaudi) {
+      setPerf(null);
+    } else {
+      requests.push(
+        fetch("/api/scan/signal-performance", { signal: controller.signal })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.ok) setPerf(data);
+          })
+          .catch(() => {})
+      );
+    }
+
+    void Promise.allSettled(requests);
 
     return () => controller.abort();
-  }, []);
+  }, [market, isSaudi]);
 
   const visible = expanded ? snapshot?.rows : snapshot?.rows?.slice(0, 6);
 
@@ -102,7 +120,7 @@ export default function UnusualActivity() {
           </span>
           <Activity className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
           <h2 className="text-sm font-black text-zinc-950 dark:text-white">
-            {ar ? "نشاط غير طبيعي وانفجار سعري" : "Unusual Activity & Volume Breakout"}
+            {ar ? `نشاط غير طبيعي وانفجار سعري — ${isSaudi ? "تاسي" : "EGX"}` : `Unusual Activity & Volume Breakout — ${isSaudi ? "TASI" : "EGX"}`}
           </h2>
           {snapshot && (
             <span className="shrink-0 border border-amber-500/40 bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-900 dark:bg-amber-400/10 dark:text-amber-300">
@@ -165,7 +183,10 @@ export default function UnusualActivity() {
               </span>
               <b className="font-mono text-zinc-950 dark:text-white">{topMover.symbol}</b>
               <span className="text-zinc-600 dark:text-zinc-400">
-                {ar ? "سعر الإشارة:" : "Signal:"} <b className="font-mono">{topMover.signalClose?.toFixed(2)}</b>
+                {ar ? "سعر الإشارة:" : "Signal:"}{" "}
+                <b className="font-mono">
+                  {topMover.signalClose != null ? `${topMover.signalClose.toFixed(2)} ${currencyLabel}` : "—"}
+                </b>
               </span>
               {topMover.intradayHighPct != null && (
                 <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
@@ -203,20 +224,28 @@ export default function UnusualActivity() {
                   {reviewUnusual.map((row) => (
                     <tr key={row.symbol} className="hover:bg-amber-500/5">
                       <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
-                        <Link prefetch={false} href={`/stocks/${row.symbol.toLowerCase()}`} className="hover:text-amber-500">
+                        <Link
+                          prefetch={false}
+                          href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+                          className="hover:text-amber-500"
+                        >
                           {row.symbol}
                         </Link>
                       </td>
-                      <td className="py-1 px-2 font-mono">{row.signalClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono">
+                        {row.signalClose != null ? `${row.signalClose.toFixed(2)} ${currencyLabel}` : "—"}
+                      </td>
                       <td className="py-1 px-2 font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                        {row.nextHigh?.toFixed(2) ?? "—"}{" "}
+                        {row.nextHigh != null ? `${row.nextHigh.toFixed(2)} ${currencyLabel}` : "—"}{" "}
                         {row.intradayHighPct != null && (
                           <span className="text-[10px] font-normal">
                             (+{row.intradayHighPct}%)
                           </span>
                         )}
                       </td>
-                      <td className="py-1 px-2 font-mono">{row.nextClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono">
+                        {row.nextClose != null ? `${row.nextClose.toFixed(2)} ${currencyLabel}` : "—"}
+                      </td>
                       <td className="py-1 px-2 font-mono font-bold">
                         <span
                           className={
@@ -278,7 +307,7 @@ export default function UnusualActivity() {
                           : "text-rose-700 dark:text-rose-400"
                       }
                     >
-                      {row.close?.toFixed(2) ?? "—"}
+                      {row.close != null ? `${row.close.toFixed(2)} ${currencyLabel}` : "—"}
                     </b>
                   </span>
                   <span className="text-zinc-600 dark:text-[#b4bac6]">
@@ -309,7 +338,7 @@ export default function UnusualActivity() {
                 <Link
                   prefetch={false}
                   aria-label={`${ar ? "فتح" : "Open"} ${row.symbol}`}
-                  href={`/chart?symbol=${encodeURIComponent(row.symbol)}&exchange=EGX`}
+                  href={`/chart?symbol=${encodeURIComponent(row.symbol)}&exchange=${isSaudi ? "TADAWUL" : "EGX"}`}
                   className="absolute inset-0"
                 />
               </div>

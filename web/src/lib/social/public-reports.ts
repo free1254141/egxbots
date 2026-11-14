@@ -35,7 +35,7 @@ export const getPublicReports = unstable_cache(async (): Promise<PublicReport[]>
     } catch { return false; }
   }).map((r: any) => ({ session_date: r.session_date, kind: r.kind, content: r.content,
     created_at: r.created_at, updated_at: r.updated_at, evidence: Array.isArray(r.evidence) ? r.evidence : [] }));
-}, ['public-reports-v1'], { revalidate: 86400, tags: [REPORT_CACHE_TAG] });
+}, ['public-reports-v1'], { revalidate: 604800, tags: [REPORT_CACHE_TAG] });
 
 export function reportUrl(r: Pick<PublicReport, 'session_date' | 'kind'>) {
   return `/reports/${r.session_date}/${r.kind}`;

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
-import { createProTelegramInvite, revokeProTelegramAccess } from "@/lib/telegramProInvite";
+import {
+  createProTelegramInvite,
+  createSaudiProTelegramInvite,
+  revokeProTelegramAccess,
+} from "@/lib/telegramProInvite";
+
+const SAUDI_VIP_WEB_URL = "https://web.telegram.org/a/#-1004397045436";
 
 export const dynamic = "force-dynamic";
 
@@ -231,10 +237,17 @@ export async function GET(request: Request) {
   }
 
   const validInvite = isInviteValid(saved, subscriptionEnd) ? saved : null;
+  const saudiInviteLink =
+    (typeof createSaudiProTelegramInvite === "function"
+      ? await createSaudiProTelegramInvite(user.id, subscriptionEnd).catch(() => "")
+      : "") || SAUDI_VIP_WEB_URL;
+
   return NextResponse.json({
     is_pro: true,
     current_period_end: subscriptionEnd,
     invite_link: validInvite?.invite_link?.trim() || "",
+    saudi_invite_link: saudiInviteLink,
+    saudi_vip_web_url: SAUDI_VIP_WEB_URL,
     invite_expires_at: validInvite?.invite_expires_at || null,
     invite_status: validInvite ? "ready" : "unavailable",
     bot_active: botActive,

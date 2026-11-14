@@ -10,14 +10,14 @@ declare
     v_expires_at timestamptz;
 begin
     -- 1. Check if user already used a trial
-    select * into v_existing_trial from public.subscription_trials where user_id = p_user_id;
+    select * into v_existing_trial from public.subscription_trials where user_id::text = p_user_id::text;
     if found then
         return jsonb_build_object('success', false, 'error', 'TRIAL_ALREADY_USED', 'message', 'لقد استخدمت الفترة التجريبية من قبل');
     end if;
 
     -- 2. Check if user currently has an active paid subscription
     select * into v_existing_sub from public.subscriptions 
-    where user_id = p_user_id 
+    where user_id::text = p_user_id::text 
       and status = 'active' 
       and plan_id in ('pro', 'lifetime', 'pro_lifetime')
       and (current_period_end is null or current_period_end > now());
@@ -28,10 +28,10 @@ begin
     -- 3. Check if user previously had an approved paid subscription or is a founders offer member
     if exists (
         select 1 from public.local_payment_orders
-        where user_id = p_user_id and status = 'approved'
+        where user_id::text = p_user_id::text and status = 'approved'
     ) or exists (
         select 1 from public.founders_offer_members
-        where user_id = p_user_id
+        where user_id::text = p_user_id::text
     ) then
         return jsonb_build_object('success', false, 'error', 'PREVIOUS_SUBSCRIBER', 'message', 'التجربة المجانية متاحة فقط للمشتركين الجدد الذين لم يسبق لهم الاشتراك');
     end if;

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseClient } from "@/lib/supabase/route-data";
 import fs from "fs";
 import path from "path";
 
-export const revalidate = 86400;
+export const revalidate = 604800;
+
+const PDF_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=604800, s-maxage=2592000, stale-while-revalidate=2592000, immutable",
+  "Vercel-CDN-Cache-Control": "public, s-maxage=2592000, stale-while-revalidate=2592000, immutable",
+};
 
 // Known static PDF mirrors for EGX sessions
 const SESSION_PDF_MAP: Record<string, string> = {
@@ -18,13 +23,10 @@ export async function GET(
 ) {
   const { id } = await context.params;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
   let item: any = null;
-  if (supabaseUrl && supabaseKey && id) {
+  if (id) {
     try {
-      const supabase = createClient(supabaseUrl, supabaseKey);
+      const supabase = getSupabaseClient();
       const { data } = await supabase
         .from("egx_disclosures")
         .select("id, symbol, disclosure_date, disclosure_type, source_url")
@@ -65,7 +67,7 @@ export async function GET(
           headers: {
             "Content-Type": "application/pdf",
             "Content-Disposition": `inline; filename="egx_disclosure_${item?.symbol || 'official'}.pdf"`,
-            "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+            ...PDF_CACHE_HEADERS,
           },
         });
       } catch (err) {
@@ -85,7 +87,7 @@ export async function GET(
           headers: {
             "Content-Type": "application/pdf",
             "Content-Disposition": `inline; filename="egx_disclosure_${item?.symbol || 'official'}.pdf"`,
-            "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+            ...PDF_CACHE_HEADERS,
           },
         });
       } catch (err) {
@@ -113,7 +115,7 @@ export async function GET(
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="egx_disclosure_${item?.symbol || 'official'}.pdf"`,
-        "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+        ...PDF_CACHE_HEADERS,
       },
     });
   } catch (e: any) {
@@ -131,7 +133,7 @@ export async function GET(
           headers: {
             "Content-Type": "application/pdf",
             "Content-Disposition": `inline; filename="egx_disclosure_${item?.symbol || 'official'}.pdf"`,
-            "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+            ...PDF_CACHE_HEADERS,
           },
         });
       }

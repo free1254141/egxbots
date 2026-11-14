@@ -3,10 +3,50 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scanAiFastWithParams, evaluateScan, getPublicScanSettings, type ScanAiParams, type ScanResult } from "@/lib/api";
 import type { PredictResponse } from "@/lib/types";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createSupabaseBrowserClient, createMarketSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useRefreshOnVisibility } from "@/hooks/useRealtimeRefresh";
 import { useAuth } from "./AuthContext";
 import { usePathname } from "next/navigation";
+
+export type ActiveMarket = "egx" | "tasi";
+
+const MARKET_STORAGE_KEY = "egxbots_market";
+const MARKET_CHANGE_EVENT = "egxbots:market-change";
+
+function normalizeMarketValue(value: unknown): ActiveMarket | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toLowerCase();
+    if (
+        normalized === "tasi" ||
+        normalized === "tadawul" ||
+        normalized === "saudi" ||
+        normalized === "saudi arabia" ||
+        normalized === "sr"
+    ) {
+        return "tasi";
+    }
+    if (normalized === "egx" || normalized === "egypt") {
+        return "egx";
+    }
+    return null;
+}
+
+function readStoredMarket(): ActiveMarket {
+    if (typeof window === "undefined") return "egx";
+    try {
+        return normalizeMarketValue(window.localStorage.getItem(MARKET_STORAGE_KEY)) ?? "egx";
+    } catch {
+        return "egx";
+    }
+}
+
+function countryForMarket(market: ActiveMarket): string {
+    return market === "tasi" ? "Saudi Arabia" : "Egypt";
+}
+
+function exchangeForMarket(market: ActiveMarket): string {
+    return market === "tasi" ? "TADAWUL" : "EGX";
+}
 
 type AiScannerState = {
     country: string;
@@ -87,6 +127,7 @@ interface AIScannerContextType {
 
     updateResultStatus: (id: string, status: "win" | "loss") => Promise<boolean>;
     
+    activeMarket: ActiveMarket;
     recommendations: any[];
     recsLoading: boolean;
     recsError: string | null;
@@ -136,13 +177,32 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     const { user } = useAuth();
     const pathname = usePathname();
     const isAiScannerPage = pathname.startsWith("/scanner/ai");
+    // Auth & user tables (positions, profiles) always stay on Primary Supabase.
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-    const [state, setAiScanner] = useState<AiScannerState>(DEFAULT_STATE);
+    const [activeMarket, setActiveMarket] = useState<ActiveMarket>(() => readStoredMarket());
+    const activeMarketRef = useRef<ActiveMarket>(activeMarket);
+    activeMarketRef.current = activeMarket;
+    const marketClientsRef = useRef<Partial<Record<ActiveMarket, ReturnType<typeof createSupabaseBrowserClient>>>>({});
+    const getMarketClient = useCallback((market: ActiveMarket = activeMarketRef.current) => {
+        if (!marketClientsRef.current[market]) {
+            marketClientsRef.current[market] =
+                typeof createMarketSupabaseBrowserClient === "function"
+                    ? createMarketSupabaseBrowserClient(market)
+                    : supabase;
+        }
+        return marketClientsRef.current[market]!;
+    }, [supabase]);
+    const [state, setAiScanner] = useState<AiScannerState>(() => ({
+        ...DEFAULT_STATE,
+        country: countryForMarket(readStoredMarket()),
+    }));
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [recommendations, setRecommendationsState] = useState<any[]>([]);
     const recommendationsRef = useRef<any[]>([]);
     const recommendationsUserRef = useRef<string | null | undefined>(undefined);
+    const recommendationsMarketRef = useRef<ActiveMarket | null>(null);
+    const loadedLimitRef = useRef<number | undefined>(undefined);
     const setRecommendations = useCallback((val: any[]) => {
         recommendationsRef.current = val;
         setRecommendationsState(val);
@@ -152,8 +212,8 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     const recommendationsReqVersionRef = useRef(0);
     const recommendationsInFlightRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
     // The daily worker is the source of truth. Keep the browser snapshot for
-    // one day and only refresh explicitly or after the next daily cycle.
-    const RECOMMENDATIONS_FRESH_MS = 5 * 60 * 1000;
+    // 30 minutes and only refresh explicitly or after the next daily cycle.
+    const RECOMMENDATIONS_FRESH_MS = 30 * 60 * 1000;
     const [recsLoading, setRecsLoading] = useState(false);
     const [recsError, setRecsError] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
@@ -169,6 +229,8 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
 
         try {
             const batchId = crypto.randomUUID();
+            const targetMarket = normalizeMarketValue(scanParams.country) ?? activeMarketRef.current;
+            const marketClient = getMarketClient(targetMarket);
 
             // Insert rows directly into scan_results with all metadata
             // Use the scan's end date (to_date) as created_at so records are saved with the selected date
@@ -180,7 +242,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 batch_id: batchId,
                 user_id: user.id,
                 symbol: r.symbol,
-                exchange: r.exchange || "US",
+                exchange: r.exchange || exchangeForMarket(targetMarket),
                 name: r.name,
                 model_name: scanParams.modelName || "unknown",
                 country: scanParams.country,
@@ -217,7 +279,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             }));
 
             if (rows.length > 0) {
-                const { error: resultsErr } = await supabase
+                const { error: resultsErr } = await marketClient
                     .from("scan_results")
                     .insert(rows);
                 if (resultsErr) throw resultsErr;
@@ -276,7 +338,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         } catch (err) {
             console.error("Failed to save scan results:", err);
         }
-    }, [user, supabase]);
+    }, [user, supabase, getMarketClient]);
 
     const saveCurrentScan = useCallback(async (isPublic: boolean = false): Promise<boolean> => {
         if (!state.results.length || !user) return false;
@@ -354,9 +416,10 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     }, [state.results, state.progress.total, state.lastDurationMs, state.country, state.limit, state.modelName, state.endDate, state.scanAllMarket, state.rfPreset, state.rfParamsJson, saveScanToSupabase, user, state.councilModel, state.validatorModel]);
     const fetchScanHistory = useCallback(async (filters?: { country?: string; model?: string; isPublic?: boolean }) => {
         if (!user) return [];
+        const marketClient = getMarketClient(normalizeMarketValue(filters?.country) ?? activeMarketRef.current);
 
         // Query unique batch_ids to simulate history
-        let query = supabase
+        let query = marketClient
             .from("scan_results")
             .select("batch_id, created_at, model_name, country, from_date, to_date, scanned_count, duration_ms, is_public")
             .order("created_at", { ascending: false })
@@ -384,11 +447,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         }
 
         return uniqueBatches;
-    }, [user, supabase]);
+    }, [user, getMarketClient]);
 
     const fetchScanResults = useCallback(async (batchId: string) => {
-        if (!supabase) return [];
-        const { data, error } = await supabase
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return [];
+        const { data, error } = await marketClient
             .from("scan_results")
             .select("id, batch_id, user_id, symbol, exchange, name, model_name, country, last_close, precision, signal, status, entry_price, target_price, stop_loss, risk_adjusted_return, is_public, created_at, updated_at, exit_price, profit_loss_pct, top_reasons, adjustments, features")
             .eq("batch_id", batchId)
@@ -409,13 +473,14 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             }
             return { ...row, technical_score: tech || 0, fundamental_score: fund || 0 };
         });
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const fetchLatestScanForModel = useCallback(async (modelName: string, onlyPublic: boolean = true) => {
-        if (!supabase) return null;
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return null;
 
         // 1. Get the latest batch_id or date for this model
-        let query = supabase
+        let query = marketClient
             .from("scan_results")
             .select("batch_id, created_at")
             .eq("model_name", modelName)
@@ -434,7 +499,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
 
         // 2. Fetch results for that specific date (or batch if preferred, but user wants date pagination)
         // Include features column for fallback extraction of technical_score, fundamental_score, sentiment_score
-        const { data: results, error: resultsErr } = await supabase
+        const { data: results, error: resultsErr } = await marketClient
             .from("scan_results")
             .select("id, batch_id, user_id, symbol, exchange, name, model_name, country, last_close, precision, signal, status, entry_price, target_price, stop_loss, risk_adjusted_return, is_public, created_at, updated_at, exit_price, profit_loss_pct, top_reasons, adjustments, features")
             .eq("model_name", modelName)
@@ -459,11 +524,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         });
 
         return { history: mappedResults[0], results: mappedResults };
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const toggleResultPublicStatus = useCallback(async (id: string, isPublic: boolean) => {
-        if (!supabase) return false;
-        const { error } = await supabase
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return false;
+        const { error } = await marketClient
             .from("scan_results")
             .update({ is_public: isPublic })
             .eq("id", id);
@@ -472,11 +538,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return false;
         }
         return true;
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const bulkUpdatePublicStatus = useCallback(async (ids: string[], isPublic: boolean) => {
-        if (!supabase || ids.length === 0) return false;
-        const { error } = await supabase
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient || ids.length === 0) return false;
+        const { error } = await marketClient
             .from("scan_results")
             .update({ is_public: isPublic })
             .in("id", ids);
@@ -485,12 +552,13 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return false;
         }
         return true;
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const fetchPublicScanDates = useCallback(async (modelName: string) => {
-        if (!supabase) return [];
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return [];
         // Get unique dates where results are public
-        const { data, error } = await supabase
+        const { data, error } = await marketClient
             .from("scan_results")
             .select("created_at")
             .eq("model_name", modelName)
@@ -502,13 +570,14 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return [];
         }
 
-        const dates = Array.from(new Set(data.map(d => new Date(d.created_at).toISOString().split('T')[0])));
+        const dates = Array.from(new Set(data.map((d: any) => new Date(d.created_at).toISOString().split('T')[0])));
         return dates;
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const fetchScanResultsByDate = useCallback(async (modelName: string, date: string) => {
-        if (!supabase) return [];
-        const { data, error } = await supabase
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return [];
+        const { data, error } = await marketClient
             .from("scan_results")
             .select("id, batch_id, user_id, symbol, exchange, name, model_name, country, last_close, precision, signal, status, entry_price, target_price, stop_loss, risk_adjusted_return, is_public, created_at, updated_at, exit_price, profit_loss_pct, top_reasons, adjustments, features")
             .eq("model_name", modelName)
@@ -533,11 +602,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             }
             return { ...row, technical_score: tech || 0, fundamental_score: fund || 0, council_score: row.council_score || 0, consensus_ratio: row.consensus_ratio || "" };
         });
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const fetchGlobalModelStats = useCallback(async (modelName: string) => {
-        if (!supabase) return { winRate: 0, avgPl: 0, total: 0 };
-        const { data, error } = await supabase
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return { winRate: 0, avgPl: 0, total: 0 };
+        const { data, error } = await marketClient
             .from("scan_results")
             .select("status, profit_loss_pct")
             .eq("model_name", modelName)
@@ -548,18 +618,19 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return { winRate: 0, avgPl: 0, total: 0 };
         }
 
-        const wins = data.filter(r => r.status === 'win').length;
+        const wins = data.filter((r: any) => r.status === 'win').length;
         const total = data.length;
         const winRate = total > 0 ? (wins / total) * 100 : 0;
-        const avgPl = total > 0 ? (data.reduce((acc, r) => acc + (r.profit_loss_pct || 0), 0) / total) : 0;
+        const avgPl = total > 0 ? (data.reduce((acc: number, r: any) => acc + (r.profit_loss_pct || 0), 0) / total) : 0;
 
         return { winRate, avgPl, total };
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const fetchPublishedResults = useCallback(async (filters?: { country?: string; model?: string; startDate?: string; endDate?: string }) => {
-        if (!supabase) return [];
+        const marketClient = getMarketClient(normalizeMarketValue(filters?.country) ?? activeMarketRef.current);
+        if (!marketClient) return [];
         // Include features column for fallback extraction of technical_score, fundamental_score, sentiment_score
-        let query = supabase
+        let query = marketClient
             .from("scan_results")
             .select("id, batch_id, user_id, symbol, exchange, name, model_name, country, last_close, precision, signal, status, entry_price, target_price, stop_loss, risk_adjusted_return, is_public, created_at, updated_at, exit_price, profit_loss_pct, top_reasons, adjustments, features")
             .eq("is_public", true)
@@ -600,14 +671,15 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 consensus_ratio: ratio || ""
             };
         });
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const updateResultStatus = useCallback(async (id: string, status: "win" | "loss") => {
-        if (!supabase) return false;
+        const marketClient = getMarketClient(activeMarketRef.current);
+        if (!marketClient) return false;
 
         // Calculate P/L if status is set
         // In a real app we might fetch the actual price, but for now we just mark status
-        const { error } = await supabase
+        const { error } = await marketClient
             .from("scan_results")
             .update({
                 status: status,
@@ -621,7 +693,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return false;
         }
         return true;
-    }, [supabase]);
+    }, [getMarketClient]);
 
     const refreshScanPerformance = useCallback(async (scanId: string) => {
         try {
@@ -824,16 +896,42 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
     }, [state.scanHistory]);
 
     const resetAiScanner = useCallback(() => {
-        setAiScanner(DEFAULT_STATE);
+        setAiScanner({
+            ...DEFAULT_STATE,
+            country: countryForMarket(activeMarketRef.current),
+        });
     }, []);
 
     const loadRecommendations = useCallback(async (isLandingPage: boolean = false, force: boolean = false, requestedLimit?: number) => {
+        const currentMarket = activeMarketRef.current;
         const userId = user?.id ?? null;
         const sameViewer = recommendationsUserRef.current === userId;
-        if (recommendationsRef.current.length > 0 && !force && sameViewer && loadedLandingRef.current === isLandingPage) {
+        const sameMarket = recommendationsMarketRef.current === currentMarket;
+        if (recommendationsRef.current.length > 0 && !force && sameViewer && sameMarket && loadedLandingRef.current === isLandingPage) {
             return;
         }
-        const inFlightKey = `${userId ?? "anon"}:${isLandingPage}:${requestedLimit ?? "all"}`;
+        const isPublicScope = !userId || isLandingPage;
+        const recsSessionKey = `egxbots_ai_recs_v3:${currentMarket}:${isPublicScope ? "pub" : userId}:${isLandingPage ? "landing" : "full"}:${requestedLimit ?? "default"}`;
+        if (!force && typeof window !== "undefined") {
+            try {
+                const rawCached = window.sessionStorage.getItem(recsSessionKey);
+                if (rawCached) {
+                    const parsed = JSON.parse(rawCached) as { ts: number; data: any[] };
+                    if (parsed?.ts && Date.now() - parsed.ts < RECOMMENDATIONS_FRESH_MS && Array.isArray(parsed.data)) {
+                        setRecommendations(parsed.data);
+                        recommendationsUserRef.current = userId;
+                        recommendationsMarketRef.current = currentMarket;
+                        loadedLandingRef.current = isLandingPage;
+                        loadedLimitRef.current = requestedLimit;
+                        recommendationsLoadedAtRef.current = parsed.ts;
+                        return;
+                    }
+                }
+            } catch {
+                // Ignore sessionStorage failures
+            }
+        }
+        const inFlightKey = `${currentMarket}:${userId ?? "anon"}:${isLandingPage}:${requestedLimit ?? "all"}`;
         if (!force && recommendationsInFlightRef.current?.key === inFlightKey) {
             return recommendationsInFlightRef.current.promise;
         }
@@ -846,29 +944,29 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             let scanErr: any = null;
             let sectorMap: Record<string, string> = {};
 
-            // The public home page must not make a browser-to-Supabase query
-            // for 200 recommendations. This API is CDN-cached and selects only
-            // fields actually rendered by the public table.
+            // The public home page and anonymous visitors must share one CDN-cached
+            // public response (?scope=public) so 100k visitors cause 0 Lambda hits.
             if (isLandingPage) {
                 const fetchLimit = requestedLimit ? Math.min(requestedLimit * 2, 20) : 6;
-                const response = await fetch(`/api/ai_bot/recommendations?limit=${fetchLimit}`);
+                const response = await fetch(`/api/ai_bot/recommendations?limit=${fetchLimit}&scope=public&market=${currentMarket}`, force ? { cache: "no-store" } : undefined);
                 if (!response.ok) throw new Error("Failed to load public recommendations");
                 scanData = await response.json();
                 sectorMap = Object.fromEntries((scanData || []).map((row: any) => [row.symbol, row.sector || "General"]));
             } else {
-                // Use the session-aware API for the public scanner as well. A
-                // browser Supabase query bypasses the server-side delay gate.
-                const response = await fetch("/api/ai_bot/recommendations?limit=200");
+                const scopeParam = isPublicScope ? "public" : "user";
+                const response = await fetch(`/api/ai_bot/recommendations?limit=200&scope=${scopeParam}&market=${currentMarket}`, force ? { cache: "no-store" } : undefined);
                 if (!response.ok) throw new Error("Failed to load recommendations");
                 scanData = await response.json();
             }
 
-            if (reqVersion !== recommendationsReqVersionRef.current) return;
+            if (reqVersion !== recommendationsReqVersionRef.current || activeMarketRef.current !== currentMarket) return;
             if (scanErr) throw new Error(scanErr.message);
             if (!scanData || scanData.length === 0) {
                 setRecommendations([]);
                 recommendationsUserRef.current = userId;
+                recommendationsMarketRef.current = currentMarket;
                 loadedLandingRef.current = isLandingPage;
+                loadedLimitRef.current = requestedLimit;
                 recommendationsLoadedAtRef.current = Date.now();
                 setRecsLoading(false);
                 return;
@@ -910,7 +1008,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                         symbol: null,
                         name: null,
                         logo_url: null,
-                        exchange: row.exchange || "EGX",
+                        exchange: row.exchange || exchangeForMarket(currentMarket),
                         status: row.status,
                         precision: Number(row.precision) || 0,
                         profit_loss_pct: row.profit_loss_pct != null ? Number(row.profit_loss_pct) : null,
@@ -939,7 +1037,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                         logo_url: null,
                         signal: row.signal || "BUY",
                         precision: Number(row.precision) || 0,
-                        exchange: row.exchange || "EGX",
+                        exchange: row.exchange || exchangeForMarket(currentMarket),
                         country: null,
                         status: row.status || "open",
                         created_at: row.created_at,
@@ -1027,7 +1125,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     name: row.name || row.symbol,
                     signal: row.signal || "BUY",
                     precision: row.precision || 0.5,
-                    exchange: row.exchange || "EGX",
+                    exchange: row.exchange || exchangeForMarket(currentMarket),
                     last_close: currentPrice,
                     price_date: row.price_date || null,
                     price_volume: row.price_volume ?? null,
@@ -1038,7 +1136,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                     technical_score: tech,
                     fundamental_score: fund,
                     sentiment_score: sentiment,
-                    sector: sectorMap[row.symbol] || "General",
+                    sector: row.sector || sectorMap[row.symbol] || "General",
                     logo_url: row.logo_url,
                     top_reasons: row.top_reasons || null,
                     status: openPosition?.status || row.status || "open",
@@ -1061,7 +1159,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
                 };
             });
 
-            if (reqVersion !== recommendationsReqVersionRef.current) return;
+            if (reqVersion !== recommendationsReqVersionRef.current || activeMarketRef.current !== currentMarket) return;
             let visibleRecommendations = mapped;
             if (!isLandingPage) {
                 // The recommendations route row-masks fresh and high-safety
@@ -1087,10 +1185,22 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             });
             setRecommendations(dedupedRecommendations);
             recommendationsUserRef.current = userId;
+            recommendationsMarketRef.current = currentMarket;
             loadedLandingRef.current = isLandingPage;
+            loadedLimitRef.current = requestedLimit;
             recommendationsLoadedAtRef.current = Date.now();
+            if (typeof window !== "undefined") {
+                try {
+                    window.sessionStorage.setItem(
+                        recsSessionKey,
+                        JSON.stringify({ ts: recommendationsLoadedAtRef.current, data: dedupedRecommendations })
+                    );
+                } catch {
+                    // Ignore storage quota errors
+                }
+            }
         } catch (err: any) {
-            if (reqVersion !== recommendationsReqVersionRef.current) return;
+            if (reqVersion !== recommendationsReqVersionRef.current || activeMarketRef.current !== currentMarket) return;
             console.error("Error loading recommendations in context:", err);
             setRecsError(err.message || "Failed to fetch data");
         } finally {
@@ -1104,7 +1214,71 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         })();
         recommendationsInFlightRef.current = { key: inFlightKey, promise: runPromise };
         return runPromise;
-    }, [supabase, user?.id]);
+    }, [supabase, user?.id, setRecommendations]);
+
+    // React to global market switcher events from Header/Navbar.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+
+        const applyMarketSwitch = (nextMarket: ActiveMarket) => {
+            if (nextMarket === activeMarketRef.current) return;
+            activeMarketRef.current = nextMarket;
+            setActiveMarket(nextMarket);
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+                setLoading(false);
+            }
+            setAiScanner(prev => ({
+                ...prev,
+                country: countryForMarket(nextMarket),
+                results: [],
+                hasScanned: false,
+                selected: null,
+                detailData: null,
+                progress: { current: 0, total: 0 },
+            }));
+            recommendationsReqVersionRef.current += 1;
+            recommendationsInFlightRef.current = null;
+            recommendationsMarketRef.current = nextMarket;
+            recommendationsLoadedAtRef.current = 0;
+            setRecommendations([]);
+            setRecsError(null);
+            if (loadedLandingRef.current !== null) {
+                void loadRecommendations(
+                    loadedLandingRef.current,
+                    true,
+                    loadedLimitRef.current
+                );
+            }
+        };
+
+        const storedMarket = readStoredMarket();
+        if (storedMarket !== activeMarketRef.current) {
+            applyMarketSwitch(storedMarket);
+        }
+
+        const handleMarketChange = (event: Event) => {
+            const custom = event as CustomEvent<any>;
+            const detailMarket = normalizeMarketValue(
+                typeof custom?.detail === "string" ? custom.detail : custom?.detail?.market
+            );
+            applyMarketSwitch(detailMarket ?? readStoredMarket());
+        };
+
+        const handleStorageChange = (event: StorageEvent) => {
+            if (event.key === MARKET_STORAGE_KEY) {
+                applyMarketSwitch(normalizeMarketValue(event.newValue) ?? "egx");
+            }
+        };
+
+        window.addEventListener(MARKET_CHANGE_EVENT, handleMarketChange);
+        window.addEventListener("storage", handleStorageChange);
+        return () => {
+            window.removeEventListener(MARKET_CHANGE_EVENT, handleMarketChange);
+            window.removeEventListener("storage", handleStorageChange);
+        };
+    }, [loadRecommendations, setRecommendations]);
 
     // Recommendations are produced by the daily job and served through the
     // API cache. Do not keep a Supabase Realtime subscription here: every scan
@@ -1115,7 +1289,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             loadedLandingRef.current !== null &&
             Date.now() - recommendationsLoadedAtRef.current >= RECOMMENDATIONS_FRESH_MS
         ) {
-            return loadRecommendations(loadedLandingRef.current, true);
+            return loadRecommendations(loadedLandingRef.current, true, loadedLimitRef.current);
         }
     }, Boolean(user));
 
@@ -1142,11 +1316,12 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
         fetchGlobalModelStats,
         updateResultStatus,
         fetchPublishedResults,
+        activeMarket,
         recommendations,
         recsLoading,
         recsError,
         loadRecommendations,
-    }), [state, loading, error, runAiScan, stopAiScan, clearAiScannerView, restoreLastAiScan, resetAiScanner, fetchScanHistory, fetchScanResults, fetchLatestScanForModel, refreshScanPerformance, saveCurrentScan, saveSelectedResults, toggleResultPublicStatus, bulkUpdatePublicStatus, fetchPublicScanDates, fetchScanResultsByDate, fetchGlobalModelStats, updateResultStatus, fetchPublishedResults, recommendations, recsLoading, recsError, loadRecommendations]);
+    }), [state, loading, error, runAiScan, stopAiScan, clearAiScannerView, restoreLastAiScan, resetAiScanner, fetchScanHistory, fetchScanResults, fetchLatestScanForModel, refreshScanPerformance, saveCurrentScan, saveSelectedResults, toggleResultPublicStatus, bulkUpdatePublicStatus, fetchPublicScanDates, fetchScanResultsByDate, fetchGlobalModelStats, updateResultStatus, fetchPublishedResults, activeMarket, recommendations, recsLoading, recsError, loadRecommendations]);
 
     return <AIScannerContext.Provider value={value}>{children}</AIScannerContext.Provider>;
 };

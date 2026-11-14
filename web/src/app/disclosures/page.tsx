@@ -64,7 +64,7 @@ async function getInitialDisclosuresData(): Promise<{
         "id, symbol, company_name, disclosure_type, disclosure_date, title, raw_content, ai_summary, sentiment, action_type, shares_count, stake_before, stake_after, party_name, party_role, source_url, metadata"
       )
       .order("disclosure_date", { ascending: false })
-      .limit(300),
+      .limit(2000),
     supabase
       .from("stock_technical_indicators")
       .select("symbol, close, change_pct")

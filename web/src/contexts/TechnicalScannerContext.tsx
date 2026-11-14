@@ -64,6 +64,7 @@ export type TechScannerState = {
 
 type TechnicalScannerContextType = {
   state: TechScannerState;
+  activeMarket: ActiveMarket;
   setTechScanner: (u: Updater<TechScannerState>) => void;
   loading: boolean;
   error: string | null;
@@ -74,8 +75,48 @@ type TechnicalScannerContextType = {
   resetTechScanner: () => void;
 };
 
-const SESSION_KEY = "egxbots_tech_scanner_v1";
+const SESSION_KEY_PREFIX = "egxbots_tech_scanner_v2";
+const LEGACY_SESSION_KEY = "egxbots_tech_scanner_v1";
+const MARKET_STORAGE_KEY = "egxbots_market";
+const MARKET_CHANGE_EVENT = "egxbots:market-change";
 const CACHE_TTL_MS = 15 * 60 * 1000;
+
+export type ActiveMarket = "egx" | "tasi";
+
+function normalizeMarketValue(value: unknown): ActiveMarket | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "tasi" ||
+    normalized === "tadawul" ||
+    normalized === "saudi" ||
+    normalized === "saudi arabia" ||
+    normalized === "sr"
+  ) {
+    return "tasi";
+  }
+  if (normalized === "egx" || normalized === "egypt") {
+    return "egx";
+  }
+  return null;
+}
+
+function readStoredMarket(): ActiveMarket {
+  if (typeof window === "undefined") return "egx";
+  try {
+    return normalizeMarketValue(window.localStorage.getItem(MARKET_STORAGE_KEY)) ?? "egx";
+  } catch {
+    return "egx";
+  }
+}
+
+function countryForMarket(market: ActiveMarket): string {
+  return market === "tasi" ? "Saudi Arabia" : "Egypt";
+}
+
+function getSessionKey(market: ActiveMarket): string {
+  return `${SESSION_KEY_PREFIX}:${market}`;
+}
 
 const DEFAULT_STATE: TechScannerState = {
   country: "Egypt",
@@ -121,21 +162,36 @@ const DEFAULT_STATE: TechScannerState = {
 
 const TechnicalScannerContext = createContext<TechnicalScannerContextType | undefined>(undefined);
 
-function loadSessionState(): TechScannerState {
-  if (typeof window === "undefined") return DEFAULT_STATE;
+function loadSessionState(market: ActiveMarket = "egx"): TechScannerState {
+  const expectedCountry = countryForMarket(market);
+  const baseState: TechScannerState = { ...DEFAULT_STATE, country: expectedCountry };
+  if (typeof window === "undefined") return baseState;
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return DEFAULT_STATE;
+    const key = getSessionKey(market);
+    const raw =
+      sessionStorage.getItem(key) ||
+      (market === "egx" ? sessionStorage.getItem(LEGACY_SESSION_KEY) : null);
+    if (!raw) return baseState;
     const parsed = JSON.parse(raw) as Partial<TechScannerState>;
+    // Invalidate old cache if results don't contain score data
+    const hasResults = Array.isArray(parsed.results) && parsed.results.length > 0;
+    const hasScoreData = hasResults && parsed.results![0].fundamental_score !== undefined;
+    if (hasResults && !hasScoreData) {
+      sessionStorage.removeItem(key);
+      if (market === "egx") sessionStorage.removeItem(LEGACY_SESSION_KEY);
+      return baseState;
+    }
     return {
-      ...DEFAULT_STATE,
+      ...baseState,
       ...parsed,
+      country: expectedCountry,
       selectedStock: null,
+      activeSymbol: null,
       results: Array.isArray(parsed.results) ? parsed.results : [],
       scanHistory: Array.isArray(parsed.scanHistory) ? parsed.scanHistory : [],
     };
   } catch {
-    return DEFAULT_STATE;
+    return baseState;
   }
 }
 
@@ -210,6 +266,8 @@ function buildFilterFromState(s: TechScannerState): TechFilter {
 }
 
 export function TechnicalScannerProvider({ children }: { children: ReactNode }) {
+  const [activeMarket, setActiveMarket] = useState<ActiveMarket>("egx");
+  const activeMarketRef = useRef<ActiveMarket>("egx");
   const [state, setState] = useState<TechScannerState>(DEFAULT_STATE);
   const [isLoaded, setIsLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -217,36 +275,16 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
   const abortRef = useRef<AbortController | null>(null);
   const stateRef = useRef(state);
 
-  // Load from session storage after mount to prevent SSR/hydration mismatch
+  // Load from market-scoped session storage after mount to prevent SSR/hydration mismatch
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<TechScannerState>;
-        // Invalidate old cache if results don't contain score data
-        const hasScoreData = Array.isArray(parsed.results) && parsed.results.length > 0 &&
-          parsed.results[0].fundamental_score !== undefined;
-        if (!hasScoreData && Array.isArray(parsed.results) && parsed.results.length > 0) {
-          // Old cache without scores — clear it to force a fresh scan
-          sessionStorage.removeItem(SESSION_KEY);
-          setIsLoaded(true);
-          return;
-        }
-        setState((prev) => ({
-          ...prev,
-          ...parsed,
-          selectedStock: null,
-          results: Array.isArray(parsed.results) ? parsed.results : [],
-          scanHistory: Array.isArray(parsed.scanHistory) ? parsed.scanHistory : [],
-        }));
-      }
-    } catch (e) {
-      console.error("Failed to load session state", e);
-    } finally {
-      setIsLoaded(true);
-    }
+    const initialMarket = readStoredMarket();
+    activeMarketRef.current = initialMarket;
+    setActiveMarket(initialMarket);
+    const loaded = loadSessionState(initialMarket);
+    stateRef.current = loaded;
+    setState(loaded);
+    setIsLoaded(true);
   }, []);
-
 
   useEffect(() => {
     stateRef.current = state;
@@ -254,28 +292,38 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!isLoaded) return;
+    const market = activeMarketRef.current;
+    if (state.country !== countryForMarket(market)) return;
     try {
-      const { selectedStock: _selected, ...persisted } = state;
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
+      const { selectedStock: _selected, activeSymbol: _activeSymbol, ...persisted } = state;
+      sessionStorage.setItem(getSessionKey(market), JSON.stringify(persisted));
     } catch {
       // sessionStorage may be unavailable
     }
-  }, [state, isLoaded]);
+  }, [state, isLoaded, activeMarket]);
 
   const setTechScanner = useCallback((u: Updater<TechScannerState>) => {
-    setState((prev) =>
-      typeof u === "function" ? (u as (p: TechScannerState) => TechScannerState)(prev) : { ...prev, ...u }
-    );
+    setState((prev) => {
+      const next =
+        typeof u === "function" ? (u as (p: TechScannerState) => TechScannerState)(prev) : { ...prev, ...u };
+      stateRef.current = next;
+      return next;
+    });
   }, []);
 
   const clearTechScannerView = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      results: [],
-      hasScanned: false,
-      scannedCount: 0,
-      selectedStock: null,
-    }));
+    setState((prev) => {
+      const next: TechScannerState = {
+        ...prev,
+        results: [],
+        hasScanned: false,
+        scannedCount: 0,
+        selectedStock: null,
+        activeSymbol: null,
+      };
+      stateRef.current = next;
+      return next;
+    });
   }, []);
 
   const restoreLastTechScan = useCallback(() => {
@@ -284,23 +332,34 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
       const last = prev.scanHistory?.[prev.scanHistory.length - 1];
       if (!last) return prev;
       restored = true;
-      return {
+      const next: TechScannerState = {
         ...prev,
         results: last.results,
         hasScanned: true,
         scannedCount: last.scannedCount,
         selectedStock: null,
       };
+      stateRef.current = next;
+      return next;
     });
     return restored;
   }, []);
 
   const resetTechScanner = useCallback(() => {
-    setState(DEFAULT_STATE);
-    sessionStorage.removeItem(SESSION_KEY);
+    const market = activeMarketRef.current;
+    const next: TechScannerState = { ...DEFAULT_STATE, country: countryForMarket(market) };
+    stateRef.current = next;
+    setState(next);
+    try {
+      sessionStorage.removeItem(getSessionKey(market));
+      if (market === "egx") sessionStorage.removeItem(LEGACY_SESSION_KEY);
+    } catch {
+      // ignore
+    }
   }, []);
 
   const runTechScan = useCallback(async (opts?: { force?: boolean }) => {
+    const reqMarket = activeMarketRef.current;
     const current = stateRef.current;
     const filter = buildFilterFromState(current);
     const key = buildFilterKey(filter);
@@ -309,13 +368,17 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
     if (!opts?.force) {
       const cached = current.scanHistory?.find((h) => h.key === key && now - h.createdAt < CACHE_TTL_MS);
       if (cached) {
-        setState((prev) => ({
-          ...prev,
-          results: cached.results,
-          hasScanned: true,
-          scannedCount: cached.scannedCount,
-          selectedStock: null,
-        }));
+        setState((prev) => {
+          const next: TechScannerState = {
+            ...prev,
+            results: cached.results,
+            hasScanned: true,
+            scannedCount: cached.scannedCount,
+            selectedStock: null,
+          };
+          stateRef.current = next;
+          return next;
+        });
         return;
       }
 
@@ -334,17 +397,24 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
     setError(null);
 
     if (opts?.force) {
-      setState((prev) => ({
-        ...prev,
-        results: [],
-        hasScanned: false,
-        scannedCount: 0,
-        selectedStock: null,
-      }));
+      setState((prev) => {
+        const next: TechScannerState = {
+          ...prev,
+          results: [],
+          hasScanned: false,
+          scannedCount: 0,
+          selectedStock: null,
+        };
+        stateRef.current = next;
+        return next;
+      });
     }
 
     try {
       const res = await scanTech(filter, controller.signal);
+      if (reqMarket !== activeMarketRef.current || controller.signal.aborted) {
+        return;
+      }
 
       let next = res.results || [];
       if (current.goldenCross) {
@@ -362,7 +432,7 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
         };
         const deduped = history.filter((h) => h.key !== key);
         const capped = [...deduped, snapshot].slice(-5);
-        return {
+        const updated: TechScannerState = {
           ...prev,
           results: next,
           hasScanned: true,
@@ -370,6 +440,8 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
           scanHistory: capped,
           selectedStock: null,
         };
+        stateRef.current = updated;
+        return updated;
       });
 
       // ── Analytics tracking (non-blocking) ─────────────────────────────
@@ -423,10 +495,14 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
       if (err instanceof Error && err.name === "AbortError") {
         return;
       }
-      setError(err instanceof Error ? err.message : "Scan failed");
+      if (reqMarket === activeMarketRef.current) {
+        setError(err instanceof Error ? err.message : "Scan failed");
+      }
     } finally {
-      setLoading(false);
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        setLoading(false);
+        abortRef.current = null;
+      }
     }
   }, []);
 
@@ -438,18 +514,77 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
     }
   }, []);
 
+  // React to global market switching from the Header / Navbar.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyMarketSwitch = (nextMarket: ActiveMarket) => {
+      if (nextMarket === activeMarketRef.current) return;
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+        setLoading(false);
+      }
+      const prevHasScanned = stateRef.current.hasScanned;
+      const onScannerPage = window.location.pathname.startsWith("/scanner/technical");
+      activeMarketRef.current = nextMarket;
+      setActiveMarket(nextMarket);
+      setError(null);
+
+      const restoredForMarket = loadSessionState(nextMarket);
+      const nextState: TechScannerState = {
+        ...restoredForMarket,
+        country: countryForMarket(nextMarket),
+        selectedStock: null,
+        activeSymbol: null,
+        results: [],
+        hasScanned: false,
+        scannedCount: 0,
+        sector: "",
+        industry: "",
+      };
+      stateRef.current = nextState;
+      setState(nextState);
+
+      if (prevHasScanned || onScannerPage) {
+        void runTechScan({ force: true });
+      }
+    };
+
+    const handleMarketChange = (event: Event) => {
+      const custom = event as CustomEvent<any>;
+      const detailMarket = normalizeMarketValue(
+        typeof custom?.detail === "string" ? custom.detail : custom?.detail?.market
+      );
+      applyMarketSwitch(detailMarket ?? readStoredMarket());
+    };
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === MARKET_STORAGE_KEY) {
+        applyMarketSwitch(normalizeMarketValue(event.newValue) ?? "egx");
+      }
+    };
+
+    window.addEventListener(MARKET_CHANGE_EVENT, handleMarketChange);
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener(MARKET_CHANGE_EVENT, handleMarketChange);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [runTechScan]);
+
   useEffect(() => {
     if (!isLoaded) return;
-    const current = stateRef.current;
-
-    if (current.country !== "Egypt") {
-      setTechScanner((prev) => ({ ...prev, country: "Egypt" }));
+    const expectedCountry = countryForMarket(activeMarket);
+    if (stateRef.current.country !== expectedCountry) {
+      setTechScanner((prev) => ({ ...prev, country: expectedCountry }));
     }
-  }, [state.country, setTechScanner, isLoaded]);
+  }, [activeMarket, state.country, setTechScanner, isLoaded]);
 
   const value = useMemo<TechnicalScannerContextType>(
     () => ({
       state,
+      activeMarket,
       setTechScanner,
       loading,
       error,
@@ -461,6 +596,7 @@ export function TechnicalScannerProvider({ children }: { children: ReactNode }) 
     }),
     [
       state,
+      activeMarket,
       setTechScanner,
       loading,
       error,

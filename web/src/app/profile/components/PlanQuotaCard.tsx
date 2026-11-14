@@ -93,7 +93,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
     });
   };
 
-  const fetchQuota = useCallback(async (isSilent = false) => {
+  const fetchQuota = useCallback(async (isSilent = false, fromBroadcast = false) => {
     if (!isSilent) setRefreshing(true);
     try {
       const res = await fetch("/api/user/quota", { cache: "no-store" });
@@ -102,6 +102,13 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
         if (json.ok) {
           setData(json);
           onQuotaLoaded?.(json);
+          if (!fromBroadcast && json.plan?.is_pro === true) {
+            try {
+              if (localStorage.getItem("egx_pro_active") !== "true") {
+                broadcastEntitlements(true);
+              }
+            } catch {}
+          }
         }
       }
     } catch (e) {
@@ -114,10 +121,10 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
 
   useEffect(() => {
     fetchQuota();
-    const handleUpdate = () => { void fetchQuota(false); };
+    const handleUpdate = () => { void fetchQuota(false, true); };
     const handleStorage = (e: StorageEvent) => {
       if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
-        void fetchQuota(false);
+        void fetchQuota(false, true);
       }
     };
     window.addEventListener("egx:entitlements-updated", handleUpdate);

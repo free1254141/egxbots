@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useWatchlist, type SavedSymbol } from "@/contexts/WatchlistContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
 import { Loader2, Send, Globe, Star, Trash2, Edit3, X, Check, ExternalLink, User, Wallet, CheckCircle2, Smartphone, ChevronDown, ChevronUp, Bot } from "lucide-react";
@@ -20,6 +21,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const { t, language } = useLanguage();
+  const { isSaudi } = useMarket();
   const { watchlist, updateSymbol, removeSymbol } = useWatchlist();
   const { invite: proInvite, loading: inviteLoading, error: inviteError, refresh: refreshProInvite } = useTelegramPro();
   const isAr = language === "ar";
@@ -60,6 +62,10 @@ export default function ProfilePage() {
     }
   };
   const proInviteUrl = proInvite.is_pro && proInvite.invite_link ? proInvite.invite_link : "";
+  const saudiProInviteUrl = proInvite.is_pro
+    ? (proInvite.saudi_invite_link || "https://web.telegram.org/a/#-1004397045436")
+    : "";
+  const saudiTelegramWebUrl = "https://web.telegram.org/a/#-1004397045436";
   const freeTelegramUrl = "https://t.me/egxbots/153";
   const freeTelegramWebUrl = "https://web.telegram.org/a/#@egxbots";
   const telegramWebUrl = (() => {
@@ -579,14 +585,16 @@ export default function ProfilePage() {
             </div>
 
             {/* Telegram channel subscribe (simple) */}
-            <div className="neobrutal-card p-6 sm:p-8 space-y-5 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] md:col-span-2">
+            <div id="telegram" className="neobrutal-card p-6 sm:p-8 space-y-5 bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] md:col-span-2">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 border-4 border-black dark:border-white bg-sky-500 text-white flex items-center justify-center shadow-[3px_3px_0px_rgba(0,0,0,1)] dark:shadow-[3px_3px_0px_rgba(255,255,255,1)]">
                   <Send className="h-5 w-5" />
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-black dark:text-white uppercase tracking-tight">
-                    {isAr ? "قناة التليجرام" : "Telegram Channel"}
+                    {isSaudi
+                      ? (isAr ? "قناة تليجرام VIP (السوق السعودي 🇸🇦)" : "Saudi VIP Telegram Channel 🇸🇦")
+                      : (isAr ? "قناة التليجرام" : "Telegram Channel")}
                   </h3>
                   {telegramLinked && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 dark:text-emerald-400">
@@ -600,18 +608,49 @@ export default function ProfilePage() {
               <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300 leading-relaxed">
                  {inviteLoading
                    ? (isAr ? "جاري التحقق من رابط قناة التليجرام..." : "Checking your Telegram channel invite...")
-                   : inviteError
+                   : inviteError && !isSaudi
                      ? (isAr ? "تعذر تجهيز دعوة VIP حالياً. أعد المحاولة، وإذا استمرت المشكلة تواصل مع الدعم من الموقع." : "We couldn't prepare the VIP invite. Retry, or contact support if the problem continues.")
                      : proInvite.is_pro
-                       ? (isAr ? "أنت مشترك Pro. استخدم رابط الدعوة الخاص بك للوصول إلى قناة Pro." : "You are a Pro member. Use your private invite to join the Pro Telegram channel.")
-                       : (isAr ? "القناة المجانية تعرض الإشارات الفنية السابقة والتحليلات بتأخير 15 يوماً. التحديث الفوري متاح في Pro." : "The free channel shows past technical signals and updates with a 15-day delay. Live updates are available in Pro.")}
+                       ? (isSaudi
+                           ? (isAr ? "أنت مشترك Pro. استخدم رابط قناة VIP الخاصة بالسوق السعودي لمتابعة إشارات وتنبيهات تاسي الفورية." : "You are a Pro member. Use the Saudi VIP channel link below for live TASI signals and alerts.")
+                           : (isAr ? "أنت مشترك Pro. استخدم رابط الدعوة الخاص بك للوصول إلى قناة Pro." : "You are a Pro member. Use your private invite to join the Pro Telegram channel."))
+                       : (isSaudi
+                           ? (isAr ? "السوق السعودي (تاسي) مخصص له قناة تليجرام VIP حصرية لمشتركي Pro فقط لإشارات الدخول والتنبيهات الفورية (لا توجد قناة مجانية للسوق السعودي)." : "The Saudi market (TASI) has an exclusive VIP Telegram channel for Pro subscribers only (no free channel for Saudi market).")
+                           : (isAr ? "القناة المجانية تعرض الإشارات الفنية السابقة والتحليلات بتأخير 15 يوماً. التحديث الفوري متاح في Pro." : "The free channel shows past technical signals and updates with a 15-day delay. Live updates are available in Pro."))}
               </p>
 
-               {proInvite.is_pro && proInvite.invite_link && (
-                 <div className="border-4 border-indigo-600 bg-indigo-50 dark:bg-indigo-950/30 p-4 space-y-2" dir={isAr ? "rtl" : "ltr"}>
-                   <p className="text-sm font-black text-indigo-700 dark:text-indigo-300">{isAr ? "رابط قناة VIP الخاص بك" : "Your VIP channel invite"}</p>
-                   <a href={proInvite.invite_link} target="_blank" rel="noopener noreferrer" className="block break-all text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300 underline">{proInvite.invite_link}</a>
-                   <p className="text-[11px] font-bold text-zinc-600 dark:text-zinc-400">{isAr ? `الرابط صالح حتى ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString("ar-EG") : "نهاية اشتراكك"}.` : `Valid until ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString() : "your subscription ends"}.`}</p>
+               {proInvite.is_pro && (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3" dir={isAr ? "rtl" : "ltr"}>
+                   {saudiProInviteUrl && (
+                     <div className={`border-4 ${isSaudi ? "border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30" : "border-zinc-400 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50"} p-4 space-y-2`}>
+                       <p className="text-sm font-black text-emerald-700 dark:text-emerald-300">
+                         {isAr ? "رابط قناة VIP للسوق السعودي 🇸🇦" : "Saudi Market VIP Channel 🇸🇦"}
+                       </p>
+                       <a href={saudiProInviteUrl} target="_blank" rel="noopener noreferrer" className="block break-all text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300 underline">
+                         {saudiProInviteUrl}
+                       </a>
+                       <p className="text-[11px] font-bold text-zinc-600 dark:text-zinc-400">
+                         {isAr
+                           ? `الرابط صالح حتى ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString("ar-EG") : "نهاية اشتراكك"}.`
+                           : `Valid until ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString() : "your subscription ends"}.`}
+                       </p>
+                     </div>
+                   )}
+                   {proInvite.invite_link && (
+                     <div className="border-4 border-indigo-600 bg-indigo-50 dark:bg-indigo-950/30 p-4 space-y-2">
+                       <p className="text-sm font-black text-indigo-700 dark:text-indigo-300">
+                         {isAr ? "رابط قناة VIP للسوق المصري 🇪🇬" : "Egyptian Market VIP Channel 🇪🇬"}
+                       </p>
+                       <a href={proInvite.invite_link} target="_blank" rel="noopener noreferrer" className="block break-all text-xs font-mono font-bold text-indigo-700 dark:text-indigo-300 underline">
+                         {proInvite.invite_link}
+                       </a>
+                       <p className="text-[11px] font-bold text-zinc-600 dark:text-zinc-400">
+                         {isAr
+                           ? `الرابط صالح حتى ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString("ar-EG") : "نهاية اشتراكك"}.`
+                           : `Valid until ${proInvite.invite_expires_at ? new Date(proInvite.invite_expires_at).toLocaleDateString() : "your subscription ends"}.`}
+                       </p>
+                     </div>
+                   )}
                  </div>
                )}
                {(inviteError || inviteLoading) && (
@@ -621,48 +660,107 @@ export default function ProfilePage() {
                  </div>
                )}
                <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                {(proInviteUrl || (!proInvite.is_pro && !inviteError && !inviteLoading)) && <>
-                <a
-                  href={proInviteUrl || freeTelegramUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
-                >
-                  <Send className="w-4 h-4 shrink-0" />
-                  {proInviteUrl ? (isAr ? "دخول قناة Pro" : "Join Pro Telegram") : (isAr ? "القناة المجانية" : "Free Channel")}
-                </a>
-                <a
-                  href={botAppUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
-                >
-                  <Smartphone className="w-4 h-4 shrink-0" />
-                  {proInvite.bot_active
-                    ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
-                    : (isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)")}
-                </a>
-                <a
-                  href={botWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-teal-300 dark:bg-teal-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
-                >
-                  <Globe className="w-4 h-4 shrink-0" />
-                  {proInvite.bot_active
-                    ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
-                    : (isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)")}
-                </a>
-                <a
-                  href={telegramWebUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white font-black text-xs uppercase tracking-[0.1em] shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-                >
-                  <Globe className="w-4 h-4 shrink-0" />
-                  {proInviteUrl ? (isAr ? "فتح دعوة Pro" : "Open Pro Invite") : (isAr ? "افتح القناة المجانية" : "Open Free Channel")}
-                </a>
-                </>}
+                {isSaudi ? (
+                  <>
+                    {proInvite.is_pro ? (
+                      <a
+                        href={saudiProInviteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                      >
+                        <Send className="w-4 h-4 shrink-0" />
+                        {isAr ? "دخول قناة VIP السعودية 🇸🇦" : "Join Saudi VIP Channel 🇸🇦"}
+                      </a>
+                    ) : (
+                      !inviteLoading && (
+                        <Link
+                          href="/pricing"
+                          className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                        >
+                          <Send className="w-4 h-4 shrink-0" />
+                          {isAr ? "ترقية الحساب لدخول قناة VIP السعودية 👑" : "Upgrade to Pro for Saudi VIP Channel 👑"}
+                        </Link>
+                      )
+                    )}
+                    <a
+                      href={botAppUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                    >
+                      <Smartphone className="w-4 h-4 shrink-0" />
+                      {proInvite.bot_active
+                        ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
+                        : (isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)")}
+                    </a>
+                    <a
+                      href={botWebUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-teal-300 dark:bg-teal-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                    >
+                      <Globe className="w-4 h-4 shrink-0" />
+                      {proInvite.bot_active
+                        ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
+                        : (isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)")}
+                    </a>
+                    {proInvite.is_pro && (
+                      <a
+                        href={saudiTelegramWebUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white font-black text-xs uppercase tracking-[0.1em] shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                      >
+                        <Globe className="w-4 h-4 shrink-0" />
+                        {isAr ? "فتح قناة VIP السعودية (Web)" : "Open Saudi VIP (Web)"}
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  (proInviteUrl || (!proInvite.is_pro && !inviteError && !inviteLoading)) && <>
+                  <a
+                    href={proInviteUrl || freeTelegramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-amber-300 dark:bg-amber-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                  >
+                    <Send className="w-4 h-4 shrink-0" />
+                    {proInviteUrl ? (isAr ? "دخول قناة Pro" : "Join Pro Telegram") : (isAr ? "القناة المجانية" : "Free Channel")}
+                  </a>
+                  <a
+                    href={botAppUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-400 dark:bg-emerald-500 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                  >
+                    <Smartphone className="w-4 h-4 shrink-0" />
+                    {proInvite.bot_active
+                      ? (isAr ? "فتح البوت (App)" : "Open Bot (App)")
+                      : (isAr ? "تفعيل البوت (+10 رسائل 🎁)" : "Activate Bot (+10 msgs 🎁)")}
+                  </a>
+                  <a
+                    href={botWebUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-teal-300 dark:bg-teal-400 text-black font-black text-xs uppercase tracking-[0.1em] shadow-[3px_3px_0px_rgba(0,0,0,1)] hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all"
+                  >
+                    <Globe className="w-4 h-4 shrink-0" />
+                    {proInvite.bot_active
+                      ? (isAr ? "فتح البوت (Web)" : "Open Bot (Web)")
+                      : (isAr ? "تفعيل الويب (+10 رسائل 🎁)" : "Activate Web (+10 msgs 🎁)")}
+                  </a>
+                  <a
+                    href={telegramWebUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-12 flex-1 items-center justify-center gap-2 border-4 border-black dark:border-white bg-white dark:bg-zinc-800 text-black dark:text-white font-black text-xs uppercase tracking-[0.1em] shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                  >
+                    <Globe className="w-4 h-4 shrink-0" />
+                    {proInviteUrl ? (isAr ? "فتح دعوة Pro" : "Open Pro Invite") : (isAr ? "افتح القناة المجانية" : "Open Free Channel")}
+                  </a>
+                  </>
+                )}
               </div>
             </div>
           </div>

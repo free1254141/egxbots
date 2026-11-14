@@ -5,7 +5,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { usePathname } from "next/navigation";
 
 export type ServiceType = "stock_score" | "technical_scanner" | "ai_bot";
 
@@ -26,8 +25,6 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
     const { user } = useAuth();
-    const pathname = usePathname();
-    const needsNotificationData = pathname.startsWith("/scanner/backtests");
     const { language } = useLanguage();
     const isAr = language === "ar";
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -39,23 +36,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const [notificationChannel, setNotificationChannel] = useState<"telegram" | null>(null);
     const [subscriptions, setSubscriptions] = useState<Record<string, boolean>>({});
     const [toggling, setToggling] = useState<Record<string, boolean>>({});
-    const [botUsername, setBotUsername] = useState("egxbots_bot");
+    const [botUsername] = useState("egxbots_bot");
 
     // Track whether we've already fetched for this user — prevents re-fetch on tab switch
     const hasFetchedRef = useRef<string | null>(null);
-
-    // Fetch bot username once per mount (not per page visit)
-    useEffect(() => {
-        fetch("/api/ai_bot/telegram/bot_username")
-            .then((res) => res.json())
-            .then((data) => {
-                if (typeof data?.username === "string" && data.username.trim()) {
-                    setBotUsername(data.username.trim());
-                }
-            })
-            .catch((err) => console.error("Error fetching bot username:", err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // intentionally empty — run once on app mount
 
     // Load all notification data (called on demand or explicitly via reloadAll)
     const reloadAll = useCallback(async () => {

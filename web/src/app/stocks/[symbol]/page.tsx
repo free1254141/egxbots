@@ -2,9 +2,11 @@ import { getPublicStockSnapshot } from "@/lib/seo/stock-snapshot";
 import { notFound, redirect } from "next/navigation";
 import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
-import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
+import { getPublicStockDirectory, getPublicTasiStockDirectory } from "@/lib/seo/stock-directory";
 import { selectStockLinks } from "@/lib/seo/sitemap-entries";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
+import { SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
+import type { MarketMode } from "@/lib/supabase/route-data";
 
 // Pin to Frankfurt so every ISR render shares the same market-query-cache
 // KV namespace. Without this, Vercel routes /stocks/* to the edge region
@@ -12,10 +14,10 @@ import { getCanonicalStockName } from "@/lib/ai/stock-names";
 // independently -- wasting CPU and multiplying DB reads for identical data.
 export const preferredRegion = "fra1";
 
-// Stock price and technical data is updated once per day by the daily job.
-// 1-hour ISR was overly aggressive; 24h matches actual data cadence and
-// drastically cuts the number of re-renders Vercel has to run per symbol.
-export const revalidate = 86400;
+// Stock price and technical data is invalidated on-demand via POST /api/revalidate
+// after each trading day's pipeline finishes. A 7-day (604800s) ISR TTL prevents
+// cache expiration across Thursday->Sunday weekends and multi-day holidays.
+export const revalidate = 604800;
 
 // Complete Egyptian stock exchange symbol directory for 100% pre-rendering at build time.
 // Pre-rendering both lowercase and uppercase eliminates dynamic Lambda executions when crawlers request either format.
@@ -54,48 +56,74 @@ interface PageProps {
   params: Promise<{
     symbol: string;
   }>;
+  searchParams?: Promise<{
+    market?: string;
+  }>;
+}
+
+function resolveSymbolAndMarket(rawSymbol: string, queryMarket?: string): {
+  cleanSymbol: string;
+  marketMode: MarketMode;
+} {
+  const upper = rawSymbol.toUpperCase();
+  const stripped = upper.replace(/\.(SR|SA|TADAWUL)$/i, "");
+  const saudi = isSaudiSymbol(upper) || (queryMarket === "tasi" && /^\d{4}$/.test(stripped));
+  return {
+    cleanSymbol: saudi ? stripped : upper,
+    marketMode: saudi ? "tasi" : "egx",
+  };
 }
 
 // Generate dynamic metadata for SEO search indexers
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
   const raw = (await params).symbol;
   if (raw !== raw.toLowerCase()) {
     return {
       alternates: {
-        canonical: `https://egxbots.com/stocks/${raw.toLowerCase()}`,
+        canonical: `https://egxbots.com/stocks/${raw.toLowerCase().replace(/\.(sr|sa|tadawul)$/i, "")}`,
       },
     };
   }
-  const symbol = raw.toUpperCase();
-  const snapshot = await getPublicStockSnapshot(symbol);
+  const resolvedSearch = searchParams ? await searchParams : undefined;
+  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(raw, resolvedSearch?.market);
+  const isSaudi = marketMode === "tasi";
+  const snapshot = await getPublicStockSnapshot(symbol, marketMode);
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
   const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
 
-  // Always resolve official Arabic and English company names for high-CTR Egyptian Google searches
-  const canonical = getCanonicalStockName(symbol);
-  const nameAr = canonical.name_ar || fund.name || fund.Name || symbol;
-  const nameEn = canonical.name_en && canonical.name_en !== symbol
-    ? canonical.name_en
-    : String(fund.name || fund.Name || symbol);
+  // Resolve official Arabic and English company names for high-CTR searches
+  const canonical = isSaudi ? { name_ar: symbol, name_en: symbol, sector: "" } : getCanonicalStockName(symbol);
+  const nameAr = isSaudi
+    ? (fund.name_ar || SAUDI_STOCK_NAMES_AR[symbol] || fund.name || fund.Name || symbol)
+    : (canonical.name_ar || fund.name || fund.Name || symbol);
+  const nameEn = isSaudi
+    ? String(fund.name || fund.Name || SAUDI_STOCK_NAMES_AR[symbol] || symbol)
+    : (canonical.name_en && canonical.name_en !== symbol
+      ? canonical.name_en
+      : String(fund.name || fund.Name || symbol));
 
-  // Short Arabic display name for title (e.g., "العربية للألومنيوم", "أبو قير للأسمدة", "إم بي للهندسة")
+  // Short Arabic display name for title
   const shortAr = nameAr
-    .replace(/^(?:شركة|مجموعة|بنك)\s+/g, (m: string) => (m.includes("بنك") ? "بنك " : ""))
+    .replace(/^(?:شركة|مجموعة|بنك|مصرف)\s+/g, (m: string) => (m.includes("بنك") ? "بنك " : m.includes("مصرف") ? "مصرف " : ""))
     .trim();
 
   const title = shortAr && shortAr !== symbol
-    ? `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`
+    ? (isSaudi
+      ? `سعر سهم ${shortAr} (${symbol}) اليوم في تاسي | تحليل فني ودعم ومقاومة`
+      : `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`)
     : `سعر وتحليل سهم ${symbol} اليوم | نقاط الدعم والمقاومة`;
 
   const latest = (snapshot.latestPrice || null) as { close?: number | string; date?: string } | null;
   const lastClose = Number(latest?.close ?? 0);
   const lastDate = String(latest?.date ?? "").slice(0, 10);
+  const currencyAr = isSaudi ? "ر.س" : "ج.م";
+  const marketAr = isSaudi ? "السوق السعودي (تداول / تاسي)" : "البورصة المصرية";
   const pricePart =
     Number.isFinite(lastClose) && lastClose > 0
-      ? `آخر سعر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ج.م${lastDate ? ` (${lastDate})` : ""}. `
+      ? `آخر سعر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencyAr}${lastDate ? ` (${lastDate})` : ""}. `
       : "";
-  const description = `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في البورصة المصرية: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
+  const description = `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في ${marketAr}: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
 
   return {
     title,
@@ -111,11 +139,11 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       `سعر سهم ${symbol}`,
       `تحليل سهم ${symbol}`,
       `${symbol} stock price`,
-      "تحليل الأسهم المصرية بالذكاء الاصطناعي",
+      isSaudi ? "تحليل الأسهم السعودية بالذكاء الاصطناعي" : "تحليل الأسهم المصرية بالذكاء الاصطناعي",
       "EGX BOTS",
       "egxbots",
-      "البورصة المصرية",
-      "EGX"
+      isSaudi ? "السوق السعودي تاسي" : "البورصة المصرية",
+      isSaudi ? "TASI" : "EGX"
     ],
     alternates: {
       canonical: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
@@ -143,27 +171,41 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function StockDetailPage({ params }: PageProps) {
+export default async function StockDetailPage({ params, searchParams }: PageProps) {
   const rawSymbol = (await params).symbol;
-  // Enforce lowercase canonical URL: redirect uppercase visits (e.g. /stocks/COMI -> /stocks/comi)
-  if (rawSymbol !== rawSymbol.toLowerCase()) {
-    redirect(`/stocks/${rawSymbol.toLowerCase()}`);
+  const resolvedSearch = searchParams ? await searchParams : undefined;
+  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(rawSymbol, resolvedSearch?.market);
+  const isSaudi = marketMode === "tasi";
+
+  // Enforce lowercase canonical URL: redirect uppercase or suffixed visits
+  if (rawSymbol !== rawSymbol.toLowerCase() || (isSaudi && rawSymbol.toLowerCase() !== symbol.toLowerCase())) {
+    redirect(`/stocks/${symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`);
   }
 
-  const symbol = rawSymbol.toUpperCase();
-  const snapshot = await getPublicStockSnapshot(symbol);
+  const snapshot = await getPublicStockSnapshot(symbol, marketMode);
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
   if (!fundRow && !latestPrice) notFound();
-  const exchange = 'EGX';
+  const exchange = isSaudi ? "TADAWUL" : "EGX";
+  const currencyCode = isSaudi ? "SAR" : "EGP";
+  const currencyNameAr = isSaudi ? "ريال سعودي" : "جنيه مصري";
+  const marketLabelAr = isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية";
 
   const fund = fundRow?.data || {};
-  const canonical = getCanonicalStockName(symbol);
-  const nameAr = canonical.name_ar || fund.name || fund.Name || symbol;
-  const nameEn = canonical.name_en && canonical.name_en !== symbol
-    ? canonical.name_en
-    : String(fund.name || fund.Name || symbol);
+  const canonical = isSaudi ? { name_ar: symbol, name_en: symbol, sector: "" } : getCanonicalStockName(symbol);
+  const nameAr = isSaudi
+    ? (fund.name_ar || SAUDI_STOCK_NAMES_AR[symbol] || fund.name || fund.Name || symbol)
+    : (canonical.name_ar || fund.name || fund.Name || symbol);
+  const nameEn = isSaudi
+    ? String(fund.name || fund.Name || SAUDI_STOCK_NAMES_AR[symbol] || symbol)
+    : (canonical.name_en && canonical.name_en !== symbol
+      ? canonical.name_en
+      : String(fund.name || fund.Name || symbol));
 
-  const related = selectStockLinks(await getPublicStockDirectory(), symbol, String(fund.sector || fund.Sector || canonical.sector || ""));
+  const directory =
+    isSaudi && typeof getPublicTasiStockDirectory === "function"
+      ? await getPublicTasiStockDirectory().catch(() => [])
+      : await getPublicStockDirectory();
+  const related = selectStockLinks(directory, symbol, String(fund.sector || fund.Sector || canonical.sector || ""));
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
 
   const lastPriceVal = Number((latestPrice as any)?.close ?? 0);
@@ -176,17 +218,22 @@ export default async function StockDetailPage({ params }: PageProps) {
         "@type": "BreadcrumbList",
         "itemListElement": [
           { "@type": "ListItem", "position": 1, "name": "الرئيسية", "item": "https://egxbots.com" },
-          { "@type": "ListItem", "position": 2, "name": "دليل الأسهم المصرية", "item": "https://egxbots.com/stocks" },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": isSaudi ? "دليل الأسهم السعودية" : "دليل الأسهم المصرية",
+            "item": isSaudi ? "https://egxbots.com/stocks?market=tasi" : "https://egxbots.com/stocks"
+          },
           { "@type": "ListItem", "position": 3, "name": `سهم ${nameAr} (${symbol})`, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
         ]
       },
       {
         "@type": "WebPage",
-        "name": `سعر وتحليل سهم ${nameAr} (${symbol}) في البورصة المصرية`,
+        "name": `سعر وتحليل سهم ${nameAr} (${symbol}) في ${marketLabelAr}`,
         "alternateName": `${nameEn} (${symbol}) Stock Analysis`,
         "url": `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
         ...(priceDate ? { dateModified: priceDate } : {}),
-        "description": `بيانات فنية وسعر إغلاق سهم ${nameAr} (${symbol} - ${nameEn}) بالبورصة المصرية مع تقييمات الذكاء الاصطناعي ومستويات الدعم والمقاومة.`,
+        "description": `بيانات فنية وسعر إغلاق سهم ${nameAr} (${symbol} - ${nameEn}) في ${marketLabelAr} مع تقييمات الذكاء الاصطناعي ومستويات الدعم والمقاومة.`,
         "publisher": { "@type": "Organization", "name": "EGX BOTS", "url": "https://egxbots.com" }
       },
       ...(Number.isFinite(lastPriceVal) && lastPriceVal > 0 ? [{
@@ -194,13 +241,13 @@ export default async function StockDetailPage({ params }: PageProps) {
         "name": `سهم ${nameAr} (${symbol})`,
         "alternateName": `${nameEn} (${symbol})`,
         "tickerSymbol": symbol,
-        "exchange": "EGX",
-        "currency": "EGP",
-        "description": `سهم ${nameAr} (${nameEn}) المتداول في البورصة المصرية تحت رمز ${symbol}.`,
+        "exchange": exchange,
+        "currency": currencyCode,
+        "description": `سهم ${nameAr} (${nameEn}) المتداول في ${marketLabelAr} تحت رمز ${symbol}.`,
         "offers": {
           "@type": "Offer",
           "price": lastPriceVal,
-          "priceCurrency": "EGP",
+          "priceCurrency": currencyCode,
           ...(priceDate ? { "priceValidUntil": priceDate } : {})
         }
       }] : []),
@@ -209,11 +256,11 @@ export default async function StockDetailPage({ params }: PageProps) {
         "mainEntity": [
           {
             "@type": "Question",
-            "name": `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في البورصة المصرية؟`,
+            "name": `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في ${marketLabelAr}؟`,
             "acceptedAnswer": {
               "@type": "Answer",
               "text": Number.isFinite(lastPriceVal) && lastPriceVal > 0
-                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol}) ما قيمته ${lastPriceVal} جنيه مصري ${priceDate ? `بتاريخ ${priceDate}` : ''}.`
+                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol}) ما قيمته ${lastPriceVal} ${currencyNameAr} ${priceDate ? `بتاريخ ${priceDate}` : ''}.`
                 : `يمكنك الاطلاع على أحدث سعر إغلاق وبيانات التداول لسهم ${nameAr} (${symbol}) مباشرة عبر منصة EGX BOTS.`
             }
           },
@@ -247,6 +294,7 @@ export default async function StockDetailPage({ params }: PageProps) {
       <StockDetailClient
         symbol={symbol}
         exchange={exchange}
+        market={marketMode}
         fundamentals={fundRow}
         latestPrice={latestPrice}
         latestTech={latestTech}

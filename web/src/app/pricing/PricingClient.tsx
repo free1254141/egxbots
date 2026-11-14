@@ -40,6 +40,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { trackEvent } from "@/lib/gtm";
 
 import { broadcastEntitlements } from "@/lib/entitlements";
+import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
 export { broadcastEntitlements };
 
 type Step = "plans" | "payment" | "submitted";
@@ -120,26 +121,26 @@ export default function PricingClient() {
   const [pricingCategory, setPricingCategory] = useState<"retail" | "b2b">("retail");
 
   useEffect(() => {
-    if (!user) {
+    if (!user?.id) {
       setTrialEligible(true);
       return;
     }
     let active = true;
-    fetch("/api/subscription/trial", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
+    void fetchUserQuotaCached(user.id)
       .then((data) => {
-        if (active && data?.eligible) {
+        if (!active || !data || data.ok === false || !data.plan) return;
+        if (data?.plan?.trial_eligible) {
           setTrialEligible(true);
-        } else if (active) {
+        } else {
           setTrialEligible(false);
-          if (data?.expires_at) setTrialExpiresAt(data.expires_at);
+          if (data?.plan?.trial_expires_at) setTrialExpiresAt(data.plan.trial_expires_at);
         }
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [user?.id]);
 
   const handleStartTrial = async () => {
     if (!user) {
@@ -156,6 +157,7 @@ export default function PricingClient() {
       });
       const data = await res.json();
       if (res.ok && data?.success) {
+        invalidateUserQuotaCache(user.id);
         toast.success(isAr ? "تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!" : "Pro 3-day trial activated successfully!");
         setIsPro(true);
         broadcastEntitlements(true);
@@ -448,20 +450,20 @@ export default function PricingClient() {
     }
     let active = true;
     let inFlight = false;
-    const refreshPlan = async () => {
+    let lastKnownPro: boolean | null = null;
+    const refreshPlan = async (force = false) => {
       if (inFlight) return;
       inFlight = true;
       try {
-        const response = await fetch("/api/user/quota");
-        if (!response.ok) return;
-        const data = await response.json();
-        if (!active) return;
+        const data = await fetchUserQuotaCached(user.id, { force });
+        if (!active || !data || data.ok === false || !data.plan) return;
         const proActive = data?.plan?.is_pro === true;
         setIsPro(proActive);
         setSubscriptionEnd(data?.plan?.current_period_end || null);
-        if (proActive) {
+        if (proActive && lastKnownPro === false) {
           broadcastEntitlements(true);
         }
+        lastKnownPro = proActive;
       } catch {
         // Keep the last known state on a temporary network failure.
       } finally {
@@ -469,10 +471,10 @@ export default function PricingClient() {
       }
     };
     setIsPro(false);
-    void refreshPlan();
-    const onFocus = () => void refreshPlan();
+    void refreshPlan(orderStatus === "approved");
+    const onFocus = () => void refreshPlan(true);
     const onVisible = () => {
-      if (document.visibilityState === "visible") void refreshPlan();
+      if (document.visibilityState === "visible") void refreshPlan(true);
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
@@ -782,6 +784,12 @@ export default function PricingClient() {
       savingsPct,
     };
   });
+
+  const annualPlan = paidPlans.find((p) => p.id === "pro_1y");
+  const annualCostEgp = annualPlan?.amount_egp ?? 1850;
+  const roiPortfolioEgp = annualCostEgp > 1200 ? 40000 : 25000;
+  const roiTradeProfitEgp = Math.round(roiPortfolioEgp * 0.05);
+  const roiNetGainEgp = roiTradeProfitEgp - annualCostEgp;
 
   const b2bPlans = [
     {
@@ -2100,7 +2108,7 @@ export default function PricingClient() {
                   {isAr ? "محفظة تداول متوسطة" : "Example Portfolio"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  20,000 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م</span>
+                  {roiPortfolioEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م</span>
                 </div>
                 <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                   {isAr ? "رأس مال تجريبي للاحتساب" : "Baseline portfolio size"}
@@ -2112,7 +2120,7 @@ export default function PricingClient() {
                   {isAr ? "ربح صفقة سوينج (+5%)" : "One +5% Swing Trade"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-emerald-800 dark:text-emerald-300 font-mono">
-                  +1,000 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">ج.م صافي</span>
+                  +{roiTradeProfitEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">ج.م صافي</span>
                 </div>
                 <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                   {isAr ? "إشارة ذكاء اصطناعي واحدة" : "From single AI breakout signal"}
@@ -2124,10 +2132,12 @@ export default function PricingClient() {
                   {isAr ? "تكلفة اشتراك السنة كلها" : "Full Annual Pro Cost"}
                 </span>
                 <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  900 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م / سنة</span>
+                  {annualCostEgp.toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">ج.م / سنة</span>
                 </div>
                 <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 font-bold">
-                  {isAr ? "أنت رابح 100 ج.م من أول صفقة!" : "Instant positive ROI on trade #1"}
+                  {isAr
+                    ? `أنت رابح ${roiNetGainEgp.toLocaleString("en-US")} ج.م من أول صفقة!`
+                    : `Instant +${roiNetGainEgp.toLocaleString("en-US")} EGP ROI on trade #1`}
                 </p>
               </div>
             </div>

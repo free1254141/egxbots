@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseServiceClient, toNumber } from "@/lib/supabase/route-data";
-import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
+import {
+  resolveRequestMarket,
+  getMarketExchange,
+  getMarketSupabaseServiceClient,
+  getSupabaseServiceClient,
+  toNumber,
+} from "@/lib/supabase/route-data";
+import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
 import { paymentsEnabled } from "@/lib/ai/plan-gate";
 import { applyRecommendationQuotes } from "@/lib/recommendation-quotes";
@@ -10,7 +16,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const revalidate = 86400;
+export const revalidate = 604800;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(req: NextRequest) {
@@ -23,10 +29,36 @@ export async function GET(req: NextRequest) {
     "id,batch_id,symbol,exchange,name,last_close,precision,signal,status,entry_price,target_price,stop_loss,is_public,created_at,updated_at,exit_price,profit_loss_pct,top_reasons,rich_details";
   
   try {
-    const supabase = getSupabaseServiceClient({ cacheMarketData: true });
-    // Session + plan now resolve through in-memory freshness windows instead
-    // of a Supabase auth round trip on every page view.
-    const { authenticated, pro } = await getViewerContext(req);
+    const market =
+      typeof resolveRequestMarket === "function"
+        ? resolveRequestMarket(req)
+        : url.searchParams.get("market")?.toLowerCase() === "tasi"
+          ? "tasi"
+          : "egx";
+    const exchange =
+      typeof getMarketExchange === "function"
+        ? getMarketExchange(market)
+        : market === "tasi"
+          ? "TADAWUL"
+          : "EGX";
+    const currency = market === "tasi" ? "SAR" : "EGP";
+    const supabase =
+      typeof getMarketSupabaseServiceClient === "function"
+        ? getMarketSupabaseServiceClient(market, { cacheMarketData: true })
+        : getSupabaseServiceClient({ cacheMarketData: true });
+    const scope = url.searchParams.get("scope");
+    const isPublicScope = scope === "public";
+    const explicitMarketParam =
+      url.searchParams.has("market") ||
+      url.searchParams.has("country") ||
+      url.searchParams.has("exchange");
+    // Session + plan resolve through in-memory freshness windows (Primary Supabase);
+    // skip completely when scope=public so landing/public callers share a single 7-day Edge CDN cache key per market.
+    const { authenticated, pro } = isPublicScope
+      ? { authenticated: false, pro: false }
+      : await getViewerContext(req);
+    const canUsePublicCdnCache =
+      (!authenticated || isPublicScope) && (market === "egx" || explicitMarketParam);
     const payments = paymentsEnabled();
     const delayedVisibility = !authenticated || (payments && !pro);
     const delayDays = Number(process.env.FREE_SIGNAL_DELAY_DAYS || 15) || 15;
@@ -39,7 +71,8 @@ export async function GET(req: NextRequest) {
     const recommendationsQuery = supabase
       .from("scan_results")
       .select(recommendationFields)
-      .eq("is_public", true);
+      .eq("is_public", true)
+      .eq("exchange", exchange);
     const { data, error } = await recommendationsQuery
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -51,10 +84,18 @@ export async function GET(req: NextRequest) {
     const openSymbols = [...new Set(visibleData.filter(row => row.status === "open").map(row => row.symbol))];
     if (openSymbols.length) {
       const since = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
-      const { data: quotes, error: quoteError } = await supabase.from("stock_prices")
+      let { data: quotes, error: quoteError } = await supabase.from("stock_prices")
         .select("symbol,exchange,date,close,volume,updated_at")
+        .eq("exchange", exchange)
         .in("symbol", openSymbols).gte("date", since)
         .order("date", { ascending: false }).limit(6000);
+      if (quoteError && String(quoteError.message || "").toLowerCase().includes("updated_at")) {
+        ({ data: quotes, error: quoteError } = await supabase.from("stock_prices")
+          .select("symbol,exchange,date,close,volume")
+          .eq("exchange", exchange)
+          .in("symbol", openSymbols).gte("date", since)
+          .order("date", { ascending: false }).limit(6000));
+      }
       if (quoteError) throw quoteError;
       visibleData = applyRecommendationQuotes(visibleData, quotes || []);
     }
@@ -88,8 +129,33 @@ export async function GET(req: NextRequest) {
       : { data: [] as Array<{ symbol: string; data?: Record<string, unknown> }> };
     const sectorMap = new Map((fundamentals || []).map((row: any) => [
       String(row.symbol),
-      row.data?.sector || row.data?.Sector || row.data?.industry || "General",
+      row.data?.sector || row.data?.Sector || row.data?.industry || null,
     ]));
+
+    const stockMetaMap = new Map<string, { name?: string | null; name_ar?: string | null; sector?: string | null }>();
+    if (market === "tasi" && symbols.length) {
+      try {
+        let { data: stockMetaRows, error: stockMetaErr } = await supabase
+          .from("stocks")
+          .select("symbol,name,name_ar,sector")
+          .eq("exchange", exchange)
+          .in("symbol", symbols)
+          .limit(symbols.length);
+        if (stockMetaErr) {
+          ({ data: stockMetaRows } = await supabase
+            .from("stocks")
+            .select("symbol,name,sector")
+            .eq("exchange", exchange)
+            .in("symbol", symbols)
+            .limit(symbols.length));
+        }
+        for (const s of stockMetaRows || []) {
+          if (s?.symbol) stockMetaMap.set(String(s.symbol), s);
+        }
+      } catch {
+        // Non-fatal: fallback to scan_results.name and stock_fundamentals.sector
+      }
+    }
 
     const results = visibleData.map((row: Record<string, unknown>) => {
       // Closed outcomes remain encrypted for Free users only during the 15-day delay window.
@@ -129,7 +195,8 @@ export async function GET(req: NextRequest) {
         return {
           id: row.id,
           locked: true,
-          exchange: row.exchange || "EGX",
+          exchange: row.exchange || exchange,
+          currency,
           signal: row.signal || "BUY",
           status: row.status || "open",
           precision,
@@ -150,7 +217,8 @@ export async function GET(req: NextRequest) {
         return {
           id: row.id,
           identity_locked: true,
-          exchange: row.exchange || "EGX",
+          exchange: row.exchange || exchange,
+          currency,
           status: row.status,
           precision: toNumber(row.precision, 0),
           profit_loss_pct: toNumber(row.profit_loss_pct, 0),
@@ -161,12 +229,27 @@ export async function GET(req: NextRequest) {
           delayed: false,
         };
       }
+      const stockMeta = stockMetaMap.get(String(row.symbol));
+      const resolvedName =
+        market === "tasi"
+          ? String(stockMeta?.name_ar || row.name || stockMeta?.name || row.symbol || "")
+          : row.name;
+      const tasiNameFields =
+        market === "tasi"
+          ? { name_ar: stockMeta?.name_ar || resolvedName || null }
+          : {};
       return {
-      ...(authenticated ? row : {
+      ...(authenticated ? {
+        ...row,
+        exchange: row.exchange || exchange,
+        name: resolvedName,
+        ...tasiNameFields,
+      } : {
         id: row.id,
         symbol: row.symbol,
-        exchange: row.exchange,
-        name: row.name,
+        exchange: row.exchange || exchange,
+        name: resolvedName,
+        ...tasiNameFields,
         is_public: row.is_public,
         created_at: row.created_at,
         ...(isClosed ? {
@@ -179,7 +262,8 @@ export async function GET(req: NextRequest) {
         delayed: !isClosed,
         anonymous: true,
       }),
-      sector: sectorMap.get(String(row.symbol)) || "General",
+      currency,
+      sector: sectorMap.get(String(row.symbol)) || stockMeta?.sector || "General",
       year: row.created_at ? new Date(String(row.created_at)).getFullYear() : null,
       // Rows reaching this branch are visible now (Pro, or Free after the
       // 15-day delay); only rows returned by the locked branch are delayed.
@@ -194,16 +278,17 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json(results, {
-      headers: {
-        // Visibility depends on the request's Supabase session. Never let a
-        // CDN-shared response cross between anonymous and authenticated users.
-        // Keep plan-specific responses private, but allow the same browser
-        // tab to reuse the daily snapshot while navigating between tabs.
-        "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
-        "Vercel-Cache-Tag": DAILY_CACHE_TAGS.recommendations,
-      },
-    });
+    const headers: Record<string, string> =
+      canUsePublicCdnCache
+        ? dailyCacheHeaders(DAILY_CACHE_TAGS.recommendations)
+        : {
+            // Personalized or cookie-scoped TASI views stay private; AIScannerContext handles the
+            // 30m sessionStorage cache, so HTTP no-store prevents stale Free or cross-market CDN poisoning.
+            "Cache-Control": "private, no-store, max-age=0",
+            "Vercel-Cache-Tag": DAILY_CACHE_TAGS.recommendations,
+          };
+
+    return NextResponse.json(results, { headers });
   } catch (error) {
     console.error("ai_bot recommendations error:", error);
     // Never disguise a data outage as "zero recommendations": that looks like a

@@ -92,13 +92,13 @@ afterEach(() => {
   delete (globalThis as any).fetch;
 });
 
-function request(userId: string | null = "u-free") {
+function request(userId: string | null = "u-free", extraQuery = "") {
   const headers = new Headers();
   if (userId) {
     headers.set("x-user-id", userId);
     if (userId.endsWith("pro")) headers.set("x-pro", "true");
   }
-  return { url: "https://app.test/api/ai_bot/recommendations?limit=10", headers } as unknown as NextRequest;
+  return { url: `https://app.test/api/ai_bot/recommendations?limit=10${extraQuery}`, headers } as unknown as NextRequest;
 }
 
 async function getRows(res: Response) {
@@ -108,6 +108,7 @@ async function getRows(res: Response) {
 it("removes the safety gate and masks open >50% opportunities with a Pro badge and age", async () => {
   const { GET } = await import("@/app/api/ai_bot/recommendations/route");
   const response = await GET(request("u-free"));
+  expect(response.headers.get("cache-control")).toContain("private");
   expect(response.headers.get("cache-control")).toContain("no-store");
   const rows = await getRows(response);
   const fresh = rows.find((r: any) => r.id === "fresh");
@@ -160,7 +161,9 @@ it("removes the safety gate and masks open >50% opportunities with a Pro badge a
 
 it("encrypts anonymous open signals and marks >50% opportunities without exposing identity", async () => {
   const { GET } = await import("@/app/api/ai_bot/recommendations/route");
-  const rows = await getRows(await GET(request(null)));
+  const response = await GET(request(null));
+  expect(response.headers.get("cache-control")).toContain("s-maxage=604800");
+  const rows = await getRows(response);
   expect(rows.some((r: any) => r.id === "fresh")).toBe(true);
   expect(rows.map((r: any) => r.id)).toEqual(["fresh", "old-high-safety", "old-safe", "old-high-return", "old-loss", "recent-loss", "fresh-loss", "large-win", "threshold-win"]);
   expect(rows.find((r: any) => r.id === "fresh")).toMatchObject({ locked: true, exchange: "EGX", signal: "BUY", status: "open", precision: 0.9 });
@@ -200,4 +203,14 @@ it("reads only public datasets and delegates auth to the cached viewer context",
   expect(calls.filter(call => call === "viewer:u-free")).toHaveLength(2);
   expect(calls).not.toContain("from:subscriptions");
   expect(calls).not.toContain("from:positions");
+});
+
+it("bypasses viewer auth and serves 7-day CDN cache when scope=public even if authenticated", async () => {
+  const { GET } = await import("@/app/api/ai_bot/recommendations/route");
+  const beforeViewerCalls = calls.filter((call) => call.startsWith("viewer:")).length;
+  const response = await GET(request("u-pro", "&scope=public"));
+  expect(response.headers.get("cache-control")).toContain("s-maxage=604800");
+  expect(calls.filter((call) => call.startsWith("viewer:"))).toHaveLength(beforeViewerCalls);
+  const rows = await getRows(response);
+  expect(rows.find((r: any) => r.id === "fresh").symbol).toBeUndefined();
 });

@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import BrandedPageHeader from '@/components/BrandedPageHeader';
 import { getPublicReports, reportNames, reportUrl, type PublicReport } from '@/lib/social/public-reports';
 
-export const revalidate = 86400;
+export const revalidate = 604800;
 // Generate on first request, then serve the entire HTML route from ISR.
 export async function generateStaticParams() { return []; }
 type Props = { params: Promise<{ date: string; kind: string }> };
@@ -46,7 +46,7 @@ export default async function ReportPage({ params }: Props) {
     mainEntityOfPage: `https://egxbots.com${reportUrl(r)}`, author: { '@type': 'Organization', name: 'EGX BOTS' } };
   return <main dir="rtl" className="mx-auto max-w-5xl px-4 py-8 text-zinc-950 dark:text-white">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema).replace(/</g, '\\u003c') }} />
-    <Link href="/reports" className="mb-5 inline-block text-sm underline">كل التقارير اليومية</Link>
+    <Link href="/reports" prefetch={false} className="mb-5 inline-block text-sm underline">كل التقارير اليومية</Link>
     <BrandedPageHeader eyebrow="EGX BOTS RESEARCH" title={title} description="تحليل آلي تعليمي مبني على البيانات المحفوظة للجلسة؛ ليس توصية شراء أو بيع." />
     <article className="space-y-8 border border-zinc-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900 sm:p-8">
       <section><h2 className="mb-4 text-xl font-bold">ملخص الجلسة</h2><VerifiedSummary report={r} /></section>
@@ -55,7 +55,7 @@ export default async function ReportPage({ params }: Props) {
         <p>أُعدّ التقرير بعد اكتمال مزامنة الأسعار وحساب المؤشرات اليومية. الأرقام أعلاه مأخوذة من الأدلة المحفوظة مع التقرير، وقد تختلف عن بيانات جلسات لاحقة.</p>
         <p>الحجم النسبي يقارن حجم التداول بمتوسطه المرجعي في السكانر. درجة التجميع تقييم خوارزمي وليست إثباتًا لهوية المشترين أو احتمال ربح. الاستمرار هو عدد جلسات الإشارة المسجل في المصدر.</p>
         <p>لا نستنتج نسبة تغطية السوق أو تغيّرها من عينة محدودة، ولا ننشئ مقارنة بجلسة سابقة دون بيانات متجانسة محفوظة.</p>
-        <Link className="underline" href={r.kind === 'market' ? '/scanner/market' : '/scanner/technical'}>فتح أداة التحليل</Link>
+        <Link prefetch={false} className="underline" href={r.kind === 'market' ? '/scanner/market' : '/scanner/technical'}>فتح أداة التحليل</Link>
       </section>
     </article>
   </main>;

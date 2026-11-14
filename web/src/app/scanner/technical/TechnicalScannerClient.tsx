@@ -8,6 +8,7 @@ import {
     Info, LayoutTemplate, Settings2, ChevronDown, ChevronUp, Star, ExternalLink, Brain
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useWatchlist } from "@/contexts/WatchlistContext";
 import { useTechnicalScanner } from "@/contexts/TechnicalScannerContext";
 import type { TechResult } from "@/lib/api";
@@ -22,6 +23,7 @@ const DEFAULT_PILLS = ["price", "rsi", "marketcap", "sector", "divergence", "sha
 
 export default function TechnicalScannerPage() {
     const { t, language } = useLanguage();
+    const { currencyCode, currencyLabel, isSaudi } = useMarket();
     const { saveSymbol, removeSymbolBySymbol, isSaved } = useWatchlist();
     
     const {
@@ -407,7 +409,7 @@ export default function TechnicalScannerPage() {
             case "price":
                 return {
                     label: "Price",
-                    valueDisplay: minPrice ? `>= ${minPrice} EGP` : "Any",
+                    valueDisplay: minPrice ? `>= ${minPrice} ${currencyCode}` : "Any",
                     isActive: !!minPrice,
                     onReset: () => {
                         setTechScanner({ minPrice: "" });
@@ -419,7 +421,7 @@ export default function TechnicalScannerPage() {
                             <h4 className="text-xs font-bold text-[#787b86] uppercase">Minimum Stock Price</h4>
                             <input
                                 type="number"
-                                placeholder="Min Price (EGP)"
+                                placeholder={`Min Price (${currencyCode})`}
                                 value={minPrice}
                                 onChange={(e) => setTechScanner({ minPrice: e.target.value })}
                                 className="w-full h-8 px-2.5 rounded bg-[#1c2030] border border-[#2a2e39] text-white text-xs focus:outline-none focus:border-[#2962ff] font-mono"
@@ -509,7 +511,7 @@ export default function TechnicalScannerPage() {
                     },
                     renderPopover: () => (
                         <div className="space-y-3">
-                            <h4 className="text-xs font-bold text-[#787b86] uppercase">Market Cap (EGP)</h4>
+                            <h4 className="text-xs font-bold text-[#787b86] uppercase">Market Cap ({currencyCode})</h4>
                             <div className="flex flex-col gap-2">
                                 <input
                                     type="number"
@@ -560,7 +562,7 @@ export default function TechnicalScannerPage() {
                     },
                     renderPopover: () => (
                         <div className="space-y-3">
-                            <h4 className="text-xs font-bold text-[#787b86] uppercase">EGX Sectors</h4>
+                            <h4 className="text-xs font-bold text-[#787b86] uppercase">{isSaudi ? "TASI Sectors" : "EGX Sectors"}</h4>
                             <select
                                 value={sector}
                                 onChange={(e) => setTechScanner({ sector: e.target.value })}
@@ -1176,8 +1178,12 @@ export default function TechnicalScannerPage() {
                             </h4>
                             <p className="text-[10px] text-[#787b86] leading-relaxed">
                                 {language === "ar"
-                                    ? "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)."
-                                    : "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork)."}
+                                    ? isSaudi
+                                        ? "عرض أسهم السوق السعودي (تاسي) المتوافقة شرعياً فقط (يستثني البنوك التقليدية والتأمين والكحول والتبغ ولحم الخنزير)."
+                                        : "عرض أسهم البورصة المصرية المتوافقة شرعياً فقط (يستثني البنوك والتأمين والكحول والتبغ ولحم الخنزير)."
+                                    : isSaudi
+                                        ? "Show only Saudi Tadawul (TASI) stocks screened for Sharia compliance (excludes conventional banks, insurance, alcohol, tobacco & pork)."
+                                        : "Show only EGX stocks screened for Sharia compliance (excludes banks, insurance, alcohol, tobacco & pork)."}
                             </p>
                             <label className="flex items-center gap-2.5 text-xs text-[#d1d4dc] cursor-pointer select-none">
                                 <input
@@ -1350,7 +1356,7 @@ export default function TechnicalScannerPage() {
         ];
 
         const ALL_FILTERS = [
-            { id: "price", label: "Min Price", desc: "Minimum stock price in EGP", cat: "market" },
+            { id: "price", label: "Min Price", desc: `Minimum stock price in ${currencyCode}`, cat: "market" },
             { id: "rsi", label: "Relative Strength Index (RSI)", desc: "14-period RSI indicator", cat: "technical" },
             { id: "marketcap", label: "Market Capitalization", desc: "Total market value of shares", cat: "market" },
             { id: "sector", label: "Sector", desc: "Company's macroeconomic sector", cat: "security" },
@@ -1365,7 +1371,7 @@ export default function TechnicalScannerPage() {
             { id: "roc", label: "Rate of Change (ROC)", desc: "12-period speed momentum indicator", cat: "technical" },
             { id: "marketmaker", label: "Market Maker Flow", desc: "Avoid distribution or require accumulation with CMF 20", cat: "moneyflow" },
             { id: "ai", label: "Random Forest AI Filter", desc: "Machine Learning trade prediction filter", cat: "ai" },
-            { id: "sharia", label: "Sharia-Compliant Stocks", desc: "Show only EGX stocks screened for Islamic Sharia compliance", cat: "security" },
+            { id: "sharia", label: "Sharia-Compliant Stocks", desc: isSaudi ? "Show only Saudi Tadawul stocks screened for Islamic Sharia compliance" : "Show only EGX stocks screened for Islamic Sharia compliance", cat: "security" },
             { id: "divergence", label: "Technical Divergence", desc: "Scan for RSI, MACD, and Stochastic divergences", cat: "technical" }
         ];
 
@@ -1459,7 +1465,7 @@ export default function TechnicalScannerPage() {
                         {/* Country indicator (Pinned) */}
                         <div className="flex items-center gap-1.5 h-8 px-3 rounded bg-[#1c2030] border border-[#2a2e39] text-[11px] font-bold text-white shrink-0 uppercase tracking-wider">
                             <Globe className="w-3.5 h-3.5 text-[#2962ff]" />
-                            <span>Egypt (EGX)</span>
+                            <span>{isSaudi ? "Saudi Arabia (TASI)" : "Egypt (EGX)"}</span>
                         </div>
 
                     {/* Dynamic Filter Pills */}
@@ -1649,7 +1655,7 @@ export default function TechnicalScannerPage() {
                                                 {/* Pop Out Button */}
                                                 <button
                                                     onClick={() => {
-                                                        const exchange = country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US");
+                                                        const exchange = (isSaudi || country?.toLowerCase() === "saudi arabia") ? "TADAWUL" : country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US");
                                                         const popoutUrl = `/chart/popout?symbol=${encodeURIComponent(activeSymbol)}&exchange=${encodeURIComponent(exchange)}`;
                                                         window.open(popoutUrl, "_blank", "width=1200,height=750,menubar=no,status=no,toolbar=no");
                                                     }}
@@ -1685,7 +1691,7 @@ export default function TechnicalScannerPage() {
                                             <TradingViewChart 
                                                 symbol={activeSymbol} 
                                                 theme="dark" 
-                                                exchange={country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US")} 
+                                                exchange={(isSaudi || country?.toLowerCase() === "saudi arabia") ? "TADAWUL" : country?.toLowerCase() === "egypt" ? "EGX" : (country?.toLowerCase() === "crypto" ? "CRYPTO" : "US")} 
                                             />
                                         </div>
 
@@ -1970,6 +1976,7 @@ export default function TechnicalScannerPage() {
                                             </td>
                                             <td className="px-4 py-2 text-right">
                                                 <span className="font-mono text-xs font-bold text-[#d1d4dc]">{formatNum(r.last_close)}</span>
+                                                <span className="ms-1 text-[10px] font-bold text-[#787b86]">{currencyLabel}</span>
                                             </td>
                                             <td className="px-4 py-2 text-right">
                                                 <span className={`font-mono text-xs font-bold ${r.change_p >= 0 ? "text-[#26a69a]" : "text-[#ef5350]"}`}>

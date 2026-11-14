@@ -17,6 +17,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { toast } from "sonner";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
 import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
+import { broadcastEntitlements } from "@/lib/entitlements";
 
 export default function TrialWelcomePrompt() {
   const { user } = useAuth();
@@ -74,13 +76,12 @@ export default function TrialWelcomePrompt() {
     // ── END SESSION CACHE ──────────────────────────────────────────────────────
 
     let active = true;
-    // Remove cache: "no-store" so the browser can honour the server's
-    // Cache-Control: private, max-age=300 response header.
-    fetch("/api/subscription/trial")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!active) return;
-        if (data?.eligible) {
+    // Unified session-cached quota+trial check (eliminates duplicate /api/subscription/trial GET calls).
+    void fetchUserQuotaCached(user.id)
+      .then((quota) => {
+        if (!active || !quota?.ok) return;
+        const isEligible = Boolean(quota?.plan?.trial_eligible);
+        if (isEligible) {
           setEligible(true);
           setDismissed(false);
           try {
@@ -88,26 +89,19 @@ export default function TrialWelcomePrompt() {
           } catch { /* ignore */ }
         } else {
           setEligible(false);
-          // Check if active trial or Pro but telegram unlinked
-          fetch("/api/user/quota")
-            .then((r) => (r.ok ? r.json() : null))
-            .then((quota) => {
-              if (!active) return;
-              const isProOrTrial = quota?.plan?.is_pro || quota?.plan?.is_trial;
-              const tgLinked = quota?.plan?.telegram_linked;
-              const tgUnlinked = !!(isProOrTrial && !tgLinked);
-              try {
-                sessionStorage.setItem(SESSION_KEY, JSON.stringify({ eligible: false, telegramUnlinked: tgUnlinked, ts: Date.now() }));
-              } catch { /* ignore */ }
-              if (tgUnlinked) {
-                const tgDismissed = localStorage.getItem("egxbots_tg_prompt_dismissed_v1");
-                if (!tgDismissed || Number(tgDismissed) < Date.now()) {
-                  setTelegramUnlinked(true);
-                  setDismissed(false);
-                }
-              }
-            })
-            .catch(() => {});
+          const isProOrTrial = Boolean(quota?.plan?.is_pro || quota?.plan?.is_trial);
+          const tgLinked = Boolean(quota?.plan?.telegram_linked);
+          const tgUnlinked = isProOrTrial && !tgLinked;
+          try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify({ eligible: false, telegramUnlinked: tgUnlinked, ts: Date.now() }));
+          } catch { /* ignore */ }
+          if (tgUnlinked) {
+            const tgDismissed = localStorage.getItem("egxbots_tg_prompt_dismissed_v1");
+            if (!tgDismissed || Number(tgDismissed) < Date.now()) {
+              setTelegramUnlinked(true);
+              setDismissed(false);
+            }
+          }
         }
       })
       .catch(() => {});
@@ -132,6 +126,8 @@ export default function TrialWelcomePrompt() {
       });
       const data = await res.json();
       if (res.ok && data?.success) {
+        invalidateUserQuotaCache(user.id);
+        broadcastEntitlements(true);
         toast.success(isAr ? "🎉 مبروك! تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!" : "🎉 Congrats! 3-day Pro trial activated!");
         setEligible(false);
         setDismissed(true);

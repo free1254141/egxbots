@@ -131,7 +131,9 @@ type AppStateContextType = {
 };
 
 const STORAGE_KEY = "ai_stocks_app_state_v1";
-const COUNTRIES_KEY = "ai_stocks_countries_v1";
+const COUNTRIES_KEY = "egxbots_countries_cache_v1";
+const INVENTORY_KEY = "egxbots_inventory_cache_v1";
+const USER_SETTINGS_SESSION_PREFIX = "egxbots_user_settings_v2:";
 const HOME_PRED_KEY = "ai_stocks_home_last_predict_v1";
 
 const DEFAULT_STATE: AppState = {
@@ -348,6 +350,48 @@ function mergeDefaults(saved: PersistedAppState): AppState {
   };
 }
 
+function toLightweightAppState(full: AppState): PersistedAppState {
+  const fullPersisted = toPersistedState(full);
+  return {
+    ...fullPersisted,
+    home: {
+      ...fullPersisted.home,
+      predictHistory: [],
+    },
+    techScanner: {
+      ...fullPersisted.techScanner,
+      results: [],
+      scanHistory: [],
+    },
+    comparisonScanner: {
+      ...fullPersisted.comparisonScanner,
+      results: {},
+    },
+    aiScanner: {
+      ...fullPersisted.aiScanner,
+      results: [],
+      scanHistory: [],
+    },
+  };
+}
+
+function stripHeavyRemoteArrays(raw: Record<string, any> | undefined): PersistedAppState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  return {
+    ...raw,
+    home: raw.home ? { ...raw.home, predictHistory: [] } : raw.home,
+    techScanner: raw.techScanner
+      ? { ...raw.techScanner, results: [], scanHistory: [], scannedCount: 0, hasScanned: false }
+      : raw.techScanner,
+    comparisonScanner: raw.comparisonScanner
+      ? { ...raw.comparisonScanner, results: {} }
+      : raw.comparisonScanner,
+    aiScanner: raw.aiScanner
+      ? { ...raw.aiScanner, results: [], scanHistory: [], scannedCount: 0, hasScanned: false }
+      : raw.aiScanner,
+  } as PersistedAppState;
+}
+
 function toPersistedState(full: AppState): PersistedAppState {
   return {
     home: {
@@ -420,7 +464,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
 
-  const [countries, setCountries] = useState<string[]>(["Egypt", "USA"]);
+  const [countries, setCountries] = useState<string[]>(["Egypt"]);
   const [countriesLoading, setCountriesLoading] = useState(false);
 
   const stateRef = useRef(state);
@@ -447,14 +491,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  const refreshInventory = useCallback(async () => {
+  const refreshInventory = useCallback(async (force = false) => {
     if (isInventoryFetchingRef.current) return;
+    if (!force && typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(INVENTORY_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { ts: number; data: any[] };
+          if (parsed?.ts && Date.now() - parsed.ts < 24 * 60 * 60 * 1000 && Array.isArray(parsed.data)) {
+            setInventory(parsed.data);
+            return;
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
     isInventoryFetchingRef.current = true;
     setInventoryLoading(true);
     try {
       const { getInventory } = await import("@/lib/api");
       const next = await getInventory();
       setInventory(next);
+      if (typeof window !== "undefined" && Array.isArray(next)) {
+        try {
+          window.localStorage.setItem(INVENTORY_KEY, JSON.stringify({ ts: Date.now(), data: next }));
+        } catch {
+          // ignore storage quota
+        }
+      }
     } catch (e) {
       console.error("Failed to fetch inventory:", e);
     } finally {
@@ -465,6 +530,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const isCountryActive = useCallback((country: string) => {
     if (isAdmin) return true;
+    if (inventory.length === 0) return true;
     // Country is active if any exchange for that country has price_count > 0
     return inventory.some(item => item.country === country && item.price_count > 0);
   }, [inventory, isAdmin]);
@@ -472,14 +538,37 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const isSymbolActive = useCallback((symbol: string, exchange: string) => {
     if (isAdmin) return true;
     if (symbol.toLowerCase().startsWith("fund_")) return false;
+    if (inventory.length === 0) return true;
     // Symbol is "active" if its exchange has price data
     // (A more precise check would involve a lookup, but this is consistent with inventory logic)
     return inventory.some(item => item.exchange === exchange && item.price_count > 0);
   }, [inventory, isAdmin]);
 
+  // Hydrate cached inventory/countries from localStorage on mount without invoking
+  // serverless functions for ordinary visitors; only admins fetch live inventory on mount.
   useEffect(() => {
-    refreshInventory();
-  }, [refreshInventory]);
+    try {
+      const rawInv = window.localStorage.getItem(INVENTORY_KEY);
+      if (rawInv) {
+        const parsed = JSON.parse(rawInv) as { ts: number; data: any[] };
+        if (parsed?.ts && Date.now() - parsed.ts < 24 * 60 * 60 * 1000 && Array.isArray(parsed.data)) {
+          setInventory(parsed.data);
+        }
+      }
+      const cachedCountries = safeParseCountries(window.localStorage.getItem(COUNTRIES_KEY));
+      if (cachedCountries?.countries?.length && Date.now() - cachedCountries.fetchedAt < 24 * 60 * 60 * 1000) {
+        setCountries(cachedCountries.countries);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) {
+      void refreshInventory();
+    }
+  }, [isAdmin, refreshInventory]);
 
   const [syncedSymbols, setSyncedSymbols] = useState<any[]>([]);
   const [syncedSymbolsLoading, setSyncedSymbolsLoading] = useState(false);
@@ -512,7 +601,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [isAdmin]);
 
   const refreshCountries = useCallback(async (opts?: { force?: boolean }) => {
-    const cacheTtlMs = 7 * 24 * 60 * 60 * 1000;
+    const cacheTtlMs = 24 * 60 * 60 * 1000;
     const source = isAdmin ? "local" : "supabase";
     if (!opts?.force) {
       const cached = safeParseCountries(localStorage.getItem(COUNTRIES_KEY));
@@ -542,20 +631,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }, [isAdmin]);
 
-  // Refetch when admin status changes to ensure we have the right list
+  // Refetch countries automatically ONLY for admins; ordinary visitors default to ["Egypt"]
+  // and fetch on demand when opening the country selector dialog.
   useEffect(() => {
     if (isAdmin) {
       void refreshCountries({ force: true });
     }
   }, [isAdmin, refreshCountries]);
-
-  useEffect(() => {
-    const cached = safeParseCountries(localStorage.getItem(COUNTRIES_KEY));
-    if (cached?.countries?.length) {
-      setCountries(cached.countries);
-    }
-    void refreshCountries();
-  }, [refreshCountries]);
 
   // useAuth moved to top
 
@@ -565,7 +647,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const lastSettingsUserIdRef = useRef<string | null>(null);
   const lastPersistedSettingsRef = useRef<string | null>(null);
   const remoteExtraAppStateRef = useRef<Record<string, any>>({});
-  const SETTINGS_STALE_TIME_MS = 60 * 1000; // 1 minute
+  const SETTINGS_STALE_TIME_MS = 30 * 60 * 1000; // 30 minutes
 
   useEffect(() => {
     let cancelled = false;
@@ -594,37 +676,59 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { data: row } = await supabase
-        .from("user_settings")
-        .select("app_state")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const remote = row?.app_state as PersistedAppState | undefined;
-      if (row?.app_state && typeof row.app_state === "object") {
-        remoteExtraAppStateRef.current = { ...row.app_state };
+      // Check sessionStorage cache (30m TTL) before querying Supabase user_settings
+      const sessionKey = `${USER_SETTINGS_SESSION_PREFIX}${user.id}`;
+      let rawAppState: Record<string, any> | null = null;
+      let loadedFromSession = false;
+      try {
+        const cachedRaw = window.sessionStorage.getItem(sessionKey);
+        if (cachedRaw) {
+          const parsed = JSON.parse(cachedRaw) as { ts: number; app_state: Record<string, any> | null };
+          if (parsed?.ts && now - parsed.ts < SETTINGS_STALE_TIME_MS) {
+            rawAppState = parsed.app_state || null;
+            loadedFromSession = true;
+          }
+        }
+      } catch {
+        // ignore storage errors
       }
 
+      if (!loadedFromSession) {
+        const { data: row } = await supabase
+          .from("user_settings")
+          .select("app_state")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        rawAppState = (row?.app_state as Record<string, any> | undefined) || null;
+        try {
+          const sanitizedSessionBlob = stripHeavyRemoteArrays(rawAppState || undefined);
+          window.sessionStorage.setItem(
+            sessionKey,
+            JSON.stringify({ ts: Date.now(), app_state: sanitizedSessionBlob || null })
+          );
+        } catch {
+          // ignore storage quota
+        }
+      }
+
+      const remote = stripHeavyRemoteArrays(rawAppState || undefined);
+      if (rawAppState && typeof rawAppState === "object") {
+        // Preserve non-UI keys such as `scanner_alerts` without holding giant arrays in memory
+        const sanitizedExtra: Record<string, any> = { ...rawAppState, ...(remote || {}) };
+        remoteExtraAppStateRef.current = sanitizedExtra;
+      }
 
       const hasRemote = remote && typeof remote === "object" && Object.keys(remote as any).length > 0;
 
-      // Merge strategy: Remote > Local > Default
-      // If we have remote, use it. If not, use local.
+      // Merge strategy: Remote UI prefs > Local > Default (never rehydrate bloat arrays from Supabase)
       let nextState = hasRemote ? mergeDefaults(remote as PersistedAppState) : local ? mergeDefaults(local) : DEFAULT_STATE;
-
-      // Explicitly restore cloud-only history items that were filtered out of local
-      if (hasRemote) {
-        nextState = maybeRestoreCloudHomeData(nextState, remote as PersistedAppState);
-      }
 
       if (cancelled) return;
       setState(nextState);
 
-      // Do not write the same preferences back to Supabase merely because the
-      // global provider mounted. A local-only state will be persisted once by
-      // the debounced state effect below.
       lastPersistedSettingsRef.current = hasRemote
-        ? JSON.stringify(toPersistedState(nextState))
+        ? JSON.stringify(toLightweightAppState(nextState))
         : null;
 
       // Mark as initialized
@@ -640,37 +744,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [supabase, user]);
 
   useEffect(() => {
-    const fullPersisted = toPersistedState(state);
+    const lightweightPrefs = toLightweightAppState(state);
 
-    // Filtered state for localStorage (Privacy/Security: No trade history on disk)
-    const localFiltered = {
-      ...fullPersisted,
-      home: {
-        ...fullPersisted.home,
-        predictHistory: [],
-      },
-      techScanner: {
-        ...fullPersisted.techScanner,
-        results: [],
-        scanHistory: [],
-      },
-      aiScanner: {
-        ...fullPersisted.aiScanner,
-        results: [],
-        scanHistory: [],
-      }
-    };
+    // 1. Always save UI preferences (without large scan result arrays) to local storage
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(lightweightPrefs));
 
-    // 1. Always save UI preferences to local storage
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(localFiltered));
-
-    // 2. Save FULL state (including history) to Supabase
+    // 2. Save ONLY lightweight UI preferences to Supabase (never bulk scan arrays)
     if (user && hasSettingsInitializedRef.current) {
-      const serialized = JSON.stringify(fullPersisted);
+      const serialized = JSON.stringify(lightweightPrefs);
       if (lastPersistedSettingsRef.current === serialized) return;
       lastPersistedSettingsRef.current = serialized;
       const timeoutId = window.setTimeout(async () => {
-        let baseAppState = remoteExtraAppStateRef.current || {};
+        const { scanner_alerts } = remoteExtraAppStateRef.current || {};
+        let mergedAppState: Record<string, any> = {
+          ...(scanner_alerts ? { scanner_alerts } : {}),
+          ...lightweightPrefs,
+        };
         try {
           const { data: freshRow } = await supabase
             .from("user_settings")
@@ -678,22 +767,29 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             .eq("user_id", user.id)
             .maybeSingle();
           if (freshRow?.app_state && typeof freshRow.app_state === "object") {
-            baseAppState = { ...baseAppState, ...freshRow.app_state };
-            remoteExtraAppStateRef.current = baseAppState;
+            const cleaned = stripHeavyRemoteArrays(freshRow.app_state as Record<string, any>) || {};
+            mergedAppState = {
+              ...freshRow.app_state,
+              ...cleaned,
+              ...lightweightPrefs,
+            };
+            remoteExtraAppStateRef.current = mergedAppState;
           }
         } catch {}
 
-        const mergedAppState = {
-          ...baseAppState,
-          ...fullPersisted,
-        };
+        try {
+          window.sessionStorage.setItem(
+            `${USER_SETTINGS_SESSION_PREFIX}${user.id}`,
+            JSON.stringify({ ts: Date.now(), app_state: mergedAppState })
+          );
+        } catch {}
 
         void supabase.from("user_settings").upsert({
           user_id: user.id,
           app_state: mergedAppState,
           updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
-      }, 1500); // Slightly longer debounce for full sync
+      }, 1500);
 
       return () => {
         window.clearTimeout(timeoutId);

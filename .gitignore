@@ -94,6 +94,8 @@ web/public/favicon_io/*.png
 api/models/*.pkl
 api/models/*.bin
 !api/models/vhagar.pkl
+!api/models/KING_TASI.pkl
+!api/models/model_TADAWUL.pkl
 scratch/
 symbols_data/*.json
 !symbols_data/Egypt_all_symbols.json

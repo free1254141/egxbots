@@ -1,7 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
-import { AuthError } from "@supabase/supabase-js";
+import { AuthError, createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const wrappedAuth = new WeakSet<object>();
 function deduplicateRefresh(client: ReturnType<typeof createBrowserClient>) {
@@ -66,4 +66,50 @@ export function createSupabaseBrowserClient() {
   }
 
   return deduplicateRefresh(createBrowserClient(url, anonKey));
+}
+
+let cachedSaudiBrowserClient: {
+  cacheKey: string;
+  client: SupabaseClient<any, "public", any>;
+} | null = null;
+
+/**
+ * Market-aware browser Supabase client for public market-data reads.
+ * Primary auth/profiles/subscriptions always use `createSupabaseBrowserClient()`.
+ */
+export function createMarketSupabaseBrowserClient(
+  market: "egx" | "tasi" = "egx",
+) {
+  if (market !== "tasi") {
+    return createSupabaseBrowserClient();
+  }
+
+  const url = process.env.NEXT_PUBLIC_SAUDI_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SAUDI_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    console.error("Missing Saudi Supabase environment variables:", {
+      hasUrl: !!url,
+      hasAnonKey: !!anonKey,
+    });
+    throw new Error(
+      "Missing Saudi Supabase env vars - check NEXT_PUBLIC_SAUDI_SUPABASE_URL and NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY",
+    );
+  }
+
+  const cacheKey = `${url}|${anonKey}`;
+  if (cachedSaudiBrowserClient && cachedSaudiBrowserClient.cacheKey === cacheKey) {
+    return cachedSaudiBrowserClient.client;
+  }
+
+  const client = createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+  cachedSaudiBrowserClient = { cacheKey, client };
+  return client;
 }

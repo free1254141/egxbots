@@ -16,6 +16,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isPro } from "@/lib/ai/plan-gate";
@@ -24,6 +25,7 @@ import type { SignalPerformancePayload } from "@/app/api/scan/signal-performance
 
 export default function TrapDetector() {
   const { language } = useLanguage();
+  const { market, isSaudi, currencyLabel } = useMarket();
   const { user } = useAuth();
   const ar = language === "ar";
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -85,25 +87,39 @@ export default function TrapDetector() {
   // Fetch data for all users (free and Pro)
   useEffect(() => {
     const controller = new AbortController();
+    setSnapshot(null);
+    setError(false);
+    setShowReview(false);
 
-    Promise.allSettled([
-      fetch("/api/scan/traps", { signal: controller.signal })
+    const requests: Promise<unknown>[] = [
+      fetch(`/api/scan/traps?market=${market}`, { signal: controller.signal })
         .then((res) => {
           if (!res.ok) throw new Error("Failed");
           return res.json();
         })
-        .then(setSnapshot),
-      fetch("/api/scan/signal-performance", { signal: controller.signal })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data?.ok) setPerf(data);
+        .then(setSnapshot)
+        .catch((cause) => {
+          if (cause?.name !== "AbortError") setError(true);
         }),
-    ]).catch((cause) => {
-      if (cause?.name !== "AbortError") setError(true);
-    });
+    ];
+
+    if (isSaudi) {
+      setPerf(null);
+    } else {
+      requests.push(
+        fetch("/api/scan/signal-performance", { signal: controller.signal })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.ok) setPerf(data);
+          })
+          .catch(() => {})
+      );
+    }
+
+    void Promise.allSettled(requests);
 
     return () => controller.abort();
-  }, []);
+  }, [market, isSaudi]);
 
   const rows: TrapSignalRow[] =
     activeTab === "BEAR_TRAP" ? snapshot?.bearTraps || [] : snapshot?.bullTraps || [];
@@ -122,7 +138,7 @@ export default function TrapDetector() {
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-emerald-500 shrink-0" />
           <h2 className="text-sm font-black uppercase tracking-wide">
-            🪤 {ar ? "كاشف المصائد والانعكاسات (إغلاق الجلسة)" : "Trap Detector (Daily Close)"}
+            🪤 {ar ? `كاشف المصائد والانعكاسات — ${isSaudi ? "تاسي" : "EGX"} (إغلاق الجلسة)` : `Trap Detector — ${isSaudi ? "TASI" : "EGX"} (Daily Close)`}
           </h2>
           {snapshot?.asOf && (
             <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
@@ -254,15 +270,21 @@ export default function TrapDetector() {
                   {currentReviewList.map((row) => (
                     <tr key={row.symbol} className="hover:bg-emerald-500/5">
                       <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
-                        <Link prefetch={false} href={`/stocks/${row.symbol.toLowerCase()}`} className="hover:text-emerald-500">
+                        <Link
+                          prefetch={false}
+                          href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+                          className="hover:text-emerald-500"
+                        >
                           {row.symbol}
                         </Link>
                       </td>
-                      <td className="py-1 px-2 font-mono">{row.signalClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono">
+                        {row.signalClose != null ? `${row.signalClose.toFixed(2)} ${currencyLabel}` : "—"}
+                      </td>
                       <td className="py-1 px-2 font-mono font-bold">
                         {activeTab === "BEAR_TRAP" ? (
                           <span className="text-emerald-600 dark:text-emerald-400">
-                            {row.nextHigh?.toFixed(2) ?? "—"}{" "}
+                            {row.nextHigh != null ? `${row.nextHigh.toFixed(2)} ${currencyLabel}` : "—"}{" "}
                             {row.intradayHighPct != null && (
                               <span className="text-[10px] font-normal">
                                 (+{row.intradayHighPct}%)
@@ -271,7 +293,7 @@ export default function TrapDetector() {
                           </span>
                         ) : (
                           <span className="text-rose-600 dark:text-rose-400">
-                            {row.nextLow?.toFixed(2) ?? "—"}{" "}
+                            {row.nextLow != null ? `${row.nextLow.toFixed(2)} ${currencyLabel}` : "—"}{" "}
                             {row.intradayLowPct != null && (
                               <span className="text-[10px] font-normal">
                                 ({row.intradayLowPct}%)
@@ -280,7 +302,9 @@ export default function TrapDetector() {
                           </span>
                         )}
                       </td>
-                      <td className="py-1 px-2 font-mono">{row.nextClose?.toFixed(2) ?? "—"}</td>
+                      <td className="py-1 px-2 font-mono">
+                        {row.nextClose != null ? `${row.nextClose.toFixed(2)} ${currencyLabel}` : "—"}
+                      </td>
                       <td className="py-1 px-2 font-mono font-bold">
                         <span
                           className={
@@ -326,7 +350,7 @@ export default function TrapDetector() {
               <Link
                 prefetch={false}
                 key={row.symbol}
-                href={`/stocks/${row.symbol.toLowerCase()}`}
+                href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
                 className="group border-2 border-zinc-200 bg-white p-3 transition hover:border-emerald-500 dark:border-[#303744] dark:bg-[#171e29]"
               >
                 <div className="flex items-start justify-between gap-2">
@@ -359,13 +383,17 @@ export default function TrapDetector() {
                 <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
                   <div className="flex justify-between gap-1">
                     <dt className="text-zinc-500 dark:text-zinc-400">{ar ? "الإغلاق" : "Close"}</dt>
-                    <dd className="font-mono font-bold">{row.close}</dd>
+                    <dd className="font-mono font-bold">
+                      {row.close} {currencyLabel}
+                    </dd>
                   </div>
                   <div className="flex justify-between gap-1">
                     <dt className="text-zinc-500 dark:text-zinc-400">
                       {isBearTrap ? (ar ? "الدعم" : "Support") : ar ? "المقاومة" : "Resist"}
                     </dt>
-                    <dd className="font-mono font-bold text-amber-500">{row.keyLevel}</dd>
+                    <dd className="font-mono font-bold text-amber-500">
+                      {row.keyLevel} {currencyLabel}
+                    </dd>
                   </div>
                   <div className="flex justify-between gap-1">
                     <dt className="text-zinc-500 dark:text-zinc-400">

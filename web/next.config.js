@@ -190,20 +190,20 @@ compress: true,
   async headers() {
     return [
       {
-        // Cache public stock pages across Vercel Edge CDN for 24h with stale-while-revalidate
+        // Cache public stock pages across Vercel Edge CDN for 7 days (weekend-proof), invalidated via /api/revalidate
         source: '/stocks/:symbol*',
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400',
+            value: 'public, max-age=3600, s-maxage=604800, stale-while-revalidate=2592000',
           },
           {
             key: 'Vercel-CDN-Cache-Control',
-            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000',
           },
           {
             key: 'CDN-Cache-Control',
-            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000',
           },
         ],
       },
@@ -227,11 +227,33 @@ compress: true,
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400',
+            value: 'public, max-age=3600, s-maxage=604800, stale-while-revalidate=2592000',
           },
           {
             key: 'Vercel-CDN-Cache-Control',
-            value: 'public, s-maxage=86400, stale-while-revalidate=86400',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+        ],
+      },
+      {
+        // Public reports, news, and backtest track-record pages (weekend-proof 7-day CDN cache)
+        source: '/(reports|reports/:path*|news|scanner/backtests|track-record)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=3600, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000, stale-if-error=2592000',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=2592000',
           },
         ],
       },

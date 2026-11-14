@@ -1,6 +1,7 @@
 import type { PredictResponse } from "@/lib/types";
 import type { SimilarityReport } from "@/lib/historical-similarity";
 import type { PortfolioPerformance } from "@/lib/portfolio-performance";
+import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 
 export async function fetchPortfolioPerformance(signal?: AbortSignal): Promise<PortfolioPerformance> {
   const response = await fetch("/api/portfolio/performance", { cache: "no-store", signal });
@@ -52,8 +53,21 @@ export interface UnusualActivitySnapshot {
   rows: UnusualActivityRow[];
 }
 
-export async function fetchUnusualActivity(signal?: AbortSignal): Promise<UnusualActivitySnapshot> {
-  const response = await fetch("/api/scan/unusual-activity", { signal });
+function resolveStoredBrowserMarket(): "egx" | "tasi" {
+  if (typeof window === "undefined") return "egx";
+  try {
+    return window.localStorage.getItem("egxbots_market") === "tasi" ? "tasi" : "egx";
+  } catch {
+    return "egx";
+  }
+}
+
+export async function fetchUnusualActivity(
+  signal?: AbortSignal,
+  market?: "egx" | "tasi",
+): Promise<UnusualActivitySnapshot> {
+  const resolvedMarket = market === "tasi" || market === "egx" ? market : resolveStoredBrowserMarket();
+  const response = await fetch(`/api/scan/unusual-activity?market=${resolvedMarket}`, { signal });
   if (!response.ok) throw new Error(`Unusual activity request failed: ${response.status}`);
   return response.json();
 }
@@ -677,6 +691,10 @@ export async function searchSymbols(
   if (source) params.set("source", source);
 
   if (exchange) params.set("exchange", exchange);
+
+  if (!country && !exchange) {
+    params.set("market", resolveStoredBrowserMarket());
+  }
 
 
 
@@ -2254,17 +2272,118 @@ export async function getPublicMarketOverview(signal?: AbortSignal): Promise<Pub
   return { status, breadth };
 }
 
-export async function getRecommendationChartHistory(symbol: string, exchange: string, signal?: AbortSignal): Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }> {
-  const params = new URLSearchParams({ symbol, exchange });
-  const response = await fetch(`/api/recommendations/chart-markers?${params}`, { signal });
-  if (!response.ok) throw new Error(`Failed to load recommendation history (${response.status})`);
-  const data = await response.json();
-  return {
-    markers: Array.isArray(data.markers) ? data.markers : [],
-    recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
-  };
+const CHART_MARKERS_TTL_MS = 30 * 60 * 1000;
+const chartMarkersCache = new Map<string, { ts: number; data: { markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] } }>();
+const chartMarkersInFlight = new Map<string, Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }>>();
+let chartMarkersListenersBound = false;
+let chartMarkersEpoch = 0;
+let lastChartViewerKey: string | null = null;
+
+function clearChartMarkersCache(): void {
+  chartMarkersEpoch += 1;
+  chartMarkersCache.clear();
+  chartMarkersInFlight.clear();
 }
 
-export async function getRecommendationChartMarkers(symbol: string, exchange: string, signal?: AbortSignal): Promise<RecommendationChartMarker[]> {
-  return (await getRecommendationChartHistory(symbol, exchange, signal)).markers;
+function bindChartMarkersInvalidationListeners(): void {
+  if (chartMarkersListenersBound || typeof window === "undefined") return;
+  chartMarkersListenersBound = true;
+  window.addEventListener("egx:entitlements-updated", clearChartMarkersCache);
+  window.addEventListener(TRIAL_AUTOSTART_EVENT, clearChartMarkersCache);
+  window.addEventListener("storage", (e: StorageEvent) => {
+    if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
+      clearChartMarkersCache();
+    }
+  });
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    );
+  });
+}
+
+export async function getRecommendationChartHistory(
+  symbol: string,
+  exchange: string,
+  signal?: AbortSignal,
+  viewerId?: string | null
+): Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }> {
+  bindChartMarkersInvalidationListeners();
+  const viewerKey = viewerId ? String(viewerId) : "anon";
+  // In-place sign-in/sign-out changes viewer entitlements; flush cached markers immediately
+  // so Pro picks never linger after sign-out and Free/anon picks refresh on sign-in.
+  if (lastChartViewerKey !== null && lastChartViewerKey !== viewerKey) {
+    clearChartMarkersCache();
+  }
+  lastChartViewerKey = viewerKey;
+
+  const key = `${viewerKey}:${symbol.trim().toUpperCase()}:${exchange.trim().toUpperCase()}`;
+  const cached = chartMarkersCache.get(key);
+  if (cached && Date.now() - cached.ts < CHART_MARKERS_TTL_MS) {
+    return cached.data;
+  }
+  const existing = chartMarkersInFlight.get(key);
+  if (existing) {
+    return raceWithAbort(existing, signal);
+  }
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  const params = new URLSearchParams({ symbol, exchange });
+  if (viewerKey === "anon") {
+    params.set("scope", "public");
+  }
+  const requestEpoch = chartMarkersEpoch;
+  let selfRun: Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }> | null = null;
+  const run = (async () => {
+    try {
+      // Do not bind the shared in-flight request to one component's AbortSignal; callers
+      // detach safely via raceWithAbort while simultaneous sibling mounts deduplicate cleanly.
+      const response = await fetch(`/api/recommendations/chart-markers?${params}`, {
+        cache: viewerKey === "anon" ? "default" : "no-store",
+      });
+      if (!response.ok) throw new Error(`Failed to load recommendation history (${response.status})`);
+      const data = await response.json();
+      const parsed = {
+        markers: Array.isArray(data.markers) ? data.markers : [],
+        recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+      };
+      if (requestEpoch === chartMarkersEpoch) {
+        chartMarkersCache.set(key, { ts: Date.now(), data: parsed });
+      }
+      return parsed;
+    } finally {
+      if (selfRun && chartMarkersInFlight.get(key) === selfRun) {
+        chartMarkersInFlight.delete(key);
+      }
+    }
+  })();
+  selfRun = run;
+  chartMarkersInFlight.set(key, run);
+  return raceWithAbort(run, signal);
+}
+
+export async function getRecommendationChartMarkers(
+  symbol: string,
+  exchange: string,
+  signal?: AbortSignal,
+  viewerId?: string | null
+): Promise<RecommendationChartMarker[]> {
+  return (await getRecommendationChartHistory(symbol, exchange, signal, viewerId)).markers;
 }

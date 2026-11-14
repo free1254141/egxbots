@@ -288,7 +288,13 @@ export interface CostComparisonItem {
   insider_vwap: number;
   current_price: number;
   discount_pct: number;
+  price_diff_pct: number; // Negative = below insider cost (discount), Positive = above insider cost (still held)
+  is_below_cost: boolean;
   shares_accumulated: number;
+  buy_value_egp: number;
+  buy_count: number;
+  sell_count: number;
+  last_action_date: string;
 }
 
 export interface FlowDistribution {
@@ -483,21 +489,6 @@ export function analyzeDisclosures(
 
     const sec = getSymbolSector(sym);
 
-    // Netting condition: Insider must still maintain net accumulated shares (netShares > 0).
-    // If a subsequent or concurrent sell cancelled out the buy (netShares <= 0), it is not an active accumulation opportunity!
-    if (discountPct < -1.0 && netShares > 0) {
-      symbolsBelowCostCount++;
-      costDiscountTop.push({
-        symbol: sym,
-        company_name: info.company_name,
-        sector: sec,
-        insider_vwap: Number(insiderVWAP.toFixed(2)),
-        current_price: Number(curPrice.toFixed(2)),
-        discount_pct: Math.abs(discountPct),
-        shares_accumulated: netShares, // الصافي الفعلي بعد خصم أي بيع
-      });
-    }
-
     // Determine Action Bias & Streak
     let actionBias: "accumulating" | "distributing" | "neutral" = "neutral";
     if (netShares > 0) {
@@ -523,6 +514,30 @@ export function analyzeDisclosures(
     }
 
     const lastActionDate = sortedActions.length > 0 ? sortedActions[0].date : "";
+
+    // Retain ALL examined stocks where insiders have positive net accumulated shares (netShares > 0)
+    // and no subsequent sell disclosures cancelled out their accumulation.
+    if (netShares > 0 && insiderVWAP > 0) {
+      const isBelowCost = discountPct <= 0;
+      if (isBelowCost) {
+        symbolsBelowCostCount++;
+      }
+      costDiscountTop.push({
+        symbol: sym,
+        company_name: info.company_name,
+        sector: sec,
+        insider_vwap: Number(insiderVWAP.toFixed(2)),
+        current_price: Number(curPrice.toFixed(2)),
+        discount_pct: Math.abs(discountPct),
+        price_diff_pct: discountPct,
+        is_below_cost: isBelowCost,
+        shares_accumulated: netShares,
+        buy_value_egp: Math.round(totalBuyValueEgp - totalSellValueEgp),
+        buy_count: info.buys.length,
+        sell_count: info.sells.length,
+        last_action_date: lastActionDate,
+      });
+    }
 
     const metric: InsiderMetric = {
       symbol: sym,
@@ -584,8 +599,8 @@ export function analyzeDisclosures(
     }
   });
 
-  // Sort cost discounts descending by discount magnitude
-  costDiscountTop.sort((a, b) => b.discount_pct - a.discount_pct);
+  // Sort cost comparisons ascending by price_diff_pct (largest discount below insider cost first, then held positions above cost)
+  costDiscountTop.sort((a, b) => a.price_diff_pct - b.price_diff_pct);
 
   // Flow Distribution summary
   const grandTotal = grandTotalBuyValue + grandTotalSellValue;

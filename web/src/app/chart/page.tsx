@@ -208,7 +208,7 @@ function ChartContent() {
     setRecommendations([]);
     setSelectedRecommendationId(null);
     setFocusTimestamp(undefined);
-    getRecommendationChartHistory(symbol, exchange, controller.signal)
+    getRecommendationChartHistory(symbol, exchange, controller.signal, user?.id ?? null)
       .then((data) => setRecommendations(data.recommendations))
       .catch(() => {
         if (!controller.signal.aborted) setRecommendationsError(true);
@@ -217,7 +217,7 @@ function ChartContent() {
         if (!controller.signal.aborted) setLoadingRecommendations(false);
       });
     return () => controller.abort();
-  }, [symbol, exchange, user]);
+  }, [symbol, exchange, user?.id]);
 
   const closedRecommendations = recommendations.filter((row) =>
     ["win", "loss"].includes(String(row.status).toLowerCase()),

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { getSupabaseClient } from "@/lib/supabase/route-data";
+import {
+  resolveRequestMarket,
+  getMarketExchange,
+  getMarketSupabaseClient,
+} from "@/lib/supabase/route-data";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
-import { filterByDelay, planLimits, paymentsEnabled } from "@/lib/ai/plan-gate";
+import { planLimits, paymentsEnabled } from "@/lib/ai/plan-gate";
 import { savedSignalReasons } from "@/lib/signal-explanation";
 
 export const runtime = "nodejs";
@@ -19,20 +23,31 @@ function paymentsEnabledSafe(): boolean {
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseClient();
+    const url = new URL(req.url);
+    const market = resolveRequestMarket(req);
+    const exchange = getMarketExchange(market);
+    const country = market === "tasi" ? "Saudi Arabia" : "Egypt";
+    const currency = market === "tasi" ? "SAR" : "EGP";
+    const explicitMarketParam =
+      url.searchParams.has("market") ||
+      url.searchParams.has("country") ||
+      url.searchParams.has("exchange");
+
+    const supabase = getMarketSupabaseClient(market);
     const billingEnabled = paymentsEnabledSafe();
     const responseHeaders: Record<string, string> = billingEnabled
       ? { "Cache-Control": "private, max-age=300, stale-while-revalidate=300" }
-      : {
-          "Cache-Control": "public, max-age=30",
-          "Vercel-CDN-Cache-Control": "public, s-maxage=120, stale-while-revalidate=300",
-        };
+      : explicitMarketParam
+        ? {
+            "Cache-Control": "public, max-age=30",
+            "Vercel-CDN-Cache-Control": "public, s-maxage=120, stale-while-revalidate=300",
+          }
+        : {
+            "Cache-Control": "private, no-store, max-age=0",
+          };
 
-    // Determine the requesting user (if logged in) so we can apply plan-gated
-    // visibility: subscribers see today's recommendations immediately; free
-    // users only see recommendations older than the configured signal delay.
-    // Identity and plan resolve through the cached viewer context — no Supabase
-    // auth round trip per page view.
+    // Determine the requesting user (if logged in) on Primary Supabase so we can apply
+    // plan-gated visibility identically across EGX and TASI.
     let userIsPro = !billingEnabled; // the route is shared/cacheable while billing is disabled
     let userPlan = "free";
     if (billingEnabled) {
@@ -45,7 +60,7 @@ export async function GET(req: NextRequest) {
     const { data: recommendations, error: recError } = await supabase
       .from("scan_results")
       .select("symbol, name, signal, entry_price, target_price, stop_loss, precision, top_reasons, model_name, created_at")
-      .eq("country", "Egypt")
+      .eq("country", country)
       .eq("status", "open")
       .eq("is_public", true)
       .order("created_at", { ascending: false })
@@ -62,6 +77,9 @@ export async function GET(req: NextRequest) {
         total_open: 0,
         buy_count: 0,
         sell_count: 0,
+        market,
+        exchange,
+        currency,
       }, { headers: responseHeaders });
     }
 
@@ -75,19 +93,20 @@ export async function GET(req: NextRequest) {
         gated: true,
         is_pro: false,
         signal_delay_days: planLimits(userPlan).signal_delay_days,
+        market,
+        exchange,
+        currency,
       }, { headers: responseHeaders });
     }
 
     const visible = recommendations;
-
     const symbols = visible.map((r: any) => r.symbol);
 
     // 2. Fetch latest prices for these symbols from stock_technical_indicators
-    // Get the latest technical indicators date first to query the exact row
     const { data: dateRows } = await supabase
       .from("stock_technical_indicators")
       .select("date")
-      .eq("exchange", "EGX")
+      .eq("exchange", exchange)
       .order("date", { ascending: false })
       .limit(1);
 
@@ -99,7 +118,7 @@ export async function GET(req: NextRequest) {
       const { data: priceRows } = await supabase
         .from("stock_technical_indicators")
         .select("symbol, close")
-        .eq("exchange", "EGX")
+        .eq("exchange", exchange)
         .eq("date", latestDate)
         .in("symbol", symbols);
 
@@ -114,14 +133,14 @@ export async function GET(req: NextRequest) {
     }
 
     // Fallback: if some symbols are missing or date failed, check stock_prices latest close
-    const missingSymbols = symbols.filter((s: any) => !pricesMap.has(s.toUpperCase()));
+    const missingSymbols = symbols.filter((s: any) => !pricesMap.has(String(s).toUpperCase()));
     if (missingSymbols.length > 0) {
       const uniqueMissing = [...new Set(missingSymbols.map((symbol: any) => String(symbol).toUpperCase()))];
       const fallbackLimit = Math.min(Math.max(uniqueMissing.length * 30, 300), 2000);
       const { data: fallbackPrices } = await supabase
         .from("stock_prices")
         .select("symbol,close,date")
-        .eq("exchange", "EGX")
+        .eq("exchange", exchange)
         .in("symbol", uniqueMissing)
         .order("date", { ascending: false })
         .limit(fallbackLimit);
@@ -137,13 +156,42 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // For TASI, resolve Arabic stock names from stocks.name_ar when available.
+    const tasiNamesMap = new Map<string, string>();
+    if (market === "tasi" && symbols.length > 0) {
+      try {
+        const uniqueSyms = Array.from(new Set(symbols.map((s: any) => String(s || "").trim()).filter(Boolean)));
+        let { data: stockRows, error: stockErr } = await supabase
+          .from("stocks")
+          .select("symbol,name_ar,name")
+          .eq("exchange", exchange)
+          .in("symbol", uniqueSyms)
+          .limit(uniqueSyms.length);
+        if (stockErr) {
+          ({ data: stockRows } = await supabase
+            .from("stocks")
+            .select("symbol,name")
+            .eq("exchange", exchange)
+            .in("symbol", uniqueSyms)
+            .limit(uniqueSyms.length));
+        }
+        for (const row of stockRows || []) {
+          const key = String(row?.symbol || "").trim().toUpperCase();
+          const label = row?.name_ar || row?.name;
+          if (key && label) tasiNamesMap.set(key, String(label));
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
     // 3. Process Signals
     let buyCount = 0;
     let sellCount = 0;
     const signals: any[] = [];
 
     for (const rec of visible) {
-      const symbolUpper = rec.symbol.toUpperCase();
+      const symbolUpper = String(rec.symbol || "").toUpperCase();
       const currentPrice = pricesMap.get(symbolUpper) || Number(rec.entry_price || 0);
 
       const entry = Number(rec.entry_price || 0);
@@ -164,7 +212,10 @@ export async function GET(req: NextRequest) {
 
       signals.push({
         symbol: rec.symbol,
-        name: rec.name || rec.symbol,
+        name:
+          market === "tasi"
+            ? tasiNamesMap.get(symbolUpper) || rec.name || rec.symbol
+            : rec.name || rec.symbol,
         signal: isBuy ? "BUY" : "SELL",
         entry_price: entry,
         current_price: currentPrice,
@@ -188,6 +239,9 @@ export async function GET(req: NextRequest) {
       gated: false,
       is_pro: true,
       signal_delay_days: 0,
+      market,
+      exchange,
+      currency,
     }, { headers: responseHeaders });
   } catch (error) {
     console.error("AI Signals API error:", error);

@@ -832,11 +832,11 @@ export default function TradingViewChart({
     const controller = new AbortController();
     setRecommendationMarkers([]);
     if (externalCandles !== undefined) return () => controller.abort();
-    getRecommendationChartMarkers(symbol, exchange || "EGX", controller.signal)
+    getRecommendationChartMarkers(symbol, exchange || "EGX", controller.signal, user?.id ?? null)
       .then(setRecommendationMarkers)
       .catch(() => { if (!controller.signal.aborted) setRecommendationMarkers([]); });
     return () => controller.abort();
-  }, [symbol, exchange, user, externalCandles !== undefined]);
+  }, [symbol, exchange, user?.id, externalCandles !== undefined]);
 
   useEffect(() => {
     let isMounted = true;

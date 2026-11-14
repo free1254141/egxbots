@@ -39,7 +39,20 @@ export const WatchlistProvider = ({ children }: { children: ReactNode }) => {
     const hasInitializedRef = useRef(false);
     const lastFetchedAtRef = useRef<number>(0);
     const lastUserIdRef = useRef<string | null>(null);
-    const STALE_TIME_MS = 60 * 1000; // 1 minute
+    const WATCHLIST_CACHE_PREFIX = "egxbots_watchlist_v1:";
+    const STALE_TIME_MS = 15 * 60 * 1000; // 15 minutes
+
+    const writeWatchlistSession = useCallback((userId: string, items: SavedSymbol[]) => {
+        if (typeof window === "undefined") return;
+        try {
+            window.sessionStorage.setItem(
+                `${WATCHLIST_CACHE_PREFIX}${userId}`,
+                JSON.stringify({ ts: Date.now(), items })
+            );
+        } catch {
+            // ignore storage errors
+        }
+    }, []);
 
     function safeParseStored(raw: string | null): SavedSymbol[] | null {
         if (!raw) return null;
@@ -71,13 +84,31 @@ export const WatchlistProvider = ({ children }: { children: ReactNode }) => {
                 return;
             }
 
+            const local = safeParseStored(localStorage.getItem("ai_stocks_watchlist"));
+            if (!local?.length && typeof window !== "undefined") {
+                try {
+                    const cachedRaw = window.sessionStorage.getItem(`${WATCHLIST_CACHE_PREFIX}${user.id}`);
+                    if (cachedRaw) {
+                        const parsed = JSON.parse(cachedRaw) as { ts: number; items: SavedSymbol[] };
+                        if (parsed?.ts && now - parsed.ts < STALE_TIME_MS && Array.isArray(parsed.items)) {
+                            setWatchlist(parsed.items);
+                            hasInitializedRef.current = true;
+                            lastFetchedAtRef.current = parsed.ts;
+                            lastUserIdRef.current = user.id;
+                            return;
+                        }
+                    }
+                } catch {
+                    // ignore storage errors
+                }
+            }
+
             const { data: profile } = await supabase
                 .from("profiles")
                 .select("default_target_pct, default_stop_pct")
                 .eq("id", user.id)
                 .maybeSingle();
 
-            const local = safeParseStored(localStorage.getItem("ai_stocks_watchlist"));
             if (local && local.length > 0) {
                 const { data: existing } = await supabase
                     .from("positions")
@@ -143,20 +174,20 @@ export const WatchlistProvider = ({ children }: { children: ReactNode }) => {
                 return;
             }
 
-            setWatchlist(
-                data.map((r: any) => ({
-                    id: r.id,
-                    symbol: String(r.symbol).toUpperCase(),
-                    name: r.name,
-                    source: r.source,
-                    addedAt: r.added_at,
-                    metadata: r.metadata ?? {},
-                    targetPct: r.target_pct ?? undefined,
-                    stopPct: r.stop_pct ?? undefined,
-                    entryPrice: r.entry_price ?? null,
-                    status: r.status ?? "open",
-                }))
-            );
+            const mappedWatchlist = data.map((r: any) => ({
+                id: r.id,
+                symbol: String(r.symbol).toUpperCase(),
+                name: r.name,
+                source: r.source,
+                addedAt: r.added_at,
+                metadata: r.metadata ?? {},
+                targetPct: r.target_pct ?? undefined,
+                stopPct: r.stop_pct ?? undefined,
+                entryPrice: r.entry_price ?? null,
+                status: r.status ?? "open",
+            }));
+            setWatchlist(mappedWatchlist);
+            writeWatchlistSession(user.id, mappedWatchlist);
 
             // Mark as initialized
             hasInitializedRef.current = true;
@@ -220,22 +251,26 @@ export const WatchlistProvider = ({ children }: { children: ReactNode }) => {
 
         if (error || !data) return;
 
-        setWatchlist((prev) => [
-            {
-                id: data.id,
-                symbol: String(data.symbol).toUpperCase(),
-                name: data.name,
-                source: data.source,
-                addedAt: data.added_at,
-                metadata: data.metadata ?? {},
-                targetPct: data.target_pct ?? undefined,
-                stopPct: data.stop_pct ?? undefined,
-                entryPrice: data.entry_price ?? null,
-                status: data.status ?? "open",
-            },
-            ...prev,
-        ]);
-    }, [user, supabase, isSaved]);
+        setWatchlist((prev) => {
+            const next = [
+                {
+                    id: data.id,
+                    symbol: String(data.symbol).toUpperCase(),
+                    name: data.name,
+                    source: data.source,
+                    addedAt: data.added_at,
+                    metadata: data.metadata ?? {},
+                    targetPct: data.target_pct ?? undefined,
+                    stopPct: data.stop_pct ?? undefined,
+                    entryPrice: data.entry_price ?? null,
+                    status: data.status ?? "open",
+                },
+                ...prev,
+            ];
+            writeWatchlistSession(user.id, next);
+            return next;
+        });
+    }, [user, supabase, isSaved, writeWatchlistSession]);
 
     const confirmSave = useCallback(async (targetPct: number, stopPct: number, itemToSave: Omit<SavedSymbol, "id" | "addedAt">) => {
         if (!itemToSave || !user) return;
@@ -305,30 +340,38 @@ export const WatchlistProvider = ({ children }: { children: ReactNode }) => {
 
         if (error || !data) return false;
 
-        setWatchlist((prev) => prev.map((item) => item.id === id ? {
-            id: data.id,
-            symbol: String(data.symbol).toUpperCase(),
-            name: data.name,
-            source: data.source,
-            addedAt: data.added_at,
-            metadata: data.metadata ?? {},
-            targetPct: data.target_pct ?? undefined,
-            stopPct: data.stop_pct ?? undefined,
-            entryPrice: data.entry_price ?? null,
-            status: data.status ?? "open",
-        } : item));
+        setWatchlist((prev) => {
+            const next = prev.map((item) => item.id === id ? {
+                id: data.id,
+                symbol: String(data.symbol).toUpperCase(),
+                name: data.name,
+                source: data.source,
+                addedAt: data.added_at,
+                metadata: data.metadata ?? {},
+                targetPct: data.target_pct ?? undefined,
+                stopPct: data.stop_pct ?? undefined,
+                entryPrice: data.entry_price ?? null,
+                status: data.status ?? "open",
+            } : item);
+            writeWatchlistSession(user.id, next);
+            return next;
+        });
 
         return true;
-    }, [user, supabase]);
+    }, [user, supabase, writeWatchlistSession]);
 
     const removeSymbol = useCallback((id: string) => {
         if (!user) return;
         void (async () => {
             const { error } = await supabase.from("positions").delete().eq("id", id).eq("user_id", user.id);
             if (error) return;
-            setWatchlist((prev) => prev.filter((item) => item.id !== id));
+            setWatchlist((prev) => {
+                const next = prev.filter((item) => item.id !== id);
+                writeWatchlistSession(user.id, next);
+                return next;
+            });
         })();
-    }, [user, supabase]);
+    }, [user, supabase, writeWatchlistSession]);
 
     const removeSymbolBySymbol = useCallback((symbol: string) => {
         if (!user) return;

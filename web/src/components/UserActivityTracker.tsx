@@ -38,6 +38,16 @@ function blockTracking() {
   }
 }
 
+function normalizeTrackedPath(cleanPath: string): string {
+  if (cleanPath.startsWith("/stocks/")) return "/stocks/[symbol]";
+  if (cleanPath.startsWith("/blogs/")) return "/blogs/[slug]";
+  if (cleanPath.startsWith("/reports/")) return "/reports/[report]";
+  return cleanPath;
+}
+
+const TRACKED_PATHS_STORAGE_KEY = "egxbots_tracked_paths_v2";
+const TRACK_DEDUPE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 function Tracker() {
   const { user } = useAuth();
   const pathname = usePathname();
@@ -50,21 +60,27 @@ function Tracker() {
     if (!user || !pathname || pathname.startsWith("/admin") || pathname.startsWith("/api/")) return;
     const basePath = pathname.replace(/^\/(?:ar|en)(?=\/|$)/, "") || "/";
     const cleanPath = basePath === "/scanner/backtests" ? `${basePath}?tab=${tab}` : basePath;
-    const key = `${user.id}:${cleanPath}`;
+    const normalizedPath = normalizeTrackedPath(cleanPath);
+    const key = `${user.id}:${normalizedPath}`;
     if (lastTracked.current === key) return;
     if (trackingBlocked()) return;
 
-    // Deduplicate repeated navigation to the same page within 15 minutes
+    // Deduplicate repeated navigation to the same route pattern within 6 hours via localStorage
     try {
-      const raw = sessionStorage.getItem("egxbots_tracked_paths_v1");
-      const map = raw ? JSON.parse(raw) : {};
+      const raw = localStorage.getItem(TRACKED_PATHS_STORAGE_KEY);
+      const map: Record<string, number> = raw ? JSON.parse(raw) : {};
       const now = Date.now();
-      if (map[key] && now - map[key] < 15 * 60 * 1000) {
+      for (const existingKey of Object.keys(map)) {
+        if (now - Number(map[existingKey] || 0) >= TRACK_DEDUPE_MS) {
+          delete map[existingKey];
+        }
+      }
+      if (map[key] && now - map[key] < TRACK_DEDUPE_MS) {
         lastTracked.current = key;
         return;
       }
       map[key] = now;
-      sessionStorage.setItem("egxbots_tracked_paths_v1", JSON.stringify(map));
+      localStorage.setItem(TRACKED_PATHS_STORAGE_KEY, JSON.stringify(map));
     } catch {}
 
     lastTracked.current = key;
@@ -73,7 +89,7 @@ function Tracker() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event_name: "page_view",
-        path: cleanPath,
+        path: normalizedPath,
         session_id: getTrackingSessionId(),
         metadata: { title: typeof document !== "undefined" ? document.title : "", ...(basePath === "/scanner/backtests" ? { tab } : {}) },
       }),

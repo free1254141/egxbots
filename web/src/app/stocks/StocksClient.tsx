@@ -1,29 +1,120 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { Search, Filter, ArrowUpRight, Sparkles } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
+import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR } from "@/lib/saudi-stocks";
 
 interface StockItem {
   symbol: string;
   name: string;
+  nameAr?: string;
   sector: string;
   marketCap?: number | null;
 }
 
+const FALLBACK_TASI_STOCKS: StockItem[] = (() => {
+  const bySymbol = new Map<string, StockItem>();
+  for (const s of POPULAR_TASI_STOCKS) {
+    bySymbol.set(s.symbol, {
+      symbol: s.symbol,
+      name: s.name,
+      nameAr: s.name_ar,
+      sector: "السوق السعودي (تاسي)",
+      marketCap: null,
+    });
+  }
+  for (const [symbol, nameAr] of Object.entries(SAUDI_STOCK_NAMES_AR)) {
+    if (!bySymbol.has(symbol)) {
+      bySymbol.set(symbol, {
+        symbol,
+        name: nameAr,
+        nameAr,
+        sector: "السوق السعودي (تاسي)",
+        marketCap: null,
+      });
+    }
+  }
+  return Array.from(bySymbol.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+})();
+
 export default function StocksClient({ initialStocks }: { initialStocks: StockItem[] }) {
   const { language } = useLanguage();
+  const { market, isSaudi } = useMarket();
   const isAr = language === "ar";
 
   const [query, setQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState("all");
+  const [tasiStocks, setTasiStocks] = useState<StockItem[] | null>(null);
+  const [isLoadingTasi, setIsLoadingTasi] = useState(false);
+
+  useEffect(() => {
+    setSelectedSector("all");
+    if (!isSaudi || tasiStocks !== null) return;
+
+    const controller = new AbortController();
+    setIsLoadingTasi(true);
+
+    fetch("/api/symbols/search?q=&limit=500&market=tasi", { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
+      .then((payload) => {
+        const results = Array.isArray(payload?.results) ? payload.results : [];
+        const bySymbol = new Map<string, StockItem>();
+        for (const item of results) {
+          const cleanSym = String(item?.symbol || item?.Symbol || "")
+            .trim()
+            .toUpperCase()
+            .replace(/\.(SR|SA|TADAWUL)$/i, "");
+          if (!cleanSym) continue;
+          const nameAr = String(item?.name_ar || item?.NameAr || SAUDI_STOCK_NAMES_AR[cleanSym] || "").trim();
+          const nameEn = String(item?.name || item?.Name || nameAr || cleanSym).trim();
+          const sector = String(item?.sector || item?.Sector || "").trim();
+          bySymbol.set(cleanSym, {
+            symbol: cleanSym,
+            name: nameEn || cleanSym,
+            nameAr: nameAr || undefined,
+            sector,
+            marketCap: null,
+          });
+        }
+        const parsed = Array.from(bySymbol.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+        setTasiStocks(parsed.length > 0 ? parsed : FALLBACK_TASI_STOCKS);
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          console.warn("Failed to load TASI directory, using fallback list:", err);
+          setTasiStocks(FALLBACK_TASI_STOCKS);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingTasi(false);
+      });
+
+    return () => controller.abort();
+  }, [market, isSaudi, tasiStocks]);
 
   const enrichedStocks = useMemo(() => {
-    return initialStocks.map((s) => {
+    const sourceStocks = isSaudi ? (tasiStocks ?? FALLBACK_TASI_STOCKS) : initialStocks;
+    return sourceStocks.map((s) => {
+      if (isSaudi) {
+        const cleanSym = s.symbol.toUpperCase().replace(/\.(SR|SA|TADAWUL)$/i, "");
+        const nameAr = s.nameAr || SAUDI_STOCK_NAMES_AR[cleanSym] || s.name || cleanSym;
+        const nameEn = s.name && s.name !== cleanSym ? s.name : (nameAr || cleanSym);
+        const defaultSector = isAr ? "السوق السعودي (تاسي)" : "Saudi Exchange (TASI)";
+        return {
+          ...s,
+          symbol: cleanSym,
+          nameAr,
+          nameEn,
+          sectorDisplay: s.sector || defaultSector,
+        };
+      }
+
       const canonical = getCanonicalStockName(s.symbol);
       const nameAr = canonical.name_ar && canonical.name_ar !== s.symbol ? canonical.name_ar : (s.name || s.symbol);
       const nameEn = canonical.name_en && canonical.name_en !== s.symbol ? canonical.name_en : (s.name || s.symbol);
@@ -35,7 +126,7 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
         sectorDisplay: isAr ? sectorAr : (s.sector || sectorAr),
       };
     });
-  }, [initialStocks, isAr]);
+  }, [initialStocks, tasiStocks, isSaudi, isAr]);
 
   const sectors = useMemo(() => {
     const set = new Set<string>();
@@ -69,19 +160,23 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
           dir={isAr ? "rtl" : "ltr"}
           badgeIcon={<Sparkles className="w-5 h-5 text-amber-500" />}
           eyebrow={
-            isAr
-              ? "دليل السوق والشركات | EGX DIRECTORY"
-              : "EGX MARKET & COMPANIES DIRECTORY"
+            isSaudi
+              ? (isAr ? "دليل السوق السعودي والشركات | TASI DIRECTORY" : "TASI MARKET & COMPANIES DIRECTORY")
+              : (isAr ? "دليل السوق والشركات | EGX DIRECTORY" : "EGX MARKET & COMPANIES DIRECTORY")
           }
           title={
-            isAr
-              ? "دليل أسهم البورصة المصرية بالذكاء الاصطناعي"
-              : "Egyptian Exchange (EGX) AI Stocks Directory"
+            isSaudi
+              ? (isAr ? "دليل أسهم السوق السعودي (تاسي) بالذكاء الاصطناعي" : "Saudi Exchange (TASI) AI Stocks Directory")
+              : (isAr ? "دليل أسهم البورصة المصرية بالذكاء الاصطناعي" : "Egyptian Exchange (EGX) AI Stocks Directory")
           }
           description={
-            isAr
-              ? "تصفح جميع الشركات والأسهم المقيدة في البورصة المصرية بالاسم العربي والرمز، واستعرض التقييمات الفنية ونماذج التعلم الآلي ومستويات السيولة لكل سهم."
-              : "Browse all listed companies on the Egyptian Exchange (EGX) by Arabic/English name or ticker, and explore technical indicators, machine learning scores, and liquidity metrics."
+            isSaudi
+              ? (isAr
+                  ? "تصفح جميع الشركات والأسهم المدرجة في السوق السعودي (تداول / تاسي) بالاسم العربي والرمز (4 أرقام)، واستعرض التقييمات الفنية ومستويات الدعم والمقاومة لكل سهم بالريال السعودي (ر.س)."
+                  : "Browse all listed companies on the Saudi Exchange (Tadawul / TASI) by Arabic/English name or 4-digit ticker, and explore technical indicators, AI scores, and key price levels in SAR.")
+              : (isAr
+                  ? "تصفح جميع الشركات والأسهم المقيدة في البورصة المصرية بالاسم العربي والرمز، واستعرض التقييمات الفنية ونماذج التعلم الآلي ومستويات السيولة لكل سهم."
+                  : "Browse all listed companies on the Egyptian Exchange (EGX) by Arabic/English name or ticker, and explore technical indicators, machine learning scores, and liquidity metrics.")
           }
         />
       </div>
@@ -95,9 +190,13 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={
-              isAr
-                ? "ابحث بالاسم العربي أو الإنجليزي أو الرمز (مثال: العربية للألومنيوم، طلعت مصطفى، COMI، ALUM)..."
-                : "Search by company name or symbol (e.g., COMI, ALUM, Talaat Moustafa)..."
+              isSaudi
+                ? (isAr
+                    ? "ابحث بالاسم العربي أو الإنجليزي أو الرمز (مثال: أرامكو، الراجحي، 2222، 1120)..."
+                    : "Search by company name or symbol (e.g., 2222, 1120, Aramco, Al Rajhi)...")
+                : (isAr
+                    ? "ابحث بالاسم العربي أو الإنجليزي أو الرمز (مثال: العربية للألومنيوم، طلعت مصطفى، COMI، ALUM)..."
+                    : "Search by company name or symbol (e.g., COMI, ALUM, Talaat Moustafa)...")
             }
             className="w-full h-11 pl-10 pr-4 text-xs font-black border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-950 text-black dark:text-white outline-none focus:bg-[#FFE600] focus:text-black transition-none"
           />
@@ -123,7 +222,9 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
       {/* Stocks Count Indicator */}
       <div className="mb-4 flex justify-between items-center text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">
         <span>
-          {isAr
+          {isSaudi && isLoadingTasi
+            ? (isAr ? "جاري تحميل دليل السوق السعودي..." : "Loading TASI directory...")
+            : isAr
             ? `عرض ${filtered.length} سهم من أصل ${enrichedStocks.length}`
             : `Showing ${filtered.length} of ${enrichedStocks.length} stocks`}
         </span>
@@ -143,7 +244,7 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
           <Link
             prefetch={false}
             key={stock.symbol}
-            href={`/stocks/${stock.symbol.toLowerCase()}`}
+            href={`/stocks/${stock.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
             className="group block p-4 bg-white dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.5)] transition-all"
           >
             <div className="flex items-center justify-between gap-3 mb-3">
@@ -158,7 +259,7 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
                     {stock.symbol}
                   </span>
                   <span className="block text-[10px] text-zinc-500 font-bold uppercase">
-                    EGX
+                    {isSaudi ? "TASI" : "EGX"}
                   </span>
                 </div>
               </div>

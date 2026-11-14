@@ -176,6 +176,7 @@ export async function GET(req: NextRequest) {
         label: isLifetime ? "مدى الحياة (Lifetime)" : (isTrial ? "تجربة Pro مجانية" : (pro ? "Pro" : "مجاني")),
         is_trial: isTrial,
         trial_eligible: trialEligible,
+        trial_expires_at: trialRes.data?.expires_at || null,
         is_pro: pro,
         is_lifetime: isLifetime,
         status: pro ? (activeSub?.status || "active") : (activeSub ? "canceled" : "none"),
@@ -207,8 +208,9 @@ export async function GET(req: NextRequest) {
         },
       },
     }, {
-      // Private client cache for 60s prevents repeated redundant checks across tabs while navigating
-      headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+      // Client deduplication + 30m TTL live in fetchUserQuotaCached (sessionStorage),
+      // so prevent browser HTTP caching from serving stale Free responses after an upgrade/trial.
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (err: any) {
     console.error("[api/user/quota] GET error:", err);

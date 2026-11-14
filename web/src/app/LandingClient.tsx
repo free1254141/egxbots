@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useChat } from "@/contexts/ChatContext";
 import {
     Brain,
@@ -68,8 +69,15 @@ const FALLBACK_SIMILARITY_STOCKS = [
 export default function LandingClient() {
     const { user, signInWithGoogle } = useAuth();
     const { language } = useLanguage();
+    const { market, isSaudi, currencyLabel } = useMarket();
     const { setIsOpen } = useChat();
     const isAr = language === "ar";
+    const stats = isSaudi
+        ? [
+            { value: "260+", labelEn: "TASI Symbols", labelAr: "سهم سعودي", colorClass: "neobrutal-bg-yellow" },
+            ...STATS.slice(1),
+        ]
+        : STATS;
 
     const [similarityScans, setSimilarityScans] = useState<any[]>(FALLBACK_SIMILARITY_STOCKS);
     const [similarityUpdatedAt, setSimilarityUpdatedAt] = useState<string | null>(null);
@@ -107,10 +115,36 @@ export default function LandingClient() {
         }
     };
 
+    const fetchLandingCachedJson = async (key: string, url: string, ttlMs = 60 * 60 * 1000) => {
+        const storageKey = `egxbots_landing_widgets_v2:${market}:${key}`;
+        if (typeof window !== "undefined") {
+            try {
+                const raw = window.sessionStorage.getItem(storageKey);
+                if (raw) {
+                    const parsed = JSON.parse(raw) as { ts: number; data: any };
+                    if (parsed?.ts && Date.now() - parsed.ts < ttlMs && parsed.data) {
+                        return parsed.data;
+                    }
+                }
+            } catch {
+                // ignore storage errors
+            }
+        }
+        const res = await fetch(url);
+        const data = await res.json();
+        if (typeof window !== "undefined" && res.ok && data) {
+            try {
+                window.sessionStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), data }));
+            } catch {
+                // ignore quota errors
+            }
+        }
+        return data;
+    };
+
     useEffect(() => {
         setNewsLoading(true);
-        fetch("/api/scan/news?limit=3")
-            .then(res => res.json())
+        fetchLandingCachedJson("news_3", "/api/scan/news?limit=3")
             .then(data => {
                 if (data?.data) {
                     setRecentNews(data.data);
@@ -121,8 +155,7 @@ export default function LandingClient() {
     }, []);
 
     useEffect(() => {
-        fetch("/api/scan/similarity/published?limit=6")
-            .then(res => res.json())
+        fetchLandingCachedJson("similarity_6", "/api/scan/similarity/published?limit=6")
             .then(data => {
                 if (data?.scans && data.scans.length > 0) {
                     const mapped = data.scans.map((s: any) => ({
@@ -162,8 +195,9 @@ export default function LandingClient() {
 
     useEffect(() => {
         let cancelled = false;
-        fetch("/api/market/status")
-            .then(res => res.json())
+        setMarketLoading(true);
+        setMarketData(null);
+        fetchLandingCachedJson(`market_status_${market}`, `/api/market/status?market=${market}`)
             .then(data => {
                 if (!cancelled) {
                     setMarketData(data);
@@ -175,25 +209,23 @@ export default function LandingClient() {
                 if (!cancelled) setMarketLoading(false);
             });
         return () => { cancelled = true; };
-    }, []);
+    }, [market]);
 
     // Aggregate proof numbers (picks / closed / win rate / users). Served from
-    // the Edge CDN, so it costs one cached request per visitor instead of a
-    // database read.
+    // the Edge CDN and cached for 1h in sessionStorage.
     useEffect(() => {
-        fetch("/api/market/proof")
-            .then(res => res.json())
+        let cancelled = false;
+        fetchLandingCachedJson(`market_proof_${market}`, `/api/market/proof?market=${market}`)
             .then(data => {
-                if (data && typeof data === "object") setProof(data);
+                if (!cancelled && data && typeof data === "object") setProof(data);
             })
             .catch(() => {});
-    }, []);
+        return () => { cancelled = true; };
+    }, [market]);
 
-    // Pricing teaser data. Served by the CDN-cached public config, so the
-    // section costs one cache hit and never exposes a per-user price.
+    // Pricing teaser data. Served by the CDN-cached public config and cached in sessionStorage.
     useEffect(() => {
-        fetch("/api/payment/public-config")
-            .then(res => res.json())
+        fetchLandingCachedJson("payment_public_config", "/api/payment/public-config")
             .then(data => {
                 if (data && Array.isArray(data.plans)) setPlanConfig(data);
             })
@@ -413,7 +445,13 @@ export default function LandingClient() {
                     <div className="landing-fade-up inline-block border-4 border-black dark:border-white px-4 py-2.5 neobrutal-bg-yellow font-black text-xs sm:text-sm uppercase tracking-widest mb-8 rotate-[-1.5deg] shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:rotate-[0deg] hover:scale-105 transition-all duration-200 cursor-pointer">
                         <span className="flex items-center gap-2 text-black dark:text-black">
                             <Sparkles className="w-4 h-4 text-black dark:text-black animate-spin" style={{ animationDuration: '3s' }} />
-                            {isAr ? "منصة تحليل البورصة المصرية بالذكاء الاصطناعي" : "EGX Stock Analysis Powered by AI"}
+                            {isAr
+                                ? isSaudi
+                                    ? "منصة تحليل السوق السعودي والمصري بالذكاء الاصطناعي"
+                                    : "منصة تحليل البورصة المصرية بالذكاء الاصطناعي"
+                                : isSaudi
+                                    ? "Saudi Tadawul (TASI) Analysis Powered by AI"
+                                    : "EGX Stock Analysis Powered by AI"}
                         </span>
                     </div>
 
@@ -515,7 +553,9 @@ export default function LandingClient() {
                             ? (isAr
                                 ? `معدل نجاح ${proof.win_rate}% على ${proof.closed.toLocaleString("en-US")} توصية مغلقة — بيانات حقيقية محدثة يومياً`
                                 : `${proof.win_rate}% win rate across ${proof.closed.toLocaleString("en-US")} closed picks — real, refreshed daily`)
-                            : (isAr ? "بيانات حقيقية محدثة يومياً من السوق المصري" : "Real Egyptian market data, refreshed daily")}
+                            : isSaudi
+                                ? (isAr ? "بيانات حقيقية محدثة يومياً من السوق السعودي (تاسي)" : "Real Saudi market data (TASI), refreshed daily")
+                                : (isAr ? "بيانات حقيقية محدثة يومياً من السوق المصري" : "Real Egyptian market data, refreshed daily")}
                     </p>
 
                     {/* Interactive AI Chatbot Spotlight Feature Banner */}
@@ -638,13 +678,19 @@ export default function LandingClient() {
                             {isAr ? "ترتيب السوق اليوم" : "TODAY'S MARKET RANKING"}
                         </div>
                         <h2 className="text-3xl sm:text-5xl font-black text-black dark:text-white tracking-tight">
-                            {isAr ? "أفضل الأسهم المصرية" : "Top Ranked Popular Stocks"}
+                            {isAr
+                                ? isSaudi
+                                    ? "أفضل الأسهم السعودية"
+                                    : "أفضل الأسهم المصرية"
+                                : isSaudi
+                                    ? "Top Ranked Saudi Stocks"
+                                    : "Top Ranked Popular Stocks"}
                         </h2>
                     </div>
 
                     {/* Transparent System Stats — moved under heading */}
                     <div className="max-w-5xl mx-auto mb-12 grid grid-cols-2 md:grid-cols-4 gap-6">
-                        {STATS.map((stat, idx) => (
+                        {stats.map((stat, idx) => (
                             <div
                                 key={stat.value}
                                 className={`border-4 border-black dark:border-white ${stat.colorClass} p-6 text-center flex flex-col justify-center items-center shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_rgba(255,255,255,1)] hover:scale-105 transition-all duration-200 cursor-pointer animate-[fadeInUp_0.6s_ease-out_both]`}
@@ -1125,12 +1171,18 @@ export default function LandingClient() {
                             {isAr ? "اتجاه السوق والعملة" : "MARKET TREND & CURRENCY"}
                         </div>
                         <h2 className="text-3xl sm:text-5xl font-black text-black dark:text-white tracking-tight">
-                            {isAr ? "متابعة لحظية للسوق المصرية" : "Live Egyptian Market Pulse"}
+                            {isSaudi
+                                ? (isAr ? "متابعة لحظية للسوق السعودي (تاسي)" : "Live Saudi Market Pulse (TASI)")
+                                : (isAr ? "متابعة لحظية للسوق المصرية" : "Live Egyptian Market Pulse")}
                         </h2>
                         <p className="text-sm sm:text-base text-zinc-500 max-w-xl mx-auto font-bold mt-4">
-                            {isAr
-                                ? "تتبع مباشر لمؤشرات البورصة المصرية (EGX 30 / EGX 100) وسعر الدولار لحظة بلحظة."
-                                : "Live EGX index tracking, USD/EGP rate, and real-time market regime analysis."}
+                            {isSaudi
+                                ? (isAr
+                                    ? "تتبع مباشر لأداء مؤشر السوق السعودي العام (TASI - تداول) والاتجاه العام لحظة بلحظة."
+                                    : "Live Saudi Tadawul (TASI) index tracking, SAR market data, and real-time regime analysis.")
+                                : (isAr
+                                    ? "تتبع مباشر لمؤشرات البورصة المصرية (EGX 30 / EGX 100) وسعر الدولار لحظة بلحظة."
+                                    : "Live EGX index tracking, USD/EGP rate, and real-time market regime analysis.")}
                         </p>
                     </div>
 
@@ -1141,41 +1193,93 @@ export default function LandingClient() {
                         </div>
                     ) : marketData ? (
                         <>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                                {(() => {
-                                    const egx30 = getMarketStats(marketData.egx30);
-                                    const egx100 = getMarketStats(marketData.egx100);
-                                    const usdegp = getMarketStats(marketData.usdegp);
-                                    const cards = [
-                                        { labelKey: "EGX 30", labelAr: "EGX 30", value: egx30.last, changePct: egx30.changePct, unit: isAr ? "نقطة" : "pts", icon: Landmark, up: egx30.changePct >= 0 },
-                                        { labelKey: "EGX 100", labelAr: "EGX 100", value: egx100.last, changePct: egx100.changePct, unit: isAr ? "نقطة" : "pts", icon: Layers, up: egx100.changePct >= 0 },
-                                        { labelKey: "USD/EGP", labelAr: "USD/EGP", value: usdegp.last, changePct: usdegp.changePct, unit: isAr ? "جنيه" : "EGP", icon: DollarSign, up: usdegp.changePct >= 0 },
-                                    ];
-                                    return cards.map((card, idx) => (
-                                        <div key={idx} className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col justify-between hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all duration-200">
-                                            <div className="flex items-center justify-between mb-3">
-                                                <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{card.labelAr}</span>
-                                                <card.icon className="w-5 h-5 text-indigo-500" />
+                            {isSaudi ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                                    {(() => {
+                                        const tasi = getMarketStats(marketData.tasi);
+                                        const up = tasi.changePct >= 0;
+                                        return (
+                                            <>
+                                                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col justify-between hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all duration-200">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">TASI</span>
+                                                        <Landmark className="w-5 h-5 text-emerald-500" />
+                                                    </div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                                            {typeof tasi.last === "number" && tasi.last > 0 ? tasi.last.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
+                                                        </span>
+                                                        <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{isAr ? "نقطة" : "pts"}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 mt-4">
+                                                        <span className={`text-sm font-black flex items-center ${up ? "text-emerald-500" : "text-rose-500"}`}>
+                                                            {up ? "+" : ""}{typeof tasi.changePct === "number" && Number.isFinite(tasi.changePct) ? tasi.changePct.toFixed(2) : "0.00"}%
+                                                        </span>
+                                                        {up
+                                                            ? <ArrowUpRight className="w-4 h-4 text-emerald-500" />
+                                                            : <ArrowDownRight className="w-4 h-4 text-rose-500" />
+                                                        }
+                                                    </div>
+                                                </div>
+
+                                                <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col justify-between hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all duration-200">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                                            {isAr ? "العملة والسوق" : "Market & Currency"}
+                                                        </span>
+                                                        <DollarSign className="w-5 h-5 text-emerald-500" />
+                                                    </div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                                            SAR
+                                                        </span>
+                                                        <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{currencyLabel}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 mt-4 text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                                                        {isAr ? "تداول السعودية · TADAWUL" : "Saudi Exchange · TADAWUL"}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                                    {(() => {
+                                        const egx30 = getMarketStats(marketData.egx30);
+                                        const egx100 = getMarketStats(marketData.egx100);
+                                        const usdegp = getMarketStats(marketData.usdegp);
+                                        const cards = [
+                                            { labelKey: "EGX 30", labelAr: "EGX 30", value: egx30.last, changePct: egx30.changePct, unit: isAr ? "نقطة" : "pts", icon: Landmark, up: egx30.changePct >= 0 },
+                                            { labelKey: "EGX 100", labelAr: "EGX 100", value: egx100.last, changePct: egx100.changePct, unit: isAr ? "نقطة" : "pts", icon: Layers, up: egx100.changePct >= 0 },
+                                            { labelKey: "USD/EGP", labelAr: "USD/EGP", value: usdegp.last, changePct: usdegp.changePct, unit: isAr ? "جنيه" : "EGP", icon: DollarSign, up: usdegp.changePct >= 0 },
+                                        ];
+                                        return cards.map((card, idx) => (
+                                            <div key={idx} className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col justify-between hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all duration-200">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{card.labelAr}</span>
+                                                    <card.icon className="w-5 h-5 text-indigo-500" />
+                                                </div>
+                                                <div className="flex items-baseline gap-2">
+                                                    <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                                        {typeof card.value === "number" ? card.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
+                                                    </span>
+                                                    <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{card.unit}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 mt-4">
+                                                    <span className={`text-sm font-black flex items-center ${card.up ? "text-emerald-500" : "text-rose-500"}`}>
+                                                        {card.up ? "+" : ""}{typeof card.changePct === "number" ? card.changePct.toFixed(2) : "0.00"}%
+                                                    </span>
+                                                    {card.up
+                                                        ? <ArrowUpRight className="w-4 h-4 text-emerald-500" />
+                                                        : <ArrowDownRight className="w-4 h-4 text-rose-500" />
+                                                    }
+                                                </div>
                                             </div>
-                                            <div className="flex items-baseline gap-2">
-                                                <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
-                                                    {typeof card.value === "number" ? card.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
-                                                </span>
-                                                <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{card.unit}</span>
-                                            </div>
-                                            <div className="flex items-center gap-1.5 mt-4">
-                                                <span className={`text-sm font-black flex items-center ${card.up ? "text-emerald-500" : "text-rose-500"}`}>
-                                                    {card.up ? "+" : ""}{typeof card.changePct === "number" ? card.changePct.toFixed(2) : "0.00"}%
-                                                </span>
-                                                {card.up
-                                                    ? <ArrowUpRight className="w-4 h-4 text-emerald-500" />
-                                                    : <ArrowDownRight className="w-4 h-4 text-rose-500" />
-                                                }
-                                            </div>
-                                        </div>
-                                    ));
-                                })()}
-                            </div>
+                                        ));
+                                    })()}
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] flex flex-col justify-between">
@@ -1202,18 +1306,30 @@ export default function LandingClient() {
                                                             : "↔️ Sideways"}
                                         </span>
                                         <p className="text-xs text-zinc-600 dark:text-zinc-500 font-bold mt-2">
-                                            {isAr
-                                                ? "بناءً على تحليل مؤشر EGX 30 وأداء السوق اليومي."
-                                                : "Based on EGX 30 index momentum and daily market performance."}
+                                            {isSaudi
+                                                ? (isAr
+                                                    ? "بناءً على تحليل مؤشر تاسي (TASI) وأداء السوق السعودي اليومي."
+                                                    : "Based on TASI index momentum and daily Saudi market performance.")
+                                                : (isAr
+                                                    ? "بناءً على تحليل مؤشر EGX 30 وأداء السوق اليومي."
+                                                    : "Based on EGX 30 index momentum and daily market performance.")}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="border-4 border-black dark:border-white bg-[#FFE600] dark:bg-[#FFE600] text-black dark:text-black p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex flex-col justify-center">
-                                    <p className="text-sm font-black uppercase tracking-wider mb-2">{isAr ? "مؤشر البورصة المصرية" : "EGX Market Overview"}</p>
+                                    <p className="text-sm font-black uppercase tracking-wider mb-2">
+                                        {isSaudi
+                                            ? (isAr ? "مؤشر السوق السعودي (تاسي)" : "Saudi Market (TASI) Overview")
+                                            : (isAr ? "مؤشر البورصة المصرية" : "EGX Market Overview")}
+                                    </p>
                                     <p className="text-xs font-bold opacity-80 leading-relaxed mb-4">
-                                        {isAr
-                                            ? "احصل على تحليل كامل للأسهم المصرية، خرائط حرارية للقطاعات، وتوصيات يومية مدعومة بالذكاء الاصطناعي."
-                                            : "Get full EGX market analysis, sector heatmaps, and AI-backed daily recommendations."}
+                                        {isSaudi
+                                            ? (isAr
+                                                ? "احصل على تحليل كامل لأسهم تداول السعودية، خرائط حرارية للقطاعات، وتوصيات يومية مدعومة بالذكاء الاصطناعي."
+                                                : "Get full Saudi Tadawul market analysis, sector heatmaps, and AI-backed daily recommendations.")
+                                            : (isAr
+                                                ? "احصل على تحليل كامل للأسهم المصرية، خرائط حرارية للقطاعات، وتوصيات يومية مدعومة بالذكاء الاصطناعي."
+                                                : "Get full EGX market analysis, sector heatmaps, and AI-backed daily recommendations.")}
                                     </p>
                                     <Link
                                         href="/scanner/market"
@@ -1357,7 +1473,7 @@ export default function LandingClient() {
                                     <div className="text-xs font-black uppercase tracking-widest text-zinc-500">{plan.label}</div>
                                     <div className="mt-3 flex items-baseline gap-1.5">
                                         <span className="text-4xl font-black font-mono text-black dark:text-white">{plan.price}</span>
-                                        <span className="text-sm font-black text-zinc-500">{isAr ? "ج.م" : "EGP"}</span>
+                                        <span className="text-sm font-black text-zinc-500">{currencyLabel}</span>
                                     </div>
                                     <div className="mt-1 text-xs font-bold text-zinc-500">{plan.period}</div>
                                     {plan.badge && (

@@ -12,6 +12,8 @@ import {
   BarChart3,
   RefreshCw,
 } from "lucide-react";
+import { useMarket } from "@/contexts/MarketContext";
+import { isSaudiSymbol } from "@/lib/saudi-stocks";
 
 interface SystemsComparisonTabProps {
   isAr?: boolean;
@@ -42,18 +44,27 @@ export default function SystemsComparisonTab({
   isPro = false,
   recommendations: initialRecs = [],
 }: SystemsComparisonTabProps) {
+  const { market, isSaudi, currencyLabel } = useMarket();
   const [selectedPeriod, setSelectedPeriod] = useState<"august" | "september" | "full_year">("full_year");
   const [loading, setLoading] = useState(false);
-  const [mediumRows, setMediumRows] = useState<any[]>(initialRecs || []);
+
+  const matchingInitialRecs = useMemo(
+    () =>
+      (initialRecs || []).filter((r) => {
+        const symSaudi = r?.exchange === "TADAWUL" || isSaudiSymbol(String(r?.symbol || ""));
+        return isSaudi ? symSaudi : !symSaudi;
+      }),
+    [initialRecs, isSaudi]
+  );
+
+  const [mediumRows, setMediumRows] = useState<any[]>(matchingInitialRecs);
   const [shortTrades, setShortTrades] = useState<any[]>([]);
   const [fastSignals, setFastSignals] = useState<any[]>([]);
 
-  // Update mediumRows if initialRecs updates
+  // Update mediumRows if matching initialRecs updates
   useEffect(() => {
-    if (initialRecs && initialRecs.length > 0) {
-      setMediumRows(initialRecs);
-    }
-  }, [initialRecs]);
+    setMediumRows(matchingInitialRecs);
+  }, [matchingInitialRecs]);
 
   // Load live data from the 3 systems
   useEffect(() => {
@@ -61,17 +72,35 @@ export default function SystemsComparisonTab({
 
     async function fetchAllLiveSystems() {
       setLoading(true);
+      setShortTrades([]);
+      setFastSignals([]);
+      if (matchingInitialRecs.length === 0) {
+        setMediumRows([]);
+      }
       try {
+        const shouldFetchMed = matchingInitialRecs.length === 0;
+        if (isSaudi) {
+          if (shouldFetchMed) {
+            const medRes = await fetch(`/api/ai_bot/recommendations?status=all&limit=200&market=${market}`, {
+              cache: "no-store",
+            }).then((r) => (r.ok ? r.json() : null));
+            if (!cancelled && Array.isArray(medRes)) {
+              setMediumRows(medRes);
+            }
+          }
+          return;
+        }
+
         const promises: Promise<any>[] = [
           fetch("/api/short-swings", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
           fetch("/api/user/scanner-alerts", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
         ];
 
         // If medium recommendations were not passed from parent, fetch them
-        if (!initialRecs || initialRecs.length === 0) {
+        if (shouldFetchMed) {
           promises.push(
-            fetch("/api/ai_bot/recommendations?status=all&limit=200", { cache: "no-store" }).then((r) =>
-              r.ok ? r.json() : null
+            fetch(`/api/ai_bot/recommendations?status=all&limit=200&market=${market}`, { cache: "no-store" }).then(
+              (r) => (r.ok ? r.json() : null)
             )
           );
         }
@@ -103,7 +132,7 @@ export default function SystemsComparisonTab({
     return () => {
       cancelled = true;
     };
-  }, [initialRecs]);
+  }, [matchingInitialRecs, market, isSaudi]);
 
   // Dynamic Computation of live metrics per system per period
   const livePeriodData = useMemo<Record<"august" | "september" | "full_year", PeriodMetrics>>(() => {
@@ -122,6 +151,17 @@ export default function SystemsComparisonTab({
       });
 
       const trades = filtered.length > 0 ? filtered : (period === "full_year" ? closed : []);
+      if (isSaudi && trades.length === 0) {
+        return {
+          tradeCount: 0,
+          winRate: 0,
+          totalReturn: 0,
+          profitFactor: 0,
+          avgHolding: "—",
+          bestTrade: isAr ? "لا توجد صفقات مغلقة في تاسي بعد" : "No closed TASI trades yet",
+          summaryAr: `توصيات المدى المتوسط للسوق السعودي (تاسي - ${currencyLabel}) تعتمد على الصفقات المغلقة الفعلية ولا تظهر بيانات تاريخية من السوق المصري.`,
+        };
+      }
       const wins = trades.filter((r) => (r.status || "").toLowerCase() === "win" || (r.profit_loss_pct || 0) > 0);
       const losses = trades.filter((r) => (r.status || "").toLowerCase() === "loss" || (r.profit_loss_pct || 0) < 0);
       const winRate = trades.length > 0 ? (wins.length / trades.length) * 100 : (period === "august" ? 78.0 : period === "september" ? 36.1 : 57.3);
@@ -165,6 +205,17 @@ export default function SystemsComparisonTab({
 
     // ── Helper 2: Calculate Short Swings Metrics ──
     const calcShort = (period: "august" | "september" | "full_year"): SystemMetric => {
+      if (isSaudi) {
+        return {
+          tradeCount: 0,
+          winRate: 0,
+          totalReturn: 0,
+          profitFactor: 0,
+          avgHolding: "—",
+          bestTrade: isAr ? "خاص بالسوق المصري (EGX)" : "EGX-only system",
+          summaryAr: "نظام إشارات المدى القصير (Short Swings) مخصص حالياً للسوق المصري فقط، بينما تتوفر إشارات المدى المتوسط لسوق تاسي.",
+        };
+      }
       const filtered = shortTrades.filter((t) => {
         if (period === "full_year") return true;
         const d = String(t.exit_date || t.entry_date || "");
@@ -215,6 +266,17 @@ export default function SystemsComparisonTab({
 
     // ── Helper 3: Calculate Fast Scanner Metrics ──
     const calcFast = (period: "august" | "september" | "full_year"): SystemMetric => {
+      if (isSaudi) {
+        return {
+          tradeCount: 0,
+          winRate: 0,
+          totalReturn: 0,
+          profitFactor: 0,
+          avgHolding: "—",
+          bestTrade: isAr ? "خاص بالسوق المصري (EGX)" : "EGX-only system",
+          summaryAr: "رادار الرصد اللحظي (15 دقيقة) يعمل حالياً على الأسهم المصرية فقط ولا يعرض صفقات غير حقيقية في وضع تاسي.",
+        };
+      }
       const getRet = (s: any) => {
         if (typeof s.return_pct === "number") return s.return_pct;
         const ex = s.exit_price ?? s.current_price;
@@ -300,7 +362,7 @@ export default function SystemsComparisonTab({
         fast: calcFast("full_year"),
       },
     };
-  }, [mediumRows, shortTrades, fastSignals]);
+  }, [mediumRows, shortTrades, fastSignals, isSaudi, isAr, currencyLabel]);
 
   const current = livePeriodData[selectedPeriod];
 
@@ -348,10 +410,18 @@ export default function SystemsComparisonTab({
 
         <p className="mt-3 text-xs sm:text-sm font-bold text-zinc-900 leading-relaxed border-t-2 border-black/20 pt-3">
           {isAr
-            ? "يوفر EGX BOTS ثلاثة أنظمة رصد خوارزمية متكاملة في البورصة المصرية تتفق في أدوات التحليل وتتكامل في الأفق الزمني: إشارات المدى المتوسط (2–6 أسابيع)، وإشارات المدى القصير (3–10 جلسات)، وإشارات الرصد اللحظي السريع على فريم 15 دقيقة (1–4 جلسات). كافة البيانات والإحصائيات أدناه مستخرجة حياً من سجل الصفقات الحقيقية بالمنصة."
-            : "EGX BOTS provides three complementary algorithmic technical scanning systems across different time horizons: Medium-Term (2–6 weeks), Short-Term (3–10 sessions), and Intraday Fast Radar on 15m candles (1–4 sessions). All metrics below are computed live from empirical platform logs."}
+            ? `يوفر EGX BOTS ثلاثة أنظمة رصد خوارزمية متكاملة (${isSaudi ? `السوق السعودي تاسي · العملة ${currencyLabel}` : `البورصة المصرية · العملة ${currencyLabel}`}) تتفق في أدوات التحليل وتتكامل في الأفق الزمني: إشارات المدى المتوسط (2–6 أسابيع)، وإشارات المدى القصير (3–10 جلسات)، وإشارات الرصد اللحظي السريع على فريم 15 دقيقة (1–4 جلسات). كافة البيانات والإحصائيات أدناه مستخرجة حياً من سجل الصفقات الحقيقية بالمنصة.`
+            : `EGX BOTS provides three complementary algorithmic technical scanning systems (${isSaudi ? `Saudi Market TASI · ${currencyLabel}` : `Egyptian Exchange EGX · ${currencyLabel}`}) across different time horizons: Medium-Term (2–6 weeks), Short-Term (3–10 sessions), and Intraday Fast Radar on 15m candles (1–4 sessions). All metrics below are computed live from empirical platform logs.`}
         </p>
       </div>
+
+      {isSaudi && (
+        <div className="border-3 border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 p-3 sm:p-4 text-xs font-bold text-emerald-950 dark:text-emerald-200">
+          {isAr
+            ? `🇸🇦 وضع السوق السعودي (تاسي · ${currencyLabel}): يتم عرض إحصائيات صفقات المدى المتوسط المسجلة في تاسي فقط. أنظمة المدى القصير والرادار اللحظي (15 دقيقة) تعمل حالياً في وضع البورصة المصرية.`
+            : `🇸🇦 Saudi Market Mode (TASI · ${currencyLabel}): Showing verified Tadawul Medium-Term recommendation stats only. Short-Swings and 15m Intraday Fast Radar are currently active for EGX.`}
+        </div>
+      )}
 
       {/* ── 2. Period Selector Buttons ── */}
       <div className="flex flex-wrap items-center gap-2 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 p-1.5 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff]">
@@ -721,7 +791,7 @@ export default function SystemsComparisonTab({
         </div>
 
         <p className="text-[11px] font-bold text-zinc-400 pt-2 border-t border-zinc-800">
-          ⚠️ إخلاء مسؤولية تنظيمي (FRA): جميع الأرقام والإحصائيات المعروضة أعلاه محسوبة ومستخرجة حياً من سجلات وبيانات المنصة لأغراض البحث والدراسة العلمية، ولا تُعد نصيحة استثمارية أو ضماناً لتحقيق عوائد مستقبلية.
+          ⚠️ إخلاء مسؤولية تنظيمي {isSaudi ? "(السوق السعودي - تداول)" : "(FRA)"}: جميع الأرقام والإحصائيات المعروضة أعلاه محسوبة ومستخرجة حياً من سجلات وبيانات المنصة لأغراض البحث والدراسة العلمية، ولا تُعد نصيحة استثمارية أو ضماناً لتحقيق عوائد مستقبلية.
         </p>
       </div>
     </div>

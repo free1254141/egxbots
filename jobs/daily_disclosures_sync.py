@@ -31,11 +31,37 @@ if ROOT_DIR not in sys.path:
 load_dotenv(os.path.join(ROOT_DIR, '.env'))
 
 from scripts.disclosures.sync_egx_disclosures import (
-    STOCK_MAP, match_stock, parse_date, analyze_batch_with_ai
+    STOCK_MAP, EXCLUDE_KEYWORDS, match_stock, parse_date, analyze_batch_with_ai
 )
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+
+EXTRA_NON_EGX_KEYWORDS = [
+    'السعودي', 'تداول', 'أرامكو', 'الراجحي', 'دبي', 'أبوظبي', 'أبو ظبي', 'الكويت', 'قطر', 'البحرين',
+    'مسقط', 'عمان', 'وول ستريت', 'ناسداك', 'الفيدرالي', 'النفط', 'الذهب', 'بيتكوين', 'عملات',
+    'الروبية', 'الريال', 'الدرهم', 'الدينار', 'أوروبا', 'آسيا', 'الصين', 'اليابان', 'الأمريكي',
+    'الأمريكية', 'البريطاني', 'تركيا', 'الهند', 'عطاء التعليمية', 'الخليج للكيماويات',
+    'بوبيان للبتروكيماويات', 'إنفيديا', 'انفيديا', 'آبل', 'مايكروسوفت', 'تسلا', 'أمازون',
+    'ميتا', 'جوجل', 'ألفابت', 'سهم صادرات', 'أعيان للإجارة', 'كهرباء ومياه دبي', 'تبريد',
+    'بيتك', 'إعمار', 'أدنوك', 'سالك', 'الدار العقارية', 'طيران الجزيرة', 'زين الكويت',
+    'بورصة الكويت', 'سوق دبي', 'سوق أبوظبي'
+]
+
+
+def extract_shares_from_title(title: str):
+    if not title:
+        return None
+    m = re.search(r'(\d+(?:[.,]\d+)?)\s*(مليون|ألف|الف)\s*سهم', title)
+    if m:
+        num = float(m.group(1).replace(',', '.'))
+        mult = 1_000_000 if m.group(2) == 'مليون' else 1_000
+        return int(round(num * mult))
+    m2 = re.search(r'بعدد\s*(\d[\d,]*)\s*سهم', title)
+    if m2:
+        return int(m2.group(1).replace(',', ''))
+    return None
+
 
 def run_daily_sync():
     print("=" * 65)
@@ -66,6 +92,16 @@ def run_daily_sync():
         'site:mubasher.info/news "مجلس إدارة" "البورصة المصرية"'
     ]
 
+    # Preload latest prices for execution_price enrichment
+    price_map = {}
+    try:
+        p_res = sb.table('stock_technical_indicators').select('symbol, close').execute()
+        for r in (p_res.data or []):
+            if r.get('symbol') and r.get('close'):
+                price_map[r['symbol']] = float(r['close'])
+    except Exception as e:
+        print(f"⚠️ Warning: Could not preload prices ({e})")
+
     new_items = []
     seen_titles = set()
 
@@ -88,10 +124,14 @@ def run_daily_sync():
 
                     # Only process items from latest_date onward
                     if dt_obj >= latest_date and title not in seen_titles:
-                        seen_titles.add(title)
                         clean_t = re.sub(r'\s*-\s*معلومات مباشر.*$', '', title).strip()
+                        if any(kw in clean_t for kw in EXCLUDE_KEYWORDS) or any(kw in clean_t for kw in EXTRA_NON_EGX_KEYWORDS):
+                            continue
                         sym, official_name = match_stock(clean_t)
-                        
+                        if not sym:
+                            continue
+
+                        seen_titles.add(title)
                         action_type = 'general'
                         if 'خفض حصته' in clean_t or 'تراجع' in clean_t or 'بيع' in clean_t:
                             action_type = 'sell'
@@ -106,19 +146,25 @@ def run_daily_sync():
                         elif 'مجلس إدارة' in clean_t:
                             d_type = 'board_resolution'
 
+                        shares_cnt = extract_shares_from_title(clean_t)
+                        meta = {'raw_title': clean_t, 'pub_date': pub, 'synced_by': 'daily_job'}
+                        if action_type in ('buy', 'sell') and sym in price_map:
+                            meta['execution_price'] = price_map[sym]
+                            meta['transaction_currency'] = 'EGP'
+
                         new_items.append({
                             'symbol': sym,
-                            'company_name': official_name or (sym if sym else 'البورصة المصرية'),
+                            'company_name': official_name or sym,
                             'disclosure_type': d_type,
                             'disclosure_date': dt_obj.strftime('%Y-%m-%d'),
                             'title': clean_t,
                             'raw_content': f"الإفصاح: {clean_t}\nالتاريخ: {dt_obj}\nالمصدر: البورصة المصرية",
                             'action_type': action_type,
-                            'shares_count': None,
+                            'shares_count': shares_cnt,
                             'party_name': 'الشركة / كبار المساهمين',
                             'party_role': 'مساهم رئيسي / إدارة',
                             'source_url': link,
-                            'metadata': {'raw_title': clean_t, 'pub_date': pub, 'synced_by': 'daily_job'}
+                            'metadata': meta
                         })
         except Exception as e:
             print(f"Error querying RSS: {e}")

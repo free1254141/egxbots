@@ -234,6 +234,18 @@ def _due_phase(now):
     return None
 
 
+def _run_saudi_daily_refresh():
+    """Run Saudi Tadawul daily refresh reusing trained models after EGX close."""
+    import sys
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from scripts.saudi_pipeline_bootstrap import main as run_saudi_pipeline
+
+    return run_saudi_pipeline(reuse_models=True)
+
+
 def _execute_phase(phase, source):
     import asyncio
     try:
@@ -241,6 +253,15 @@ def _execute_phase(phase, source):
         result = asyncio.run(run_daily_job(trigger="scheduled", phase=phase,
                            model_filter=_scheduler_state.get("model_filter", "adaptive")))
         _record_run(result.get("job_run_id", source), scheduler_result_status(result))
+        if (
+            phase == "close"
+            and os.getenv("SAUDI_SUPABASE_URL")
+            and os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+        ):
+            try:
+                _run_saudi_daily_refresh()
+            except Exception as saudi_exc:
+                print(f"[DAILY-JOB-SCHEDULER] Saudi daily refresh failed (non-fatal): {saudi_exc}")
     except Exception as exc:
         print(f"[DAILY-JOB-SCHEDULER] {phase} run failed: {exc}")
         _record_run(source, "failed")

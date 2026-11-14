@@ -11,55 +11,212 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useMarket, type MarketMode } from "@/contexts/MarketContext";
+import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
 import { searchSymbols } from "@/lib/api";
 import PortfolioHeaderChip from "@/components/PortfolioHeaderChip";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
 
-const POPULAR_EGX_STOCKS = [
-    { symbol: "COMI", name: "Commercial International Bank", exchange: "EGX", country: "Egypt" },
-    { symbol: "FWRY", name: "Fawry for Banking & Payment Technology", exchange: "EGX", country: "Egypt" },
-    { symbol: "TMGH", name: "Talaat Moustafa Group", exchange: "EGX", country: "Egypt" },
-    { symbol: "EAST", name: "Eastern Company", exchange: "EGX", country: "Egypt" },
-    { symbol: "AALR", name: "General Co. for Land Reclamation", exchange: "EGX", country: "Egypt" },
+type SearchResult = {
+    symbol: string;
+    name?: string;
+    name_ar?: string;
+    exchange?: string;
+};
+
+const POPULAR_EGX_STOCKS: SearchResult[] = [
+    { symbol: "COMI", name: "Commercial International Bank", name_ar: "البنك التجاري الدولي", exchange: "EGX" },
+    { symbol: "FWRY", name: "Fawry for Banking & Payment Technology", name_ar: "فوري لتكنولوجيا البنوك", exchange: "EGX" },
+    { symbol: "TMGH", name: "Talaat Moustafa Group", name_ar: "مجموعة طلعت مصطفى", exchange: "EGX" },
+    { symbol: "EAST", name: "Eastern Company", name_ar: "الشرقية للدخان", exchange: "EGX" },
+    { symbol: "AALR", name: "General Co. for Land Reclamation", name_ar: "العامة لاستصلاح الأراضي", exchange: "EGX" },
 ];
 
-type SearchResult = { symbol: string; name?: string; exchange?: string };
+function StockSearchRow({
+    result,
+    language,
+    isSaudi,
+    onSelect,
+}: {
+    result: SearchResult;
+    language: string;
+    isSaudi: boolean;
+    onSelect: (symbol: string) => void;
+}) {
+    const baseSym = String(result.symbol || "").split(".")[0].toUpperCase();
+    const exUpper = (result.exchange || "").toUpperCase();
+    const isTasiItem =
+        exUpper === "TADAWUL" ||
+        exUpper === "TASI" ||
+        isSaudi ||
+        isSaudiSymbol(result.symbol);
+    const badgeLabel = isTasiItem ? "TASI" : exUpper || "EGX";
+    const displayName =
+        language === "ar"
+            ? result.name_ar || (isTasiItem ? SAUDI_STOCK_NAMES_AR[baseSym] : undefined) || result.name
+            : result.name;
+
+    return (
+        <button
+            onClick={() => onSelect(result.symbol)}
+            className="flex items-center justify-between w-full px-4 py-2.5 rounded-none text-left border-b border-black/10 dark:border-white/10 last:border-b-0 hover:bg-[#FFE600] hover:text-black transition-none group/item text-black dark:text-white"
+        >
+            <div className="flex flex-col min-w-0">
+                <span className="text-xs font-black text-black dark:text-white group-hover/item:text-black">
+                    {result.symbol}
+                </span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-[200px] sm:max-w-[260px] group-hover/item:text-black/80">
+                    {displayName}
+                </span>
+            </div>
+            <span
+                className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-none text-black border-2 border-black shrink-0 ${
+                    isTasiItem ? "bg-emerald-400" : "bg-[#00FF66]"
+                }`}
+            >
+                {badgeLabel}
+            </span>
+        </button>
+    );
+}
+
+function MarketSwitcher({
+    market,
+    setMarket,
+    language,
+    variant = "bar",
+}: {
+    market: MarketMode;
+    setMarket: (m: MarketMode) => void;
+    language: string;
+    variant?: "bar" | "drawer";
+}) {
+    const isSaudi = market === "tasi";
+
+    if (variant === "drawer") {
+        return (
+            <div className="px-3 pt-3 pb-1">
+                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400 px-1 mb-1.5">
+                    {language === "ar" ? "تبديل السوق" : "Active Market"}
+                </div>
+                <div
+                    role="group"
+                    aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
+                    className="grid grid-cols-2 gap-1.5 p-1 rounded-xl border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900"
+                >
+                    <button
+                        type="button"
+                        onClick={() => setMarket("egx")}
+                        aria-pressed={!isSaudi}
+                        className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-black transition-all ${
+                            !isSaudi
+                                ? "bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                                : "text-zinc-600 dark:text-zinc-300 border-2 border-transparent hover:text-black dark:hover:text-white"
+                        }`}
+                    >
+                        <span aria-hidden="true">🇪🇬</span>
+                        <span>{language === "ar" ? "مصر (EGX)" : "Egypt (EGX)"}</span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setMarket("tasi")}
+                        aria-pressed={isSaudi}
+                        className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-black transition-all ${
+                            isSaudi
+                                ? "bg-emerald-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                                : "text-zinc-600 dark:text-zinc-300 border-2 border-transparent hover:text-black dark:hover:text-white"
+                        }`}
+                    >
+                        <span aria-hidden="true">🇸🇦</span>
+                        <span>{language === "ar" ? "السعودية (TASI)" : "Saudi (TASI)"}</span>
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div
+            role="group"
+            aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
+            className="inline-flex items-center p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.3)] shrink-0"
+        >
+            <button
+                type="button"
+                onClick={() => setMarket("egx")}
+                aria-pressed={!isSaudi}
+                title={language === "ar" ? "السوق المصري (EGX)" : "Egyptian Market (EGX)"}
+                className={`flex items-center gap-1 h-7 px-1.5 sm:px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                    !isSaudi
+                        ? "bg-[#FFE600] text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+                        : "text-zinc-600 dark:text-zinc-400 border-2 border-transparent hover:text-black dark:hover:text-white"
+                }`}
+            >
+                <span aria-hidden="true">🇪🇬</span>
+                <span className="hidden 2xl:inline">
+                    {language === "ar" ? "مصر (EGX)" : "EGX"}
+                </span>
+                <span className="2xl:hidden">EGX</span>
+            </button>
+            <button
+                type="button"
+                onClick={() => setMarket("tasi")}
+                aria-pressed={isSaudi}
+                title={language === "ar" ? "السوق السعودي (تاسي TASI)" : "Saudi Market (Tadawul TASI)"}
+                className={`flex items-center gap-1 h-7 px-1.5 sm:px-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                    isSaudi
+                        ? "bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]"
+                        : "text-zinc-600 dark:text-zinc-400 border-2 border-transparent hover:text-black dark:hover:text-white"
+                }`}
+            >
+                <span aria-hidden="true">🇸🇦</span>
+                <span className="hidden 2xl:inline">
+                    {language === "ar" ? "السعودية (TASI)" : "TASI"}
+                </span>
+                <span className="2xl:hidden">TASI</span>
+            </button>
+        </div>
+    );
+}
 
 function SearchDropdown({
     language,
+    isSaudi,
     searchQuery,
     searching,
     searchResults,
     onSelect,
 }: {
     language: string;
+    isSaudi: boolean;
     searchQuery: string;
     searching: boolean;
     searchResults: SearchResult[];
     onSelect: (symbol: string) => void;
 }) {
     if (!searchQuery.trim()) {
+        const popularStocks = isSaudi ? POPULAR_TASI_STOCKS : POPULAR_EGX_STOCKS;
+        const popularHeading = isSaudi
+            ? language === "ar"
+                ? "الأسهم السعودية الأكثر شعبية"
+                : "Popular TASI Stocks"
+            : language === "ar"
+              ? "الأسهم المصرية الأكثر شعبية"
+              : "Popular EGX Stocks";
+
         return (
             <div className="flex flex-col">
                 <div className="px-4 py-2 text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest border-b-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 select-none">
-                    {language === "ar" ? "الأسهم المصرية الأكثر شعبية" : "Popular EGX Stocks"}
+                    {popularHeading}
                 </div>
-                {POPULAR_EGX_STOCKS.map((result) => (
-                    <button
+                {popularStocks.map((result) => (
+                    <StockSearchRow
                         key={result.symbol}
-                        onClick={() => onSelect(result.symbol)}
-                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-none text-left border-b border-black/10 dark:border-white/10 last:border-b-0 hover:bg-[#FFE600] hover:text-black transition-none group/item text-black dark:text-white"
-                    >
-                        <div className="flex flex-col min-w-0">
-                            <span className="text-xs font-black text-black dark:text-white group-hover/item:text-black">{result.symbol}</span>
-                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-[200px] sm:max-w-[260px] group-hover/item:text-black/80">
-                                {result.name}
-                            </span>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-none bg-[#00FF66] text-black border-2 border-black shrink-0">
-                            EGX
-                        </span>
-                    </button>
+                        result={result}
+                        language={language}
+                        isSaudi={isSaudi}
+                        onSelect={onSelect}
+                    />
                 ))}
             </div>
         );
@@ -78,21 +235,13 @@ function SearchDropdown({
         return (
             <div className="flex flex-col">
                 {searchResults.map((result) => (
-                    <button
+                    <StockSearchRow
                         key={result.symbol}
-                        onClick={() => onSelect(result.symbol)}
-                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-none text-left border-b border-black/10 dark:border-white/10 last:border-b-0 hover:bg-[#FFE600] hover:text-black transition-none group/item text-black dark:text-white"
-                    >
-                        <div className="flex flex-col min-w-0">
-                            <span className="text-xs font-black text-black dark:text-white group-hover/item:text-black">{result.symbol}</span>
-                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-[200px] sm:max-w-[260px] group-hover/item:text-black/80">
-                                {result.name}
-                            </span>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-none bg-[#00FF66] text-black border-2 border-black shrink-0">
-                            EGX
-                        </span>
-                    </button>
+                        result={result}
+                        language={language}
+                        isSaudi={isSaudi}
+                        onSelect={onSelect}
+                    />
                 ))}
             </div>
         );
@@ -107,6 +256,7 @@ function SearchDropdown({
 
 export default function Header() {
     const { language, setLanguage, t } = useLanguage();
+    const { market, setMarket, isSaudi, country, exchange } = useMarket();
     const { theme, toggleTheme } = useTheme();
     const { user, signOut } = useAuth();
     const pathname = usePathname();
@@ -170,25 +320,45 @@ export default function Header() {
     }, [updateHeaderOffset, user]);
 
     useEffect(() => {
+        setSearchResults([]);
+    }, [market]);
+
+    useEffect(() => {
         if (!searchQuery.trim()) {
             setSearchResults([]);
+            setSearching(false);
             return;
         }
 
+        const controller = new AbortController();
         const delayDebounce = setTimeout(async () => {
             setSearching(true);
             try {
-                const results = await searchSymbols(searchQuery, "Egypt", 50, undefined, undefined, "EGX");
+                const results = await searchSymbols(
+                    searchQuery,
+                    country,
+                    50,
+                    controller.signal,
+                    undefined,
+                    exchange
+                );
                 setSearchResults(results);
-            } catch (err) {
-                console.error("Error searching symbols:", err);
+            } catch (err: any) {
+                if (err?.name !== "AbortError") {
+                    console.error("Error searching symbols:", err);
+                }
             } finally {
-                setSearching(false);
+                if (!controller.signal.aborted) {
+                    setSearching(false);
+                }
             }
         }, 350);
 
-        return () => clearTimeout(delayDebounce);
-    }, [searchQuery]);
+        return () => {
+            clearTimeout(delayDebounce);
+            controller.abort();
+        };
+    }, [searchQuery, country, exchange]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -283,7 +453,7 @@ export default function Header() {
     return (
         <>
         <header ref={headerRef} className="fixed top-0 left-0 right-0 z-[100] w-full border-b-4 border-black dark:border-white bg-white dark:bg-zinc-950 header-stable" dir="ltr">
-            <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-4 md:px-8 py-3 flex items-center justify-between gap-4">
+            <div ref={shellRef} className="mx-auto max-w-[1800px] w-full px-3 sm:px-4 md:px-8 py-3 flex items-center justify-between gap-2 md:gap-4">
                 {/* Brand */}
                 <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
                     {/* Hanging Palestine Watermelon Pennant next to site logo */}
@@ -333,7 +503,15 @@ export default function Header() {
                                 <input
                                     id="header-search-input"
                                     type="text"
-                                    placeholder={language === "ar" ? "ابحث عن سهم..." : "Search EGX..."}
+                                    placeholder={
+                                        language === "ar"
+                                            ? isSaudi
+                                                ? "ابحث عن سهم سعودي (2222)..."
+                                                : "ابحث عن سهم مصري..."
+                                            : isSaudi
+                                              ? "Search TASI (2222)..."
+                                              : "Search EGX..."
+                                    }
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     onFocus={() => setSearchFocused(true)}
@@ -348,6 +526,7 @@ export default function Header() {
                                 <div className="absolute top-11 left-0 right-0 max-h-72 overflow-y-auto rounded-none p-0 z-50 animate-in fade-in slide-in-from-top-1 duration-200 custom-scrollbar bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_#FFE600]">
                                     <SearchDropdown
                                         language={language}
+                                        isSaudi={isSaudi}
                                         searchQuery={searchQuery}
                                         searching={searching}
                                         searchResults={searchResults}
@@ -395,7 +574,15 @@ export default function Header() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 md:gap-1.5 shrink-0 animate-in fade-in duration-700 delay-300">
+                        <MarketSwitcher
+                            market={market}
+                            setMarket={setMarket}
+                            language={language}
+                            variant="bar"
+                        />
+
                         <button
+                            id="header-mobile-search-btn"
                             onClick={() => {
                                 setMobileSearchOpen((v) => !v);
                                 if (!mobileSearchOpen) {
@@ -515,7 +702,15 @@ export default function Header() {
                             <input
                                 id="header-search-input-mobile"
                                 type="text"
-                                placeholder={language === "ar" ? "ابحث عن سهم مصري..." : "Search EGX symbol..."}
+                                placeholder={
+                                    language === "ar"
+                                        ? isSaudi
+                                            ? "ابحث عن سهم سعودي (2222)..."
+                                            : "ابحث عن سهم مصري..."
+                                        : isSaudi
+                                          ? "Search TASI symbol..."
+                                          : "Search EGX symbol..."
+                                }
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 onFocus={() => setSearchFocused(true)}
@@ -535,6 +730,7 @@ export default function Header() {
                         <div className="mt-2 max-h-72 overflow-y-auto custom-scrollbar">
                             <SearchDropdown
                                 language={language}
+                                isSaudi={isSaudi}
                                 searchQuery={searchQuery}
                                 searching={searching}
                                 searchResults={searchResults}
@@ -565,6 +761,13 @@ export default function Header() {
                                     <X className="h-5 w-5 text-black dark:text-white" />
                                 </button>
                             </div>
+
+                            <MarketSwitcher
+                                market={market}
+                                setMarket={setMarket}
+                                language={language}
+                                variant="drawer"
+                            />
 
                             {/* Nav links */}
                             <div className="px-3 py-2 flex flex-col gap-1">

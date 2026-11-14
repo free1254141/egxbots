@@ -11,10 +11,15 @@ from api.stock_ai import _init_supabase, supabase
 
 
 ACTIVE_PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime"]
+SAUDI_VIP_TELEGRAM_WEB_URL = "https://web.telegram.org/a/#-1004397045436"
 
 
 def pro_chat_id() -> str:
     return os.getenv("TELEGRAM_PRO_CHAT_ID", "").strip()
+
+
+def saudi_pro_chat_id() -> str:
+    return os.getenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436").strip()
 
 
 def _bot_token() -> str:

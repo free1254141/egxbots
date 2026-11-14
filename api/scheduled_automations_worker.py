@@ -467,12 +467,21 @@ def _fetch_market_indicators_brief(
             f"stock_technical_indicators?symbol=in.({sym_filter})&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&limit=10"
         ) or []
     else:
+        latest_ti_rows = _supabase_request(
+            "stock_technical_indicators?exchange=eq.EGX&select=date&order=date.desc&limit=1"
+        ) or []
+        latest_ti_date = (
+            latest_ti_rows[0].get("date")
+            if isinstance(latest_ti_rows, list) and latest_ti_rows and isinstance(latest_ti_rows[0], dict)
+            else None
+        )
+        ti_date_filter = f"&date=eq.{latest_ti_date}" if latest_ti_date else ""
         rows = _supabase_request(
-            "stock_technical_indicators?exchange=eq.EGX&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit=8"
+            f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit=8"
         ) or []
         if not rows:
             rows = _supabase_request(
-                "stock_technical_indicators?select=symbol,close,change_pct,volume,rsi_14,ema_20,bb_upper,bb_lower&order=volume.desc&limit=5"
+                f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&select=symbol,close,change_pct,volume,rsi_14,ema_20,bb_upper,bb_lower&order=volume.desc&limit=5"
             ) or []
 
     if isinstance(rows, list) and rows:
@@ -522,8 +531,17 @@ def _fetch_market_indicators_brief(
 
     # 4. Wyckoff Accumulation & Breakout Scan Summary (if prompt asks about Wyckoff / accumulation / waves / breakouts)
     if any(k in combined_text for k in ("وايكوف", "تجميع", "سيول", "موج", "اخترق", "اختراق", "نموذج", "اليوت", "إليوت", "ارتداد", "ايجاب", "إيجاب")):
+        latest_scan_rows = _supabase_request(
+            "stock_scans_summary?select=scan_date&order=scan_date.desc&limit=1"
+        ) or []
+        latest_scan_date = (
+            latest_scan_rows[0].get("scan_date")
+            if isinstance(latest_scan_rows, list) and latest_scan_rows and isinstance(latest_scan_rows[0], dict)
+            else None
+        )
+        scan_date_filter = f"&scan_date=eq.{latest_scan_date}" if latest_scan_date else ""
         acc_rows = _supabase_request(
-            "stock_scans_summary?acc_score=gte.50&select=symbol,scan_date,signal,wyckoff_phase,acc_score,vol_ratio,consecutive_acc_days,rsi_14,change_pct&order=acc_score.desc&limit=8"
+            f"stock_scans_summary?acc_score=gte.50{scan_date_filter}&wyckoff_phase=neq.distribution&select=symbol,scan_date,signal,wyckoff_phase,acc_score,vol_ratio,consecutive_acc_days,rsi_14,change_pct&order=acc_score.desc&limit=8"
         ) or []
         if isinstance(acc_rows, list) and acc_rows:
             acc_lines = ["🔍 نتائج مسح التجميع المؤسسي (وايكوف) والسيولة الذكية:"]

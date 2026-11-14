@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { MarketProvider } from "@/contexts/MarketContext";
 import { WatchlistProvider } from "@/contexts/WatchlistContext";
 import { AppStateProvider } from "@/contexts/AppStateContext";
 import { AIScannerProvider } from "@/contexts/AIScannerContext";
@@ -39,6 +40,21 @@ if (typeof window !== "undefined") {
   window.addEventListener('error', (e) => handleChunkError(e.error || e));
   window.addEventListener('unhandledrejection', (e) => handleChunkError(e.reason));
 
+  const resolveActiveMarketHeader = (): "egx" | "tasi" => {
+    try {
+      const param = new URLSearchParams(window.location.search).get("market")?.trim().toLowerCase();
+      if (param === "tasi" || param === "tadawul" || param === "saudi") return "tasi";
+      if (param === "egx" || param === "egypt") return "egx";
+    } catch {
+      // Ignore URL parsing errors
+    }
+    try {
+      return localStorage.getItem("egxbots_market") === "tasi" ? "tasi" : "egx";
+    } catch {
+      return "egx";
+    }
+  };
+
   const originalFetch = window.fetch;
   window.fetch = async (input, init) => {
     let url = "";
@@ -57,12 +73,18 @@ if (typeof window !== "undefined") {
       url.startsWith("http://localhost") ||
       url.startsWith("http://127.0.0.1")
     ) {
+      const isRequestInput = typeof Request !== "undefined" && input instanceof Request;
       const newInit = { ...init };
-      const headers = new Headers(newInit.headers || {});
+      const headers = new Headers(
+        newInit.headers || (isRequestInput ? input.headers : undefined)
+      );
       headers.set("ngrok-skip-browser-warning", "true");
+      if (!headers.has("x-egxbots-market")) {
+        headers.set("x-egxbots-market", resolveActiveMarketHeader());
+      }
       newInit.headers = headers;
 
-      if (input instanceof Request) {
+      if (isRequestInput) {
         const clonedRequest = new Request(input, {
           headers: newInit.headers,
         });
@@ -83,6 +105,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         <TelegramProProvider>
           <AffiliateProvider>
             <LanguageProvider>
+            <MarketProvider>
             <NotificationProvider>
               <PortfolioProvider>
                <WatchlistProvider>
@@ -100,6 +123,7 @@ export default function Providers({ children }: { children: ReactNode }) {
                </WatchlistProvider>
               </PortfolioProvider>
             </NotificationProvider>
+            </MarketProvider>
           </LanguageProvider>
           </AffiliateProvider>
         </TelegramProProvider>

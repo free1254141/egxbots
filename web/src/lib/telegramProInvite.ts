@@ -1,3 +1,48 @@
+export const SAUDI_VIP_TELEGRAM_WEB_URL = "https://web.telegram.org/a/#-1004397045436";
+
+export async function createSaudiProTelegramInvite(userId: string, expiresAt: string): Promise<string> {
+  const token = process.env.SUPPORT_BOT_TOKEN?.trim();
+  const chatId = process.env.SAUDI_TELEGRAM_PRO_CHAT_ID?.trim() || "-1004397045436";
+  if (!token || !chatId) return SAUDI_VIP_TELEGRAM_WEB_URL;
+
+  const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+  const now = Date.now();
+  const rawExpireMs = new Date(expiresAt).getTime();
+  const maxExpireMs = now + 365 * 86_400_000;
+
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    name: `Saudi Pro ${userId.slice(0, 8)}`,
+    member_limit: 1,
+  };
+
+  if (Number.isFinite(rawExpireMs) && rawExpireMs > now && rawExpireMs <= maxExpireMs) {
+    payload.expire_date = Math.floor(rawExpireMs / 1000);
+  }
+
+  const body = JSON.stringify(payload);
+
+  for (const base of [relayUrl, "https://api.telegram.org"]) {
+    try {
+      const response = await fetch(`${base}/bot${token}/createChatInviteLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data?.ok && data.result?.invite_link) {
+        return String(data.result.invite_link);
+      }
+      if (base === relayUrl) continue;
+    } catch {
+      if (base === relayUrl) continue;
+    }
+  }
+  return SAUDI_VIP_TELEGRAM_WEB_URL;
+}
+
 export async function createProTelegramInvite(userId: string, expiresAt: string): Promise<string> {
   const token = process.env.SUPPORT_BOT_TOKEN?.trim();
   const chatId = process.env.TELEGRAM_PRO_CHAT_ID?.trim();

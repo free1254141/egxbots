@@ -50,6 +50,8 @@ type PortfolioContextValue = {
 };
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
+const PORTFOLIO_CACHE_PREFIX = "egxbots_portfolio_snapshot_v1:";
+const PORTFOLIO_CACHE_TTL_MS = 15 * 60 * 1000;
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -69,13 +71,37 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         setLoading(false);
         return;
       }
+      const cacheKey = `${PORTFOLIO_CACHE_PREFIX}${user.id}`;
+      if (!force && typeof window !== "undefined") {
+        try {
+          const raw = window.sessionStorage.getItem(cacheKey);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { ts: number; data: PortfolioSnapshot };
+            if (parsed?.ts && Date.now() - parsed.ts < PORTFOLIO_CACHE_TTL_MS && parsed.data?.ok) {
+              setStored({ owner: user.id, snapshot: parsed.data });
+              setLoading(false);
+              return;
+            }
+          }
+        } catch {
+          // ignore storage errors
+        }
+      }
       setLoading(true);
       try {
-        const response = await fetch("/api/portfolio", { cache: "no-store" });
+        const response = await fetch("/api/portfolio", force ? { cache: "no-store" } : undefined);
         if (response.ok) {
           const next = await response.json();
-          if (generation.current === version)
+          if (generation.current === version) {
             setStored({ owner: user.id, snapshot: next });
+            if (typeof window !== "undefined" && next?.ok) {
+              try {
+                window.sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: next }));
+              } catch {
+                // ignore quota errors
+              }
+            }
+          }
         }
       } finally {
         if (generation.current === version) setLoading(false);

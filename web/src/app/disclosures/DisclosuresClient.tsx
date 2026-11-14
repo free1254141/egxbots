@@ -340,6 +340,12 @@ export default function DisclosuresClient({
     return analyzeDisclosures(filteredPool, priceMap || {});
   }, [filteredPool, priceMap]);
 
+  // Cumulative historical analytics (ignores short timeframe filter so older uncancelled insider positions are ALWAYS preserved)
+  const cumulativeAnalytics = useMemo(() => {
+    const sectorPool = filterDisclosuresByTimeframeAndSector(basePool, "all", selectedSector);
+    return analyzeDisclosures(sectorPool, priceMap || {});
+  }, [basePool, selectedSector, priceMap]);
+
   // Timeframe label in Arabic / English
   const timeframeLabel = useMemo(() => {
     switch (selectedTimeframe) {
@@ -380,15 +386,15 @@ export default function DisclosuresClient({
     if (selectedTimeframe !== "all" || selectedSector !== "all") {
       list = filterDisclosuresByTimeframeAndSector(list, selectedTimeframe, selectedSector);
     }
-    const metrics = activeAnalytics.symbolMetrics;
+    const metrics = cumulativeAnalytics.symbolMetrics;
 
     return list.filter((item) => {
       const sym = item.symbol ? item.symbol.toUpperCase() : null;
-      if (!sym || !metrics[sym]) return true;
+      if (!sym || !metrics[sym]) return smartFilter === "all";
 
       const m = metrics[sym];
       if (smartFilter === "below_cost") {
-        return m.discount_pct < -1.0 && m.net_shares > 0;
+        return m.discount_pct <= 0 && m.net_shares > 0;
       }
       if (smartFilter === "accumulating") {
         return m.action_bias === "accumulating";
@@ -398,7 +404,7 @@ export default function DisclosuresClient({
       }
       return true;
     });
-  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, activeAnalytics]);
+  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, cumulativeAnalytics]);
 
   // Group disclosures by stock into unified cards (one consolidated card per stock per timeframe!)
   const groupedDisclosures = useMemo(() => {
@@ -500,15 +506,15 @@ export default function DisclosuresClient({
           </span>
         </div>
 
-        {/* KPI 3: Stocks Trading Below Insider Cost */}
+        {/* KPI 3: Stocks Trading Below Insider Cost & Retained Active Accumulation */}
         <div
           onClick={() => {
-            setSmartFilter("below_cost");
-            const el = document.getElementById("disclosures-feed");
+            setActiveTab("insider_radar");
+            const el = document.getElementById("insider-cost-comparison");
             if (el) el.scrollIntoView({ behavior: "smooth" });
           }}
           className="p-4 border-4 border-black dark:border-white bg-amber-400/25 dark:bg-amber-400/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)] cursor-pointer hover:bg-amber-400/40 transition-colors group"
-          title={isAr ? "اضغط لتصفية الإفصاحات بالأسهم التي تتداول بأقل من التكلفة" : "Click to filter stocks trading below insider cost"}
+          title={isAr ? "اضغط للانتقال إلى قسم مقارنة تكلفة الداخلي بسعر السوق (كامل الأسهم المحتفظ بها)" : "Click to jump to Insider Cost vs Market Price Comparison"}
         >
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-black uppercase text-amber-950 dark:text-amber-300">
@@ -517,13 +523,15 @@ export default function DisclosuresClient({
             <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300 flex items-baseline gap-2">
-            <span>{activeAnalytics ? activeAnalytics.costDiscountTop.length : 0}</span>
-            <span className="text-xs font-bold text-amber-800 dark:text-amber-400 underline">
-              {isAr ? "تصفية" : "Filter"}
+            <span>{cumulativeAnalytics ? cumulativeAnalytics.executiveStats.symbols_below_cost_count : 0}</span>
+            <span className="text-xs font-bold text-amber-800 dark:text-amber-400">
+              {isAr
+                ? `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} سهم محتفظ به`
+                : `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} held`}
             </span>
           </div>
           <span className="text-[11px] font-bold text-amber-900/80 dark:text-amber-300/80">
-            {isAr ? "فرص شراء بأقل من سعر صانعه (اضغط للتصفية)" : "Discounted vs insider entry (Click to filter)"}
+            {isAr ? "محتفظ بها تاريخياً بلا إفصاح بيع يلغيها (اضغط للعرض)" : "Retained with zero cancelling sell filings (Click to view)"}
           </span>
         </div>
 
@@ -697,13 +705,14 @@ export default function DisclosuresClient({
           {/* Simple Analytical Charts */}
           {activeAnalytics && (
             <InsiderCharts
-              costDiscounts={activeAnalytics.costDiscountTop}
+              costDiscounts={cumulativeAnalytics.costDiscountTop}
               flowDistribution={activeAnalytics.flowDistribution}
               isAr={isAr}
               timeframeLabel={timeframeLabel}
               onSelectTimeframe={(tf) => setSelectedTimeframe(tf)}
               onSelectSymbol={(sym) => setModalSymbol(sym)}
               onFilterBelowCost={() => {
+                setSelectedTimeframe("all");
                 setSmartFilter("below_cost");
                 const el = document.getElementById("disclosures-feed");
                 if (el) el.scrollIntoView({ behavior: "smooth" });

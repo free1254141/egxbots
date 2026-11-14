@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
 import { paymentsEnabled } from "@/lib/ai/plan-gate";
+import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,8 +30,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { authenticated, pro } = await getViewerContext(request);
-    const unrestricted = authenticated && (!paymentsEnabled() || pro);
+    const scope = request.nextUrl.searchParams.get("scope");
+    let isAuthenticated = false;
+    let unrestricted = false;
+    if (scope !== "public") {
+      const viewer = await getViewerContext(request);
+      isAuthenticated = viewer.authenticated;
+      unrestricted = viewer.authenticated && (!paymentsEnabled() || viewer.pro);
+    }
     const delayDays = Number(process.env.FREE_SIGNAL_DELAY_DAYS || 15) || 15;
     const cutoff = Date.now() - delayDays * 86400000;
     const db = getSupabaseServiceClient({ cacheMarketData: true });
@@ -84,10 +91,11 @@ export async function GET(request: NextRequest) {
       target_price: row.target_price,
       stop_loss: row.stop_loss,
     }));
-    const cacheHeader = unrestricted
-      ? "private, max-age=60, stale-while-revalidate=120"
-      : "public, max-age=14400, s-maxage=86400, stale-while-revalidate=86400";
-    return NextResponse.json({ markers, recommendations }, { headers: { "Cache-Control": cacheHeader } });
+    const headers: Record<string, string> =
+      scope === "public" || !isAuthenticated
+        ? dailyCacheHeaders(DAILY_CACHE_TAGS.recommendations)
+        : { "Cache-Control": "private, no-store, max-age=0" };
+    return NextResponse.json({ markers, recommendations }, { headers });
   } catch (error) {
     console.error("[CHART_MARKERS]", error);
     return NextResponse.json({ markers: [] }, { status: 503 });

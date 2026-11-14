@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
-import { getSupabaseClient, toNumber } from "@/lib/supabase/route-data";
+import {
+  resolveRequestMarket,
+  getMarketExchange,
+  getMarketSupabaseClient,
+  toNumber,
+  type MarketMode,
+} from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const runtime = "nodejs";
@@ -11,54 +17,105 @@ export const runtime = "nodejs";
 const MONEY_FLOW_COLUMNS_ENABLED = process.env.TECHNICAL_MONEY_FLOW_COLUMNS_ENABLED === "true";
 
 type TechnicalDataset = {
+  stocks: any[];
   indicators: any[];
   fundamentals: any[];
   scanResults: any[];
 };
 
-const getCachedTechnicalDataset = unstable_cache(
-  async (): Promise<TechnicalDataset> => {
-    const supabase = getSupabaseClient();
-    const { data: egxStocks } = await supabase
+async function fetchStocksMeta(supabase: any, exchange: string): Promise<any[]> {
+  const attempts = [
+    "symbol, name, name_ar, sector, industry",
+    "symbol, name, name_ar, sector",
+    "symbol, name, sector",
+    "symbol",
+  ];
+  for (const selectFields of attempts) {
+    const { data, error } = await supabase
       .from("stocks")
-      .select("symbol")
-      .eq("exchange", "EGX")
-      .eq("is_active", true);
-    const symbols = (egxStocks || []).map((s: any) => s.symbol).filter(Boolean);
+      .select(selectFields)
+      .eq("exchange", exchange)
+      .eq("is_active", true)
+      .limit(1000);
+    if (!error) return data || [];
+  }
+  return [];
+}
 
-    const moneyFlowFields = MONEY_FLOW_COLUMNS_ENABLED
-      ? ", cmf_20, mm_accumulation, mm_distribution"
-      : "";
-    const fields = `symbol, exchange, date, close, rsi_14, ema_20, ema_50, ema_200,
-      atr_14, adx_14, stoch_k, stoch_d, volume, change_pct, vol_sma20, momentum_10,
-      roc_12, macd, macd_signal, r_vol, vwap_20${moneyFlowFields}, rsi_divergence,
-      macd_divergence, stoch_divergence, divergence_strength, divergence_periods,
-      divergence_summary`;
-    let { data: indicators, error } = await supabase
+async function fetchIndicatorsWithFallback(supabase: any, exchange: string): Promise<any[]> {
+  const moneyFlowFields = MONEY_FLOW_COLUMNS_ENABLED
+    ? ", cmf_20, mm_accumulation, mm_distribution"
+    : "";
+  const fullFields = `symbol, exchange, date, close, rsi_14, ema_20, ema_50, ema_200,
+    atr_14, adx_14, stoch_k, stoch_d, volume, change_pct, vol_sma20, momentum_10,
+    roc_12, macd, macd_signal, r_vol, vwap_20${moneyFlowFields}, rsi_divergence,
+    macd_divergence, stoch_divergence, divergence_strength, divergence_periods,
+    divergence_summary`;
+
+  const candidateSelects = [
+    fullFields,
+    ...(MONEY_FLOW_COLUMNS_ENABLED
+      ? [fullFields.replace(", cmf_20, mm_accumulation, mm_distribution", "")]
+      : []),
+    fullFields
+      .replace(", cmf_20, mm_accumulation, mm_distribution", "")
+      .replace("vol_sma20", "volume_sma_20"),
+    `symbol, exchange, date, close, rsi_14, ema_50, ema_200, atr_14, adx_14,
+      stoch_k, stoch_d, volume, change_pct, volume_sma_20, momentum_10,
+      roc_12, macd, macd_signal, r_vol, vwap_20`,
+    "symbol, exchange, date, close, rsi_14, ema_50, ema_200, volume, change_pct",
+  ];
+
+  let lastError: any = null;
+  for (const selectFields of candidateSelects) {
+    const { data, error } = await supabase
       .from("stock_technical_indicators")
-      .select(fields)
-      .in("exchange", ["EGX"])
+      .select(selectFields)
+      .eq("exchange", exchange)
       .limit(1000)
       .order("date", { ascending: false });
+    if (!error) return data || [];
+    lastError = error;
+  }
+  if (lastError) throw lastError;
+  return [];
+}
 
-    if (error && MONEY_FLOW_COLUMNS_ENABLED) {
-      ({ data: indicators, error } = await supabase
-        .from("stock_technical_indicators")
-        .select(fields.replace(", cmf_20, mm_accumulation, mm_distribution", ""))
-        .in("exchange", ["EGX"])
-        .limit(1000)
-        .order("date", { ascending: false }));
-    }
-    if (error) throw error;
+async function loadTechnicalDataset(market: MarketMode): Promise<TechnicalDataset> {
+  const supabase = getMarketSupabaseClient(market);
+  const exchange = getMarketExchange(market);
 
-    const uniqueSymbols = [...new Set((indicators || []).map((row: any) => row.symbol).filter(Boolean))];
-    const [{ data: fundamentals }, { data: scanResults }] = await Promise.all([
-      supabase.from("stock_fundamentals").select("symbol, name, fund_score, data").in("symbol", uniqueSymbols),
-      supabase.from("scan_results").select("symbol, precision").in("symbol", uniqueSymbols),
-    ]);
-    return { indicators: indicators || [], fundamentals: fundamentals || [], scanResults: scanResults || [] };
-  },
+  const [stocks, indicators] = await Promise.all([
+    fetchStocksMeta(supabase, exchange),
+    fetchIndicatorsWithFallback(supabase, exchange),
+  ]);
+
+  const uniqueSymbols = [...new Set((indicators || []).map((row: any) => row.symbol).filter(Boolean))];
+  if (uniqueSymbols.length === 0) {
+    return { stocks, indicators: [], fundamentals: [], scanResults: [] };
+  }
+
+  const [{ data: fundamentals }, { data: scanResults }] = await Promise.all([
+    supabase.from("stock_fundamentals").select("symbol, name, fund_score, data").in("symbol", uniqueSymbols),
+    supabase.from("scan_results").select("symbol, precision").in("symbol", uniqueSymbols),
+  ]);
+  return {
+    stocks: stocks || [],
+    indicators: indicators || [],
+    fundamentals: fundamentals || [],
+    scanResults: scanResults || [],
+  };
+}
+
+const getCachedEgxTechnicalDataset = unstable_cache(
+  async (): Promise<TechnicalDataset> => loadTechnicalDataset("egx"),
   ["technical-scanner-egx-daily"],
+  { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
+);
+
+const getCachedTasiTechnicalDataset = unstable_cache(
+  async (): Promise<TechnicalDataset> => loadTechnicalDataset("tasi"),
+  ["technical-scanner-tasi-daily"],
   { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market] },
 );
 
@@ -99,10 +156,17 @@ export async function POST(req: Request) {
       divergence_min_strength,
     } = body;
 
-    const { indicators, fundamentals, scanResults } = await getCachedTechnicalDataset();
+    const market = resolveRequestMarket(req, body?.market || body?.country || body?.exchange);
+    const exchange = getMarketExchange(market);
+    const currency = market === "tasi" ? "SAR" : "EGP";
+
+    const { stocks, indicators, fundamentals, scanResults } =
+      market === "tasi"
+        ? await getCachedTasiTechnicalDataset()
+        : await getCachedEgxTechnicalDataset();
 
     if (!indicators || indicators.length === 0) {
-      return NextResponse.json({ results: [], scanned_count: 0 }, { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.market) });
+      return NextResponse.json({ results: [], scanned_count: 0 }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
     }
 
     // Sort in memory by date descending to ensure the latest row comes first for deduplication
@@ -123,6 +187,13 @@ export async function POST(req: Request) {
     const dedupedIndicators = Array.from(uniqueIndicatorsMap.values());
 
     const scannedSymbols = dedupedIndicators.map((ind: any) => ind.symbol);
+
+    const stockMap = new Map<string, any>();
+    if (stocks) {
+      stocks.forEach((s: any) => {
+        if (s?.symbol) stockMap.set(s.symbol, s);
+      });
+    }
 
     const fundMap = new Map();
     if (fundamentals) {
@@ -156,7 +227,7 @@ export async function POST(req: Request) {
       const roc12 = toNumber(tech.roc_12);
       const macd = toNumber(tech.macd);
       const macd_signal = toNumber(tech.macd_signal);
-      const vol_sma20 = toNumber(tech.vol_sma20);
+      const vol_sma20 = toNumber(tech.vol_sma20 ?? tech.volume_sma_20);
       const r_vol = toNumber(tech.r_vol);
       const change_p = toNumber(tech.change_pct);
 
@@ -169,13 +240,17 @@ export async function POST(req: Request) {
       const fundRecord = fundMap.get(tech.symbol) || {};
       const fundData = fundRecord.data || {};
       
-      const companyName = fundRecord.name || fundData.name || tech.symbol;
+      const stockRecord = stockMap.get(tech.symbol) || {};
+      const companyName =
+        market === "tasi"
+          ? stockRecord.name_ar || fundRecord.name || fundData.name || stockRecord.name || tech.symbol
+          : fundRecord.name || fundData.name || stockRecord.name || tech.symbol;
       const m_cap = toNumber(fundData.marketCap);
       const peRatio = toNumber(fundData.peRatio);
       const eps = toNumber(fundData.eps);
       const dividendYield = toNumber(fundData.dividendYield);
-      const sec = fundData.sector || "";
-      const ind = fundData.industry || "";
+      const sec = fundData.sector || stockRecord.sector || "";
+      const ind = fundData.industry || stockRecord.industry || "";
       const beta = toNumber(fundData.beta);
       const logoUrl = fundData.logoUrl || null;
 
@@ -364,7 +439,10 @@ export async function POST(req: Request) {
 
       scanned.push({
         symbol: tech.symbol,
+        exchange: tech.exchange || exchange,
+        currency,
         name: companyName,
+        ...(stockRecord.name_ar ? { name_ar: stockRecord.name_ar } : {}),
         date: tech.date ?? null,
         year: tech.date ? new Date(tech.date).getFullYear() : null,
         last_close: close,
@@ -418,6 +496,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error('Technical scan API error:', error);
-    return NextResponse.json({ results: [], scanned_count: 0 }, { headers: dailyCacheHeaders(DAILY_CACHE_TAGS.market) });
+    return NextResponse.json({ results: [], scanned_count: 0 }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   }
 }

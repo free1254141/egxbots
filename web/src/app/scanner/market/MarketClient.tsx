@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { buildHeatmapSnapshotFromRows } from "@/lib/heatmapSnapshot";
 import {
     Loader2, RefreshCw, Landmark,
@@ -31,6 +32,7 @@ interface MarketStatusResponse {
     egx30: MarketDataPoint[];
     egx100: MarketDataPoint[];
     usdegp: MarketDataPoint[];
+    tasi?: MarketDataPoint[];
     regime: string;
     egx30_return: number;
     reject_buys: boolean;
@@ -226,11 +228,12 @@ const squarify = (items: any[], x: number, y: number, w: number, h: number): Tre
     return result;
 };
 
-const SmartMoneyTreemap = ({ sectors, isAr, selectedSector, onSelect }: {
+const SmartMoneyTreemap = ({ sectors, isAr, selectedSector, onSelect, currencyCode = "EGP" }: {
     sectors: any[];
     isAr: boolean;
     selectedSector: any;
     onSelect: (sec: any) => void;
+    currencyCode?: string;
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ w: 1000, h: 400 });
@@ -348,6 +351,7 @@ const SectorRotationWheel = ({ sectors, isAr, selectedSector, onSelect }: {
     selectedSector: any;
     onSelect: (sec: any) => void;
 }) => {
+    const { currencyCode } = useMarket();
     const size = 620;
     const cx = size / 2;
     const cy = size / 2;
@@ -458,7 +462,7 @@ const SectorRotationWheel = ({ sectors, isAr, selectedSector, onSelect }: {
                             >
                                 <div className="min-w-0">
                                     <p className="truncate text-sm font-black text-zinc-950 dark:text-white">{isAr ? sector.sector_ar : sector.sector}</p>
-                                    <p className="text-[10px] font-mono font-bold text-zinc-500">{(Number(sector.money_flow || 0) / 1_000_000).toFixed(0)}M EGP</p>
+                                    <p className="text-[10px] font-mono font-bold text-zinc-500">{(Number(sector.money_flow || 0) / 1_000_000).toFixed(0)}M {currencyCode}</p>
                                 </div>
                                 <div className={`text-sm font-mono font-black ${up ? "text-emerald-500" : "text-rose-500"}`}>
                                     {up ? "+" : ""}{Number(sector.change_pct || 0).toFixed(2)}%
@@ -573,11 +577,13 @@ const SearchableSymbolSelect = ({ symbols, value, onChange, isAr, t }: {
     );
 };
 
-const SectorDrillModal = ({ sector, isAr, t, onClose }: {
+const SectorDrillModal = ({ sector, isAr, t, onClose, currencyCode = "EGP", isSaudi = false }: {
     sector: any;
     isAr: boolean;
     t: (k: string) => string;
     onClose: () => void;
+    currencyCode?: string;
+    isSaudi?: boolean;
 }) => {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
@@ -642,7 +648,7 @@ const SectorDrillModal = ({ sector, isAr, t, onClose }: {
                         {t("market.heatmap.share")}: <span className="text-zinc-950 dark:text-white">{sector.market_share}%</span>
                     </span>
                     <span className="text-[10px] font-black font-mono uppercase tracking-wider text-zinc-500 bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 px-2.5 py-1">
-                        {t("market.heatmap.flow")}: <span className="text-zinc-950 dark:text-white">{flow.toLocaleString(undefined, { maximumFractionDigits: 0 })} EGP</span>
+                        {t("market.heatmap.flow")}: <span className="text-zinc-950 dark:text-white">{flow.toLocaleString(undefined, { maximumFractionDigits: 0 })} {currencyCode}</span>
                     </span>
                     <span className={`text-[10px] font-black font-mono uppercase tracking-wider border-2 border-black dark:border-zinc-800 px-2.5 py-1 ${pct >= 0 ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10" : "text-rose-700 dark:text-rose-400 bg-rose-500/10"}`}>
                         {pct >= 0 ? "+" : ""}{Number(pct).toFixed(2)}%
@@ -674,15 +680,15 @@ const SectorDrillModal = ({ sector, isAr, t, onClose }: {
                                         className={`hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors ${isAr ? "text-right" : "text-left"}`}
                                     >
                                         <td className={`px-4 py-3 font-black text-indigo-500 hover:underline ${isAr ? "text-right" : "text-left"}`}>
-                                            <Link prefetch={false} href={`/stocks/${st.symbol.toLowerCase()}`}>{st.symbol}</Link>
+                                            <Link prefetch={false} href={`/stocks/${st.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}>{st.symbol}</Link>
                                         </td>
                                         <td className={`px-4 py-3 text-zinc-500 dark:text-zinc-400 font-semibold truncate max-w-xs ${isAr ? "text-right" : "text-left"}`}>{st.name}</td>
-                                        <td className="px-4 py-3 font-mono font-bold">{(st.close ?? 0).toFixed(2)} <span className="text-[9px] text-zinc-500">EGP</span></td>
+                                        <td className="px-4 py-3 font-mono font-bold">{(st.close ?? 0).toFixed(2)} <span className="text-[9px] text-zinc-500">{currencyCode}</span></td>
                                         <td className={`px-4 py-3 font-mono font-bold ${(st.change_pct ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                                             {(st.change_pct ?? 0) >= 0 ? "+" : ""}{(st.change_pct ?? 0).toFixed(2)}%
                                         </td>
                                         <td className="px-4 py-3 font-mono text-zinc-600 dark:text-zinc-400">
-                                            {(st.money_flow ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-[9px]">EGP</span>
+                                            {(st.money_flow ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-[9px]">{currencyCode}</span>
                                         </td>
                                         <td className="px-4 py-3 font-mono text-zinc-500">
                                             <div className="flex items-center gap-2">
@@ -922,7 +928,7 @@ const formatMonth = (m: string, isAr: boolean) => {
 
 const flowM = (v: number) => (Math.abs(v) / 1_000_000).toFixed(0);
 
-const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFrames, onSelectDay }: {
+const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFrames, onSelectDay, currencyCode = "EGP" }: {
     data: any;
     loading: boolean;
     error: string | null;
@@ -931,6 +937,7 @@ const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFram
     onRefresh: () => void;
     dailyFrames: any[];
     onSelectDay: (frame: any) => void;
+    currencyCode?: string;
 }) => {
     const [selMonth, setSelMonth] = useState<string | null>(null);
 
@@ -1009,7 +1016,7 @@ const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFram
                         {dailyFrames.map((frame) => {
                             const total = Number(frame.total_market_flow || 0);
                             const max = Math.max(...dailyFrames.map((x) => Number(x.total_market_flow || 0)), 1);
-                            return <button key={frame.date} title={`${frame.date} · ${flowM(total)}M EGP`} onClick={() => onSelectDay(frame)} className="group min-w-5 flex-1 h-full flex flex-col items-center justify-end gap-1 cursor-pointer">
+                            return <button key={frame.date} title={`${frame.date} · ${flowM(total)}M ${currencyCode}`} onClick={() => onSelectDay(frame)} className="group min-w-5 flex-1 h-full flex flex-col items-center justify-end gap-1 cursor-pointer">
                                 <span className="hidden group-hover:block text-[8px] font-mono text-zinc-500">{flowM(total)}M</span>
                                 <div className="w-full bg-[#FFDC58] border-x border-t border-black/50 hover:bg-rose-500 transition-colors" style={{height:`${Math.max(3,total/max*100)}%`}} />
                                 <span className="text-[8px] whitespace-nowrap text-zinc-500">{String(frame.date).slice(5)}</span>
@@ -1164,12 +1171,15 @@ const MoneyFlowTimeline = ({ data, loading, error, isAr, t, onRefresh, dailyFram
 
 export default function MarketClient() {
     const { t, language } = useLanguage();
+    const { market, isSaudi, country, currencyCode, currencyLabel } = useMarket();
+    const activeMarketRef = useRef(market);
+    activeMarketRef.current = market;
     const isAr = language === "ar";
 
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<MarketStatusResponse | null>(null);
-    const [activeTab, setActiveTab] = useState<"egx30" | "egx100" | "usdegp">("egx30");
+    const [activeTab, setActiveTab] = useState<"egx30" | "egx100" | "usdegp" | "tasi">(isSaudi ? "tasi" : "egx30");
 
     const [heatmapData, setHeatmapData] = useState<any>(null);
     const [heatmapDate, setHeatmapDate] = useState<string>("");
@@ -1213,72 +1223,76 @@ export default function MarketClient() {
     const [aiSignalsTotal, setAiSignalsTotal] = useState<number>(0);
     const [recommendationsByDate, setRecommendationsByDate] = useState<Record<string, number>>({});
 
-    const fetchMarketStatus = async () => {
+    const fetchMarketStatus = async (reqMarket = market) => {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch("/api/market/status");
+            const res = await fetch(`/api/market/status?market=${reqMarket}`);
             if (!res.ok) {
                 throw new Error(`Failed to load market data (Status ${res.status})`);
             }
             const payload: MarketStatusResponse = await res.json();
-            setData(payload);
+            if (activeMarketRef.current === reqMarket) setData(payload);
         } catch (err: any) {
             console.error("Error fetching market status:", err);
-            setError(err.message || "Failed to load market data");
+            if (activeMarketRef.current === reqMarket) setError(err.message || "Failed to load market data");
         } finally {
-            setLoading(false);
+            if (activeMarketRef.current === reqMarket) setLoading(false);
         }
     };
 
-    const fetchBreadthData = async () => {
+    const fetchBreadthData = async (reqMarket = market) => {
         setBreadthLoading(true);
         try {
-            const res = await fetch("/api/market/breadth");
+            const res = await fetch(`/api/market/breadth?market=${reqMarket}`);
             if (res.ok) {
                 const data = await res.json();
-                setBreadthData(data);
+                if (activeMarketRef.current === reqMarket) setBreadthData(data);
             }
         } catch (err) {
             console.error("Failed to fetch market breadth data:", err);
         } finally {
-            setBreadthLoading(false);
+            if (activeMarketRef.current === reqMarket) setBreadthLoading(false);
         }
     };
 
-    const fetchAISignals = async () => {
+    const fetchAISignals = async (reqMarket = market) => {
         setAiSignalsLoading(true);
         try {
-            const res = await fetch("/api/market/ai-signals");
+            const res = await fetch(`/api/market/ai-signals?market=${reqMarket}`);
             if (res.ok) {
                 const data = await res.json();
-                setAiSignals(data.signals || []);
-                setAiSignalsGated(Boolean(data.gated || data.is_pro === false));
-                setAiSignalsTotal(Number(data.total_open || 0));
+                if (activeMarketRef.current === reqMarket) {
+                    setAiSignals(data.signals || []);
+                    setAiSignalsGated(Boolean(data.gated || data.is_pro === false));
+                    setAiSignalsTotal(Number(data.total_open || 0));
+                }
             }
         } catch (err) {
             console.error("Failed to fetch AI signals:", err);
         } finally {
-            setAiSignalsLoading(false);
+            if (activeMarketRef.current === reqMarket) setAiSignalsLoading(false);
         }
     };
 
-    const fetchRecommendationCounts = async () => {
+    const fetchRecommendationCounts = async (reqMarket = market) => {
         try {
-            const res = await fetch("/api/market/recommendation-counts", { cache: "no-store" });
+            const res = await fetch(`/api/market/recommendation-counts?market=${reqMarket}`, { cache: "no-store" });
             if (!res.ok) return;
             const payload = await res.json();
-            setRecommendationsByDate(payload.daily_counts && typeof payload.daily_counts === "object" ? payload.daily_counts : {});
+            if (activeMarketRef.current === reqMarket) {
+                setRecommendationsByDate(payload.daily_counts && typeof payload.daily_counts === "object" ? payload.daily_counts : {});
+            }
         } catch (err) {
             console.error("Failed to fetch recommendation counts for market chart:", err);
         }
     };
 
-    const fetchHeatmapData = async (date?: string) => {
+    const fetchHeatmapData = async (date?: string, reqMarket = market, reqCountry = country) => {
         setHeatmapLoading(true);
         setHeatmapError(null);
         try {
-            const params = new URLSearchParams({ country: "Egypt" });
+            const params = new URLSearchParams({ country: reqCountry, market: reqMarket });
             if (date) {
                 params.set("single_date", date);
                 params.set("date", date);
@@ -1304,6 +1318,7 @@ export default function MarketClient() {
                         ? { ...payload.frames_by_date[frameDate], selected_date: frameDate, requested_date: frameDate }
                         : null;
 
+            if (activeMarketRef.current !== reqMarket) return;
             setHeatmapData(nextData);
             setHeatmapDate(frameDate);
             setAvailableHeatmapDates(availableDates);
@@ -1324,9 +1339,9 @@ export default function MarketClient() {
             }
         } catch (err: any) {
             console.error("Error fetching sector heatmap:", err);
-            setHeatmapError(err.message || "Failed to load heatmap data");
+            if (activeMarketRef.current === reqMarket) setHeatmapError(err.message || "Failed to load heatmap data");
         } finally {
-            setHeatmapLoading(false);
+            if (activeMarketRef.current === reqMarket) setHeatmapLoading(false);
         }
     };
 
@@ -1335,32 +1350,33 @@ export default function MarketClient() {
         void fetchHeatmapData(nextDate);
     };
 
-    const fetchTimelineData = async (forceRefresh = false) => {
+    const fetchTimelineData = async (forceRefresh = false, reqMarket = market, reqCountry = country) => {
         setTimelineLoading(true);
         setTimelineError(null);
         try {
-            const res = await fetch(`/api/scan/sectors/timeline?country=Egypt&months=6${forceRefresh ? "&force_refresh=true" : ""}`);
+            const res = await fetch(`/api/scan/sectors/timeline?country=${encodeURIComponent(reqCountry)}&market=${reqMarket}&months=6${forceRefresh ? "&force_refresh=true" : ""}`);
             if (!res.ok) {
                 throw new Error(`Failed to load timeline data (Status ${res.status})`);
             }
             const payload = await res.json();
-            setTimelineData(payload);
+            if (activeMarketRef.current === reqMarket) setTimelineData(payload);
         } catch (err: any) {
             console.error("Error fetching sector timeline:", err);
-            setTimelineError(err.message || "Failed to load timeline data");
+            if (activeMarketRef.current === reqMarket) setTimelineError(err.message || "Failed to load timeline data");
         } finally {
-            setTimelineLoading(false);
+            if (activeMarketRef.current === reqMarket) setTimelineLoading(false);
         }
     };
 
-    const fetchDailyHeatmapFrames = async () => {
+    const fetchDailyHeatmapFrames = async (reqMarket = market, reqCountry = country) => {
         try {
             const dates = [...availableHeatmapDates].sort().slice(-30);
             if (dates.length < 2) return;
-            const params = new URLSearchParams({ country: "Egypt", start_date: dates[0], end_date: dates[dates.length - 1] });
+            const params = new URLSearchParams({ country: reqCountry, market: reqMarket, start_date: dates[0], end_date: dates[dates.length - 1] });
             const res = await fetch(`/api/scan/sectors/heatmap?${params}`);
             if (!res.ok) return;
             const payload = await res.json();
+            if (activeMarketRef.current !== reqMarket) return;
             const frames = payload.frames_by_date || {};
             const dailyRows = Array.isArray(payload.rows) ? payload.rows : [];
             const built = dates.map((date) => {
@@ -1453,26 +1469,47 @@ export default function MarketClient() {
     };
 
     useEffect(() => {
-        void fetchMarketStatus();
-        void fetchHeatmapData();
-        void fetchCorrSymbols();
-        void fetchBreadthData();
-        void fetchAISignals();
-        void fetchRecommendationCounts();
-        void fetchTimelineData();
-    }, []);
+        setData(null);
+        setError(null);
+        setBreadthData(null);
+        setAiSignals([]);
+        setRecommendationsByDate({});
+        setHeatmapData(null);
+        setAvailableHeatmapDates([]);
+        setHeatmapDate("");
+        setDailyHeatmapFrames([]);
+        setTimelineData(null);
+        setSelectedSector(null);
+        setDrillOpen(false);
+        setActiveTab(isSaudi ? "tasi" : "egx30");
+        void fetchMarketStatus(market);
+        void fetchHeatmapData(undefined, market, country);
+        void fetchBreadthData(market);
+        void fetchAISignals(market);
+        void fetchRecommendationCounts(market);
+        void fetchTimelineData(false, market, country);
+        if (isSaudi) {
+            setCorrSymbols([]);
+            setCorrData(null);
+            setCorrError(null);
+            setHedgeScan(null);
+            setHedgeError(null);
+        } else {
+            void fetchCorrSymbols();
+        }
+    }, [market, isSaudi, country]);
 
     useEffect(() => {
         if (timelineOpen && availableHeatmapDates.length >= 2 && dailyHeatmapFrames.length === 0) {
-            void fetchDailyHeatmapFrames();
+            void fetchDailyHeatmapFrames(market, country);
         }
-    }, [availableHeatmapDates, timelineOpen]);
+    }, [availableHeatmapDates, timelineOpen, market, country]);
 
     useEffect(() => {
-        if (selectedCorrSymbol) {
+        if (!isSaudi && selectedCorrSymbol) {
             void fetchCorrData(selectedCorrSymbol);
         }
-    }, [selectedCorrSymbol]);
+    }, [selectedCorrSymbol, isSaudi]);
 
     const formatDate = (dateStr: string) => {
         if (!dateStr) return "";
@@ -1497,6 +1534,7 @@ export default function MarketClient() {
     const egx30Stats = data?.egx30 && Array.isArray(data.egx30) && data.egx30.length > 0 ? getStats(data.egx30) : { last: 0, change: 0, changePct: 0 };
     const egx100Stats = data?.egx100 && Array.isArray(data.egx100) && data.egx100.length > 0 ? getStats(data.egx100) : { last: 0, change: 0, changePct: 0 };
     const usdegpStats = data?.usdegp && Array.isArray(data.usdegp) && data.usdegp.length > 0 ? getStats(data.usdegp) : { last: 0, change: 0, changePct: 0 };
+    const tasiStats = data?.tasi && Array.isArray(data.tasi) && data.tasi.length > 0 ? getStats(data.tasi) : { last: 0, change: 0, changePct: 0 };
 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
@@ -1515,7 +1553,7 @@ export default function MarketClient() {
                         <span className="text-[10px] font-bold text-zinc-400 uppercase">{isAr ? "السعر" : "Price"}</span>
                         <span className="text-zinc-950 dark:text-white font-mono font-black text-sm">
                             {val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            <span className="text-[9px] text-zinc-500 dark:text-zinc-400 ml-1">EGP</span>
+                            <span className="text-[9px] text-zinc-500 dark:text-zinc-400 ml-1">{currencyCode}</span>
                         </span>
                     </p>
                     {activeTab !== "usdegp" && (
@@ -1549,7 +1587,7 @@ export default function MarketClient() {
                 <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4" role="status">
                 <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
                 <p className="text-sm font-mono text-zinc-600 dark:text-zinc-500">
-                    {isAr ? "جاري تحميل بيانات وتحليلات السوق البورصة المصرية..." : "Loading EGX market data and analysis..."}
+                    {isSaudi ? (isAr ? "جاري تحميل بيانات وتحليلات السوق السعودي (تاسي)..." : "Loading Saudi Tadawul (TASI) market data...") : (isAr ? "جاري تحميل بيانات وتحليلات السوق البورصة المصرية..." : "Loading EGX market data and analysis...")}
                 </p>
                 </div>
             </div>
@@ -1587,7 +1625,8 @@ export default function MarketClient() {
     }
 
     const activeChartData =
-        (activeTab === "egx30" ? data.egx30 :
+        (isSaudi || activeTab === "tasi" ? (data.tasi || []) :
+        activeTab === "egx30" ? data.egx30 :
         activeTab === "egx100" ? data.egx100 :
         data.usdegp) || [];
     const chartWithRecommendationCounts = activeChartData.map((point) => ({
@@ -1596,10 +1635,12 @@ export default function MarketClient() {
     }));
 
     const chartColor =
+        isSaudi || activeTab === "tasi" ? "#10B981" :
         activeTab === "usdegp" ? "#8B5CF6" :
         activeTab === "egx30" ? "#FFDC58" :
         "#10B981";
     const chartLabel =
+        isSaudi || activeTab === "tasi" ? "TASI" :
         activeTab === "usdegp" ? "USD/EGP" :
         activeTab === "egx30" ? "EGX 30" :
         "EGX 100";
@@ -1668,9 +1709,13 @@ export default function MarketClient() {
                         <button
                             type="button"
                             onClick={() => {
-                                const prompt = isAr
-                                    ? "اشرح لي وضع السوق المصري ككل اليوم بالتفصيل: حالة المؤشر العام EGX30 واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
-                                    : "Explain the overall Egyptian market status today in detail: EGX30 trend and regime, market breadth and health, total liquidity and top sectors, and what the key takeaway is for investors right now.";
+                                const prompt = isSaudi
+                                    ? (isAr
+                                        ? "اشرح لي وضع السوق السعودي (تاسي TASI) ككل اليوم بالتفصيل: حالة المؤشر العام واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
+                                        : "Explain the overall Saudi Tadawul (TASI) market status today in detail: TASI index trend and regime, market breadth and health, total liquidity and top sectors, and the key takeaway for investors right now.")
+                                    : (isAr
+                                        ? "اشرح لي وضع السوق المصري ككل اليوم بالتفصيل: حالة المؤشر العام EGX30 واتجاه السوق، قوة واتساع السوق، السيولة الإجمالية وأهم القطاعات، وإيه الخلاصة للمستثمر حالياً؟"
+                                        : "Explain the overall Egyptian market status today in detail: EGX30 trend and regime, market breadth and health, total liquidity and top sectors, and what the key takeaway is for investors right now.");
                                 window.dispatchEvent(new CustomEvent("open-chat-with-message", { detail: prompt }));
                             }}
                             className="inline-flex min-h-10 items-center justify-center gap-2 border-2 border-black bg-amber-300 hover:bg-amber-400 px-3.5 text-xs font-black text-black shadow-[3px_3px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 hover:shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:border-white"
@@ -1707,6 +1752,56 @@ export default function MarketClient() {
             )}
 
             {/* Metrics Cards Grid */}
+            {isSaudi ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10 font-sans font-medium">
+                    {/* TASI Index Card */}
+                    <div
+                        onClick={() => setActiveTab("tasi")}
+                        className={`relative flex cursor-pointer flex-col justify-between overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950/70 sm:p-6 border-emerald-400 ring-2 ring-emerald-500/10 dark:border-emerald-400/60`}
+                    >
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "المؤشر العام السعودي (تاسي TASI)" : "Tadawul All Share Index (TASI)"}
+                            </span>
+                            <Landmark className="w-5 h-5 text-emerald-400" />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {tasiStats.last.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{t("market.points")}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 font-mono ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span className={`text-sm font-black flex items-center ${tasiStats.changePct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {tasiStats.changePct >= 0 ? "+" : ""}{tasiStats.changePct.toFixed(2)}%
+                            </span>
+                            {tasiStats.changePct >= 0
+                                ? <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                                : <ArrowDownRight className="w-4 h-4 text-rose-400" />
+                            }
+                        </div>
+                    </div>
+
+                    {/* Saudi Currency & Exchange Card */}
+                    <div className="relative flex flex-col justify-between overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-zinc-950/70 sm:p-6">
+                        <div className={`flex items-center justify-between ${isAr ? "flex-row-reverse" : "flex-row"} mb-3`}>
+                            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                {isAr ? "السوق والعملة المعتمدة" : "Exchange & Currency"}
+                            </span>
+                            <DollarSign className="w-5 h-5 text-emerald-400" />
+                        </div>
+                        <div className={`flex items-baseline gap-2 ${isAr ? "justify-start flex-row-reverse" : "justify-start"}`}>
+                            <span className="text-3xl font-black text-zinc-950 dark:text-white font-mono leading-none">
+                                {currencyCode}
+                            </span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-500 font-bold">{currencyLabel}</span>
+                        </div>
+                        <div className={`flex items-center gap-1.5 mt-4 text-xs font-bold text-zinc-500 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
+                            <span>{isAr ? "السوق المالية السعودية (تداول · TADAWUL)" : "Saudi Exchange (TADAWUL)"}</span>
+                        </div>
+                    </div>
+                </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 font-sans font-medium">
                 {/* EGX 30 Card */}
                 <div
@@ -1792,6 +1887,7 @@ export default function MarketClient() {
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Current Market Regime Status */}
             <div className={`border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.15)] mb-10 font-sans ${activeRegime.border}`}>
@@ -1820,7 +1916,8 @@ export default function MarketClient() {
                 <div className={`flex items-center justify-between mb-6 ${isAr ? "flex-row-reverse" : "flex-row"}`}>
                     <div className="space-y-1">
                         <span className="text-xs font-black text-zinc-700 dark:text-zinc-400 uppercase tracking-wider">
-                            {activeTab === "egx30" ? t("market.tab_egx30_desc") :
+                            {(isSaudi || activeTab === "tasi") ? (isAr ? "المؤشر العام للسوق السعودي (تاسي TASI) — بيانات الجلسات التاريخية" : "Saudi Tadawul All Share Index (TASI) — Daily History") :
+                             activeTab === "egx30" ? t("market.tab_egx30_desc") :
                              activeTab === "egx100" ? t("market.tab_egx100_desc") :
                              t("market.tab_usdegp_desc")}
                         </span>
@@ -2026,6 +2123,7 @@ export default function MarketClient() {
                                 sectors={heatmapData.sectors}
                                 isAr={isAr}
                                 selectedSector={selectedSector}
+                                currencyCode={currencyCode}
                                 onSelect={(sec: any) => openDrill(sec)}
                             />
                         </div>
@@ -2054,7 +2152,7 @@ export default function MarketClient() {
                             </p>
                             {heatmapData?.total_market_flow > 0 && (
                                 <span className={`text-[10px] font-mono font-black text-zinc-500 bg-zinc-50 dark:bg-zinc-900 border-2 border-black/10 dark:border-zinc-800 px-2.5 py-1 ${isAr ? "text-left" : "text-right"}`}>
-                                    {isAr ? "إجمالي سيولة السوق" : "Total Market Flow"}: <span className="text-zinc-950 dark:text-white">{(heatmapData.total_market_flow / 1_000_000).toFixed(0)}M EGP</span>
+                                    {isAr ? "إجمالي سيولة السوق" : "Total Market Flow"}: <span className="text-zinc-950 dark:text-white">{(heatmapData.total_market_flow / 1_000_000).toFixed(0)}M {currencyCode}</span>
                                 </span>
                             )}
                         </div>
@@ -2079,6 +2177,7 @@ export default function MarketClient() {
                                 error={timelineError}
                                 isAr={isAr}
                                 t={t}
+                                currencyCode={currencyCode}
                                 onRefresh={() => void fetchTimelineData(true)}
                                 dailyFrames={dailyHeatmapFrames}
                                 onSelectDay={selectLiquidityDay}
@@ -2094,11 +2193,15 @@ export default function MarketClient() {
                     sector={selectedSector}
                     isAr={isAr}
                     t={t}
+                    currencyCode={currencyCode}
+                    isSaudi={isSaudi}
                     onClose={() => setDrillOpen(false)}
                 />
             )}
 
-            {/* Ready Hedge Filters Section */}
+            {/* Ready Hedge Filters & Macro-Correlation Sections (Egypt-specific USD/Gold macro) */}
+            {!isSaudi ? (
+                <>
             <HedgeFiltersSection
                 scan={hedgeScan}
                 loading={hedgeLoading}
@@ -2327,6 +2430,14 @@ export default function MarketClient() {
                         </div>
                     )}
                 </div>
+                </>
+            ) : (
+                <div className="mb-10 border-2 border-emerald-500/40 bg-emerald-500/5 p-4 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    {isAr
+                        ? "🇸🇦 محرك الارتباط بالدولار والذهب مخصص للسوق المصري نظراً لارتباط الجنيه بسعر الصرف الموازي، بينما يرتبط الريال السعودي بالدولار بسعر ثابت." 
+                        : "🇸🇦 USD/Gold Hedge & Macro-Correlation is tailored for EGX currency-hedging analysis (SAR is pegged to USD)."}
+                </div>
+            )}
 
             {/* Daily Analysis Summary Card */}
             {!breadthLoading && breadthData && (
