@@ -102,3 +102,32 @@ def test_telegram_bot_unlink_conflicting_profiles_on_link():
     mock_eq.neq.assert_called_with("id", "user_active")
 
 
+def test_native_vip_chat_b2b_bypass_quota_and_fast_cache():
+    """Verify B2B group requests bypass personal quota resolution and serve from fast-path RAM cache without NameError."""
+    from unittest.mock import patch, MagicMock
+    from api.native_telegram_vip_chat import handle_native_vip_chat
+    from api.agentic_chat.analysis_cache import clear_analysis_cache, set_vip_analysis_cache
+
+    clear_analysis_cache()
+    cached_text = "📊 **تحليل سهم فوري (FWRY):** السعر الحالي 8.50 ج.م، الدعم 8.20 ج.م والمقاومة 8.90 ج.م مع سيولة مؤسسية قوية."
+    set_vip_analysis_cache("vip_stock_FWRY", cached_text, tables=[{"title": "FWRY"}], recommendations=[])
+
+    with patch("api.native_telegram_vip_chat._resolve_telegram_user") as mock_resolve, \
+         patch("api.stock_ai._init_supabase"), \
+         patch("api.stock_ai.supabase", MagicMock()):
+        res = handle_native_vip_chat({
+            "action": "chat",
+            "telegram_user_id": 777888,
+            "telegram_username": "b2b_member",
+            "message": "حلل سهم فوري FWRY",
+            "chat_source": "telegram_b2b",
+            "bypass_quota": True,
+        })
+        assert res["ok"] is True
+        assert "8.50" in res["reply"]
+        assert res["tables"] == [{"title": "FWRY"}]
+        # Personal user resolution must NOT be called when bypass_quota=True
+        mock_resolve.assert_not_called()
+
+
+

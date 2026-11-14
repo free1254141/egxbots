@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from api.agentic_chat.pipeline import run_agentic_chat_stream
+from api.agentic_chat.tools_execution import _normalize_market_code, _ui_market_label
 from api.agentic_chat.auth_guard import (
     get_authenticated_user,
     check_and_consume_quota,
@@ -51,6 +52,7 @@ class ChatRequest(BaseModel):
     action: Optional[str] = None
     title: Optional[str] = None
     stream: Optional[bool] = True
+    market: Optional[str] = None
 
 
 @router.get("/health")
@@ -61,6 +63,7 @@ async def health_check():
         "service": "agentic_chat",
         "engine": "deepseek-v3",
         "mode": "async-streaming",
+        "markets": ["EGX", "TASI"],
     }
 
 
@@ -71,6 +74,7 @@ def _persist_message_background(
     reply: str,
     latency_ms: int = 0,
     image_url: Optional[str] = None,
+    market: str = "EGX",
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
@@ -100,6 +104,7 @@ def _persist_message_background(
             "latency_ms": safe_latency,
             "engine": "deepseek-v3",
             "chat_source": "web_chat",
+            "market": market,
         }
         user_row = {
             "session_id": session_id,
@@ -373,6 +378,12 @@ async def chat_stream_endpoint(
     session_id = body.session_id or body.sessionId or f"sess_{int(time.time() * 1000)}"
     model = body.model or "deepseek-chat"
     auto_recs = (body.autonomous_recommendations or body.autonomousRecommendations or False) and user_is_pro
+    raw_market = (
+        body.market
+        or request.headers.get("x-egxbots-market")
+        or request.query_params.get("market")
+    )
+    active_market = _ui_market_label(_normalize_market_code(raw_market))
 
     accept_header = accept if isinstance(accept, str) else (request.headers.get("accept", "") or "")
     wants_streaming = body.stream is not False or "text/event-stream" in accept_header
@@ -396,6 +407,7 @@ async def chat_stream_endpoint(
                 is_pro=user_is_pro,
                 remaining_quota=remaining_quota,
                 quota_limit=quota_limit,
+                market=active_market,
             ):
                 line = sse_chunk.strip()
                 if line.startswith("data:"):
@@ -424,6 +436,7 @@ async def chat_stream_endpoint(
                         reply=final_reply,
                         latency_ms=latency_ms,
                         image_url=primary_image_url,
+                        market=active_market,
                     )
                 )
 
@@ -454,6 +467,7 @@ async def chat_stream_endpoint(
             is_pro=user_is_pro,
             remaining_quota=remaining_quota,
             quota_limit=quota_limit,
+            market=active_market,
         ):
             line = sse_chunk.strip()
             if line.startswith("data:"):
@@ -483,12 +497,14 @@ async def chat_stream_endpoint(
                     reply=full_reply,
                     latency_ms=latency_ms,
                     image_url=primary_image_url,
+                    market=active_market,
                 )
             )
 
         return JSONResponse({
             "reply": full_reply,
             "session_id": session_id,
+            "market": active_market,
             "tables": tables,
             "latency_ms": latency_ms,
             "is_pro": user_is_pro,

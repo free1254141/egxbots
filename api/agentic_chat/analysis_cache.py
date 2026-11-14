@@ -34,13 +34,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from api.stock_aliases import resolve_stock_symbol, ARABIC_STOCK_MAPPINGS
+from api.egx_trading_calendar import is_egx_session
 
 logger = logging.getLogger("agentic_chat.cache")
 
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
 LIVE_SESSION_TTL_SECONDS = 15 * 60  # 15 minutes during live trading
 MAX_OFF_HOURS_AGE_SECONDS = 4 * 24 * 3600  # Never serve anything older than 4 days
-MAX_MEMORY_CACHE_ENTRIES = 500
+MAX_MEMORY_CACHE_ENTRIES = 1500
 
 SESSION_OPEN_MIN = 10 * 60  # 10:00 Cairo
 SESSION_CLOSE_MIN = 14 * 60 + 30  # 14:30 Cairo
@@ -56,6 +57,23 @@ LINE_PLACEHOLDER = "\uE000"
 # Tier 1 In-Memory Storage
 _memory_cache: Dict[str, Dict[str, Any]] = {}
 _memory_lock = threading.RLock()
+_inflight_locks: Dict[str, threading.Lock] = {}
+_inflight_meta_lock = threading.Lock()
+
+
+def get_inflight_cache_lock(cache_key: str) -> threading.Lock:
+    """Return a per-key lock for Single-Flight request coalescing so concurrent identical queries only compute once."""
+    with _inflight_meta_lock:
+        if len(_inflight_locks) > 2000:
+            # Prune unlocked entries if dictionary grows large
+            unlocked = [k for k, lk in list(_inflight_locks.items()) if not lk.locked()]
+            for k in unlocked[:1000]:
+                _inflight_locks.pop(k, None)
+        lk = _inflight_locks.get(cache_key)
+        if lk is None:
+            lk = threading.Lock()
+            _inflight_locks[cache_key] = lk
+        return lk
 
 
 def clear_analysis_cache() -> None:
@@ -96,12 +114,36 @@ def get_cairo_now() -> dt.datetime:
 
 
 def is_egx_live_session(now_cairo: Optional[dt.datetime] = None) -> bool:
-    """True if currently inside EGX live trading session (Sun-Thu 10:00 - 14:30 Cairo)."""
+    """True if currently inside EGX live trading session (Sun-Thu 10:00 - 14:30 Cairo, excl. holidays)."""
     cairo_dt = now_cairo or get_cairo_now()
-    if cairo_dt.weekday() not in TRADING_WEEKDAYS:
+    if cairo_dt.weekday() not in TRADING_WEEKDAYS or not is_egx_session(cairo_dt):
         return False
     current_minutes = cairo_dt.hour * 60 + cairo_dt.minute
     return SESSION_OPEN_MIN <= current_minutes < SESSION_CLOSE_MIN
+
+
+def get_last_completed_session_ready_ts(now_cairo: dt.datetime) -> Optional[float]:
+    """Return Cairo timestamp (17:15) of the most recently completed EGX trading session."""
+    current_minutes = now_cairo.hour * 60 + now_cairo.minute
+    today = now_cairo.date()
+    for back in range(0, 14):
+        candidate_day = today - dt.timedelta(days=back)
+        if not is_egx_session(candidate_day):
+            continue
+        if back == 0 and current_minutes < SESSION_CLOSE_MIN:
+            continue
+        ready_hour, ready_min = divmod(DATA_READY_MIN, 60)
+        ready_dt = dt.datetime(
+            candidate_day.year,
+            candidate_day.month,
+            candidate_day.day,
+            ready_hour,
+            ready_min,
+            0,
+            tzinfo=CAIRO_TZ,
+        )
+        return ready_dt.timestamp()
+    return None
 
 
 def resolve_cache_validity(computed_at_ts: float, now_ts: Optional[float] = None) -> bool:
@@ -109,8 +151,8 @@ def resolve_cache_validity(computed_at_ts: float, now_ts: Optional[float] = None
     Decide whether a cached entry may still be served:
     - Always valid for the first 15 minutes.
     - During live session (10:00–14:30 Sun–Thu): never valid beyond 15 minutes.
-    - Outside session: if computed after the 17:00 after-close job finished (>= 17:15 Cairo),
-      valid all night and all weekend until the next trading session opens at 10:00 AM Cairo time.
+    - Outside session: valid only if computed at or after the latest completed session's
+      post-close ready time (17:15 Cairo), so weekend/holiday checks never serve older sessions.
     """
     if now_ts is None:
         now_ts = time.time()
@@ -124,31 +166,15 @@ def resolve_cache_validity(computed_at_ts: float, now_ts: Optional[float] = None
         return False
 
     now_cairo = dt.datetime.fromtimestamp(now_ts, tz=CAIRO_TZ) if now_ts else get_cairo_now()
-    current_minutes = now_cairo.hour * 60 + now_cairo.minute
 
     # If inside live trading session, never serve anything older than 15 minutes
     if is_egx_live_session(now_cairo):
         return False
 
-    # Outside live session: check if computed after latest completed session ready time (17:15)
     try:
-        computed_cairo = dt.datetime.fromtimestamp(computed_at_ts, tz=CAIRO_TZ)
-        computed_minutes = computed_cairo.hour * 60 + computed_cairo.minute
-        is_computed_after_close = (computed_minutes >= DATA_READY_MIN)
-
-        if is_computed_after_close:
-            # 1. Computed today after close: valid all evening/night
-            if computed_cairo.date() == now_cairo.date():
-                return True
-            # 2. Computed yesterday after close: valid in morning before 10:00 AM
-            if now_cairo.date() == computed_cairo.date() + dt.timedelta(days=1):
-                return current_minutes < SESSION_OPEN_MIN
-            # 3. Weekend (Fri/Sat): valid all weekend if computed Thursday after close
-            if now_cairo.weekday() in {4, 5}:  # Fri=4, Sat=5
-                return True
-            # 4. Sunday morning before 10:00 AM: valid if computed Thursday after close
-            if now_cairo.weekday() == 6 and current_minutes < SESSION_OPEN_MIN:
-                return True
+        ready_ts = get_last_completed_session_ready_ts(now_cairo)
+        if ready_ts is not None:
+            return computed_at_ts >= ready_ts
     except Exception as e:
         logger.warning(f"[analysis_cache] Freshness check warning: {e}")
 
@@ -395,23 +421,37 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     if any(k in norm for k in (" اقوي القطاعات ", " أقوى القطاعات ", " أفضل القطاعات ")):
         return "vip_top_sectors"
 
-    # Single stock query
+    # Single or Two-Stock Comparison query
+    is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|مقارنة|ايهما|أيهما|مقابل|vs|versus)\b", norm))
     latin_matches = re.findall(r"\b[A-Za-z]{2,8}\b", query)
-    stopwords = {"THE", "AND", "FOR", "BUY", "SELL", "BOT", "EGX", "VIP", "AI", "CHAT", "RSI", "MACD"}
-    found_sym = None
+    stopwords = {"THE", "AND", "FOR", "BUY", "SELL", "BOT", "EGX", "VIP", "AI", "CHAT", "RSI", "MACD", "VS"}
+    found_syms: List[str] = []
     for tok in latin_matches:
         u = tok.upper()
         if u not in stopwords:
             res = resolve_stock_symbol(u)
-            if res:
-                found_sym = res
-                break
+            if res and res not in found_syms:
+                found_syms.append(res)
+                if not is_comparison_query:
+                    break
 
-    if not found_sym:
-        for ar_name, sym in ARABIC_STOCK_MAPPINGS.items():
-            if f" {ar_name.lower()} " in norm or norm.startswith(f" {ar_name.lower()} "):
-                found_sym = sym
-                break
+    if (not found_syms) or (is_comparison_query and len(found_syms) < 2):
+        # Sort by longest alias first so full Arabic names match before short tokens
+        for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
+            ar_low = ar_name.lower()
+            if f" {ar_low} " in norm or f" و{ar_low} " in norm or f" ب{ar_low} " in norm:
+                if sym not in found_syms:
+                    found_syms.append(sym)
+                if not is_comparison_query or len(found_syms) >= 2:
+                    break
+
+    if is_comparison_query:
+        if len(found_syms) == 2:
+            s1, s2 = sorted(found_syms[:2])
+            return f"vip_compare_{s1}_{s2}"
+        return None
+
+    found_sym = found_syms[0] if found_syms else None
 
     if found_sym:
         # Check sub-intent

@@ -143,8 +143,8 @@ def detect_topic_query_intent(text: str) -> Optional[Tuple[str, str]]:
     if not raw:
         return None
 
-    # Strip bot mention if present
-    cleaned = re.sub(r"^(?:/ask(?:@\w+)?|@egxbots_bot|يا\s*[اأ]رتورو|[اأ]رتورو)\s*[:،\-]?\s*", "", raw, flags=re.IGNORECASE).strip()
+    # Strip bot command/mention prefix if present
+    cleaned = re.sub(r"^(?:/(?:ask|scanner)(?:@\w+)?|@egxbots_bot|يا\s*[اأ]رتورو|[اأ]رتورو)\s*[:،\-]?\s*", "", raw, flags=re.IGNORECASE).strip()
     if not cleaned:
         cleaned = raw
     norm_cleaned = _norm_ar(cleaned)
@@ -1335,6 +1335,67 @@ def _show_topic_recs_restricted_dialog(
 _VIP_WORKER_SLOTS = threading.BoundedSemaphore(int(os.getenv("TELEGRAM_VIP_MAX_CONCURRENCY", "8") or 8))
 
 
+def _download_telegram_file(bot_token: str, file_id: str) -> Optional[Tuple[str, str, bytes]]:
+    """
+    Download a photo/document from Telegram via getFile and return (data_uri, file_path, raw_bytes).
+    """
+    if not bot_token or not file_id:
+        return None
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/getFile"
+        resp = requests.post(url, json={"file_id": file_id}, timeout=12)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not data.get("ok"):
+            return None
+        file_path = data.get("result", {}).get("file_path")
+        if not file_path:
+            return None
+
+        dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+        dl_resp = requests.get(dl_url, timeout=30)
+        if dl_resp.status_code != 200:
+            return None
+
+        raw_bytes = dl_resp.content
+        import base64
+        b64 = base64.b64encode(raw_bytes).decode("utf-8")
+        ext = file_path.lower().split(".")[-1] if "." in file_path else "jpg"
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        data_uri = f"data:{mime};base64,{b64}"
+        return data_uri, file_path, raw_bytes
+    except Exception as exc:
+        print(f"[TELEGRAM_VIP_CHAT] _download_telegram_file error: {exc}")
+        return None
+
+
+def _upload_telegram_image_to_storage(raw_bytes: bytes, file_path: str) -> Optional[str]:
+    """
+    Upload image bytes to Supabase Storage bucket 'chat-images' and return public URL.
+    """
+    if not raw_bytes:
+        return None
+    try:
+        from api.stock_ai import _init_supabase, supabase
+        _init_supabase()
+        from datetime import datetime
+        ext = "png" if file_path.lower().endswith(".png") else "jpg"
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        base_name = os.path.basename(file_path)
+        filename = f"telegram/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{base_name}"
+        supabase.storage.from_("chat-images").upload(
+            filename,
+            raw_bytes,
+            {"content-type": mime, "upsert": "true"}
+        )
+        pub_url = supabase.storage.from_("chat-images").get_public_url(filename)
+        return pub_url
+    except Exception as exc:
+        print(f"[TELEGRAM_VIP_CHAT] Supabase storage upload warning: {exc}")
+        return None
+
+
 def _execute_and_reply_vip_chat(
     bot_token: str,
     chat_id: Any,
@@ -1344,13 +1405,15 @@ def _execute_and_reply_vip_chat(
     query_text: str,
     reply_to_message_id: Optional[int] = None,
     callback_query_id: Optional[str] = None,
+    file_id: Optional[str] = None,
+    images: Optional[List[str]] = None,
 ) -> None:
     """Bounded-concurrency wrapper: bursts of simultaneous users queue briefly instead of overloading the backend."""
     acquired = _VIP_WORKER_SLOTS.acquire(timeout=90)
     try:
         _execute_and_reply_vip_chat_inner(
             bot_token, chat_id, thread_id, tg_user_id, user_name, query_text,
-            reply_to_message_id, callback_query_id,
+            reply_to_message_id, callback_query_id, file_id=file_id, images=images,
         )
     finally:
         if acquired:
@@ -1366,18 +1429,37 @@ def _execute_and_reply_vip_chat_inner(
     query_text: str,
     reply_to_message_id: Optional[int] = None,
     callback_query_id: Optional[str] = None,
+    file_id: Optional[str] = None,
+    images: Optional[List[str]] = None,
 ) -> None:
     """Run the query through the website's Agentic Pipeline (/api/telegram/vip-chat) and post the formatted answer."""
-    # Send temporary "جاري التحليل..." status message FIRST so user sees instant feedback without waiting for sendChatAction
+    processed_images: List[str] = list(images or [])
+    image_storage_url: Optional[str] = None
+
+    if file_id and not processed_images:
+        dl_res = _download_telegram_file(bot_token, file_id)
+        if dl_res:
+            data_uri, file_path, raw_bytes = dl_res
+            image_storage_url = _upload_telegram_image_to_storage(raw_bytes, file_path)
+            processed_images.append(data_uri)
+
     safe_user = html.escape(user_name or "المستثمر")
     safe_query = html.escape(query_text[:120])
+    if file_id or processed_images:
+        wait_text = (
+            f"📸 <b>استلمت صورة المحفظة / الشارت يا <a href=\"tg://user?id={tg_user_id}\">{safe_user}</a>!</b>\n"
+            f"🔍 <i>جاري فحص الأسهم وحساب نقاط الدعم والمقاومة والأهداف بالذكاء الاصطناعي...</i>"
+        )
+    else:
+        wait_text = (
+            f"⏳ <b>جاري تحليل طلبك يا <a href=\"tg://user?id={tg_user_id}\">{safe_user}</a>...</b>\n"
+            f"💬 الطلب: <code>{safe_query}</code>"
+        )
+
     wait_msg_id = send_vip_message(
         bot_token=bot_token,
         chat_id=chat_id,
-        text=(
-            f"⏳ <b>جاري تحليل طلبك يا <a href=\"tg://user?id={tg_user_id}\">{safe_user}</a>...</b>\n"
-            f"💬 الطلب: <code>{safe_query}</code>"
-        ),
+        text=wait_text,
         message_thread_id=thread_id,
         reply_to_message_id=reply_to_message_id,
     )
@@ -1388,15 +1470,19 @@ def _execute_and_reply_vip_chat_inner(
     _call_telegram_api(bot_token, "sendChatAction", action_payload, timeout=4)
 
     is_private_chat = str(chat_id) == str(tg_user_id)
-    api_res = call_web_vip_chat_api(
-        {
-            "action": "chat",
-            "telegram_user_id": tg_user_id,
-            "telegram_username": user_name,
-            "message": query_text,
-            "chat_source": "telegram_private" if is_private_chat else "telegram_topic",
-        }
-    )
+    api_payload: Dict[str, Any] = {
+        "action": "chat",
+        "telegram_user_id": tg_user_id,
+        "telegram_username": user_name,
+        "message": query_text,
+        "chat_source": "telegram_private" if is_private_chat else "telegram_topic",
+    }
+    if processed_images:
+        api_payload["images"] = processed_images
+    if image_storage_url:
+        api_payload["image_storage_url"] = image_storage_url
+
+    api_res = call_web_vip_chat_api(api_payload)
 
     # Delete temporary waiting message
     if wait_msg_id:
@@ -1800,10 +1886,22 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
     chat_type = str(chat.get("type") or "")
     thread_id = msg.get("message_thread_id")
     msg_id = msg.get("message_id")
-    text = str(msg.get("text") or "").strip()
 
-    if not chat_id or not text:
+    photos = msg.get("photo") or []
+    document = msg.get("document") or {}
+    doc_mime = str(document.get("mime_type") or "").lower()
+    is_image_doc = bool(document and doc_mime.startswith("image/"))
+    has_photo = bool(photos or is_image_doc)
+    photo_file_id = photos[-1].get("file_id") if photos else (document.get("file_id") if is_image_doc else None)
+
+    caption = str(msg.get("caption") or "").strip()
+    text = str(msg.get("text") or caption).strip()
+
+    if not chat_id or (not text and not has_photo):
         return False
+
+    if has_photo and not text:
+        text = "حلل محفظتي الاستثمارية بناءً على الصورة المرفقة واستخرج الأسهم والأسعار والكميات وقدم خطة دعم ومقاومة وهدف ووقف خسارة لكل سهم"
 
     tg_user_id, user_name = _extract_user_info(from_obj)
     if not tg_user_id:
@@ -1864,13 +1962,17 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         )
         return True
 
-    # Command to show/pin the interactive ARTORO Control Panel (or /start in private DM)
-    if clean_lower.startswith("/start") or clean_lower in (
-        "/panel",
-        "/vippanel",
-        "/artoro",
-        "/artoro_panel",
-        "/menu",
+    # Command to show/pin the interactive ARTORO Control Panel (or /start or bare /scanner)
+    if (
+        clean_lower.startswith("/start")
+        or (clean_lower == "/scanner" and len(text.split()) == 1)
+        or clean_lower in (
+            "/panel",
+            "/vippanel",
+            "/artoro",
+            "/artoro_panel",
+            "/menu",
+        )
     ):
         panel_msg_id = send_vip_message(
             bot_token=bot_token,
@@ -1978,6 +2080,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             "query_text": query_text,
             "reply_to_message_id": msg_id,
             "callback_query_id": None,
+            "file_id": photo_file_id,
         },
         daemon=True,
     ).start()

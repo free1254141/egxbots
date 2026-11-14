@@ -404,6 +404,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     const [autonomousRecommendations, setAutonomousRecommendationsState] = useState<boolean>(false);
 
+    const [activeMarket, setActiveMarket] = useState<"egx" | "tasi">(() => {
+        if (typeof window !== "undefined") {
+            return localStorage.getItem("egxbots_market") === "tasi" ? "tasi" : "egx";
+        }
+        return "egx";
+    });
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const syncMarket = () => {
+            setActiveMarket(localStorage.getItem("egxbots_market") === "tasi" ? "tasi" : "egx");
+        };
+        const onMarketChange = (event: Event) => {
+            const detail = (event as CustomEvent<{ market?: string }>)?.detail;
+            if (detail?.market === "tasi" || detail?.market === "egx") {
+                setActiveMarket(detail.market);
+            } else {
+                syncMarket();
+            }
+        };
+        const onStorage = (event: StorageEvent) => {
+            if (event.key === "egxbots_market") {
+                syncMarket();
+            }
+        };
+        syncMarket();
+        window.addEventListener("egxbots:market-change", onMarketChange);
+        window.addEventListener("storage", onStorage);
+        return () => {
+            window.removeEventListener("egxbots:market-change", onMarketChange);
+            window.removeEventListener("storage", onStorage);
+        };
+    }, []);
+
 
 
     useEffect(() => {
@@ -1589,15 +1623,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 });
 
+            const currentMarket: "egx" | "tasi" =
+                typeof window !== "undefined" && localStorage.getItem("egxbots_market") === "tasi"
+                    ? "tasi"
+                    : activeMarket;
+
+            const parsedChatBody = JSON.parse(chatReq.body) as Record<string, unknown>;
+            parsedChatBody.market = currentMarket;
+
             const response = await fetch("/api/ai-chat", {
 
                 ...chatReq,
+
+                body: JSON.stringify(parsedChatBody),
 
                 headers: {
 
                     ...chatReq.headers,
 
                     ...getAuthHeaders(),
+
+                    "x-egxbots-market": currentMarket,
 
                 },
 
@@ -2133,7 +2179,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         }
 
-    }, [remainingQuota, selectedModel, setActiveSessionId, setSessions, setSessionMessages, flushStoredMessages, autonomousRecommendations]);
+    }, [remainingQuota, selectedModel, setActiveSessionId, setSessions, setSessionMessages, flushStoredMessages, autonomousRecommendations, activeMarket]);
 
 
 

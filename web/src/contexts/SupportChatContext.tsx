@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { fetchUserQuotaCached } from "@/lib/user-quota-client";
 
 export type SupportMessage = {
     id: string;
@@ -39,38 +40,24 @@ export function SupportChatProvider({ children }: { children: React.ReactNode })
 
     const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
-    // Check if user is a PRO subscriber
+    // Check if user is a PRO subscriber using shared 30m deduplicated quota client
     useEffect(() => {
         if (!user?.id) {
             setIsPro(false);
             return;
         }
-        // The plan rarely changes within a session; reuse a recent answer instead of
-        // invoking /api/user/quota (a serverless function) on every full page load.
-        const cacheKey = `egxbots_support_pro_v1:${user.id}`;
-        try {
-            const cached = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
-            if (cached && typeof cached.pro === "boolean" && Date.now() - cached.at < 5 * 60 * 1000) {
-                setIsPro(cached.pro);
-                return;
-            }
-        } catch {
-            // ignore storage/JSON errors and fall through to the network
-        }
-        fetch("/api/user/quota")
-            .then((res) => res.json())
+        let active = true;
+        void fetchUserQuotaCached(user.id)
             .then((data) => {
-                const pro = Boolean(data?.ok && data?.plan?.is_pro);
-                setIsPro(pro);
-                if (data?.ok) {
-                    try {
-                        sessionStorage.setItem(cacheKey, JSON.stringify({ pro, at: Date.now() }));
-                    } catch {
-                        // storage unavailable
-                    }
-                }
+                if (!active) return;
+                setIsPro(Boolean(data?.ok && data?.plan?.is_pro));
             })
-            .catch(() => setIsPro(false));
+            .catch(() => {
+                if (active) setIsPro(false);
+            });
+        return () => {
+            active = false;
+        };
     }, [user?.id]);
 
     // Load or generate session ID

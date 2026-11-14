@@ -21,6 +21,7 @@ import { isChatAdminEmail } from "@/lib/chat-sharing";
 import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { consumeTrialAutostart, prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
 
 function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
     return (
@@ -34,6 +35,7 @@ function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "
 }
 
 export default function ChatWidget() {
+    const { user } = useAuth();
     const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false);
     const { 
         isOpen, 
@@ -203,8 +205,7 @@ export default function ChatWidget() {
     useEffect(() => {
         if (!showUpgradeModal) return;
         let active = true;
-        fetch("/api/user/quota")
-            .then(r => r.ok ? r.json() : null)
+        void fetchUserQuotaCached(user?.id)
             .then(data => {
                 if (!active || !data?.ok) return;
                 if (data.plan?.trial_eligible !== undefined) {
@@ -216,17 +217,41 @@ export default function ChatWidget() {
             })
             .catch(() => {});
 
-        fetch("/api/payment/public-config")
-            .then(r => r.ok ? r.json() : null)
-            .then(cfg => {
-                if (active && cfg?.founders?.ends_at) {
-                    setFoundersEndsAt(cfg.founders.ends_at);
+        const PUBLIC_CFG_KEY = "egxbots_public_payment_config_v1";
+        let usedCachedCfg = false;
+        try {
+            const rawCfg = window.sessionStorage.getItem(PUBLIC_CFG_KEY);
+            if (rawCfg) {
+                const parsedCfg = JSON.parse(rawCfg) as { ts: number; data: any };
+                if (parsedCfg?.ts && Date.now() - parsedCfg.ts < 60 * 60 * 1000 && parsedCfg.data) {
+                    usedCachedCfg = true;
+                    if (active && parsedCfg.data?.founders?.ends_at) {
+                        setFoundersEndsAt(parsedCfg.data.founders.ends_at);
+                    }
                 }
-            })
-            .catch(() => {});
+            }
+        } catch {
+            // ignore sessionStorage errors
+        }
+
+        if (!usedCachedCfg) {
+            fetch("/api/payment/public-config")
+                .then(r => r.ok ? r.json() : null)
+                .then(cfg => {
+                    if (cfg) {
+                        try {
+                            window.sessionStorage.setItem(PUBLIC_CFG_KEY, JSON.stringify({ ts: Date.now(), data: cfg }));
+                        } catch { /* ignore */ }
+                    }
+                    if (active && cfg?.founders?.ends_at) {
+                        setFoundersEndsAt(cfg.founders.ends_at);
+                    }
+                })
+                .catch(() => {});
+        }
 
         return () => { active = false; };
-    }, [showUpgradeModal]);
+    }, [showUpgradeModal, user?.id]);
 
     const handleActivateTrialFromModal = async () => {
         setTrialStartingModal(true);
@@ -239,6 +264,7 @@ export default function ChatWidget() {
             });
             const data = await res.json();
             if (res.ok && data?.success) {
+                invalidateUserQuotaCache(user?.id);
                 toast.success("تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!");
                 setShowUpgradeModal(false);
                 broadcastEntitlements(true);
@@ -254,7 +280,6 @@ export default function ChatWidget() {
             setTrialStartingModal(false);
         }
     };
-    const { user } = useAuth();
     const router = useRouter();
     let pathname = "";
     try {

@@ -30,6 +30,10 @@ def test_analysis_cache_canonical_keys():
     assert extract_canonical_cache_key("عتاقة نظامه ايه") == "vip_stock_ATQA"
     assert extract_canonical_cache_key("طلعت مصطفى TMGH") == "vip_stock_TMGH"
 
+    # Canonical two-stock comparison keys
+    assert extract_canonical_cache_key("قارن بين COMI و FWRY") == "vip_compare_COMI_FWRY"
+    assert extract_canonical_cache_key("مقارنة بين السويدي و فوري") == "vip_compare_FWRY_SWDY"
+
     # Canonical market keys
     assert extract_canonical_cache_key("حالة السوق المصري النهاردة") == "vip_market_summary"
     assert extract_canonical_cache_key("وضع السوق") == "vip_market_summary"

@@ -41,7 +41,8 @@ async function proxyToPythonChatbot(req: NextRequest, pathSuffix: string = "") {
       k === "content-type" ||
       k === "accept" ||
       k === "x-benchmark-test" ||
-      k === "x-benchmark-key"
+      k === "x-benchmark-key" ||
+      k === "x-egxbots-market"
     ) {
       headers.set(k, val);
     }

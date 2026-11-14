@@ -17,7 +17,18 @@ import pytz
 
 from api.agentic_chat.prompts import AGENTIC_SYSTEM_PROMPT
 from api.agentic_chat.tools_schema import AGENTIC_TOOLS_SCHEMA
-from api.agentic_chat.tools_execution import dispatch_tool
+from api.agentic_chat.tools_execution import (
+    CAIRO_TZ,
+    RIYADH_TZ,
+    _BUILTIN_SAUDI_ALIASES,
+    _EXT_SAUDI_MAPPINGS,
+    _normalize_market_code,
+    _resolve_symbol_and_market,
+    _ui_market_label,
+    dispatch_tool,
+    reset_active_market_context,
+    set_active_market_context,
+)
 from api.agentic_chat.auth_guard import filter_output, strip_dsml
 from api.agentic_chat.vision import (
     analyze_image,
@@ -37,7 +48,6 @@ from api.agentic_chat.analysis_cache import (
 )
 
 logger = logging.getLogger("agentic_chat")
-CAIRO_TZ = pytz.timezone("Africa/Cairo")
 
 
 def _get_deepseek_key() -> str:
@@ -45,34 +55,37 @@ def _get_deepseek_key() -> str:
     return key.strip()
 
 
+def _norm_ar_hint(text: str) -> str:
+    t = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", text)
+    t = re.sub(r"[أإآ]", "ا", t)
+    t = re.sub(r"ة", "ه", t)
+    t = re.sub(r"ى", "ي", t)
+    return t.lower()
+
+
 def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
     """
-    Extract Egyptian stock symbol hints from Arabic company names, aliases, and tickers.
-    Matches known Egyptian stock mappings (e.g. 'عتاقة' / 'عتاقه' -> 'ATQA').
+    Extract EGX and Saudi (TASI) stock symbol hints from Arabic names, aliases, Latin tickers,
+    and 4-digit Tadawul tickers.
     """
     if not message:
         return []
     try:
         from api.stock_aliases import ARABIC_STOCK_MAPPINGS, resolve_stock_symbol
     except Exception:
-        return []
+        ARABIC_STOCK_MAPPINGS = {}
+        resolve_stock_symbol = lambda x: None  # noqa: E731
 
-    norm_msg = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", message)
-    norm_msg = re.sub(r"[أإآ]", "ا", norm_msg)
-    norm_msg = re.sub(r"ة", "ه", norm_msg)
-    norm_msg = re.sub(r"ى", "ي", norm_msg).lower()
+    norm_msg = _norm_ar_hint(message)
     norm_msg = re.sub(r"(?:بورص[ةه]|سوق|مؤشر)\s+النيل", " ", norm_msg)
 
     hints: List[Dict[str, Any]] = []
     seen_symbols = set()
 
-    # 1. Match Arabic full names and aliases, sorted longest first
-    sorted_aliases = sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True)
-    for ar_name, sym in sorted_aliases:
-        norm_key = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", ar_name)
-        norm_key = re.sub(r"[أإآ]", "ا", norm_key)
-        norm_key = re.sub(r"ة", "ه", norm_key)
-        norm_key = re.sub(r"ى", "ي", norm_key).lower()
+    # 1a. Match Egyptian Arabic full names and aliases, sorted longest first
+    sorted_egx = sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True)
+    for ar_name, sym in sorted_egx:
+        norm_key = _norm_ar_hint(ar_name)
         if len(norm_key) < 2:
             continue
 
@@ -87,11 +100,36 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
             s_upper = sym.upper()
             if s_upper not in seen_symbols:
                 seen_symbols.add(s_upper)
-                hints.append({"name": ar_name, "symbols": [s_upper]})
+                hints.append({"name": ar_name, "symbols": [s_upper], "market": "EGX"})
 
-    # 2. Match Latin tickers (2-6 uppercase letters)
+    # 1b. Match Saudi Arabic & English company aliases, sorted longest first
+    merged_saudi: Dict[str, str] = {}
+    merged_saudi.update(_BUILTIN_SAUDI_ALIASES)
+    merged_saudi.update(_EXT_SAUDI_MAPPINGS or {})
+    sorted_saudi = sorted(merged_saudi.items(), key=lambda x: len(str(x[0])), reverse=True)
+    for sa_name, sym in sorted_saudi:
+        norm_key = _norm_ar_hint(str(sa_name))
+        if len(norm_key) < 3:
+            continue
+        escaped = re.escape(norm_key)
+        if norm_key.startswith("ال"):
+            without_al = re.escape(norm_key[2:])
+            pattern = rf"(?:^|[^\w\u0621-\u064a])(?:(?:و|ف|ب|ل|ك|ال)?{escaped}|لل{without_al})(?:$|[^\w\u0621-\u064a])"
+        else:
+            pattern = rf"(?:^|[^\w\u0621-\u064a])(?:و|ف|ب|ل|ك|ال)?{escaped}(?:$|[^\w\u0621-\u064a])"
+        if re.search(pattern, norm_msg, re.IGNORECASE):
+            s_upper = str(sym).upper().strip()
+            if s_upper not in seen_symbols:
+                seen_symbols.add(s_upper)
+                hints.append({"name": sa_name, "symbols": [s_upper], "market": "TASI"})
+
+    # 2. Match Latin tickers (2-6 uppercase letters for EGX, e.g. COMI, TMGH)
     latin_matches = re.findall(r"\b[A-Za-z]{2,6}\b", message)
-    stopwords = {"EGX", "BUY", "SELL", "HOLD", "THE", "AND", "FOR", "RSI", "MACD", "EMA", "SMA", "VIP", "PRO", "API", "NOW", "TODAY", "NEWS", "USD", "EGP"}
+    stopwords = {
+        "EGX", "TASI", "KSA", "BUY", "SELL", "HOLD", "THE", "AND", "FOR",
+        "RSI", "MACD", "EMA", "SMA", "VIP", "PRO", "API", "NOW", "TODAY",
+        "NEWS", "USD", "EGP", "SAR",
+    }
     for tok in latin_matches:
         u = tok.upper()
         if u in stopwords:
@@ -99,9 +137,66 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
         res = resolve_stock_symbol(u)
         if res and res not in seen_symbols:
             seen_symbols.add(res)
-            hints.append({"name": tok, "symbols": [res]})
+            hints.append({"name": tok, "symbols": [res], "market": "EGX"})
+
+    # 3. Match 4-digit Tadawul tickers while filtering dates, years, and round cash/share amounts
+    scrubbed_msg = re.sub(r"\b\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?\b", " ", message)
+    for m in re.finditer(r"(?<!\d)(\d{4})(\.(?:SR|SA|TADAWUL))?(?!\d)", scrubbed_msg, re.IGNORECASE):
+        num = m.group(1)
+        has_saudi_suffix = bool(m.group(2))
+        if num in seen_symbols:
+            continue
+        if not has_saudi_suffix:
+            val = int(num)
+            # Tadawul stock codes are >= 1010 and never end in 000
+            if val < 1010 or val % 500 == 0:
+                continue
+            # Filter obvious calendar years (keep 2010 SABIC & 2020 SABIC Nutri unless prefixed with year words)
+            after_ctx = scrubbed_msg[m.end() : m.end() + 18].lower()
+            before_ctx = scrubbed_msg[max(0, m.start() - 18) : m.start()].lower()
+            if (1900 <= val <= 2009 or 2021 <= val <= 2035) or (
+                val in (2010, 2020) and re.search(r"(?:عام|سنة|سنه|year|in)\s*$", before_ctx)
+            ):
+                continue
+            # Filter amounts/quantities such as '1500 سهم' or '2200 جنيه' or '1200 ريال'
+            if re.match(
+                r"^\s*(?:%|جنيه|ج\.م|egp|ريال|ر\.س|sar|دولار|نقطة|مليون|الف|ألف|سهم|أسهم|اسهم)\b",
+                after_ctx,
+            ):
+                continue
+        seen_symbols.add(num)
+        hints.append({"name": num, "symbols": [num], "market": "TASI"})
 
     return hints[:10]
+
+
+def _is_saudi_related_query(
+    message: str,
+    active_market: Optional[str] = None,
+    hints: Optional[List[Dict[str, Any]]] = None,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+) -> bool:
+    """Bypass EGX-only analysis_cache whenever Saudi TASI context or tickers are involved."""
+    if _normalize_market_code(active_market) == "TADAWUL":
+        return True
+    if any(h.get("market") == "TASI" for h in (hints or []) if isinstance(h, dict)):
+        return True
+    msg_up = (message or "").upper()
+    if any(kw in msg_up for kw in ("TASI", "TADAWUL", ".SR", ".SA", "SAR", "تاسي", "تداول", "السعود")):
+        return True
+    for tc in (tool_calls or []):
+        try:
+            args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+        except Exception:
+            args = {}
+        if _normalize_market_code(args.get("market")) == "TADAWUL":
+            return True
+        syms = args.get("symbols") or ([args["symbol"]] if args.get("symbol") else [])
+        for s in syms:
+            _, m = _resolve_symbol_and_market(s)
+            if m == "TADAWUL":
+                return True
+    return False
 
 
 def parse_dsml_tool_calls(text: str) -> List[Dict[str, Any]]:
@@ -172,12 +267,48 @@ async def run_agentic_chat_stream(
     is_pro: bool = True,
     remaining_quota: int = 999,
     quota_limit: int = 999,
+    market: Optional[str] = None,
 ):
     """
-    Main agentic streaming generator.
+    Main agentic streaming generator (supports EGX & Saudi TASI simultaneously).
     Yields Server-Sent Events (SSE) formatted as: `data: <json_or_marker>\\n\\n`
     """
+    ui_exch = _normalize_market_code(market)
+    mkt_token = set_active_market_context(ui_exch)
+    try:
+        async for ev in _run_agentic_chat_stream_impl(
+            message=message,
+            history=history,
+            images=images,
+            session_id=session_id,
+            user_id=user_id,
+            model=model,
+            autonomous_recommendations=autonomous_recommendations,
+            is_pro=is_pro,
+            remaining_quota=remaining_quota,
+            quota_limit=quota_limit,
+            ui_exch=ui_exch,
+        ):
+            yield ev
+    finally:
+        reset_active_market_context(mkt_token)
+
+
+async def _run_agentic_chat_stream_impl(
+    message: str,
+    history: Optional[List[Dict[str, Any]]] = None,
+    images: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    model: str = "deepseek-chat",
+    autonomous_recommendations: bool = False,
+    is_pro: bool = True,
+    remaining_quota: int = 999,
+    quota_limit: int = 999,
+    ui_exch: str = "EGX",
+):
     start_time = time.time()
+    ui_label = _ui_market_label(ui_exch)
     api_key = _get_deepseek_key()
     if not api_key:
         err_event = {
@@ -189,16 +320,31 @@ async def run_agentic_chat_stream(
         return
 
     # Yield initial thinking status
-    yield f"data: {json.dumps({'type': 'status', 'status': 'thinking', 'message': 'جاري تحليل استفسارك في البورصة المصرية...'}, ensure_ascii=False)}\n\n"
+    thinking_msg = (
+        "جاري تحليل استفسارك في السوق السعودي (تداول) والبورصة المصرية..."
+        if ui_label == "TASI"
+        else "جاري تحليل استفسارك عبر EGX BOTS..."
+    )
+    yield f"data: {json.dumps({'type': 'status', 'status': 'thinking', 'message': thinking_msg}, ensure_ascii=False)}\n\n"
 
     # Static system prompt first (enables DeepSeek prefix caching)
     formatted_messages = [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
 
-    # Inject dynamic Cairo timestamp and trading date in a separate message after static prompt
+    # Inject dynamic Cairo & Riyadh timestamps plus active UI market tie-breaker hint
     now_cairo = datetime.now(CAIRO_TZ)
+    now_riyadh = datetime.now(RIYADH_TZ)
+    active_mkt_desc = (
+        "السوق السعودي (تداول TASI — ر.س)"
+        if ui_label == "TASI"
+        else "البورصة المصرية (EGX — ج.م)"
+    )
     date_context = (
-        f"📅 الجلسة الحالية وتوقيت القاهرة الآن: {now_cairo.strftime('%Y-%m-%d %H:%M:%S')}. "
-        f"جميع الأسعار والمؤشرات بالجنيه المصري (EGP). وضع التوصيات الحرة: {'مفعل' if autonomous_recommendations else 'غير مفعل'}."
+        f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:%M:%S')}. "
+        f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
+        "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة أسهم واستفسارات EGX و TASI معاً). "
+        "التزم بدقة بالعملة: ج.م (EGP) للأسهم المصرية و ر.س (SAR) للأسهم السعودية. "
+        f"وضع التوصيات الحرة: {'مفعل' if autonomous_recommendations else 'غير مفعل'}."
     )
     formatted_messages.append({"role": "system", "content": date_context})
 
@@ -288,7 +434,7 @@ async def run_agentic_chat_stream(
     if hints:
         hints_payload = {"symbol_hints": hints}
         hints_text = (
-            "سياق رموز البورصة المصرية المكتشفة في استفسار المستخدم والصور المرفقة (symbol_hints):\n"
+            "سياق رموز الأسهم المكتشفة في استفسار المستخدم والصور المرفقة (EGX / TASI symbol_hints):\n"
             f"{json.dumps(hints_payload, ensure_ascii=False)}\n"
             "التزم بدقة بهذه الرموز عند استدعاء الأدوات get_stock و get_stock_levels و get_comparison ولا تخترع رمزاً بديلاً."
         )
@@ -321,9 +467,11 @@ async def run_agentic_chat_stream(
     recommendations_data: List[Any] = []
     tools_executed_count = 0
     candidate_cache_key: Optional[str] = None
+    is_saudi_flow = _is_saudi_related_query(message, active_market=ui_exch, hints=hints)
 
     # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
-    if not vision_data and (not images or len(images) == 0):
+    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers are involved.
+    if not is_saudi_flow and not vision_data and (not images or len(images) == 0):
         early_key = build_analysis_cache_key(message)
         if early_key:
             candidate_cache_key = early_key
@@ -335,11 +483,10 @@ async def run_agentic_chat_stream(
 
                 cached_reply = cached_hit["reply"]
                 words = cached_reply.split(" ")
-                chunk_size = 5
+                chunk_size = 20
                 for i in range(0, len(words), chunk_size):
                     chunk = " ".join(words[i : i + chunk_size]) + " "
                     yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
-                    await asyncio.sleep(0.01)
 
                 total_lat = int((time.time() - start_time) * 1000)
                 suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
@@ -450,7 +597,19 @@ async def run_agentic_chat_stream(
                 # When DeepSeek decides the tool call in Round 1, check if this canonical
                 # read query has already been analyzed and cached in Supabase market_cache / memory.
                 # -------------------------------------------------------------------
-                if round_count == 1 and len(tool_calls) == 1 and not vision_data and (not images or len(images) == 0):
+                saudi_tool_call = is_saudi_flow or _is_saudi_related_query(
+                    message, active_market=ui_exch, hints=hints, tool_calls=tool_calls
+                )
+                if saudi_tool_call:
+                    is_saudi_flow = True
+
+                if (
+                    not saudi_tool_call
+                    and round_count == 1
+                    and len(tool_calls) == 1
+                    and not vision_data
+                    and (not images or len(images) == 0)
+                ):
                     primary_call = tool_calls[0]
                     p_name = primary_call.get("function", {}).get("name", "")
                     try:
@@ -468,11 +627,10 @@ async def run_agentic_chat_stream(
 
                             cached_reply = cached_hit["reply"]
                             words = cached_reply.split(" ")
-                            chunk_size = 5
+                            chunk_size = 20
                             for i in range(0, len(words), chunk_size):
                                 chunk = " ".join(words[i : i + chunk_size]) + " "
                                 yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
-                                await asyncio.sleep(0.01)
 
                             total_lat = int((time.time() - start_time) * 1000)
                             suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
@@ -495,7 +653,7 @@ async def run_agentic_chat_stream(
 
                 # Tool calls requested:
                 tools_executed_count += len(tool_calls)
-                yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات البورصة المصرية ({len(tool_calls)} مصادر)...'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(tool_calls)} مصادر)...'}, ensure_ascii=False)}\n\n"
 
                 # Append assistant tool-call intent to message history
                 formatted_messages.append(assistant_msg)
@@ -509,8 +667,16 @@ async def run_agentic_chat_stream(
                         fn_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
                     except Exception:
                         fn_args = {}
-                    # Pass verified user_id and user_prompt for anti-injection validation
-                    tool_tasks.append(dispatch_tool(fn_name, fn_args, user_id=user_id, user_prompt=message))
+                    # Pass verified user_id, user_prompt, and active UI default_market tie-breaker
+                    tool_tasks.append(
+                        dispatch_tool(
+                            fn_name,
+                            fn_args,
+                            user_id=user_id,
+                            user_prompt=message,
+                            default_market=ui_exch,
+                        )
+                    )
 
                 tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
                 t_tools = time.time() - t_tools_start
@@ -586,21 +752,6 @@ async def run_agentic_chat_stream(
     # Apply compliance filter on final reply
     accumulated_reply = filter_output(accumulated_reply)
 
-    # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
-    if accumulated_reply and not vision_data and (not images or len(images) == 0):
-        effective_key = candidate_cache_key or build_analysis_cache_key(message)
-        if effective_key:
-            try:
-                set_vip_analysis_cache(
-                    cache_key=effective_key,
-                    reply=accumulated_reply,
-                    tables=tables_data,
-                    recommendations=recommendations_data,
-                )
-                logger.info(f"[agentic_chat] Saved to Two-Tier Cache: {effective_key}")
-            except Exception as cache_err:
-                logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
-
     # Suggest dynamic follow-up buttons based on context
     if "تحليل سهم" in accumulated_reply or "الدعم" in accumulated_reply or "المقاومة" in accumulated_reply:
         suggested_buttons = ["📊 تحديث المستويات الفنية", "🎯 أهداف السهم القادمة", "📈 ترشيح فرص بديلة"]
@@ -610,6 +761,26 @@ async def run_agentic_chat_stream(
         suggested_buttons = ["📈 أفضل أسهم السوق اليوم", "🔍 تحليل سهم محدد", "💼 فحص محفظتي"]
 
     total_latency_ms = int((time.time() - start_time) * 1000)
+
+    def _row_currency(item: Dict[str, Any]) -> str:
+        c = item.get("currency")
+        if c:
+            return str(c)
+        mkt = item.get("market") or item.get("exchange")
+        if mkt and _normalize_market_code(mkt) == "TADAWUL":
+            return "ر.س"
+        if re.fullmatch(r"\d{4}", str(item.get("symbol") or "").strip()):
+            return "ر.س"
+        return "ج.م"
+
+    def _row_sharia_label(item: Dict[str, Any]) -> str:
+        flag = item.get("is_sharia_compliant")
+        if flag is True:
+            idx = item.get("sharia_index") or "الشريعة"
+            return f"متوافق ({idx})"
+        if flag is False:
+            return "غير متوافق"
+        return "غير مصنف"
 
     # Format tables into standard ExcelTable schema expected by frontend
     excel_tables = []
@@ -624,14 +795,15 @@ async def run_agentic_chat_stream(
                 if not sym or sym in seen_rec:
                     continue
                 seen_rec.add(sym)
+                curr = _row_currency(r)
                 name = (r.get("name") or r.get("name_ar") or sym).split(",")[0].strip()
                 sig = r.get("signal") or "BUY"
-                ep = f"{r.get('entry_price', '—')} ج.م" if r.get('entry_price') is not None else "—"
-                tp = f"{r.get('target_price', '—')} ج.م" if r.get('target_price') is not None else "—"
-                sl = f"{r.get('stop_loss', '—')} ج.م" if r.get('stop_loss') is not None else "—"
+                ep = f"{r.get('entry_price', '—')} {curr}" if r.get('entry_price') is not None else "—"
+                tp = f"{r.get('target_price', '—')} {curr}" if r.get('target_price') is not None else "—"
+                sl = f"{r.get('stop_loss', '—')} {curr}" if r.get('stop_loss') is not None else "—"
                 status_txt = r.get("status") or "نشطة (مفتوحة)"
                 d_str = str(r.get("date") or "")
-                sharia_txt = "متوافق (EGX33)" if r.get("is_sharia_compliant") else "غير متوافق"
+                sharia_txt = _row_sharia_label(r)
                 rec_rows.append([sym, name, sig, ep, tp, sl, status_txt, d_str, sharia_txt])
         if rec_rows:
             excel_tables.append({
@@ -662,14 +834,14 @@ async def run_agentic_chat_stream(
         if len(stocks_with_symbol) >= 2:
             headers = ["المعيار"] + [f"{(s.get('name_ar') or s.get('symbol')).split(',')[0].strip()} ({s.get('symbol')})" for s in stocks_with_symbol]
             rows_list = [
-                ["السعر الحالي"] + [f"{s.get('close', '—')} ج.م" if s.get('close') is not None else "—" for s in stocks_with_symbol],
+                ["السعر الحالي"] + [f"{s.get('close', '—')} {_row_currency(s)}" if s.get('close') is not None else "—" for s in stocks_with_symbol],
                 ["التغير اليومي"] + [f"{s.get('change_pct', '—')}%" if s.get('change_pct') is not None else "—" for s in stocks_with_symbol],
                 ["مؤشر RSI"] + [str(s.get('rsi_14', '—')) for s in stocks_with_symbol],
                 ["التقييم الفني"] + [str(s.get('verdict', '—')) for s in stocks_with_symbol],
-                ["الدعم الأول"] + [f"{s.get('support_1', '—')} ج.م" if s.get('support_1') is not None else "—" for s in stocks_with_symbol],
-                ["المقاومة الأولى"] + [f"{s.get('resistance_1', '—')} ج.م" if s.get('resistance_1') is not None else "—" for s in stocks_with_symbol],
+                ["الدعم الأول"] + [f"{s.get('support_1', '—')} {_row_currency(s)}" if s.get('support_1') is not None else "—" for s in stocks_with_symbol],
+                ["المقاومة الأولى"] + [f"{s.get('resistance_1', '—')} {_row_currency(s)}" if s.get('resistance_1') is not None else "—" for s in stocks_with_symbol],
                 ["مؤشر King AI"] + [str(s.get('king_ai_score', '—')) for s in stocks_with_symbol],
-                ["التوافق الشرعي"] + ["متوافق (EGX33)" if s.get('is_sharia_compliant') else "غير متوافق" for s in stocks_with_symbol],
+                ["التوافق الشرعي"] + [_row_sharia_label(s) for s in stocks_with_symbol],
             ]
             excel_tables.append({
                 "id": f"comparison_{int(time.time())}",
@@ -682,15 +854,16 @@ async def run_agentic_chat_stream(
         elif len(stocks_with_symbol) == 1:
             s = stocks_with_symbol[0]
             sym = s.get("symbol") or ""
+            curr = _row_currency(s)
             name = (s.get("name_ar") or sym).split(",")[0].strip()
-            close_str = f"{s.get('close', '—')} ج.م" if s.get('close') is not None else "—"
+            close_str = f"{s.get('close', '—')} {curr}" if s.get('close') is not None else "—"
             chg_str = f"{s.get('change_pct', '—')}%" if s.get('change_pct') is not None else "—"
             rsi_str = str(s.get('rsi_14', '—'))
             verdict_str = s.get('verdict') or "—"
-            s1_str = f"{s.get('support_1', '—')} ج.م" if s.get('support_1') is not None else "—"
-            r1_str = f"{s.get('resistance_1', '—')} ج.م" if s.get('resistance_1') is not None else "—"
+            s1_str = f"{s.get('support_1', '—')} {curr}" if s.get('support_1') is not None else "—"
+            r1_str = f"{s.get('resistance_1', '—')} {curr}" if s.get('resistance_1') is not None else "—"
             king_str = str(s.get('king_ai_score', '—'))
-            sharia_str = "متوافق (EGX33)" if s.get('is_sharia_compliant') else "غير متوافق"
+            sharia_str = _row_sharia_label(s)
             excel_tables.append({
                 "id": f"table_{int(time.time())}",
                 "title": f"التحليل الفني لسهم {name} ({sym})",
@@ -699,6 +872,22 @@ async def run_agentic_chat_stream(
                 "source": "EGX BOTS",
                 "data_time": time.strftime("%Y-%m-%d"),
             })
+
+    # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
+    # Placed after excel_tables formatting so cached hits return structured ExcelTable objects ready for Web & Telegram.
+    if not is_saudi_flow and accumulated_reply and not vision_data and (not images or len(images) == 0):
+        effective_key = candidate_cache_key or build_analysis_cache_key(message)
+        if effective_key:
+            try:
+                set_vip_analysis_cache(
+                    cache_key=effective_key,
+                    reply=accumulated_reply,
+                    tables=excel_tables if excel_tables else tables_data,
+                    recommendations=recommendations_data,
+                )
+                logger.info(f"[agentic_chat] Saved to Two-Tier Cache: {effective_key}")
+            except Exception as cache_err:
+                logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
 
     # Final done event with accurate quota and pro status
     done_event = {

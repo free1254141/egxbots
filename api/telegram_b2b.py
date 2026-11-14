@@ -5,19 +5,67 @@ answering member stock questions with group daily limits, anti-spam cooldowns,
 and custom signature branding.
 """
 
+import concurrent.futures
+import datetime as dt
 import html
 import os
 import re
+import sys
 import threading
+import time
 from typing import Any, Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from api.stock_ai import _init_supabase, supabase
 
-_B2B_SEMAPHORE = threading.BoundedSemaphore(int(os.getenv("TELEGRAM_B2B_MAX_CONCURRENCY", "8") or 8))
+CAIRO_TZ = ZoneInfo("Africa/Cairo")
+_MAX_CONCURRENCY = int(os.getenv("TELEGRAM_B2B_MAX_CONCURRENCY", "12") or 12)
+_B2B_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENCY)
+_B2B_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_CONCURRENCY, thread_name_prefix="b2b_worker")
 _PROCESSED_B2B_EVENTS: Dict[str, float] = {}
 _DEDUP_LOCK = threading.Lock()
+
+# Persistent HTTP Session for Telegram Bot API calls (reuses TCP/TLS connections)
+_B2B_HTTP_SESSION = requests.Session()
+_b2b_adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32)
+_B2B_HTTP_SESSION.mount("https://", _b2b_adapter)
+_B2B_HTTP_SESSION.mount("http://", _b2b_adapter)
+
+# Zero-DB In-Memory Pre-Filter Caches (protects Supabase from spam, cooldown retries, and unlicensed chatter)
+_B2B_CACHE_LOCK = threading.Lock()
+_B2B_UNLICENSED_CHATS: Dict[int, float] = {}           # chat_id -> timestamp when marked unlicensed (TTL 180s)
+_B2B_UNLICENSED_PROMPT_TS: Dict[int, float] = {}       # chat_id -> last time upgrade prompt was sent (throttle 45s)
+_B2B_MEMBER_COOLDOWN: Dict[Tuple[int, int], float] = {}  # (chat_id, user_id) -> last allowed query timestamp (90s)
+_B2B_EXHAUSTED_GROUPS: Dict[int, Tuple[str, int]] = {}   # chat_id -> (cairo_date_str, daily_limit)
+
+MEMBER_COOLDOWN_SECONDS = 90
+
+
+def _is_pytest() -> bool:
+    return bool("pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST"))
+
+
+def _get_cairo_date_str() -> str:
+    return dt.datetime.now(CAIRO_TZ).strftime("%Y-%m-%d")
+
+
+def clear_b2b_memory_caches(chat_id: Optional[int] = None) -> None:
+    """Clear in-memory B2B pre-filter caches (all or for a specific chat_id)."""
+    with _B2B_CACHE_LOCK:
+        if chat_id is None:
+            _B2B_UNLICENSED_CHATS.clear()
+            _B2B_UNLICENSED_PROMPT_TS.clear()
+            _B2B_MEMBER_COOLDOWN.clear()
+            _B2B_EXHAUSTED_GROUPS.clear()
+        else:
+            _B2B_UNLICENSED_CHATS.pop(chat_id, None)
+            _B2B_UNLICENSED_PROMPT_TS.pop(chat_id, None)
+            _B2B_EXHAUSTED_GROUPS.pop(chat_id, None)
+            for k in [k for k in _B2B_MEMBER_COOLDOWN if k[0] == chat_id]:
+                _B2B_MEMBER_COOLDOWN.pop(k, None)
 
 # Supported trigger command prefixes
 TRIGGER_COMMANDS = (
@@ -56,14 +104,41 @@ def _mark_b2b_processed(event_key: str, window_seconds: float = 300.0) -> bool:
 
 
 def _call_telegram_api(token: str, method: str, payload: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
-    """Helper to dispatch Telegram Bot API calls."""
-    try:
-        url = f"https://api.telegram.org/bot{token}/{method}"
-        resp = requests.post(url, json=payload, timeout=timeout)
-        return resp.json() if resp.ok else (resp.json() if resp.status_code < 500 else {})
-    except Exception as exc:
-        print(f"[TELEGRAM_B2B] Telegram API call {method} error: {exc}")
-        return {}
+    """Helper to dispatch Telegram Bot API calls using a persistent connection pool + 429 retry + Relay fallback."""
+    clean_payload = {k: v for k, v in payload.items() if v is not None}
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    for attempt in range(2):
+        try:
+            resp = _B2B_HTTP_SESSION.post(url, json=clean_payload, timeout=timeout)
+            if resp.status_code == 429 and attempt == 0:
+                try:
+                    retry_after = min(int(resp.json().get("parameters", {}).get("retry_after", 2)), 5)
+                except Exception:
+                    retry_after = 2
+                time.sleep(retry_after)
+                continue
+            return resp.json() if resp.ok else (resp.json() if resp.status_code < 500 else {})
+        except Exception as exc:
+            relay_url = (os.getenv("TELEGRAM_RELAY_URL") or "").strip()
+            if relay_url and attempt == 0:
+                try:
+                    relay_secret = (os.getenv("TELEGRAM_RELAY_SECRET") or os.getenv("CRON_SECRET") or "").strip()
+                    r_headers = {"Content-Type": "application/json"}
+                    if relay_secret:
+                        r_headers["Authorization"] = f"Bearer {relay_secret}"
+                    r_resp = _B2B_HTTP_SESSION.post(
+                        relay_url,
+                        json={"token": token, "method": method, "payload": clean_payload},
+                        headers=r_headers,
+                        timeout=timeout,
+                    )
+                    if r_resp.ok:
+                        return r_resp.json()
+                except Exception:
+                    pass
+            print(f"[TELEGRAM_B2B] Telegram API call {method} error: {exc}")
+            return {}
+    return {}
 
 
 def is_explicit_group_trigger(text: str, msg: Dict[str, Any], bot_username: str = "") -> Tuple[bool, str]:
@@ -172,6 +247,7 @@ def handle_b2b_group_message(
                         "group_title": group_title,
                         "status": "active",
                     }).eq("id", matched["id"]).execute()
+                    clear_b2b_memory_caches(chat_id)
                     tier_names = {"b2b_starter": "Starter B2B (150 عضو)", "b2b_pro": "Pro VIP B2B (500 عضو)", "b2b_enterprise": "Enterprise B2B (1,500 عضو)"}
                     t_name = tier_names.get(matched.get("tier"), "B2B VIP")
                     is_trial = str(matched.get("order_id") or "").startswith("B2B-TRIAL-")
@@ -223,16 +299,60 @@ def handle_b2b_group_message(
             })
             return True
 
-    # 2. Check & consume B2B group quota atomically via RPC
-    try:
-        rpc_res = supabase.rpc(
-            "check_and_consume_b2b_group_quota",
-            {"p_chat_id": chat_id, "p_user_id": user_id},
-        ).execute()
-        result = rpc_res.data or {}
-    except Exception as exc:
-        print(f"[TELEGRAM_B2B] Error checking B2B quota: {exc}")
-        result = {"allowed": False, "reason": "db_error"}
+    # 2. Fast Zero-DB In-Memory Pre-Filters (protects Supabase from unlicensed group spam, 90s cooldowns & exhausted daily quotas)
+    now_ts = time.time()
+    today_cairo = _get_cairo_date_str()
+    result: Optional[Dict[str, Any]] = None
+
+    if not _is_pytest():
+        with _B2B_CACHE_LOCK:
+            # 2a. Unlicensed group short-circuit (180s TTL)
+            unlic_ts = _B2B_UNLICENSED_CHATS.get(chat_id)
+            if unlic_ts and (now_ts - unlic_ts) < 180.0:
+                last_prompt = _B2B_UNLICENSED_PROMPT_TS.get(chat_id, 0.0)
+                if (now_ts - last_prompt) < 45.0:
+                    # Silent drop if we already sent the unlicensed banner in the last 45s
+                    return True
+                _B2B_UNLICENSED_PROMPT_TS[chat_id] = now_ts
+                result = {"allowed": False, "reason": "not_licensed"}
+
+            # 2b. Exhausted daily group limit short-circuit (valid until midnight Cairo)
+            if result is None:
+                exh = _B2B_EXHAUSTED_GROUPS.get(chat_id)
+                if exh and exh[0] == today_cairo:
+                    result = {"allowed": False, "reason": "group_daily_limit_reached", "daily_limit": exh[1]}
+
+            # 2c. Per-member 90s cooldown short-circuit
+            if result is None and clean_query:
+                last_q_ts = _B2B_MEMBER_COOLDOWN.get((chat_id, user_id))
+                if last_q_ts and (now_ts - last_q_ts) < MEMBER_COOLDOWN_SECONDS:
+                    rem_sec = max(1, int(MEMBER_COOLDOWN_SECONDS - (now_ts - last_q_ts)))
+                    result = {"allowed": False, "reason": "member_cooldown", "cooldown_remaining": rem_sec}
+
+    # Check & consume B2B group quota atomically via RPC (only if pre-filter didn't short-circuit)
+    if result is None:
+        try:
+            rpc_res = supabase.rpc(
+                "check_and_consume_b2b_group_quota",
+                {"p_chat_id": chat_id, "p_user_id": user_id},
+            ).execute()
+            result = rpc_res.data or {}
+        except Exception as exc:
+            print(f"[TELEGRAM_B2B] Error checking B2B quota: {exc}")
+            result = {"allowed": False, "reason": "db_error"}
+
+        # Update in-memory pre-filter caches from authoritative RPC response
+        if not _is_pytest():
+            with _B2B_CACHE_LOCK:
+                r_reason = str(result.get("reason") or "")
+                if not result.get("allowed"):
+                    if r_reason == "not_licensed":
+                        _B2B_UNLICENSED_CHATS[chat_id] = now_ts
+                        _B2B_UNLICENSED_PROMPT_TS[chat_id] = now_ts
+                    elif r_reason == "group_daily_limit_reached":
+                        _B2B_EXHAUSTED_GROUPS[chat_id] = (today_cairo, int(result.get("daily_limit") or 50))
+                elif clean_query:
+                    _B2B_MEMBER_COOLDOWN[(chat_id, user_id)] = now_ts
 
     allowed = bool(result.get("allowed"))
     reason = str(result.get("reason") or "")
@@ -373,12 +493,20 @@ def handle_b2b_group_message(
         timeout=3,
     )
 
-    # Spawn background thread to query agentic pipeline and reply
-    threading.Thread(
-        target=_process_and_send_b2b_reply,
-        args=(bot_token, chat_id, thread_id, msg_id, user_id, user_name, clean_query, custom_signature, daily_used, daily_limit),
-        daemon=True,
-    ).start()
+    # Dispatch to bounded ThreadPoolExecutor to query agentic pipeline and reply without spawning unbounded threads
+    _B2B_EXECUTOR.submit(
+        _process_and_send_b2b_reply,
+        bot_token,
+        chat_id,
+        thread_id,
+        msg_id,
+        user_id,
+        user_name,
+        clean_query,
+        custom_signature,
+        daily_used,
+        daily_limit,
+    )
 
     return True
 

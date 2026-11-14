@@ -876,39 +876,99 @@ ARABIC_STOCK_MAPPINGS: Dict[str, str] = {
     "الصناعات الكيماوية": "GSPC",
     "كيماويات مصر": "GSPC",
     "الغربية للتجارة": "GTHE",
-    "جراند تريد": "GTHE"
+    "جراند تريد": "GTHE",
+    "بنك فيصل الإسلامي": "FAIT",
+    "بنك فيصل الاسلامي": "FAIT",
+    "بنك فيصل الإسلامي المصري": "FAIT",
+    "بنك فيصل": "FAIT",
+    "فيصل الإسلامي": "FAIT",
+    "فيصل الاسلامي": "FAIT",
+    "FAIT": "FAIT",
+    "العربية للتنمية والاستثمار العقاري": "ADRI",
+    "العربيه للتنميه والاستثمار العقاري": "ADRI",
+    "العربية للتنمية والاستثمار": "ADRI",
+    "العربية للتنمية": "ADRI",
+    "ADRI": "ADRI",
+    "بريميم هيلث كير": "PHGC",
+    "بريميم هيلث كير جروب": "PHGC",
+    "بريميوم هيلث كير": "PHGC",
+    "Premium HealthCare": "PHGC",
+    "PHGC": "PHGC",
 }
+
+
+_ARABIC_DIACRITICS_RE = re.compile(r"[\u064B-\u065F\u0670\u0640]")
+
+
+def _normalize_arabic_text(text: str) -> str:
+    """Normalize Arabic alef/teh-marbuta/yeh forms and strip diacritics for alias matching."""
+    if not text:
+        return ""
+    s = _ARABIC_DIACRITICS_RE.sub("", text)
+    s = (
+        s.replace("أ", "ا")
+        .replace("إ", "ا")
+        .replace("آ", "ا")
+        .replace("ة", "ه")
+        .replace("ى", "ي")
+        .replace("ؤ", "و")
+        .replace("ئ", "ي")
+    )
+    return " ".join(s.split())
+
+
+_NORMALIZED_PHRASES = sorted(
+    {
+        _normalize_arabic_text(k): v
+        for k, v in ARABIC_STOCK_MAPPINGS.items()
+        if _normalize_arabic_text(k)
+    }.items(),
+    key=lambda kv: len(kv[0]),
+    reverse=True,
+)
+_SORTED_ORIGINAL_PHRASES = sorted(ARABIC_STOCK_MAPPINGS.keys(), key=len, reverse=True)
+_KNOWN_SYMBOLS = set(ARABIC_STOCK_MAPPINGS.values())
+_TICKER_IGNORE_WORDS = {
+    "THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX", "AI", "PRO",
+    "FREE", "NOW", "TODAY", "ALL", "VS", "SCANNER", "ASK", "PANEL", "START",
+    "HELP", "NEWS", "CHART", "TEST", "HTTP", "HTTPS", "COM", "EGXBOTS",
+}
+
 
 def resolve_stock_symbol(text: str) -> Optional[str]:
     """Extract and resolve an EGX stock symbol from English or Arabic input."""
     if not text:
         return None
-    
+
     clean_text = text.strip()
-    
+
     # 1. Direct dictionary lookup for entire text
     if clean_text in ARABIC_STOCK_MAPPINGS:
         return ARABIC_STOCK_MAPPINGS[clean_text]
-        
-    # 2. Check for exact matches with longest Arabic phrase first
-    sorted_phrases = sorted(ARABIC_STOCK_MAPPINGS.keys(), key=len, reverse=True)
-    for phrase in sorted_phrases:
+
+    # 2. Check for exact matches with longest original phrase first
+    for phrase in _SORTED_ORIGINAL_PHRASES:
         if phrase in clean_text:
             return ARABIC_STOCK_MAPPINGS[phrase]
-            
+
+    # 2b. Normalized Arabic fallback (أ/إ/آ -> ا, ة -> ه, ى -> ي, diacritics stripped)
+    norm_text = _normalize_arabic_text(clean_text)
+    for norm_phrase, sym in _NORMALIZED_PHRASES:
+        if len(norm_phrase) >= 3 and norm_phrase in norm_text:
+            return sym
+
     # 3. Check for English ticker symbols (#COMI, COMI, TMGH, etc.)
     tokens = re.findall(r"[A-Za-z]{2,8}", clean_text)
-    ignore_words = {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX", "AI", "PRO", "FREE", "NOW", "TODAY", "ALL"}
     for tok in tokens:
         upper = tok.upper()
-        if upper not in ignore_words:
-            # If in our known symbols or catalog
-            if upper in ARABIC_STOCK_MAPPINGS.values():
+        if upper not in _TICKER_IGNORE_WORDS:
+            if upper in _KNOWN_SYMBOLS:
                 return upper
             if len(upper) >= 3:
                 return upper
-                
+
     return None
+
 
 def extract_all_stock_symbols(text: str) -> List[str]:
     """Extract all distinct EGX stock symbols mentioned in a text (for comparisons)."""
@@ -916,27 +976,40 @@ def extract_all_stock_symbols(text: str) -> List[str]:
         return []
     symbols = []
     clean_text = text.strip()
-    sorted_phrases = sorted(ARABIC_STOCK_MAPPINGS.keys(), key=len, reverse=True)
     matched_regions = []
-    
-    for phrase in sorted_phrases:
+    matched_norm_phrases = []
+
+    for phrase in _SORTED_ORIGINAL_PHRASES:
         start = clean_text.find(phrase)
         if start != -1:
             end = start + len(phrase)
-            # Check overlap
             overlap = any(s < end and start < e for s, e in matched_regions)
             if not overlap:
                 sym = ARABIC_STOCK_MAPPINGS[phrase]
                 if sym not in symbols:
                     symbols.append(sym)
                 matched_regions.append((start, end))
-                
+                matched_norm_phrases.append(_normalize_arabic_text(phrase))
+
+    norm_text = _normalize_arabic_text(clean_text)
+    norm_regions = []
+    for norm_phrase, sym in _NORMALIZED_PHRASES:
+        if len(norm_phrase) < 3 or any(norm_phrase in mp for mp in matched_norm_phrases):
+            continue
+        start = norm_text.find(norm_phrase)
+        if start != -1:
+            end = start + len(norm_phrase)
+            overlap = any(s < end and start < e for s, e in norm_regions)
+            if not overlap:
+                if sym not in symbols:
+                    symbols.append(sym)
+                norm_regions.append((start, end))
+
     tokens = re.findall(r"[A-Za-z]{2,8}", clean_text)
-    ignore_words = {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX", "AI", "PRO", "FREE", "NOW", "TODAY", "ALL", "VS"}
     for tok in tokens:
         upper = tok.upper()
-        if upper not in ignore_words and (upper in ARABIC_STOCK_MAPPINGS.values() or len(upper) >= 3):
+        if upper not in _TICKER_IGNORE_WORDS and (upper in _KNOWN_SYMBOLS or len(upper) >= 3):
             if upper not in symbols:
                 symbols.append(upper)
-                
+
     return symbols

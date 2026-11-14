@@ -90,8 +90,8 @@ class TestToolsExecutionAndTables(unittest.TestCase):
         mock_sb = MagicMock()
         mock_get_sb.return_value = mock_sb
 
-        # Mock stock_technical_indicators
-        mock_sb.from_().select().eq().order().limit().execute.return_value.data = [
+        # Mock stock_technical_indicators (both latest date probe and filtered scan)
+        sample_rows = [
             {
                 "symbol": "TMGH",
                 "date": "2026-11-10",
@@ -104,6 +104,8 @@ class TestToolsExecutionAndTables(unittest.TestCase):
                 "egx_ai_score": 88.0,
             }
         ]
+        mock_sb.from_().select().eq().order().limit().execute.return_value.data = sample_rows
+        mock_sb.from_().select().eq().eq().order().limit().execute.return_value.data = sample_rows
 
         res = _sync_get_technical_scan(preset="top_gainers")
         self.assertEqual(res["status"], "success")
