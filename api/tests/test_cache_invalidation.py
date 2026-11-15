@@ -1,5 +1,6 @@
 import os
 import unittest
+import urllib.error
 from unittest import mock
 
 from api import cache_invalidation as ci
@@ -127,6 +128,40 @@ class SelectCacheTagsTests(unittest.TestCase):
         self.assertIn(ci.TAG_MARKET, result["invalidated"])
         self.assertIn(ci.TAG_NEWS, result["invalidated"])
         self.assertNotIn(ci.TAG_SYMBOLS, result["invalidated"])
+
+    def test_invalidation_falls_back_per_tag_after_batch_500(self):
+        steps = [
+            step("sync_prices", "success"),
+            step("calculate_indicators", "success"),
+            step("news_sentiment", "success"),
+        ]
+        seen = []
+
+        class OkResp:
+            status = 200
+            def read(self): return b'{"ok":true}'
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+
+        def fake_urlopen(request, timeout=None):
+            import json as _json
+            body = _json.loads(request.data.decode("utf-8"))
+            tags = body["tags"]
+            seen.append(tags)
+            if len(tags) > 1 or tags == [ci.TAG_MARKET]:
+                import io
+                raise urllib.error.HTTPError(request.full_url, 500, "Server Error", {}, io.BytesIO(b'{"error":"fail"}'))
+            return OkResp()
+
+        with mock.patch.dict(os.environ, {"REVALIDATE_URL": "https://example.test/api/revalidate", "REVALIDATE_SECRET": "s3cret"}):
+            with mock.patch("time.sleep", return_value=None):
+                with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    result = ci.invalidate_daily_cache(steps)
+
+        self.assertIn(ci.TAG_NEWS, result["invalidated"])
+        self.assertNotIn(ci.TAG_MARKET, result["invalidated"])
+        self.assertIn("daily-market-data:HTTP 500", result["error"])
+        self.assertTrue(any(len(t) == 1 for t in seen))
 
 
 if __name__ == "__main__":

@@ -516,79 +516,137 @@ export default function DisclosuresClient({
             <FileText className="w-4 h-4 text-black dark:text-white" />
           </div>
           <div className="text-2xl sm:text-3xl font-black text-black dark:text-white">
-            {selectedTimeframe === "all" && selectedSector === "all"
-              ? initialStats.total || filteredPool.length
-              : filteredPool.length}
+            {isSaudi
+              ? (selectedTimeframe === "all" && selectedSector === "all"
+                ? (totalCount || filteredPool.length)
+                : filteredPool.length)
+              : (selectedTimeframe === "all" && selectedSector === "all"
+                ? initialStats.total || filteredPool.length
+                : filteredPool.length)}
           </div>
           <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
             {isAr ? "مؤرشفة ومحللة بالذكاء الاصطناعي" : "Archived & AI-analyzed"}
           </span>
         </div>
 
-        {/* KPI 2: Net Insider Liquidity Flow (EGP) */}
-        <div className="p-4 border-4 border-black dark:border-white bg-[#00FF66]/20 dark:bg-[#00FF66]/10 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-black uppercase text-emerald-900 dark:text-[#00FF66]">
-              {isAr ? "صافي سيولة الداخليين" : "Net Insider Flow"}
-            </span>
-            <TrendingUp className="w-4 h-4 text-emerald-700 dark:text-[#00FF66]" />
-          </div>
-          <div className="text-xl sm:text-2xl font-black text-emerald-800 dark:text-[#00FF66] truncate">
-            {activeAnalytics
-              ? `${activeAnalytics.flowDistribution.net_value_egp >= 0 ? "+" : ""}${formatEgp(activeAnalytics.flowDistribution.net_value_egp)}`
-              : `${initialStats.buys} شراء`}
-          </div>
-          <span className="text-[11px] font-bold text-emerald-800/80 dark:text-emerald-300/80">
-            {activeAnalytics.flowDistribution.net_value_egp >= 0
-              ? isAr ? "شراء تجميعي يفوق التخارج" : "Accumulation exceeds exits"
-              : isAr ? "تخارج يفوق الشراء" : "Selling exceeds buys"}
-          </span>
-        </div>
+        {isSaudi ? (
+          <>
+            {/* Saudi KPI 2: Bullish / Positive Disclosures */}
+            <div className="p-4 border-4 border-black dark:border-white bg-[#00FF66]/20 dark:bg-[#00FF66]/10 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-emerald-900 dark:text-[#00FF66]">
+                  {isAr ? "إفصاحات إيجابية" : "Bullish Filings"}
+                </span>
+                <TrendingUp className="w-4 h-4 text-emerald-700 dark:text-[#00FF66]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-800 dark:text-[#00FF66]">
+                {filteredPool.filter((d) => d.sentiment === "bullish" || d.action_type === "buy").length}
+              </div>
+              <span className="text-[11px] font-bold text-emerald-800/80 dark:text-emerald-300/80">
+                {isAr ? "توزيعات، عقود ونمو أرباح" : "Dividends, contracts & growth"}
+              </span>
+            </div>
 
-        {/* KPI 3: Stocks Trading Below Insider Cost & Retained Active Accumulation */}
-        <div
-          onClick={() => {
-            setActiveTab("insider_radar");
-            const el = document.getElementById("insider-cost-comparison");
-            if (el) el.scrollIntoView({ behavior: "smooth" });
-          }}
-          className="p-4 border-4 border-black dark:border-white bg-amber-400/25 dark:bg-amber-400/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)] cursor-pointer hover:bg-amber-400/40 transition-colors group"
-          title={isAr ? "اضغط للانتقال إلى قسم مقارنة تكلفة الداخلي بسعر السوق (كامل الأسهم المحتفظ بها)" : "Click to jump to Insider Cost vs Market Price Comparison"}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-black uppercase text-amber-950 dark:text-amber-300">
-              {isAr ? "أقل من تكلفة الداخلي" : "Below Insider Cost"}
-            </span>
-            <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300 flex items-baseline gap-2">
-            <span>{cumulativeAnalytics ? cumulativeAnalytics.executiveStats.symbols_below_cost_count : 0}</span>
-            <span className="text-xs font-bold text-amber-800 dark:text-amber-400">
-              {isAr
-                ? `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} سهم محتفظ به`
-                : `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} held`}
-            </span>
-          </div>
-          <span className="text-[11px] font-bold text-amber-900/80 dark:text-amber-300/80">
-            {isAr ? "محتفظ بها تاريخياً بلا إفصاح بيع يلغيها (اضغط للعرض)" : "Retained with zero cancelling sell filings (Click to view)"}
-          </span>
-        </div>
+            {/* Saudi KPI 3: Bearish / Negative Disclosures */}
+            <div className="p-4 border-4 border-black dark:border-white bg-[#FF3366]/15 dark:bg-[#FF3366]/10 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-rose-900 dark:text-rose-300">
+                  {isAr ? "تنبيهات سلبية" : "Bearish Filings"}
+                </span>
+                <TrendingDown className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-rose-800 dark:text-rose-300">
+                {filteredPool.filter((d) => d.sentiment === "bearish" || d.action_type === "sell").length}
+              </div>
+              <span className="text-[11px] font-bold text-rose-800/80 dark:text-rose-300/80">
+                {isAr ? "تراجع نتائج أو مخاطر" : "Earnings drop or risk alerts"}
+              </span>
+            </div>
 
-        {/* KPI 4: Major Shareholders Structures */}
-        <div className="p-4 border-4 border-black dark:border-white bg-[#FFE600]/35 dark:bg-[#FFE600]/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-black uppercase text-black dark:text-[#FFE600]">
-              {isAr ? "هياكل كبار المساهمين" : "Major Shareholders"}
-            </span>
-            <Users className="w-4 h-4 text-black dark:text-[#FFE600]" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-black dark:text-[#FFE600]">
-            {activeAnalytics ? activeAnalytics.majorShareholders.length : initialStats.shareholding}
-          </div>
-          <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
-            {isAr ? "نماذج المادة 30 والتداول الحر" : "Article 30 & Free Float"}
-          </span>
-        </div>
+            {/* Saudi KPI 4: Neutral / Corporate Filings */}
+            <div className="p-4 border-4 border-black dark:border-white bg-[#FFE600]/35 dark:bg-[#FFE600]/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-black dark:text-[#FFE600]">
+                  {isAr ? "إعلانات إدارية ومحايدة" : "Neutral & Board"}
+                </span>
+                <Users className="w-4 h-4 text-black dark:text-[#FFE600]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-black dark:text-[#FFE600]">
+                {filteredPool.filter((d) => d.sentiment !== "bullish" && d.sentiment !== "bearish" && d.action_type !== "buy" && d.action_type !== "sell").length}
+              </div>
+              <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                {isAr ? "جمعيات، مجالس إدارة وتنظيم" : "Board & general notices"}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* KPI 2: Net Insider Liquidity Flow (EGP) */}
+            <div className="p-4 border-4 border-black dark:border-white bg-[#00FF66]/20 dark:bg-[#00FF66]/10 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-emerald-900 dark:text-[#00FF66]">
+                  {isAr ? "صافي سيولة الداخليين" : "Net Insider Flow"}
+                </span>
+                <TrendingUp className="w-4 h-4 text-emerald-700 dark:text-[#00FF66]" />
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-emerald-800 dark:text-[#00FF66] truncate">
+                {activeAnalytics
+                  ? `${activeAnalytics.flowDistribution.net_value_egp >= 0 ? "+" : ""}${formatEgp(activeAnalytics.flowDistribution.net_value_egp)}`
+                  : `${initialStats.buys} شراء`}
+              </div>
+              <span className="text-[11px] font-bold text-emerald-800/80 dark:text-emerald-300/80">
+                {activeAnalytics.flowDistribution.net_value_egp >= 0
+                  ? isAr ? "شراء تجميعي يفوق التخارج" : "Accumulation exceeds exits"
+                  : isAr ? "تخارج يفوق الشراء" : "Selling exceeds buys"}
+              </span>
+            </div>
+
+            {/* KPI 3: Stocks Trading Below Insider Cost & Retained Active Accumulation */}
+            <div
+              onClick={() => {
+                setActiveTab("insider_radar");
+                const el = document.getElementById("insider-cost-comparison");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
+              className="p-4 border-4 border-black dark:border-white bg-amber-400/25 dark:bg-amber-400/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)] cursor-pointer hover:bg-amber-400/40 transition-colors group"
+              title={isAr ? "اضغط للانتقال إلى قسم مقارنة تكلفة الداخلي بسعر السوق (كامل الأسهم المحتفظ بها)" : "Click to jump to Insider Cost vs Market Price Comparison"}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-amber-950 dark:text-amber-300">
+                  {isAr ? "أقل من تكلفة الداخلي" : "Below Insider Cost"}
+                </span>
+                <Target className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-amber-950 dark:text-amber-300 flex items-baseline gap-2">
+                <span>{cumulativeAnalytics ? cumulativeAnalytics.executiveStats.symbols_below_cost_count : 0}</span>
+                <span className="text-xs font-bold text-amber-800 dark:text-amber-400">
+                  {isAr
+                    ? `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} سهم محتفظ به`
+                    : `/ ${cumulativeAnalytics ? cumulativeAnalytics.costDiscountTop.length : 0} held`}
+                </span>
+              </div>
+              <span className="text-[11px] font-bold text-amber-900/80 dark:text-amber-300/80">
+                {isAr ? "محتفظ بها تاريخياً بلا إفصاح بيع يلغيها (اضغط للعرض)" : "Retained with zero cancelling sell filings (Click to view)"}
+              </span>
+            </div>
+
+            {/* KPI 4: Major Shareholders Structures */}
+            <div className="p-4 border-4 border-black dark:border-white bg-[#FFE600]/35 dark:bg-[#FFE600]/15 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.4)]">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-black uppercase text-black dark:text-[#FFE600]">
+                  {isAr ? "هياكل كبار المساهمين" : "Major Shareholders"}
+                </span>
+                <Users className="w-4 h-4 text-black dark:text-[#FFE600]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-black dark:text-[#FFE600]">
+                {activeAnalytics ? activeAnalytics.majorShareholders.length : initialStats.shareholding}
+              </div>
+              <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                {isAr ? "نماذج المادة 30 والتداول الحر" : "Article 30 & Free Float"}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Timeframe & Sector Filter Command Bar */}
@@ -697,7 +755,8 @@ export default function DisclosuresClient({
         </div>
       </div>
 
-      {/* Main Subtabs Navigation */}
+      {/* Main Subtabs Navigation (EGX Insider/Article 30 only) */}
+      {!isSaudi && (
       <div className="flex border-4 border-black dark:border-white mb-8 bg-zinc-100 dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.4)]">
         <button
           type="button"
@@ -725,12 +784,13 @@ export default function DisclosuresClient({
           <span>{isAr ? "👥 كبار المساهمين والمؤسسين (المادة 30)" : "👥 Major Shareholders & Ownership (Art. 30)"}</span>
         </button>
       </div>
+      )}
 
       {/* TAB 1: Insider Trading Radar & Smart Money Flow */}
-      {activeTab === "insider_radar" && (
+      {(isSaudi || activeTab === "insider_radar") && (
         <>
-          {/* Smart Money Liquidity Heatmap */}
-          {activeAnalytics && (
+          {/* Smart Money Liquidity Heatmap (requires share counts - EGX only) */}
+          {!isSaudi && activeAnalytics && (
             <div className="mb-6">
               <InsiderHeatmap
                 items={activeAnalytics.heatmapItems}
@@ -741,8 +801,8 @@ export default function DisclosuresClient({
             </div>
           )}
 
-          {/* Simple Analytical Charts */}
-          {activeAnalytics && (
+          {/* Simple Analytical Charts (requires share counts - EGX only) */}
+          {!isSaudi && activeAnalytics && (
             <InsiderCharts
               costDiscounts={cumulativeAnalytics.costDiscountTop}
               flowDistribution={activeAnalytics.flowDistribution}

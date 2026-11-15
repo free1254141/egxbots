@@ -23,7 +23,7 @@ const HOT_TTL = 3 * 86400;
 const CHUNK = 900_000;
 const MAX_BODY = 16 * 1024 * 1024;
 const SHARDS = 16;
-const MAX_SHARD = 128;
+const MAX_SHARD = 32;
 // Runtime Cache is quota-limited and returns 429 under load. Cache operations
 // must never fail the request itself: retry briefly, then degrade to a direct
 // origin read.
@@ -166,19 +166,19 @@ async function touch(q: Query) {
 
 async function origin(q: Query, scope: Scope, fetcher: typeof fetch) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const response = await fetcher(q.url, {
         headers: { ...q.headers, apikey: scope.key, authorization: `Bearer ${scope.key}` },
-        cache: "no-store", signal: AbortSignal.timeout(12000),
+        cache: "no-store", signal: AbortSignal.timeout(15000),
       });
-      if (response.status < 500 || attempt === 1) return response;
+      if (response.status < 500 || attempt === 2) return response;
       lastError = new Error(`Supabase returned ${response.status}`);
     } catch (error) {
       lastError = error;
-      if (attempt === 1) break;
+      if (attempt === 2) break;
     }
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
   }
   const table = new URL(q.url).pathname.split("/").pop() || "unknown";
   throw new Error(`Market refresh failed for ${table}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
@@ -257,13 +257,15 @@ export async function refreshMarketQueries(tags: string[], eventId: string, fetc
         if (current === eventId || (current !== "bootstrap" && Date.parse(current) > Date.parse(eventId))) continue;
         const groups = await Promise.all(Array.from({ length: SHARDS }, (_, i) => cacheGet(`registry:${id}:${tag}:${i}`)));
         const registered = (groups.flatMap(group => Array.isArray(group) ? group : []) as Query[]);
+        if (!registered.length && current === "bootstrap") continue;
         const activity = await Promise.all(registered.map(q => cacheGet(hotKey(q))));
         const queries = registered.filter((_, i) => Boolean(activity[i]));
+        const hotIds = new Set(queries.map(q => q.id));
         // Cap proactive warming to top 4 hot queries to keep serverless CPU under 500ms
         const warmQueries = queries.slice(0, 4);
         summary.coldSkipped += registered.length - warmQueries.length;
-        for (let i = 0; i < warmQueries.length; i += 4) {
-          await Promise.all(warmQueries.slice(i, i + 4).map(async q => {
+        for (let i = 0; i < warmQueries.length; i += 2) {
+          await Promise.all(warmQueries.slice(i, i + 2).map(async q => {
             const previous = await cacheGet(entryKey(q, current)) as Entry | null;
             const staged = await cacheGet(entryKey(q, eventId)) as Entry | null;
             const entry = staged && await read(q, eventId) ? staged : await save(q, eventId, await origin(q, scope, fetcher));
@@ -279,10 +281,13 @@ export async function refreshMarketQueries(tags: string[], eventId: string, fetc
           await cacheSet(versionKey(id, tag), eventId, { ttl: TTL, name: "market-generation" });
           versionMemory.delete(versionKey(id, tag));
         }
-        // Keep the warm-up index alive even when all reads hit the shared cache.
-        await Promise.all(groups.map((group, i) => Array.isArray(group) && group.length
-          ? cacheSet(`registry:${id}:${tag}:${i}`, group, { ttl: TTL, name: "market-query-index" })
-          : Promise.resolve()));
+        // Prune inactive queries after counting coldSkipped so stale stock pages do
+        // not accumulate thousands of hotKey reads on every future revalidation.
+        await Promise.all(groups.map((group, i) => {
+          if (!Array.isArray(group) || !group.length) return Promise.resolve();
+          const active = (group as Query[]).filter(row => hotIds.has(row.id));
+          return cacheSet(`registry:${id}:${tag}:${i}`, active, { ttl: TTL, name: "market-query-index" });
+        }));
       }
     }
     summary.completed.push(tag);

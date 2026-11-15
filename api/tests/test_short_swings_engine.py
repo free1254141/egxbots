@@ -323,3 +323,140 @@ def test_f13_case_insensitive_metadata_loading(monkeypatch, tmp_path):
     assert "COMI" in meta
     assert "name_en" in meta["COMI"]
     assert "name_ar" in meta["COMI"]
+
+
+
+def test_morning_phase_supported_and_isolated_from_midday(telegram_dependencies):
+    """Morning intraday phase completes without ValueError and uses its own checkpoint."""
+    from api.short_swings_daily import run_daily_short_swings
+    from api import daily_recovery_state
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    session_date = datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
+    memory = {}
+
+    def write(_sb, key, payload, expected):
+        memory[key] = {"payload": dict(payload)}
+        return memory[key]
+
+    mock_sb = MagicMock()
+    with patch.object(daily_recovery_state, "read_checkpoint", side_effect=lambda sb, key: memory.get(key)), \
+         patch.object(daily_recovery_state, "replace_checkpoint", side_effect=write), \
+         patch("api.cache_invalidation.invalidate_cache_tags", return_value={"invalidated": []}), \
+         patch("api.short_swings_daily._get_sent_cache_state", return_value={"sent_entries": {}, "sent_exits": {}}), \
+         patch("api.short_swings_daily.compute_short_swings", side_effect=lambda phase="close", **kwargs: {"as_of": session_date, "status": "ok", "phase": phase, "active_trades": [], "closed_trades": []}), \
+         patch("api.short_swings_daily._get_supabase_client", return_value=mock_sb), \
+         patch("api.daily_bot_run._telegram_recommendation_writes_enabled", return_value=True):
+        morning_res = run_daily_short_swings(trigger="scheduled", phase="morning")
+        midday_res = run_daily_short_swings(trigger="scheduled", phase="midday")
+
+    assert morning_res["success"] is True
+    assert morning_res["status"] == "completed"
+    assert f"short_swings_run_{session_date}_morning" in memory
+    assert midday_res["success"] is True
+    assert midday_res["status"] == "completed"
+    assert f"short_swings_run_{session_date}_midday" in memory
+
+
+# =========================================================================
+# Regression Tests: Causal Day-0 Stop, Two-Tier Profit Lock & +13% Take Profit
+# =========================================================================
+def _build_uptrend_rows(symbol: str, start_end_date: str = "2026-10-05", periods: int = 90):
+    import pandas as pd
+    dates = pd.bdate_range(end=start_end_date, periods=periods)
+    return [
+        {
+            "symbol": symbol,
+            "exchange": "EGX",
+            "date": day.strftime("%Y-%m-%d"),
+            "open": 100.0 + i * 0.5,
+            "high": 100.5 + i * 0.5,
+            "low": 99.5 + i * 0.5,
+            "close": 100.2 + i * 0.5,
+            "volume": 100_000.0,
+        }
+        for i, day in enumerate(dates)
+    ]
+
+
+def _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-12T16:00:00+02:00"):
+    import datetime as dt
+    import pandas as pd
+
+    parsed_now = dt.datetime.fromisoformat(now_iso)
+
+    class FixedClock(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return parsed_now.astimezone(tz or dt.timezone.utc)
+
+    monkeypatch.setattr(
+        engine,
+        "dt",
+        types.SimpleNamespace(
+            datetime=FixedClock,
+            date=dt.date,
+            timezone=dt.timezone,
+            timedelta=dt.timedelta,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "api.stock_ai", types.SimpleNamespace(_init_supabase=lambda: None, supabase=None))
+    monkeypatch.setattr("api.hf_history_cache.load_history_snapshot", lambda _: pd.DataFrame(rows))
+    monkeypatch.setattr(engine, "load_stock_metadata", lambda: {})
+    monkeypatch.setattr(engine, "_load_published_signals", lambda _: [])
+    monkeypatch.setattr(engine, "_persist_saved_snapshot", lambda *_: True)
+    monkeypatch.setattr(engine, "CACHE_PATHS", [tmp_path / "ss_test_cache.json"])
+    return engine.compute_short_swings(phase="close")
+
+
+def test_day0_negative_close_blocks_be_and_schedules_eod_stop(monkeypatch, tmp_path):
+    """Spiking +5% on Day 0 before closing below -4% must NOT arm fake stop_be; must exit at next open as stop_loss."""
+    assert "take_profit" in EXIT_REASON_LABELS
+    rows = _build_uptrend_rows("REVX", start_end_date="2026-10-05", periods=90)
+    # 2026-10-06: strong breakout bar triggering entry on 2026-10-07 open
+    rows.append({"symbol": "REVX", "exchange": "EGX", "date": "2026-10-06", "open": 146.0, "high": 152.0, "low": 145.5, "close": 151.0, "volume": 280_000.0})
+    # 2026-10-07 (Day 0): opens at 151.0, spikes +7% intraday (161.6), reverses and closes at 142.0 (below -4% initial stop ~145.18)
+    rows.append({"symbol": "REVX", "exchange": "EGX", "date": "2026-10-07", "open": 151.0, "high": 161.6, "low": 141.5, "close": 142.0, "volume": 320_000.0})
+    # 2026-10-08 (Day 1): opens lower at 140.0 — pending Day-0 EOD stop closes cleanly at Open with stop_loss
+    rows.append({"symbol": "REVX", "exchange": "EGX", "date": "2026-10-08", "open": 140.0, "high": 143.0, "low": 139.0, "close": 141.0, "volume": 200_000.0})
+
+    result = _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-08T16:00:00+02:00")
+    revx_closed = [t for t in result["closed_trades"] if t["symbol"] == "REVX"]
+    assert len(revx_closed) == 1
+    assert revx_closed[0]["reason"] == "stop_loss"
+    assert revx_closed[0]["exit_date"] == "2026-10-08"
+
+
+def test_two_tier_profit_lock_protects_9pct_gain_from_be_choke(monkeypatch, tmp_path):
+    """Reaching +9% with positive close locks +4.0% floor for next session instead of dropping to +0.15%."""
+    rows = _build_uptrend_rows("LOCKX", start_end_date="2026-10-05", periods=90)
+    # 2026-10-06: breakout signal
+    rows.append({"symbol": "LOCKX", "exchange": "EGX", "date": "2026-10-06", "open": 146.0, "high": 152.0, "low": 145.5, "close": 151.0, "volume": 280_000.0})
+    # 2026-10-07 (Day 0): opens at 151.0 (fill ~151.2265), rallies to 166.5 (+10.1% >= +9%) and closes strongly at 165.0
+    rows.append({"symbol": "LOCKX", "exchange": "EGX", "date": "2026-10-07", "open": 151.0, "high": 166.5, "low": 150.5, "close": 165.0, "volume": 350_000.0})
+    # 2026-10-08 (Day 1): retraces intraday down to 154.0 (+1.8%), crossing the +4.0% Tier-2 lock (~157.28)
+    rows.append({"symbol": "LOCKX", "exchange": "EGX", "date": "2026-10-08", "open": 162.0, "high": 163.0, "low": 154.0, "close": 155.0, "volume": 220_000.0})
+
+    result = _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-08T16:00:00+02:00")
+    closed = [t for t in result["closed_trades"] if t["symbol"] == "LOCKX"]
+    assert len(closed) == 1
+    assert closed[0]["reason"] == "stop_be"
+    assert closed[0]["return_pct"] >= 3.7
+
+
+def test_causal_take_profit_exits_cleanly_at_13_pct(monkeypatch, tmp_path):
+    """Hitting +13% on Day 1 exits cleanly as take_profit around +12.8% net."""
+    rows = _build_uptrend_rows("TPX", start_end_date="2026-10-05", periods=90)
+    # 2026-10-06: breakout signal
+    rows.append({"symbol": "TPX", "exchange": "EGX", "date": "2026-10-06", "open": 146.0, "high": 152.0, "low": 145.5, "close": 151.0, "volume": 280_000.0})
+    # 2026-10-07 (Day 0): quiet hold +3%
+    rows.append({"symbol": "TPX", "exchange": "EGX", "date": "2026-10-07", "open": 151.0, "high": 156.0, "low": 150.0, "close": 155.0, "volume": 210_000.0})
+    # 2026-10-08 (Day 1): surges to 175.0 (+15.7% above entry ~151.23) -> fills target +13%
+    rows.append({"symbol": "TPX", "exchange": "EGX", "date": "2026-10-08", "open": 156.0, "high": 175.0, "low": 155.0, "close": 172.0, "volume": 380_000.0})
+
+    result = _run_offline_engine(monkeypatch, tmp_path, rows, now_iso="2026-10-08T16:00:00+02:00")
+    closed = [t for t in result["closed_trades"] if t["symbol"] == "TPX"]
+    assert len(closed) == 1
+    assert closed[0]["reason"] == "take_profit"
+    assert closed[0]["return_pct"] == pytest.approx(12.83, abs=0.05)

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import pickle
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 import lightgbm as lgb
@@ -46,6 +47,8 @@ class TheCouncil:
             self.weights = weights
 
         self.threshold = 0.5
+        self._compiled_lock = threading.RLock()
+        self._compiled_models: Dict[str, Tuple[int, str, Any, Optional[dict]]] = {}
 
     @staticmethod
     def get_categorical_features(artifact: dict) -> List[str]:
@@ -238,20 +241,112 @@ class TheCouncil:
                     return (res_data if res_data else d), res_obj
         return None, None
 
-    def get_consensus(self, X: pd.DataFrame) -> np.ndarray:
+    def _get_compiled_model(
+        self, name: str, model: Any
+    ) -> Tuple[str, Any, Optional[dict]]:
+        """Compile and cache boosters or meta-model wrappers once per model instance."""
+        model_id = id(model)
+        with self._compiled_lock:
+            cached = self._compiled_models.get(name)
+            if cached is not None and cached[0] == model_id:
+                return cached[1], cached[2], cached[3]
+
+            entry: Tuple[str, Any, Optional[dict]] = ("missing", None, None)
+            if isinstance(model, dict):
+                kind = (model.get("kind") or "").strip().lower()
+                if kind == "meta_labeling_system":
+                    try:
+                        from api.backtest_radar import reconstruct_meta_model
+
+                        wrapper = reconstruct_meta_model(model)
+                        if wrapper is not None:
+                            entry = ("meta", wrapper, model)
+                    except Exception as meta_ex:
+                        logger.error(
+                            f"COUNCIL: Meta-model reconstruction failed for {name}: {meta_ex}"
+                        )
+
+                if entry[0] == "missing":
+                    model_data, m_obj = self._find_model_data(model)
+                    if m_obj is not None:
+                        if isinstance(m_obj, str):
+                            entry = (
+                                "booster",
+                                lgb.Booster(model_str=m_obj),
+                                model_data,
+                            )
+                        elif isinstance(m_obj, lgb.Booster):
+                            entry = ("booster", m_obj, model_data)
+                        else:
+                            entry = ("predict_p1", m_obj, model_data)
+            else:
+                entry = ("predict_p1", model, model)
+
+            self._compiled_models[name] = (model_id, entry[0], entry[1], entry[2])
+            return entry
+
+    def _predict_compiled(
+        self, name: str, model: Any, X: pd.DataFrame
+    ) -> np.ndarray:
+        """Align input features and run inference once for a single council member."""
+        entry_kind, compiled_obj, artifact_meta = self._get_compiled_model(name, model)
+        if entry_kind == "missing" or compiled_obj is None:
+            raise ValueError(
+                f"Model {name} has no recognized booster or meta-model"
+            )
+
+        X_aligned = self._align_X_for_artifact(X, artifact_meta)
+
+        if entry_kind == "meta":
+            return compiled_obj.predict_proba(X_aligned)[:, 1]
+
+        if entry_kind == "booster":
+            cats = self.get_categorical_features(artifact_meta or {})
+            if not cats and isinstance(model, dict) and artifact_meta is not model:
+                cats = self.get_categorical_features(model)
+            if cats:
+                for c in cats:
+                    if c in X_aligned.columns:
+                        X_aligned[c] = X_aligned[c].astype("category")
+                X_aligned = align_pandas_categories_to_booster(
+                    X_aligned, cats, compiled_obj, cats
+                )
+            return np.asarray(compiled_obj.predict(X_aligned)).astype(float)
+
+        return self._predict_p1(compiled_obj, X_aligned)
+
+    @staticmethod
+    def _classify_model_type(model: Any) -> str:
+        """Classify model family for strict LightGBM/XGBoost ensemble agreement."""
+        if isinstance(model, dict):
+            kind = (model.get("kind") or "").strip().lower()
+            if "lgb" in kind or "meta" in kind:
+                return "lgbm"
+            if "xgb" in kind:
+                return "xgb"
+            return "other"
+        model_str = str(type(model)).lower()
+        if "lgb" in model_str or "lightgbm" in model_str:
+            return "lgbm"
+        if "xgb" in model_str or "xgboost" in model_str:
+            return "xgb"
+        return "other"
+
+    def evaluate(
+        self, X: pd.DataFrame
+    ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         """
-        Compute Weighted Soft Voting Consensus Strength.
-        ConsensusStrength = Σ(probability × weight)
+        Evaluate weighted soft-voting consensus and per-model votes in a single pass.
         """
         if X.empty:
-            return np.array([])
+            return np.array([]), {}
 
         total_weighted_prob = np.zeros(len(X))
         total_weight = 0.0
+        votes: Dict[str, np.ndarray] = {}
 
-        lgbm_preds = []
-        xgb_preds = []
-        other_preds = []
+        lgbm_preds: List[np.ndarray] = []
+        xgb_preds: List[np.ndarray] = []
 
         for name, weight in self.weights.items():
             if weight <= 0:
@@ -262,113 +357,39 @@ class TheCouncil:
                 continue
 
             try:
-                p1 = None
-                if isinstance(model, dict):
-                    # 1. Check for meta-labeling system
-                    kind = (model.get("kind") or "").strip().lower()
-                    if kind == "meta_labeling_system":
-                        try:
-                            from api.backtest_radar import reconstruct_meta_model
+                p1 = self._predict_compiled(name, model, X)
+                if p1 is None or len(p1) == 0:
+                    votes[name] = np.zeros(len(X))
+                    continue
 
-                            wrapper = reconstruct_meta_model(model)
-                            if wrapper:
-                                X_aligned = self._align_X_for_artifact(X, model)
-                                p1 = wrapper.predict_proba(X_aligned)[:, 1]
-                        except Exception as meta_ex:
-                            logger.error(
-                                f"COUNCIL: Meta-model reconstruction failed for {name}: {meta_ex}"
-                            )
+                votes[name] = p1
+                logger.debug(
+                    f"COUNCIL TRACE: model={name} weight={weight:.4f} avg_p1={np.mean(p1):.4f}"
+                )
+                total_weighted_prob += p1 * weight
+                total_weight += weight
 
-                    # 2. Search for Booster
-                    if p1 is None:
-                        model_data, m_obj = self._find_model_data(model)
-                        if m_obj:
-                            X_aligned = self._align_X_for_artifact(X, model_data)
-
-                            if isinstance(m_obj, str):
-                                # LightGBM string booster
-                                booster = lgb.Booster(model_str=m_obj)
-                                cats = self.get_categorical_features(model_data)
-                                if cats:
-                                    for c in cats:
-                                        if c in X_aligned.columns:
-                                            X_aligned[c] = X_aligned[c].astype(
-                                                "category"
-                                            )
-                                    X_aligned = align_pandas_categories_to_booster(
-                                        X_aligned, cats, booster, cats
-                                    )
-                                p1 = np.asarray(booster.predict(X_aligned)).astype(
-                                    float
-                                )
-                            elif isinstance(m_obj, lgb.Booster):
-                                # Direct LightGBM booster
-                                cats = self.get_categorical_features(model_data)
-                                if cats:
-                                    for c in cats:
-                                        if c in X_aligned.columns:
-                                            X_aligned[c] = X_aligned[c].astype(
-                                                "category"
-                                            )
-                                    X_aligned = align_pandas_categories_to_booster(
-                                        X_aligned, cats, m_obj, cats
-                                    )
-                                p1 = np.asarray(m_obj.predict(X_aligned)).astype(float)
-                            else:
-                                # Generic model (RandomForest, etc.)
-                                p1 = self._predict_p1(m_obj, X_aligned)
-
-                    if p1 is None:
-                        logger.error(
-                            f"COUNCIL ERROR: Model {name} has no recognized booster or meta-model"
-                        )
-                        continue
-                else:
-                    # Direct model object
-                    X_aligned = self._align_X_for_artifact(X, model)
-                    p1 = self._predict_p1(model, X_aligned)
-
-                if p1 is not None and len(p1) > 0:
-                    logger.info(
-                        f"COUNCIL TRACE: model={name} weight={weight:.4f} avg_p1={np.mean(p1):.4f}"
-                    )
-                    total_weighted_prob += p1 * weight
-                    total_weight += weight
-
-                    # Track model predictions by type to enforce ensemble agreement
-                    model_type = "other"
-                    if isinstance(model, dict):
-                        kind = (model.get("kind") or "").strip().lower()
-                        if "lgb" in kind or "meta" in kind:
-                            model_type = "lgbm"
-                        elif "xgb" in kind:
-                            model_type = "xgb"
-                    else:
-                        model_str = str(type(model)).lower()
-                        if "lgb" in model_str or "lightgbm" in model_str:
-                            model_type = "lgbm"
-                        elif "xgb" in model_str or "xgboost" in model_str:
-                            model_type = "xgb"
-
-                    if model_type == "lgbm":
-                        lgbm_preds.append(p1)
-                    elif model_type == "xgb":
-                        xgb_preds.append(p1)
-                    else:
-                        other_preds.append(p1)
+                model_type = self._classify_model_type(model)
+                if model_type == "lgbm":
+                    lgbm_preds.append(p1)
+                elif model_type == "xgb":
+                    xgb_preds.append(p1)
 
             except Exception as e:
                 logger.error(f"COUNCIL ERROR: Model {name} failed: {e}")
+                votes[name] = np.zeros(len(X))
 
         if total_weight == 0:
             logger.error("COUNCIL ERROR: Total weight is zero, check model loading")
-            return np.zeros(len(X))
+            return np.zeros(len(X)), votes
 
         consensus = total_weighted_prob / total_weight
 
         # Enforce consensus between LightGBM and XGBoost if both are present in the council
-        if len(lgbm_preds) > 0 and len(xgb_preds) > 0:
-            logger.info("COUNCIL: Enforcing strict consensus between LightGBM and XGBoost models.")
+        if lgbm_preds and xgb_preds:
+            logger.debug(
+                "COUNCIL: Enforcing strict consensus between LightGBM and XGBoost models."
+            )
             for i in range(len(X)):
                 lgbm_buy = any(p[i] >= 0.5 for p in lgbm_preds)
                 xgb_buy = any(p[i] >= 0.5 for p in xgb_preds)
@@ -376,63 +397,21 @@ class TheCouncil:
                 if not (lgbm_buy and xgb_buy):
                     consensus[i] = 0.0
 
+        return consensus, votes
+
+    def get_consensus(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Compute Weighted Soft Voting Consensus Strength.
+        ConsensusStrength = Σ(probability × weight)
+        """
+        consensus, _ = self.evaluate(X)
         return consensus
 
     def get_detailed_votes(self, X: pd.DataFrame) -> Dict[str, np.ndarray]:
         """
         Returns individual scores for each model in the council.
         """
-        votes = {}
-        for name, weight in self.weights.items():
-            if weight <= 0:
-                continue
-            model = self.models.get(name)
-            if model is None:
-                continue
-            try:
-                if isinstance(model, dict):
-                    kind = (model.get("kind") or "").strip().lower()
-                    if kind == "meta_labeling_system":
-                        from api.backtest_radar import reconstruct_meta_model
-
-                        wrapper = reconstruct_meta_model(model)
-                        if wrapper is None:
-                            raise ValueError(
-                                "Failed to reconstruct meta_labeling_system"
-                            )
-                        X_aligned = self._align_X_for_artifact(X, model)
-                        votes[name] = wrapper.predict_proba(X_aligned)[:, 1]
-                    elif kind == "lgbm_booster" or kind == "council_validator":
-                        model_str = model.get("model_str") or (
-                            model.get("primary_model") or {}
-                        ).get("model_str")
-                        if model_str:
-                            booster = lgb.Booster(model_str=model_str)
-                            X_aligned = self._align_X_for_artifact(X, model)
-                            cats = self.get_categorical_features(
-                                model
-                            ) or self.get_categorical_features(
-                                model.get("primary_model") or {}
-                            )
-                            if cats:
-                                for c in cats:
-                                    if c in X_aligned.columns:
-                                        X_aligned[c] = X_aligned[c].astype("category")
-                                X_aligned = align_pandas_categories_to_booster(
-                                    X_aligned, cats, booster, cats
-                                )
-                            votes[name] = np.asarray(booster.predict(X_aligned)).astype(
-                                float
-                            )
-                        else:
-                            votes[name] = np.zeros(len(X))
-                    else:
-                        votes[name] = np.zeros(len(X))
-                else:
-                    X_aligned = self._align_X_for_artifact(X, model)
-                    votes[name] = self._predict_p1(model, X_aligned)
-            except Exception:
-                votes[name] = np.zeros(len(X))
+        _, votes = self.evaluate(X)
         return votes
 
     def filter(self, X: pd.DataFrame) -> pd.DataFrame:

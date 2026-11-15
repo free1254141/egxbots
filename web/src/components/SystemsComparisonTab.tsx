@@ -718,7 +718,7 @@ export default function SystemsComparisonTab({
                 </td>
                 <td className="p-3 border border-black">-8% إلى -12% (وقف فني واسع لتحمل التذبذب)</td>
                 <td className="p-3 border border-black bg-amber-50 dark:bg-amber-950/20 text-black dark:text-white font-black">
-                  -4.0% صارم + تأمين التعادل عند +4.5%
+                  -4.0% صارم + تأمين +0.8% (+5%) و+4% (+9%) وهدف +13%
                 </td>
                 <td className="p-3 border border-black bg-emerald-50 dark:bg-emerald-950/20 text-black dark:text-white font-black">
                   -2.8% إلى -3.5% + تأمين التعادل آلياً عند +2.5%

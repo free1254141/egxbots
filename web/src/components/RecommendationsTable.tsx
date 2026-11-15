@@ -15,6 +15,8 @@ import SignalExplanation from "./SignalExplanation";
 import { explainSignal, finiteNumber } from "@/lib/signal-explanation";
 import { useTheme } from "@/contexts/ThemeContext";
 import TradingViewChart from "./TradingViewChartDynamic";
+import type { CustomMarker } from "./TradingViewChart";
+import type { Candle } from "@/lib/indicators";
 import RecommendationCalendar from "./RecommendationCalendar";
 import ShortSwingsTab from "./ShortSwingsTab";
 import FastScannerTab from "./FastScannerTab";
@@ -314,7 +316,12 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
 
     // Detail dialog state
     const [selectedRow, setSelectedRow] = useState<any>(null);
+    const [modalCandles, setModalCandles] = useState<Candle[]>([]);
     const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setModalCandles([]);
+    }, [selectedRow?.id, selectedRow?.symbol]);
 
     useEffect(() => {
         setMounted(true);
@@ -1698,12 +1705,82 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
                                     <span className={`text-xs font-bold ${d("text-zinc-500", "text-zinc-500")}`}>{row.symbol}</span>
                                 </div>
                                 <div style={{ height: 520 }}>
-                                    <TradingViewChart
-                                        symbol={row.symbol}
-                                        exchange={row.exchange}
-                                        theme={isDark ? "dark" : "light"}
-                                        showApiMarkers={false}
-                                    />
+                                    {(() => {
+                                        const toDayTs = (iso?: string | null) => {
+                                            if (!iso) return undefined;
+                                            const dPart = String(iso).slice(0, 10);
+                                            if (!/^\d{4}-\d{2}-\d{2}$/.test(dPart)) return undefined;
+                                            const ms = Date.parse(`${dPart}T00:00:00Z`);
+                                            return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+                                        };
+                                        const rawEntryTs = toDayTs(row.created_at);
+                                        const rawExitTs = isClosed ? toDayTs(row.updated_at) : undefined;
+                                        const firstCandleTs = modalCandles.length > 0 ? modalCandles[0].time : undefined;
+                                        const lastCandleTs = modalCandles.length > 0 ? modalCandles[modalCandles.length - 1].time : undefined;
+                                        const entryTime = rawEntryTs ?? firstCandleTs;
+                                        const endTime = rawExitTs ?? lastCandleTs ?? rawEntryTs;
+
+                                        const chartMarkers: CustomMarker[] = [];
+                                        if (entryTime !== undefined) {
+                                            chartMarkers.push({
+                                                time: entryTime,
+                                                position: "belowBar",
+                                                color: "#10b981",
+                                                shape: "arrowUp",
+                                                text: isAr ? "دخول" : "Entry",
+                                            });
+                                        }
+                                        if (isClosed && rawExitTs !== undefined) {
+                                            chartMarkers.push({
+                                                time: rawExitTs,
+                                                position: "aboveBar",
+                                                color: isWin ? "#22c55e" : "#f43f5e",
+                                                shape: "arrowDown",
+                                                text: isAr ? "خروج" : "Exit",
+                                            });
+                                        }
+
+                                        const chartOverlays: { id: string; label: string; kind: "line"; points: { time: number; value: number }[]; color: string }[] = [];
+                                        if (entryTime !== undefined && endTime !== undefined) {
+                                            const tEnd = Math.max(entryTime, endTime);
+                                            const addLine = (id: string, label: string, val: number, color: string) => {
+                                                if (typeof val === "number" && Number.isFinite(val) && val > 0) {
+                                                    chartOverlays.push({
+                                                        id,
+                                                        label,
+                                                        kind: "line",
+                                                        color,
+                                                        points: [
+                                                            { time: entryTime, value: val },
+                                                            { time: tEnd, value: val },
+                                                        ],
+                                                    });
+                                                }
+                                            };
+                                            addLine("rec-entry", isAr ? "سعر الدخول" : "Entry", entryPrice, "#3b82f6");
+                                            addLine("rec-target1", isAr ? "الهدف الأول" : "Target 1", targetPrice, "#10b981");
+                                            if (hasTarget2 && target2 > 0) {
+                                                addLine("rec-target2", isAr ? "الهدف الثاني" : "Target 2", target2, "#f59e0b");
+                                            }
+                                            addLine("rec-stop", isTrailingStop ? (isAr ? "وقف الأرباح" : "Trailing Stop") : (isAr ? "وقف الخسارة" : "Stop Loss"), stopLoss, "#f43f5e");
+                                            if (isClosed && row.exit_price) {
+                                                addLine("rec-exit", isAr ? "سعر الخروج" : "Exit", Number(row.exit_price), isWin ? "#22c55e" : "#e11d48");
+                                            }
+                                        }
+
+                                        return (
+                                            <TradingViewChart
+                                                symbol={row.symbol}
+                                                exchange={row.exchange}
+                                                theme={isDark ? "dark" : "light"}
+                                                showApiMarkers={true}
+                                                customMarkers={chartMarkers}
+                                                strategyOverlays={chartOverlays}
+                                                focusTimestamp={entryTime}
+                                                onCandlesLoaded={setModalCandles}
+                                            />
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         </div>

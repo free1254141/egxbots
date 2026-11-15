@@ -3,9 +3,12 @@ import re
 import json
 import logging
 import datetime
+import time
+import threading
 import urllib.request as urllib_req
 import pandas as pd
 import numpy as np
+from typing import Optional
 from bs4 import BeautifulSoup
 
 # Setup logger
@@ -13,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_PATH = os.path.join(BASE_DIR, "symbols_data", "macro_history_cache.json")
+
+_MACRO_HISTORY_LOCK = threading.Lock()
+_MACRO_HISTORY_MEM_CACHE = {"ts": 0.0, "data": None}
+_MACRO_HISTORY_MEM_TTL_SECONDS = 300
 
 def scrape_live_rates() -> dict:
     """
@@ -142,6 +149,14 @@ def build_or_update_macro_history() -> list:
     Builds the macro indicators historical daily dataset:
     USD Official, USD Parallel (implied CIB), Gold EGP (implied spot * CIB parallel rate).
     """
+    now_mono = time.monotonic()
+    with _MACRO_HISTORY_LOCK:
+        if (
+            _MACRO_HISTORY_MEM_CACHE["data"]
+            and (now_mono - _MACRO_HISTORY_MEM_CACHE["ts"]) < _MACRO_HISTORY_MEM_TTL_SECONDS
+        ):
+            return list(_MACRO_HISTORY_MEM_CACHE["data"])
+
     # Try loading cache first
     cached_data = []
     # Try loading from Supabase market_cache first
@@ -158,6 +173,9 @@ def build_or_update_macro_history() -> list:
                     if parsed.tzinfo is not None:
                         parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
                     if datetime.datetime.utcnow() - parsed < datetime.timedelta(hours=3):
+                        with _MACRO_HISTORY_LOCK:
+                            _MACRO_HISTORY_MEM_CACHE["ts"] = time.monotonic()
+                            _MACRO_HISTORY_MEM_CACHE["data"] = cached_data
                         return cached_data
     except Exception as e_sb:
         logger.debug(f"Supabase macro_history_cache load failed: {e_sb}")
@@ -177,6 +195,9 @@ def build_or_update_macro_history() -> list:
             is_fresh = True
             
     if is_fresh and cached_data:
+        with _MACRO_HISTORY_LOCK:
+            _MACRO_HISTORY_MEM_CACHE["ts"] = time.monotonic()
+            _MACRO_HISTORY_MEM_CACHE["data"] = cached_data
         return cached_data
 
     logger.info("Rebuilding macro history cache...")
@@ -310,6 +331,10 @@ def build_or_update_macro_history() -> list:
     except Exception as e:
         logger.error(f"Error saving macro history cache: {e}")
         
+    if records:
+        with _MACRO_HISTORY_LOCK:
+            _MACRO_HISTORY_MEM_CACHE["ts"] = time.monotonic()
+            _MACRO_HISTORY_MEM_CACHE["data"] = records
     return records
 
 def get_stock_history_from_db(symbol: str) -> list:
@@ -335,21 +360,27 @@ def get_stock_history_from_db(symbol: str) -> list:
         logger.error(f"Error fetching stock {symbol} history: {e}")
         return []
 
-def calculate_macro_correlation(symbol: str) -> dict:
+def calculate_macro_correlation(
+    symbol: str,
+    macro_data: Optional[list] = None,
+    stock_data: Optional[list] = None,
+) -> dict:
     """
     Computes Pearson correlation for a stock symbol vs USD and Gold
     over the last 30 trading days of overlap.
     """
-    # 1. Load macro indicators
-    macro_data = build_or_update_macro_history()
+    # 1. Load macro indicators (reuse caller-provided snapshot when available)
+    if macro_data is None:
+        macro_data = build_or_update_macro_history()
     df_macro = pd.DataFrame(macro_data)
     if df_macro.empty:
         return {}
     df_macro["date"] = pd.to_datetime(df_macro["date"])
     df_macro.set_index("date", inplace=True)
     
-    # 2. Load stock prices
-    stock_data = get_stock_history_from_db(symbol)
+    # 2. Load stock prices (reuse bulk OHLCV when supplied by daily pipeline)
+    if stock_data is None:
+        stock_data = get_stock_history_from_db(symbol)
     df_stock = pd.DataFrame(stock_data)
     if df_stock.empty or len(df_stock) < 10:
         return {

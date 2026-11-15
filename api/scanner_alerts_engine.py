@@ -344,7 +344,7 @@ def evaluate_scanner_candidates(
     force: bool = True,
     limit_per_category: int = 2,
 ) -> Dict[str, Any]:
-    """Exact EGX scanner classification, ranking, and cross-category deduplication."""
+    """Exact EGX scanner classification, breadth-adaptive sniper gate, and deduplication."""
     sent = sent_keys or set()
     volume_matches: List[Dict[str, Any]] = []
     breakout_matches: List[Dict[str, Any]] = []
@@ -354,12 +354,35 @@ def evaluate_scanner_candidates(
     negative_stocks = 0
     neutral_stocks = 0
 
+    valid_rows = [r for r in latest_by_symbol.values() if float(r.get("close") or 0.0) > 0]
+    ema_rows = [r for r in valid_rows if float(r.get("ema_20") or 0.0) > 0]
+    if len(valid_rows) >= 5 and len(ema_rows) >= 3:
+        above_ema20_count = sum(
+            1
+            for r in valid_rows
+            if float(r.get("ema_20") or 0.0) > 0 and float(r.get("close") or 0.0) >= float(r.get("ema_20") or 0.0)
+        )
+        green_count = sum(1 for r in valid_rows if float(r.get("change_pct") or 0.0) > 0)
+        avg_chg = sum(float(r.get("change_pct") or 0.0) for r in valid_rows) / len(valid_rows)
+        breadth_above_ema20_pct = (above_ema20_count / len(valid_rows)) * 100.0
+        green_ratio_pct = (green_count / len(valid_rows)) * 100.0
+        is_market_healthy = breadth_above_ema20_pct >= 30.0 and green_ratio_pct >= 25.0 and avg_chg > -1.2
+    else:
+        is_market_healthy = True
+
+    effective_limit = min(limit_per_category, 1) if not is_market_healthy else limit_per_category
+
     for sym, row in latest_by_symbol.items():
         close = float(row.get("close") or 0.0)
+        open_p = float(row.get("open") or close)
         ch_pct = float(row.get("change_pct") or 0.0)
         vol = float(row.get("volume") or 0.0)
         rsi = float(row.get("rsi_14") or 50.0)
         r_vol = float(row.get("r_vol") or 0.0)
+        ema_20 = float(row.get("ema_20") or 0.0)
+        bb_upper = float(row.get("bb_upper") or 0.0)
+        has_bb_upper = "bb_upper" in row
+        turnover = close * vol
 
         if close <= 0:
             continue
@@ -371,8 +394,23 @@ def evaluate_scanner_candidates(
         else:
             neutral_stocks += 1
 
-        # 1. Volume Surge
-        if r_vol >= 1.7 and ch_pct >= 1.2 and vol >= 15000:
+        # Exclude penny stock traps (< 1.50) and red distribution candles
+        if close < 1.5 or (open_p > 0 and close < open_p * 0.995):
+            continue
+
+        is_uptrend = ema_20 <= 0 or close >= ema_20 * 0.99
+
+        # 1. Volume Surge (sniper mode in weak breadth, capped to avoid chasing parabolic peaks)
+        min_vol_rvol = 2.0 if is_market_healthy else 2.2
+        min_vol_turnover = 400_000.0 if is_market_healthy else 500_000.0
+        if (
+            r_vol >= min_vol_rvol
+            and vol >= 50_000
+            and turnover >= min_vol_turnover
+            and 1.5 <= ch_pct <= 7.5
+            and is_uptrend
+            and 35.0 <= rsi <= 72.0
+        ):
             volume_matches.append({
                 "symbol": sym,
                 "close": close,
@@ -381,8 +419,18 @@ def evaluate_scanner_candidates(
                 "rsi_14": rsi,
             })
 
-        # 2. Breakout
-        if ch_pct >= 2.5 and r_vol >= 1.4 and vol >= 20000:
+        # 2. Breakout (BB upper penetration with volume confirmation, RSI & chase capped)
+        min_bo_change = 2.2 if is_market_healthy else 2.5
+        bb_ok = (bb_upper > 0 and close >= bb_upper * 0.998) if has_bb_upper else True
+        if (
+            bb_ok
+            and r_vol >= 1.8
+            and vol >= 50_000
+            and turnover >= 500_000.0
+            and min_bo_change <= ch_pct <= 7.5
+            and is_uptrend
+            and rsi <= 74.0
+        ):
             breakout_matches.append({
                 "symbol": sym,
                 "close": close,
@@ -391,8 +439,16 @@ def evaluate_scanner_candidates(
                 "rsi_14": rsi,
             })
 
-        # 3. RSI Oversold Rebound
-        if rsi <= 35.0 and ch_pct >= 0.5:
+        # 3. RSI Oversold Rebound (avoid knife-catching crashes and illiquid microcaps)
+        not_crashing = ema_20 <= 0 or close >= ema_20 * 0.85
+        max_os_rsi = 28.0 if is_market_healthy else 26.0
+        if (
+            0.0 < rsi <= max_os_rsi
+            and ch_pct >= 1.0
+            and not_crashing
+            and vol >= 50_000
+            and turnover >= 250_000.0
+        ):
             oversold_matches.append({
                 "symbol": sym,
                 "close": close,
@@ -421,7 +477,7 @@ def evaluate_scanner_candidates(
                 continue
             picked.append(s)
             seen_fresh_symbols.add(sym)
-            if len(picked) >= limit_per_category:
+            if len(picked) >= effective_limit:
                 break
         return picked
 
@@ -432,6 +488,7 @@ def evaluate_scanner_candidates(
         "positive_stocks": positive_stocks,
         "negative_stocks": negative_stocks,
         "neutral_stocks": neutral_stocks,
+        "is_market_healthy": is_market_healthy,
     }
 
 
@@ -448,6 +505,8 @@ def step_scanner_lifecycle(
     action_time: str,
     now_iso: str,
     causal_be_prev_only: bool = False,
+    intraday_live: bool = False,
+    allow_new_entries: bool = True,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Advance tracked scanner signals using the exact EGX breakeven, target, stop, and expiry rules."""
     hit_target_signals: List[Dict[str, Any]] = []
@@ -463,9 +522,14 @@ def step_scanner_lifecycle(
             else float(sig.get("current_price", sig.get("entry_price", 0.0)))
         )
 
-        is_price_current = as_of_date >= sig.get("entry_date", "")
-        bar_high = max(float(p.get("high", curr_price)), curr_price) if (p and is_price_current) else curr_price
-        bar_low = min(float(p.get("low", curr_price)), curr_price) if (p and is_price_current) else curr_price
+        entry_date = sig.get("entry_date", "")
+        is_price_current = as_of_date >= entry_date
+        same_entry_day = bool(entry_date and as_of_date == entry_date)
+        # In live intraday runs, `p["high"]`/`p["low"]` come from full-day OHLC starting at 10:00 AM
+        # (before an intraday signal was issued). Never use pre-signal session lows/highs on entry day.
+        use_daily_ohlc = bool(p and is_price_current and not (intraday_live and same_entry_day))
+        bar_high = max(float(p.get("high", curr_price)), curr_price) if use_daily_ohlc else curr_price
+        bar_low = min(float(p.get("low", curr_price)), curr_price) if use_daily_ohlc else curr_price
 
         prev_highest = float(sig.get("highest_price") or sig.get("entry_price") or curr_price)
         highest_price = max(prev_highest, bar_high)
@@ -475,7 +539,7 @@ def step_scanner_lifecycle(
         max_gain_pct = round(((highest_price - entry_price) / entry_price) * 100, 2)
 
         if causal_be_prev_only:
-            elapsed_sessions = int(sig.get("sessions_count", 1)) + (1 if p and as_of_date > sig.get("entry_date", "") else 0)
+            elapsed_sessions = int(sig.get("sessions_count", 1)) + (1 if p and as_of_date > entry_date else 0)
         else:
             elapsed_sessions = count_elapsed_sessions(sig.get("entry_date", action_date), action_date)
             elapsed_sessions = max(int(sig.get("sessions_count", 1)), elapsed_sessions)
@@ -492,17 +556,18 @@ def step_scanner_lifecycle(
         })
 
         # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry price.
-        # In daily OHLC replay (causal_be_prev_only=True), only arm BE from prior sessions so
-        # intra-candle high/low sequence never creates false breakevens.
-        be_reference_high = prev_highest if causal_be_prev_only else highest_price
+        # In daily OHLC replay (causal_be_prev_only=True) and live intraday ticks (intraday_live=True),
+        # only arm BE from prior observations so intra-bar/pre-entry high/low never creates false breakevens.
+        strict_causal_be = causal_be_prev_only or intraday_live
+        be_reference_high = prev_highest if strict_causal_be else highest_price
         has_breakeven = be_reference_high >= entry_price * 1.025
         effective_stop = max(float(sig.get("stop_loss", 0.0)), entry_price) if has_breakeven else float(sig.get("stop_loss", 0.0))
 
-        if highest_price >= entry_price * 1.025 and (not causal_be_prev_only or has_breakeven):
+        if highest_price >= entry_price * 1.025 and (not strict_causal_be or has_breakeven):
             updated_sig["stop_loss"] = max(float(sig.get("stop_loss", 0.0)), entry_price)
             updated_sig["stop_loss_pct"] = 0.0
-        elif causal_be_prev_only and highest_price >= entry_price * 1.025:
-            # Arm for the next session once today survives without stopping out
+        elif strict_causal_be and highest_price >= entry_price * 1.025:
+            # Arm for the next tick/session once today survives without stopping out
             updated_sig["be_armed_next"] = True
 
         hit_stop = (curr_price <= effective_stop) if has_breakeven else (bar_low <= effective_stop)
@@ -551,7 +616,7 @@ def step_scanner_lifecycle(
             })
             current_closed.insert(0, updated_sig)
         else:
-            if causal_be_prev_only and updated_sig.pop("be_armed_next", False):
+            if (causal_be_prev_only or intraday_live) and updated_sig.pop("be_armed_next", False):
                 updated_sig["stop_loss"] = max(float(updated_sig.get("stop_loss", 0.0)), entry_price)
                 updated_sig["stop_loss_pct"] = 0.0
             still_active_signals.append(updated_sig)
@@ -563,36 +628,37 @@ def step_scanner_lifecycle(
             return True
         return False
 
-    for scanner_type, picks in (("volume_surge", final_vol), ("breakout", final_bo), ("rsi_oversold", final_os)):
-        for cand in picks:
-            if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
-                break
-            if _is_symbol_active_or_closed_today(cand["symbol"]):
-                continue
-            plan = calculate_trade_plan(cand["close"], scanner_type)
-            still_active_signals.append({
-                "id": f"{cand['symbol']}_{action_date}_{scanner_type}",
-                "symbol": cand["symbol"],
-                "scanner_type": scanner_type,
-                "entry_price": cand["close"],
-                "entry_date": action_date,
-                "entry_time": action_time,
-                "target_1": plan["target_1"],
-                "target_1_pct": plan["target_1_pct"],
-                "target_2": plan["target_2"],
-                "target_2_pct": plan["target_2_pct"],
-                "stop_loss": plan["stop_loss"],
-                "stop_loss_pct": plan["stop_loss_pct"],
-                "current_price": cand["close"],
-                "highest_price": cand["close"],
-                "lowest_price": cand["close"],
-                "return_pct": 0.0,
-                "max_gain_pct": 0.0,
-                "status": "active",
-                "sessions_count": 1,
-                "max_sessions": plan["max_sessions"],
-                "updated_at": now_iso,
-            })
+    if allow_new_entries:
+        for scanner_type, picks in (("volume_surge", final_vol), ("breakout", final_bo), ("rsi_oversold", final_os)):
+            for cand in picks:
+                if len(still_active_signals) >= MAX_PORTFOLIO_ACTIVE:
+                    break
+                if _is_symbol_active_or_closed_today(cand["symbol"]):
+                    continue
+                plan = calculate_trade_plan(cand["close"], scanner_type)
+                still_active_signals.append({
+                    "id": f"{cand['symbol']}_{action_date}_{scanner_type}",
+                    "symbol": cand["symbol"],
+                    "scanner_type": scanner_type,
+                    "entry_price": cand["close"],
+                    "entry_date": action_date,
+                    "entry_time": action_time,
+                    "target_1": plan["target_1"],
+                    "target_1_pct": plan["target_1_pct"],
+                    "target_2": plan["target_2"],
+                    "target_2_pct": plan["target_2_pct"],
+                    "stop_loss": plan["stop_loss"],
+                    "stop_loss_pct": plan["stop_loss_pct"],
+                    "current_price": cand["close"],
+                    "highest_price": cand["close"],
+                    "lowest_price": cand["close"],
+                    "return_pct": 0.0,
+                    "max_gain_pct": 0.0,
+                    "status": "active",
+                    "sessions_count": 1,
+                    "max_sessions": plan["max_sessions"],
+                    "updated_at": now_iso,
+                })
 
     return still_active_signals, current_closed, hit_target_signals, stopped_out_signals
 
@@ -607,7 +673,8 @@ def compute_scanner_signals_kpis(
     sum_wins = sum(float(s.get("return_pct") or 0.0) for s in closed_wins)
     sum_losses = abs(sum(float(s.get("return_pct") or 0.0) for s in closed_losses))
 
-    win_rate = round((len(closed_wins) / len(final_closed)) * 100, 1) if final_closed else 80.0
+    decided_count = len(closed_wins) + len(closed_losses)
+    win_rate = round((len(closed_wins) / decided_count) * 100, 1) if decided_count > 0 else 80.0
     profit_factor = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 4.5
     return {
         "win_rate_pct": win_rate,
@@ -648,7 +715,9 @@ def run_scanner_alerts_simulation(
             continue
         frame = bdf.copy()
         cols_lower = {c.lower(): c for c in frame.columns}
+        open_col = cols_lower.get("open")
         close_s = pd.to_numeric(frame[cols_lower["close"]], errors="coerce")
+        open_s = pd.to_numeric(frame[open_col], errors="coerce") if open_col else close_s
         high_s = pd.to_numeric(frame[cols_lower["high"]], errors="coerce")
         low_s = pd.to_numeric(frame[cols_lower["low"]], errors="coerce")
         vol_s = pd.to_numeric(frame[cols_lower["volume"]], errors="coerce")
@@ -657,6 +726,10 @@ def run_scanner_alerts_simulation(
         ch_pct = ((close_s - prev_c) / prev_c.replace(0, np.nan)) * 100.0
         vol_sma20 = vol_s.rolling(20, min_periods=20).mean()
         r_vol = vol_s / vol_sma20.replace(0, np.nan)
+        ema20 = close_s.ewm(span=20, adjust=False).mean()
+        sma20 = close_s.rolling(20, min_periods=20).mean()
+        std20 = close_s.rolling(20, min_periods=20).std()
+        bb_upper = (sma20 + 2.0 * std20).fillna(0.0)
 
         delta = close_s.diff()
         gain = delta.clip(lower=0.0).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
@@ -669,6 +742,7 @@ def run_scanner_alerts_simulation(
         part = pd.DataFrame({
             "date": idx_dates,
             "symbol": str(sym).upper().split(".")[0],
+            "open": open_s.values,
             "close": close_s.values,
             "high": high_s.values,
             "low": low_s.values,
@@ -677,6 +751,8 @@ def run_scanner_alerts_simulation(
             "change_pct": ch_pct.values,
             "r_vol": r_vol.values,
             "rsi_14": rsi14.values,
+            "ema_20": ema20.values,
+            "bb_upper": bb_upper.values,
         })
         part = part[part["date"] >= start_date].dropna(subset=["close", "change_pct", "r_vol"])
         if not part.empty:
@@ -715,12 +791,15 @@ def run_scanner_alerts_simulation(
         for r in sub.itertuples(index=False):
             latest_by_symbol[r.symbol] = {
                 "symbol": r.symbol,
+                "open": float(r.open),
                 "close": round(float(r.close), 3 if float(r.close) < 2 else 2),
                 "change_pct": round(float(r.change_pct), 2),
                 "volume": float(r.volume),
                 "vol_sma20": float(r.vol_sma20),
                 "r_vol": round(float(r.r_vol), 2),
                 "rsi_14": round(float(r.rsi_14), 1),
+                "ema_20": float(r.ema_20),
+                "bb_upper": float(r.bb_upper),
                 "high": float(r.high),
                 "low": float(r.low),
             }
@@ -873,6 +952,8 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
             "vol_sma20": float(r.get("vol_sma20") or 0.0),
             "r_vol": float(r.get("r_vol") or 1.0),
             "rsi_14": float(r.get("rsi_14") or 50.0),
+            "ema_20": float(r.get("ema_20") or 0.0),
+            "bb_upper": float(r.get("bb_upper") or 0.0),
             "open": p_info.get("open", close_val),
             "high": p_info.get("high", close_val),
             "low": p_info.get("low", close_val),
@@ -885,15 +966,16 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
     sent_keys = set(sent_today.get("sent_keys", []))
 
     # Evaluate Scanners via shared helper (exact EGX rules)
+    allow_new_entries = bool(force or cairo["time_str"] < "14:25")
     eval_res = evaluate_scanner_candidates(
         latest_by_symbol,
         sent_keys=sent_keys,
         force=force,
         limit_per_category=2,
     )
-    final_vol = eval_res["final_vol"]
-    final_bo = eval_res["final_bo"]
-    final_os = eval_res["final_os"]
+    final_vol = eval_res["final_vol"] if allow_new_entries else []
+    final_bo = eval_res["final_bo"] if allow_new_entries else []
+    final_os = eval_res["final_os"] if allow_new_entries else []
     positive_stocks = eval_res["positive_stocks"]
     negative_stocks = eval_res["negative_stocks"]
     neutral_stocks = eval_res["neutral_stocks"]
@@ -918,6 +1000,8 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
         action_time=cairo["time_str"],
         now_iso=datetime.now(timezone.utc).isoformat(),
         causal_be_prev_only=False,
+        intraday_live=True,
+        allow_new_entries=allow_new_entries,
     )
 
     # Send Follow-Up Target Hit Alerts (VIP & Free channels)

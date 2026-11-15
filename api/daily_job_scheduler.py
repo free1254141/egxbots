@@ -28,9 +28,22 @@ _scheduler_state: Dict[str, Any] = {
     "last_run_job_id": None,
     "total_runs": 0,
     "total_failed": 0,
+    # Independent Saudi (Tadawul / TASI) schedule in Asia/Riyadh
+    "saudi_enabled": True,
+    "saudi_morning_run_time": "10:20",
+    "saudi_midday_run_time": "12:45",
+    "saudi_close_run_time": "15:25",
+    "saudi_timezone": "Asia/Riyadh",
+    "saudi_active_days": [0, 1, 2, 3, 6],
+    "saudi_status": "idle",
+    "saudi_next_run_at": None,
+    "saudi_last_run_at": None,
+    "saudi_last_run_status": None,
+    "saudi_last_run_job_id": None,
 }
 _run_history: List[Dict[str, Any]] = []
 _scheduler_lock = threading.RLock()
+_saudi_scheduler_lock = threading.RLock()
 _scheduler_thread = None
 _stop_event = threading.Event()
 _last_recommendation_retry_at = time.monotonic()
@@ -41,6 +54,7 @@ _last_subscription_reminders_at = time.monotonic()
 _last_marketing_lifecycle_at = time.monotonic()
 _last_short_swings_retry_at = time.monotonic()
 _last_phase_attempts = {}
+_saudi_last_phase_attempts = {}
 _completed_phases = set()
 _DEFAULT_STALE_RUN_MINUTES = 90
 
@@ -80,6 +94,17 @@ def _save_config():
         pass
 
 
+def _load_env_files_once():
+    try:
+        from dotenv import load_dotenv
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        load_dotenv(os.path.join(repo_root, "web", ".env.local"), override=False)
+        load_dotenv(os.path.join(repo_root, ".env"), override=False)
+    except Exception:
+        pass
+
+
+_load_env_files_once()
 _load_config()
 
 
@@ -87,6 +112,14 @@ def _now_cairo() -> datetime:
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Africa/Cairo"))
+    except Exception:
+        return datetime.utcnow() + timedelta(hours=3)
+
+
+def _now_riyadh() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Riyadh"))
     except Exception:
         return datetime.utcnow() + timedelta(hours=3)
 
@@ -139,28 +172,22 @@ def _has_executable_steps(row: Dict[str, Any]) -> bool:
     return False
 
 
-def _daily_job_ran_today(today: str, phase: str = "close") -> bool:
-    """Check the durable ledger and recover runs that stopped heartbeating.
-
-    A process crash can leave a row in ``running`` forever.  Only a run with a
-    recent persisted step heartbeat blocks another scheduled/catch-up attempt;
-    stale rows are retained for audit but marked failed.
-    """
-    key = f"{today}:{phase}"
-    if key in _completed_phases:
+def _job_ran_today(today: str, job_type: str, local_tz, cache_key: str) -> bool:
+    """Check the durable ledger for any market/phase and recover stale runs."""
+    if cache_key in _completed_phases:
         return True
     try:
         from api.stock_ai import _init_supabase, supabase
         _init_supabase()
         if not supabase:
             return True  # Unavailable durable ledger must not grant a new run.
-        local_start = datetime.fromisoformat(today).replace(tzinfo=_now_cairo().tzinfo)
+        local_start = datetime.fromisoformat(today).replace(tzinfo=local_tz)
         utc_start = local_start.astimezone(timezone.utc)
         utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
         result = (
             supabase.table("daily_job_runs")
             .select("id,status,started_at,steps")
-            .eq("job_type", "daily_morning" if phase == "morning" else ("daily_midday" if phase == "midday" else "daily_bot"))
+            .eq("job_type", job_type)
             .gte("started_at", utc_start.isoformat())
             .lt("started_at", utc_end.isoformat())
             .in_("status", ["running", "completed", "failed"])
@@ -203,11 +230,21 @@ def _daily_job_ran_today(today: str, phase: str = "close") -> bool:
                 except Exception as cleanup_error:
                     print(f"[DAILY-JOB-SCHEDULER] Could not mark stale run {run_id} failed: {cleanup_error}")
         if has_completed_run:
-            _completed_phases.add(key)
+            _completed_phases.add(cache_key)
         return has_completed_run or has_active_run
     except Exception as exc:
         print(f"[DAILY-JOB-SCHEDULER] Durable run check failed: {exc}")
         return True
+
+
+def _daily_job_ran_today(today: str, phase: str = "close") -> bool:
+    job_type = "daily_morning" if phase == "morning" else ("daily_midday" if phase == "midday" else "daily_bot")
+    return _job_ran_today(today, job_type, _now_cairo().tzinfo, f"{today}:{phase}")
+
+
+def _saudi_job_ran_today(today: str, phase: str = "close") -> bool:
+    job_type = "saudi_morning" if phase == "morning" else ("saudi_midday" if phase == "midday" else "saudi_close")
+    return _job_ran_today(today, job_type, _now_riyadh().tzinfo, f"saudi:{today}:{phase}")
 
 
 def _minutes(value):
@@ -234,48 +271,72 @@ def _due_phase(now):
     return None
 
 
-def _run_saudi_daily_refresh():
-    """Run Saudi Tadawul daily refresh reusing trained models after EGX close."""
-    import sys
+def _saudi_configured() -> bool:
+    return bool(os.getenv("SAUDI_SUPABASE_URL") and os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY"))
 
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-    from scripts.saudi_pipeline_bootstrap import main as run_saudi_pipeline
 
-    res = run_saudi_pipeline(reuse_models=True)
+def _due_saudi_phase(now: Optional[datetime] = None) -> Optional[str]:
+    from api.saudi_trading_calendar import is_saudi_session
+    now = now or _now_riyadh()
+    if not _saudi_configured() or not is_saudi_session(now):
+        return None
+    if not _scheduler_state.get("saudi_enabled", True) or now.weekday() not in _scheduler_state.get("saudi_active_days", [0, 1, 2, 3, 6]):
+        return None
+    current = now.hour * 60 + now.minute
+    close_min = _minutes(_scheduler_state.get("saudi_close_run_time", "15:25"))
+    midday_min = _minutes(_scheduler_state.get("saudi_midday_run_time", "12:45"))
+    morning_min = _minutes(_scheduler_state.get("saudi_morning_run_time", "10:20"))
+    if current >= close_min:
+        return "close"
+    if midday_min <= current < 15 * 60:
+        return "midday"
+    if morning_min <= current < midday_min:
+        return "morning"
+    return None
+
+
+def _run_saudi_daily_refresh(phase: str = "close", source: str = "manual"):
+    """Execute independent Saudi Tadawul multi-phase job (no EGX dependency)."""
+    from api.saudi_daily_runner import run_saudi_daily_job
+    return run_saudi_daily_job(phase=phase, trigger=source)
+
+
+def _execute_saudi_phase(phase: str, source: str):
     try:
-        from scripts.saudi_backtest_and_systems import main as run_saudi_systems
-        run_saudi_systems()
-    except Exception as sys_exc:
-        print(f"[DAILY-JOB-SCHEDULER] Saudi 3-systems refresh failed (non-fatal): {sys_exc}")
-    try:
-        from api.saudi_telegram_dispatch import dispatch_saudi_open_recommendations
-        dispatch_saudi_open_recommendations()
-    except Exception as tg_exc:
-        print(f"[DAILY-JOB-SCHEDULER] Saudi Telegram dispatch failed (non-fatal): {tg_exc}")
-    saudi_cache_tags = []
-    try:
-        from api.saudi_news_sync import sync_saudi_news
-        news_res = sync_saudi_news()
-        if isinstance(news_res, dict) and news_res.get("ok"):
-            saudi_cache_tags.append("daily-news-data")
-    except Exception as news_exc:
-        print(f"[DAILY-JOB-SCHEDULER] Saudi news sync failed (non-fatal): {news_exc}")
-    try:
-        from api.saudi_disclosures_sync import sync_saudi_disclosures
-        disc_res = sync_saudi_disclosures()
-        if isinstance(disc_res, dict) and disc_res.get("ok"):
-            saudi_cache_tags.append("daily-disclosures")
-    except Exception as disc_exc:
-        print(f"[DAILY-JOB-SCHEDULER] Saudi disclosures sync failed (non-fatal): {disc_exc}")
-    if saudi_cache_tags:
-        try:
-            from api.cache_invalidation import invalidate_cache_tags
-            invalidate_cache_tags(saudi_cache_tags)
-        except Exception as inv_exc:
-            print(f"[DAILY-JOB-SCHEDULER] Saudi cache invalidation failed (non-fatal): {inv_exc}")
-    return res
+        result = _run_saudi_daily_refresh(phase=phase, source=source)
+        with _saudi_scheduler_lock:
+            _scheduler_state["saudi_last_run_at"] = datetime.utcnow().isoformat()
+            _scheduler_state["saudi_last_run_status"] = result.get("status", "completed")
+            _scheduler_state["saudi_last_run_job_id"] = result.get("job_run_id", source)
+    except Exception as exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi {phase} run failed: {exc}")
+        with _saudi_scheduler_lock:
+            _scheduler_state["saudi_last_run_at"] = datetime.utcnow().isoformat()
+            _scheduler_state["saudi_last_run_status"] = "failed"
+    finally:
+        with _saudi_scheduler_lock:
+            _scheduler_state["saudi_status"] = "idle"
+
+
+def _claim_saudi_phase_in_process(now: datetime, phase: str) -> bool:
+    key = f"saudi:{now.date().isoformat()}:{phase}"
+    with _saudi_scheduler_lock:
+        last = _saudi_last_phase_attempts.get(key, {})
+        if (
+            _scheduler_state.get("saudi_status") == "running"
+            or last.get("attempts", 0) >= 3
+            or time.monotonic() - last.get("at", -100000) < 900
+        ):
+            return False
+        if _saudi_job_ran_today(now.date().isoformat(), phase):
+            _saudi_last_phase_attempts[key] = {"at": time.monotonic(), "attempts": last.get("attempts", 0)}
+            return False
+        if len(_saudi_last_phase_attempts) > 10:
+            _saudi_last_phase_attempts.clear()
+        _saudi_last_phase_attempts[key] = {"at": time.monotonic(), "attempts": last.get("attempts", 0) + 1}
+        _scheduler_state["saudi_status"] = "running"
+        _scheduler_state["saudi_current_phase"] = phase
+        return True
 
 
 def _execute_phase(phase, source):
@@ -285,15 +346,6 @@ def _execute_phase(phase, source):
         result = asyncio.run(run_daily_job(trigger="scheduled", phase=phase,
                            model_filter=_scheduler_state.get("model_filter", "adaptive")))
         _record_run(result.get("job_run_id", source), scheduler_result_status(result))
-        if (
-            phase == "close"
-            and os.getenv("SAUDI_SUPABASE_URL")
-            and os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
-        ):
-            try:
-                _run_saudi_daily_refresh()
-            except Exception as saudi_exc:
-                print(f"[DAILY-JOB-SCHEDULER] Saudi daily refresh failed (non-fatal): {saudi_exc}")
     except Exception as exc:
         print(f"[DAILY-JOB-SCHEDULER] {phase} run failed: {exc}")
         _record_run(source, "failed")
@@ -321,14 +373,22 @@ def _claim_phase_in_process(now, phase):
 
 
 def run_startup_catchup() -> bool:
-    """Recover only the appropriate missing phase after an HF restart."""
+    """Recover missing EGX and/or Saudi phase independently after a server restart."""
+    started = False
     now = _now_cairo()
     phase = _due_phase(now)
-    if not phase or not _claim_phase_in_process(now, phase):
-        return False
-    threading.Thread(target=_execute_phase, args=(phase, "startup_catchup"),
-                     daemon=True, name="daily-job-startup-catchup").start()
-    return True
+    if phase and _claim_phase_in_process(now, phase):
+        threading.Thread(target=_execute_phase, args=(phase, "startup_catchup"),
+                         daemon=True, name="daily-job-startup-catchup").start()
+        started = True
+
+    now_saudi = _now_riyadh()
+    saudi_phase = _due_saudi_phase(now_saudi)
+    if saudi_phase and _claim_saudi_phase_in_process(now_saudi, saudi_phase):
+        threading.Thread(target=_execute_saudi_phase, args=(saudi_phase, "startup_catchup"),
+                         daemon=True, name="saudi-daily-job-startup-catchup").start()
+        started = True
+    return started
 
 
 def _js_days_to_python(days: Any) -> List[int]:
@@ -456,7 +516,34 @@ def _compute_next_run() -> str:
         day = now + timedelta(days=offset)
         if day.weekday() not in _scheduler_state["active_days"] or not is_egx_session(day):
             continue
-        for value in (_scheduler_state["midday_run_time"], _scheduler_state["run_time"]):
+        for value in (
+            _scheduler_state.get("morning_run_time", "10:15"),
+            _scheduler_state["midday_run_time"],
+            _scheduler_state["run_time"],
+        ):
+            minutes = _minutes(value)
+            candidate = day.replace(hour=minutes // 60, minute=minutes % 60, second=0, microsecond=0)
+            if candidate > now:
+                candidates.append(candidate)
+    return min(candidates).isoformat() if candidates else None
+
+
+def _compute_saudi_next_run() -> Optional[str]:
+    if not _saudi_configured() or not _scheduler_state.get("saudi_enabled", True):
+        return None
+    from api.saudi_trading_calendar import is_saudi_session
+    now = _now_riyadh()
+    candidates = []
+    active_days = _scheduler_state.get("saudi_active_days", [0, 1, 2, 3, 6])
+    for offset in range(8):
+        day = now + timedelta(days=offset)
+        if day.weekday() not in active_days or not is_saudi_session(day):
+            continue
+        for value in (
+            _scheduler_state.get("saudi_morning_run_time", "10:20"),
+            _scheduler_state.get("saudi_midday_run_time", "12:45"),
+            _scheduler_state.get("saudi_close_run_time", "15:25"),
+        ):
             minutes = _minutes(value)
             candidate = day.replace(hour=minutes // 60, minute=minutes % 60, second=0, microsecond=0)
             if candidate > now:
@@ -540,6 +627,20 @@ def _scheduler_worker():
                 except Exception as mkt_err:
                     print(f"[DAILY-JOB-SCHEDULER] Marketing lifecycle check failed: {mkt_err}")
                 _last_marketing_lifecycle_at = now_monotonic
+
+            # Independent Saudi (Tadawul / TASI) schedule runs in its own daemon thread so it never delays EGX.
+            now_riyadh = _now_riyadh()
+            with _saudi_scheduler_lock:
+                _scheduler_state["saudi_next_run_at"] = _compute_saudi_next_run()
+            saudi_phase = _due_saudi_phase(now_riyadh)
+            if saudi_phase and _claim_saudi_phase_in_process(now_riyadh, saudi_phase):
+                print(f"[DAILY-JOB-SCHEDULER] Triggering Saudi {saudi_phase} job at {now_riyadh}")
+                threading.Thread(
+                    target=_execute_saudi_phase,
+                    args=(saudi_phase, "scheduled"),
+                    daemon=True,
+                    name=f"saudi-daily-job-{saudi_phase}",
+                ).start()
 
             if not enabled:
                 with _scheduler_lock:

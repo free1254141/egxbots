@@ -2,18 +2,19 @@
 Short Swings Engine (الصفقات القصيرة ⚡ PRO)
 Independent, decoupled swing trading engine for high-conviction momentum & trend-riding setups.
 Features:
-- 20-Day Base Breakout with Volume Surge (>= 140% of 20MA).
-- Power Pullback to EMA10 in strong uptrends.
-- Market Breadth Gate (>= 45% of liquid stocks above EMA50).
-- Breakeven lock once price reaches +4.5% (effective starting the subsequent session).
-- Conservative gap-down stop loss execution.
-- EMA10 Trailing Stop (rides runners).
+- 20-Day Base Breakout with Volume Surge (>= 140% of 20MA) & rising EMA50 structure.
+- Strict Relative Strength Leaders in selective breadth (30%-45%) with rising breadth guard.
+- Market Breadth Gate (>= 45% of liquid stocks above EMA50 & non-collapsing breadth delta).
+- Causal two-tier profit lock (+5.0% -> +0.8% floor; +9.0% -> +4.0% floor, positive-close required).
+- Conservative gap-down stop loss & Day-0 close stop check.
+- +13.0% causal take-profit target & EMA10 Trailing Stop.
 - Dynamic performance KPIs computed directly from executed historical trades.
 """
 import os
 import sys
 import json
 import gzip
+import math
 import threading
 import datetime as dt
 from pathlib import Path
@@ -55,6 +56,15 @@ SAUDI_ENTRY_CURRENT_TURNOVER = 6_250_000.0
 SAUDI_MIN_BREADTH = 0.65
 SAUDI_START_DATE = "2021-01-01"
 
+# Causal stop, profit-lock, and take-profit parameters (validated across 2024-2026 EGX)
+INITIAL_SL_PCT = 0.04
+BE_TRIGGER_PCT = 0.05
+BE_LOCK_PCT = 0.008
+TIER2_TRIGGER_PCT = 0.09
+TIER2_LOCK_PCT = 0.04
+TP_TARGET_PCT = 0.13
+MIN_BREADTH_DELTA5 = -0.02
+
 _SNAPSHOT_BOOTSTRAP_LOCK = threading.Lock()
 _SNAPSHOT_BOOTSTRAPPED = False
 _SAUDI_SNAPSHOT_BOOTSTRAPPED = False
@@ -91,14 +101,31 @@ def _restore_saved_snapshot():
     return (row or {}).get("payload", {}).get("swings")
 
 
+def _sanitize_json_value(value: Any) -> Any:
+    """Recursively convert NaN/Inf and numpy scalars to strict Postgres-safe JSON types."""
+    if isinstance(value, dict):
+        return {k: _sanitize_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json_value(v) for v in value]
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        fval = float(value)
+        return fval if math.isfinite(fval) else None
+    return value
+
+
 def _persist_saved_snapshot(client, result):
     from api.daily_recovery_state import read_checkpoint, replace_checkpoint
+    clean_result = _sanitize_json_value(result)
     old = read_checkpoint(client, "short_swings_latest")
     saved = ((old or {}).get("payload") or {}).get("swings") or {}
     version = lambda item: (item.get("as_of") or "", item.get("computed_at") or "")
-    if version(saved) > version(result):
+    if version(saved) > version(clean_result):
         return False
-    if not replace_checkpoint(client, "short_swings_latest", {"swings": result}, old):
+    if not replace_checkpoint(client, "short_swings_latest", {"swings": clean_result}, old):
         raise RuntimeError("Cannot persist shared short-swings display snapshot")
     return True
 
@@ -163,8 +190,9 @@ def _persist_saudi_snapshot(result: Dict[str, Any]) -> None:
     ).execute()
 
 EXIT_REASON_LABELS = {
+    "take_profit": "تحقيق المستهدف وجني الأرباح (+13%)",
     "ema10_break": "كسر متوسط EMA10 (حماية أرباح)",
-    "stop_be": "وقف التعادل (حماية رأس المال)",
+    "stop_be": "وقف حماية الأرباح والتعادل",
     "stop_loss": "وقف الخسارة الأولي (-4%)",
     "max_time": "انتهاء المدة الزمنية القصوى (20 جلسة)",
     "delisted_or_halted": "إغلاق لانتهاء المدة / توقف التداول"
@@ -563,7 +591,7 @@ def compute_short_swings(
         minutes = now_cairo.hour * 60 + now_cairo.minute
         market_close_min = (15 * 60 + 10) if is_saudi else (14 * 60 + 30)
         phase = "midday" if 10 * 60 <= minutes < market_close_min else "close"
-    if phase not in {"midday", "close"}:
+    if phase not in {"morning", "midday", "close"}:
         raise ValueError("Invalid short-swings phase")
     session_date = now_cairo.date().isoformat()
     df = pd.DataFrame()
@@ -720,6 +748,7 @@ def compute_short_swings(
         g["ema10"] = c.ewm(span=10, adjust=False).mean()
         g["ema20"] = c.ewm(span=20, adjust=False).mean()
         g["ema50"] = c.ewm(span=50, adjust=False).mean()
+        g["ema50_slope"] = g["ema50"] / g["ema50"].shift(5) - 1.0
 
         prev_c = c.shift(1)
         tr = pd.concat([h - l, (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
@@ -779,18 +808,29 @@ def compute_short_swings(
 
     df = pd.concat(groups, ignore_index=True)
 
-    # Market breadth (lagged 1 day)
-    breadth_raw = df[df["breadth_liquid"]].groupby("date")["above_ema50"].mean()
-    df = df.merge(breadth_raw.shift(1).rename("breadth"), on="date", how="left")
+    # Market breadth (lagged 1 day) & 5-session breadth momentum
+    breadth_raw = df[df["breadth_liquid"]].groupby("date")["above_ema50"].mean().sort_index()
+    breadth_prev = breadth_raw.shift(1)
+    breadth_d5 = breadth_prev - breadth_prev.shift(5)
+    bmap = pd.DataFrame({
+        "date": breadth_raw.index,
+        "breadth": breadth_prev.values,
+        "breadth_d5": breadth_d5.values,
+    })
+    df = df.merge(bmap, on="date", how="left")
     df["breadth"] = df["breadth"].fillna(0.5)
+    df["breadth_d5"] = df["breadth_d5"].fillna(0.0)
 
-    mkt_ok = df["breadth"] >= (SAUDI_MIN_BREADTH if is_saudi else 0.45)
+    mkt_ok = df["breadth"] >= SAUDI_MIN_BREADTH if is_saudi else ((df["breadth"] >= 0.45) & (df["breadth_d5"] >= MIN_BREADTH_DELTA5))
     trend_aligned = (
         df["liquid"]
         & (df["close"] > df["ema10"])
         & (df["ema10"] > df["ema20"])
         & (df["ema20"] > df["ema50"])
     )
+    if not is_saudi:
+        # Require positive intermediate-term slope on EGX to avoid dead-cat bounces.
+        trend_aligned = trend_aligned & (df["ema50_slope"].fillna(0.0) > 0)
 
     day_range = df["high"] - df["low"]
     close_pos = (df["close"] - df["low"]) / (day_range.replace(0, 1e-9))
@@ -806,48 +846,35 @@ def compute_short_swings(
         & (df["ret20"] >= 0.05)
     )
 
-    # Power Pullback
-    sig_power_pb = (
-        mkt_ok
-        & trend_aligned
-        & (df["ret20"] >= 0.08)
-        & (df["low"] <= df["ema10"] * 1.01)
-        & (df["close"] > df["ema10"])
-        & (df["volume"] >= df["vol_ma20"] * 1.2)
-        & (df["close"] > df["open"])
-        & (close_pos >= 0.75)
-    )
-
     if is_saudi:
-        # On Tadawul, low-breadth defensive (~mkt_ok) counter-trend signals bleed during
-        # multi-quarter TASI downtrends (2022/2025-2026); confine entries to healthy bull breadth.
+        # Preserve calibrated Saudi Power Pullback while disabling low-breadth counter-trend setups.
+        sig_power_pb = (
+            mkt_ok
+            & trend_aligned
+            & (df["ret20"] >= 0.08)
+            & (df["low"] <= df["ema10"] * 1.01)
+            & (df["close"] > df["ema10"])
+            & (df["volume"] >= df["vol_ma20"] * 1.2)
+            & (df["close"] > df["open"])
+            & (close_pos >= 0.75)
+        )
         sig_rs_leader = pd.Series(False, index=df.index)
         sig_defensive_pb = pd.Series(False, index=df.index)
     else:
-        # Defensive Relative Strength Leader (when broad breadth is below 45%):
+        # Disable EGX Power Pullback & Defensive Pullback (1.29 / 0.56 PF in choppy regimes).
+        sig_power_pb = pd.Series(False, index=df.index)
+        # Strict Relative Strength Leader in selective breadth (30% <= breadth < bull threshold):
         sig_rs_leader = (
             (~mkt_ok)
+            & (df["breadth"] >= 0.30)
             & trend_aligned
-            & (df["close"] >= df["high20"] * 0.985)
-            & (df["volume"] >= df["vol_ma20"] * 1.25)
+            & (df["close"] >= df["high20"])
+            & (df["volume"] >= df["vol_ma20"] * 1.5)
             & (df["close"] > df["open"])
             & (close_pos >= 0.70)
-            & (df["ret20"] >= 0.07)
+            & (df["ret20"] >= 0.08)
         )
-
-        # Defensive Momentum Pullback in low-breadth markets:
-        sig_defensive_pb = (
-            (~mkt_ok)
-            & df["liquid"]
-            & (df["close"] > df["ema20"])
-            & (df["ema20"] > df["ema50"])
-            & (df["ret20"] >= 0.02)
-            & (df["low"] <= df["ema10"] * 1.015)
-            & (df["close"] > df["ema10"])
-            & (df["volume"] >= df["vol_ma20"] * 1.1)
-            & (df["close"] > df["open"])
-            & (close_pos >= 0.65)
-        )
+        sig_defensive_pb = pd.Series(False, index=df.index)
 
     df["signal"] = sig_base_bo | sig_power_pb | sig_rs_leader | sig_defensive_pb
     df["sig_type"] = np.where(
@@ -908,7 +935,7 @@ def compute_short_swings(
     # A day's open/low predates a midday publication and cannot fill a new trade.
     sig_map[session_date] = [signal for signal in sig_map[session_date]
                              if signal.get('entry_kind') == 'intraday_observed' or signal.get('published')]
-    if phase == 'midday':
+    if phase in {"morning", "midday"}:
         for _, row in df[(df['date'] == session_date) & df['signal'] & (df['volume'] > 0)].iterrows():
             quotes = observed_quotes or {}
             quote = _verified_intraday_quote(quotes.get(row['symbol']) or quotes.get(row['symbol'].upper().split('.')[0]), now_cairo)
@@ -917,16 +944,42 @@ def compute_short_swings(
                     'date': session_date, 'close': row['close'], 'turnover': row['turnover'],
                     'sig_type': row['sig_type'], 'entry_kind': 'intraday_observed', **quote})
 
+    def _record_closed_trade(sym: str, pos: Dict[str, Any], exit_date: str, fill_price: float, sessions_held: int, reason_code: str) -> None:
+        """Append a finalized closed trade using consistent schema and localized labels."""
+        ret_pct = (fill_price / pos["entry_price"] - 1) * 100
+        m_info = meta.get(sym.upper().split(".")[0], {})
+        closed_trades.append({
+            "symbol": sym,
+            "name_ar": m_info.get("name_ar", sym),
+            "name_en": m_info.get("name_en", sym),
+            "sector": m_info.get("sector", "عام"),
+            "entry_date": pos["date"],
+            "exit_date": exit_date,
+            "entry_price": round(pos["entry_price"], 3),
+            "exit_price": round(fill_price, 3),
+            "return_pct": round(ret_pct, 2),
+            "max_gain_pct": round(pos["max_gain"], 2),
+            "sessions": sessions_held,
+            "holding_days": sessions_held,
+            "reason": reason_code,
+            "exit_reason": EXIT_REASON_LABELS.get(reason_code, "إغلاق حسب الخطة"),
+            "trigger_type": pos["sig_type"],
+            "entry_mode": pos.get('entry_mode'), "observed_at": pos.get('observed_at')
+        })
+
     # Run execution simulation
     positions = {}
     closed_trades = []
 
     for i, day in enumerate(dates):
-        # 1. Update breakeven activations scheduled from previous session
+        # 1. Update breakeven & tiered profit-lock activations scheduled from previous session
         for sym, p in positions.items():
+            if p.get("pending_sl") is not None:
+                p["sl_price"] = max(p["sl_price"], p["pending_sl"])
+                p["pending_sl"] = None
             if p.get("be_pending_activation"):
                 p["be_active"] = True
-                p["sl_price"] = max(p["sl_price"], p["entry_price"] * 1.003)
+                p["sl_price"] = max(p["sl_price"], p["entry_price"] * (1 + BE_LOCK_PCT))
                 p["be_pending_activation"] = False
 
         # 2. Check exits at Open for yesterday's pending signals
@@ -946,27 +999,8 @@ def compute_short_swings(
                 # Close the trade at last recorded price so it does not linger indefinitely as a phantom trade.
                 if p.get("pending") or age >= 20 or p["missing_sessions"] >= 5:
                     fill_price = p["last"] * (1 - 0.0015)
-                    ret_pct = (fill_price / p["entry_price"] - 1) * 100
-                    m_info = meta.get(sym.upper().split(".")[0], {})
                     reason_code = p.get("pending") or ("max_time" if age >= 20 else "delisted_or_halted")
-                    closed_trades.append({
-                        "symbol": sym,
-                        "name_ar": m_info.get("name_ar", sym),
-                        "name_en": m_info.get("name_en", sym),
-                        "sector": m_info.get("sector", "عام"),
-                        "entry_date": p["date"],
-                        "exit_date": p.get("last_date") or day,
-                        "entry_price": round(p["entry_price"], 3),
-                        "exit_price": round(fill_price, 3),
-                        "return_pct": round(ret_pct, 2),
-                        "max_gain_pct": round(p["max_gain"], 2),
-                        "sessions": min(age, 20),
-                        "holding_days": min(age, 20),
-                        "reason": reason_code,
-                        "exit_reason": EXIT_REASON_LABELS.get(reason_code, "إغلاق حسب الخطة"),
-                        "trigger_type": p["sig_type"],
-                        "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
-                    })
+                    _record_closed_trade(sym, p, p.get("last_date") or day, fill_price, min(age, 20), reason_code)
                     del positions[sym]
                 continue
 
@@ -976,27 +1010,7 @@ def compute_short_swings(
 
             if age >= 1 and p.get("pending"):
                 fill_price = b.open * (1 - 0.0015)
-                ret_pct = (fill_price / p["entry_price"] - 1) * 100
-                m_info = meta.get(sym.upper().split(".")[0], {})
-                reason_code = p["pending"]
-                closed_trades.append({
-                    "symbol": sym,
-                    "name_ar": m_info.get("name_ar", sym),
-                    "name_en": m_info.get("name_en", sym),
-                    "sector": m_info.get("sector", "عام"),
-                    "entry_date": p["date"],
-                    "exit_date": day,
-                    "entry_price": round(p["entry_price"], 3),
-                    "exit_price": round(fill_price, 3),
-                    "return_pct": round(ret_pct, 2),
-                    "max_gain_pct": round(p["max_gain"], 2),
-                    "sessions": age,
-                    "holding_days": age,
-                    "reason": reason_code,
-                    "exit_reason": EXIT_REASON_LABELS.get(reason_code, "إغلاق حسب الخطة"),
-                    "trigger_type": p["sig_type"],
-                    "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
-                })
+                _record_closed_trade(sym, p, day, fill_price, age, p["pending"])
                 del positions[sym]
 
         # 3. Enter new positions at today's open based on yesterday's signals
@@ -1016,11 +1030,13 @@ def compute_short_swings(
                 continue
 
             limit_price = s["close"]
+            opened_at_open = False
             # Max opening gap allowed: +2.0% (consistent with Telegram alerts & strategy docs)
             if s.get('entry_kind') == 'intraday_observed':
                 exec_price = s['entry_price']
             elif b.open <= limit_price * 1.02:
                 exec_price = b.open
+                opened_at_open = True
             elif b.low <= limit_price:
                 exec_price = limit_price
             else:
@@ -1034,11 +1050,13 @@ def compute_short_swings(
                 "published": bool(s.get('published')),
                 "index": i,
                 "entry_price": fill,
-                "sl_price": fill * (1 - 0.04),
+                "sl_price": fill * (1 - INITIAL_SL_PCT),
                 "highest_high": fill,
                 "max_gain": 0.0,
                 "be_active": False,
                 "be_pending_activation": False,
+                "pending_sl": None,
+                "opened_at_open": opened_at_open,
                 "last": b.close if b else fill,
                 "sig_type": s["sig_type"],
                 "pending": None,
@@ -1073,28 +1091,8 @@ def compute_short_swings(
                 else:
                     raw_fill = max(b.low, p["sl_price"]) * (1 - 0.0015)
                 fill_price = max(b.low * (1 - 0.0015), min(b.high, raw_fill))
-
-                ret_pct = (fill_price / p["entry_price"] - 1) * 100
-                m_info = meta.get(sym.upper().split(".")[0], {})
                 reason_code = "stop_be" if p["be_active"] else "stop_loss"
-                closed_trades.append({
-                    "symbol": sym,
-                    "name_ar": m_info.get("name_ar", sym),
-                    "name_en": m_info.get("name_en", sym),
-                    "sector": m_info.get("sector", "عام"),
-                    "entry_date": p["date"],
-                    "exit_date": day,
-                    "entry_price": round(p["entry_price"], 3),
-                    "exit_price": round(fill_price, 3),
-                    "return_pct": round(ret_pct, 2),
-                    "max_gain_pct": round(p["max_gain"], 2),
-                    "sessions": age,
-                    "holding_days": age,
-                    "reason": reason_code,
-                    "exit_reason": EXIT_REASON_LABELS.get(reason_code, "وقف خسارة"),
-                    "trigger_type": p["sig_type"],
-                    "entry_mode": p.get('entry_mode'), "observed_at": p.get('observed_at')
-                })
+                _record_closed_trade(sym, p, day, fill_price, age, reason_code)
                 del positions[sym]
                 continue
 
@@ -1103,11 +1101,28 @@ def compute_short_swings(
                 p["highest_high"] = b.high
                 p["max_gain"] = max(p["max_gain"], (b.high / p["entry_price"] - 1) * 100)
 
-            # Breakeven target (+4.5%): Schedule breakeven stop activation for the NEXT session
-            # Eliminates intra-candle high/low ambiguity.
+            # Causal take-profit target (+13%): skip Day-0 intraday limit-dip entries to avoid high/low order ambiguity.
+            can_tp_today = (age >= 1) or bool(p.get("opened_at_open"))
+            tp_price = p["entry_price"] * (1 + TP_TARGET_PCT)
+            if can_tp_today and b.high >= tp_price:
+                fill_price = tp_price * (1 - 0.0015)
+                _record_closed_trade(sym, p, day, fill_price, max(1, age), "take_profit")
+                del positions[sym]
+                continue
+
+            # Two-tier profit lock starting NEXT session, requiring positive close to avoid intra-bar spike traps.
             gain = (b.high / p["entry_price"] - 1)
-            if not p["be_active"] and not p.get("be_pending_activation") and gain >= 0.045:
+            positive_close = b.close > p["entry_price"]
+            if positive_close and gain >= TIER2_TRIGGER_PCT:
                 p["be_pending_activation"] = True
+                p["pending_sl"] = max(p.get("pending_sl") or 0.0, p["entry_price"] * (1 + TIER2_LOCK_PCT))
+            elif positive_close and not p["be_active"] and not p.get("be_pending_activation") and gain >= BE_TRIGGER_PCT:
+                p["be_pending_activation"] = True
+                p["pending_sl"] = max(p.get("pending_sl") or 0.0, p["entry_price"] * (1 + BE_LOCK_PCT))
+
+            # Day-0 EOD stop guard: exit next open when entry session closes below initial -4% stop.
+            if age == 0 and b.close <= p["sl_price"] and not p.get("pending"):
+                p["pending"] = "stop_loss"
 
             # If already breakeven-secured and close falls below EMA10, schedule exit at next open
             if p["be_active"]:
@@ -1115,7 +1130,7 @@ def compute_short_swings(
                 # past the open-fill decision above.  This keeps the displayed
                 # trailing stop and the simulated exit rule consistent.
                 p["sl_price"] = max(p["sl_price"], float(b.ema10))
-                if b.close < b.ema10:
+                if b.close < b.ema10 and not p.get("pending"):
                     p["pending"] = "ema10_break"
 
             # Max holding period limit (20 sessions)
@@ -1153,7 +1168,7 @@ def compute_short_swings(
                 continue
         seen_symbols.add(sym)
         close_price = round(float(s_row["close"]), 3)
-        sl_price = round(close_price * 0.96, 3)
+        sl_price = round(close_price * (1 - INITIAL_SL_PCT), 3)
         m_info = meta.get(sym.upper().split(".")[0], {})
         active_output.append({
             "signal_id": f"{sym}_{last_date}",
@@ -1169,6 +1184,7 @@ def compute_short_swings(
             "return_pct": 0.0,
             "stop_loss": sl_price,
             "trailing_stop": sl_price,
+            "take_profit": round(close_price * (1 + TP_TARGET_PCT), 3),
             "ema10_trend": round(float(s_row["ema10"]), 3),
             "is_breakeven_protected": False,
             "max_gain_pct": 0.0,
@@ -1184,7 +1200,7 @@ def compute_short_swings(
         if not b and not p.get("published"):
             continue
         curr_price = b.close if b else p["entry_price"]
-        if phase == 'midday' and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
+        if phase in {"morning", "midday"} and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
             quotes = observed_quotes or {}
             current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo)
             curr_price = current_observation['entry_price'] if current_observation else p['entry_price']
@@ -1209,8 +1225,9 @@ def compute_short_swings(
             "price_date": b.date if b else None,
             "reference_close": round(curr_price, 3) if b else None,
             "return_pct": round(curr_gain, 2) if b else None,
-            "stop_loss": round(p["entry_price"] * (1 - 0.04), 3),
+            "stop_loss": round(p["entry_price"] * (1 - INITIAL_SL_PCT), 3),
             "trailing_stop": round(active_stop, 3),
+            "take_profit": round(p["entry_price"] * (1 + TP_TARGET_PCT), 3),
             "ema10_trend": round(float(b.ema10), 3) if b else None,
             "is_breakeven_protected": p["be_active"],
             "max_gain_pct": round(p["max_gain"], 2),
@@ -1267,13 +1284,14 @@ def compute_short_swings(
 
     # Admin repair calculations must survive the next deployment too. Failed
     # persistence remains visible; the daily publisher retries it before sends.
+    result = _sanitize_json_value(result)
     try:
         if is_saudi:
             _persist_saudi_snapshot(result)
         elif supabase:
             _persist_saved_snapshot(supabase, result)
     except Exception as error:
-        print(f"[SHORT_SWINGS] Durable snapshot save failed: {type(error).__name__}")
+        print(f"[SHORT_SWINGS] Durable snapshot save failed: {type(error).__name__}: {str(error)[:200]}")
         result["snapshot_persistence_error"] = type(error).__name__
 
     # Atomic write to cache files

@@ -87,12 +87,15 @@ it("retries one transient network failure before abandoning the cache refresh", 
   expect(result.queries).toBe(1);
 });
 
-it("skips inactive stock queries during the next daily refresh", async () => {
+it("skips inactive stock queries and prunes them from future daily refreshes", async () => {
   const origin = jest.fn(async () => Response.json([{ symbol: "COMI", close: 10 }]));
   await marketCachedFetch(scope, origin as typeof fetch)(query, options);
   for (const key of [...entries.keys()]) if (key.startsWith("hot:")) entries.delete(key);
-  const result = await refreshMarketQueries([DAILY_CACHE_TAGS.market], "2026-09-26T17:00:00.000Z", origin as typeof fetch);
-  expect(result.coldSkipped).toBe(1);
-  expect(result.queries).toBe(0);
+  const first = await refreshMarketQueries([DAILY_CACHE_TAGS.market], "2026-09-26T17:00:00.000Z", origin as typeof fetch);
+  expect(first.coldSkipped).toBe(1);
+  expect(first.queries).toBe(0);
+  const second = await refreshMarketQueries([DAILY_CACHE_TAGS.market], "2026-09-27T17:00:00.000Z", origin as typeof fetch);
+  expect(second.coldSkipped).toBe(0);
+  expect(second.queries).toBe(0);
   expect(origin).toHaveBeenCalledTimes(1);
 });

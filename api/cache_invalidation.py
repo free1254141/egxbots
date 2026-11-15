@@ -18,7 +18,7 @@ import os
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 TAG_MARKET = "daily-market-data"
 TAG_NEWS = "daily-news-data"
@@ -104,6 +104,40 @@ def invalidate_daily_cache(steps: List[Dict[str, Any]], timeout: float = 310.0) 
     return invalidate_cache_tags(tags, timeout)
 
 
+def _post_revalidate(endpoint: str, secret: str, tags: List[str], event_id: str, timeout: float) -> Tuple[Optional[int], Optional[str]]:
+    payload = json.dumps({"tags": tags, "event_id": event_id}).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=payload,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {secret}",
+        },
+    )
+    last_error = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                body = response.read().decode("utf-8", errors="ignore")
+            print(f"[CACHE] Invalidated {tags}: HTTP {response.status} {body[:200]}")
+            return response.status, None
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="ignore")[:200]
+            print(f"[CACHE] Revalidation HTTP {error.code} for {tags}: {detail}")
+            last_error = f"HTTP {error.code}"
+            if error.code < 500 or attempt == 1:
+                return None, last_error
+        except Exception as error:  # network, DNS, timeout — never break the job
+            print(f"[CACHE] Revalidation failed for {tags}: {error}")
+            last_error = str(error)
+            if attempt == 1:
+                return None, last_error
+        import time
+        time.sleep(1.5)
+    return None, last_error
+
+
 def invalidate_cache_tags(tags: List[str], timeout: float = 310.0) -> Dict[str, Any]:
     """Refresh explicit datasets after independent successful scheduled jobs."""
     if not tags or any(tag not in TAG_STEP_REQUIREMENTS for tag in tags):
@@ -116,26 +150,28 @@ def invalidate_cache_tags(tags: List[str], timeout: float = 310.0) -> Dict[str, 
         return {"invalidated": [], "skipped": True}
 
     # Stable across HTTP retries: Vercel stages data before switching generation.
-    payload = json.dumps({"tags": tags, "event_id": datetime.now(timezone.utc).isoformat()}).encode("utf-8")
-    request = urllib.request.Request(
-        endpoint,
-        data=payload,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {secret}",
-        },
-    )
+    event_id = datetime.now(timezone.utc).isoformat()
+    status, error = _post_revalidate(endpoint, secret, tags, event_id, timeout)
+    if not error:
+        return {"invalidated": tags, "skipped": False, "status": status}
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", errors="ignore")
-        print(f"[CACHE] Invalidated {tags}: HTTP {response.status} {body[:200]}")
-        return {"invalidated": tags, "skipped": False, "status": response.status}
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="ignore")[:200]
-        print(f"[CACHE] Revalidation HTTP {error.code}: {detail}")
-        return {"invalidated": [], "skipped": False, "error": f"HTTP {error.code}"}
-    except Exception as error:  # network, DNS, timeout — never break the job
-        print(f"[CACHE] Revalidation failed: {error}")
-        return {"invalidated": [], "skipped": False, "error": str(error)}
+    # If a multi-tag batch hit a single-tag upstream glitch (e.g. HTTP 500 on one dataset),
+    # fall back to invalidating each tag individually so healthy tags are never blocked.
+    if len(tags) > 1:
+        invalidated: List[str] = []
+        tag_errors: List[str] = []
+        for single_tag in tags:
+            s_status, s_err = _post_revalidate(endpoint, secret, [single_tag], datetime.now(timezone.utc).isoformat(), timeout)
+            if not s_err:
+                invalidated.append(single_tag)
+            else:
+                tag_errors.append(f"{single_tag}:{s_err}")
+        if invalidated and not tag_errors:
+            return {"invalidated": invalidated, "skipped": False, "status": 200}
+        return {
+            "invalidated": invalidated,
+            "skipped": False,
+            **({"error": "; ".join(tag_errors)} if tag_errors else {}),
+        }
+
+    return {"invalidated": [], "skipped": False, "error": error}

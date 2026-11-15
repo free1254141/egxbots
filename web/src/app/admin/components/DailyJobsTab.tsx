@@ -114,6 +114,24 @@ const STEP_LABELS: Record<string, { ar: string; en: string; icon: string }> = {
     evaluate_recommendations: { ar: "تقييم التوصيات", en: "Evaluate", icon: "🎯" },
     generate_recommendations: { ar: "توصيات جديدة", en: "New Recs", icon: "🟢" },
     historical_similarity: { ar: "نماذج متكررة", en: "Similarity", icon: "🔍" },
+    saudi_price_sync: { ar: "مزامنة أسعار تداول", en: "TASI Price Sync", icon: "🇸🇦" },
+    saudi_intraday_refresh: { ar: "تحديث تداول اللحظي", en: "TASI Intraday", icon: "⏱️" },
+    saudi_pipeline_bootstrap: { ar: "محرك وتوصيات تداول", en: "TASI Pipeline", icon: "🧠" },
+    saudi_systems_backtests: { ar: "أنظمة وباك تست تاسي", en: "TASI Systems", icon: "⚙️" },
+    saudi_short_swings: { ar: "مضاربة تاسي القصيرة", en: "TASI Swings", icon: "⚡" },
+    saudi_telegram_vip: { ar: "تيليجرام تاسي VIP", en: "TASI VIP Alert", icon: "📨" },
+    saudi_news_sync: { ar: "أخبار السوق السعودي", en: "TASI News", icon: "📰" },
+    saudi_disclosures_sync: { ar: "إفصاحات تداول", en: "TASI Disclosures", icon: "📢" },
+    cache_revalidation: { ar: "تحديث الكاش", en: "Cache Revalidate", icon: "♻️" },
+};
+
+const JOB_TYPE_LABELS: Record<string, string> = {
+    daily_morning: "🇪🇬 EGX Morning",
+    daily_midday: "🇪🇬 EGX Midday",
+    daily_bot: "🇪🇬 EGX Close",
+    saudi_morning: "🇸🇦 TASI Morning",
+    saudi_midday: "🇸🇦 TASI Midday",
+    saudi_close: "🇸🇦 TASI Close",
 };
 
 export default function DailyJobsTab() {
@@ -648,6 +666,9 @@ export default function DailyJobsTab() {
                                                     <span className={`px-2 py-0.5 text-[9px] font-black uppercase border rounded ${getStatusColor(run.status)}`}>
                                                         {hasPartialFailure ? "partial" : run.status}
                                                     </span>
+                                                    <span className="text-[9px] font-mono text-zinc-200 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5">
+                                                        {JOB_TYPE_LABELS[run.job_type] || run.job_type}
+                                                    </span>
                                                     <span className="text-[9px] font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5">
                                                         {run.trigger}
                                                     </span>
@@ -666,7 +687,7 @@ export default function DailyJobsTab() {
                                                 <span className="text-zinc-600"> steps</span>
                                             </div>
                                             <div className="text-[10px] font-mono text-zinc-400">
-                                                Stocks: {getStepByName(run, "generate_recommendations")?.count || 0}
+                                                Stocks: {getStepByName(run, "generate_recommendations")?.count || getStepByName(run, "saudi_pipeline_bootstrap")?.count || getStepByName(run, "saudi_intraday_refresh")?.count || run.total_symbols || 0}
                                             </div>
                                             <span className="text-zinc-600 text-xs">{isExpanded ? "▲" : "▼"}</span>
                                         </div>

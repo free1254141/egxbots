@@ -517,6 +517,7 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       vol >= 50_000 &&
       turnover >= minVolSurgeTurnover &&
       change >= 1.5 &&
+      change <= 7.5 &&
       isUptrend &&
       rsi >= 35 &&
       rsi <= 72
@@ -532,6 +533,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       vol >= 50_000 &&
       turnover >= 500_000 &&
       change >= (isMarketHealthyForBuying ? 2.2 : 2.5) &&
+      change <= 7.5 &&
+      rsi <= 74 &&
       isUptrend;
     if (config.scanners_enabled.breakout && isConfirmedBreakout) {
       breakoutMatches.push({ symbol, close, change_pct: change, r_vol: rVol, rsi_14: rsi });
@@ -641,9 +644,11 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
 
   // STALE DATA GUARD: If indicators are from a prior session (< today), never dispatch as today's live signals
   const isDataStale = !options.forceDispatch && cairoTime.isTradingDay && (asOfDate < cairoTime.dateStr);
+  const allowNewEntries = Boolean(options.forceDispatch || options.forceMarketHours || cairoTime.timeStr < "14:25");
 
   const hasAnyFreshMatches = !isDataStale && (
-    freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0 || freshDisclosures.length > 0
+    (allowNewEntries && (freshVolume.length > 0 || freshBreakout.length > 0 || freshOversold.length > 0)) ||
+    freshDisclosures.length > 0
   );
 
   // ── STEP 4: Active Pro Subscribers Stats (Informational) ─────────────────
@@ -828,13 +833,17 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     const p = priceMap.get(sig.symbol);
     const currPrice = p ? p.close : sig.current_price;
 
-    // CRITICAL GUARD: Prior-session data (asOfDate < sig.entry_date) must NEVER be used to evaluate
-    // intraday high/low or stop-loss for a signal created today or later!
+    // CRITICAL GUARD: Prior-session data (asOfDate < sig.entry_date) AND same-day full-session
+    // OHLC (asOfDate === sig.entry_date, which includes 10:00 AM pre-signal highs/lows)
+    // must NEVER trigger phantom same-day stops or breakevens for intraday signals!
     const isPriceCurrentForSignal = asOfDate >= sig.entry_date;
-    const barHigh = (p && isPriceCurrentForSignal) ? Math.max(p.high, p.close) : currPrice;
-    const barLow = (p && isPriceCurrentForSignal) ? Math.min(p.low, p.close) : currPrice;
+    const sameEntryDay = Boolean(sig.entry_date && asOfDate === sig.entry_date);
+    const useDailyOhlc = Boolean(p && isPriceCurrentForSignal && !sameEntryDay);
+    const barHigh = useDailyOhlc && p ? Math.max(p.high, p.close) : currPrice;
+    const barLow = useDailyOhlc && p ? Math.min(p.low, p.close) : currPrice;
 
-    const highestPrice = Math.max(sig.highest_price || sig.entry_price, barHigh);
+    const prevHighest = sig.highest_price || sig.entry_price;
+    const highestPrice = Math.max(prevHighest, barHigh);
     const lowestPrice = Math.min(sig.lowest_price || sig.entry_price, barLow);
     const returnPct = Number((((currPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
     const maxGainPct = Number((((highestPrice - sig.entry_price) / sig.entry_price) * 100).toFixed(2));
@@ -863,8 +872,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       updated_at: new Date().toISOString(),
     };
 
-    // Breakeven Trail: If stock reached >= +2.5% gain towards target, raise stop loss to entry price
-    const hasBreakevenProtection = Math.max(sig.highest_price || 0, highestPrice) >= sig.entry_price * 1.025;
+    // Causal Breakeven Trail: Only enforce breakeven stop on ticks AFTER >= +2.5% gain was observed.
+    const hasBreakevenProtection = prevHighest >= sig.entry_price * 1.025;
     const effectiveStopLoss = hasBreakevenProtection
       ? Math.max(sig.stop_loss, sig.entry_price)
       : sig.stop_loss;
@@ -926,6 +935,10 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
       };
       currentClosed.unshift(updatedSig);
     } else {
+      if (highestPrice >= sig.entry_price * 1.025) {
+        updatedSig.stop_loss = Math.max(sig.stop_loss, sig.entry_price);
+        updatedSig.stop_loss_pct = 0;
+      }
       stillActiveSignals.push(updatedSig);
     }
   }
@@ -941,8 +954,8 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
     );
   };
 
-  // Add new fresh signals into stillActiveSignals ONLY IF data is not stale (or forced)
-  if (!isDataStale || options.forceDispatch) {
+  // Add new fresh signals into stillActiveSignals ONLY IF data is not stale and before closing auction (or forced)
+  if ((!isDataStale && allowNewEntries) || options.forceDispatch) {
     for (const v of freshVolume) {
       if (stillActiveSignals.length >= MAX_PORTFOLIO_ACTIVE) break;
       if (isSymbolAlreadyActiveOrClosedToday(v.symbol)) continue;
@@ -1183,10 +1196,11 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
   // Compute updated signals KPIs from deduplicated signals
   const closedWins = finalClosedSignals.filter((s) => (s.return_pct || 0) > 0);
   const closedLosses = finalClosedSignals.filter((s) => (s.return_pct || 0) < 0);
+  const decidedCount = closedWins.length + closedLosses.length;
   const sumWins = closedWins.reduce((a, b) => a + (b.return_pct || 0), 0);
   const sumLosses = Math.abs(closedLosses.reduce((a, b) => a + (b.return_pct || 0), 0));
   const signalsKpis: ScannerSignalsKPIs = {
-    win_rate_pct: finalClosedSignals.length > 0 ? Number(((closedWins.length / finalClosedSignals.length) * 100).toFixed(1)) : 80.0,
+    win_rate_pct: decidedCount > 0 ? Number(((closedWins.length / decidedCount) * 100).toFixed(1)) : 80.0,
     total_closed: finalClosedSignals.length,
     total_active: finalActiveSignals.length,
     avg_win_pct: closedWins.length > 0 ? Number((sumWins / Math.max(1, closedWins.length)).toFixed(1)) : 3.5,

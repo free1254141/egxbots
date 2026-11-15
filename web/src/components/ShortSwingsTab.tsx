@@ -49,6 +49,15 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useMarket } from "@/contexts/MarketContext";
 
+/** Map engine exit reason codes to consistent Arabic labels for trade tables and modals. */
+function formatShortSwingExitReason(trade: { reason?: string; exit_reason?: string }): string {
+  if (trade.reason === "take_profit") return "جني أرباح المستهدف (+13%)";
+  if (trade.reason === "ema10_break") return "إغلاق تحت EMA10 (ركوب اتجاه)";
+  if (trade.reason === "stop_be") return "وقف حماية الأرباح والتعادل";
+  if (trade.reason === "stop_loss") return "وقف خسارة -4%";
+  return trade.exit_reason || trade.reason || "انتهاء المدة";
+}
+
 export interface ShortSwingTrade {
   symbol: string;
   name_ar?: string;
@@ -65,6 +74,7 @@ export interface ShortSwingTrade {
   ema10_trend?: number | null;
   trailing_stop?: number | null;
   stop_loss?: number | null;
+  take_profit?: number | null;
   is_breakeven_protected?: boolean;
   max_gain_pct?: number;
   trigger_type?: string;
@@ -736,7 +746,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                 <span>{isAr ? "قواعد واستراتيجية الصفقات القصيرة" : "Short Swings Strategy Rules"}</span>
               </div>
               <p className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed max-w-4xl">
-                استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة. يتم تأمين الصفقة آلياً عند ربح +4.5%، وترك الأرباح تنطلق دون سقف عبر الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
+                استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة في اتجاه صاعد (EMA50 صاعد واتساع سوق متماسك). يتم تأمين الصفقة على مرحلتين (+5.0% لحجز +0.8%، ثم +9.0% لحجز +4.0% بدءاً من الجلسة التالية مع إغلاق إيجابي)، مع مستهدف جني أرباح <strong>+13%</strong> أو تتبع الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
               </p>
             </div>
 
@@ -813,11 +823,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
-                      <span><strong>إدارة الوقف:</strong> وقف خسارة صارم جداً (-4.0% كحد أقصى)، مع تأمين الدخول آلياً عند +4.5%.</span>
+                      <span><strong>إدارة الوقف:</strong> وقف خسارة صارم (-4.0% كحد أقصى)، مع تأمين متدرج: رفع الوقف إلى +0.8% عند +5.0% وإلى +4.0% عند +9.0% (بشرط إغلاق إيجابي).</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
-                      <span><strong>ركوب الاتجاه:</strong> لا يوجد سقف للأرباح؛ الوقف يتبع متوسط 10 أيام (EMA10) ما دامت موجة الصعود مستمرة.</span>
+                      <span><strong>جني الأرباح وركوب الاتجاه:</strong> مستهدف جني أرباح مباشر عند +13.0%، والوقف المتحرك يتبع متوسط 10 أيام (EMA10) ما دامت الموجة مستمرة.</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
@@ -2306,13 +2316,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         </span>
                       </td>
                       <td className="p-3 text-zinc-500 text-[11px]">
-                        {t.reason === "ema10_break"
-                          ? "إغلاق تحت EMA10 (ركوب اتجاه)"
-                          : t.reason === "stop_be"
-                          ? "تأمين نقطة الدخول"
-                          : t.reason === "stop_loss"
-                          ? "وقف خسارة -4%"
-                          : t.reason || "انتهاء المدة"}
+                        {formatShortSwingExitReason(t)}
                       </td>
                       <td className="p-3"><button onClick={(event) => { event.stopPropagation(); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button></td>
                     </tr>
@@ -2641,13 +2645,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                       <td className="p-3 text-zinc-500 text-[11px]">
                         {t.is_active
                           ? (t.trigger_type || "اختراق قمة 20 جلسة")
-                          : t.reason === "ema10_break"
-                          ? "إغلاق تحت EMA10 (ركوب اتجاه)"
-                          : t.reason === "stop_be"
-                          ? "تأمين نقطة الدخول"
-                          : t.reason === "stop_loss"
-                          ? "وقف خسارة -4%"
-                          : t.reason || "انتهاء المدة"}
+                          : formatShortSwingExitReason(t)}
                       </td>
                       <td className="p-3"><button onClick={(event) => { event.stopPropagation(); setSelectedActiveTrade(t); }} className="px-3 py-1 border-2 border-black dark:border-white bg-[#FFE600] text-black font-black text-xs">{isAr ? "التفاصيل والشارت" : "Details & chart"}</button></td>
                     </tr>
@@ -2901,11 +2899,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                           <div>
                             <span className="text-zinc-500 text-[10px] block">سبب الخروج</span>
                             <span className="text-black dark:text-white text-[11px]">
-                              {t.reason === "ema10_break"
-                                ? "كسر EMA10"
-                                : t.reason === "stop_be"
-                                ? "تأمين أرباح"
-                                : "وقف خسارة"}
+                              {formatShortSwingExitReason(t)}
                             </span>
                           </div>
                         </div>
@@ -3092,11 +3086,11 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed">
                       {selectedActiveTrade.is_pending_entry ? (
                         <span>
-                          مستوى الوقف المبدئي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> (-4% من السعر المرجعي). بعد التنفيذ وتأمين الصفقة عند +4.5%، يبدأ رفع الوقف آلياً مع متوسط EMA10 لحجز الأرباح.
+                          مستوى الوقف المبدئي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> (-4% من السعر المرجعي). بعد التنفيذ وتأمين الصفقة عند +5.0% (+0.8%) ثم +9.0% (+4.0%)، يبدأ رفع الوقف آلياً مع EMA10 حتى مستهدف +13%.
                         </span>
                       ) : (
                         <span>
-                          الاستراتيجية تتبع قاعدة <strong>ركوب الاتجاه دون سقف للأرباح (Run Winners)</strong>. مستوى الوقف المتحرك الحالي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> ويتبع يومياً المتوسط المتحرك الأسي 10 أيام (EMA10). أمر الخروج الرقمي ينفذ فقط عند أول إغلاق مؤكد أسفل هذا المتوسط.
+                          الاستراتيجية تجمع بين <strong>تأمين الأرباح المتدرج ومستهدف +13%</strong> مع ركوب الموجة. مستوى الوقف المتحرك الحالي محدد عند <strong>{selectedActiveTrade.trailing_stop != null ? safeNum(selectedActiveTrade.trailing_stop).toFixed(2) : "—"} {currencyLabel}</strong> ويتبع يومياً المتوسط المتحرك الأسي 10 أيام (EMA10) وحماية الأرباح المتدرجة.
                         </span>
                       )}
                     </p>
@@ -3107,21 +3101,21 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     <div className="flex items-center gap-2">
                       <Zap className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       <h4 className="text-xs font-black uppercase text-sky-900 dark:text-sky-200">
-                        بروتوكول حماية رأس المال (Breakeven Lock)
+                        بروتوكول حماية الأرباح المتدرج (Two-Tier Lock)
                       </h4>
                     </div>
                     <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-relaxed">
                       {selectedActiveTrade.is_pending_entry ? (
                         <span>
-                          ⏳ عند بلوغ +4.5% يُجدول رفع الوقف لنقطة التعادل من الجلسة التالية. الفجوات والانزلاق قد تؤثر على التنفيذ.
+                          ⏳ عند بلوغ +5.0% مع إغلاق إيجابي يُرفع الوقف إلى +0.8% من الجلسة التالية، وعند +9.0% يُرفع إلى +4.0%، مع مستهدف جني أرباح +13%.
                         </span>
                       ) : selectedActiveTrade.is_breakeven_protected ? (
                         <span className="text-emerald-700 dark:text-emerald-300">
-                          🛡️ <strong>تم رفع الوقف:</strong> بلغ السعر مستوى التأمين ورُفع الوقف إلى نقطة التعادل. يظل التنفيذ معرضاً للفجوات والانزلاق.
+                          🛡️ <strong>تم تأمين الصفقة:</strong> تم رفع الوقف لحماية الأرباح فوق نقطة الدخول ويواصل التتبع مع EMA10 أو +4.0% فوق الدخول.
                         </span>
                       ) : (
                         <span>
-                          ⏳ الصفقة في مرحلة الصعود الأولى. سيتم رفع الوقف آلياً إلى سعر الدخول فور ملامسة ربح +4.5% لمنع تحول الأرباح إلى خسائر.
+                          ⏳ الصفقة في مرحلة الصعود الأولى. سيتم تأمين الوقف عند +0.8% فور ملامسة +5.0% بإغلاق إيجابي، ثم +4.0% عند +9.0%.
                         </span>
                       )}
                     </p>

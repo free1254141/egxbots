@@ -27,14 +27,25 @@ FILES_TO_SYNC = [
     "api/acceleration_score.py",
     "api/daily_bot_run.py",
     "api/daily_job_scheduler.py",
+    "api/daily_stage_recovery.py",
+    "api/council.py",
+    "api/update_ml_scores.py",
+    "api/macro_correlation.py",
+    "api/payment_common.py",
+    "Dockerfile",
     "api/saudi_stock_aliases.py",
+    "api/saudi_daily_runner.py",
+    "api/saudi_price_sync.py",
+    "api/saudi_trading_calendar.py",
     "api/saudi_train_models.py",
     "api/saudi_telegram_dispatch.py",
     "api/saudi_news_sync.py",
     "api/saudi_disclosures_sync.py",
+    "api/short_swings_daily.py",
     "api/short_swings_engine.py",
     "api/scanner_alerts_engine.py",
     "api/data/saudi_short_swings_cache.json",
+    "api/data/short_swings_cache.json",
     "api/stock_ai.py",
     "api/models/KING_TASI.pkl",
     "api/models/KING_TASI.pkl.model_card.json",
@@ -88,7 +99,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(support): update support ai agent anti-fraud guard, scheduled reminders and backend updates"
+    commit_msg = "perf(backend): optimize council evaluation, symbols/payment/macro caches, short-swings JSON sanitization, and Saudi pipeline"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

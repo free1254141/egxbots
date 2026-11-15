@@ -281,7 +281,8 @@ export function deriveTrackedSignalsFromHistory(
   const totalClosed = closedSignals.length;
   const wins = closedSignals.filter((s) => (s.return_pct || 0) > 0);
   const losses = closedSignals.filter((s) => (s.return_pct || 0) < 0);
-  const winRate = totalClosed > 0 ? Number(((wins.length / totalClosed) * 100).toFixed(1)) : 80.0;
+  const decidedCount = wins.length + losses.length;
+  const winRate = decidedCount > 0 ? Number(((wins.length / decidedCount) * 100).toFixed(1)) : 80.0;
 
   const sumWins = wins.reduce((sum, s) => sum + (s.return_pct || 0), 0);
   const sumLosses = Math.abs(losses.reduce((sum, s) => sum + (s.return_pct || 0), 0));

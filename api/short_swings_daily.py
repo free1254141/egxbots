@@ -99,6 +99,7 @@ def build_vip_entry_message(trades: List[Dict[str, Any]], as_of_date: str, web_o
         # stop_loss remains the original -4% risk reference.
         sl_price = float(t.get("trailing_stop") or t.get("stop_loss") or (close_ref * 0.96))
         sl_pct = ((sl_price / close_ref) - 1.0) * 100.0 if close_ref > 0 else -4.0
+        tp_price = float(t.get("take_profit") or (close_ref * 1.13))
         sig_type = t.get("trigger_type", "اختراق قمة 20 جلسة مع انفجار سيولة")
         sector = t.get("sector", "عام")
 
@@ -107,8 +108,8 @@ def build_vip_entry_message(trades: List[Dict[str, Any]], as_of_date: str, web_o
             f"  • *سعر الإغلاق المرجعي:* `{close_ref:.2f}` ج.م",
             f"  • *نقطة الدخول المقترحة:* مع افتتاح جلسة الغد (شرط عدم الافتتاح بفجوة صاعدة > 2.0%)",
             f"  • *الوقف الحالي:* `{sl_price:.2f}` ج.م (`{sl_pct:.1f}%` من الإغلاق) | الوقف المبدئي -4%",
-            f"  • *تأمين الصفقة (Breakeven):* عند وصول السعر إلى `+{close_ref * 1.045:.2f}` ج.م (+4.5%) يُرفع الوقف لنقطة الدخول بدءاً من الجلسة التالية.",
-            f"  • *استراتيجية جني الأرباح:* الوقف يتبع متوسط `EMA10` يومياً لركوب كامل الموجة 🚀",
+            f"  • *تأمين الأرباح المتدرج:* عند `+{close_ref * 1.05:.2f}` (+5.0% مع إغلاق إيجابي) يُرفع الوقف إلى `+0.8%`، وعند `+9.0%` يُرفع إلى `+4.0%` بدءاً من الجلسة التالية.",
+            f"  • *جني الأرباح وركوب الاتجاه:* مستهدف جني الأرباح عند `{tp_price:.2f}` ج.م (`+13.0%`) مع تتبع يومي لمتوسط `EMA10` 🚀",
             f"  • *النموذج الفني:* {sig_type}",
             ""
         ])
@@ -309,8 +310,9 @@ def _snapshot_matches(swings, as_of, phase):
 def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_run_id=None, observed_quotes=None, force=False):
     from api.daily_recovery_state import read_checkpoint, replace_checkpoint, utc_now, parse_timestamp
     from api.daily_bot_run import _telegram_recommendation_writes_enabled
-    if phase not in {"midday", "close"}:
+    if phase not in {"morning", "midday", "close"}:
         raise ValueError("Invalid short-swings phase")
+    is_intraday = phase in {"morning", "midday"}
     as_of = dt.datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
     sb = _get_supabase_client()
     if not sb and not dry_run:
@@ -329,7 +331,7 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
         last_start = parse_timestamp(payload.get("started_at"))
         retry_at = parse_timestamp(payload.get("retry_at"))
         if not force and ((payload.get("status") == "running" and last_start and now - last_start < dt.timedelta(minutes=45))
-                or (retry_at and now < retry_at) or payload.get("attempts", 0) >= (2 if phase == 'midday' else 4)):
+                or (retry_at and now < retry_at) or payload.get("attempts", 0) >= (2 if is_intraday else 4)):
             return {"success": False, "status": "waiting", "message": "Short-swings attempt running, backing off or exhausted"}
         payload = {**payload, "status": "running", "attempts": payload.get("attempts", 0) + 1,
                    "started_at": now.isoformat(), "phase": phase, "as_of": as_of,
@@ -353,7 +355,7 @@ def _run_daily_short_swings(trigger="manual", dry_run=False, phase="close", job_
         if swings.get("as_of"):
             as_of = swings["as_of"]
         entries = [trade for trade in swings.get("active_trades", [])
-                   if trade.get("signal_date") == as_of and ((phase == 'close' and trade.get('is_pending_entry')) or (phase == 'midday' and trade.get('is_new_entry') and trade.get('entry_kind') == 'intraday_observed'))]
+                   if trade.get("signal_date") == as_of and ((phase == 'close' and trade.get('is_pending_entry')) or (is_intraday and trade.get('is_new_entry') and trade.get('entry_kind') == 'intraday_observed'))]
         updates = [trade for trade in swings.get("active_trades", [])
                    if not trade.get("is_pending_entry") and trade.get("price_date") == as_of
                    and trade.get("current_price") is not None and not trade.get('is_new_entry')]
@@ -446,7 +448,7 @@ def retry_incomplete_short_swings(phase):
         # ledger existed. Resume only a recorded short failure with good prices.
         start = dt.datetime.fromisoformat(as_of).replace(tzinfo=ZoneInfo("Africa/Cairo"))
         jobs = (sb.table("daily_job_runs").select("id,status,steps")
-                .eq("job_type", "daily_midday" if phase == "midday" else "daily_bot")
+                .eq("job_type", "daily_morning" if phase == "morning" else ("daily_midday" if phase == "midday" else "daily_bot"))
                 .gte("started_at", start.astimezone(dt.timezone.utc).isoformat())
                 .lt("started_at", (start + dt.timedelta(days=1)).astimezone(dt.timezone.utc).isoformat())
                 .order("started_at", desc=True).limit(1).execute())

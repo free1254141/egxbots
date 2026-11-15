@@ -6,16 +6,10 @@ import { useRouter } from "next/navigation";
 import {
   X,
   Sparkles,
-  Zap,
   Bot,
   BellRing,
-  ShieldCheck,
   TrendingUp,
-  Target,
-  ArrowRight,
   CheckCircle2,
-  PlayCircle,
-  HelpCircle,
   ExternalLink,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -55,19 +49,19 @@ export default function QuickProfitGuideModal({
   const steps = [
     {
       step: 1,
-      badge: isAr ? "الخطوة الأولى · التوقيت والسيولة" : "Step 1 · Timing & Flow",
-      title: isAr ? "اقتنص السهم من الماسح اللحظي (Fast Scanner)" : "Spot Surging Stocks on Fast Scanner",
-      icon: <Zap className="w-6 h-6 text-amber-500" />,
-      color: "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+      badge: isAr ? "الخطوة الأولى · رصد الإشارات" : "Step 1 · Signal Discovery",
+      title: isAr ? "تابع الفرص في إشارات المدى المتوسط 📈" : "Spot Setups on Medium-Term Signals 📈",
+      icon: <TrendingUp className="w-6 h-6 text-blue-500" />,
+      color: "border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400",
       description: isAr
-        ? "خلال جلسة التداول (10:00 ص إلى 2:30 م)، افتح صفحة الماسح الفني. الخوارزمية تمسح آلياً كافة أسهم البورصة المصرية وترصد الأسهم التي تخترق قمم 20 جلسة مصحوبة بانفجار في أحجام التداول (Volume Spike)."
-        : "During market hours (10:00 AM - 2:30 PM), check the Fast Scanner. Algorithms scan all EGX stocks to catch 20-session breakouts with explosive volume.",
+        ? "افتح تبويب إشارات المدى المتوسط لرصد موجات الصعود الهادئة ونماذج الانعكاس الإيجابي وتجاوز القمم السعرية مع تدفق سيولة تدريجي، وعرض مناطق الدخول والأهداف ووقف الخسارة المرن."
+        : "Open Medium-Term Signals to monitor steady upward waves, bullish reversals, and structural breakouts with sustained volume, complete with entry zones, targets, and adaptive stop-loss levels.",
       proTips: [
-        isAr ? "اختر الأسهم التي يتجاوز معدل سيولتها 1.5x متوسطها المعتاد." : "Focus on stocks with volume ratio > 1.5x normal average.",
-        isAr ? "التزم بالأسهم المدرجة في قطاعات نشطة متصدرة للسيولة." : "Stick to stocks in active leading sectors.",
+        isAr ? "ركّز على الإشارات النشطة المدعومة بتدفق سيولة وتوافق فني وأساسي." : "Focus on active signals supported by volume confirmation and technical strength.",
+        isAr ? "راجع الأفق الزمني المتوسط ومستويات الأهداف ووقف الخسارة المعلنة لكل إشارة." : "Review the multi-week horizon, target zones, and stop-loss levels for each signal.",
       ],
-      actionLabel: isAr ? "معاينة الماسح اللحظي" : "Open Fast Scanner",
-      actionHref: "/scanner/technical",
+      actionLabel: isAr ? "فتح إشارات المدى المتوسط" : "Open Medium-Term Signals",
+      actionHref: "/scanner/backtests?tab=medium_swings",
     },
     {
       step: 2,
@@ -158,7 +152,7 @@ export default function QuickProfitGuideModal({
                   {isAr ? `خطوة ${s.step}` : `Step ${s.step}`}
                 </div>
                 <div className="text-xs sm:text-sm font-black truncate">
-                  {s.step === 1 ? (isAr ? "1. اقتنص السهم" : "1. Scanner") : s.step === 2 ? (isAr ? "2. استشر الشات" : "2. AI Chat") : (isAr ? "3. التزم بالوقف" : "3. Stops & Alerts")}
+                  {s.step === 1 ? (isAr ? "1. المدى المتوسط" : "1. Medium Signals") : s.step === 2 ? (isAr ? "2. استشر الشات" : "2. AI Chat") : (isAr ? "3. التزم بالوقف" : "3. Stops & Alerts")}
                 </div>
               </button>
             );

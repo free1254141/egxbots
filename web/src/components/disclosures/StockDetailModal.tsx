@@ -23,6 +23,7 @@ import {
   Calendar,
 } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
+import { useMarket } from "@/contexts/MarketContext";
 import {
   InsiderMetric,
   CompanyOwnershipStructure,
@@ -56,6 +57,7 @@ export default function StockDetailModal({
   onDiscussInChat,
   onFilterBySymbol,
 }: StockDetailModalProps) {
+  const { isSaudi } = useMarket();
   // ESC key listener
   useEffect(() => {
     if (!isOpen) return;
@@ -143,16 +145,17 @@ export default function StockDetailModal({
     if (val == null || isNaN(val) || val === 0) return "—";
     const abs = Math.abs(val);
     const sign = val < 0 ? "-" : "";
+    const unit = isSaudi ? (isAr ? "ر.س" : "SAR") : (isAr ? "ج.م" : "EGP");
     if (abs >= 1_000_000_000) {
-      return `${sign}${(abs / 1_000_000_000).toFixed(2)} ${isAr ? "مليار ج.م" : "B EGP"}`;
+      return `${sign}${(abs / 1_000_000_000).toFixed(2)} ${isAr ? `مليار ${unit}` : `B ${unit}`}`;
     }
     if (abs >= 1_000_000) {
-      return `${sign}${(abs / 1_000_000).toFixed(1)} ${isAr ? "مليون ج.م" : "M EGP"}`;
+      return `${sign}${(abs / 1_000_000).toFixed(1)} ${isAr ? `مليون ${unit}` : `M ${unit}`}`;
     }
     if (abs >= 1_000) {
-      return `${sign}${(abs / 1_000).toFixed(0)} ${isAr ? "ألف ج.م" : "k EGP"}`;
+      return `${sign}${(abs / 1_000).toFixed(0)} ${isAr ? `ألف ${unit}` : `k ${unit}`}`;
     }
-    return `${sign}${abs.toFixed(0)} ${isAr ? "ج.م" : "EGP"}`;
+    return `${sign}${abs.toFixed(0)} ${unit}`;
   };
 
   return (
@@ -207,7 +210,7 @@ export default function StockDetailModal({
               </span>
               <div className="flex items-center gap-2">
                 <span className="text-2xl sm:text-3xl font-black text-black dark:text-white">
-                  {currentPrice > 0 ? `${currentPrice.toFixed(2)} ج.م` : "—"}
+                  {currentPrice > 0 ? `${currentPrice.toFixed(2)} ${isSaudi ? (isAr ? "ر.س" : "SAR") : (isAr ? "ج.م" : "EGP")}` : "—"}
                 </span>
                 {changePct !== 0 && (
                   <span
@@ -257,7 +260,8 @@ export default function StockDetailModal({
           </div>
         )}
 
-        {/* Section 1: Smart Money & Insider Analytics KPIs */}
+        {/* Section 1: Smart Money & Insider Analytics KPIs (EGX Insider Share Counts) */}
+        {!isSaudi && (
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <Target className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -422,6 +426,7 @@ export default function StockDetailModal({
             </div>
           )}
         </div>
+        )}
 
         {/* Section: AI Financial Analysis & Strategic Insight */}
         <div className="mb-6 p-4 sm:p-5 border-3 border-black dark:border-white/30 bg-gradient-to-br from-yellow-50 via-amber-50/40 to-orange-50 dark:from-yellow-950/20 dark:via-zinc-900 dark:to-zinc-900 shadow-[4px_4px_0px_#000] dark:shadow-[4px_4px_0px_#fff]">
@@ -438,7 +443,8 @@ export default function StockDetailModal({
           </div>
 
           <div className="space-y-3">
-            {/* Contextual Executive AI Opinion */}
+            {/* Contextual Executive AI Opinion (EGX insider flow only) */}
+            {!isSaudi && (
             <div className="p-3 bg-white/90 dark:bg-zinc-950/80 border-2 border-black dark:border-white/20 text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed shadow-[2px_2px_0px_#000]">
               <div className="flex items-center gap-2 mb-1.5 font-black text-black dark:text-white text-xs">
                 <Brain className="w-4 h-4 text-purple-600 dark:text-purple-400" />
@@ -464,6 +470,7 @@ export default function StockDetailModal({
                   : `Insider flow in ${companyName} is currently neutral.`}
               </p>
             </div>
+            )}
 
             {/* Official Filing AI Summary (if available) */}
             {stockDisclosures.some((d) => d.ai_summary) && (
@@ -479,7 +486,8 @@ export default function StockDetailModal({
           </div>
         </div>
 
-        {/* Section 2: Article 30 Major Shareholders Structure & Free Float */}
+        {/* Section 2: Article 30 Major Shareholders Structure & Free Float (EGX only) */}
+        {!isSaudi && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -667,6 +675,7 @@ export default function StockDetailModal({
             </div>
           )}
         </div>
+        )}
 
         {/* Section 3: All Historical Insider Disclosures for this Stock */}
         <div className="mb-6">

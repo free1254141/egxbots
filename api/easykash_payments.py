@@ -12,6 +12,10 @@ import json
 
 import os
 
+import threading
+
+import time
+
 from datetime import datetime, timezone
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -28,7 +32,7 @@ import requests
 
 
 
-from api.stock_ai import _init_supabase, supabase
+from api.stock_ai import _get_thread_local_supabase, _init_supabase, supabase
 
 from api.payment_common import (
 
@@ -49,6 +53,8 @@ from api.payment_common import (
     is_user_eligible_for_100_egp_renewal,
 
     founders_offer_is_open,
+
+    eligibility_scope,
 
 )
 
@@ -170,11 +176,23 @@ def is_easykash_ready() -> bool:
 
 
 
+_LIFETIME_COUNT_LOCK = threading.Lock()
+
+_LIFETIME_COUNT_CACHE: Dict[str, Any] = {"ts": 0.0, "client_ref": None, "count": 0}
+
+_LIFETIME_COUNT_TTL_SECONDS = 60
+
+
 def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
     from api.plan_limits import free_limits, pro_limits
 
+    with eligibility_scope():
 
+        return _build_payment_config(user_id=user_id, free_limits=free_limits, pro_limits=pro_limits)
+
+
+def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Dict[str, Any]:
 
     enabled = is_payments_enabled() and is_easykash_ready()
 
@@ -188,7 +206,7 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
     is_eligible_50 = is_user_eligible_for_50_egp_renewal(user_id) if user_id else False
 
-    is_eligible_100 = is_user_eligible_for_100_egp_renewal(user_id) if user_id else False
+    is_eligible_100 = False if is_eligible_50 else (is_user_eligible_for_100_egp_renewal(user_id) if user_id else False)
 
     monthly_amount = float(plan_amount_egp("pro", user_id=user_id))
 
@@ -310,7 +328,7 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
 
 
-    # Lifetime spots counter: strictly limited to 20 users only
+    # Lifetime spots counter: strictly limited to 20 users only (briefly cached in RAM)
 
     lifetime_limit = int(settings.get("lifetime_limit") or os.getenv("LIFETIME_LIMIT", "20"))
 
@@ -320,15 +338,47 @@ def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
         if supabase:
 
-            res_life = supabase.table("subscriptions").select("user_id", count="exact").eq("status", "active").eq("plan_id", "lifetime").execute()
+            now_mono = time.monotonic()
 
-            if res_life and res_life.data:
+            client_ref = _get_thread_local_supabase() or supabase
 
-                lifetime_count = len(set(r.get("user_id") for r in res_life.data if r.get("user_id")))
+            with _LIFETIME_COUNT_LOCK:
 
-            else:
+                if (
 
-                lifetime_count = res_life.count or 0
+                    client_ref is _LIFETIME_COUNT_CACHE["client_ref"]
+
+                    and (now_mono - _LIFETIME_COUNT_CACHE["ts"]) < _LIFETIME_COUNT_TTL_SECONDS
+
+                ):
+
+                    lifetime_count = _LIFETIME_COUNT_CACHE["count"]
+
+                    cached_hit = True
+
+                else:
+
+                    cached_hit = False
+
+            if not cached_hit:
+
+                res_life = supabase.table("subscriptions").select("user_id", count="exact").eq("status", "active").eq("plan_id", "lifetime").execute()
+
+                if res_life and res_life.data:
+
+                    lifetime_count = len(set(r.get("user_id") for r in res_life.data if r.get("user_id")))
+
+                else:
+
+                    lifetime_count = res_life.count or 0
+
+                with _LIFETIME_COUNT_LOCK:
+
+                    _LIFETIME_COUNT_CACHE["client_ref"] = client_ref
+
+                    _LIFETIME_COUNT_CACHE["ts"] = time.monotonic()
+
+                    _LIFETIME_COUNT_CACHE["count"] = lifetime_count
 
     except Exception:
 

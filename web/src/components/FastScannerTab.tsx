@@ -381,9 +381,10 @@ export default function FastScannerTab({ isAr = true, isPro = false }: FastScann
   // Summary Stats matching Medium Swings & Short Swings:
   const summaryStats = useMemo(() => {
     const totalClosed = cleanClosedSignals.length;
-    const wins = cleanClosedSignals.filter((s) => getSignalReturn(s) > 0 || s.status === "target_hit");
-    const losses = cleanClosedSignals.filter((s) => getSignalReturn(s) < 0 || s.status === "stopped_out");
-    const winRate = totalClosed > 0 ? (wins.length / totalClosed) * 100 : 61.9;
+    const wins = cleanClosedSignals.filter((s) => getSignalReturn(s) > 0);
+    const losses = cleanClosedSignals.filter((s) => getSignalReturn(s) < 0);
+    const decidedCount = wins.length + losses.length;
+    const winRate = decidedCount > 0 ? (wins.length / decidedCount) * 100 : 61.9;
     const grossWin = wins.reduce((sum, s) => sum + Math.max(0, getSignalReturn(s)), 0);
     const grossLoss = Math.abs(losses.reduce((sum, s) => sum + Math.min(0, getSignalReturn(s)), 0));
     const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? 1.68 : 1.5);

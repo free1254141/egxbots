@@ -522,21 +522,48 @@ def _process_symbol(
         consensus_ratio = ""
         detailed_votes = {}
         if council:
-            # get_consensus returns a numpy array for each row
-            scores = council.get_consensus(candidate)
+            # Evaluate weighted consensus and per-model votes in a single inference pass
+            scores, votes = council.evaluate(candidate)
             if len(scores) > 0:
                 council_score = float(scores[0])
-            
-            votes = council.get_detailed_votes(candidate)
+
             detailed_votes = {m: float(v[0]) for m, v in votes.items() if len(v) > 0}
-            
+
             # Consensus Ratio string e.g. "2/4"
             passing_votes = sum(1 for v in detailed_votes.values() if v >= 0.55)
             total_voters = len(detailed_votes)
             consensus_ratio = f"{passing_votes}/{total_voters}"
 
-        # Debug logging for BUY predictions or interesting scores
-        if pred == 1 or council_score > 0.4:
+        # Fast path for raw probability export (e.g. update_ml_scores):
+        # skip heavy news DB calls, dynamic risk/explanation scoring, and per-stock stdout logs.
+        if return_raw_prob:
+            if buy_threshold > 0.0:
+                if validator is not None and validator_score is not None:
+                    try:
+                        if float(validator_score) < float(getattr(validator, "approval_threshold", 0.5)):
+                            return None
+                    except Exception:
+                        pass
+                distribution_gate = get_distribution_gate(candidate.iloc[-1])
+                if distribution_gate["blocked"]:
+                    return None
+                news_sentiment = stock_ai._get_latest_news_sentiment(sym)
+                if news_sentiment.get("negative_flag") == 1:
+                    return None
+
+            last_close = float(candidate.iloc[-1]["Close"])
+            return {
+                "date": str(candidate.index[-1].date()) if hasattr(candidate.index, 'date') else str(pd.to_datetime(candidate.index[-1]).date()),
+                "symbol": sym,
+                "exchange": ex,
+                "name": name,
+                "precision": float(precision),
+                "last_close": last_close,
+                "signal": "BUY" if pred == 1 else "HOLD",
+            }
+
+        # Debug logging for BUY predictions or interesting scores (skip spam when threshold <= 0)
+        if (buy_threshold > 0.0 or os.getenv("DEBUG_RAW_SCAN") == "1") and (pred == 1 or council_score > 0.4):
             debug_msg = f"DEBUG SCAN: {sym} | radar_prob={precision:.3f} | council={council_score:.2f} [{consensus_ratio}]"
             if pred == 1:
                 debug_msg += " | [OK] RADAR BUY"
@@ -549,8 +576,8 @@ def _process_symbol(
             except Exception:
                 pass
         
-        # Filter logic: Must pass Radar Buy (pred=1) or buy_threshold <= 0.0 / return_raw_prob for raw probability scanning
-        if pred == 1 or buy_threshold <= 0.0 or return_raw_prob:
+        # Filter logic: Must pass Radar Buy (pred=1) or buy_threshold <= 0.0 for raw scanning
+        if pred == 1 or buy_threshold <= 0.0:
             if validator is not None and validator_score is not None:
                 try:
                     if float(validator_score) < float(getattr(validator, "approval_threshold", 0.5)) and buy_threshold > 0.0:

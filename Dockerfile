@@ -19,6 +19,14 @@ COPY symbols_data ./symbols_data
 COPY scripts ./scripts
 COPY jobs ./jobs
 
+# Prevent OpenMP/BLAS thread oversubscription on 2-vCPU Hugging Face Spaces.
+ENV OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    LOKY_MAX_CPU_COUNT=2
+
 # Hugging Face Spaces expects the app to listen on port 7860 by default.
 ENV PORT=7860
 EXPOSE 10000

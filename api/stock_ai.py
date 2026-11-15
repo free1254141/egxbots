@@ -1505,10 +1505,28 @@ def get_supabase_countries() -> List[str]:
     return []
 
 
+_SUPABASE_SYMBOLS_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_SUPABASE_SYMBOLS_CACHE_LOCK = threading.Lock()
+_SUPABASE_SYMBOLS_TTL_SECONDS = 600
+
+
+def clear_supabase_symbols_cache() -> None:
+    """Clear the in-memory symbol catalog cache."""
+    with _SUPABASE_SYMBOLS_CACHE_LOCK:
+        _SUPABASE_SYMBOLS_CACHE.clear()
+
+
 def get_supabase_symbols(country: Optional[str] = None) -> List[Dict[str, Any]]:
     """Fetch symbols from Supabase that have price data, ensuring high coverage."""
     _init_supabase()
     if not supabase: return []
+
+    cache_key = str(country or "__ALL__").strip().lower() or "__ALL__"
+    now_ts = time.time()
+    with _SUPABASE_SYMBOLS_CACHE_LOCK:
+        cached = _SUPABASE_SYMBOLS_CACHE.get(cache_key)
+        if cached and (now_ts - cached[0]) < _SUPABASE_SYMBOLS_TTL_SECONDS:
+            return list(cached[1])
 
     # Normalize country casing: every lookup below is case-sensitive
     # (get_active_symbols p_country, stock_fundamentals data->>country,
@@ -1622,7 +1640,11 @@ def get_supabase_symbols(country: Optional[str] = None) -> List[Dict[str, Any]]:
         except Exception as price_err:
             print(f"Fallback price query failed: {price_err}")
 
-        return sorted(list(symbols_map.values()), key=lambda x: str(x.get('symbol') or ''))
+        out = sorted(list(symbols_map.values()), key=lambda x: str(x.get('symbol') or ''))
+        if out:
+            with _SUPABASE_SYMBOLS_CACHE_LOCK:
+                _SUPABASE_SYMBOLS_CACHE[cache_key] = (time.time(), out)
+        return list(out)
         
     except Exception as e:
         print(f"Error fetching symbols: {e}")

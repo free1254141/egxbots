@@ -1,6 +1,8 @@
 """Shared billing flags, prices and Pro entitlement activation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 import os
 import time
 from datetime import datetime, timezone, timedelta
@@ -9,6 +11,22 @@ from api.stock_ai import _init_supabase, supabase
 
 _SETTINGS_CACHE_SECONDS = 15
 _settings_cache: dict = {"fetched_at": 0.0, "row": None}
+_ELIGIBILITY_MEMO: ContextVar[dict | None] = ContextVar("billing_eligibility_memo", default=None)
+
+
+@contextmanager
+def eligibility_scope():
+    """Deduplicate repeated renewal-eligibility DB queries within one request."""
+    prev = _ELIGIBILITY_MEMO.get()
+    if prev is not None:
+        yield prev
+        return
+    memo: dict = {}
+    token = _ELIGIBILITY_MEMO.set(memo)
+    try:
+        yield memo
+    finally:
+        _ELIGIBILITY_MEMO.reset(token)
 
 
 def founders_offer_ends_at() -> datetime | None:
@@ -108,6 +126,39 @@ def pro_discount_active() -> bool:
     return pro_discount()["active"]
 
 
+def _has_active_or_grace_subscription(user_id: str) -> bool:
+    """Return True if the user's latest subscription is active or within 3-day grace."""
+    sub_res = (
+        supabase.table("subscriptions")
+        .select("status, current_period_end")
+        .eq("user_id", user_id)
+        .order("current_period_end", desc=True)
+        .limit(1)
+        .execute()
+    )
+    sub = (sub_res.data or [None])[0]
+    if not sub:
+        return False
+
+    end_str = sub.get("current_period_end")
+    status = sub.get("status")
+    now = datetime.now(timezone.utc)
+    if end_str:
+        try:
+            end_dt = datetime.fromisoformat(str(end_str).replace("Z", "+00:00"))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if now < end_dt:
+                return True
+            if now <= end_dt + timedelta(days=3):
+                return True
+            return False
+        except Exception:
+            pass
+
+    return status in ("active", "trialing")
+
+
 def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
     """Determine if a user qualifies for grandfathered 50 EGP monthly renewal.
 
@@ -118,13 +169,19 @@ def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
     """
     if not user_id or user_id == "ba9c27e8-f62d-452f-8a29-dc77fd092207":
         return False
+    memo = _ELIGIBILITY_MEMO.get()
+    memo_key = (50, user_id)
+    if memo is not None and memo_key in memo:
+        return memo[memo_key]
+
+    result = False
     try:
         _init_supabase()
         if not supabase:
             return False
 
         # 1. Did the user join under the 50 EGP founders era (before Nov 1, 2026) or have an approved 50 EGP order?
-        in_members = (
+        has_50_era = bool(
             supabase.table("founders_offer_members")
             .select("user_id")
             .eq("user_id", user_id)
@@ -133,45 +190,26 @@ def is_user_eligible_for_50_egp_renewal(user_id: str | None) -> bool:
             .execute()
             .data
         )
-        had_50_order = (
-            supabase.table("local_payment_orders")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("amount_egp", 50.0)
-            .eq("status", "approved")
-            .limit(1)
-            .execute()
-            .data
-        )
-        if not in_members and not had_50_order:
-            return False
-
-        # 2. Check current subscription status & grace period (use order/limit to avoid PGRST116)
-        sub_res = supabase.table("subscriptions").select("status, current_period_end").eq("user_id", user_id).order("current_period_end", desc=True).limit(1).execute()
-        sub = (sub_res.data or [None])[0]
-        if not sub:
-            return False
-
-        end_str = sub.get("current_period_end")
-        status = sub.get("status")
-        now = datetime.now(timezone.utc)
-        if end_str:
-            try:
-                end_dt = datetime.fromisoformat(str(end_str).replace("Z", "+00:00"))
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
-                if now < end_dt:
-                    return True
-                if now <= end_dt + timedelta(days=3):
-                    return True
-                return False
-            except Exception:
-                pass
-
-        return status in ("active", "trialing")
+        if not has_50_era:
+            has_50_era = bool(
+                supabase.table("local_payment_orders")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("amount_egp", 50.0)
+                .eq("status", "approved")
+                .limit(1)
+                .execute()
+                .data
+            )
+        if has_50_era:
+            result = _has_active_or_grace_subscription(user_id)
     except Exception as exc:
         print(f"[BILLING] Error checking 50 EGP eligibility for {user_id}: {exc}")
-        return False
+        result = False
+
+    if memo is not None:
+        memo[memo_key] = result
+    return result
 
 
 def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
@@ -184,6 +222,12 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
     """
     if not user_id or user_id == "ba9c27e8-f62d-452f-8a29-dc77fd092207":
         return False
+    memo = _ELIGIBILITY_MEMO.get()
+    memo_key = (100, user_id)
+    if memo is not None and memo_key in memo:
+        return memo[memo_key]
+
+    result = False
     try:
         _init_supabase()
         if not supabase:
@@ -191,42 +235,34 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
 
         # If they qualify for 50 EGP grandfathering, that takes precedence
         if is_user_eligible_for_50_egp_renewal(user_id):
+            if memo is not None:
+                memo[memo_key] = False
             return False
 
         # Did the user join under founders offer (monthly <= 100, 6m <= 500, or 1y <= 1000)?
-        in_members = supabase.table("founders_offer_members").select("user_id").eq("user_id", user_id).limit(1).execute().data
-        had_100_order = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).lte("amount_egp", 100.0).eq("status", "approved").limit(1).execute().data
-        had_founders_6m = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_6m").lte("amount_egp", 500.0).eq("status", "approved").limit(1).execute().data
-        had_founders_1y = supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_1y").lte("amount_egp", 1000.0).eq("status", "approved").limit(1).execute().data
-        if not in_members and not had_100_order and not had_founders_6m and not had_founders_1y:
-            return False
-
-        # Check current subscription status & grace period (use order/limit to avoid PGRST116)
-        sub_res = supabase.table("subscriptions").select("status, current_period_end").eq("user_id", user_id).order("current_period_end", desc=True).limit(1).execute()
-        sub = (sub_res.data or [None])[0]
-        if not sub:
-            return False
-
-        end_str = sub.get("current_period_end")
-        status = sub.get("status")
-        now = datetime.now(timezone.utc)
-        if end_str:
-            try:
-                end_dt = datetime.fromisoformat(str(end_str).replace("Z", "+00:00"))
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
-                if now < end_dt:
-                    return True
-                if now <= end_dt + timedelta(days=3):
-                    return True
-                return False
-            except Exception:
-                pass
-
-        return status in ("active", "trialing")
+        has_founders_access = bool(
+            supabase.table("founders_offer_members")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not has_founders_access:
+            has_founders_access = bool(
+                supabase.table("local_payment_orders").select("id").eq("user_id", user_id).in_("plan_id", ["pro", "pro_renewal"]).lte("amount_egp", 100.0).eq("status", "approved").limit(1).execute().data
+                or supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_6m").lte("amount_egp", 500.0).eq("status", "approved").limit(1).execute().data
+                or supabase.table("local_payment_orders").select("id").eq("user_id", user_id).eq("plan_id", "pro_1y").lte("amount_egp", 1000.0).eq("status", "approved").limit(1).execute().data
+            )
+        if has_founders_access:
+            result = _has_active_or_grace_subscription(user_id)
     except Exception as exc:
         print(f"[BILLING] Error checking 100 EGP eligibility for {user_id}: {exc}")
-        return False
+        result = False
+
+    if memo is not None:
+        memo[memo_key] = result
+    return result
 
 
 def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:

@@ -246,6 +246,55 @@ def _filter_active_symbols(symbols_list: List[str]) -> List[str]:
                 if not isinstance(data, dict) or data.get("isListed") is not True:
                     inactive_symbols_set.add(sym)
 
+            # Also exclude legacy EODHD symbols that have been in `stocks` > 14 days
+            # with zero price rows anywhere in `stock_prices` (e.g. renamed/delisted tickers).
+            recent_price_syms = set(str(sym).upper() for sym in latest_per_symbol.index)
+            missing_recent = [
+                str(sym).strip().upper()
+                for sym in symbols_list
+                if str(sym).strip().upper() not in recent_price_syms
+                and str(sym).strip().upper() not in inactive_symbols_set
+            ]
+            if missing_recent:
+                try:
+                    cutoff_iso = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=14)).isoformat()
+                    stocks_meta_res = (
+                        supabase.table("stocks")
+                        .select("symbol,is_active,created_at")
+                        .eq("exchange", "EGX")
+                        .in_("symbol", missing_recent)
+                        .execute()
+                    )
+                    old_candidates = []
+                    for row in stocks_meta_res.data or []:
+                        sym_u = str(row.get("symbol") or "").strip().upper()
+                        if not sym_u:
+                            continue
+                        if row.get("is_active") is False:
+                            inactive_symbols_set.add(sym_u)
+                            continue
+                        created_at = str(row.get("created_at") or "")
+                        if created_at and created_at < cutoff_iso:
+                            old_candidates.append(sym_u)
+                    if old_candidates:
+                        any_price_res = (
+                            supabase.table("stock_prices")
+                            .select("symbol")
+                            .eq("exchange", "EGX")
+                            .in_("symbol", old_candidates)
+                            .limit(len(old_candidates) * 2)
+                            .execute()
+                        )
+                        has_any_price = set(
+                            str(r.get("symbol") or "").strip().upper()
+                            for r in (any_price_res.data or [])
+                        )
+                        for sym_u in old_candidates:
+                            if sym_u not in has_any_price:
+                                inactive_symbols_set.add(sym_u)
+                except Exception as meta_err:
+                    print(f"[ACTIVE_FILTER] Legacy empty-price check skipped: {meta_err}")
+
         filtered_symbols = [sym for sym in symbols_list if str(sym).strip().upper() not in inactive_symbols_set]
         excluded = [sym for sym in symbols_list if str(sym).strip().upper() in inactive_symbols_set]
         if excluded:
@@ -3096,7 +3145,7 @@ def _refresh_market_status_cache():
         # Update macro history correlation cache
         try:
             from api.macro_correlation import build_or_update_macro_history
-            build_or_update_macro_history()
+            macro_history = build_or_update_macro_history()
             print("[MARKET_STATUS] Macro correlation history cache updated successfully")
 
             # Pre-calculate and cache individual stock macro correlations in Supabase
@@ -3110,12 +3159,33 @@ def _refresh_market_status_cache():
                     if str(row.get("Symbol", row.get("symbol", row.get("Code", "")))).strip()
                 ))
                 syms = [s for s in syms if s and s != "COMI"]
+                bulk_prices = stock_ai._get_exchange_bulk_data("EGX", bypass_min_limit=True, cache_ttl_seconds=7200) or {}
+
+                def _bulk_stock_series(sym_code: str):
+                    df_sym = bulk_prices.get(sym_code)
+                    if df_sym is None or df_sym.empty:
+                        return None
+                    close_col = "Close" if "Close" in df_sym.columns else ("close" if "close" in df_sym.columns else None)
+                    if not close_col:
+                        return None
+                    s = df_sym[close_col]
+                    idx_dates = [str(idx)[:10] for idx in df_sym.index]
+                    rows = [
+                        {"date": d_str, "close": float(val)}
+                        for d_str, val in zip(idx_dates, s.values)
+                        if d_str >= "2024-06-01" and val is not None and np.isfinite(val)
+                    ]
+                    return rows or None
 
                 print(f"[MARKET_STATUS] Pre-calculating macro correlations for {len(syms)} EGX symbols...")
                 correlation_cache_rows = []
                 for sym in syms:
                     try:
-                        res_corr = calculate_macro_correlation(sym)
+                        res_corr = calculate_macro_correlation(
+                            sym,
+                            macro_data=macro_history,
+                            stock_data=_bulk_stock_series(sym),
+                        )
                         if res_corr and res_corr.get("symbol"):
                             correlation_cache_rows.append({
                                 "cache_key": f"macro_correlation_{sym}",
@@ -3561,7 +3631,9 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     except Exception as e:
                         return sym, [], e
 
-                with ThreadPoolExecutor(max_workers=15) as executor:
+                import os as _os
+                ind_workers = min(4, max(2, _os.cpu_count() or 2))
+                with ThreadPoolExecutor(max_workers=ind_workers) as executor:
                     futures = {executor.submit(_calc_one, sym): sym for sym in symbols_raw}
                     for future in as_completed(futures):
                         sym, records, err = future.result()
@@ -3622,32 +3694,6 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
             except Exception as e:
                 _record_step("ml_scores_update", False, str(e)[:200], 0)
                 print(f"[ML_SCORES] Error updating scores: {e}")
-
-        # Intraday monitoring must finish before optional external RSS sweeps.
-        if phase in {"morning", "midday"}:
-            if _stage_needed('refresh_market_status_for_gate'):
-                _start_step("refresh_market_status_for_gate", "Refreshing intraday market status")
-                try:
-                    ok_status, status_message = _refresh_market_status_cache()
-                    _record_step("refresh_market_status_for_gate", ok_status, status_message, 0)
-                except Exception as error:
-                    _record_step("refresh_market_status_for_gate", False, str(error)[:200], 0)
-            if _stage_needed('short_swings_daily'):
-                _start_step("short_swings_daily", "Monitoring short positions during the session")
-                try:
-                    from api.short_swings_daily import run_daily_short_swings
-                    prices_ok = any(step.get("status") == "success" for step in steps_log
-                                    if step.get("step") == "sync_prices")
-                    indicators_ok = any(step.get("status") == "success" for step in steps_log
-                                        if step.get("step") == "calculate_indicators")
-                    # A partial provider sync must not hide valid short setups. The
-                    # indicator pass already filters the usable price subset; only
-                    # withhold the engine when neither prices nor indicators exist.
-                    swings_res = run_daily_short_swings(trigger="scheduled", dry_run=dry_run, phase="midday", job_run_id=job_run_id) if (prices_ok or indicators_ok) else {
-                        "success": False, "message": "No usable price/indicator data; intraday short monitoring withheld"}
-                    _record_step("short_swings_daily", swings_res.get("success", False), swings_res.get("message", ""), swings_res.get("count", 0))
-                except Exception as error:
-                    _record_step("short_swings_daily", False, str(error)[:200], 0)
 
         # 2.5 Fetch & Analyze News Sentiment
         print("\n>>> STEP 2.5: Fetching and analyzing news sentiment...")
@@ -3831,6 +3877,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
         if _stage_needed('historical_similarity'):
             _start_step("historical_similarity", "Running market-wide historical similarity scan")
             try:
+                import os as _os
                 from api.historical_similarity import run_market_wide_similarity_scan, publish_similarity_report
                 results = run_market_wide_similarity_scan(
                     k=10,
@@ -3838,7 +3885,7 @@ async def run_daily_job(dry_run: bool = False, model_filter: str = None, skip_sy
                     target_return=0.05,
                     stop_loss=-0.03,
                     search_scope="same_symbol",
-                    max_workers=15
+                    max_workers=min(4, max(2, _os.cpu_count() or 2))
                 )
                 if results:
                     # Prune old similarity reports (older than 7 days) to prevent db bloat

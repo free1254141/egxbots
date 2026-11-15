@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseServiceClient } from "@/lib/supabase/route-data";
+import { getMarketSupabaseServiceClient, resolveRequestMarket } from "@/lib/supabase/route-data";
+import { isSaudiSymbol } from "@/lib/saudi-stocks";
 import { getViewerContext } from "@/lib/supabase/viewer-context";
 import { paymentsEnabled } from "@/lib/ai/plan-gate";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
@@ -40,10 +41,17 @@ export async function GET(request: NextRequest) {
     }
     const delayDays = Number(process.env.FREE_SIGNAL_DELAY_DAYS || 15) || 15;
     const cutoff = Date.now() - delayDays * 86400000;
-    const db = getSupabaseServiceClient({ cacheMarketData: true });
+    const isSaudiReq =
+      exchange === "TADAWUL" ||
+      exchange === "TASI" ||
+      exchange === "SA" ||
+      isSaudiSymbol(symbol) ||
+      resolveRequestMarket(request) === "tasi";
+    const effectiveExchange = isSaudiReq ? "TADAWUL" : exchange;
+    const db = getMarketSupabaseServiceClient(isSaudiReq ? "tasi" : "egx", { cacheMarketData: true });
     const { data, error } = await db.from("scan_results")
       .select("id,created_at,updated_at,status,signal,entry_price,exit_price,profit_loss_pct,last_close,target_price,stop_loss")
-      .eq("symbol", symbol).eq("exchange", exchange).eq("is_public", true)
+      .eq("symbol", symbol).eq("exchange", effectiveExchange).eq("is_public", true)
       .order("created_at", { ascending: false }).limit(500);
     if (error) throw error;
     const visible = ((data || []) as ScanRow[]).filter((row) => {

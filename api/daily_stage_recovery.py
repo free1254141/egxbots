@@ -1,6 +1,7 @@
 """Resume failed daily stages once, without replaying successful stages/reports."""
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -95,7 +96,7 @@ def execute_stage(name, phase, job_id, previous):
                 return bot.calculate_indicators_for_symbol(symbol, 'EGX', bulk.get(symbol.upper())), None
             except Exception as error:
                 return [], str(error)
-        with ThreadPoolExecutor(max_workers=15) as pool:
+        with ThreadPoolExecutor(max_workers=min(4, max(2, os.cpu_count() or 2))) as pool:
             for symbol, (records, error) in zip(symbols, pool.map(calculate, symbols)):
                 if error: failures.append(symbol)
                 rows.extend(records)
