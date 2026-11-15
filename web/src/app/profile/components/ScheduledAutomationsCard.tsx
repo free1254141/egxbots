@@ -18,6 +18,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Automation {
   id: string;
@@ -70,6 +71,8 @@ export default function ScheduledAutomationsCard({
   telegramLinked = false,
   onQuotaConsumed,
 }: Props) {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const isAr = language === "ar";
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,15 +92,65 @@ export default function ScheduledAutomationsCard({
   const [formDays, setFormDays] = useState("trading_days");
   const [formCustomChatId, setFormCustomChatId] = useState("");
 
-  const loadAutomations = async () => {
+  const AUTOMATIONS_CACHE_KEY = userId ? `egxbots_automations_v1:${userId}` : null;
+  const AUTOMATIONS_CACHE_TTL_MS = 30 * 60 * 1000;
+
+  const loadAutomations = async (force = false) => {
+    if (!userId) {
+      setAutomations([]);
+      setServerTgLinked(false);
+      setServerTgChatId(null);
+      setLoading(false);
+      return;
+    }
+    if (!force && AUTOMATIONS_CACHE_KEY && typeof window !== "undefined") {
+      try {
+        const raw = window.sessionStorage.getItem(AUTOMATIONS_CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            ts: number;
+            automations: Automation[];
+            telegram_linked: boolean;
+            default_telegram_chat_id: string | null;
+          };
+          if (parsed?.ts && Date.now() - parsed.ts < AUTOMATIONS_CACHE_TTL_MS && Array.isArray(parsed.automations)) {
+            setAutomations(parsed.automations);
+            setServerTgLinked(Boolean(parsed.telegram_linked));
+            setServerTgChatId(parsed.default_telegram_chat_id || null);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
     try {
       setLoading(true);
       const res = await fetch("/api/automations", { cache: "no-store" });
       const data = await res.json();
       if (res.ok) {
-        setAutomations(data.automations || []);
-        setServerTgLinked(Boolean(data.telegram_linked));
-        setServerTgChatId(data.default_telegram_chat_id || null);
+        const list = data.automations || [];
+        const linked = Boolean(data.telegram_linked);
+        const defaultChatId = data.default_telegram_chat_id || null;
+        setAutomations(list);
+        setServerTgLinked(linked);
+        setServerTgChatId(defaultChatId);
+        if (AUTOMATIONS_CACHE_KEY && typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(
+              AUTOMATIONS_CACHE_KEY,
+              JSON.stringify({
+                ts: Date.now(),
+                automations: list,
+                telegram_linked: linked,
+                default_telegram_chat_id: defaultChatId,
+              }),
+            );
+          } catch {
+            // ignore storage quota errors
+          }
+        }
       } else {
         setErrorMsg(data.error || "تعذر تحميل المهام المجدولة");
       }
@@ -109,8 +162,16 @@ export default function ScheduledAutomationsCard({
   };
 
   useEffect(() => {
-    loadAutomations();
-  }, []);
+    if (!userId) {
+      setAutomations([]);
+      setServerTgLinked(false);
+      setServerTgChatId(null);
+      setLoading(false);
+      return;
+    }
+    void loadAutomations(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   const handleSelectPreset = (preset: typeof PRESET_PROMPTS[0]) => {
     setFormName(preset.title);
@@ -163,7 +224,7 @@ export default function ScheduledAutomationsCard({
         if (res.ok) {
           setSuccessMsg("تم تعديل الاستشارة المجدولة بنجاح!");
           resetForm();
-          loadAutomations();
+          void loadAutomations(true);
         } else {
           setErrorMsg(data.error || "فشل التعديل");
         }
@@ -184,7 +245,7 @@ export default function ScheduledAutomationsCard({
         if (res.ok) {
           setSuccessMsg("تمت إضافة الاستشارة المجدولة بنجاح! سيتم إرسالها يومياً على التليجرام.");
           resetForm();
-          loadAutomations();
+          void loadAutomations(true);
         } else {
           setErrorMsg(data.error || "فشل الحفظ");
         }
@@ -204,6 +265,9 @@ export default function ScheduledAutomationsCard({
         body: JSON.stringify({ is_active: !auto.is_active }),
       });
       if (res.ok) {
+        if (AUTOMATIONS_CACHE_KEY) {
+          try { window.sessionStorage.removeItem(AUTOMATIONS_CACHE_KEY); } catch {}
+        }
         setAutomations((prev) =>
           prev.map((a) => (a.id === auto.id ? { ...a, is_active: !auto.is_active } : a))
         );
@@ -220,6 +284,9 @@ export default function ScheduledAutomationsCard({
     try {
       const res = await fetch(`/api/automations/${id}`, { method: "DELETE" });
       if (res.ok) {
+        if (AUTOMATIONS_CACHE_KEY) {
+          try { window.sessionStorage.removeItem(AUTOMATIONS_CACHE_KEY); } catch {}
+        }
         setAutomations((prev) => prev.filter((a) => a.id !== id));
         setSuccessMsg(isAr ? "تم حذف المهمة المجدولة بنجاح" : "Automation deleted");
       }
@@ -238,7 +305,7 @@ export default function ScheduledAutomationsCard({
       if (res.ok && data.ok) {
         setSuccessMsg("تم إرسال الاستشارة التجريبية فوراً إلى حساب التليجرام بنجاح! 🚀");
         if (onQuotaConsumed) onQuotaConsumed();
-        loadAutomations();
+        void loadAutomations(true);
       } else {
         const reasonText =
           data.error === "pro_required" || data.reason === "pro_required"

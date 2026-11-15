@@ -18,7 +18,7 @@ import {
     ExternalLink
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { useMarket, EgxOnlyGuard } from "@/contexts/MarketContext";
+import { useMarket } from "@/contexts/MarketContext";
 import StockLogo from "@/components/StockLogo";
 import NewsStats from "@/components/NewsStats";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
@@ -38,7 +38,7 @@ interface NewsItem {
 
 export default function NewsPage() {
     const { language } = useLanguage();
-    const { isSaudi } = useMarket();
+    const { market, isSaudi } = useMarket();
     const isAr = language === "ar";
 
     // State
@@ -63,7 +63,7 @@ export default function NewsPage() {
         setLoadError(false);
         try {
             const offset = (page - 1) * limit;
-            let url = `/api/scan/news?limit=${limit}&offset=${offset}&sort=${sortBy}`;
+            let url = `/api/scan/news?limit=${limit}&offset=${offset}&sort=${sortBy}&market=${market}`;
             
             if (debouncedSearch.trim()) {
                 url += `&search=${encodeURIComponent(debouncedSearch)}`;
@@ -98,7 +98,7 @@ export default function NewsPage() {
         } finally {
             if (!signal.aborted) setLoading(false);
         }
-    }, [page, debouncedSearch, sentiment, dateFilter, monthFilter, sortBy, selectedSector, period]);
+    }, [page, debouncedSearch, sentiment, dateFilter, monthFilter, sortBy, selectedSector, period, market]);
 
     // Handle search input debounce/delay
     useEffect(() => {
@@ -116,14 +116,10 @@ export default function NewsPage() {
 
     // Trigger fetch when fetchNews callback changes
     useEffect(() => {
-        if (isSaudi) {
-            setLoading(false);
-            return;
-        }
         const controller = new AbortController();
         void fetchNews(controller.signal);
         return () => controller.abort();
-    }, [fetchNews, isSaudi]);
+    }, [fetchNews]);
 
     const handleSentimentFilter = (val: string) => {
         setSentiment(val);
@@ -208,14 +204,17 @@ export default function NewsPage() {
     };
 
     return (
-        <EgxOnlyGuard sectionNameAr="رادار الأخبار وتحليل المشاعر" sectionNameEn="AI News & Sentiment Radar">
         <div className="w-full pt-5 sm:pt-7" dir={isAr ? "rtl" : "ltr"}>
             <BrandedPageHeader
                 eyebrow={isAr ? "أخبار وذكاء السوق" : "AI NEWS & INTELLIGENCE"}
                 title={isAr ? "نبض الأخبار ومشاعر الذكاء الاصطناعي" : "AI News & Sentiment Pulse"}
-                description={isAr
-                    ? "تغطية ذكية لأخبار البورصة المصرية وتحليل المشاعر لتوضيح اتجاهات السوق ومخاطر الأخبار."
-                    : "AI-assisted coverage of EGX news and sentiment to surface market trends and event risks."}
+                description={isSaudi
+                    ? (isAr
+                        ? "تغطية ذكية لأخبار السوق السعودي (تداول تاسي) وتحليل المشاعر لتوضيح اتجاهات السوق ومخاطر الأخبار."
+                        : "AI-assisted coverage of Saudi TASI news and sentiment to surface market trends and event risks.")
+                    : (isAr
+                        ? "تغطية ذكية لأخبار البورصة المصرية وتحليل المشاعر لتوضيح اتجاهات السوق ومخاطر الأخبار."
+                        : "AI-assisted coverage of EGX news and sentiment to surface market trends and event risks.")}
             />
 
             {/* News stats & charts dashboard */}
@@ -494,6 +493,5 @@ export default function NewsPage() {
                 </div>
             )}
         </div>
-        </EgxOnlyGuard>
     );
 }

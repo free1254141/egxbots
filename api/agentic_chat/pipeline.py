@@ -43,11 +43,51 @@ from api.agentic_chat.analysis_cache import (
     set_vip_analysis_cache,
     build_analysis_cache_key,
     resolve_tool_call_to_cache_key,
+    resolve_tool_calls_to_cache_key,
     get_cached_analysis,
     set_cached_analysis,
 )
 
 logger = logging.getLogger("agentic_chat")
+
+
+def _collect_structured_outputs(
+    result: Any,
+    tables_data: List[Any],
+    recommendations_data: List[Any],
+) -> None:
+    """Collect structured stock/recommendation rows from a single tool output."""
+    if not isinstance(result, dict):
+        return
+    if "stocks" in result and isinstance(result["stocks"], list):
+        tables_data.extend(result["stocks"])
+    elif "accumulation_stocks" in result and isinstance(result["accumulation_stocks"], list):
+        tables_data.extend(result["accumulation_stocks"])
+    if "recommendations" in result and isinstance(result["recommendations"], list):
+        recommendations_data.extend(result["recommendations"])
+
+
+def _append_tool_results(
+    tool_calls: List[Dict[str, Any]],
+    tool_results: List[Any],
+    formatted_messages: List[Dict[str, Any]],
+    tables_data: List[Any],
+    recommendations_data: List[Any],
+) -> None:
+    """Serialize tool outputs into DeepSeek tool messages and collect structured table rows."""
+    for tc, result in zip(tool_calls, tool_results):
+        tc_id = tc.get("id", f"call_{int(time.time() * 1000)}")
+        if isinstance(result, Exception):
+            content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False)
+        else:
+            content_str = json.dumps(result, ensure_ascii=False)
+            _collect_structured_outputs(result, tables_data, recommendations_data)
+
+        formatted_messages.append({
+            "role": "tool",
+            "tool_call_id": tc_id,
+            "content": content_str,
+        })
 
 
 def _get_deepseek_key() -> str:
@@ -356,12 +396,14 @@ async def _run_agentic_chat_stream_impl(
     formatted_messages.append({"role": "system", "content": date_context})
 
     # Add bounded conversation history (last 10 turns max)
+    has_conversation_history = False
     if history and isinstance(history, list):
         for msg in history[-10:]:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             img_url = msg.get("image_url") or msg.get("imageUrl")
             if role in ("user", "assistant") and (content or img_url):
+                has_conversation_history = True
                 if role == "user" and img_url:
                     formatted_messages.append({
                         "role": "user",
@@ -482,8 +524,13 @@ async def _run_agentic_chat_stream_impl(
     is_saudi_flow = _is_saudi_related_query(message, active_market=ui_exch, hints=hints)
 
     # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
-    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers are involved.
-    if not is_saudi_flow and not vision_data and (not images or len(images) == 0):
+    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers, multi-turn history, or images are involved.
+    if (
+        not is_saudi_flow
+        and not has_conversation_history
+        and not vision_data
+        and (not images or len(images) == 0)
+    ):
         early_key = build_analysis_cache_key(message)
         if early_key:
             candidate_cache_key = early_key
@@ -514,6 +561,7 @@ async def _run_agentic_chat_stream_impl(
                     "remaining_quota": remaining_quota,
                     "quota_limit": quota_limit,
                     "cached": True,
+                    "cache_key": early_key,
                 }
                 yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -521,6 +569,57 @@ async def _run_agentic_chat_stream_impl(
 
     max_rounds = 3
     round_count = 0
+
+    # Single-Stock Fast-Track: when single-turn uncached query maps canonically to vip_stock_<SYM>,
+    # pre-fetch get_stock + get_stock_levels + get_news in parallel in Python so DeepSeek only needs 1 synthesis call.
+    fast_stock_match = (
+        re.fullmatch(r"vip_stock_([A-Z0-9]{2,8})", candidate_cache_key)
+        if (
+            candidate_cache_key
+            and not has_conversation_history
+            and not is_saudi_flow
+            and not vision_data
+            and (not images or len(images) == 0)
+        )
+        else None
+    )
+    if fast_stock_match:
+        fast_sym = fast_stock_match.group(1)
+        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': 'جاري جلب أحدث بيانات السوق (3 مصادر)...'}, ensure_ascii=False)}\n\n"
+        t_tools_start = time.time()
+        fast_results = await asyncio.gather(
+            dispatch_tool("get_stock", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
+            dispatch_tool("get_stock_levels", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
+            dispatch_tool("get_news", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
+            return_exceptions=True,
+        )
+        t_tools = time.time() - t_tools_start
+        logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}): Tools(3)={t_tools:.2f}s (skipped Round 1 LLM)")
+        for r in fast_results:
+            if not isinstance(r, Exception):
+                _collect_structured_outputs(r, tables_data, recommendations_data)
+
+        fast_ctx_payload = {
+            "get_stock": fast_results[0] if not isinstance(fast_results[0], Exception) else {"status": "error", "message": str(fast_results[0])},
+            "get_stock_levels": fast_results[1] if not isinstance(fast_results[1], Exception) else {"status": "error", "message": str(fast_results[1])},
+            "get_news": fast_results[2] if not isinstance(fast_results[2], Exception) else {"status": "error", "message": str(fast_results[2])},
+        }
+        fast_ctx_msg = {
+            "role": "system",
+            "content": (
+                f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات لسهم {fast_sym} (نتائج get_stock و get_stock_levels و get_news):\n"
+                f"{json.dumps(fast_ctx_payload, ensure_ascii=False)}\n"
+                "تم تنفيذ جميع الأدوات المطلوبة بنجاح. اكتب الآن التقرير التحليلي الكامل مباشرة للمستخدم اعتماداً على هذه الأرقام الموثقة فقط، وبدون كتابة أي وسوم استدعاء أدوات أو DSML."
+            ),
+        }
+        # Build clean grounded messages excluding any prior conversational turns
+        fast_messages = [m for m in formatted_messages if m.get("role") == "system"]
+        fast_messages.append(fast_ctx_msg)
+        if formatted_messages and formatted_messages[-1].get("role") == "user":
+            fast_messages.append(formatted_messages[-1])
+        formatted_messages = fast_messages
+        tools_executed_count += 3
+        max_rounds = 0  # Proceed straight to DeepSeek single-call synthesis without tools schema
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
@@ -617,24 +716,34 @@ async def _run_agentic_chat_stream_impl(
 
                 if (
                     not saudi_tool_call
+                    and not has_conversation_history
                     and round_count == 1
-                    and len(tool_calls) == 1
+                    and len(tool_calls) >= 1
                     and not vision_data
                     and (not images or len(images) == 0)
                 ):
-                    primary_call = tool_calls[0]
-                    p_name = primary_call.get("function", {}).get("name", "")
-                    try:
-                        p_args = json.loads(primary_call.get("function", {}).get("arguments", "{}"))
-                    except Exception:
-                        p_args = {}
-                    dynamic_key = resolve_tool_call_to_cache_key(p_name, p_args)
-                    if dynamic_key:
-                        candidate_cache_key = dynamic_key
-                        cached_hit = get_vip_analysis_cache(dynamic_key, user_id=user_id)
+                    dynamic_key = resolve_tool_calls_to_cache_key(tool_calls)
+                    if not dynamic_key:
+                        candidate_cache_key = None
+                    else:
+                        preserved_special = False
+                        if candidate_cache_key and candidate_cache_key.startswith("vip_stock_"):
+                            cand_parts = candidate_cache_key.split("_")
+                            if len(cand_parts) >= 4:
+                                cand_sym = cand_parts[2]
+                                if dynamic_key in (
+                                    f"vip_stock_{cand_sym}",
+                                    f"vip_news_{cand_sym}",
+                                    f"vip_fair_value_{cand_sym}",
+                                ):
+                                    preserved_special = True
+                        if not preserved_special:
+                            candidate_cache_key = dynamic_key
+                        lookup_key = candidate_cache_key
+                        cached_hit = get_vip_analysis_cache(lookup_key, user_id=user_id)
                         if cached_hit and cached_hit.get("reply"):
                             origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
-                            logger.info(f"[agentic_chat] Serving from Model-Driven Two-Tier Cache: {dynamic_key} ({cached_hit.get('origin')})")
+                            logger.info(f"[agentic_chat] Serving from Model-Driven Two-Tier Cache: {lookup_key} ({cached_hit.get('origin')})")
                             yield f"data: {json.dumps({'type': 'status', 'status': 'cached', 'message': f'تم استرجاع أحدث قراءة فنية موثقة من {origin_label}...'}, ensure_ascii=False)}\n\n"
 
                             cached_reply = cached_hit["reply"]
@@ -658,6 +767,7 @@ async def _run_agentic_chat_stream_impl(
                                 "remaining_quota": remaining_quota,
                                 "quota_limit": quota_limit,
                                 "cached": True,
+                                "cache_key": lookup_key,
                             }
                             yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
                             yield "data: [DONE]\n\n"
@@ -694,26 +804,18 @@ async def _run_agentic_chat_stream_impl(
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
-                for tc, result in zip(tool_calls, tool_results):
-                    tc_id = tc.get("id", f"call_{int(time.time()*1000)}")
-                    if isinstance(result, Exception):
-                        content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False)
-                    else:
-                        content_str = json.dumps(result, ensure_ascii=False)
-                        # Extract table data if present
-                        if isinstance(result, dict):
-                            if "stocks" in result and isinstance(result["stocks"], list):
-                                tables_data.extend(result["stocks"])
-                            elif "accumulation_stocks" in result and isinstance(result["accumulation_stocks"], list):
-                                tables_data.extend(result["accumulation_stocks"])
-                            if "recommendations" in result and isinstance(result["recommendations"], list):
-                                recommendations_data.extend(result["recommendations"])
+                _append_tool_results(tool_calls, list(tool_results), formatted_messages, tables_data, recommendations_data)
 
-                    formatted_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": content_str,
-                    })
+                # If Round 1 already fetched both stock price/indicators & levels, go straight to synthesis
+                called_names = {tc.get("function", {}).get("name", "") for tc in tool_calls}
+                if (
+                    round_count == 1
+                    and candidate_cache_key
+                    and re.fullmatch(r"vip_stock_[A-Z0-9]{2,8}", candidate_cache_key)
+                    and "get_stock" in called_names
+                    and "get_stock_levels" in called_names
+                ):
+                    break
 
                 # If reached max_rounds, break to final synthesis
                 if round_count >= max_rounds:
@@ -721,36 +823,102 @@ async def _run_agentic_chat_stream_impl(
 
             # If all rounds were consumed by tool calls and no text reply was generated yet:
             if tools_executed_count > 0 and not accumulated_reply:
-                synthesis_payload = {
+                synthesis_payload: Dict[str, Any] = {
                     "model": "deepseek-chat",
                     "messages": formatted_messages,
-                    "tools": AGENTIC_TOOLS_SCHEMA,
-                    "tool_choice": "none",  # Forbid tools so DeepSeek produces only synthesis text
                     "temperature": 0.3,
                     "max_tokens": 4000,
                 }
+                if not fast_stock_match:
+                    synthesis_payload["tools"] = AGENTIC_TOOLS_SCHEMA
+                    synthesis_payload["tool_choice"] = "none"  # Forbid tools so DeepSeek produces only synthesis text
 
                 yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'جاري صياغة التقرير والتحليل الفني...'}, ensure_ascii=False)}\n\n"
 
                 t_turn2_start = time.time()
-                synth_resp = await client.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers=headers,
-                    json=synthesis_payload,
-                )
-                if synth_resp.status_code == 200:
+                synth_resp = None
+                last_synth_err: Optional[Exception] = None
+                for synth_attempt in range(2):
+                    try:
+                        synth_resp = await client.post(
+                            "https://api.deepseek.com/chat/completions",
+                            headers=headers,
+                            json=synthesis_payload,
+                        )
+                        if synth_resp.status_code == 200:
+                            break
+                        logger.warning(
+                            f"[agentic_chat] Synthesis error HTTP {synth_resp.status_code} (attempt {synth_attempt + 1}/2)"
+                        )
+                        if synth_resp.status_code not in (429, 500, 502, 503, 504) or synth_attempt == 1:
+                            break
+                    except httpx.HTTPError as http_err:
+                        last_synth_err = http_err
+                        logger.warning(
+                            f"[agentic_chat] Synthesis HTTP error (attempt {synth_attempt + 1}/2): {http_err}"
+                        )
+                        if synth_attempt == 1:
+                            break
+                    await asyncio.sleep(0.5)
+
+                if synth_resp is not None and synth_resp.status_code == 200:
                     synth_json = synth_resp.json()
                     synth_content = synth_json.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if synth_content:
-                        accumulated_reply = filter_output(synth_content)
-                        words = accumulated_reply.split(" ")
-                        chunk_size = 4
-                        for i in range(0, len(words), chunk_size):
-                            chunk = " ".join(words[i : i + chunk_size]) + " "
-                            yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
-                            await asyncio.sleep(0.015)
+                        filtered_synth = filter_output(synth_content)
+                        # DSML safety fallback: if synthesis emitted only DSML tool calls, execute them and synthesize once cleanly
+                        if not filtered_synth and ("DSML" in synth_content or "dsml" in synth_content):
+                            dsml_extra_calls = parse_dsml_tool_calls(synth_content)
+                            if dsml_extra_calls:
+                                logger.warning(f"[agentic_chat] Synthesis emitted DSML fallback ({len(dsml_extra_calls)} calls); executing cleanly")
+                                extra_results = await asyncio.gather(
+                                    *[
+                                        dispatch_tool(
+                                            tc.get("function", {}).get("name", ""),
+                                            json.loads(tc.get("function", {}).get("arguments", "{}") or "{}"),
+                                            user_id=user_id,
+                                            user_prompt=message,
+                                            default_market=ui_exch,
+                                        )
+                                        for tc in dsml_extra_calls
+                                    ],
+                                    return_exceptions=True,
+                                )
+                                formatted_messages.append({"role": "assistant", "content": None, "tool_calls": dsml_extra_calls})
+                                _append_tool_results(dsml_extra_calls, list(extra_results), formatted_messages, tables_data, recommendations_data)
+                                retry_payload = {
+                                    **synthesis_payload,
+                                    "tools": AGENTIC_TOOLS_SCHEMA,
+                                    "tool_choice": "none",
+                                }
+                                retry_resp = await client.post(
+                                    "https://api.deepseek.com/chat/completions",
+                                    headers=headers,
+                                    json=retry_payload,
+                                )
+                                if retry_resp.status_code == 200:
+                                    retry_content = retry_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                                    filtered_synth = filter_output(retry_content)
+                        accumulated_reply = filtered_synth
+                        if accumulated_reply:
+                            words = accumulated_reply.split(" ")
+                            chunk_size = 4
+                            for i in range(0, len(words), chunk_size):
+                                chunk = " ".join(words[i : i + chunk_size]) + " "
+                                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
+                                await asyncio.sleep(0.015)
                 else:
-                    logger.error(f"[agentic_chat] Synthesis error: HTTP {synth_resp.status_code}")
+                    status_info = f"HTTP {synth_resp.status_code}" if synth_resp is not None else str(last_synth_err)
+                    logger.error(f"[agentic_chat] Synthesis error: {status_info}")
+                    yield f"data: {json.dumps({'type': 'error', 'detail': 'تعذر الاتصال بمحرك التحليل الذكي حالياً، يرجى المحاولة مرة أخرى.'}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
+                if not accumulated_reply:
+                    logger.error("[agentic_chat] Synthesis produced empty filtered reply")
+                    yield f"data: {json.dumps({'type': 'error', 'detail': 'لم يتمكن المساعد من صياغة الرد، يرجى إعادة المحاولة.'}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
 
                 t_turn2 = time.time() - t_turn2_start
                 logger.info(f"[agentic_chat] Synthesis finished: Turn2={t_turn2:.2f}s, Total={time.time()-start_time:.2f}s")
@@ -887,9 +1055,21 @@ async def _run_agentic_chat_stream_impl(
 
     # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
     # Placed after excel_tables formatting so cached hits return structured ExcelTable objects ready for Web & Telegram.
-    if not is_saudi_flow and accumulated_reply and not vision_data and (not images or len(images) == 0):
-        effective_key = candidate_cache_key or build_analysis_cache_key(message)
+    saved_cache_key: Optional[str] = None
+    if (
+        not is_saudi_flow
+        and not has_conversation_history
+        and accumulated_reply
+        and not vision_data
+        and (not images or len(images) == 0)
+    ):
+        effective_key = (
+            candidate_cache_key
+            if tools_executed_count > 0
+            else (candidate_cache_key or build_analysis_cache_key(message))
+        )
         if effective_key:
+            saved_cache_key = effective_key
             try:
                 set_vip_analysis_cache(
                     cache_key=effective_key,
@@ -913,6 +1093,8 @@ async def _run_agentic_chat_stream_impl(
         "remaining_quota": remaining_quota,
         "quota_limit": quota_limit,
         "vision": vision_data,
+        "cached": False,
+        "cache_key": saved_cache_key or candidate_cache_key,
     }
 
     yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"

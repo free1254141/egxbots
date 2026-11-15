@@ -145,15 +145,16 @@ def quick_activate_pro(chat_id: int, target_email: str, duration_days: int = 30)
         # Check if user has an existing pending order to update
         existing = (
             _supabase.table("local_payment_orders")
-            .select("id")
+            .select("id,affiliate_id,affiliate_code,commission_amount_egp,commission_status,amount_egp")
             .eq("user_id", user_id)
             .eq("status", "pending")
             .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
-        if existing and existing.data:
-            order_id = existing.data[0]["id"]
+        pending_order = existing.data[0] if (existing and existing.data) else None
+        if pending_order:
+            order_id = pending_order["id"]
             _supabase.table("local_payment_orders").update({
                 "provider": "admin_telegram",
                 "customer_note": f"Activated via Telegram Support Bot by admin {chat_id}",
@@ -192,6 +193,17 @@ def quick_activate_pro(chat_id: int, target_email: str, duration_days: int = 30)
             "status": "approved",
             "updated_at": now_iso
         }).eq("id", order_id).execute()
+
+        if pending_order and pending_order.get("affiliate_id"):
+            try:
+                from api.easykash_payments import _credit_affiliate_commission
+                _credit_affiliate_commission(
+                    pending_order,
+                    float(pending_order.get("amount_egp") or 100.0),
+                    now_iso,
+                )
+            except Exception as aff_err:
+                print(f"[SUPPORT_CHAT] Affiliate commission update warning: {aff_err}")
 
         # Fetch updated subscription period end
         sub_res = (

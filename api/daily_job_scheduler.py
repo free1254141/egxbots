@@ -254,6 +254,16 @@ def _run_saudi_daily_refresh():
         dispatch_saudi_open_recommendations()
     except Exception as tg_exc:
         print(f"[DAILY-JOB-SCHEDULER] Saudi Telegram dispatch failed (non-fatal): {tg_exc}")
+    try:
+        from api.saudi_news_sync import sync_saudi_news
+        sync_saudi_news()
+    except Exception as news_exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi news sync failed (non-fatal): {news_exc}")
+    try:
+        from api.saudi_disclosures_sync import sync_saudi_disclosures
+        sync_saudi_disclosures()
+    except Exception as disc_exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi disclosures sync failed (non-fatal): {disc_exc}")
     return res
 
 

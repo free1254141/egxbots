@@ -25,9 +25,9 @@ describe("daily site usage chart", () => {
         expect(screen.queryByTestId("newActiveUsers")).toBeNull();
         expect(screen.queryByTestId("returningActiveUsers")).toBeNull();
         expect(screen.queryByText("نشطون قدامى")).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "90 يوم" }));
+        fireEvent.click(screen.getByRole("button", { name: "3 شهور" }));
         expect(screen.getByTestId("usage-series").getAttribute("data-rows")).toBe("90");
-        expect(screen.getByRole("button", { name: "90 يوم" }).getAttribute("aria-pressed")).toBe("true");
+        expect(screen.getByRole("button", { name: "3 شهور" }).getAttribute("aria-pressed")).toBe("true");
     });
 
     it("distinguishes incomplete or unavailable data from a zero activity day", () => {

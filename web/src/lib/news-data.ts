@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "@/lib/supabase/route-data";
+import { getMarketExchange, getMarketSupabaseClient, type MarketMode } from "@/lib/supabase/route-data";
 
 export type NewsRow = {
   id: number; symbol: string; exchange: string; date: string;
@@ -8,9 +8,10 @@ export type NewsRow = {
 /** Canonical monthly queries reuse the existing generation-based Vercel cache.
  * Search, sorting, pagination and charts never create new Supabase query keys.
  */
-export async function getNewsRows(params: URLSearchParams): Promise<NewsRow[]> {
+export async function getNewsRows(params: URLSearchParams, market: MarketMode = "egx"): Promise<NewsRow[]> {
+  const timeZone = market === "tasi" ? "Asia/Riyadh" : "Africa/Cairo";
   const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date());
   const exact = params.get("date") || "";
   const month = params.get("month") || "";
@@ -31,7 +32,8 @@ export async function getNewsRows(params: URLSearchParams): Promise<NewsRow[]> {
   }
   const cursor = new Date(`${start.slice(0, 7)}-01T00:00:00Z`);
   const rows: NewsRow[] = [];
-  const supabase = getSupabaseClient();
+  const supabase = getMarketSupabaseClient(market);
+  const exchange = getMarketExchange(market);
   while (cursor.toISOString().slice(0, 10) <= end) {
     const from = cursor.toISOString().slice(0, 10);
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);
@@ -39,7 +41,7 @@ export async function getNewsRows(params: URLSearchParams): Promise<NewsRow[]> {
     for (let offset = 0; ; offset += 500) {
       const { data, error } = await supabase.from("stock_news_sentiment")
         .select("id,symbol,exchange,date,sentiment_score,news_count,headlines,sources")
-        .eq("exchange", "EGX").gt("news_count", 0)
+        .eq("exchange", exchange).gt("news_count", 0)
         .gte("date", from).lt("date", until)
         .order("date", { ascending: false }).order("id", { ascending: true })
         .range(offset, offset + 499);

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient, toNumber } from "@/lib/supabase/route-data";
+import { getMarketSupabaseClient, resolveRequestMarket, toNumber, type MarketMode } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { getNewsRows } from "@/lib/news-data";
 
@@ -77,32 +77,34 @@ function getNormalizedSector(sectorStr: string): SectorInfo {
   return { ar: "أخرى", en: "Other" };
 }
 
-let symbolToSectorCache: Record<string, SectorInfo> | null = null;
-let lastCacheTime = 0;
+const symbolToSectorCache: Partial<Record<MarketMode, Record<string, SectorInfo>>> = {};
+const lastCacheTime: Partial<Record<MarketMode, number>> = {};
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const PUBLIC_CACHE_HEADERS = dailyCacheHeaders(DAILY_CACHE_TAGS.news);
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+    const market = resolveRequestMarket(req);
     const search = url.searchParams.get("search") || "";
     const dateFilter = url.searchParams.get("date") || "";
     const monthFilter = url.searchParams.get("month") || "";
     const period = url.searchParams.get("period") || "15d";
     const requestedSector = url.searchParams.get("sector") || "";
 
-    const supabase = getSupabaseClient();
+    const supabase = getMarketSupabaseClient(market);
 
-    // 1. Fetch fundamentals to build symbol -> sector mapping (with server-side cache)
+    // 1. Fetch fundamentals & stocks to build symbol -> sector mapping (with server-side cache per market)
     const nowTime = Date.now();
     const symbolToSector: Record<string, SectorInfo> = {};
 
-    if (symbolToSectorCache && (nowTime - lastCacheTime < CACHE_TTL)) {
-      Object.assign(symbolToSector, symbolToSectorCache);
+    if (symbolToSectorCache[market] && (nowTime - (lastCacheTime[market] || 0) < CACHE_TTL)) {
+      Object.assign(symbolToSector, symbolToSectorCache[market]);
     } else {
-      const { data: fundRows } = await supabase
-        .from("stock_fundamentals")
-        .select("symbol, data");
+      const [{ data: fundRows }, { data: stockMetaRows }] = await Promise.all([
+        supabase.from("stock_fundamentals").select("symbol, data"),
+        market === "tasi" ? supabase.from("stocks").select("symbol, sector").eq("exchange", "TADAWUL") : Promise.resolve({ data: null }),
+      ]);
 
       if (fundRows) {
         for (const row of fundRows) {
@@ -114,12 +116,18 @@ export async function GET(req: Request) {
           } catch {}
           symbolToSector[row.symbol.toUpperCase()] = getNormalizedSector(sectorStr);
         }
-        symbolToSectorCache = { ...symbolToSector };
-        lastCacheTime = nowTime;
       }
+      for (const row of stockMetaRows || []) {
+        if (!row.symbol || !row.sector) continue;
+        const symKey = String(row.symbol).toUpperCase();
+        if (symbolToSector[symKey] && symbolToSector[symKey].en !== "Other") continue;
+        symbolToSector[symKey] = getNormalizedSector(String(row.sector));
+      }
+      symbolToSectorCache[market] = { ...symbolToSector };
+      lastCacheTime[market] = nowTime;
     }
 
-    const newsRows = await getNewsRows(url.searchParams);
+    const newsRows = await getNewsRows(url.searchParams, market);
 
     // 3. Initialize aggregation structures
     let positiveCount = 0;

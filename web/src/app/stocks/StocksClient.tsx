@@ -57,6 +57,24 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
     setSelectedSector("all");
     if (!isSaudi || tasiStocks !== null) return;
 
+    const TASI_DIR_CACHE_KEY = "egxbots_tasi_stocks_dir_v1";
+    const TASI_DIR_TTL_MS = 6 * 60 * 60 * 1000;
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.sessionStorage.getItem(TASI_DIR_CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { ts: number; data: StockItem[] };
+          if (parsed?.ts && Date.now() - parsed.ts < TASI_DIR_TTL_MS && Array.isArray(parsed.data) && parsed.data.length > 0) {
+            setTasiStocks(parsed.data);
+            setIsLoadingTasi(false);
+            return;
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
     const controller = new AbortController();
     setIsLoadingTasi(true);
 
@@ -83,7 +101,15 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
           });
         }
         const parsed = Array.from(bySymbol.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
-        setTasiStocks(parsed.length > 0 ? parsed : FALLBACK_TASI_STOCKS);
+        const finalStocks = parsed.length > 0 ? parsed : FALLBACK_TASI_STOCKS;
+        if (parsed.length > 0 && typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(TASI_DIR_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: parsed }));
+          } catch {
+            // ignore storage quota errors
+          }
+        }
+        setTasiStocks(finalStocks);
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
@@ -244,7 +270,7 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
           <Link
             prefetch={false}
             key={stock.symbol}
-            href={`/stocks/${stock.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+            href={`/stocks/${stock.symbol.toLowerCase()}`}
             className="group block p-4 bg-white dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)] hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[6px_6px_0px_0px_rgba(255,255,255,0.5)] transition-all"
           >
             <div className="flex items-center justify-between gap-3 mb-3">

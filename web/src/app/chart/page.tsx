@@ -85,7 +85,7 @@ function ChartContent() {
     [],
   );
 
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { watchlist, saveSymbol, removeSymbol, removeSymbolBySymbol, isSaved } =
     useWatchlist();
 
@@ -202,6 +202,7 @@ function ChartContent() {
   }, [symbol, exchange]);
 
   useEffect(() => {
+    if (authLoading) return;
     const controller = new AbortController();
     setLoadingRecommendations(true);
     setRecommendationsError(false);
@@ -217,7 +218,7 @@ function ChartContent() {
         if (!controller.signal.aborted) setLoadingRecommendations(false);
       });
     return () => controller.abort();
-  }, [symbol, exchange, user?.id]);
+  }, [authLoading, symbol, exchange, user?.id]);
 
   const closedRecommendations = recommendations.filter((row) =>
     ["win", "loss"].includes(String(row.status).toLowerCase()),

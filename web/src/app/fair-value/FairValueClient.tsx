@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
+import { fetchFairValueReportCached } from "@/lib/api";
 import type {
   FairValueReport,
   FairValueStockItem,
@@ -83,19 +84,19 @@ export default function FairValueClient({
       return;
     }
     let active = true;
+    const controller = new AbortController();
     async function load() {
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch(`/api/market/fair-value?market=${market}`);
-        if (!res.ok) throw new Error(isAr ? "تعذر تحميل بيانات السعر العادل" : "Failed to load fair value data");
-        const data: FairValueReport = await res.json();
+        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(market, controller.signal);
         if (active) {
           setReport(data);
           setSectorFilter("all");
           setSelectedChartStock(data.stocks?.[0] ?? null);
         }
       } catch (err: any) {
+        if (controller.signal.aborted || err?.name === "AbortError") return;
         if (active) setError(err?.message || (isAr ? "حدث خطأ غير متوقع" : "Unexpected error occurred"));
       } finally {
         if (active) setLoading(false);
@@ -104,6 +105,7 @@ export default function FairValueClient({
     load();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [initialReport, market, isAr]);
 

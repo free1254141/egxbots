@@ -73,9 +73,9 @@ export async function GET(req: NextRequest) {
       .select(recommendationFields)
       .eq("is_public", true)
       .eq("exchange", exchange);
-    const { data, error } = await recommendationsQuery
-      .order("created_at", { ascending: false })
-      .limit(limit);
+    const { data, error } = await (market === "tasi"
+      ? recommendationsQuery.order("created_at", { ascending: false }).order("precision", { ascending: false }).limit(limit)
+      : recommendationsQuery.order("created_at", { ascending: false }).limit(limit));
     if (error) throw error;
 
     let visibleData: any[] = data || [];

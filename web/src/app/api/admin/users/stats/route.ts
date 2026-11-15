@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseClient();
     const now = new Date();
     const snapshotAt = now.toISOString();
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const oneEightyDaysAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000).toISOString();
 
     const [
       profilesRes,
@@ -33,8 +33,8 @@ export async function GET(req: NextRequest) {
       supabase.from("profiles").select("id,language,telegram_chat_id,whatsapp_number,notification_channel,display_name,username,created_at", { count: "exact" }).range(0, 999),
       supabase.from("subscriptions").select("user_id,plan_id,status,current_period_end,created_at"),
       supabase.from("bot_subscriptions").select("service_type,notifications_enabled"),
-      supabase.from("user_activity_events").select("id,user_id,event_name,path,created_at", { count: "exact" }).gte("created_at", ninetyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
-      supabase.from("ai_chat_messages").select("id,user_id,role,created_at", { count: "exact" }).gte("created_at", ninetyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
+      supabase.from("user_activity_events").select("id,user_id,event_name,path,created_at", { count: "exact" }).gte("created_at", oneEightyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
+      supabase.from("ai_chat_messages").select("id,user_id,role,created_at", { count: "exact" }).gte("created_at", oneEightyDaysAgo).lte("created_at", snapshotAt).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
       supabase.from("ai_chat_sessions").select("id,user_id,created_at,updated_at").limit(100000),
       supabase.from("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,payment_review_status,customer_note,created_at").order("created_at", { ascending: false }).limit(500),
       supabase.from("kashier_payments").select("order_id,user_id,amount_paid,status,created_at").order("created_at", { ascending: false }).limit(500),
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
         const pageRes = await supabase
           .from("user_activity_events")
           .select("id,user_id,event_name,path,created_at")
-          .gte("created_at", ninetyDaysAgo)
+          .gte("created_at", oneEightyDaysAgo)
           .lte("created_at", snapshotAt)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         const pageRes = await supabase
           .from("ai_chat_messages")
           .select("id,user_id,role,created_at")
-          .gte("created_at", ninetyDaysAgo)
+          .gte("created_at", oneEightyDaysAgo)
           .lte("created_at", snapshotAt)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })

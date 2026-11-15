@@ -47,6 +47,8 @@ const report = buildPortfolioPerformance(
 );
 beforeEach(() => {
   jest.clearAllMocks();
+  window.sessionStorage.clear();
+  window.localStorage.clear();
   (fetchPortfolioPerformance as jest.Mock).mockResolvedValue(report);
   snapshot = {
     is_pro: false,

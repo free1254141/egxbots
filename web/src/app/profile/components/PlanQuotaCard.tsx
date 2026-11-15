@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { broadcastEntitlements } from "@/lib/entitlements";
+import { fetchUserQuotaCached } from "@/lib/user-quota-client";
 import {
   Zap,
   MessageSquare,
@@ -66,6 +68,8 @@ interface Props {
 
 export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Props) {
   const { language } = useLanguage();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const isAr = language === "ar";
 
   const [data, setData] = useState<QuotaData | null>(null);
@@ -93,22 +97,24 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
     });
   };
 
-  const fetchQuota = useCallback(async (isSilent = false, fromBroadcast = false) => {
+  const fetchQuota = useCallback(async (isSilent = false, fromBroadcast = false, forceRefresh = false) => {
     if (!isSilent) setRefreshing(true);
     try {
-      const res = await fetch("/api/user/quota", { cache: "no-store" });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.ok) {
-          setData(json);
-          onQuotaLoaded?.(json);
-          if (!fromBroadcast && json.plan?.is_pro === true) {
-            try {
-              if (localStorage.getItem("egx_pro_active") !== "true") {
-                broadcastEntitlements(true);
-              }
-            } catch {}
-          }
+      const shouldForce = fromBroadcast || forceRefresh || refreshTrigger > 0;
+      const json = userId
+        ? await fetchUserQuotaCached(userId, { force: shouldForce })
+        : await fetch("/api/user/quota", { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : null))
+            .catch(() => null);
+      if (json?.ok) {
+        setData(json);
+        onQuotaLoaded?.(json);
+        if (!fromBroadcast && json.plan?.is_pro === true) {
+          try {
+            if (localStorage.getItem("egx_pro_active") !== "true") {
+              broadcastEntitlements(true);
+            }
+          } catch {}
         }
       }
     } catch (e) {
@@ -117,7 +123,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
       setLoading(false);
       setRefreshing(false);
     }
-  }, [onQuotaLoaded]);
+  }, [onQuotaLoaded, refreshTrigger, userId]);
 
   useEffect(() => {
     fetchQuota();
@@ -259,7 +265,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
-            onClick={() => fetchQuota(false)}
+            onClick={() => fetchQuota(false, false, true)}
             disabled={refreshing}
             title={isAr ? "تحديث الاستخدام" : "Refresh usage"}
             className="h-9 px-3 border-2 border-black dark:border-white bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white font-black text-xs flex items-center gap-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"

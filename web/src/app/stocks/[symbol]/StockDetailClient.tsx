@@ -186,7 +186,7 @@ export default function StockDetailClient({
 }: StockDetailClientProps) {
   const { language } = useLanguage();
   const t = localDict[language] || localDict.en;
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { isSaved, saveSymbol, removeSymbolBySymbol } = useWatchlist();
   const router = useRouter();
 
@@ -207,12 +207,13 @@ export default function StockDetailClient({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [recommendationMarkers, setRecommendationMarkers] = useState<RecommendationChartMarker[]>([]);
   useEffect(() => {
+    if (authLoading) return;
     const controller = new AbortController();
     getRecommendationChartMarkers(cleanSymbol, resolvedExchange, controller.signal, user?.id ?? null)
       .then(setRecommendationMarkers)
       .catch(() => { if (!controller.signal.aborted) setRecommendationMarkers([]); });
     return () => controller.abort();
-  }, [cleanSymbol, resolvedExchange, user?.id]);
+  }, [authLoading, cleanSymbol, resolvedExchange, user?.id]);
 
   // Extract fundamentals
   const fundData = fundamentals?.data || {};
@@ -457,7 +458,7 @@ export default function StockDetailClient({
   // Watchlist toggle handler
   const handleWatchlistToggle = useCallback(() => {
     if (!user) {
-      router.push(`/login?redirect=/stocks/${cleanSymbol.toLowerCase()}${isSaudiStock ? "?market=tasi" : ""}`);
+      router.push(`/login?redirect=/stocks/${cleanSymbol.toLowerCase()}`);
       return;
     }
     const alreadySaved = isSaved(symbol);
@@ -1204,14 +1205,14 @@ export default function StockDetailClient({
           <TrendingUp className="w-5 h-5 text-green-400" />
           {relatedBasis === "sector" ? (language === "ar" ? "أسهم من نفس القطاع" : "Stocks in the same sector") : (language === "ar" ? "أسهم أخرى من الدليل" : "Explore the stock directory")}
         </h2>
-        <Link href={`/stocks${isSaudiStock ? "?market=tasi" : ""}`} className="mb-4 inline-block text-sm underline underline-offset-4">{language === "ar" ? "تصفح دليل الأسهم بالكامل" : "Browse all published stocks"}</Link>
+        <Link href="/stocks" className="mb-4 inline-block text-sm underline underline-offset-4">{language === "ar" ? "تصفح دليل الأسهم بالكامل" : "Browse all published stocks"}</Link>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           {relatedStocks.map((stock) => {
             return (
               <Link
                 prefetch={false}
                 key={stock.symbol}
-                href={`/stocks/${stock.symbol.toLowerCase()}${isSaudiStock ? "?market=tasi" : ""}`}
+                href={`/stocks/${stock.symbol.toLowerCase()}`}
                 className="p-3 border-2 border-black bg-[var(--app-surface-strong)] hover:bg-yellow-400 dark:hover:bg-yellow-500 hover:text-black font-mono transition-all text-center flex flex-col justify-center items-center gap-1 cursor-pointer active:translate-x-[2px] active:translate-y-[2px]"
               >
                 <span className="font-extrabold text-base tracking-wide">{stock.symbol}</span>
@@ -1289,7 +1290,7 @@ export default function StockDetailClient({
                 </>
               )}
               {isSaudiStock && (
-                <Link href="/stocks?market=tasi" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                <Link href="/stocks" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
                   {language === "ar" ? "دليل أسهم السوق السعودي (تاسي)" : "Saudi Exchange (TASI) Directory"}
                 </Link>
               )}

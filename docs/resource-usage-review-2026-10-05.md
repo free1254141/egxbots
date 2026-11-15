@@ -71,7 +71,24 @@
 ### ب) آلية Two-Tier Caching & On-Demand Revalidation
 * **دور بايثون (Hugging Face):** ينفّذ الحسابات اليومية مرة واحدة بعد إغلاق الجلسة، يحدّث Supabase، ثم يرسل إشارة إبطال التاجات لـ `POST /api/revalidate` لتطهير الكاش المتأثر فقط (`DAILY_CACHE_TAGS`).
 * **دور Vercel Edge & Next.js ISR:** يحتفظ بالصفحات والـ JSON العام لمدة **7 أيام (`604800s`)** في الـ Edge بدون إعادة توليد تلقائية أثناء الإجازات أو ارتفاع عدد الزوار.
-* **البيانات الخاصة بالمستخدم:** لا تُخزَّن أبداً على Edge مشترك؛ بل تبقى محمية بـ `private` Headers وRLS، مع تقليل ضغطها بالـ `sessionStorage` قصير/متوسط الأجل (`15m–30m`) وتوحيد الطلبات المتزامنة (`in-flight deduplication`).
+* **البيانات الخاصة بالمستخدم:** لا تُخزَّن أبداً على Edge مشترك؛ بل تبقى محمية بـ `private` Headers وRLS، مع تقليل ضغطها بالـ `sessionStorage`/`localStorage` وتوحيد الطلبات المتزامنة (`in-flight deduplication`).
+
+---
+
+## 3.5 تدقيق 15 نوفمبر 2026: إصلاح تسريبات الكوتا بعد إطلاق السوق السعودي (TASI)
+
+بعد إطلاق صفحات وبيانات السوق السعودي (Commits `e6295d6f`, `b319fddc`, `fc244124`)، أظهر فحص **Vercel Observability (نافذة 12 ساعة حتى 15 نوفمبر 2026 — 10:59 صباحاً)** ارتفاع استهلاك الدوال في 10 مسارات رئيسية:
+
+1. **`/stocks/[symbol]` (`374` استدعاء / `38s` Active CPU):**
+   * **السبب الجذري:** إضافة `searchParams?: Promise<{ market?: string }>` وتنفيذ `await searchParams` داخل `generateMetadata` و`StockDetailPage` في `web/src/app/stocks/[symbol]/page.tsx` أخرج المسار بالكامل من وضع Static/ISR (`revalidate = 604800`) وأجبر Next.js 15 على Dynamic Rendering مع كل زيارة، كما غابت رموز تاسي عن `generateStaticParams()` وحملت الروابط معامل `?market=tasi`.
+   * **الإصلاح:** إزالة `searchParams` نهائياً من `web/src/app/stocks/[symbol]/page.tsx`، والاعتماد على صيغة الرمز الرباعي (`^\d{4}$` عبر `isSaudiSymbol`) لاكتشاف السوق السعودي، وإدراج كافة رموز `SAUDI_STOCK_NAMES_AR` في `generateStaticParams()`، وإزالة `?market=tasi` من روابط `/stocks/${symbol}` في `StocksClient.tsx` و`StockDetailClient.tsx` و`TrapDetector.tsx` و`UnusualActivity.tsx` و`MarketClient.tsx`.
+2. **`/api/recommendations/chart-markers` (`100` استدعاء / `4.17s` CPU) و`/api/market/status` (`52` استدعاء / `2.32s` CPU):**
+   * **السبب الجذري:** الزوار المسجلون على الباقة المجانية لم يمرّروا `?scope=public` إلى `chart-markers` فكان يتم تجاوز CDN Edge cache، كما كانت مكونات `StockDetailClient` و`chart/page.tsx` و`TradingViewChart` تطلق الطلبات أثناء `authLoading`، والاعتماد المسبق على `egx_pro_active` غير المربوط بالمستخدم كان يعرض الماركرز لخيارات متعارضة عند تبديل الحسابات؛ كما استدعت `getPublicMarketOverview` مساري `/api/market/status` و`/api/market/breadth` بدون `?market=` ما كان يُعيد `private, no-store`.
+   * **الإصلاح:** حجب استدعاء الماركرز أثناء `authLoading` في `StockDetailClient.tsx` و`chart/page.tsx` و`TradingViewChart.tsx`، وإزالة الاعتماد المباشر على `egx_pro_active` لصالح `fetchUserQuotaCached(viewerId)` المقيّد بـ `userId` (مع مسح `egx_pro_active` عند `signOut` في `AuthContext.tsx`)، وتمرير `scope=public` + `cache: "default"` لغير المشتركين في Pro مع كاش `sessionStorage` (`egxbots_chart_markers_v2:*` لمدة 30 دقيقة) وتمرير `?market=` في `getPublicMarketOverview`.
+3. **`/api/user/quota` (`212` استدعاء / `19s` CPU):**
+   * **الإصلاح:** حفظ كاش الحصة (`egxbots_user_quota_v2:*` لمدة 30 دقيقة) في `sessionStorage` و`localStorage` معاً ومزامنة `egx_pro_active` بدون مسحه مع كل Reload (إلا عند `invalidateUserQuotaCache` أو `broadcastEntitlements`)، وتوجيه `PlanQuotaCard.tsx` لاستخدام `fetchUserQuotaCached`، ودمج الـ `useEffect` المزدوج في `PricingClient.tsx` مع تقييد تحديثات `focus`/`visibilitychange` بـ debounce 5 ثوانٍ وتخطيها بعد تأكيد Pro.
+4. **`/api/portfolio` (`113` استدعاء / `11s`) و`/api/profile/telegram-pro` (`65` استدعاء) و`/api/portfolio/performance` (`37`) و`/api/automations` (`37`):**
+   * **الإصلاح:** تخزين لقطة المحفظة في `sessionStorage` و`localStorage` لمدة 6 ساعات في `PortfolioContext.tsx` وقصر الجلب التلقائي عند التحميل على `/profile` و`/chat` (أو وجود كاش)، وإضافة كاش `sessionStorage` لمدة 30 دقيقة في `TelegramProContext.tsx` و`usePortfolioReport.ts` (مع تضمين `cash_balance` والمراكز في البصمة لضمان تحميل سجل المعاملات والربح المحقق حتى عند تصفير المراكز) و`ScheduledAutomationsCard.tsx` (معزولاً بـ `userId` ومشمولاً بالإبطال الفوري داخل `broadcastEntitlements`).
 
 ---
 

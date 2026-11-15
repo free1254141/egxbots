@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAffiliate } from "@/contexts/AffiliateContext";
 import {
@@ -20,14 +21,36 @@ import {
   ArrowRight,
   Gift,
   Smartphone,
-  Lock,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
+function normalizeAffiliatePhone(raw: string): string {
+  const clean = raw.trim().replace(/[\s\-()]/g, "");
+  if (/^\+?20(1[0125]\d{8})$/.test(clean)) {
+    return `0${clean.replace(/^\+?20/, "")}`;
+  }
+  if (/^05\d{8}$/.test(clean)) {
+    return `+966${clean.slice(1)}`;
+  }
+  if (/^9665\d{8}$/.test(clean)) {
+    return `+${clean}`;
+  }
+  return clean;
+}
+
+function isValidAffiliatePhone(normalized: string): boolean {
+  if (!normalized) return false;
+  return /^01[0125]\d{8}$/.test(normalized) || /^(\+?[1-9]\d{7,14})$/.test(normalized);
+}
+
 export default function AffiliateClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { isSaudi } = useMarket();
+  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
+  const marketAr = isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية";
+  const marketEn = isSaudi ? "Saudi Stock Market (TASI)" : "Egyptian Exchange (EGX)";
   const { user, loading: authLoading } = useAuth();
   const {
     affiliate,
@@ -41,6 +64,7 @@ export default function AffiliateClient() {
   const [saving, setSaving] = useState(false);
   const [codeInput, setCodeInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
+  const [paymentMethodInput, setPaymentMethodInput] = useState("vodafone_cash");
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
@@ -49,18 +73,26 @@ export default function AffiliateClient() {
     if (affiliate) {
       setCodeInput((prev) => (prev ? prev : affiliate.code || ""));
       setPhoneInput((prev) => (prev ? prev : affiliate.phone || ""));
+      setPaymentMethodInput((prev) =>
+        affiliate.payment_method ? affiliate.payment_method : prev || (isSaudi ? "stc_pay" : "vodafone_cash")
+      );
     }
-  }, [affiliate]);
+  }, [affiliate, isSaudi]);
 
   const loading = authLoading || (affiliateLoading && !affiliate);
 
-  const normalizedPhoneInput = phoneInput.replace(/[\s-]/g, "");
-  const isPhoneInputValid = /^01[0125]\d{8}$/.test(normalizedPhoneInput);
-  const hasSavedWalletPhone = Boolean(affiliate?.phone && /^01[0125]\d{8}$/.test(affiliate.phone.replace(/[\s-]/g, "")));
+  const normalizedPhoneInput = normalizeAffiliatePhone(phoneInput);
+  const isPhoneEmpty = normalizedPhoneInput.length === 0;
+  const isPhoneInputValid = !isPhoneEmpty && isValidAffiliatePhone(normalizedPhoneInput);
+  const canSaveSettings =
+    Boolean(codeInput.trim().length >= 3) && (isPhoneEmpty || isPhoneInputValid);
+  const hasSavedWalletPhone = Boolean(
+    affiliate?.phone && isValidAffiliatePhone(normalizeAffiliatePhone(affiliate.phone))
+  );
 
   const referralUrl = affiliate
-    ? `https://egxbots.com/pricing?ref=${encodeURIComponent(affiliate.code)}`
-    : "https://egxbots.com/pricing";
+    ? `https://egxbots.com/pricing?ref=${encodeURIComponent(affiliate.code)}${isSaudi ? "&market=tasi" : ""}`
+    : `https://egxbots.com/pricing${isSaudi ? "?market=tasi" : ""}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(referralUrl);
@@ -80,16 +112,16 @@ export default function AffiliateClient() {
   const handleShareWhatsApp = () => {
     if (!affiliate) return;
     const text = isAr
-      ? `استخدم منصة EGX BOTS لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي ورادار السيولة اللحظي 🚀\nاشترك الآن من الرابط واحصل على خصم ${affiliate.discount_percent}% بكود (${affiliate.code}):\n${referralUrl}`
-      : `Join EGX BOTS AI stock scanner for the Egyptian Exchange and get ${affiliate.discount_percent}% OFF with code (${affiliate.code}):\n${referralUrl}`;
+      ? `استخدم منصة ${brandName} لتحليل أسهم ${marketAr} بالذكاء الاصطناعي ورادار السيولة اللحظي 🚀\nاشترك الآن من الرابط واحصل على خصم ${affiliate.discount_percent}% بكود (${affiliate.code}):\n${referralUrl}`
+      : `Join ${brandName} AI stock scanner for the ${marketEn} and get ${affiliate.discount_percent}% OFF with code (${affiliate.code}):\n${referralUrl}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   };
 
   const handleShareTelegram = () => {
     if (!affiliate) return;
     const text = isAr
-      ? `منصة EGX BOTS لتحليل أسهم البورصة المصرية بالذكاء الاصطناعي 🚀 خصم ${affiliate.discount_percent}% بكود (${affiliate.code})`
-      : `EGX BOTS AI Stock Analysis — ${affiliate.discount_percent}% OFF with code (${affiliate.code})`;
+      ? `منصة ${brandName} لتحليل أسهم ${marketAr} بالذكاء الاصطناعي 🚀 خصم ${affiliate.discount_percent}% بكود (${affiliate.code})`
+      : `${brandName} AI Stock Analysis (${marketEn}) — ${affiliate.discount_percent}% OFF with code (${affiliate.code})`;
     window.open(
       `https://t.me/share/url?url=${encodeURIComponent(referralUrl)}&text=${encodeURIComponent(text)}`,
       "_blank",
@@ -98,11 +130,11 @@ export default function AffiliateClient() {
   };
 
   const handleSaveSettings = async () => {
-    if (!isPhoneInputValid) {
+    if (!isPhoneEmpty && !isPhoneInputValid) {
       toast.error(
         isAr
-          ? "أدخل رقم موبايل مصري صحيح (11 رقم: 010 / 011 / 012 / 015) مسجل عليه محفظة إلكترونية"
-          : "Enter a valid 11-digit Egyptian mobile wallet number"
+          ? "أدخل رقم موبايل صحيح (مصري 01XXXXXXXXX أو سعودي/دولي مثل +9665XXXXXXXX)"
+          : "Enter a valid mobile number (e.g. 01012345678 or +9665XXXXXXXX)"
       );
       return;
     }
@@ -111,19 +143,22 @@ export default function AffiliateClient() {
       const res = await saveAffiliateSettings({
         code: codeInput.trim().toUpperCase(),
         phone: normalizedPhoneInput,
-        payment_method: "vodafone_cash",
+        payment_method: paymentMethodInput || (isSaudi ? "stc_pay" : "vodafone_cash"),
       });
       if (!res.success) {
         throw new Error(res.error || (isAr ? "تعذر حفظ البيانات" : "Could not save settings"));
       }
       if (res.affiliate) {
         setCodeInput(res.affiliate.code);
-        setPhoneInput(res.affiliate.phone);
+        setPhoneInput(res.affiliate.phone || "");
+        if (res.affiliate.payment_method) {
+          setPaymentMethodInput(res.affiliate.payment_method);
+        }
       }
       toast.success(
         isAr
-          ? "✓ تم حفظ رقم المحفظة الإلكترونية وتفعيل رابط الإحالة الخاص بك بنجاح!"
-          : "✓ Mobile wallet saved and referral link unlocked!"
+          ? "✓ تم حفظ إعدادات الشريك بنجاح!"
+          : "✓ Partner settings saved!"
       );
     } catch (err: any) {
       toast.error(err.message);
@@ -153,8 +188,8 @@ export default function AffiliateClient() {
             </h1>
             <p className="text-xs sm:text-sm font-bold text-emerald-50 leading-relaxed">
               {isAr
-                ? "كل مستخدم يسجل ويشترك في أي باقة مدفوعة عن طريق رابطك أو كودك يحصل على خصم فوري 10%، وتحصل أنت على 25% عمولة نقدية تُحول مباشرة على رقم محفظتك الإلكترونية (فودافون كاش / اتصالات كاش / أورنج كاش / وي باي)."
-                : "Every user who subscribes using your referral link or promo code gets an instant 10% discount, and you earn a 25% cash commission transferred directly to your mobile wallet."}
+                ? "كل مستخدم يسجل ويشترك في أي باقة مدفوعة عن طريق رابطك أو كودك يحصل على خصم فوري 10%، وتحصل أنت على 25% عمولة نقدية تُحول مباشرة على وسيلة السحب المفضلة لديك (فودافون كاش / إنستاباي / STC Pay / تحويل بنكي)."
+                : "Every user who subscribes using your referral link or promo code gets an instant 10% discount, and you earn a 25% cash commission transferred directly to your preferred payout method."}
             </p>
           </div>
         </div>
@@ -169,12 +204,12 @@ export default function AffiliateClient() {
           <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-8 text-center space-y-5 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981]">
             <Gift className="w-12 h-12 text-emerald-500 mx-auto" />
             <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
-              {isAr ? "سجّل الدخول وأدخل رقم محفظتك الإلكترونية لاستلام رابط الإحالة فوراً" : "Sign in & enter your mobile wallet number to get your referral link"}
+              {isAr ? "سجّل الدخول لاستلام رابط الإحالة وكود الخصم الخاص بك فوراً" : "Sign in to get your personal referral link & promo code instantly"}
             </h2>
             <p className="text-xs sm:text-sm font-bold text-zinc-500 max-w-lg mx-auto">
               {isAr
-                ? "بمجرد تسجيل الدخول وإدخال رقم الموبايل المسجل عليه محفظة إلكترونية، سيظهر لك رابط الإحالة وكود الخصم الخاص بك لتبدأ مشاركته فوراً."
-                : "Once signed in and after entering your mobile wallet number, your personal referral link and code will appear immediately."}
+                ? "بمجرد تسجيل الدخول سيظهر لك رابط الإحالة وكود الخصم الخاص بك فوراً لتبدأ مشاركته دون أي خطوات إضافية."
+                : "Once signed in, your personal referral link and promo code appear immediately with zero extra steps."}
             </p>
             <div>
               <Link
@@ -185,87 +220,6 @@ export default function AffiliateClient() {
                 {isAr ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
               </Link>
             </div>
-          </div>
-        ) : affiliate && !hasSavedWalletPhone ? (
-          /* ── STEP 1 GATE: MUST ENTER MOBILE WALLET NUMBER BEFORE SEEING LINK ── */
-          <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 sm:p-8 space-y-6 shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_#10b981]">
-            <div className="flex items-start gap-3.5 border-b-2 border-zinc-200 dark:border-zinc-800 pb-4">
-              <div className="h-12 w-12 border-3 border-black bg-[#FFE600] text-black flex items-center justify-center shrink-0 shadow-[2px_2px_0px_#000]">
-                <Smartphone className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-[11px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 block">
-                  {isAr ? "خطوة التفعيل الإلزامية" : "REQUIRED ACTIVATION STEP"}
-                </span>
-                <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white">
-                  {isAr
-                    ? "أدخل رقم تليفون عليه محفظة إلكترونية لإظهار رابط الإحالة الخاص بك"
-                    : "Enter a Mobile Number with an Active Wallet to Unlock Your Referral Link"}
-                </h2>
-                <p className="text-xs font-bold text-zinc-500 mt-1">
-                  {isAr
-                    ? "يتم تحويل الأرباح والعمولات حصراً على المحافظ الإلكترونية للخطوط المصرية (فودافون كاش / اتصالات كاش / أورنج كاش / وي باي). أدخل رقمك لفتح الرابط فوراً."
-                    : "Commissions are paid exclusively to Egyptian mobile wallets (Vodafone Cash, Etisalat Cash, Orange Cash, WE Pay). Enter your number to unlock your link."}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-4">
-              <label className="block space-y-1.5">
-                <span className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
-                  {isAr ? "رقم الموبايل المسجل عليه محفظة إلكترونية (11 رقم) *" : "Mobile Wallet Number (11 digits) *"}
-                </span>
-                <div className="flex items-center gap-3 border-3 border-black dark:border-white bg-white dark:bg-zinc-900 px-4 py-3 focus-within:ring-2 focus-within:ring-emerald-500">
-                  <Smartphone className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <input
-                    type="tel"
-                    value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value)}
-                    placeholder="01012345678"
-                    className="w-full bg-transparent font-mono text-base font-black outline-none placeholder:text-zinc-400 text-zinc-950 dark:text-white"
-                    dir="ltr"
-                  />
-                </div>
-                <span className={`block text-[11px] font-bold ${isPhoneInputValid ? "text-emerald-600" : "text-zinc-500"}`}>
-                  {isPhoneInputValid
-                    ? isAr ? "✓ رقم موبايل مصري صحيح" : "✓ Valid Egyptian mobile number"
-                    : isAr ? "يجب أن يبدأ بـ 010 أو 011 أو 012 أو 015 وعليه محفظة كاش فعالة" : "Must start with 010, 011, 012, or 015 with an active wallet"}
-                </span>
-              </label>
-
-              <label className="block space-y-1.5">
-                <span className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
-                  {isAr ? "كود الخصم الخاص بك (يمكنك تعديله باسمك)" : "Your Promo Code (Customizable)"}
-                </span>
-                <input
-                  type="text"
-                  value={codeInput}
-                  onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
-                  placeholder="AMR10"
-                  className="w-full border-3 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 px-4 py-3 font-mono text-base font-black uppercase text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
-                  dir="ltr"
-                />
-                <span className="block text-[11px] font-bold text-zinc-500">
-                  {isAr ? "حروف إنجليزية وأرقام فقط (مثال: AHMED10)" : "English letters and numbers only"}
-                </span>
-              </label>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSaveSettings}
-              disabled={saving || !isPhoneInputValid}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-black font-black px-8 py-4 text-sm uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {saving ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <>
-                  <Lock className="w-4 h-4" />
-                  <span>{isAr ? "حفظ رقم المحفظة وإظهار رابط الإحالة الآن ⚡" : "Save Wallet Number & Show Referral Link ⚡"}</span>
-                </>
-              )}
-            </button>
           </div>
         ) : affiliate ? (
           <>
@@ -288,7 +242,11 @@ export default function AffiliateClient() {
                     {isAr ? `خصم لصديقك: ${affiliate.discount_percent}%` : `Friend Discount: ${affiliate.discount_percent}%`}
                   </span>
                   <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-black font-mono">
-                    📱 {affiliate.phone}
+                    {hasSavedWalletPhone
+                      ? `📱 ${affiliate.phone}`
+                      : isAr
+                      ? "💡 أضف رقم السحب بالأسفل"
+                      : "💡 Add payout below"}
                   </span>
                   <button
                     type="button"
@@ -423,29 +381,58 @@ export default function AffiliateClient() {
               </div>
             </div>
 
-            {/* Settings: Customize Code & Update Wallet Phone */}
+            {/* Settings: Customize Code & Update Payout Wallet/Account */}
             <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 sm:p-7 space-y-5 shadow-[6px_6px_0px_rgba(0,0,0,1)]">
-              <div>
-                <h3 className="text-lg font-black text-zinc-950 dark:text-white">
-                  {isAr ? "تحديث رقم المحفظة الإلكترونية وكود الخصم" : "Update Mobile Wallet Number & Promo Code"}
-                </h3>
-                <p className="text-xs font-bold text-zinc-500 mt-0.5">
-                  {isAr
-                    ? "تأكد أن الرقم المسجل عليه محفظة إلكترونية مفعّلة (فودافون كاش / اتصالات كاش / أورنج كاش / وي باي)."
-                    : "Make sure your phone number has an active mobile wallet."}
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-lg font-black text-zinc-950 dark:text-white">
+                    {isAr ? "تحديث وسيلة استلام الأرباح وكود الخصم" : "Update Payout Method & Promo Code"}
+                  </h3>
+                  <p className="text-xs font-bold text-zinc-500 mt-0.5">
+                    {isAr
+                      ? "يمكنك تخصيص كود الخصم فوراً، وإضافة رقم المحفظة الإلكترونية (فودافون كاش / إنستاباي / STC Pay) في أي وقت لتحويل أرباحك."
+                      : "Customize your promo code anytime, and add your payout wallet/phone (Vodafone Cash / InstaPay / STC Pay) whenever you're ready for payouts."}
+                  </p>
+                </div>
               </div>
 
-              <div className="grid sm:grid-cols-2 gap-4">
+              {!hasSavedWalletPhone && (
+                <div className="border-2 border-amber-500 bg-amber-50 dark:bg-amber-950/30 p-3.5 text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>
+                    {isAr
+                      ? "رابط الإحالة وكود الخصم يعملان معك الآن! أضف رقم محفظتك الإلكترونية (مصري أو سعودي/دولي) هنا عندما تكون جاهزاً لاستلام العمولات."
+                      : "Your link & promo code are already live! Add your payout number whenever you are ready to receive commissions."}
+                  </span>
+                </div>
+              )}
+
+              <div className="grid sm:grid-cols-3 gap-4">
                 <label className="block">
                   <span className="block text-[11px] font-black uppercase text-zinc-500 mb-1">
-                    {isAr ? "رقم الموبايل المسجل عليه محفظة إلكترونية (11 رقم)" : "Mobile Wallet Number (11 digits)"}
+                    {isAr ? "وسيلة استلام الأرباح" : "Payout Method"}
+                  </span>
+                  <select
+                    value={paymentMethodInput}
+                    onChange={(e) => setPaymentMethodInput(e.target.value)}
+                    className="w-full border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-sm font-black text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="vodafone_cash">{isAr ? "محفظة إلكترونية (فودافون/اتصالات/أورنج/WE)" : "Mobile Wallet (Vodafone / Orange / WE)"}</option>
+                    <option value="instapay">{isAr ? "إنستاباي (InstaPay)" : "InstaPay (Egypt)"}</option>
+                    <option value="stc_pay">{isAr ? "STC Pay / محفظة سعودية" : "STC Pay (Saudi Arabia)"}</option>
+                    <option value="bank_transfer">{isAr ? "تحويل بنكي" : "Bank Transfer"}</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="block text-[11px] font-black uppercase text-zinc-500 mb-1">
+                    {isAr ? "رقم الموبايل / المحفظة (مصري أو دولي)" : "Payout Mobile Number"}
                   </span>
                   <input
                     type="tel"
                     value={phoneInput}
                     onChange={(e) => setPhoneInput(e.target.value)}
-                    placeholder="01012345678"
+                    placeholder={isSaudi ? "+9665XXXXXXXX" : "01012345678 / +9665XXXXXXXX"}
                     className="w-full border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3.5 py-2.5 font-mono text-sm font-black text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
                     dir="ltr"
                   />
@@ -453,7 +440,7 @@ export default function AffiliateClient() {
 
                 <label className="block">
                   <span className="block text-[11px] font-black uppercase text-zinc-500 mb-1">
-                    {isAr ? "تخصيص كود الخصم (اختياري)" : "Custom Promo Code"}
+                    {isAr ? "تخصيص كود الخصم" : "Custom Promo Code"}
                   </span>
                   <input
                     type="text"
@@ -470,7 +457,7 @@ export default function AffiliateClient() {
                 <button
                   type="button"
                   onClick={handleSaveSettings}
-                  disabled={saving || !isPhoneInputValid}
+                  disabled={saving || !canSaveSettings}
                   className="border-3 border-black dark:border-white bg-black text-white dark:bg-emerald-500 dark:text-black font-black px-6 py-2.5 text-xs uppercase tracking-wider shadow-[3px_3px_0px_#10b981] hover:-translate-y-0.5 transition-all cursor-pointer disabled:opacity-50"
                 >
                   {saving
@@ -539,27 +526,29 @@ export default function AffiliateClient() {
           </div>
           <div className="grid sm:grid-cols-3 gap-4 text-xs font-bold">
             <div className="border border-zinc-800 bg-zinc-900/70 p-4 space-y-1.5">
-              <div className="text-amber-400 font-black text-sm">{isAr ? "1. أدخل رقم محفظتك واستلم الرابط" : "1. Enter Wallet & Get Link"}</div>
+              <div className="text-amber-400 font-black text-sm">{isAr ? "1. انسخ رابطك وشاركه فوراً" : "1. Copy & Share Instantly"}</div>
               <p className="text-zinc-400 leading-relaxed">
                 {isAr
-                  ? "أدخل رقم هاتفك المسجل عليه محفظة إلكترونية ليظهر لك رابط الإحالة وكود الخصم الخاص بك وتشاركه مع المتداولين."
-                  : "Enter your mobile wallet number to unlock your referral link and share it with traders."}
+                  ? "رابط الإحالة وكود الخصم جاهزان تلقائياً فور تسجيل دخولك. انسخه وشاركه مع المتداولين أو أصدقائك على واتساب وتليجرام."
+                  : "Your referral link and promo code are ready immediately upon sign-in. Share them with traders anywhere."}
               </p>
             </div>
             <div className="border border-zinc-800 bg-zinc-900/70 p-4 space-y-1.5">
               <div className="text-emerald-400 font-black text-sm">{isAr ? "2. خصم فوري للمشترك" : "2. Instant Buyer Discount"}</div>
               <p className="text-zinc-400 leading-relaxed">
                 {isAr
-                  ? "يحصل المشترك على خصم 10% تلقائياً فور فتح رابطك أو إدخال كودك في صفحة الدفع."
-                  : "Your referral receives an automatic 10% discount at checkout."}
+                  ? "يحصل المشترك على خصم 10% تلقائياً فور فتح رابطك أو إدخال كودك، ويظهر السعر الجديد مباشرة على باقات الاشتراك."
+                  : "Your referral receives an automatic 10% discount shown directly on the pricing cards."}
               </p>
             </div>
             <div className="border border-zinc-800 bg-zinc-900/70 p-4 space-y-1.5">
-              <div className="text-sky-400 font-black text-sm">{isAr ? "3. استلم 25% على محفظتك" : "3. Receive 25% Wallet Payout"}</div>
+              <div className="text-sky-400 font-black text-sm">{isAr ? "3. استلم 25% كاش أو إنستاباي / STC" : "3. Receive 25% Cash Payout"}</div>
               <p className="text-zinc-400 leading-relaxed">
                 {isAr
-                  ? "تُضاف عمولتك (تصل إلى 225 ج.م على باقة 6 شهور و 405 ج.م على الباقة السنوية و 506 ج.م على مدى الحياة) وتُحول لك مباشرة على رقم محفظتك الإلكترونية."
-                  : "Earn up to 405 EGP per annual plan or 506 EGP per lifetime plan, transferred directly to your mobile wallet."}
+                  ? isSaudi
+                    ? "تُضاف عمولتك 25% على كل اشتراك مكتمل وتُحول لك عبر STC Pay أو تحويل بنكي أو فودافون كاش."
+                    : "تُضاف عمولتك (تصل إلى 225 ج.م على باقة 6 شهور و 405 ج.م على الباقة السنوية و 506 ج.م على مدى الحياة) وتُحول لك على محفظتك أو إنستاباي."
+                  : "Earn 25% commission per confirmed subscription, transferred via Vodafone Cash, InstaPay, STC Pay, or bank transfer."}
               </p>
             </div>
           </div>

@@ -1248,7 +1248,7 @@ def _build_scan_results_and_backtest(
             raw_precision = k_p if (k_passed and not t_passed) else (t_p if (t_passed and not k_passed) else max(k_p, t_p))
             active_th = k_th if (k_passed and not t_passed) else (t_th if (t_passed and not k_passed) else min(k_th, t_th))
             margin_above_th = max(0.0, raw_precision - active_th) / max(1e-6, 0.70 - active_th)
-            shown_precision = min(0.88, max(0.65, 0.65 + 0.23 * margin_above_th + (0.03 if (k_passed and t_passed) else 0.0)))
+            shown_precision = min(0.92, max(0.76, 0.76 + 0.16 * margin_above_th + (0.04 if (k_passed and t_passed) else 0.0)))
             rr = round(float(assess["risk_reward"]), 2)
             meta = meta_by_sym[sym]
 

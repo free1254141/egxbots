@@ -214,7 +214,6 @@ export default function Footer() {
                   {t("nav.scanner.ai")}
                 </Link>
               </li>
-              {!isSaudi && (
                 <li>
                   <Link
                     href="/news"
@@ -223,7 +222,6 @@ export default function Footer() {
                     {t("nav.scanner.news")}
                   </Link>
                 </li>
-              )}
               <li>
                 <Link
                   href="/scanner/technical"
@@ -258,16 +256,16 @@ export default function Footer() {
                   </Link>
                 </li>
               )}
-              {!isSaudi && (
                 <li>
                   <Link
                     href="/disclosures"
                     className="text-sm font-bold text-yellow-600 dark:text-yellow-400 hover:underline transition-colors"
                   >
-                    {isAr ? "رادار إفصاحات البورصة المصرية (PDF)" : "EGX Disclosures Radar (PDF)"}
+                    {isSaudi
+                      ? (isAr ? "رادار إفصاحات السوق السعودي (تداول)" : "Saudi Tadawul Disclosures Radar")
+                      : (isAr ? "رادار إفصاحات البورصة المصرية (PDF)" : "EGX Disclosures Radar (PDF)")}
                   </Link>
                 </li>
-              )}
               <li>
                 <a
                   href="/artoro.apk"

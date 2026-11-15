@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
+import { fetchFairValueReportCached } from "@/lib/api";
 import {
   isShariaCompliant,
   getStockPurificationMeta,
@@ -103,14 +104,12 @@ export default function ShariaCleanserClient({
       return;
     }
     let active = true;
+    const controller = new AbortController();
     async function load() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/market/fair-value?market=${market}`);
-        if (res.ok) {
-          const data: FairValueReport = await res.json();
-          if (active) setReport(data);
-        }
+        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(market, controller.signal);
+        if (active) setReport(data);
       } catch {
         // Fallback
       } finally {
@@ -120,6 +119,7 @@ export default function ShariaCleanserClient({
     load();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [initialReport, market]);
 

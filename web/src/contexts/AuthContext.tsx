@@ -107,6 +107,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: error?.message ?? null };
       },
       signOut: async () => {
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.removeItem("egx_pro_active");
+          } catch {}
+        }
         await supabase.auth.signOut();
       },
     }),

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
+import { usePathname } from "next/navigation";
 
 export type PortfolioRow = {
   id: string;
@@ -51,10 +52,52 @@ type PortfolioContextValue = {
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 const PORTFOLIO_CACHE_PREFIX = "egxbots_portfolio_snapshot_v1:";
-const PORTFOLIO_CACHE_TTL_MS = 15 * 60 * 1000;
+const PORTFOLIO_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+function readCachedPortfolioSnapshot(cacheKey: string): PortfolioSnapshot | null {
+  if (typeof window === "undefined") return null;
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    try {
+      const raw = storage.getItem(cacheKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ts: number; data: PortfolioSnapshot };
+        if (parsed?.ts && Date.now() - parsed.ts < PORTFOLIO_CACHE_TTL_MS && parsed.data?.ok) {
+          return parsed.data;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return null;
+}
+
+function writeCachedPortfolioSnapshot(cacheKey: string, data: PortfolioSnapshot): void {
+  if (typeof window === "undefined" || !data?.ok) return;
+  const serialized = JSON.stringify({ ts: Date.now(), data });
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    try {
+      storage.setItem(cacheKey, serialized);
+    } catch {
+      // ignore quota errors
+    }
+  }
+}
+
+function removeCachedPortfolioSnapshot(cacheKey: string): void {
+  if (typeof window === "undefined") return;
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    try {
+      storage.removeItem(cacheKey);
+    } catch {
+      // ignore storage errors
+    }
+  }
+}
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const pathname = usePathname();
   const [stored, setStored] = useState<{
     owner: string;
     snapshot: PortfolioSnapshot;
@@ -72,20 +115,23 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         return;
       }
       const cacheKey = `${PORTFOLIO_CACHE_PREFIX}${user.id}`;
-      if (!force && typeof window !== "undefined") {
-        try {
-          const raw = window.sessionStorage.getItem(cacheKey);
-          if (raw) {
-            const parsed = JSON.parse(raw) as { ts: number; data: PortfolioSnapshot };
-            if (parsed?.ts && Date.now() - parsed.ts < PORTFOLIO_CACHE_TTL_MS && parsed.data?.ok) {
-              setStored({ owner: user.id, snapshot: parsed.data });
-              setLoading(false);
-              return;
-            }
-          }
-        } catch {
-          // ignore storage errors
+      if (!force) {
+        const cached = readCachedPortfolioSnapshot(cacheKey);
+        if (cached) {
+          setStored({ owner: user.id, snapshot: cached });
+          setLoading(false);
+          return;
         }
+        const shouldFetchRoute =
+          pathname === null ||
+          pathname.startsWith("/profile") ||
+          pathname.startsWith("/chat");
+        if (!shouldFetchRoute) {
+          setLoading(false);
+          return;
+        }
+      } else {
+        removeCachedPortfolioSnapshot(cacheKey);
       }
       setLoading(true);
       try {
@@ -94,20 +140,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
           const next = await response.json();
           if (generation.current === version) {
             setStored({ owner: user.id, snapshot: next });
-            if (typeof window !== "undefined" && next?.ok) {
-              try {
-                window.sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: next }));
-              } catch {
-                // ignore quota errors
-              }
-            }
+            writeCachedPortfolioSnapshot(cacheKey, next);
           }
         }
       } finally {
         if (generation.current === version) setLoading(false);
       }
     },
-    [user?.id],
+    [pathname, user?.id],
   );
 
   useEffect(() => {

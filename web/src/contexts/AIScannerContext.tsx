@@ -930,7 +930,7 @@ export const AIScannerProvider = ({ children }: { children: ReactNode }) => {
             return;
         }
         const isPublicScope = !userId || isLandingPage;
-        const recsSessionKey = `egxbots_ai_recs_v4:${currentMarket}:${isPublicScope ? "pub" : userId}:${isLandingPage ? "landing" : "full"}:${requestedLimit ?? "default"}`;
+        const recsSessionKey = `egxbots_ai_recs_v5:${currentMarket}:${isPublicScope ? "pub" : userId}:${isLandingPage ? "landing" : "full"}:${requestedLimit ?? "default"}`;
         if (!force && typeof window !== "undefined") {
             try {
                 const rawCached = window.sessionStorage.getItem(recsSessionKey);

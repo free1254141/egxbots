@@ -75,6 +75,8 @@ def _persist_message_background(
     latency_ms: int = 0,
     image_url: Optional[str] = None,
     market: str = "EGX",
+    cached: bool = False,
+    cache_key: Optional[str] = None,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
@@ -100,12 +102,15 @@ def _persist_message_background(
         supabase.from_("ai_chat_sessions").upsert(session_payload, on_conflict="id").execute()
 
         # 2. NOW INSERT MESSAGES INTO ai_chat_messages
-        meta = {
+        meta: Dict[str, Any] = {
             "latency_ms": safe_latency,
             "engine": "deepseek-v3",
             "chat_source": "web_chat",
             "market": market,
+            "cached": bool(cached),
         }
+        if cache_key:
+            meta["cache_key"] = cache_key
         user_row = {
             "session_id": session_id,
             "user_id": user_id,
@@ -395,6 +400,8 @@ async def chat_stream_endpoint(
         async def streaming_wrapper():
             final_reply = ""
             latency_ms = 0
+            was_cached = False
+            used_cache_key: Optional[str] = None
             t_req_start = time.time()
             async for sse_chunk in run_agentic_chat_stream(
                 message=user_msg,
@@ -418,6 +425,8 @@ async def chat_stream_endpoint(
                             if event.get("type") == "done":
                                 final_reply = event.get("reply", "")
                                 latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
+                                was_cached = bool(event.get("cached", False))
+                                used_cache_key = event.get("cache_key")
                         except Exception:
                             pass
                 yield sse_chunk
@@ -437,6 +446,8 @@ async def chat_stream_endpoint(
                         latency_ms=latency_ms,
                         image_url=primary_image_url,
                         market=active_market,
+                        cached=was_cached,
+                        cache_key=used_cache_key,
                     )
                 )
 
@@ -455,6 +466,8 @@ async def chat_stream_endpoint(
         full_reply = ""
         tables = []
         latency_ms = 0
+        was_cached = False
+        used_cache_key: Optional[str] = None
         t_req_start = time.time()
         async for sse_chunk in run_agentic_chat_stream(
             message=user_msg,
@@ -481,6 +494,8 @@ async def chat_stream_endpoint(
                             full_reply = event.get("reply", full_reply)
                             tables = event.get("tables", [])
                             latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
+                            was_cached = bool(event.get("cached", False))
+                            used_cache_key = event.get("cache_key")
                     except Exception:
                         pass
 
@@ -498,6 +513,8 @@ async def chat_stream_endpoint(
                     latency_ms=latency_ms,
                     image_url=primary_image_url,
                     market=active_market,
+                    cached=was_cached,
+                    cache_key=used_cache_key,
                 )
             )
 
@@ -510,4 +527,6 @@ async def chat_stream_endpoint(
             "is_pro": user_is_pro,
             "remaining_quota": remaining_quota,
             "quota_limit": quota_limit,
+            "cached": was_cached,
+            "cache_key": used_cache_key,
         })

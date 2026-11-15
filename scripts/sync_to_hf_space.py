@@ -30,6 +30,8 @@ FILES_TO_SYNC = [
     "api/saudi_stock_aliases.py",
     "api/saudi_train_models.py",
     "api/saudi_telegram_dispatch.py",
+    "api/saudi_news_sync.py",
+    "api/saudi_disclosures_sync.py",
     "api/short_swings_engine.py",
     "api/scanner_alerts_engine.py",
     "api/data/saudi_short_swings_cache.json",

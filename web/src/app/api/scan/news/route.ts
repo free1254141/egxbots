@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseClient, toNumber } from "@/lib/supabase/route-data";
+import { getMarketSupabaseClient, resolveRequestMarket, toNumber, type MarketMode } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { getNewsRows, newsLabel } from "@/lib/news-data";
 
@@ -7,33 +7,35 @@ export const runtime = "nodejs";
 export const revalidate = 86400;
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
-let symbolToSectorCache: Record<string, { ar: string; en: string }> | null = null;
-let lastCacheTime = 0;
+const symbolToSectorCache: Partial<Record<MarketMode, Record<string, { ar: string; en: string }>>> = {};
+const lastCacheTime: Partial<Record<MarketMode, number>> = {};
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const PUBLIC_CACHE_HEADERS = dailyCacheHeaders(DAILY_CACHE_TAGS.news);
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+    const market = resolveRequestMarket(req);
     const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit")) || 20, 100));
     const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
     const sentiment = url.searchParams.get("sentiment") || "all";
     const sector = url.searchParams.get("sector") || "";
  
-    const supabase = getSupabaseClient();
-    let rows = await getNewsRows(url.searchParams);
+    const supabase = getMarketSupabaseClient(market);
+    let rows = await getNewsRows(url.searchParams, market);
 
     // Filter by sector
     if (sector) {
       const nowTime = Date.now();
       const symbolToSector: Record<string, { ar: string; en: string }> = {};
 
-      if (symbolToSectorCache && (nowTime - lastCacheTime < CACHE_TTL)) {
-        Object.assign(symbolToSector, symbolToSectorCache);
+      if (symbolToSectorCache[market] && (nowTime - (lastCacheTime[market] || 0) < CACHE_TTL)) {
+        Object.assign(symbolToSector, symbolToSectorCache[market]);
       } else {
-        const { data: fundRows } = await supabase
-          .from("stock_fundamentals")
-          .select("symbol, data");
+        const [{ data: fundRows }, { data: stockMetaRows }] = await Promise.all([
+          supabase.from("stock_fundamentals").select("symbol, data"),
+          market === "tasi" ? supabase.from("stocks").select("symbol, sector").eq("exchange", "TADAWUL") : Promise.resolve({ data: null }),
+        ]);
 
         if (fundRows) {
           const SECTOR_MAP_LOCAL: Record<string, { ar: string; en: string }> = {
@@ -106,8 +108,24 @@ export async function GET(req: Request) {
             }
             symbolToSector[row.symbol.toUpperCase()] = { ar: matchedAr, en: matchedEn };
           }
-          symbolToSectorCache = { ...symbolToSector };
-          lastCacheTime = nowTime;
+          for (const row of stockMetaRows || []) {
+            if (!row.symbol || !row.sector) continue;
+            const symKey = String(row.symbol).toUpperCase();
+            if (symbolToSector[symKey] && symbolToSector[symKey].en !== "Other") continue;
+            let matchedEn = String(row.sector);
+            let matchedAr = String(row.sector);
+            const lower = matchedEn.toLowerCase();
+            for (const [k, val] of Object.entries(SECTOR_MAP_LOCAL).sort(([a], [b]) => b.length - a.length)) {
+              if (lower === val.en.toLowerCase() || lower === val.ar || lower.includes(k)) {
+                matchedEn = val.en;
+                matchedAr = val.ar;
+                break;
+              }
+            }
+            symbolToSector[symKey] = { ar: matchedAr, en: matchedEn };
+          }
+          symbolToSectorCache[market] = { ...symbolToSector };
+          lastCacheTime[market] = nowTime;
         }
       }
 

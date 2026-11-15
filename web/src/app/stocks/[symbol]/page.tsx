@@ -44,6 +44,9 @@ export async function generateStaticParams() {
   for (const s of ALL_FALLBACK_EGX_SYMBOLS) {
     symbolSet.add(s.toLowerCase());
   }
+  for (const s of Object.keys(SAUDI_STOCK_NAMES_AR)) {
+    symbolSet.add(s.toLowerCase());
+  }
 
   const params: Array<{ symbol: string }> = [];
   for (const sym of symbolSet) {
@@ -56,18 +59,15 @@ interface PageProps {
   params: Promise<{
     symbol: string;
   }>;
-  searchParams?: Promise<{
-    market?: string;
-  }>;
 }
 
-function resolveSymbolAndMarket(rawSymbol: string, queryMarket?: string): {
+function resolveSymbolAndMarket(rawSymbol: string): {
   cleanSymbol: string;
   marketMode: MarketMode;
 } {
   const upper = rawSymbol.toUpperCase();
   const stripped = upper.replace(/\.(SR|SA|TADAWUL)$/i, "");
-  const saudi = isSaudiSymbol(upper) || (queryMarket === "tasi" && /^\d{4}$/.test(stripped));
+  const saudi = isSaudiSymbol(upper) || /^\d{4}$/.test(stripped);
   return {
     cleanSymbol: saudi ? stripped : upper,
     marketMode: saudi ? "tasi" : "egx",
@@ -75,7 +75,7 @@ function resolveSymbolAndMarket(rawSymbol: string, queryMarket?: string): {
 }
 
 // Generate dynamic metadata for SEO search indexers
-export async function generateMetadata({ params, searchParams }: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const raw = (await params).symbol;
   if (raw !== raw.toLowerCase()) {
     return {
@@ -84,8 +84,7 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
       },
     };
   }
-  const resolvedSearch = searchParams ? await searchParams : undefined;
-  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(raw, resolvedSearch?.market);
+  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(raw);
   const isSaudi = marketMode === "tasi";
   const snapshot = await getPublicStockSnapshot(symbol, marketMode);
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
@@ -171,15 +170,14 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
   };
 }
 
-export default async function StockDetailPage({ params, searchParams }: PageProps) {
+export default async function StockDetailPage({ params }: PageProps) {
   const rawSymbol = (await params).symbol;
-  const resolvedSearch = searchParams ? await searchParams : undefined;
-  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(rawSymbol, resolvedSearch?.market);
+  const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(rawSymbol);
   const isSaudi = marketMode === "tasi";
 
   // Enforce lowercase canonical URL: redirect uppercase or suffixed visits
   if (rawSymbol !== rawSymbol.toLowerCase() || (isSaudi && rawSymbol.toLowerCase() !== symbol.toLowerCase())) {
-    redirect(`/stocks/${symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`);
+    redirect(`/stocks/${symbol.toLowerCase()}`);
   }
 
   const snapshot = await getPublicStockSnapshot(symbol, marketMode);

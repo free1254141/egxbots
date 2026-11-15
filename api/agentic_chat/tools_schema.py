@@ -327,12 +327,12 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "enum": ["view", "add", "update", "remove", "sell"],
-                        "description": "نوع العملية",
+                        "enum": ["view", "add", "update", "remove", "sell", "set_cash", "add_cash"],
+                        "description": "نوع العملية (استخدم set_cash لتحديد رصيد الكاش/السيولة الكلي، و add_cash لإضافة سيولة على الرصيد الحالي)",
                     },
                     "symbol": {
                         "type": "string",
-                        "description": "كود السهم مثل COMI أو 2222",
+                        "description": "كود السهم مثل COMI أو 2222 (غير مطلوب مع set_cash أو add_cash)",
                     },
                     "quantity": {
                         "type": "number",
@@ -341,6 +341,10 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     "price": {
                         "type": "number",
                         "description": "سعر الشراء أو البيع بعملة السهم",
+                    },
+                    "cash_amount": {
+                        "type": "number",
+                        "description": "مبلغ السيولة النقدية (الكاش) بعملة المحفظة عند استخدام set_cash أو add_cash",
                     },
                 },
                 "required": ["operation"],

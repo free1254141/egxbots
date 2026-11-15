@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Brain, Activity, UserPlus, Zap, Settings2, BarChart2, Calendar, Target, Clock, AlertTriangle, ChevronDown, Check, X, ShieldAlert, LineChart, FileText, Download, TrendingUp, Layers, Database, Play, EyeOff, UserMinus, Search, RefreshCw, ShieldCheck, HelpCircle, ArrowRightLeft, Lock, Volume2, VolumeX, Edit, Eye, Cpu, History, Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getBacktests, getBacktestTrades } from "@/lib/api";
+import { getBacktests, getBacktestTrades, fetchSaudiBacktestsCached } from "@/lib/api";
 import { selectCanonicalModelCards } from "@/lib/models";
 import { useLanguage } from "@/contexts/LanguageContext";
 import StockLogo from "@/components/StockLogo";
@@ -663,9 +663,7 @@ export default function AIScannerPage() {
         setModelsError(null);
         try {
             if (isSaudi) {
-                const res = await fetch("/api/saudi/backtests");
-                if (!res.ok) throw new Error("Failed to load Saudi model cards");
-                const payload = await res.json();
+                const payload = await fetchSaudiBacktestsCached();
                 const saudiModels = (payload?.models || []).map((row: any) => {
                     const meta = row.metadata || {};
                     const name = row.name || row.model_name || "";
@@ -730,9 +728,7 @@ export default function AIScannerPage() {
         setBacktestsError(null);
         try {
             if (isSaudi) {
-                const res = await fetch("/api/saudi/backtests");
-                if (!res.ok) throw new Error("Failed to load Saudi backtests");
-                const payload = await res.json();
+                const payload = await fetchSaudiBacktestsCached();
                 setBacktests(payload?.backtests || []);
                 return;
             }

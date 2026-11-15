@@ -226,7 +226,7 @@ export default function UnusualActivity() {
                       <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
                         <Link
                           prefetch={false}
-                          href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+                          href={`/stocks/${row.symbol.toLowerCase()}`}
                           className="hover:text-amber-500"
                         >
                           {row.symbol}

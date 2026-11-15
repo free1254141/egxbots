@@ -2,6 +2,7 @@ import type { PredictResponse } from "@/lib/types";
 import type { SimilarityReport } from "@/lib/historical-similarity";
 import type { PortfolioPerformance } from "@/lib/portfolio-performance";
 import { TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import { fetchUserQuotaCached } from "@/lib/user-quota-client";
 
 export async function fetchPortfolioPerformance(signal?: AbortSignal): Promise<PortfolioPerformance> {
   const response = await fetch("/api/portfolio/performance", { cache: "no-store", signal });
@@ -2261,9 +2262,10 @@ export interface PublicMarketOverview {
 }
 
 export async function getPublicMarketOverview(signal?: AbortSignal): Promise<PublicMarketOverview> {
+  const market = resolveStoredBrowserMarket();
   const [statusResponse, breadthResponse] = await Promise.all([
-    fetch("/api/market/status", { signal }),
-    fetch("/api/market/breadth", { signal }),
+    fetch(`/api/market/status?market=${market}`, { signal }),
+    fetch(`/api/market/breadth?market=${market}`, { signal }),
   ]);
   const [status, breadth] = await Promise.all([
     statusResponse.ok ? statusResponse.json() : null,
@@ -2273,6 +2275,7 @@ export async function getPublicMarketOverview(signal?: AbortSignal): Promise<Pub
 }
 
 const CHART_MARKERS_TTL_MS = 30 * 60 * 1000;
+const CHART_MARKERS_STORAGE_PREFIX = "egxbots_chart_markers_v2:";
 const chartMarkersCache = new Map<string, { ts: number; data: { markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] } }>();
 const chartMarkersInFlight = new Map<string, Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }>>();
 let chartMarkersListenersBound = false;
@@ -2283,6 +2286,18 @@ function clearChartMarkersCache(): void {
   chartMarkersEpoch += 1;
   chartMarkersCache.clear();
   chartMarkersInFlight.clear();
+  if (typeof window !== "undefined") {
+    try {
+      for (let i = window.sessionStorage.length - 1; i >= 0; i--) {
+        const key = window.sessionStorage.key(i);
+        if (key && key.startsWith(CHART_MARKERS_STORAGE_PREFIX)) {
+          window.sessionStorage.removeItem(key);
+        }
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
+  }
 }
 
 function bindChartMarkersInvalidationListeners(): void {
@@ -2318,6 +2333,12 @@ function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T>
   });
 }
 
+async function resolveChartMarkersViewerKey(viewerId?: string | null): Promise<string> {
+  if (!viewerId) return "public";
+  const quota = await fetchUserQuotaCached(viewerId).catch(() => null);
+  return quota?.plan?.is_pro === true ? String(viewerId) : "public";
+}
+
 export async function getRecommendationChartHistory(
   symbol: string,
   exchange: string,
@@ -2325,9 +2346,9 @@ export async function getRecommendationChartHistory(
   viewerId?: string | null
 ): Promise<{ markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] }> {
   bindChartMarkersInvalidationListeners();
-  const viewerKey = viewerId ? String(viewerId) : "anon";
+  const viewerKey = await resolveChartMarkersViewerKey(viewerId);
   // In-place sign-in/sign-out changes viewer entitlements; flush cached markers immediately
-  // so Pro picks never linger after sign-out and Free/anon picks refresh on sign-in.
+  // so Pro picks never linger after sign-out and Free/public picks refresh on sign-in.
   if (lastChartViewerKey !== null && lastChartViewerKey !== viewerKey) {
     clearChartMarkersCache();
   }
@@ -2338,6 +2359,20 @@ export async function getRecommendationChartHistory(
   if (cached && Date.now() - cached.ts < CHART_MARKERS_TTL_MS) {
     return cached.data;
   }
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem(`${CHART_MARKERS_STORAGE_PREFIX}${key}`);
+      if (raw) {
+        const parsedStorage = JSON.parse(raw) as { ts: number; data: { markers: RecommendationChartMarker[]; recommendations: RecommendationChartRecord[] } };
+        if (parsedStorage?.ts && Date.now() - parsedStorage.ts < CHART_MARKERS_TTL_MS && parsedStorage.data) {
+          chartMarkersCache.set(key, parsedStorage);
+          return parsedStorage.data;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
   const existing = chartMarkersInFlight.get(key);
   if (existing) {
     return raceWithAbort(existing, signal);
@@ -2346,7 +2381,8 @@ export async function getRecommendationChartHistory(
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
   const params = new URLSearchParams({ symbol, exchange });
-  if (viewerKey === "anon") {
+  const isPublicViewer = viewerKey === "public";
+  if (isPublicViewer) {
     params.set("scope", "public");
   }
   const requestEpoch = chartMarkersEpoch;
@@ -2356,7 +2392,7 @@ export async function getRecommendationChartHistory(
       // Do not bind the shared in-flight request to one component's AbortSignal; callers
       // detach safely via raceWithAbort while simultaneous sibling mounts deduplicate cleanly.
       const response = await fetch(`/api/recommendations/chart-markers?${params}`, {
-        cache: viewerKey === "anon" ? "default" : "no-store",
+        cache: isPublicViewer ? "default" : "no-store",
       });
       if (!response.ok) throw new Error(`Failed to load recommendation history (${response.status})`);
       const data = await response.json();
@@ -2365,7 +2401,15 @@ export async function getRecommendationChartHistory(
         recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
       };
       if (requestEpoch === chartMarkersEpoch) {
-        chartMarkersCache.set(key, { ts: Date.now(), data: parsed });
+        const entry = { ts: Date.now(), data: parsed };
+        chartMarkersCache.set(key, entry);
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(`${CHART_MARKERS_STORAGE_PREFIX}${key}`, JSON.stringify(entry));
+          } catch {
+            // ignore storage quota errors
+          }
+        }
       }
       return parsed;
     } finally {
@@ -2386,4 +2430,77 @@ export async function getRecommendationChartMarkers(
   viewerId?: string | null
 ): Promise<RecommendationChartMarker[]> {
   return (await getRecommendationChartHistory(symbol, exchange, signal, viewerId)).markers;
+}
+
+const DAILY_PUBLIC_JSON_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const dailyPublicJsonInFlight = new Map<string, Promise<any>>();
+
+async function fetchDailyPublicJsonCached<T>(
+  storageKey: string,
+  url: string,
+  ttlMs = DAILY_PUBLIC_JSON_TTL_MS,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ts: number; data: T };
+        if (parsed?.ts && Date.now() - parsed.ts < ttlMs && parsed.data) {
+          return parsed.data;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+  const existing = dailyPublicJsonInFlight.get(storageKey);
+  if (existing) {
+    return raceWithAbort(existing, signal);
+  }
+  const run = (async () => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = (await res.json()) as T;
+      if (typeof window !== "undefined" && data) {
+        try {
+          window.sessionStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), data }));
+        } catch {
+          // ignore storage quota errors
+        }
+      }
+      return data;
+    } finally {
+      dailyPublicJsonInFlight.delete(storageKey);
+    }
+  })();
+  dailyPublicJsonInFlight.set(storageKey, run);
+  return raceWithAbort(run, signal);
+}
+
+export async function fetchFairValueReportCached<T = any>(
+  market: "egx" | "tasi",
+  signal?: AbortSignal,
+): Promise<T> {
+  return fetchDailyPublicJsonCached<T>(
+    `egxbots_fair_value_v1:${market}`,
+    `/api/market/fair-value?market=${market}`,
+    DAILY_PUBLIC_JSON_TTL_MS,
+    signal,
+  );
+}
+
+export async function fetchSaudiBacktestsCached(
+  signal?: AbortSignal,
+): Promise<{ backtests: any[]; models: any[] }> {
+  return fetchDailyPublicJsonCached<{ backtests: any[]; models: any[] }>(
+    "egxbots_saudi_backtests_v1",
+    "/api/saudi/backtests",
+    DAILY_PUBLIC_JSON_TTL_MS,
+    signal,
+  );
 }

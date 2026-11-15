@@ -18,6 +18,7 @@ import {
     ReferenceLine
 } from "recharts";
 import { Loader2, TrendingUp, BarChart3, PieChart as PieIcon, LineChart as LineIcon } from "lucide-react";
+import { useMarket } from "@/contexts/MarketContext";
 
 interface StatsData {
     summary: {
@@ -68,6 +69,7 @@ export default function NewsStats({
     onSectorSelect, 
     onSentimentSelect 
 }: NewsStatsProps) {
+    const { market } = useMarket();
     const [stats, setStats] = useState<StatsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [isDark, setIsDark] = useState(false);
@@ -109,6 +111,7 @@ export default function NewsStats({
             try {
                 let url = "/api/scan/news/stats";
                 const params = new URLSearchParams();
+                params.append("market", market);
                 if (search.trim()) params.append("search", search);
                 if (dateFilter) params.append("date", dateFilter);
                 if (monthFilter) params.append("month", monthFilter);
@@ -132,7 +135,7 @@ export default function NewsStats({
 
         fetchStats();
         return () => controller.abort();
-    }, [search, dateFilter, monthFilter, period]);
+    }, [search, dateFilter, monthFilter, period, market]);
 
     // Fetch the per-stock daily sentiment timeline for the clicked sector over
     // the same period as the Daily Market Sentiment Trend chart.
@@ -146,6 +149,7 @@ export default function NewsStats({
             setSectorTimelineLoading(true);
             try {
                 const params = new URLSearchParams();
+                params.append("market", market);
                 if (search.trim()) params.append("search", search);
                 if (dateFilter) params.append("date", dateFilter);
                 if (monthFilter) params.append("month", monthFilter);

@@ -221,9 +221,9 @@ export default function UsersTab() {
     const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
     const [portfolioLoading, setPortfolioLoading] = useState(false);
 
-    // Clean Tabbed Chart Mode & Range
+    // Clean Tabbed Chart Mode & Range (14d, 30d, 3 months / 90d, 6 months / 180d)
     const [chartTab, setChartTab] = useState<"growth" | "paid" | "market">("growth");
-    const [chartDays, setChartDays] = useState<14 | 30 | 90>(30);
+    const [chartDays, setChartDays] = useState<14 | 30 | 90 | 180>(90);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showTrialModal, setShowTrialModal] = useState(false);
 
@@ -599,7 +599,7 @@ export default function UsersTab() {
 
                             {/* Timeframe Selector */}
                             <div className="flex border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-0.5">
-                                {([14, 30, 90] as const).map((days) => (
+                                {([14, 30, 90, 180] as const).map((days) => (
                                     <button
                                         key={days}
                                         type="button"
@@ -610,7 +610,13 @@ export default function UsersTab() {
                                                 : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                         }`}
                                     >
-                                        {days === 90 ? (isAr ? "90 يوم" : "90d") : isAr ? `${days} يوم` : `${days}d`}
+                                        {days === 180
+                                            ? (isAr ? "6 شهور" : "6m")
+                                            : days === 90
+                                            ? (isAr ? "3 شهور (90 يوم)" : "3m (90d)")
+                                            : isAr
+                                            ? `${days} يوم`
+                                            : `${days}d`}
                                     </button>
                                 ))}
                             </div>

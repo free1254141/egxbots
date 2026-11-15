@@ -272,7 +272,7 @@ export default function TrapDetector() {
                       <td className="py-1 px-2 font-mono font-black text-zinc-950 dark:text-white">
                         <Link
                           prefetch={false}
-                          href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+                          href={`/stocks/${row.symbol.toLowerCase()}`}
                           className="hover:text-emerald-500"
                         >
                           {row.symbol}
@@ -350,7 +350,7 @@ export default function TrapDetector() {
               <Link
                 prefetch={false}
                 key={row.symbol}
-                href={`/stocks/${row.symbol.toLowerCase()}${isSaudi ? "?market=tasi" : ""}`}
+                href={`/stocks/${row.symbol.toLowerCase()}`}
                 className="group border-2 border-zinc-200 bg-white p-3 transition hover:border-emerald-500 dark:border-[#303744] dark:bg-[#171e29]"
               >
                 <div className="flex items-start justify-between gap-2">

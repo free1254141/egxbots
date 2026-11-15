@@ -4,6 +4,8 @@ import { Metadata } from "next";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import Link from "next/link";
 
+export const revalidate = 86400;
+
 export const metadata: Metadata = {
   title: "تقييم الأسهم المصرية والسعودية (EGX & TASI) والاختبارات التاريخية",
   description: "راجع تقييم الأسهم المصرية (EGX) والسعودية (تداول تاسي TASI) والحالات التاريخية المشابهة ونتائجها بعد 5 و10 و20 جلسة، مع حجم العينة وسجل التوصيات. الأداء السابق لا يضمن عائدًا.",

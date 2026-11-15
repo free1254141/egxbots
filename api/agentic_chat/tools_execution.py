@@ -3508,6 +3508,7 @@ def _sync_manage_portfolio(
     quantity: Optional[float] = None,
     price: Optional[float] = None,
     user_prompt: str = "",
+    cash_amount: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Secure portfolio management backed by Supabase `positions` table and `profiles.cash_balance`.
@@ -3540,10 +3541,21 @@ def _sync_manage_portfolio(
             )
             raw_positions = res.data or []
 
-            # Filter real holdings (quantity > 0)
+            # Filter real holdings (quantity > 0) and tracked watchlist rows (quantity missing/0)
             holdings = [
                 p for p in raw_positions
                 if p.get("quantity") is not None and _safe_float(p.get("quantity")) is not None and _safe_float(p.get("quantity")) > 0
+            ]
+            watchlist_only = [
+                {
+                    "symbol": str(p.get("symbol", "")).upper(),
+                    "name": p.get("name") or str(p.get("symbol", "")).upper(),
+                    "entry_price": _safe_float(p.get("entry_price")),
+                    "source": p.get("source"),
+                    "added_at": p.get("added_at"),
+                }
+                for p in raw_positions
+                if p.get("quantity") is None or _safe_float(p.get("quantity")) is None or _safe_float(p.get("quantity")) <= 0
             ]
 
             # 2. Fetch cash balance from `profiles`
@@ -3556,12 +3568,22 @@ def _sync_manage_portfolio(
                 cash = 0.0
 
             if not holdings:
+                if watchlist_only:
+                    wl_syms = ", ".join(w["symbol"] for w in watchlist_only[:10])
+                    msg = (
+                        f"لديك {len(watchlist_only)} سهم مسجل في قائمة المتابعة بالموقع بدون تحديد كمية ({wl_syms}). "
+                        "أرسل لي الكمية وسعر الشراء لأي سهم لتسجيله في حسابات المحفظة الفعلية."
+                    )
+                else:
+                    msg = "محفظتك فاضية حالياً. تقدر تضيف أسهمك هنا بالكتابة أو برفع سكرين شوت لمحفظتك وهحللها فوراً."
                 return {
                     "status": "success",
                     "operation": "view",
-                    "message": "محفظتك فاضية حالياً. تقدر تضيف أسهمك هنا بالكتابة أو برفع سكرين شوت لمحفظتك وهحللها فوراً.",
+                    "message": msg,
                     "positions_count": 0,
                     "positions": [],
+                    "watchlist_count": len(watchlist_only),
+                    "watchlist_positions": watchlist_only,
                     "cash_balance": round(cash, 2),
                     "totals": {
                         "positions_count": 0,
@@ -3700,9 +3722,14 @@ def _sync_manage_portfolio(
             res_payload: Dict[str, Any] = {
                 "status": "success",
                 "operation": "view",
-                "message": f"محفظتك تحتوي على {len(enriched)} سهم.",
+                "message": (
+                    f"محفظتك تحتوي على {len(enriched)} سهم."
+                    + (f" ويوجد {len(watchlist_only)} سهم آخر في قائمة المتابعة بدون كمية محددة." if watchlist_only else "")
+                ),
                 "positions_count": len(enriched),
                 "positions": enriched,
+                "watchlist_count": len(watchlist_only),
+                "watchlist_positions": watchlist_only,
                 "cash_balance": round(cash, 2),
                 "totals": {
                     "positions_count": len(enriched),
@@ -3732,6 +3759,32 @@ def _sync_manage_portfolio(
             "status": "blocked",
             "message": "لم يتم تأكيد طلب تعديل المحفظة من رسالة المستخدم صراحةً.",
         }
+
+    if op in ("set_cash", "add_cash"):
+        amount = _safe_float(cash_amount, 2)
+        if amount is None:
+            amount = _safe_float(price, 2)
+        if amount is None:
+            amount = _safe_float(quantity, 2)
+        if amount is None or amount < 0 or (op == "add_cash" and amount == 0):
+            return {
+                "status": "needs_clarification",
+                "operation": op,
+                "message": "يلزم تحديد مبلغ السيولة النقدية (الكاش) برقم واضح لتحديث رصيد المحفظة.",
+            }
+        try:
+            p_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
+            current_cash = _safe_float(p_res.data[0].get("cash_balance")) or 0.0 if p_res.data else 0.0
+            new_cash = round(amount if op == "set_cash" else (current_cash + amount), 2)
+            sb.from_("profiles").update({"cash_balance": new_cash}).eq("id", user_id).execute()
+            return {
+                "status": "success",
+                "operation": op,
+                "cash_balance": new_cash,
+                "message": f"تم بنجاح تحديث رصيد الكاش (السيولة المتاحة) في محفظتك إلى {new_cash:,.2f} ج.م.",
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر تحديث رصيد الكاش: {str(e)}"}
 
     clean_sym, sym_mkt = _resolve_symbol_and_market(symbol)
     curr_lbl = _currency_for_market(sym_mkt)
@@ -3897,8 +3950,9 @@ async def execute_manage_portfolio(
     quantity: Optional[float] = None,
     price: Optional[float] = None,
     user_prompt: str = "",
+    cash_amount: Optional[float] = None,
 ) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_manage_portfolio, user_id, operation, symbol, quantity, price, user_prompt)
+    return await asyncio.to_thread(_sync_manage_portfolio, user_id, operation, symbol, quantity, price, user_prompt, cash_amount)
 
 
 BENCHMARK_FIXTURES: Dict[str, Any] = {
@@ -4155,8 +4209,13 @@ async def dispatch_tool(
             )
 
         elif tool_name == "get_news":
+            news_syms = arguments.get("symbols")
+            if not news_syms and arguments.get("symbol"):
+                sym_val = str(arguments.get("symbol") or "").strip().upper()
+                if sym_val and sym_val not in ("EGX", "MARKET", "ALL", "TASI", "SAUDI"):
+                    news_syms = [sym_val]
             return await execute_get_news(
-                symbols=arguments.get("symbols"),
+                symbols=news_syms,
                 market=arguments.get("market"),
             )
 
@@ -4204,6 +4263,7 @@ async def dispatch_tool(
                 quantity=arguments.get("quantity"),
                 price=arguments.get("price"),
                 user_prompt=user_prompt,
+                cash_amount=arguments.get("cash_amount"),
             )
 
         elif tool_name == "calculate_position":

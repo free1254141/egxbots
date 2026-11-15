@@ -143,12 +143,8 @@ export default function LandingClient() {
     };
 
     useEffect(() => {
-        if (isSaudi) {
-            setNewsLoading(false);
-            return;
-        }
         setNewsLoading(true);
-        fetchLandingCachedJson("news_3", "/api/scan/news?limit=3")
+        fetchLandingCachedJson(`news_3_${market}`, `/api/scan/news?limit=3&market=${market}`)
             .then(data => {
                 if (data?.data) {
                     setRecentNews(data.data);
@@ -156,7 +152,7 @@ export default function LandingClient() {
             })
             .catch(err => console.error("Error fetching homepage news:", err))
             .finally(() => setNewsLoading(false));
-    }, [isSaudi]);
+    }, [market]);
 
     useEffect(() => {
         if (isSaudi) return;
@@ -1115,8 +1111,7 @@ export default function LandingClient() {
                 </div>
             </section>
 
-            {/* AI News Section (EGX Only) */}
-            {!isSaudi && (
+            {/* AI News Section */}
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">
                 <div className="max-w-6xl mx-auto">
                     <div className="text-center mb-16">
@@ -1127,9 +1122,13 @@ export default function LandingClient() {
                             {isAr ? "آخر أخبار وتحليلات الأسهم بالذكاء الاصطناعي" : "Latest AI Market Intelligence"}
                         </h2>
                         <p className="text-sm sm:text-base text-zinc-500 max-w-xl mx-auto font-bold">
-                            {isAr 
-                                ? "تابع أهم الأخبار المالية وتحليلات معالجة اللغة الطبيعية والذكاء الاصطناعي لأسهم البورصة المصرية."
-                                : "Stay updated with NLP-driven sentiment analytics, corporate news, and AI-generated trading intelligence."}
+                            {isSaudi
+                                ? (isAr
+                                    ? "تابع أهم الأخبار المالية وتحليلات معالجة اللغة الطبيعية والذكاء الاصطناعي لأسهم السوق السعودي (تداول)."
+                                    : "Stay updated with NLP-driven sentiment analytics, corporate news, and AI-generated intelligence for Saudi Tadawul (TASI).")
+                                : (isAr 
+                                    ? "تابع أهم الأخبار المالية وتحليلات معالجة اللغة الطبيعية والذكاء الاصطناعي لأسهم البورصة المصرية."
+                                    : "Stay updated with NLP-driven sentiment analytics, corporate news, and AI-generated trading intelligence.")}
                         </p>
                     </div>
 
@@ -1199,7 +1198,6 @@ export default function LandingClient() {
                     </div>
                 </div>
             </section>
-            )}
 
             {/* Market Analysis Section */}
             <section className="px-4 sm:px-6 lg:px-8 py-20 border-t-4 border-black dark:border-white bg-white dark:bg-zinc-900">

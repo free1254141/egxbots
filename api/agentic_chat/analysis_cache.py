@@ -33,8 +33,12 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from api.stock_aliases import resolve_stock_symbol, ARABIC_STOCK_MAPPINGS
+from api.stock_aliases import resolve_stock_symbol, ARABIC_STOCK_MAPPINGS, _KNOWN_SYMBOLS
 from api.egx_trading_calendar import is_egx_session
+
+# Canonical whitelist of known EGX tickers so arbitrary English words (e.g. "ANALYZE", "PRICE", "SWING")
+# are never mistaken for ticker symbols in string-based cache key detection.
+_VALID_LATIN_TICKERS = frozenset(_KNOWN_SYMBOLS | {"COMI", "FWRY", "TMGH", "SWDY", "PHDC", "SKPC", "ATQA"})
 
 logger = logging.getLogger("agentic_chat.cache")
 
@@ -302,11 +306,14 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
         return None
     safe_args = args if isinstance(args, dict) else {}
 
-    # 1. Single Stock Analysis & Levels
+    # 1. Single Stock Analysis & Levels (reject multi-symbol batches)
     if tool_name in ("get_stock", "get_stock_levels"):
+        raw_symbols_list = safe_args.get("symbols")
+        if isinstance(raw_symbols_list, list) and len(raw_symbols_list) > 1:
+            return None
         raw_sym = safe_args.get("symbol")
-        if not raw_sym and isinstance(safe_args.get("symbols"), list) and len(safe_args["symbols"]) == 1:
-            raw_sym = safe_args["symbols"][0]
+        if not raw_sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
+            raw_sym = raw_symbols_list[0]
         if not raw_sym or not isinstance(raw_sym, str):
             return None
         sym = raw_sym.strip().upper().replace(".CA", "")
@@ -314,8 +321,13 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             return None
         return f"vip_stock_{sym}"
 
-    # 2. Recommendations
+    # 2. Recommendations (reject filtered queries like sharia_only, specific symbols, or closed/historical status)
     if tool_name == "get_recommendations":
+        if safe_args.get("sharia_only") or safe_args.get("symbols") or safe_args.get("symbol"):
+            return None
+        status = str(safe_args.get("status") or "").strip().lower()
+        if status and status not in ("open", "active"):
+            return None
         timeframe = str(safe_args.get("timeframe") or "").lower()
         if "last_week" in timeframe or "past" in timeframe:
             return "vip_recs_last_week"
@@ -325,6 +337,13 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
 
     # 3. Accumulation & Wyckoff Smart Money Flow
     if tool_name == "get_accumulation_stocks":
+        if (
+            safe_args.get("sharia_only")
+            or safe_args.get("sector")
+            or safe_args.get("symbols")
+            or safe_args.get("symbol")
+        ):
+            return None
         return "vip_accumulation"
 
     # 4. Market Overview & Top Movers
@@ -338,6 +357,13 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
 
     # 5. Technical Screener / Scans
     if tool_name in ("get_technical_scan", "screen_stocks"):
+        if (
+            safe_args.get("sharia_only")
+            or safe_args.get("sector")
+            or safe_args.get("symbols")
+            or safe_args.get("symbol")
+        ):
+            return None
         return "vip_tech_screener"
 
     # 6. Two-Stock Comparison
@@ -355,15 +381,99 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
 
     # 7. Fair Value
     if tool_name == "get_fair_value":
+        if safe_args.get("sharia_only"):
+            return None
+        raw_symbols_list = safe_args.get("symbols")
+        if isinstance(raw_symbols_list, list) and len(raw_symbols_list) > 1:
+            return None
         sym = safe_args.get("symbol")
-        return f"vip_fair_value_{str(sym).strip().upper()}" if sym else "vip_fair_value_undervalued"
+        if not sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
+            sym = raw_symbols_list[0]
+        return (
+            f"vip_fair_value_{str(sym).strip().upper().replace('.CA', '')}"
+            if sym
+            else "vip_fair_value_undervalued"
+        )
 
-    # 8. Market News
+    # 8. Market News (supports both singular symbol and plural symbols list)
     if tool_name == "get_news":
+        raw_symbols_list = safe_args.get("symbols")
+        if isinstance(raw_symbols_list, list) and len(raw_symbols_list) > 1:
+            return None
         sym = safe_args.get("symbol")
-        if sym and str(sym).upper() not in ("EGX", "MARKET", "ALL"):
-            return f"vip_news_{str(sym).strip().upper()}"
+        if not sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
+            sym = raw_symbols_list[0]
+        if sym and str(sym).strip().upper() not in ("EGX", "MARKET", "ALL", "TASI", "SAUDI", ""):
+            return f"vip_news_{str(sym).strip().upper().replace('.CA', '')}"
         return "vip_market_news"
+
+    return None
+
+
+def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+    """
+    Resolve 1 or more DeepSeek Round-1 tool calls into a single canonical cache key.
+    Rejects compound batches if any tool call is non-cacheable (e.g. portfolio, sharia, filtered scan).
+    """
+    if not tool_calls or not isinstance(tool_calls, list):
+        return None
+
+    parsed: List[Tuple[str, Dict[str, Any], Optional[str]]] = []
+    for tc in tool_calls:
+        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+        t_name = fn.get("name", "") or ""
+        raw_args = fn.get("arguments", "{}")
+        if isinstance(raw_args, dict):
+            t_args = raw_args
+        else:
+            try:
+                t_args = json.loads(raw_args or "{}")
+            except Exception:
+                t_args = {}
+        k = resolve_tool_call_to_cache_key(t_name, t_args)
+        parsed.append((t_name, t_args, k))
+
+    if len(parsed) == 1:
+        return parsed[0][2]
+
+    # Any non-cacheable tool in a parallel batch disqualifies the whole batch from shared caching
+    if any(p[2] is None for p in parsed):
+        return None
+
+    keys = [p[2] for p in parsed]
+    if len(set(keys)) == 1:
+        return keys[0]
+
+    # Parallel single-stock tools strictly limited to {get_stock, get_stock_levels, get_news} for one symbol
+    stock_tool_names = {"get_stock", "get_stock_levels", "get_news"}
+    names_set = {p[0] for p in parsed}
+    if names_set.issubset(stock_tool_names):
+        syms = set()
+        for _t_name, t_args, k in parsed:
+            # Ensure get_news also targets the stock itself (not generic market news)
+            if _t_name == "get_news" and k == "vip_market_news":
+                return None
+            raw_sym = t_args.get("symbol")
+            if not raw_sym and isinstance(t_args.get("symbols"), list) and len(t_args["symbols"]) == 1:
+                raw_sym = t_args["symbols"][0]
+            if not isinstance(raw_sym, str) or not raw_sym.strip():
+                return None
+            clean_sym = raw_sym.strip().upper().replace(".CA", "")
+            if clean_sym in ("EGX", "MARKET", "ALL", "TASI", "SAUDI"):
+                return None
+            syms.add(clean_sym)
+        if len(syms) == 1:
+            sym = next(iter(syms))
+            if 2 <= len(sym) <= 8:
+                return f"vip_stock_{sym}"
+
+    # Parallel open recommendations discovery (get_recommendations + get_technical_scan / get_accumulation_stocks)
+    if "get_recommendations" in names_set and names_set.issubset(
+        {"get_recommendations", "get_technical_scan", "screen_stocks", "get_accumulation_stocks"}
+    ):
+        recs_keys = [p[2] for p in parsed if p[0] == "get_recommendations"]
+        if recs_keys and all(rk == "vip_open_recommendations" for rk in recs_keys):
+            return "vip_open_recommendations"
 
     return None
 
@@ -372,27 +482,48 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
 # String-Based Canonical Key Resolver (Early Check Fallback)
 # ---------------------------------------------------------------------------
 
+_TASHKEEL_RE = re.compile(r"[\u0617-\u061A\u064B-\u0652\u0640]")
+
+
+def _normalize_ar_for_cache(text: str) -> str:
+    """Normalize Arabic character variants (hamza, alef maqsura, ta marbuta, tashkeel) for cache keys."""
+    if not text:
+        return ""
+    s = _TASHKEEL_RE.sub("", text.lower())
+    s = re.sub(r"[أإآٱ]", "ا", s)
+    s = s.replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
+    return s
+
+
 PERSONAL_WORDS = {
-    "محفظتي", "محفظتك", "محفظه", "محفظة", "اسهمي", "أسهمي", "متوسطي",
-    "شرائي", "اشتريت", "شريت", "بعت", "معايا", "عندي", "عالق", "متعلق",
-    "خسران", "خسرت", "كسبان", "رصيدي", "فلوسي", "مركزي", "مراكزي",
+    _normalize_ar_for_cache(w)
+    for w in {
+        "محفظتي", "محفظتك", "محفظه", "محفظة", "اسهمي", "أسهمي", "متوسطي",
+        "شرائي", "اشتريت", "شريت", "بعت", "معايا", "عندي", "عالق", "متعلق",
+        "خسران", "خسرت", "كسبان", "رصيدي", "فلوسي", "مركزي", "مراكزي",
+    }
 }
 
 DIALOGUE_WORDS = {
-    "ليه", "لماذا", "ازاي", "كيف", "اشمعني", "اشمعنا", "امتي", "امتى", "متي", "متى",
-    "لو", "اذا", "افرض", "تفتكر", "تتوقع", "اشرح", "اشرحلي", "فهمني", "باك", "backtest",
+    _normalize_ar_for_cache(w)
+    for w in {
+        "ليه", "لماذا", "ازاي", "كيف", "اشمعني", "اشمعنا", "امتي", "امتى", "متي", "متى",
+        "لو", "اذا", "افرض", "تفتكر", "تتوقع", "اشرح", "اشرحلي", "فهمني", "باك", "backtest",
+    }
 }
 
 
 def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> Optional[str]:
     """
     String intent classifier matching Vercel analysis-cache.ts.
-    Returns canonical key or None if conversational / personal / image.
+    Returns canonical key or None if conversational / personal / multi-stock / custom calculation / image.
     """
     if not query or (images and len(images) > 0):
         return None
 
-    norm = " " + re.sub(r"[^\w\s]", " ", query.lower()).strip() + " "
+    cleaned = _normalize_ar_for_cache(query)
+    norm = " " + re.sub(r"[^\w\s]", " ", cleaned).strip() + " "
+    norm = re.sub(r"\s+", " ", norm)
     tokens = set(norm.split())
 
     # Skip personal & dialogue questions
@@ -401,67 +532,88 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     if any(w in tokens for w in DIALOGUE_WORDS):
         return None
 
-    # Canonical Market-Wide Buttons & Direct Queries
-    if any(k in norm for k in (" ملخص السوق ", " حالة السوق ", " وضع السوق ", " market summary ")):
+    # Skip custom numerical calculation queries (e.g. zakaat / purification / position sizing on N shares or EGP)
+    has_number = bool(re.search(r"\b\d+\b", norm))
+    if has_number and re.search(r"(?:زكاه|تطهير|حساب|احسب|احسبلي|مبلغ|كميه)", norm):
+        return None
+
+    # Canonical Market-Wide Buttons & Direct Queries (normalized Arabic forms)
+    if any(k in norm for k in (" ملخص السوق ", " حاله السوق ", " وضع السوق ", " market summary ")):
         return "vip_market_summary"
-    if any(k in norm for k in (" اسهم التجميع ", " أسهم التجميع ", " تجميع وايكوف ", " السيولة الذكية ", " accumulation ")):
+    if any(k in norm for k in (" اسهم التجميع ", " تجميع وايكوف ", " السيوله الذكيه ", " accumulation ")):
         return "vip_accumulation"
     if any(k in norm for k in (" المسح الفني ", " مسح فني ", " الماسح الذكي ", " tech screener ")):
         return "vip_tech_screener"
-    if any(k in norm for k in (" اقوي الاسهم ", " أقوى الأسهم ", " افضل الاسهم ", " أفضل الأسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "قطاع", "مسح")):
+    if any(k in norm for k in (" اقوي الاسهم ", " افضل الاسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "قطاع", "مسح")):
         return "vip_top_stocks"
-    if any(k in norm for k in (" اخبار البورصة ", " أخبار البورصة ", " اخبار السوق ", " أخبار السوق ", " إفصاحات السوق ")):
+    if any(k in norm for k in (" اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ")):
         return "vip_market_news"
-    if any(k in norm for k in (" التوصيات المفتوحة ", " كل التوصيات المفتوحة ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ")):
+    if any(k in norm for k in (" التوصيات المفتوحه ", " كل التوصيات المفتوحه ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ")):
         return "vip_open_recommendations"
     if any(k in norm for k in (" توصيات الاسبوع الحالي ", " توصيات هذا الاسبوع ")):
         return "vip_recs_this_week"
     if any(k in norm for k in (" توصيات الاسبوع الماضي ", " توصيات الاسبوع السابق ")):
         return "vip_recs_last_week"
-    if any(k in norm for k in (" اقوي القطاعات ", " أقوى القطاعات ", " أفضل القطاعات ")):
+    if any(k in norm for k in (" اقوي القطاعات ", " افضل القطاعات ")):
         return "vip_top_sectors"
 
     # Single or Two-Stock Comparison query
-    is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|مقارنة|ايهما|أيهما|مقابل|vs|versus)\b", norm))
+    is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|ايهما|مقابل|vs|versus)\b", norm))
     latin_matches = re.findall(r"\b[A-Za-z]{2,8}\b", query)
     stopwords = {"THE", "AND", "FOR", "BUY", "SELL", "BOT", "EGX", "VIP", "AI", "CHAT", "RSI", "MACD", "VS"}
     found_syms: List[str] = []
     for tok in latin_matches:
         u = tok.upper()
-        if u not in stopwords:
+        if u not in stopwords and u in _VALID_LATIN_TICKERS:
             res = resolve_stock_symbol(u)
-            if res and res not in found_syms:
-                found_syms.append(res)
-                if not is_comparison_query:
-                    break
+            sym_clean = (res or u).strip().upper().replace(".CA", "")
+            if sym_clean and sym_clean not in found_syms:
+                found_syms.append(sym_clean)
 
-    if (not found_syms) or (is_comparison_query and len(found_syms) < 2):
-        # Sort by longest alias first so full Arabic names match before short tokens
-        for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
-            ar_low = ar_name.lower()
-            if f" {ar_low} " in norm or f" و{ar_low} " in norm or f" ب{ar_low} " in norm:
-                if sym not in found_syms:
-                    found_syms.append(sym)
-                if not is_comparison_query or len(found_syms) >= 2:
-                    break
+    # Also collect Arabic company aliases across the query (longest-first, masking matched span)
+    ar_scan_norm = norm
+    for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
+        ar_low = _normalize_ar_for_cache(ar_name)
+        matched = False
+        for pat in (f" {ar_low} ", f" و{ar_low} ", f" ب{ar_low} "):
+            if pat in ar_scan_norm:
+                matched = True
+                # Preserve conjunction prefix when removing matched alias so adjacent aliases remain detectable
+                replacement = " و" if pat.startswith(" و") else (" ب" if pat.startswith(" ب") else " ")
+                ar_scan_norm = ar_scan_norm.replace(pat, replacement, 1)
+                break
+        if matched and sym not in found_syms:
+            found_syms.append(sym)
+            if len(found_syms) >= 3:
+                break
 
     if is_comparison_query:
         if len(found_syms) == 2:
-            s1, s2 = sorted(found_syms[:2])
+            s1, s2 = sorted(found_syms)
             return f"vip_compare_{s1}_{s2}"
+        return None
+
+    # Multi-stock non-comparison query (e.g. "حلل سهم COMI و PHDC") must not collapse to first symbol
+    if len(found_syms) > 1:
         return None
 
     found_sym = found_syms[0] if found_syms else None
 
+    # Reject numerical stock calculations (e.g. "500 سهم COMI", "10000 جنيه في COMI")
+    if found_sym and has_number and re.search(r"(?:سهم|اسهم|جنيه|زكاه|تطهير|حساب|احسب|مبلغ)", norm):
+        return None
+
+    # Canonical recommendation prompts without a specific stock symbol
+    if not found_sym and any(k in norm for k in (" رشح لي ", " رشحلي ", " فرص شراء ", " فرصه شراء ", " افضل فرص الشراء ")):
+        return "vip_open_recommendations"
+
     if found_sym:
-        # Check sub-intent
-        if re.search(r"دعم|مقاوم|مستويات|اهداف|هدف|وقف", norm):
-            return f"vip_stock_{found_sym}_levels"
+        # Specialized sub-intents take precedence so e.g. "تحليل مالي لسهم COMI" hits financials, not general analysis
         if re.search(r"اخبار|خبر|افصاح|اعلان", norm):
             return f"vip_stock_{found_sym}_news"
         if re.search(r"كوبون|توزيع|ارباح", norm):
             return f"vip_stock_{found_sym}_divs"
-        if re.search(r"شرعي|حلال|حرام|شريعه", norm):
+        if re.search(r"شرعي|حلال|حرام|شريعه|زكاه|تطهير", norm):
             return f"vip_stock_{found_sym}_sharia"
         if re.search(r"سيوله|تجميع|وايكوف", norm):
             return f"vip_stock_{found_sym}_liquidity"

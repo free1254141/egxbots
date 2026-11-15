@@ -39,6 +39,8 @@ type TelegramProContextValue = {
 };
 
 const EMPTY_INVITE: TelegramProInvite = { is_pro: false, bot_active: false, telegram_chat_id: null };
+const TELEGRAM_PRO_CACHE_PREFIX = "egxbots_telegram_pro_v2:";
+const TELEGRAM_PRO_CACHE_TTL_MS = 30 * 60 * 1000;
 const TelegramProContext = createContext<TelegramProContextValue | null>(null);
 
 export function TelegramProProvider({ children }: { children: ReactNode }) {
@@ -58,12 +60,39 @@ export function TelegramProProvider({ children }: { children: ReactNode }) {
   const loadInvite = useCallback(async (force: boolean) => {
     if (!userId) return;
 
+    const storageKey = `${TELEGRAM_PRO_CACHE_PREFIX}${userId}`;
     const cached = cacheRef.current;
     if (!force && cached?.userId === userId) {
       setInvite(cached.invite);
       setError(cached.error);
       setLoading(false);
       return;
+    }
+
+    if (!force && typeof window !== "undefined") {
+      try {
+        const raw = window.sessionStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { ts: number; invite: TelegramProInvite; error: boolean };
+          if (parsed?.ts && Date.now() - parsed.ts < TELEGRAM_PRO_CACHE_TTL_MS && parsed.invite) {
+            cacheRef.current = { userId, invite: parsed.invite, error: Boolean(parsed.error) };
+            setInvite(parsed.invite);
+            setError(Boolean(parsed.error));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    if (force && typeof window !== "undefined") {
+      try {
+        window.sessionStorage.removeItem(storageKey);
+      } catch {
+        // ignore storage errors
+      }
     }
 
     if (inFlightRef.current?.userId === userId) {
@@ -79,6 +108,13 @@ export function TelegramProProvider({ children }: { children: ReactNode }) {
         const nextError = Boolean(nextInvite.is_pro && !nextInvite.invite_link);
         if (activeUserIdRef.current !== userId) return;
         cacheRef.current = { userId, invite: nextInvite, error: nextError };
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), invite: nextInvite, error: nextError }));
+          } catch {
+            // ignore storage quota errors
+          }
+        }
         setInvite(nextInvite);
         setError(nextError);
       } catch {

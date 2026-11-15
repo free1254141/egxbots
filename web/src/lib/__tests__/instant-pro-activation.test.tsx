@@ -4,6 +4,7 @@ import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import PricingClient, { broadcastEntitlements } from "../../app/pricing/PricingClient";
 import PlanQuotaCard from "../../app/profile/components/PlanQuotaCard";
+import { invalidateUserQuotaCache } from "../../lib/user-quota-client";
 
 jest.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({ user: { id: "test-user-pro" } }),
@@ -22,6 +23,8 @@ describe("instant pro activation", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     localStorage.clear();
+    sessionStorage.clear();
+    invalidateUserQuotaCache();
   });
 
   it("broadcasts entitlements across event and localStorage instantly", () => {

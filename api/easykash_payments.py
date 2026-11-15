@@ -932,6 +932,49 @@ def _verify_callback(payload: Dict[str, Any]) -> bool:
 
 
 
+def _credit_affiliate_commission(order: Dict[str, Any], paid_amount_egp: float, now_iso: str) -> None:
+    """Atomically mark an order's affiliate commission earned and increment affiliate totals."""
+    aff_id = order.get("affiliate_id")
+    order_id = str(order.get("id") or "")
+    comm_val = float(order.get("commission_amount_egp") or 0)
+    if not aff_id or not order_id or comm_val <= 0 or order.get("commission_status") in ("earned", "paid"):
+        return
+
+    _init_supabase()
+    if not supabase:
+        return
+
+    try:
+        claimed = (
+            supabase.table("local_payment_orders")
+            .update({"commission_status": "earned", "updated_at": now_iso})
+            .eq("id", order_id)
+            .or_("commission_status.is.null,commission_status.eq.pending")
+            .execute()
+        )
+        if not claimed.data:
+            return
+
+        order["commission_status"] = "earned"
+        aff_res = (
+            supabase.table("affiliates")
+            .select("total_sales_count,total_revenue_egp,total_commission_egp")
+            .eq("id", aff_id)
+            .maybe_single()
+            .execute()
+        )
+        aff_row = (aff_res.data if aff_res else None) or {}
+        if aff_row:
+            supabase.table("affiliates").update({
+                "total_sales_count": int(aff_row.get("total_sales_count") or 0) + 1,
+                "total_revenue_egp": float(aff_row.get("total_revenue_egp") or 0) + float(paid_amount_egp),
+                "total_commission_egp": float(aff_row.get("total_commission_egp") or 0) + comm_val,
+                "updated_at": now_iso,
+            }).eq("id", aff_id).execute()
+    except Exception as aff_err:
+        print(f"[EASYKASH] Affiliate commission update warning: {aff_err}")
+
+
 def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if not _verify_callback(payload):
@@ -954,7 +997,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         return {"ok": False, "status_code": 503, "code": "database_unavailable"}
 
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,discount_amount_egp").eq("id", order_id).maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,commission_status,discount_amount_egp").eq("id", order_id).maybe_single().execute()
 
     order = result.data if result else None
 
@@ -1080,39 +1123,9 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         }
 
-        if order.get("affiliate_id"):
-
-            update_payload["commission_status"] = "earned"
-
         supabase.table("local_payment_orders").update(update_payload).eq("id", order_id).eq("status", "submitted").execute()
 
-        if order.get("affiliate_id"):
-
-            try:
-
-                aff_id = order["affiliate_id"]
-
-                aff_res = supabase.table("affiliates").select("total_sales_count,total_revenue_egp,total_commission_egp").eq("id", aff_id).maybe_single().execute()
-
-                aff_row = (aff_res.data if aff_res else None) or {}
-
-                comm_val = float(order.get("commission_amount_egp") or 0)
-
-                supabase.table("affiliates").update({
-
-                    "total_sales_count": int(aff_row.get("total_sales_count") or 0) + 1,
-
-                    "total_revenue_egp": float(aff_row.get("total_revenue_egp") or 0) + float(expected_amount),
-
-                    "total_commission_egp": float(aff_row.get("total_commission_egp") or 0) + comm_val,
-
-                    "updated_at": now,
-
-                }).eq("id", aff_id).execute()
-
-            except Exception as aff_err:
-
-                print(f"[EASYKASH] Affiliate commission update warning: {aff_err}")
+        _credit_affiliate_commission(order, float(expected_amount), now)
 
     except Exception as exc:
 
@@ -1263,6 +1276,7 @@ def sync_easykash_order_status(order: Dict[str, Any]) -> Dict[str, Any]:
                     }
                     supabase.table("local_payment_orders").update(update_data).eq("id", order_id).execute()
                     order.update(update_data)
+                    _credit_affiliate_commission(order, float(order.get("amount_egp") or 0), now)
                 except Exception as act_err:
                     print(f"[EASYKASH] sync activation error for {order_id}: {act_err}")
             elif ek_status in ("FAILED", "FAIL", "REJECTED"):
@@ -1296,7 +1310,7 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
     _init_supabase()
 
-    result = supabase.table("local_payment_orders").select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
 
     order = result.data if result else None
 

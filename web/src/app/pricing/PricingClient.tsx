@@ -147,28 +147,6 @@ export default function PricingClient() {
   const [trialExpiresAt, setTrialExpiresAt] = useState<string | null>(null);
   const [pricingCategory, setPricingCategory] = useState<"retail" | "b2b">("retail");
 
-  useEffect(() => {
-    if (!user?.id) {
-      setTrialEligible(true);
-      return;
-    }
-    let active = true;
-    void fetchUserQuotaCached(user.id)
-      .then((data) => {
-        if (!active || !data || data.ok === false || !data.plan) return;
-        if (data?.plan?.trial_eligible) {
-          setTrialEligible(true);
-        } else {
-          setTrialEligible(false);
-          if (data?.plan?.trial_expires_at) setTrialExpiresAt(data.plan.trial_expires_at);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
-
   const handleStartTrial = async () => {
     if (!user) {
       router.push("/login?redirect=/pricing");
@@ -490,7 +468,8 @@ export default function PricingClient() {
   }, [user?.id, market]);
 
   useEffect(() => {
-    if (!user) {
+    if (!user?.id) {
+      setTrialEligible(true);
       setIsPro(false);
       setSubscriptionEnd(null);
       return;
@@ -498,6 +477,7 @@ export default function PricingClient() {
     let active = true;
     let inFlight = false;
     let lastKnownPro: boolean | null = null;
+    let lastFocusRefreshAt = 0;
     const refreshPlan = async (force = false) => {
       if (inFlight) return;
       inFlight = true;
@@ -507,6 +487,12 @@ export default function PricingClient() {
         const proActive = data?.plan?.is_pro === true;
         setIsPro(proActive);
         setSubscriptionEnd(data?.plan?.current_period_end || null);
+        if (data?.plan?.trial_eligible) {
+          setTrialEligible(true);
+        } else {
+          setTrialEligible(false);
+          if (data?.plan?.trial_expires_at) setTrialExpiresAt(data.plan.trial_expires_at);
+        }
         if (proActive && lastKnownPro === false) {
           broadcastEntitlements(true);
         }
@@ -517,11 +503,18 @@ export default function PricingClient() {
         inFlight = false;
       }
     };
+    const refreshIfStaleOnReturn = () => {
+      if (lastKnownPro === true && orderStatus !== "submitted") return;
+      const now = Date.now();
+      if (now - lastFocusRefreshAt < 5_000) return;
+      lastFocusRefreshAt = now;
+      void refreshPlan(true);
+    };
     setIsPro(false);
     void refreshPlan(orderStatus === "approved");
-    const onFocus = () => void refreshPlan(true);
+    const onFocus = () => refreshIfStaleOnReturn();
     const onVisible = () => {
-      if (document.visibilityState === "visible") void refreshPlan(true);
+      if (document.visibilityState === "visible") refreshIfStaleOnReturn();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
@@ -942,12 +935,19 @@ export default function PricingClient() {
   const allAvailablePlans = [...paidPlans, ...b2bPlans];
   const selectedPlanDetails = allAvailablePlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
   const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
+  const promoPriceForPlan = (baseEgp: number) => {
+    if (!appliedPromo || appliedPromo.discount_percent <= 0) {
+      return { discountEgp: 0, finalEgp: baseEgp };
+    }
+    const discountEgp = Math.min(
+      Math.max(0, baseEgp - 20),
+      Math.round((baseEgp * appliedPromo.discount_percent) / 100)
+    );
+    return { discountEgp, finalEgp: Math.max(20, baseEgp - discountEgp) };
+  };
+
   const baseProPrice = selectedPlanDetails?.amount_egp ?? (paidPlans[0]?.amount_egp || 100);
-  const promoDiscountAmount =
-    appliedPromo && appliedPromo.discount_percent > 0
-      ? Math.min(Math.max(0, baseProPrice - 20), Math.round((baseProPrice * appliedPromo.discount_percent) / 100))
-      : 0;
-  const proPrice = Math.max(20, baseProPrice - promoDiscountAmount);
+  const { discountEgp: promoDiscountAmount, finalEgp: proPrice } = promoPriceForPlan(baseProPrice);
   const promoDiscountDisplay = Math.max(0, displayAmount(baseProPrice) - displayAmount(proPrice));
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
@@ -1849,6 +1849,41 @@ export default function PricingClient() {
           </div>
         </div>
 
+        {/* ── INLINE PROMO / REFERRAL CODE INPUT ON MAIN PRICING VIEW ── */}
+        {!appliedPromo && (
+          <div className="max-w-xl mx-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/90 dark:bg-zinc-900/70 px-4 py-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shadow-sm">
+            <label htmlFor="pricing-main-promo" className="text-xs font-black text-zinc-700 dark:text-zinc-300 whitespace-nowrap flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>{isAr ? "عندك كود إحالة أو خصم؟" : "Have a referral or promo code?"}</span>
+            </label>
+            <div className="flex flex-1 gap-2">
+              <input
+                id="pricing-main-promo"
+                type="text"
+                value={promoInput}
+                onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && promoInput.trim()) {
+                    e.preventDefault();
+                    applyPromoCode(promoInput, false, false);
+                  }
+                }}
+                placeholder={isAr ? "أدخل الكود مثل: AMR15" : "Enter code e.g. AMR15"}
+                className="flex-1 min-w-0 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 font-mono text-xs font-black uppercase text-zinc-950 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                dir="ltr"
+              />
+              <button
+                type="button"
+                onClick={() => applyPromoCode(promoInput, false, false)}
+                disabled={promoChecking || !promoInput.trim()}
+                className="rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-2 text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+              >
+                {promoChecking ? (isAr ? "جاري التحقق..." : "Checking...") : (isAr ? "تطبيق" : "Apply")}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── 3 DISTINCT CARDS: FREE | PRO (WITH SWITCHER) | LIFETIME VIP ── */}
         <div className="grid lg:grid-cols-3 gap-6 items-stretch">
           {/* ── 01. Free Plan Card ── */}
@@ -1943,6 +1978,9 @@ export default function PricingClient() {
             const isFeatured = activeProDuration === "pro_6m";
             const isAnnual = activeProDuration === "pro_1y";
             const isMonthly = activeProDuration === "pro";
+            const { discountEgp: proCardPromoDiscount, finalEgp: proCardFinalEgp } = promoPriceForPlan(
+              activeProDetails.amount_egp
+            );
             const planDiscount =
               isMonthly && monthlyDiscount?.active && (foundersIsOpen || isGrandfathered || isGrandfathered100)
                 ? monthlyDiscount
@@ -2001,18 +2039,33 @@ export default function PricingClient() {
 
                   {/* Price Section */}
                   <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
-                    <div className="flex items-baseline gap-2">
+                    <div className="flex flex-wrap items-baseline gap-2">
                       <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
-                        {displayAmount(activeProDetails.amount_egp).toLocaleString()}
+                        {displayAmount(proCardFinalEgp).toLocaleString()}
                       </span>
                       <span className="text-sm font-bold text-zinc-500">{currencyLabel}</span>
-                      {planDiscount && (
+                      {(proCardPromoDiscount > 0 || planDiscount) && (
                         <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
                           {isAr ? "بدل " : "was "}
-                          {formatPrice(Number(planDiscount.original_amount_egp))}
+                          {formatPrice(
+                            proCardPromoDiscount > 0
+                              ? activeProDetails.amount_egp
+                              : Number(planDiscount?.original_amount_egp)
+                          )}
                         </span>
                       )}
                     </div>
+
+                    {proCardPromoDiscount > 0 && appliedPromo && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span>
+                          {isAr
+                            ? `🎁 مطبق خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
+                            : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}% applied`}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
@@ -2084,8 +2137,8 @@ export default function PricingClient() {
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
                     {isPro
-                      ? (isAr ? `تجديد باقة Pro (${formatPrice(activeProDetails.amount_egp)})` : `Renew Pro (${formatPrice(activeProDetails.amount_egp)})`)
-                      : (isAr ? `اشترك في Pro (${formatPrice(activeProDetails.amount_egp)})` : `Subscribe to Pro (${formatPrice(activeProDetails.amount_egp)})`)}
+                      ? (isAr ? `تجديد باقة Pro (${formatPrice(proCardFinalEgp)})` : `Renew Pro (${formatPrice(proCardFinalEgp)})`)
+                      : (isAr ? `اشترك في Pro (${formatPrice(proCardFinalEgp)})` : `Subscribe to Pro (${formatPrice(proCardFinalEgp)})`)}
                   </button>
                   <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -2097,6 +2150,9 @@ export default function PricingClient() {
           })()}
 
           {/* ── 03. Lifetime VIP Card ── */}
+          {(() => {
+            const { discountEgp: lifetimePromoDiscount, finalEgp: lifetimeFinalEgp } = promoPriceForPlan(2250);
+            return (
           <div className="relative rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/40 dark:from-amber-950/30 dark:via-zinc-900/95 dark:to-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-xl shadow-amber-500/10 dark:shadow-amber-500/5 transition-all">
             {/* Floating Top Badge */}
             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
@@ -2127,10 +2183,26 @@ export default function PricingClient() {
 
               {/* Price Section */}
               <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{displayAmount(2250).toLocaleString()}</span>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{displayAmount(lifetimeFinalEgp).toLocaleString()}</span>
                   <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">{currencyLabel}</span>
+                  {lifetimePromoDiscount > 0 && (
+                    <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
+                      {isAr ? "بدل " : "was "}
+                      {formatPrice(2250)}
+                    </span>
+                  )}
                 </div>
+                {lifetimePromoDiscount > 0 && appliedPromo && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
+                    <Sparkles className="w-3 h-3 shrink-0" />
+                    <span>
+                      {isAr
+                        ? `🎁 مطبق خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
+                        : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}% applied`}
+                    </span>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2 mt-2">
                   <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1 bg-amber-100/90 dark:bg-amber-500/10 border border-amber-300/80 dark:border-amber-500/20 rounded-md px-2 py-0.5">
                     <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
@@ -2210,8 +2282,8 @@ export default function PricingClient() {
                 <Crown className="w-4 h-4 fill-current" />
                 {lifetimeIsOpen
                   ? isPro
-                    ? (isAr ? `ترقية لحساب مدى الحياة (${formatPrice(2250)})` : `Upgrade to Lifetime (${formatPrice(2250)})`)
-                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${formatPrice(2250)}) 👑` : `Get Lifetime Deal (${formatPrice(2250)}) 👑`)
+                    ? (isAr ? `ترقية لحساب مدى الحياة (${formatPrice(lifetimeFinalEgp)})` : `Upgrade to Lifetime (${formatPrice(lifetimeFinalEgp)})`)
+                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${formatPrice(lifetimeFinalEgp)}) 👑` : `Get Lifetime Deal (${formatPrice(lifetimeFinalEgp)}) 👑`)
                   : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
               </button>
               <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
@@ -2220,6 +2292,8 @@ export default function PricingClient() {
               </div>
             </div>
           </div>
+            );
+          })()}
         </div>
 
         {/* ── ROI & INVESTMENT VALUE EQUATION ── */}

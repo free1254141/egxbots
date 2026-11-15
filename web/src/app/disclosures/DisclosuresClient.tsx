@@ -34,6 +34,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useChat } from "@/contexts/ChatContext";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import StockLogo from "@/components/StockLogo";
@@ -82,6 +83,7 @@ export default function DisclosuresClient({
   priceMap,
 }: DisclosuresClientProps) {
   const { language } = useLanguage();
+  const { market, isSaudi } = useMarket();
   const isAr = language === "ar";
   const { setIsOpen, sendMessage } = useChat();
 
@@ -156,12 +158,13 @@ export default function DisclosuresClient({
 
       try {
         const params = new URLSearchParams({
-          limit: String(PAGE_BATCH_SIZE),
+          limit: String(isSaudi && offsetVal === 0 ? 50 : PAGE_BATCH_SIZE),
           offset: String(offsetVal),
           type: selectedType,
           sentiment: selectedSentiment,
           timeframe: selectedTimeframe,
           sector: selectedSector,
+          market,
         });
         if (debouncedSearch.trim()) {
           params.set("search", debouncedSearch.trim());
@@ -193,14 +196,15 @@ export default function DisclosuresClient({
         }
       }
     },
-    [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector]
+    [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isSaudi]
   );
 
-  // Trigger fresh fetch when filters or search change (skip initial SSR render if default filters)
+  // Trigger fresh fetch when filters, search, or active market change
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       if (
+        !isSaudi &&
         !debouncedSearch &&
         selectedType === "all" &&
         selectedSentiment === "all" &&
@@ -217,7 +221,7 @@ export default function DisclosuresClient({
         controller.abort();
       } catch {}
     };
-  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, fetchBatch]);
+  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isSaudi, fetchBatch]);
 
   // Progressive infinite scroll observer ("يحمل شوية بشوية")
   useEffect(() => {
@@ -249,7 +253,9 @@ export default function DisclosuresClient({
   const handleOpenGeneralFloatingChat = () => {
     setIsOpen(true);
     sendMessage(
-      "لخص لي أهم إفصاحات وتعاملات الداخليين في البورصة المصرية لآخر جلسة، مع بيان أي أسهم تشهد تجميعاً صامتاً من مجالس الإدارة أو تتداول بأقل من تكلفة شرائهم."
+      isSaudi
+        ? "لخص لي أهم إفصاحات وأخبار الشركات في السوق السعودي (تداول) لآخر جلسة، مع بيان أبرز القرارات الجوهرية والتوزيعات والنتائج المالية المؤثرة."
+        : "لخص لي أهم إفصاحات وتعاملات الداخليين في البورصة المصرية لآخر جلسة، مع بيان أي أسهم تشهد تجميعاً صامتاً من مجالس الإدارة أو تتداول بأقل من تكلفة شرائهم."
     );
   };
 
@@ -262,13 +268,14 @@ export default function DisclosuresClient({
 
   const formatEgp = (val: number) => {
     const abs = Math.abs(val);
+    const unit = isSaudi ? (isAr ? "ر.س" : "SAR") : (isAr ? "ج.م" : "EGP");
     if (abs >= 1_000_000) {
-      return `${(val / 1_000_000).toFixed(1)} ${isAr ? "مليون ج.م" : "M EGP"}`;
+      return `${(val / 1_000_000).toFixed(1)} ${isAr ? `مليون ${unit}` : `M ${unit}`}`;
     }
     if (abs >= 1_000) {
-      return `${(val / 1_000).toFixed(0)} ${isAr ? "ألف ج.م" : "k EGP"}`;
+      return `${(val / 1_000).toFixed(0)} ${isAr ? `ألف ${unit}` : `k ${unit}`}`;
     }
-    return `${val.toFixed(0)} ${isAr ? "ج.م" : "EGP"}`;
+    return `${val.toFixed(0)} ${unit}`;
   };
 
   const getTypeLabel = (type: string) => {
@@ -415,19 +422,31 @@ export default function DisclosuresClient({
     <div className="w-full pt-5 sm:pt-7 pb-16" dir={isAr ? "rtl" : "ltr"}>
       <BrandedPageHeader
         eyebrow={
-          isAr
-            ? "رادار إفصاحات البورصة المصرية • بالذكاء الاصطناعي"
-            : "EGX FILINGS & INSIDER RADAR • AI POWERED"
+          isSaudi
+            ? (isAr
+              ? "رادار إفصاحات السوق السعودي (تداول) • بالذكاء الاصطناعي"
+              : "SAUDI TADAWUL DISCLOSURES RADAR • AI POWERED")
+            : (isAr
+              ? "رادار إفصاحات البورصة المصرية • بالذكاء الاصطناعي"
+              : "EGX FILINGS & INSIDER RADAR • AI POWERED")
         }
         title={
-          isAr
-            ? "إفصاحات الشركات وتعاملات الداخليين"
-            : "Company Disclosures & Insider Filings"
+          isSaudi
+            ? (isAr
+              ? "إفصاحات السوق السعودي وتطورات الشركات (تداول)"
+              : "Saudi Tadawul Company Disclosures & Corporate Filings")
+            : (isAr
+              ? "إفصاحات الشركات وتعاملات الداخليين"
+              : "Company Disclosures & Insider Filings")
         }
         description={
-          isAr
-            ? "رصد يومي مباشر لنماذج المادة 30، تعاملات كبار المساهمين والداخليين، ومعاينة صور الإفصاحات الرسمية مع التحليل الفوري للأثر المالي على الأسهم."
-            : "Live tracking of Article 30 shareholding reports, insider transactions, and official disclosure scans with instant AI financial impact analysis."
+          isSaudi
+            ? (isAr
+              ? "رصد يومي مباشر لإفصاحات الشركات السعودية المدرجة في تداول، التوزيعات، النتائج المالية، وقرارات مجالس الإدارات مع التحليل الفوري للأثر المالي على الأسهم."
+              : "Live tracking of Saudi Tadawul corporate disclosures, dividends, earnings announcements, and board resolutions with instant AI financial impact analysis.")
+            : (isAr
+              ? "رصد يومي مباشر لنماذج المادة 30، تعاملات كبار المساهمين والداخليين، ومعاينة صور الإفصاحات الرسمية مع التحليل الفوري للأثر المالي على الأسهم."
+              : "Live tracking of Article 30 shareholding reports, insider transactions, and official disclosure scans with instant AI financial impact analysis.")
         }
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -456,9 +475,13 @@ export default function DisclosuresClient({
         <div className="flex items-center gap-2.5">
           <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
           <span className="font-bold text-zinc-800 dark:text-zinc-200">
-            {isAr
-              ? "بيانات مالية عامة معلنة رسمياً: تعاملات الداخليين ونماذج المادة (30) منشورة وفقاً لقواعد قيد وشطب الأوراق المالية بالبورصة المصرية والهيئة العامة للرقابة المالية."
-              : "Official Public Market Data: All insider disclosures and Article 30 filings are sourced from official Egyptian Exchange (EGX) and FRA disclosures."}
+            {isSaudi
+              ? (isAr
+                ? "بيانات مالية عامة معلنة رسمياً: إفصاحات وأخبار الشركات المدرجة في السوق السعودي (تداول) مصنفة ومحللة بالذكاء الاصطناعي لأغراض المتابعة والبحث الاستثماري."
+                : "Official Public Market Data: Saudi Tadawul (TASI) corporate disclosures and announcements indexed and analyzed for research purposes.")
+              : (isAr
+                ? "بيانات مالية عامة معلنة رسمياً: تعاملات الداخليين ونماذج المادة (30) منشورة وفقاً لقواعد قيد وشطب الأوراق المالية بالبورصة المصرية والهيئة العامة للرقابة المالية."
+                : "Official Public Market Data: All insider disclosures and Article 30 filings are sourced from official Egyptian Exchange (EGX) and FRA disclosures.")}
           </span>
         </div>
         <span className="hidden md:inline-block px-2.5 py-0.5 border border-black bg-[#FFE600] text-black font-black text-[10px] uppercase shadow-[1px_1px_0px_#000]">
@@ -729,9 +752,13 @@ export default function DisclosuresClient({
                 <input
                   type="text"
                   placeholder={
-                    isAr
-                      ? "ابحث برمز السهم (COMI, FWRY, PRMH) أو اسم الشركة أو الطرف..."
-                      : "Search symbol (COMI, FWRY, PRMH) or party..."
+                    isSaudi
+                      ? (isAr
+                        ? "ابحث برمز السهم (2222, 1120, 2010) أو اسم الشركة أو الطرف..."
+                        : "Search symbol (2222, 1120, 2010) or company...")
+                      : (isAr
+                        ? "ابحث برمز السهم (COMI, FWRY, PRMH) أو اسم الشركة أو الطرف..."
+                        : "Search symbol (COMI, FWRY, PRMH) or party...")
                   }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -1037,7 +1064,11 @@ export default function DisclosuresClient({
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div className="flex items-center gap-2 font-black text-black dark:text-white text-sm">
             <Scale className="w-4 h-4 text-amber-500" />
-            <span>{isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (EGX & FRA Compliance):" : "Regulatory & Legal Disclaimer:"}</span>
+            <span>
+              {isSaudi
+                ? (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (Tadawul & CMA):" : "Regulatory & Legal Disclaimer (Tadawul):")
+                : (isAr ? "تنويه وإخلاء مسؤولية قانونية وتنظيمية (EGX & FRA Compliance):" : "Regulatory & Legal Disclaimer:")}
+            </span>
           </div>
           <button
             type="button"
@@ -1049,9 +1080,13 @@ export default function DisclosuresClient({
           </button>
         </div>
         <p>
-          {isAr
-            ? "جميع الإفصاحات ونماذج المادة (30) وتعاملات الداخليين المعروضة في هذه الصفحة مستقاة حصرياً من البيانات الرسمية المعلنة والمتاحة للجمهور الصادرة عن البورصة المصرية (EGX) والهيئة العامة للرقابة المالية (FRA) إعمالاً لمبدأ الشفافية وحرية تداول المعلومات المالية. مؤشرات 'متوسط تكلفة الداخليين (Insider VWAP)'، و'صافي السيولة'، و'الخريطة الحرارية' هي معالجات إحصائية رياضية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء أو تتبعاً خاصاً للحياة الشخصية للأفراد، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات."
-            : "All disclosures, Article 30 filings, and insider transactions displayed on this page are compiled exclusively from official public disclosures issued by the Egyptian Exchange (EGX) and the Financial Regulatory Authority (FRA). 'Insider VWAP', 'Net Flow', and 'Liquidity Heatmap' are purely statistical algorithms for educational and research purposes and do not constitute financial advice or personal tracking."}
+          {isSaudi
+            ? (isAr
+              ? "جميع الإفصاحات والإعلانات المعروضة للسوق السعودي مستقاة من المصادر الإخبارية والإفصاحات العامة المتاحة للشركات المدرجة في السوق المالية السعودية (تداول). التحليلات والمؤشرات المعروضة هي معالجات إحصائية ولغوية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات."
+              : "All Saudi market disclosures displayed on this page are compiled from public announcements and financial news sources for companies listed on Saudi Exchange (Tadawul). AI summaries and sentiment metrics are strictly for educational and research purposes and do not constitute financial advice.")
+            : (isAr
+              ? "جميع الإفصاحات ونماذج المادة (30) وتعاملات الداخليين المعروضة في هذه الصفحة مستقاة حصرياً من البيانات الرسمية المعلنة والمتاحة للجمهور الصادرة عن البورصة المصرية (EGX) والهيئة العامة للرقابة المالية (FRA) إعمالاً لمبدأ الشفافية وحرية تداول المعلومات المالية. مؤشرات 'متوسط تكلفة الداخليين (Insider VWAP)'، و'صافي السيولة'، و'الخريطة الحرارية' هي معالجات إحصائية رياضية لأغراض التحليل والدراسة والمتابعة الاستثمارية، ولا تمثل توصية بالبيع أو الشراء أو تتبعاً خاصاً للحياة الشخصية للأفراد، ولا تتحمل المنصة أي مسؤولية قانونية عن أي قرارات استثمارية تُتخذ بناءً على هذه البيانات."
+              : "All disclosures, Article 30 filings, and insider transactions displayed on this page are compiled exclusively from official public disclosures issued by the Egyptian Exchange (EGX) and the Financial Regulatory Authority (FRA). 'Insider VWAP', 'Net Flow', and 'Liquidity Heatmap' are purely statistical algorithms for educational and research purposes and do not constitute financial advice or personal tracking.")}
         </p>
       </footer>
 
@@ -1069,7 +1104,7 @@ export default function DisclosuresClient({
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-black text-white border-b-4 border-black dark:border-white">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="px-2 py-0.5 text-xs font-black bg-[#FFE600] text-black">
-                  {previewItem.symbol || "EGX"}
+                  {previewItem.symbol || (isSaudi ? "TASI" : "EGX")}
                 </span>
                 <span className="text-xs sm:text-sm font-black truncate">
                   {previewItem.company_name} — #{previewItem.id.slice(0, 8).toUpperCase()}

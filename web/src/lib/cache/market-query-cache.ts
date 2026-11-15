@@ -238,44 +238,52 @@ export function marketCachedFetch(scope: Scope, fetcher: typeof fetch = fetch): 
 export async function refreshMarketQueries(tags: string[], eventId: string, fetcher: typeof fetch = fetch) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const keys = [...new Set([process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SUPABASE_SERVICE_KEY, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, process.env.SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY].filter(Boolean))] as string[];
+  const saudiUrl = process.env.SAUDI_SUPABASE_URL || process.env.NEXT_PUBLIC_SAUDI_SUPABASE_URL;
+  const saudiKeys = [...new Set([process.env.SAUDI_SUPABASE_SECRET_KEY, process.env.SAUDI_SUPABASE_SERVICE_ROLE_KEY, process.env.SAUDI_SUPABASE_SERVICE_KEY, process.env.NEXT_PUBLIC_SAUDI_SUPABASE_PUBLISHABLE_KEY, process.env.SAUDI_SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY].filter(Boolean))] as string[];
   if (!url || !keys.length) throw new Error("Missing market origin configuration");
+  const origins: Array<{ url: string; keys: string[] }> = [{ url, keys }];
+  if (saudiUrl && saudiKeys.length) {
+    origins.push({ url: saudiUrl, keys: saudiKeys });
+  }
   const summary = { queries: 0, bytes: 0, storedBytes: 0, unchanged: 0, coldSkipped: 0, completed: [] as string[] };
   for (const tag of tags) {
     if (!Object.values(TABLES).includes(tag)) continue;
-    const targetKeys = keys.slice(0, 1);
-    for (const key of targetKeys) {
-      const scope = { url, key };
-      const id = scopeId(scope);
-      const current = (await cacheGet(versionKey(id, tag)) as string) || "bootstrap";
-      if (current === eventId || (current !== "bootstrap" && Date.parse(current) > Date.parse(eventId))) continue;
-      const groups = await Promise.all(Array.from({ length: SHARDS }, (_, i) => cacheGet(`registry:${id}:${tag}:${i}`)));
-      const registered = (groups.flatMap(group => Array.isArray(group) ? group : []) as Query[]);
-      const activity = await Promise.all(registered.map(q => cacheGet(hotKey(q))));
-      const queries = registered.filter((_, i) => Boolean(activity[i]));
-      // Cap proactive warming to top 4 hot queries to keep serverless CPU under 500ms
-      const warmQueries = queries.slice(0, 4);
-      summary.coldSkipped += registered.length - warmQueries.length;
-      for (let i = 0; i < warmQueries.length; i += 4) {
-        await Promise.all(warmQueries.slice(i, i + 4).map(async q => {
-          const previous = await cacheGet(entryKey(q, current)) as Entry | null;
-          const staged = await cacheGet(entryKey(q, eventId)) as Entry | null;
-          const entry = staged && await read(q, eventId) ? staged : await save(q, eventId, await origin(q, scope, fetcher));
-          summary.queries++;
-          summary.bytes += staged ? 0 : entry.bytes;
-          summary.storedBytes += entry.storedBytes;
-          if (previous?.digest === entry.digest) summary.unchanged++;
-        }));
+    for (const originCfg of origins) {
+      const targetKeys = originCfg.keys.slice(0, 2);
+      for (const key of targetKeys) {
+        const scope = { url: originCfg.url, key };
+        const id = scopeId(scope);
+        const current = (await cacheGet(versionKey(id, tag)) as string) || "bootstrap";
+        if (current === eventId || (current !== "bootstrap" && Date.parse(current) > Date.parse(eventId))) continue;
+        const groups = await Promise.all(Array.from({ length: SHARDS }, (_, i) => cacheGet(`registry:${id}:${tag}:${i}`)));
+        const registered = (groups.flatMap(group => Array.isArray(group) ? group : []) as Query[]);
+        const activity = await Promise.all(registered.map(q => cacheGet(hotKey(q))));
+        const queries = registered.filter((_, i) => Boolean(activity[i]));
+        // Cap proactive warming to top 4 hot queries to keep serverless CPU under 500ms
+        const warmQueries = queries.slice(0, 4);
+        summary.coldSkipped += registered.length - warmQueries.length;
+        for (let i = 0; i < warmQueries.length; i += 4) {
+          await Promise.all(warmQueries.slice(i, i + 4).map(async q => {
+            const previous = await cacheGet(entryKey(q, current)) as Entry | null;
+            const staged = await cacheGet(entryKey(q, eventId)) as Entry | null;
+            const entry = staged && await read(q, eventId) ? staged : await save(q, eventId, await origin(q, scope, fetcher));
+            summary.queries++;
+            summary.bytes += staged ? 0 : entry.bytes;
+            summary.storedBytes += entry.storedBytes;
+            if (previous?.digest === entry.digest) summary.unchanged++;
+          }));
+        }
+        const latest = await cacheGet(versionKey(id, tag)) as string | null;
+        if (!latest || latest === "bootstrap" || Date.parse(latest) <= Date.parse(eventId)) {
+          await cacheSet(priorKey(id, tag), current, { ttl: TTL, name: "market-previous-generation" });
+          await cacheSet(versionKey(id, tag), eventId, { ttl: TTL, name: "market-generation" });
+          versionMemory.delete(versionKey(id, tag));
+        }
+        // Keep the warm-up index alive even when all reads hit the shared cache.
+        await Promise.all(groups.map((group, i) => Array.isArray(group) && group.length
+          ? cacheSet(`registry:${id}:${tag}:${i}`, group, { ttl: TTL, name: "market-query-index" })
+          : Promise.resolve()));
       }
-      const latest = await cacheGet(versionKey(id, tag)) as string | null;
-      if (!latest || latest === "bootstrap" || Date.parse(latest) <= Date.parse(eventId)) {
-        await cacheSet(priorKey(id, tag), current, { ttl: TTL, name: "market-previous-generation" });
-        await cacheSet(versionKey(id, tag), eventId, { ttl: TTL, name: "market-generation" });
-        versionMemory.delete(versionKey(id, tag));
-      }
-      // Keep the warm-up index alive even when all reads hit the shared cache.
-      await Promise.all(groups.map((group, i) => Array.isArray(group) && group.length
-        ? cacheSet(`registry:${id}:${tag}:${i}`, group, { ttl: TTL, name: "market-query-index" })
-        : Promise.resolve()));
     }
     summary.completed.push(tag);
   }

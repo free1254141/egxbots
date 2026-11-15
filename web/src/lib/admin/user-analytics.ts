@@ -115,8 +115,8 @@ export function buildDailyActiveUsage(input: {
   const today = dayKey(input.now.getTime());
   const calendarDay = new Date(`${today}T12:00:00Z`);
   const dailyUsers = new Map<string, Set<string>>();
-  // The existing route loads 90 days of activity; don't portray older history as zero.
-  for (let offset = 89; offset >= 0; offset -= 1) {
+  // Load up to 180 days (6 months) of activity so full history can be viewed in charts.
+  for (let offset = 179; offset >= 0; offset -= 1) {
     const date = new Date(calendarDay);
     date.setUTCDate(date.getUTCDate() - offset);
     dailyUsers.set(date.toISOString().slice(0, 10), new Set());

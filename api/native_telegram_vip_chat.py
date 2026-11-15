@@ -332,6 +332,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     start_time = time.time()
     reply_text = ""
     tables: List[Dict[str, Any]] = []
+    was_cached: bool = False
+    used_cache_key: Optional[str] = None
 
     # Fast-Path + Single-Flight Coalescing via Two-Tier Analysis Cache
     # Avoids spinning up an asyncio loop or firing duplicate DeepSeek requests when multiple users ask the same stock question
@@ -345,11 +347,14 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 get_inflight_cache_lock,
             )
             early_cache_key = build_analysis_cache_key(query)
+            used_cache_key = early_cache_key
             if early_cache_key:
                 cached_hit = get_vip_analysis_cache(early_cache_key, user_id=user_info.get("linked_user_id"))
                 if cached_hit and cached_hit.get("reply"):
                     reply_text = cached_hit["reply"]
                     tables = cached_hit.get("tables") or []
+                    was_cached = True
+                    used_cache_key = cached_hit.get("key") or early_cache_key
                     logger.info(f"[NATIVE_VIP_CHAT] Instant Fast-Path Cache Hit for {early_cache_key} (0 DeepSeek tokens)")
                 else:
                     inflight_lock = get_inflight_cache_lock(early_cache_key)
@@ -369,6 +374,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if cached_after_wait and cached_after_wait.get("reply"):
                         reply_text = cached_after_wait["reply"]
                         tables = cached_after_wait.get("tables") or []
+                        was_cached = True
+                        used_cache_key = cached_after_wait.get("key") or early_cache_key
                         logger.info(f"[NATIVE_VIP_CHAT] Coalesced Single-Flight Cache Hit for {early_cache_key}")
 
             if not reply_text:
@@ -383,6 +390,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 async def _run_agentic():
                     full = ""
                     tbls = []
+                    stream_cached = False
+                    stream_cache_key = None
                     async for sse_chunk in run_agentic_chat_stream(
                         message=query,
                         history=formatted_history,
@@ -405,18 +414,22 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                                     elif ev.get("type") == "done":
                                         full = ev.get("reply", full)
                                         tbls = ev.get("tables", [])
+                                        if ev.get("cached") is True:
+                                            stream_cached = True
+                                        if ev.get("cache_key"):
+                                            stream_cache_key = ev.get("cache_key")
                                 except Exception:
                                     pass
-                    return full, tbls
+                    return full, tbls, stream_cached, stream_cache_key
 
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        reply_text, tables = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
+                        reply_text, tables, was_cached, used_cache_key = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
                     else:
-                        reply_text, tables = loop.run_until_complete(_run_agentic())
+                        reply_text, tables, was_cached, used_cache_key = loop.run_until_complete(_run_agentic())
                 except RuntimeError:
-                    reply_text, tables = asyncio.run(_run_agentic())
+                    reply_text, tables, was_cached, used_cache_key = asyncio.run(_run_agentic())
         except Exception as exc:
             logger.warning(f"[NATIVE_VIP_CHAT] Agentic pipeline error: {exc}")
         finally:
@@ -428,6 +441,8 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Fallback to direct technical indicators if agentic call failed
     if not reply_text:
+        was_cached = False
+        used_cache_key = None
         symbol = _extract_stock_symbol(query)
         if symbol:
             ind_rows = _supabase_request(f"stock_technical_indicators?exchange=eq.EGX&symbol=eq.{symbol}&select=symbol,date,close,change_pct,volume,vol_sma20,r_vol,rsi_14,macd,bb_upper,bb_lower,ema_20,ema_50&order=date.desc&limit=5") or []
@@ -457,14 +472,18 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     user_now_iso = user_created_dt.isoformat()
     assistant_now_iso = assistant_created_dt.isoformat()
     now_iso = assistant_now_iso
-    common_meta = {
+    common_meta: Dict[str, Any] = {
         "chat_source": chat_source,
         "telegram_user_id": tg_user_id,
         "telegram_username": user_name,
         "display_name": user_info["display_name"],
         "linked_user_id": user_info["linked_user_id"],
         "tables": tables,
+        "cached": bool(was_cached),
+        "latency_ms": latency_ms,
     }
+    if used_cache_key:
+        common_meta["cache_key"] = used_cache_key
 
     # Record session & messages in Supabase for Admin Control Panel visibility (Support & AI tab)
     def _persist_admin_audit():

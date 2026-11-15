@@ -12,7 +12,7 @@ export default function DailyUsageChart({ data, isAr, loading, complete }: {
     loading: boolean;
     complete: boolean;
 }) {
-    const [days, setDays] = useState<30 | 90>(30);
+    const [days, setDays] = useState<30 | 90 | 180>(30);
     const visibleData = data.slice(-days);
     return (
         <section aria-label={isAr ? "الاستخدام اليومي للموقع" : "Daily site usage"} className="border-4 border-black dark:border-white bg-zinc-50 dark:bg-zinc-900 p-4 mb-6 shadow-[4px_4px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_rgba(255,255,255,1)]">
@@ -22,9 +22,15 @@ export default function DailyUsageChart({ data, isAr, loading, complete }: {
                     {isAr ? "الاستخدام اليومي للموقع" : "DAILY SITE USAGE"}
                 </h3>
                 <div className="flex gap-2">
-                    {([30, 90] as const).map((period) => (
+                    {([30, 90, 180] as const).map((period) => (
                         <button key={period} type="button" aria-pressed={days === period} onClick={() => setDays(period)} className={`border-2 border-black dark:border-white px-3 py-1 text-xs font-black ${days === period ? "bg-cyan-500 text-black" : "bg-white dark:bg-zinc-950 text-zinc-500"}`}>
-                            {period} {isAr ? "يوم" : "days"}
+                            {period === 180
+                                ? (isAr ? "6 شهور" : "6m")
+                                : period === 90
+                                ? (isAr ? "3 شهور" : "3m")
+                                : isAr
+                                ? `${period} يوم`
+                                : `${period}d`}
                         </button>
                     ))}
                 </div>

@@ -13,6 +13,32 @@ function getSupabaseAdminClient() {
 const AFFILIATE_COLS =
   "id,user_id,code,name,phone,payment_method,discount_percent,commission_percent,is_active,clicks_count,total_sales_count,total_revenue_egp,total_commission_egp,paid_commission_egp,created_at,updated_at";
 
+const VALID_PAYMENT_METHODS = new Set([
+  "vodafone_cash",
+  "instapay",
+  "stc_pay",
+  "bank_transfer",
+]);
+
+function normalizePayoutPhone(raw: string): string {
+  let clean = raw.trim().replace(/[\s\-()]/g, "");
+  if (/^\+?20(1[0125]\d{8})$/.test(clean)) {
+    return `0${clean.replace(/^\+?20/, "")}`;
+  }
+  if (/^05\d{8}$/.test(clean)) {
+    return `+966${clean.slice(1)}`;
+  }
+  if (/^9665\d{8}$/.test(clean)) {
+    return `+${clean}`;
+  }
+  return clean;
+}
+
+function isValidPayoutPhone(normalized: string): boolean {
+  if (!normalized) return false;
+  return /^01[0125]\d{8}$/.test(normalized) || /^(\+?[1-9]\d{7,14})$/.test(normalized);
+}
+
 function generateUserCode(email: string, userId: string): string {
   const emailPart = (email.split("@")[0] || "EGX")
     .toUpperCase()
@@ -65,15 +91,17 @@ export async function GET(req: NextRequest) {
         candidateCode = `EGX${user.id.replace(/-/g, "").toUpperCase().slice(0, 6)}`;
       }
 
-      // Leave phone empty initially so user must enter their mobile wallet number to unlock their link
+      const prefilledPhone = normalizePayoutPhone(String(profile?.whatsapp_number || ""));
+      const validPrefill = isValidPayoutPhone(prefilledPhone) ? prefilledPhone : "";
+
       const { data: created, error: createErr } = await supabase
         .from("affiliates")
         .insert({
           user_id: user.id,
           code: candidateCode,
           name: String(displayName).slice(0, 80),
-          phone: "",
-          payment_method: "vodafone_cash",
+          phone: validPrefill,
+          payment_method: validPrefill.startsWith("+966") ? "stc_pay" : "vodafone_cash",
           discount_percent: 10,
           commission_percent: 25,
           is_active: true,
@@ -85,6 +113,25 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: createErr.message }, { status: 500 });
       }
       aff = created;
+    } else if (!String(aff.phone || "").trim()) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("whatsapp_number")
+        .eq("id", user.id)
+        .maybeSingle();
+      const prefilledPhone = normalizePayoutPhone(String(profile?.whatsapp_number || ""));
+      if (isValidPayoutPhone(prefilledPhone)) {
+        const { data: synced } = await supabase
+          .from("affiliates")
+          .update({
+            phone: prefilledPhone,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", aff.id)
+          .select(AFFILIATE_COLS)
+          .single();
+        if (synced) aff = synced;
+      }
     }
 
     const { data: referrals } = await supabase
@@ -127,22 +174,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Affiliate profile not found" }, { status: 404 });
     }
 
-    const normalizedPhone = String(body.phone || "").replace(/[\s-]/g, "");
-    if (!/^01[0125]\d{8}$/.test(normalizedPhone)) {
+    const rawPhoneInput = typeof body.phone === "string" ? body.phone.trim() : "";
+    const normalizedPhone = rawPhoneInput ? normalizePayoutPhone(rawPhoneInput) : "";
+    if (normalizedPhone && !isValidPayoutPhone(normalizedPhone)) {
       return NextResponse.json(
         {
           error:
-            "أدخل رقم موبايل مصري صحيح (11 رقم: 010 / 011 / 012 / 015) مسجل عليه محفظة إلكترونية",
+            "أدخل رقم موبايل صحيح (مصري 01XXXXXXXXX أو سعودي/دولي مثل +9665XXXXXXXX)",
         },
         { status: 400 }
       );
     }
 
+    const requestedMethod = typeof body.payment_method === "string" ? body.payment_method.trim() : "";
+    const resolvedMethod = VALID_PAYMENT_METHODS.has(requestedMethod)
+      ? requestedMethod
+      : normalizedPhone.startsWith("+966")
+      ? "stc_pay"
+      : "vodafone_cash";
+
     const patch: Record<string, unknown> = {
-      phone: normalizedPhone,
-      payment_method: "vodafone_cash",
       updated_at: new Date().toISOString(),
     };
+    if (body.phone !== undefined) {
+      patch.phone = normalizedPhone;
+      patch.payment_method = resolvedMethod;
+    } else if (requestedMethod && VALID_PAYMENT_METHODS.has(requestedMethod)) {
+      patch.payment_method = requestedMethod;
+    }
 
     if (typeof body.name === "string" && body.name.trim()) {
       patch.name = body.name.trim().slice(0, 80);

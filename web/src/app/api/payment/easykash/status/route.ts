@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     const service = getSupabaseServiceClient();
     const { data: order, error } = await service
       .from("local_payment_orders")
-      .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note")
+      .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
       .eq("id", orderId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
               } catch {}
               const { data: refreshed } = await service
                 .from("local_payment_orders")
-                .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note")
+                .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
                 .eq("id", orderId)
                 .maybeSingle();
               if (refreshed) Object.assign(order, refreshed);

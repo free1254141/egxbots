@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { EGX_SECTORS } from "@/lib/disclosures-analytics";
+import { getMarketSupabaseServiceClient, resolveRequestMarket } from "@/lib/supabase/route-data";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 86400; // 24-hour cache (until next trading day run)
 
 export async function GET(req: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json({ data: [], total: 0, stats: { total: 0, buys: 0, sells: 0, shareholding: 0 } });
-  }
-
+  const market = resolveRequestMarket(req);
   const { searchParams } = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "12", 10) || 12, 1), 50);
   const offset = Math.max(parseInt(searchParams.get("offset") || "0", 10) || 0, 0);
@@ -22,7 +16,12 @@ export async function GET(req: NextRequest) {
   const timeframe = (searchParams.get("timeframe") || "all").trim();
   const sector = (searchParams.get("sector") || "all").trim();
 
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  let supabase: any;
+  try {
+    supabase = getMarketSupabaseServiceClient(market);
+  } catch {
+    return NextResponse.json({ data: [], total: 0, stats: { total: 0, buys: 0, sells: 0, shareholding: 0 } });
+  }
 
   let query = supabase
     .from("egx_disclosures")
@@ -48,7 +47,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Sector filtering
-  if (sector !== "all") {
+  if (sector !== "all" && market !== "tasi") {
     const secDef = EGX_SECTORS.find((s) => s.id === sector);
     if (secDef && secDef.symbols.length > 0) {
       query = query.in("symbol", secDef.symbols);
@@ -63,11 +62,15 @@ export async function GET(req: NextRequest) {
       .order("disclosure_date", { ascending: false })
       .limit(150);
 
-    const uniqueDates = Array.from(
-      new Set((latestRows || []).map((r) => r.disclosure_date).filter(Boolean))
+    const uniqueDates: string[] = Array.from(
+      new Set(
+        ((latestRows || []) as Array<{ disclosure_date?: string | null }>)
+          .map((r) => r.disclosure_date)
+          .filter((d): d is string => Boolean(d))
+      )
     );
-    const refDateStr = uniqueDates[0] || new Date().toISOString().split("T")[0];
-    const yesterdayDateStr = uniqueDates.length > 1 ? uniqueDates[1] : null;
+    const refDateStr: string = uniqueDates[0] || new Date().toISOString().split("T")[0];
+    const yesterdayDateStr: string | null = uniqueDates.length > 1 ? uniqueDates[1] : null;
 
     if (timeframe === "today") {
       query = query.eq("disclosure_date", refDateStr);

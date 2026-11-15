@@ -17,6 +17,32 @@ let listenersBound = false;
 const isValidQuotaPayload = (data: any): boolean =>
   Boolean(data && data.ok !== false && (data.ok === true || data.plan));
 
+function clearUserQuotaStorage(storage: Storage, userId?: string | null): void {
+  if (userId) {
+    storage.removeItem(`${QUOTA_CACHE_PREFIX}${userId}`);
+    storage.removeItem(`egxbots_support_pro_v1:${userId}`);
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (key && key.startsWith(`egxbots_ai_recs_v2:${userId}:`)) {
+        storage.removeItem(key);
+      }
+    }
+  } else {
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (
+        key &&
+        (key.startsWith(QUOTA_CACHE_PREFIX) ||
+          key.startsWith("egxbots_support_pro_v1:") ||
+          key.startsWith("egxbots_ai_recs_v2:") ||
+          key === "egxbots_trial_status_v2")
+      ) {
+        storage.removeItem(key);
+      }
+    }
+  }
+}
+
 export function invalidateUserQuotaCache(userId?: string | null): void {
   if (userId) {
     memoryCache.delete(userId);
@@ -28,50 +54,20 @@ export function invalidateUserQuotaCache(userId?: string | null): void {
 
   if (typeof window === "undefined") return;
   try {
-    if (userId) {
-      window.sessionStorage.removeItem(`${QUOTA_CACHE_PREFIX}${userId}`);
-      window.sessionStorage.removeItem(`egxbots_support_pro_v1:${userId}`);
-      for (let i = window.sessionStorage.length - 1; i >= 0; i--) {
-        const key = window.sessionStorage.key(i);
-        if (key && key.startsWith(`egxbots_ai_recs_v2:${userId}:`)) {
-          window.sessionStorage.removeItem(key);
-        }
-      }
-    } else {
-      for (let i = window.sessionStorage.length - 1; i >= 0; i--) {
-        const key = window.sessionStorage.key(i);
-        if (
-          key &&
-          (key.startsWith(QUOTA_CACHE_PREFIX) ||
-            key.startsWith("egxbots_support_pro_v1:") ||
-            key.startsWith("egxbots_ai_recs_v2:") ||
-            key === "egxbots_trial_status_v2")
-        ) {
-          window.sessionStorage.removeItem(key);
-        }
-      }
-    }
+    clearUserQuotaStorage(window.sessionStorage, userId);
   } catch {
     // sessionStorage unavailable
+  }
+  try {
+    clearUserQuotaStorage(window.localStorage, userId);
+  } catch {
+    // localStorage unavailable
   }
 }
 
 function bindInvalidationListeners(): void {
   if (listenersBound || typeof window === "undefined") return;
   listenersBound = true;
-
-  // If the user explicitly pressed browser Refresh (F5), clear cached session quota
-  // and recommendations once at boot so manual admin approvals reflect immediately.
-  try {
-    const navEntry = window.performance?.getEntriesByType?.("navigation")?.[0] as
-      | PerformanceNavigationTiming
-      | undefined;
-    if (navEntry?.type === "reload") {
-      invalidateUserQuotaCache();
-    }
-  } catch {
-    // ignore performance API errors
-  }
 
   const clearAll = () => invalidateUserQuotaCache();
   window.addEventListener("egx:entitlements-updated", clearAll);
@@ -83,11 +79,30 @@ function bindInvalidationListeners(): void {
   });
 }
 
+function readCachedQuotaEntry(userId: string, now: number): CachedQuotaEntry | null {
+  if (typeof window === "undefined") return null;
+  const key = `${QUOTA_CACHE_PREFIX}${userId}`;
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    try {
+      const raw = storage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as CachedQuotaEntry;
+        if (parsed?.ts && now - parsed.ts < QUOTA_TTL_MS && isValidQuotaPayload(parsed.data)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore storage/JSON errors
+    }
+  }
+  return null;
+}
+
 /**
  * Shared, deduplicated `/api/user/quota` client fetcher.
  * Combines in-flight Promise deduplication across simultaneously mounted
- * components with a 30-minute `sessionStorage` cache so each session makes at
- * most 1 quota+trial call instead of 4-5 redundant round trips.
+ * components with a 30-minute `sessionStorage` + `localStorage` cache so each session
+ * and browser tab makes at most 1 quota+trial call instead of redundant round trips.
  */
 export async function fetchUserQuotaCached(
   userId?: string | null,
@@ -105,19 +120,10 @@ export async function fetchUserQuotaCached(
       return mem.data;
     }
 
-    if (typeof window !== "undefined") {
-      try {
-        const raw = window.sessionStorage.getItem(`${QUOTA_CACHE_PREFIX}${userId}`);
-        if (raw) {
-          const parsed = JSON.parse(raw) as CachedQuotaEntry;
-          if (parsed?.ts && now - parsed.ts < QUOTA_TTL_MS && isValidQuotaPayload(parsed.data)) {
-            memoryCache.set(userId, parsed);
-            return parsed.data;
-          }
-        }
-      } catch {
-        // ignore storage/JSON errors
-      }
+    const stored = readCachedQuotaEntry(userId, now);
+    if (stored) {
+      memoryCache.set(userId, stored);
+      return stored.data;
     }
 
     const existingPromise = inFlightRequests.get(userId);
@@ -131,7 +137,7 @@ export async function fetchUserQuotaCached(
   const requestPromise = (async () => {
     try {
       // Bypass browser HTTP cache so force refreshes & post-upgrade mutations never read stale Free responses;
-      // client-side deduplication and 30m TTL are handled here in memory + sessionStorage.
+      // client-side deduplication and 30m TTL are handled here in memory + sessionStorage/localStorage.
       const res = await fetch("/api/user/quota", { cache: "no-store" });
       if (!res.ok) return null;
       const data = await res.json();
@@ -139,10 +145,17 @@ export async function fetchUserQuotaCached(
         const entry: CachedQuotaEntry = { ts: Date.now(), data };
         memoryCache.set(userId, entry);
         if (typeof window !== "undefined") {
+          const serialized = JSON.stringify(entry);
           try {
-            window.sessionStorage.setItem(`${QUOTA_CACHE_PREFIX}${userId}`, JSON.stringify(entry));
+            window.sessionStorage.setItem(`${QUOTA_CACHE_PREFIX}${userId}`, serialized);
           } catch {
-            // ignore storage quota errors
+            // ignore sessionStorage quota errors
+          }
+          try {
+            window.localStorage.setItem(`${QUOTA_CACHE_PREFIX}${userId}`, serialized);
+            window.localStorage.setItem("egx_pro_active", data?.plan?.is_pro === true ? "true" : "false");
+          } catch {
+            // ignore localStorage quota errors
           }
         }
       }

@@ -350,7 +350,7 @@ export default function TradingViewChart({
   compact = false,
   hiddenDrawingIds,
 }: TradingViewChartProps) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const priceContainerRef = useRef<HTMLDivElement>(null);
@@ -829,6 +829,7 @@ export default function TradingViewChart({
 
   // 1. Fetch OHLCV candles data from our FastAPI backend
   useEffect(() => {
+    if (authLoading) return;
     const controller = new AbortController();
     setRecommendationMarkers([]);
     if (externalCandles !== undefined) return () => controller.abort();
@@ -836,7 +837,7 @@ export default function TradingViewChart({
       .then(setRecommendationMarkers)
       .catch(() => { if (!controller.signal.aborted) setRecommendationMarkers([]); });
     return () => controller.abort();
-  }, [symbol, exchange, user?.id, externalCandles !== undefined]);
+  }, [authLoading, symbol, exchange, user?.id, externalCandles !== undefined]);
 
   useEffect(() => {
     let isMounted = true;
