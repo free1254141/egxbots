@@ -4,7 +4,7 @@ import DisclosuresClient, { DisclosuresInitialStats } from "./DisclosuresClient"
 import type { DisclosureItem } from "@/lib/disclosures-analytics";
 import { analyzeDisclosures, DisclosuresAnalyticsResult, SymbolPriceInfo } from "@/lib/disclosures-analytics";
 
-export const revalidate = 86400; // 24-hour cache (until next trading day run)
+export const revalidate = 604800; // 7-day weekend-proof ISR; invalidated via /api/revalidate
 
 export const metadata: Metadata = {
   title: "رادار إفصاحات البورصة المصرية وتعاملات الداخليين | EGX BOTS",

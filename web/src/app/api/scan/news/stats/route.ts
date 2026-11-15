@@ -4,7 +4,7 @@ import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 import { getNewsRows } from "@/lib/news-data";
 
 export const runtime = "nodejs";
-export const revalidate = 86400;
+export const revalidate = 604800; // 7-day weekend-proof cache; invalidated via /api/revalidate
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 interface SectorInfo {

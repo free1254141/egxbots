@@ -254,16 +254,27 @@ def _run_saudi_daily_refresh():
         dispatch_saudi_open_recommendations()
     except Exception as tg_exc:
         print(f"[DAILY-JOB-SCHEDULER] Saudi Telegram dispatch failed (non-fatal): {tg_exc}")
+    saudi_cache_tags = []
     try:
         from api.saudi_news_sync import sync_saudi_news
-        sync_saudi_news()
+        news_res = sync_saudi_news()
+        if isinstance(news_res, dict) and news_res.get("ok"):
+            saudi_cache_tags.append("daily-news-data")
     except Exception as news_exc:
         print(f"[DAILY-JOB-SCHEDULER] Saudi news sync failed (non-fatal): {news_exc}")
     try:
         from api.saudi_disclosures_sync import sync_saudi_disclosures
-        sync_saudi_disclosures()
+        disc_res = sync_saudi_disclosures()
+        if isinstance(disc_res, dict) and disc_res.get("ok"):
+            saudi_cache_tags.append("daily-disclosures")
     except Exception as disc_exc:
         print(f"[DAILY-JOB-SCHEDULER] Saudi disclosures sync failed (non-fatal): {disc_exc}")
+    if saudi_cache_tags:
+        try:
+            from api.cache_invalidation import invalidate_cache_tags
+            invalidate_cache_tags(saudi_cache_tags)
+        except Exception as inv_exc:
+            print(f"[DAILY-JOB-SCHEDULER] Saudi cache invalidation failed (non-fatal): {inv_exc}")
     return res
 
 

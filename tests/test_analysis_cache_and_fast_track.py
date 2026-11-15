@@ -703,3 +703,47 @@ def test_router_and_telegram_persist_cache_telemetry():
     fb_meta = tg_batches[0][1][1]["metadata"]
     assert fb_meta["cached"] is False
     assert "cache_key" not in fb_meta
+
+
+def test_scheduled_worker_ai_score_rvol_limit_and_live_screen_prompt():
+    from api.agentic_chat import prompts
+    from api import scheduled_automations_worker as saw
+
+    assert "/stocks" in prompts.ARTORO_PLATFORM_CONTEXT
+    assert "شاشة أسعار الأسهم المباشرة" in prompts.ARTORO_PLATFORM_CONTEXT
+
+    seen_urls = []
+
+    def fake_supa(path, **_kwargs):
+        seen_urls.append(path)
+        if "select=date" in path:
+            return [{"date": "2026-11-15"}]
+        if "stock_technical_indicators" in path:
+            return [
+                {
+                    "symbol": "AIH",
+                    "date": "2026-11-15",
+                    "close": 0.879,
+                    "change_pct": 1.2,
+                    "volume": 500000,
+                    "r_vol": 0.0303,
+                    "rsi_14": 58.2,
+                    "ema_20": 0.85,
+                    "ema_50": 0.81,
+                    "bb_lower": 0.79,
+                    "bb_upper": 0.92,
+                    "egx_ai_score": 0.594,
+                }
+            ]
+        return []
+
+    with patch.object(saw, "_supabase_request", side_effect=fake_supa):
+        brief = saw._fetch_market_indicators_brief(
+            symbols=[],
+            prompt="عاوزك تبعتلى أعلى عشرة اسهم حاصلين على أعلى سكور شامل",
+        )
+
+    assert "تقييم AI: 59/100" in brief
+    assert "تقييم AI: 1/100" not in brief
+    assert "السيولة النسبية: 0.03x" in brief
+    assert any("limit=10" in u for u in seen_urls)

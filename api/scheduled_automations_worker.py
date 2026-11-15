@@ -476,21 +476,23 @@ def _fetch_market_indicators_brief(
             else None
         )
         ti_date_filter = f"&date=eq.{latest_ti_date}" if latest_ti_date else ""
+        ti_limit = 15 if any(k in combined_text for k in ("15", "١٥", "خمسه عشر", "خمسة عشر", "12", "١٢")) else 10
         rows = _supabase_request(
-            f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit=8"
+            f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&change_pct=gt.0&rsi_14=gte.45&rsi_14=lte.75&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,ema_50,macd,macd_signal,bb_upper,bb_lower,cmf_20,egx_ai_score,divergence_summary&order=egx_ai_score.desc.nullslast,r_vol.desc.nullslast&limit={ti_limit}"
         ) or []
         if not rows:
             rows = _supabase_request(
-                f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&select=symbol,close,change_pct,volume,rsi_14,ema_20,bb_upper,bb_lower&order=volume.desc&limit=5"
+                f"stock_technical_indicators?exchange=eq.EGX{ti_date_filter}&select=symbol,date,close,change_pct,volume,r_vol,rsi_14,ema_20,bb_upper,bb_lower,egx_ai_score&order=volume.desc&limit={ti_limit}"
             ) or []
 
     if isinstance(rows, list) and rows:
-        lines = ["📊 بيانات السوق والمؤشرات الفنية اللحظية المسجلة:"]
+        lines = ["📊 بيانات السوق والمؤشرات الفنية المسجلة:"]
         for r in rows:
             sym = str(r.get("symbol") or "").upper()
             ar_name = name_map.get(sym, "")
             label = f"#{sym} ({ar_name})" if ar_name and ar_name != sym else f"#{sym}"
             close = r.get("close")
+            r_date = r.get("date") or ""
             chg = float(r.get("change_pct") or 0)
             rsi = float(r.get("rsi_14") or 50)
             ema20 = r.get("ema_20")
@@ -504,13 +506,17 @@ def _fetch_market_indicators_brief(
                 extra.append(f"EMA50: {float(ema50):.2f}")
             if bb_l and bb_u:
                 extra.append(f"دعم/مقاومة بولينجر: {float(bb_l):.2f} - {float(bb_u):.2f}")
-            if rvol:
-                extra.append(f"السيولة النسبية: {float(rvol):.1f}x")
-            if ai_sc:
-                extra.append(f"تقييم AI: {float(ai_sc):.0f}/100")
+            if rvol is not None:
+                extra.append(f"السيولة النسبية: {float(rvol):.2f}x")
+            if ai_sc is not None:
+                ai_val = float(ai_sc)
+                ai_pct = ai_val * 100.0 if ai_val <= 1.0 else (ai_val * 10.0 if ai_val <= 10.0 else ai_val)
+                if ai_pct > 0:
+                    extra.append(f"تقييم AI: {ai_pct:.0f}/100")
             extra_str = (" | " + " | ".join(extra)) if extra else ""
+            date_tag = f" [{r_date}]" if r_date else ""
             lines.append(
-                f"• {label}: إغلاق {close} ج.م ({chg:+.2f}%) | RSI: {rsi:.1f} | EMA20: {ema20}{extra_str}"
+                f"• {label}{date_tag}: آخر سعر مسجل {close} ج.م ({chg:+.2f}%) | RSI: {rsi:.1f} | EMA20: {ema20}{extra_str}"
             )
         sections.append("\n".join(lines))
 
@@ -566,14 +572,29 @@ def _generate_ai_consultation(prompt: str, user_name: str, user_id: str = "") ->
     symbols = [w.upper() for w in words if w.upper() not in {"THE", "AND", "FOR", "BUY", "SELL", "VIP", "BOT", "EGX"}]
     indicators_brief = _fetch_market_indicators_brief(symbols, prompt=prompt, task_name=user_name, user_id=user_id)
 
+    now_cairo = dt.datetime.now(ZoneInfo("Africa/Cairo"))
+    try:
+        from api.egx_trading_calendar import is_egx_session
+        egx_open = is_egx_session(now_cairo)
+    except Exception:
+        egx_open = False
+    cairo_mins = now_cairo.hour * 60 + now_cairo.minute
+    in_trading_hours = egx_open and (10 * 60 <= cairo_mins <= 14 * 60 + 30)
+    session_status_str = (
+        f"جلسة البورصة المصرية مفتوحة حالياً للتداول (10:00 ص – 2:30 م بتوقيت القاهرة) — التوقيت الآن: {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+        if in_trading_hours
+        else f"البورصة المصرية مغلقة حالياً (خارج ساعات التداول الرسمية 10:00 ص – 2:30 م الأحد–الخميس) — التوقيت الآن: {now_cairo.strftime('%Y-%m-%d %H:%M')} القاهرة."
+    )
+
     system_prompt = (
         "أنت أرتورو (ARTORO AI)، المساعد المالي والتقني الخبير في البورصة المصرية (EGX).\n"
         "تقدم استشارة مجدولة مخصصة وموجزة للمشترك Pro بناءً على طلبه المحدد، وتعمل في أي وقت يختاره المستخدم طوال اليوم وعلى مدار الأسبوع.\n"
+        f"حالة الجلسة الآن: {session_status_str}\n"
         "قواعد الإجابة:\n"
         "1. اعتمد حصرياً على الأرقام، الأسعار، التوصيات المفتوحة، ونتائج مسح وايكوف والمؤشرات الفنية المرفقة في سياق البيانات الحقيقية، واذكر كود السهم واسمه العربي المعتمد.\n"
         "2. قدّم تحليلاً فنياً واقعياً ومحترفاً ومباشراً مقسماً بوضوح حسب نقاط سؤال المشترك بدون حشو.\n"
         "3. ركز على مستويات الدعم، المقاومة، اتجاه السيولة، وحجم التداول.\n"
-        "4. إذا كان توقيت الاستشارة خارج ساعات التداول الرسمية بالبورصة أو في عطلة نهاية الأسبوع، اعتمد على أحدث بيانات إغلاق مسجلة وقدّم رؤية استباقية واستعداداً للجلسة القادمة.\n"
+        "4. التزم بحالة الجلسة المذكورة أعلاه فقط: إذا كانت الجلسة مفتوحة لا تكتب أن الوقت خارج ساعات التداول، وإذا كانت مغلقة أو عطلة فقدّم رؤية استباقية واستعداداً للجلسة القادمة.\n"
         "5. اختم دائماً بنصيحة إدارة مخاطر ذكية ومستوى وقف خسارة محدد (2.5% إلى 3.5%) وخاتمة فنية متكاملة.\n"
         "6. التزم باللغة العربية الواضحة وتنسيق تليجرام أنيق ومرتب مع الإيموجي المناسب للقراءة السريعة.\n"
         "7. احرص على إكمال كل فكرة وجملة بدقة، ولا تترك أي فقرة أو نقطة مقطوعة أو غير مكتملة أبداً."

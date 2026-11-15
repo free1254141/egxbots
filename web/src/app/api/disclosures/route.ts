@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { EGX_SECTORS } from "@/lib/disclosures-analytics";
 import { getMarketSupabaseServiceClient, resolveRequestMarket } from "@/lib/supabase/route-data";
+import { DAILY_CACHE_TAGS, dailyCacheHeaders } from "@/lib/cache/daily";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 86400; // 24-hour cache (until next trading day run)
+export const revalidate = 604800; // 7-day weekend-proof cache; invalidated via /api/revalidate
+export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
 export async function GET(req: NextRequest) {
   const market = resolveRequestMarket(req);
@@ -117,11 +119,7 @@ export async function GET(req: NextRequest) {
     },
     {
       status: 200,
-      headers: {
-        "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
-        "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
-        "Vercel-Cache-Tag": "daily-disclosures",
-      },
+      headers: dailyCacheHeaders(DAILY_CACHE_TAGS.disclosures),
     }
   );
 }
