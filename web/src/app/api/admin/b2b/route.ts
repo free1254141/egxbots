@@ -4,6 +4,16 @@ import { requireAdmin } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 
+interface CachedChatMeta {
+  expiresAt: number;
+  invite_link: string | null;
+  group_title: string | null;
+  group_username: string | null;
+}
+
+const CHAT_META_TTL_MS = 5 * 60 * 1000;
+const telegramChatCache = new Map<number, CachedChatMeta>();
+
 function getSupabaseAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -39,12 +49,23 @@ export async function GET(request: Request) {
       // Fallback without user emails
     }
 
-    // Enrich active licenses that have telegram_chat_id with live Telegram group links
+    // Enrich active licenses that have telegram_chat_id with read-only getChat metadata (cached 5m; never calls exportChatInviteLink)
     const botToken = process.env.ARTORO_AI_BOT || "";
     if (botToken) {
+      const nowMs = Date.now();
       enriched = await Promise.all(
         enriched.map(async (lic) => {
           if (!lic.telegram_chat_id) return lic;
+          const chatIdNum = Number(lic.telegram_chat_id);
+          const cached = telegramChatCache.get(chatIdNum);
+          if (cached && cached.expiresAt > nowMs) {
+            return {
+              ...lic,
+              invite_link: cached.invite_link,
+              group_title: cached.group_title || lic.group_title,
+              group_username: cached.group_username,
+            };
+          }
           try {
             const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
               method: "POST",
@@ -55,29 +76,19 @@ export async function GET(request: Request) {
             const cdata = await resp.json();
             if (cdata.ok && cdata.result) {
               const res = cdata.result;
-              let link = res.invite_link || null;
-              if (res.username) {
-                link = `https://t.me/${res.username}`;
-              }
-              // If still no invite link, try exportChatInviteLink
-              if (!link) {
-                try {
-                  const expResp = await fetch(`https://api.telegram.org/bot${botToken}/exportChatInviteLink`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chat_id: lic.telegram_chat_id }),
-                  });
-                  const expData = await expResp.json();
-                  if (expData.ok && expData.result) {
-                    link = expData.result;
-                  }
-                } catch {}
-              }
+              const link = res.username ? `https://t.me/${res.username}` : (res.invite_link || null);
+              const meta: CachedChatMeta = {
+                expiresAt: nowMs + CHAT_META_TTL_MS,
+                invite_link: link,
+                group_title: res.title || null,
+                group_username: res.username || null,
+              };
+              telegramChatCache.set(chatIdNum, meta);
               return {
                 ...lic,
-                invite_link: link,
-                group_title: res.title || lic.group_title,
-                group_username: res.username || null,
+                invite_link: meta.invite_link,
+                group_title: meta.group_title || lic.group_title,
+                group_username: meta.group_username,
               };
             }
           } catch {}
@@ -139,6 +150,7 @@ export async function POST(request: Request) {
         duration_days = 30,
         daily_limit,
         owner_email,
+        allow_recommendations = false,
       } = body;
 
       let owner_user_id: string | null = null;
@@ -171,6 +183,7 @@ export async function POST(request: Request) {
           group_title: group_title.slice(0, 100),
           telegram_chat_id: parsedChatId,
           custom_signature: custom_signature.slice(0, 150),
+          allow_recommendations: Boolean(allow_recommendations),
           status: "active",
           starts_at: now.toISOString(),
           expires_at: expiresAt.toISOString(),
@@ -240,6 +253,7 @@ export async function POST(request: Request) {
       };
       if (body.custom_signature !== undefined) updates.custom_signature = String(body.custom_signature).slice(0, 150).trim();
       if (body.group_title !== undefined) updates.group_title = String(body.group_title).slice(0, 100).trim();
+      if (typeof body.allow_recommendations === "boolean") updates.allow_recommendations = body.allow_recommendations;
       if (body.daily_limit !== undefined) updates.daily_limit = Math.max(1, Number(body.daily_limit) || 50);
       if (body.tier !== undefined) updates.tier = body.tier;
       if (body.telegram_chat_id !== undefined) {

@@ -258,9 +258,9 @@ def _profile_url() -> str:
     return f"{origin}/profile"
 
 
-def _private_bot_url() -> str:
+def _private_bot_url(start_param: str = "artoro_chat") -> str:
     bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "egxbots_bot").strip().lstrip("@") or "egxbots_bot"
-    return f"https://t.me/{bot_username}?start=artoro_chat"
+    return f"https://t.me/{bot_username}?start={start_param}"
 
 
 def _topic_url() -> str:
@@ -1037,8 +1037,8 @@ def format_pipeline_reply_for_telegram(
 ) -> str:
     """Convert pipeline markdown response + tables into rich Telegram HTML."""
     cleaned = (reply_text or "").strip()
-    # Telegram users are already inside Telegram: drop Telegram promo lines and duplicate website markdown lines
-    cleaned = re.sub(r"^[^\n]*(?:t\.me/|/profile#telegram|قناة VIP على تليجرام|قناة EGX Bots المجانية)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
+    # Telegram users are already inside Telegram: drop Telegram promo lines and duplicate website markdown lines (preserve B2B private portfolio deep-link)
+    cleaned = re.sub(r"^[^\n]*(?:t\.me/(?!egxbots_bot\?start=b2b_portfolio)|/profile#telegram|قناة VIP على تليجرام|قناة EGX Bots المجانية)[^\n]*\n?", "", cleaned, flags=re.MULTILINE).rstrip()
     cleaned = re.sub(r"👑\s*\[قناة VIP على تليجرام[^\]]*\]\([^\)]+\)", "", cleaned).rstrip()
     cleaned = re.sub(r"📢\s*\[قناة EGX Bots المجانية[^\]]*\]\([^\)]+\)", "", cleaned).rstrip()
     cleaned = re.sub(r"🌐\s*\[منصة EGX Bots[^\]]*\]\([^\)]+\)(?:\s*•\s*👑\s*\[ترقية باقة VIP\]\([^\)]+\))?", "", cleaned).rstrip()
@@ -1189,19 +1189,11 @@ def is_vip_chat_update(data: Dict[str, Any]) -> bool:
         # Let telegram_bot handle deep link account connection (/start <uuid>)
         if text.startswith("/start") and len(text.split()) > 1:
             arg = text.split()[1].strip().lower()
-            if arg not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot"):
+            if arg not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot", "b2b_portfolio", "portfolio"):
                 return False
         return True
 
-    # 3. For any other standalone supergroup (if explicitly addressed):
-    if chat_type in ("group", "supergroup"):
-        if text.lower().startswith(("/vippanel", "/artoro_panel", "/ask")):
-            return True
-        reply_to = msg.get("reply_to_message") or {}
-        reply_text = str(reply_to.get("text") or "")
-        if "تحليل سهم فوري —" in reply_text or "مقارنة الأسهم —" in reply_text or "اسأل أرتورو —" in reply_text:
-            return True
-
+    # 3. Standalone external groups/supergroups are handled strictly by B2B group licensing (telegram_b2b.py)
     return False
 
 
@@ -1855,17 +1847,21 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
                     )
                     return True
 
-                if cb_data == "vip_tool_portfolio" and not linked:
-                    _show_limit_or_upgrade_dialog(
+                if cb_data == "vip_tool_portfolio" and not is_private:
+                    answer_vip_callback(bot_token, cb_id, "💼 افتح الشات الخاص لتحليل محفظتك بسرية", show_alert=False)
+                    send_vip_message(
                         bot_token=bot_token,
                         chat_id=chat_id,
-                        thread_id=thread_id,
-                        tg_user_id=tg_user_id,
-                        user_name=user_name,
-                        reason="account_link",
-                        used=used,
-                        limit=limit,
-                        callback_query_id=cb_id,
+                        text=(
+                            f"💼 <b>مرحباً يا {html.escape(user_name)} — محفظتك تظل سرية في الخاص!</b>\n\n"
+                            "لحماية خصوصية محفظتك، يمكنك تسجيل أسهمك أو رفع صورة محفظتك وتحليلها في الشات الخاص مباشرةً <b>بدون الحاجة للتسجيل على الموقع</b>."
+                        ),
+                        message_thread_id=thread_id,
+                        reply_markup={
+                            "inline_keyboard": [
+                                [{"text": "🔒 سجّل وحلل محفظتك بالخاص الآن", "url": _private_bot_url("b2b_portfolio")}]
+                            ]
+                        },
                     )
                     return True
 
@@ -1986,6 +1982,30 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             message_thread_id=thread_id,
             reply_to_message_id=msg_id,
             reply_markup=build_vip_chat_keyboard(is_private=is_private),
+        )
+        return True
+
+    # Tailored zero-login portfolio onboarding when arriving from B2B group or portfolio CTA
+    start_tokens = text.strip().split(maxsplit=1)
+    start_arg = start_tokens[1].strip().lower() if len(start_tokens) > 1 else ""
+    if is_private and clean_lower == "/start" and start_arg in ("b2b_portfolio", "portfolio"):
+        portfolio_welcome_html = (
+            "💼 <b>أهلاً بك في مساعد المحفظة الذكي في الخاص (بدون تسجيل دخول للموقع)!</b>\n\n"
+            "🔒 <b>بيانات محفظتك محفوظة لحساب تليجرامك الشخصي فقط وبكل سرية، ولا يراها أي عضو آخر.</b>\n\n"
+            "<b>كيف تسجل محفظتك في ثوانٍ؟</b>\n"
+            "1️⃣ <b>بالكتابة:</b> أرسل رسالة تحتوي على أسهمك وكمياتها وأسعار الشراء مثل:\n"
+            "<code>احفظ في محفظتي 1000 سهم فوري بسعر 7.5 و 500 طلعت مصطفى بسعر 55 والكاش 20000</code>\n\n"
+            "2️⃣ <b>بصورة المحفظة (سكرين شوت):</b> ارفع صورة محفظتك من تطبيق التداول واكتب معها: <code>احفظ المحفظة وحللها</code>\n\n"
+            "3️⃣ <b>للتحليل والمتابعة في أي وقت:</b> اكتب <code>حلل محفظتي</code> أو اضغط زر <b>💼 تحليل محفظتي</b> بالأسفل.\n\n"
+            "⚡ <i>متاح لك حالياً رصيد مجاني يومي بالخاص (10 استفسارات/يوم) لتسجيل ومتابعة محفظتك فوراً.</i>"
+        )
+        send_vip_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=portfolio_welcome_html,
+            message_thread_id=thread_id,
+            reply_to_message_id=msg_id,
+            reply_markup=build_vip_chat_keyboard(is_private=True),
         )
         return True
 

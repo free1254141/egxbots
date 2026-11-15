@@ -192,6 +192,7 @@ def _persist_saudi_snapshot(result: Dict[str, Any]) -> None:
 EXIT_REASON_LABELS = {
     "take_profit": "تحقيق المستهدف وجني الأرباح (+13%)",
     "ema10_break": "كسر متوسط EMA10 (حماية أرباح)",
+    "ema20_break": "كسر متوسط EMA20 (حماية أرباح)",
     "stop_be": "وقف حماية الأرباح والتعادل",
     "stop_loss": "وقف الخسارة الأولي (-4%)",
     "max_time": "انتهاء المدة الزمنية القصوى (20 جلسة)",
@@ -755,6 +756,13 @@ def compute_short_swings(
         g["atr14"] = tr.rolling(14).mean()
         g["atr_pct"] = g["atr14"] / c
 
+        rsi_delta = c.diff()
+        rsi_gain = rsi_delta.clip(lower=0.0).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        rsi_loss = (-rsi_delta.clip(upper=0.0)).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        rsi_rs = rsi_gain / rsi_loss.replace(0, np.nan)
+        rsi14 = 100.0 - (100.0 / (1.0 + rsi_rs))
+        g["rsi14"] = rsi14.where(~((rsi_gain == 0) & (rsi_loss == 0)), 50.0).fillna(50.0)
+
         g["vol_ma20"] = v.rolling(20).mean()
         g["turnover"] = (c * v).rolling(20).mean()
         g["median_turnover"] = (c * v).rolling(20).median()
@@ -821,16 +829,18 @@ def compute_short_swings(
     df["breadth"] = df["breadth"].fillna(0.5)
     df["breadth_d5"] = df["breadth_d5"].fillna(0.0)
 
-    mkt_ok = df["breadth"] >= SAUDI_MIN_BREADTH if is_saudi else ((df["breadth"] >= 0.45) & (df["breadth_d5"] >= MIN_BREADTH_DELTA5))
+    mkt_ok = (
+        ((df["breadth"] >= SAUDI_MIN_BREADTH) & (df["breadth_d5"] >= MIN_BREADTH_DELTA5))
+        if is_saudi
+        else ((df["breadth"] >= 0.45) & (df["breadth_d5"] >= MIN_BREADTH_DELTA5))
+    )
     trend_aligned = (
         df["liquid"]
         & (df["close"] > df["ema10"])
         & (df["ema10"] > df["ema20"])
         & (df["ema20"] > df["ema50"])
+        & (df["ema50_slope"].fillna(0.0) > 0)
     )
-    if not is_saudi:
-        # Require positive intermediate-term slope on EGX to avoid dead-cat bounces.
-        trend_aligned = trend_aligned & (df["ema50_slope"].fillna(0.0) > 0)
 
     day_range = df["high"] - df["low"]
     close_pos = (df["close"] - df["low"]) / (day_range.replace(0, 1e-9))
@@ -847,10 +857,18 @@ def compute_short_swings(
     )
 
     if is_saudi:
-        # Preserve calibrated Saudi Power Pullback while disabling low-breadth counter-trend setups.
+        # TADAWUL quality & anti-chasing guard: filter out erratic ATR spikes, extended runs >9% above EMA20, and parabolic RSI.
+        saudi_quality = (
+            (df["close"] >= 10.0)
+            & (df["atr_pct"].fillna(0.0) <= 0.028)
+            & (df["close"] <= df["ema20"] * 1.09)
+            & (df["rsi14"].fillna(50.0) <= 74.0)
+        )
+        sig_base_bo = sig_base_bo & saudi_quality
         sig_power_pb = (
             mkt_ok
             & trend_aligned
+            & saudi_quality
             & (df["ret20"] >= 0.08)
             & (df["low"] <= df["ema10"] * 1.01)
             & (df["close"] > df["ema10"])
@@ -893,7 +911,7 @@ def compute_short_swings(
         market[(row.symbol, row.date)] = row
 
     sig_map = defaultdict(list)
-    active_rows = df[df["signal"]][["symbol", "date", "close", "turnover", "sig_type", "ema10"]]
+    active_rows = df[df["signal"]][["symbol", "date", "close", "turnover", "sig_type", "ema10", "ema20"]]
     for row in active_rows.itertuples(index=False):
         nxt = next_date_map.get(row.date)
         if nxt:
@@ -1101,10 +1119,10 @@ def compute_short_swings(
                 p["highest_high"] = b.high
                 p["max_gain"] = max(p["max_gain"], (b.high / p["entry_price"] - 1) * 100)
 
-            # Causal take-profit target (+13%): skip Day-0 intraday limit-dip entries to avoid high/low order ambiguity.
+            # Causal take-profit target (+13% on EGX; TADAWUL trails uncapped along EMA20).
             can_tp_today = (age >= 1) or bool(p.get("opened_at_open"))
             tp_price = p["entry_price"] * (1 + TP_TARGET_PCT)
-            if can_tp_today and b.high >= tp_price:
+            if (not is_saudi) and can_tp_today and b.high >= tp_price:
                 fill_price = tp_price * (1 - 0.0015)
                 _record_closed_trade(sym, p, day, fill_price, max(1, age), "take_profit")
                 del positions[sym]
@@ -1124,14 +1142,15 @@ def compute_short_swings(
             if age == 0 and b.close <= p["sl_price"] and not p.get("pending"):
                 p["pending"] = "stop_loss"
 
-            # If already breakeven-secured and close falls below EMA10, schedule exit at next open
+            # If already breakeven-secured and close falls below trailing MA (EMA20 for TADAWUL, EMA10 for EGX), exit next open
             if p["be_active"]:
                 # Trail only from the next session: today's candle is already
                 # past the open-fill decision above.  This keeps the displayed
                 # trailing stop and the simulated exit rule consistent.
-                p["sl_price"] = max(p["sl_price"], float(b.ema10))
-                if b.close < b.ema10 and not p.get("pending"):
-                    p["pending"] = "ema10_break"
+                trail_ma = float(b.ema20) if is_saudi else float(b.ema10)
+                p["sl_price"] = max(p["sl_price"], trail_ma)
+                if b.close < trail_ma and not p.get("pending"):
+                    p["pending"] = "ema20_break" if is_saudi else "ema10_break"
 
             # Max holding period limit (20 sessions)
             if age >= 20 and not p["pending"]:
@@ -1149,6 +1168,7 @@ def compute_short_swings(
             bar = market.get((published['symbol'], last_date))
             today_rows.append({'symbol': published['symbol'], 'close': published['reference_close'],
                                'ema10': bar.ema10 if bar else published['reference_close'],
+                               'ema20': bar.ema20 if bar else published['reference_close'],
                                'sig_type': published.get('trigger_type') or 'إشارة منشورة محفوظة'})
     today_rows.extend(today_signals_df.head(15).to_dict('records'))
     # Allow actionable pending signals for the upcoming open when last_date is session_date,
@@ -1170,6 +1190,7 @@ def compute_short_swings(
         close_price = round(float(s_row["close"]), 3)
         sl_price = round(close_price * (1 - INITIAL_SL_PCT), 3)
         m_info = meta.get(sym.upper().split(".")[0], {})
+        trail_ref = float(s_row.get("ema20", s_row["ema10"])) if is_saudi else float(s_row["ema10"])
         active_output.append({
             "signal_id": f"{sym}_{last_date}",
             "symbol": sym,
@@ -1184,8 +1205,8 @@ def compute_short_swings(
             "return_pct": 0.0,
             "stop_loss": sl_price,
             "trailing_stop": sl_price,
-            "take_profit": round(close_price * (1 + TP_TARGET_PCT), 3),
-            "ema10_trend": round(float(s_row["ema10"]), 3),
+            "take_profit": None if is_saudi else round(close_price * (1 + TP_TARGET_PCT), 3),
+            "ema10_trend": round(trail_ref, 3),
             "is_breakeven_protected": False,
             "max_gain_pct": 0.0,
             "trigger_type": s_row["sig_type"],
@@ -1227,8 +1248,8 @@ def compute_short_swings(
             "return_pct": round(curr_gain, 2) if b else None,
             "stop_loss": round(p["entry_price"] * (1 - INITIAL_SL_PCT), 3),
             "trailing_stop": round(active_stop, 3),
-            "take_profit": round(p["entry_price"] * (1 + TP_TARGET_PCT), 3),
-            "ema10_trend": round(float(b.ema10), 3) if b else None,
+            "take_profit": None if is_saudi else round(p["entry_price"] * (1 + TP_TARGET_PCT), 3),
+            "ema10_trend": round(float(b.ema20 if is_saudi else b.ema10), 3) if b else None,
             "is_breakeven_protected": p["be_active"],
             "max_gain_pct": round(p["max_gain"], 2),
             "trigger_type": p["sig_type"],

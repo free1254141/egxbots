@@ -58,6 +58,65 @@ _ACTIVE_MARKET_CTX: contextvars.ContextVar[str] = contextvars.ContextVar(
     "artoro_active_market", default="EGX"
 )
 
+# Thread/async-safe Telegram user ID for unlinked private-bot portfolio isolation
+_TG_PORTFOLIO_CTX: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "artoro_tg_portfolio_user_id", default=None
+)
+_TG_PORTFOLIO_LOCKS: Dict[int, threading.Lock] = {}
+_TG_PORTFOLIO_META_LOCK = threading.Lock()
+
+
+def set_telegram_portfolio_context(telegram_user_id: Optional[int]) -> contextvars.Token:
+    """Bind the unlinked Telegram user ID so portfolio tools persist to telegram_vip_chat_state.portfolio_state."""
+    val = int(telegram_user_id) if telegram_user_id is not None else None
+    return _TG_PORTFOLIO_CTX.set(val)
+
+
+def reset_telegram_portfolio_context(token: contextvars.Token) -> None:
+    """Restore previous Telegram portfolio context."""
+    _TG_PORTFOLIO_CTX.reset(token)
+
+
+_ALLOW_RECOMMENDATIONS_CTX: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "artoro_allow_recommendations", default=True
+)
+_GROUP_PORTFOLIO_BLOCKED_CTX: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "artoro_group_portfolio_blocked", default=False
+)
+
+
+def set_allow_recommendations_context(allow: bool) -> contextvars.Token:
+    """Bind whether active recommendation exposure is allowed in the current request."""
+    return _ALLOW_RECOMMENDATIONS_CTX.set(bool(allow))
+
+
+def reset_allow_recommendations_context(token: contextvars.Token) -> None:
+    """Restore previous allow_recommendations context."""
+    _ALLOW_RECOMMENDATIONS_CTX.reset(token)
+
+
+def set_group_portfolio_blocked_context(blocked: bool) -> contextvars.Token:
+    """Bind whether personal portfolio mutations/reads are blocked because the query came from a group."""
+    return _GROUP_PORTFOLIO_BLOCKED_CTX.set(bool(blocked))
+
+
+def reset_group_portfolio_blocked_context(token: contextvars.Token) -> None:
+    """Restore previous group portfolio blocking context."""
+    _GROUP_PORTFOLIO_BLOCKED_CTX.reset(token)
+
+
+def _get_tg_portfolio_lock(telegram_user_id: int) -> threading.Lock:
+    with _TG_PORTFOLIO_META_LOCK:
+        if len(_TG_PORTFOLIO_LOCKS) > 2000:
+            unlocked = [k for k, lk in list(_TG_PORTFOLIO_LOCKS.items()) if not lk.locked()]
+            for k in unlocked[:1000]:
+                _TG_PORTFOLIO_LOCKS.pop(k, None)
+        lk = _TG_PORTFOLIO_LOCKS.get(telegram_user_id)
+        if lk is None:
+            lk = threading.Lock()
+            _TG_PORTFOLIO_LOCKS[telegram_user_id] = lk
+        return lk
+
 _TASI_MARKET_TOKENS = {
     "TASI",
     "TADAWUL",
@@ -1514,8 +1573,12 @@ async def execute_get_stock(symbols: List[str]) -> Dict[str, Any]:
 # Tool: get_stock_levels
 # ---------------------------------------------------------------------------
 def _sync_get_stock_levels_for_market(
-    sb: Any, syms: List[str], exchange_code: str
+    sb: Any,
+    syms: List[str],
+    exchange_code: str,
+    allow_recommendations: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
+    eff_allow_recs = _ALLOW_RECOMMENDATIONS_CTX.get() if allow_recommendations is None else bool(allow_recommendations)
     ui_mkt = _ui_market_label(exchange_code)
     currency = _currency_for_market(exchange_code)
     levels: List[Dict[str, Any]] = []
@@ -1565,30 +1628,31 @@ def _sync_get_stock_levels_for_market(
 
         has_rec = False
         rec_data = None
-        try:
-            res_rec = (
-                sb.from_("scan_results")
-                .select("signal,entry_price,target_price,stop_loss,status,created_at")
-                .eq("exchange", exchange_code)
-                .eq("symbol", sym)
-                .in_("status", ["open", "active"])
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if res_rec.data:
-                has_rec = True
-                r = res_rec.data[0]
-                rec_data = {
-                    "signal": r.get("signal"),
-                    "entry_price": _safe_price(r.get("entry_price")),
-                    "target_price": _safe_price(r.get("target_price")),
-                    "stop_loss": _safe_price(r.get("stop_loss")),
-                    "status": r.get("status"),
-                    "signal_date": str(r.get("created_at") or "")[:10],
-                }
-        except Exception:
-            pass
+        if eff_allow_recs:
+            try:
+                res_rec = (
+                    sb.from_("scan_results")
+                    .select("signal,entry_price,target_price,stop_loss,status,created_at")
+                    .eq("exchange", exchange_code)
+                    .eq("symbol", sym)
+                    .in_("status", ["open", "active"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if res_rec.data:
+                    has_rec = True
+                    r = res_rec.data[0]
+                    rec_data = {
+                        "signal": r.get("signal"),
+                        "entry_price": _safe_price(r.get("entry_price")),
+                        "target_price": _safe_price(r.get("target_price")),
+                        "stop_loss": _safe_price(r.get("stop_loss")),
+                        "status": r.get("status"),
+                        "signal_date": str(r.get("created_at") or "")[:10],
+                    }
+            except Exception:
+                pass
 
         levels.append({
             "symbol": sym,
@@ -1611,20 +1675,27 @@ def _sync_get_stock_levels_for_market(
     return levels
 
 
-def _sync_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
+def _sync_get_stock_levels(
+    symbols: List[str], allow_recommendations: Optional[bool] = None
+) -> Dict[str, Any]:
     egx_syms, tasi_syms = _split_symbols_by_market(symbols)
     if not egx_syms and not tasi_syms:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
 
+    eff_allow_recs = _ALLOW_RECOMMENDATIONS_CTX.get() if allow_recommendations is None else bool(allow_recommendations)
     cache_parts = [f"EGX:{s}" for s in sorted(egx_syms)] + [f"TADAWUL:{s}" for s in sorted(tasi_syms)]
-    cache_key = f"get_stock_levels:{','.join(cache_parts)}"
+    cache_key = f"get_stock_levels:{','.join(cache_parts)}:rec={1 if eff_allow_recs else 0}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
         return cached
 
     levels: List[Dict[str, Any]] = []
     if egx_syms:
-        levels.extend(_sync_get_stock_levels_for_market(_get_sb(), egx_syms, "EGX"))
+        levels.extend(
+            _sync_get_stock_levels_for_market(
+                _get_sb(), egx_syms, "EGX", allow_recommendations=eff_allow_recs
+            )
+        )
     if tasi_syms:
         sb_sa = _get_sb_for_market("TADAWUL")
         if sb_sa is None:
@@ -1640,15 +1711,21 @@ def _sync_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
                     "message": "قاعدة بيانات السوق السعودي غير متاحة حالياً.",
                 })
         else:
-            levels.extend(_sync_get_stock_levels_for_market(sb_sa, tasi_syms, "TADAWUL"))
+            levels.extend(
+                _sync_get_stock_levels_for_market(
+                    sb_sa, tasi_syms, "TADAWUL", allow_recommendations=eff_allow_recs
+                )
+            )
 
     res = {"status": "success", "levels": levels}
     _set_tool_cached(cache_key, res)
     return res
 
 
-async def execute_get_stock_levels(symbols: List[str]) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_get_stock_levels, symbols)
+async def execute_get_stock_levels(
+    symbols: List[str], allow_recommendations: Optional[bool] = None
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(_sync_get_stock_levels, symbols, allow_recommendations)
 
 
 # ---------------------------------------------------------------------------
@@ -3498,6 +3575,420 @@ async def execute_get_disclosures(
     return await asyncio.to_thread(_sync_get_disclosures, symbol, disclosure_type, limit, market)
 
 
+def _resolve_stock_display_name(clean_sym: str, sym_mkt: str) -> str:
+    """Resolve official Arabic/English company name for newly added portfolio symbols."""
+    stock_name = clean_sym
+    try:
+        sb_lookup = _get_sb_for_market(sym_mkt)
+        if sb_lookup is not None:
+            s_res = sb_lookup.from_("stocks").select("name_ar, name").eq("symbol", clean_sym).limit(1).execute()
+            if s_res.data and isinstance(s_res.data[0], dict):
+                stock_name = s_res.data[0].get("name_ar") or s_res.data[0].get("name") or clean_sym
+    except Exception:
+        pass
+    if stock_name == clean_sym:
+        stock_name = _alias_name_for_symbol(clean_sym, sym_mkt) or clean_sym
+    return stock_name
+
+
+def _build_portfolio_view_payload(
+    sb: Any,
+    holdings: List[Dict[str, Any]],
+    watchlist_only: List[Dict[str, Any]],
+    cash: float,
+) -> Dict[str, Any]:
+    """Shared live-quote enrichment & P&L calculator for both website and Telegram-only portfolios."""
+    if not holdings:
+        if watchlist_only:
+            wl_syms = ", ".join(w["symbol"] for w in watchlist_only[:10])
+            msg = (
+                f"لديك {len(watchlist_only)} سهم مسجل في قائمة المتابعة بدون تحديد كمية ({wl_syms}). "
+                "أرسل لي الكمية وسعر الشراء لأي سهم لتسجيله في حسابات المحفظة الفعلية."
+            )
+        else:
+            msg = "محفظتك فاضية حالياً. تقدر تضيف أسهمك هنا بالكتابة أو برفع سكرين شوت لمحفظتك وهحللها فوراً."
+        return {
+            "status": "success",
+            "operation": "view",
+            "message": msg,
+            "positions_count": 0,
+            "positions": [],
+            "watchlist_count": len(watchlist_only),
+            "watchlist_positions": watchlist_only,
+            "cash_balance": round(cash, 2),
+            "totals": {
+                "positions_count": 0,
+                "cost_basis": 0.0,
+                "market_value": 0.0,
+                "profit_value": 0.0,
+                "profit_pct": 0.0,
+                "equity": round(cash, 2),
+            },
+        }
+
+    symbols = list({str(p.get("symbol", "")).upper() for p in holdings if p.get("symbol")})
+    egx_syms: List[str] = []
+    sa_syms: List[str] = []
+    for s in symbols:
+        norm_s, mkt = _resolve_symbol_and_market(s)
+        if mkt == "TADAWUL":
+            sa_syms.append(norm_s)
+        else:
+            egx_syms.append(s)
+
+    price_map: Dict[str, Optional[float]] = {}
+    change_map: Dict[str, Optional[float]] = {}
+
+    if egx_syms:
+        try:
+            tech_res = (
+                sb.from_("stock_technical_indicators")
+                .select("symbol, close, change_pct, date")
+                .in_("symbol", egx_syms)
+                .order("date", desc=True)
+                .limit(max(len(egx_syms) * 5, 30))
+                .execute()
+            )
+            for row in tech_res.data or []:
+                s = str(row.get("symbol", "")).upper()
+                if s and s not in price_map:
+                    price_map[s] = _safe_price(row.get("close"))
+                    change_map[s] = _safe_float(row.get("change_pct"))
+        except Exception:
+            pass
+
+        missing_egx = [s for s in egx_syms if s not in price_map]
+        if missing_egx:
+            try:
+                sp_res = (
+                    sb.from_("stock_prices")
+                    .select("symbol, close, change_pct, date")
+                    .in_("symbol", missing_egx)
+                    .order("date", desc=True)
+                    .limit(max(len(missing_egx) * 5, 30))
+                    .execute()
+                )
+                for row in sp_res.data or []:
+                    s = str(row.get("symbol", "")).upper()
+                    if s and s not in price_map:
+                        price_map[s] = _safe_price(row.get("close"))
+                        change_map[s] = _safe_float(row.get("change_pct"))
+            except Exception:
+                pass
+
+    if sa_syms:
+        sb_sa = _get_sb_for_market("TADAWUL")
+        if sb_sa is not None:
+            sa_ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_sa, sa_syms, limit_per_sym=5)
+            for s_norm, bars in sa_ohlcv.items():
+                if bars:
+                    c0 = _safe_price(bars[0].get("close"))
+                    price_map[s_norm] = c0
+                    if len(bars) >= 2:
+                        c1 = _safe_price(bars[1].get("close"))
+                        if c1 and c0:
+                            change_map[s_norm] = _safe_float(((c0 - c1) / c1) * 100.0)
+
+    enriched = []
+    for p in holdings:
+        s = str(p.get("symbol", "")).upper()
+        norm_s, mkt = _resolve_symbol_and_market(s)
+        curr = _currency_for_market(mkt)
+        qty = _safe_float(p.get("quantity"), 4)
+        entry = _safe_price(p.get("entry_price"))
+        last_price = price_map.get(s) if s in price_map else price_map.get(norm_s)
+        change_pct = change_map.get(s) if s in change_map else change_map.get(norm_s)
+
+        valid_entry = entry is not None and entry > 0
+        cost_basis = (qty * entry) if (qty is not None and valid_entry) else None
+        market_value = (qty * last_price) if (qty is not None and last_price is not None) else None
+        profit_value = (market_value - cost_basis) if (cost_basis is not None and market_value is not None) else None
+        profit_pct = ((profit_value / cost_basis) * 100) if (cost_basis and cost_basis > 0 and profit_value is not None) else None
+
+        enriched.append({
+            "id": p.get("id"),
+            "symbol": s,
+            "market": _ui_market_label(mkt),
+            "currency": curr,
+            "name": p.get("name") or s,
+            "quantity": qty,
+            "entry_price": entry,
+            "last_price": last_price,
+            "change_pct": change_pct,
+            "market_value": round(market_value, 2) if market_value is not None else None,
+            "cost_basis": round(cost_basis, 2) if cost_basis is not None else None,
+            "profit_value": round(profit_value, 2) if profit_value is not None else None,
+            "profit_pct": round(profit_pct, 2) if profit_pct is not None else None,
+            "added_at": p.get("added_at"),
+        })
+
+    has_unknown_cost = any(p["cost_basis"] is None for p in enriched)
+    total_cost = None if has_unknown_cost else sum(p["cost_basis"] or 0 for p in enriched)
+    has_unknown_val = any(p["market_value"] is None for p in enriched)
+    total_value = None if has_unknown_val else sum(p["market_value"] or 0 for p in enriched)
+    total_profit = (total_value - total_cost) if (total_cost is not None and total_value is not None) else None
+    total_profit_pct = ((total_profit / total_cost) * 100) if (total_cost and total_cost > 0 and total_profit is not None) else None
+    equity = (total_value + cash) if total_value is not None else cash
+
+    totals_by_market: Dict[str, Dict[str, Any]] = {}
+    if sa_syms:
+        for m_lbl, curr_lbl in (("EGX", "ج.م"), ("TASI", "ر.س")):
+            sub = [x for x in enriched if x.get("market") == m_lbl]
+            if sub:
+                sub_cost = sum(x["cost_basis"] or 0 for x in sub) if all(x["cost_basis"] is not None for x in sub) else None
+                sub_val = sum(x["market_value"] or 0 for x in sub) if all(x["market_value"] is not None for x in sub) else None
+                sub_pnl = (sub_val - sub_cost) if (sub_val is not None and sub_cost is not None) else None
+                totals_by_market[m_lbl] = {
+                    "currency": curr_lbl,
+                    "positions_count": len(sub),
+                    "cost_basis": round(sub_cost, 2) if sub_cost is not None else None,
+                    "market_value": round(sub_val, 2) if sub_val is not None else None,
+                    "profit_value": round(sub_pnl, 2) if sub_pnl is not None else None,
+                }
+
+    res_payload: Dict[str, Any] = {
+        "status": "success",
+        "operation": "view",
+        "message": (
+            f"محفظتك تحتوي على {len(enriched)} سهم."
+            + (f" ويوجد {len(watchlist_only)} سهم آخر في قائمة المتابعة بدون كمية محددة." if watchlist_only else "")
+        ),
+        "positions_count": len(enriched),
+        "positions": enriched,
+        "watchlist_count": len(watchlist_only),
+        "watchlist_positions": watchlist_only,
+        "cash_balance": round(cash, 2),
+        "totals": {
+            "positions_count": len(enriched),
+            "cost_basis": round(total_cost, 2) if total_cost is not None else None,
+            "market_value": round(total_value, 2) if total_value is not None else None,
+            "profit_value": round(total_profit, 2) if total_profit is not None else None,
+            "profit_pct": round(total_profit_pct, 2) if total_profit_pct is not None else None,
+            "equity": round(equity, 2),
+        },
+    }
+    if totals_by_market:
+        res_payload["totals_by_market"] = totals_by_market
+    return res_payload
+
+
+def _load_tg_portfolio_state(sb: Any, telegram_user_id: int) -> Dict[str, Any]:
+    res = (
+        sb.from_("telegram_vip_chat_state")
+        .select("portfolio_state")
+        .eq("telegram_user_id", int(telegram_user_id))
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    raw_state = (rows[0].get("portfolio_state") if rows and isinstance(rows[0], dict) else None) or {}
+    if not isinstance(raw_state, dict):
+        raw_state = {}
+    positions = raw_state.get("positions")
+    if not isinstance(positions, list):
+        positions = []
+    cash = _safe_float(raw_state.get("cash_balance"), 2) or 0.0
+    return {
+        "cash_balance": cash,
+        "positions": [dict(p) for p in positions if isinstance(p, dict) and p.get("symbol")],
+    }
+
+
+def _save_tg_portfolio_state(sb: Any, telegram_user_id: int, state: Dict[str, Any]) -> None:
+    sb.from_("telegram_vip_chat_state").upsert(
+        {
+            "telegram_user_id": int(telegram_user_id),
+            "portfolio_state": state,
+            "updated_at": datetime.now(CAIRO_TZ).isoformat(),
+        },
+        on_conflict="telegram_user_id",
+    ).execute()
+
+
+def _manage_tg_json_portfolio(
+    sb: Any,
+    telegram_user_id: int,
+    op: str,
+    symbol: Optional[str],
+    quantity: Optional[float],
+    price: Optional[float],
+    user_prompt: str,
+    cash_amount: Optional[float],
+) -> Dict[str, Any]:
+    """Isolated zero-login portfolio storage backed by telegram_vip_chat_state.portfolio_state."""
+    if op in ("view", "get"):
+        try:
+            state = _load_tg_portfolio_state(sb, telegram_user_id)
+            holdings = [
+                p for p in state["positions"]
+                if p.get("quantity") is not None and (_safe_float(p.get("quantity")) or 0) > 0
+            ]
+            res = _build_portfolio_view_payload(sb, holdings, [], float(state.get("cash_balance") or 0.0))
+            res["storage_mode"] = "telegram_private_only"
+            return res
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر استرجاع محفظتك: {str(e)}"}
+
+    # Anti-injection write check matches website portfolio behavior
+    norm_prompt = _normalize_arabic_text(user_prompt).lower()
+    write_intent_patterns = (
+        r"(?:احفظ|سجل|اشتريت|شريت|ضف|اضف|اضيف|ضيف|ضيفه|ضيفهم|ضيفلي|"
+        r"حط|حطه|دخل|شيل|بيع|بعت|احذف|امسح|الغي|نقص|زود|تزود|"
+        r"عدل|عدلي|غير|حدث|موافق|تمام|اكد|تاكيد|نفذ|اضافه|تعديل|"
+        r"(?:^|[^\w\u0621-\u064a])شراء(?:$|[^\w\u0621-\u064a]))"
+    )
+    if not re.search(write_intent_patterns, norm_prompt):
+        return {
+            "status": "blocked",
+            "message": "لم يتم تأكيد طلب تعديل المحفظة من رسالة المستخدم صراحةً.",
+        }
+
+    lock = _get_tg_portfolio_lock(int(telegram_user_id))
+    with lock:
+        if op in ("set_cash", "add_cash"):
+            amount = _safe_float(cash_amount, 2)
+            if amount is None:
+                amount = _safe_float(price, 2)
+            if amount is None:
+                amount = _safe_float(quantity, 2)
+            if amount is None or amount < 0 or (op == "add_cash" and amount == 0):
+                return {
+                    "status": "needs_clarification",
+                    "operation": op,
+                    "message": "يلزم تحديد مبلغ السيولة النقدية (الكاش) برقم واضح لتحديث رصيد المحفظة.",
+                }
+            state = _load_tg_portfolio_state(sb, telegram_user_id)
+            current_cash = _safe_float(state.get("cash_balance"), 2) or 0.0
+            new_cash = round(amount if op == "set_cash" else (current_cash + amount), 2)
+            state["cash_balance"] = new_cash
+            _save_tg_portfolio_state(sb, telegram_user_id, state)
+            return {
+                "status": "success",
+                "operation": op,
+                "cash_balance": new_cash,
+                "storage_mode": "telegram_private_only",
+                "message": f"تم بنجاح تحديث رصيد الكاش (السيولة المتاحة) في محفظتك الخاصة على تليجرام إلى {new_cash:,.2f} ج.م.",
+            }
+
+        clean_sym, sym_mkt = _resolve_symbol_and_market(symbol)
+        curr_lbl = _currency_for_market(sym_mkt)
+        if not clean_sym:
+            return {"status": "error", "message": "رمز السهم مطلوب لإجراء تعديل المحفظة."}
+
+        state = _load_tg_portfolio_state(sb, telegram_user_id)
+        positions: List[Dict[str, Any]] = state["positions"]
+        existing_idx = next(
+            (i for i, p in enumerate(positions) if str(p.get("symbol", "")).upper() == clean_sym),
+            None,
+        )
+        existing = positions[existing_idx] if existing_idx is not None else None
+
+        if op in ("add", "buy"):
+            add_qty = _safe_float(quantity, 4)
+            new_entry = _safe_float(price, 4)
+            if add_qty is None or add_qty <= 0 or new_entry is None or new_entry <= 0:
+                return {
+                    "status": "needs_clarification",
+                    "operation": op,
+                    "symbol": clean_sym,
+                    "message": (
+                        f"يلزم تحديد عدد الأسهم (> 0) وسعر الشراء الفعلي (> 0) بوضوح لإضافة أو شراء {clean_sym} في محفظتك — "
+                        "لا يُسمح بافتراض كمية أو سعر تلقائياً."
+                    ),
+                }
+            if existing is not None:
+                old_qty = _safe_float(existing.get("quantity"), 4) or 0.0
+                new_qty = round(old_qty + add_qty, 4)
+                old_entry = _safe_float(existing.get("entry_price"), 4)
+                avg_entry = ((old_entry * old_qty) + (new_entry * add_qty)) / new_qty if (old_entry and old_qty > 0 and new_qty > 0) else new_entry
+                avg_entry_stored = round(avg_entry, 4)
+                positions[existing_idx]["quantity"] = new_qty
+                positions[existing_idx]["entry_price"] = avg_entry_stored
+                msg = f"تم بنجاح تحديث سهم {clean_sym} في محفظتك الخاصة: الإجمالي الآن {new_qty} سهم بمتوسط سعر {_safe_price(avg_entry_stored)} {curr_lbl}."
+            else:
+                stock_name = _resolve_stock_display_name(clean_sym, sym_mkt)
+                positions.append({
+                    "id": f"tg-{telegram_user_id}-{clean_sym}",
+                    "symbol": clean_sym,
+                    "name": stock_name,
+                    "quantity": add_qty,
+                    "entry_price": new_entry,
+                    "status": "open",
+                    "source": "telegram_private",
+                    "added_at": datetime.now(CAIRO_TZ).isoformat(),
+                })
+                msg = f"تم بنجاح حفظ {add_qty} سهم من {clean_sym} في محفظتك الخاصة على تليجرام بسعر {_safe_price(new_entry)} {curr_lbl} (بدون الحاجة لحساب على الموقع)."
+            _save_tg_portfolio_state(sb, telegram_user_id, state)
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "market": _ui_market_label(sym_mkt),
+                "currency": curr_lbl,
+                "storage_mode": "telegram_private_only",
+                "message": msg,
+            }
+
+        if op in ("update",):
+            if existing is None:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك الخاصة."}
+            if quantity is None and price is None:
+                return {"status": "error", "message": "يلزم تحديد الكمية أو السعر لتعديل المركز."}
+            if quantity is not None:
+                positions[existing_idx]["quantity"] = _safe_float(quantity, 4)
+            if price is not None:
+                positions[existing_idx]["entry_price"] = _safe_float(price, 4)
+            _save_tg_portfolio_state(sb, telegram_user_id, state)
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "storage_mode": "telegram_private_only",
+                "message": f"تم تعديل مركز سهم {clean_sym} في محفظتك الخاصة بنجاح.",
+            }
+
+        if op in ("remove", "delete"):
+            if existing is None:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك."}
+            positions.pop(existing_idx)
+            _save_tg_portfolio_state(sb, telegram_user_id, state)
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "storage_mode": "telegram_private_only",
+                "message": f"تم حذف سهم {clean_sym} من محفظتك الخاصة بنجاح.",
+            }
+
+        if op in ("sell",):
+            if existing is None:
+                return {"status": "error", "message": f"سهم {clean_sym} غير موجود في محفظتك المفتوحة."}
+            held = _safe_float(existing.get("quantity")) or 0.0
+            sell_qty = _safe_float(quantity) if quantity is not None else held
+            if sell_qty <= 0:
+                return {"status": "error", "message": "كمية البيع يجب أن تكون أكبر من الصفر."}
+            if sell_qty >= held:
+                positions.pop(existing_idx)
+                msg = f"تم تسجيل بيع كامل رصيد سهم {clean_sym} ({held} سهم)."
+            else:
+                rem = round(held - sell_qty, 4)
+                positions[existing_idx]["quantity"] = rem
+                msg = f"تم تسجيل بيع {sell_qty} سهم من {clean_sym}، والمتبقي {rem} سهم."
+            if price and price > 0:
+                current_cash = _safe_float(state.get("cash_balance"), 2) or 0.0
+                state["cash_balance"] = round(current_cash + (sell_qty * price), 2)
+            _save_tg_portfolio_state(sb, telegram_user_id, state)
+            return {
+                "status": "success",
+                "operation": op,
+                "symbol": clean_sym,
+                "storage_mode": "telegram_private_only",
+                "message": msg,
+            }
+
+        return {"status": "error", "message": f"العملية {op} غير مدعومة."}
+
+
 # ---------------------------------------------------------------------------
 # Tool: manage_portfolio (with prompt-injection safeguard)
 # ---------------------------------------------------------------------------
@@ -3509,14 +4000,41 @@ def _sync_manage_portfolio(
     price: Optional[float] = None,
     user_prompt: str = "",
     cash_amount: Optional[float] = None,
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Secure portfolio management backed by Supabase `positions` table and `profiles.cash_balance`.
-    Requires verified user_id.
-    Enforces anti-injection: write operations (add/update/remove/sell) require explicit
-    confirmation words in user_prompt to prevent autonomous hallucinated mutations.
-    Supports both EGX and Saudi TADAWUL holdings in unified user portfolio.
+    Secure portfolio management backed by Supabase `positions` + `profiles.cash_balance`
+    for website-authenticated accounts, or `telegram_vip_chat_state.portfolio_state`
+    for unlinked private Telegram users (zero website registration required).
     """
+    effective_tg_id = telegram_user_id if telegram_user_id is not None else _TG_PORTFOLIO_CTX.get()
+    if _GROUP_PORTFOLIO_BLOCKED_CTX.get():
+        return {
+            "status": "redirect_private",
+            "requires_private_chat": True,
+            "private_bot_url": "https://t.me/egxbots_bot?start=b2b_portfolio",
+            "message": (
+                "لحماية خصوصية محفظتك الاستثمارية، تم تعطيل تسجيل أو عرض المحافظ داخل الجروب العام أو جروبات الشركات. "
+                "افتح الشات الخاص مع البوت مباشرةً عبر الرابط التالي لتسجيل وتحليل محفظتك بسرية وبدون تسجيل دخول على الموقع: "
+                "https://t.me/egxbots_bot?start=b2b_portfolio"
+            ),
+        }
+
+    sb = _get_sb()
+    op = (operation or "view").lower().strip()
+
+    if effective_tg_id is not None:
+        return _manage_tg_json_portfolio(
+            sb=sb,
+            telegram_user_id=int(effective_tg_id),
+            op=op,
+            symbol=symbol,
+            quantity=quantity,
+            price=price,
+            user_prompt=user_prompt,
+            cash_amount=cash_amount,
+        )
+
     if not user_id:
         return {
             "status": "error",
@@ -3524,12 +4042,8 @@ def _sync_manage_portfolio(
             "requires_login": True,
         }
 
-    sb = _get_sb()
-    op = (operation or "view").lower().strip()
-
     if op in ("view", "get"):
         try:
-            # 1. Fetch open positions from `positions` table
             res = (
                 sb.from_("positions")
                 .select("id, symbol, name, quantity, entry_price, entry_at, status, source, added_at")
@@ -3541,7 +4055,6 @@ def _sync_manage_portfolio(
             )
             raw_positions = res.data or []
 
-            # Filter real holdings (quantity > 0) and tracked watchlist rows (quantity missing/0)
             holdings = [
                 p for p in raw_positions
                 if p.get("quantity") is not None and _safe_float(p.get("quantity")) is not None and _safe_float(p.get("quantity")) > 0
@@ -3558,7 +4071,6 @@ def _sync_manage_portfolio(
                 if p.get("quantity") is None or _safe_float(p.get("quantity")) is None or _safe_float(p.get("quantity")) <= 0
             ]
 
-            # 2. Fetch cash balance from `profiles`
             cash = 0.0
             try:
                 prof_res = sb.from_("profiles").select("cash_balance").eq("id", user_id).limit(1).execute()
@@ -3567,182 +4079,7 @@ def _sync_manage_portfolio(
             except Exception:
                 cash = 0.0
 
-            if not holdings:
-                if watchlist_only:
-                    wl_syms = ", ".join(w["symbol"] for w in watchlist_only[:10])
-                    msg = (
-                        f"لديك {len(watchlist_only)} سهم مسجل في قائمة المتابعة بالموقع بدون تحديد كمية ({wl_syms}). "
-                        "أرسل لي الكمية وسعر الشراء لأي سهم لتسجيله في حسابات المحفظة الفعلية."
-                    )
-                else:
-                    msg = "محفظتك فاضية حالياً. تقدر تضيف أسهمك هنا بالكتابة أو برفع سكرين شوت لمحفظتك وهحللها فوراً."
-                return {
-                    "status": "success",
-                    "operation": "view",
-                    "message": msg,
-                    "positions_count": 0,
-                    "positions": [],
-                    "watchlist_count": len(watchlist_only),
-                    "watchlist_positions": watchlist_only,
-                    "cash_balance": round(cash, 2),
-                    "totals": {
-                        "positions_count": 0,
-                        "cost_basis": 0.0,
-                        "market_value": 0.0,
-                        "profit_value": 0.0,
-                        "profit_pct": 0.0,
-                        "equity": round(cash, 2),
-                    },
-                }
-
-            # 3. Group holdings by market and enrich with latest quotes from the right DB
-            symbols = list({str(p.get("symbol", "")).upper() for p in holdings if p.get("symbol")})
-            sym_market_map: Dict[str, str] = {}
-            egx_syms: List[str] = []
-            sa_syms: List[str] = []
-            for s in symbols:
-                norm_s, mkt = _resolve_symbol_and_market(s)
-                sym_market_map[s] = mkt
-                if mkt == "TADAWUL":
-                    sa_syms.append(norm_s)
-                else:
-                    egx_syms.append(s)
-
-            price_map: Dict[str, Optional[float]] = {}
-            change_map: Dict[str, Optional[float]] = {}
-
-            if egx_syms:
-                try:
-                    tech_res = (
-                        sb.from_("stock_technical_indicators")
-                        .select("symbol, close, change_pct, date")
-                        .in_("symbol", egx_syms)
-                        .order("date", desc=True)
-                        .limit(max(len(egx_syms) * 5, 30))
-                        .execute()
-                    )
-                    for row in tech_res.data or []:
-                        s = str(row.get("symbol", "")).upper()
-                        if s and s not in price_map:
-                            price_map[s] = _safe_price(row.get("close"))
-                            change_map[s] = _safe_float(row.get("change_pct"))
-                except Exception:
-                    pass
-
-                missing_egx = [s for s in egx_syms if s not in price_map]
-                if missing_egx:
-                    try:
-                        sp_res = (
-                            sb.from_("stock_prices")
-                            .select("symbol, close, change_pct, date")
-                            .in_("symbol", missing_egx)
-                            .order("date", desc=True)
-                            .limit(max(len(missing_egx) * 5, 30))
-                            .execute()
-                        )
-                        for row in sp_res.data or []:
-                            s = str(row.get("symbol", "")).upper()
-                            if s and s not in price_map:
-                                price_map[s] = _safe_price(row.get("close"))
-                                change_map[s] = _safe_float(row.get("change_pct"))
-                    except Exception:
-                        pass
-
-            if sa_syms:
-                sb_sa = _get_sb_for_market("TADAWUL")
-                if sb_sa is not None:
-                    sa_ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_sa, sa_syms, limit_per_sym=5)
-                    for s_norm, bars in sa_ohlcv.items():
-                        if bars:
-                            c0 = _safe_price(bars[0].get("close"))
-                            price_map[s_norm] = c0
-                            if len(bars) >= 2:
-                                c1 = _safe_price(bars[1].get("close"))
-                                if c1 and c0:
-                                    change_map[s_norm] = _safe_float(((c0 - c1) / c1) * 100.0)
-
-            enriched = []
-            for p in holdings:
-                s = str(p.get("symbol", "")).upper()
-                norm_s, mkt = _resolve_symbol_and_market(s)
-                curr = _currency_for_market(mkt)
-                qty = _safe_float(p.get("quantity"), 4)
-                entry = _safe_price(p.get("entry_price"))
-                last_price = price_map.get(s) if s in price_map else price_map.get(norm_s)
-                change_pct = change_map.get(s) if s in change_map else change_map.get(norm_s)
-
-                valid_entry = entry is not None and entry > 0
-                cost_basis = (qty * entry) if (qty is not None and valid_entry) else None
-                market_value = (qty * last_price) if (qty is not None and last_price is not None) else None
-                profit_value = (market_value - cost_basis) if (cost_basis is not None and market_value is not None) else None
-                profit_pct = ((profit_value / cost_basis) * 100) if (cost_basis and cost_basis > 0 and profit_value is not None) else None
-
-                enriched.append({
-                    "id": p.get("id"),
-                    "symbol": s,
-                    "market": _ui_market_label(mkt),
-                    "currency": curr,
-                    "name": p.get("name") or s,
-                    "quantity": qty,
-                    "entry_price": entry,
-                    "last_price": last_price,
-                    "change_pct": change_pct,
-                    "market_value": round(market_value, 2) if market_value is not None else None,
-                    "cost_basis": round(cost_basis, 2) if cost_basis is not None else None,
-                    "profit_value": round(profit_value, 2) if profit_value is not None else None,
-                    "profit_pct": round(profit_pct, 2) if profit_pct is not None else None,
-                    "added_at": p.get("added_at"),
-                })
-
-            has_unknown_cost = any(p["cost_basis"] is None for p in enriched)
-            total_cost = None if has_unknown_cost else sum(p["cost_basis"] or 0 for p in enriched)
-            has_unknown_val = any(p["market_value"] is None for p in enriched)
-            total_value = None if has_unknown_val else sum(p["market_value"] or 0 for p in enriched)
-            total_profit = (total_value - total_cost) if (total_cost is not None and total_value is not None) else None
-            total_profit_pct = ((total_profit / total_cost) * 100) if (total_cost and total_cost > 0 and total_profit is not None) else None
-            equity = (total_value + cash) if total_value is not None else cash
-
-            # Per-market sub-totals when Saudi positions are present
-            totals_by_market: Dict[str, Dict[str, Any]] = {}
-            if sa_syms:
-                for m_lbl, curr_lbl in (("EGX", "ج.م"), ("TASI", "ر.س")):
-                    sub = [x for x in enriched if x.get("market") == m_lbl]
-                    if sub:
-                        sub_cost = sum(x["cost_basis"] or 0 for x in sub) if all(x["cost_basis"] is not None for x in sub) else None
-                        sub_val = sum(x["market_value"] or 0 for x in sub) if all(x["market_value"] is not None for x in sub) else None
-                        sub_pnl = (sub_val - sub_cost) if (sub_val is not None and sub_cost is not None) else None
-                        totals_by_market[m_lbl] = {
-                            "currency": curr_lbl,
-                            "positions_count": len(sub),
-                            "cost_basis": round(sub_cost, 2) if sub_cost is not None else None,
-                            "market_value": round(sub_val, 2) if sub_val is not None else None,
-                            "profit_value": round(sub_pnl, 2) if sub_pnl is not None else None,
-                        }
-
-            res_payload: Dict[str, Any] = {
-                "status": "success",
-                "operation": "view",
-                "message": (
-                    f"محفظتك تحتوي على {len(enriched)} سهم."
-                    + (f" ويوجد {len(watchlist_only)} سهم آخر في قائمة المتابعة بدون كمية محددة." if watchlist_only else "")
-                ),
-                "positions_count": len(enriched),
-                "positions": enriched,
-                "watchlist_count": len(watchlist_only),
-                "watchlist_positions": watchlist_only,
-                "cash_balance": round(cash, 2),
-                "totals": {
-                    "positions_count": len(enriched),
-                    "cost_basis": round(total_cost, 2) if total_cost is not None else None,
-                    "market_value": round(total_value, 2) if total_value is not None else None,
-                    "profit_value": round(total_profit, 2) if total_profit is not None else None,
-                    "profit_pct": round(total_profit_pct, 2) if total_profit_pct is not None else None,
-                    "equity": round(equity, 2),
-                },
-            }
-            if totals_by_market:
-                res_payload["totals_by_market"] = totals_by_market
-            return res_payload
+            return _build_portfolio_view_payload(sb, holdings, watchlist_only, cash)
         except Exception as e:
             return {"status": "error", "message": f"تعذر استرجاع المحفظة: {str(e)}"}
 
@@ -3832,17 +4169,7 @@ def _sync_manage_portfolio(
                 }).eq("id", existing["id"]).execute()
                 msg = f"تم بنجاح تحديث سهم {clean_sym}: إجمالي الرصيد الآن {new_qty} سهم بمتوسط سعر {_safe_price(avg_entry_stored)} {curr_lbl}."
             else:
-                stock_name = clean_sym
-                try:
-                    sb_lookup = _get_sb_for_market(sym_mkt)
-                    if sb_lookup is not None:
-                        s_res = sb_lookup.from_("stocks").select("name_ar, name").eq("symbol", clean_sym).limit(1).execute()
-                        if s_res.data and isinstance(s_res.data[0], dict):
-                            stock_name = s_res.data[0].get("name_ar") or s_res.data[0].get("name") or clean_sym
-                except Exception:
-                    pass
-                if stock_name == clean_sym:
-                    stock_name = _alias_name_for_symbol(clean_sym, sym_mkt) or clean_sym
+                stock_name = _resolve_stock_display_name(clean_sym, sym_mkt)
                 row = {
                     "user_id": user_id,
                     "symbol": clean_sym,
@@ -3921,7 +4248,6 @@ def _sync_manage_portfolio(
                 sb.from_("positions").update({"quantity": rem}).eq("id", existing["id"]).execute()
                 msg = f"تم تسجيل بيع {sell_qty} سهم من {clean_sym}، والمتبقي {rem} سهم."
 
-            # Update cash if price provided
             if price and price > 0:
                 proceeds = sell_qty * price
                 try:
@@ -3951,8 +4277,20 @@ async def execute_manage_portfolio(
     price: Optional[float] = None,
     user_prompt: str = "",
     cash_amount: Optional[float] = None,
+    telegram_user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_manage_portfolio, user_id, operation, symbol, quantity, price, user_prompt, cash_amount)
+    effective_tg_id = telegram_user_id if telegram_user_id is not None else _TG_PORTFOLIO_CTX.get()
+    return await asyncio.to_thread(
+        _sync_manage_portfolio,
+        user_id,
+        operation,
+        symbol,
+        quantity,
+        price,
+        user_prompt,
+        cash_amount,
+        effective_tg_id,
+    )
 
 
 BENCHMARK_FIXTURES: Dict[str, Any] = {
@@ -4148,8 +4486,125 @@ BENCHMARK_FIXTURES: Dict[str, Any] = {
         "current_market_value": 64750.0,
         "profit_loss_egp": 2250.0,
         "profit_loss_pct": 3.6,
-    }
+    },
+    "manage_user_preferences": {
+        "status": "success",
+        "operation": "get",
+        "rules": "- التداول بالأسهم المتوافقة مع الشريعة الإسلامية فقط",
+        "message": "تم استرجاع تفضيلات المستخدم بنجاح.",
+    },
 }
+
+
+def _sync_manage_user_preferences(
+    user_id: Optional[str],
+    operation: str,
+    rule: Optional[str] = None,
+    rules: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    from api.agentic_chat.user_preferences import (
+        merge_user_rule,
+        remove_user_rule,
+        replace_user_rules,
+        user_rules_list,
+    )
+    if not user_id or user_id == "00000000-0000-0000-0000-000000000000":
+        return {
+            "status": "unauthenticated",
+            "message": "يجب تسجيل الدخول لحفظ أو تعديل الذاكرة والقواعد الدائمة.",
+            "rules": "",
+        }
+
+    op = str(operation or "").strip().lower()
+    _init_supabase()
+    sb = supabase
+    if not sb:
+        return {"status": "error", "message": "قاعدة البيانات غير متاحة حالياً."}
+
+    try:
+        res = sb.table("profiles").select("custom_ai_rules").eq("id", user_id).limit(1).execute()
+        existing = res.data[0].get("custom_ai_rules") if (res and res.data) else None
+        existing_str = str(existing or "").strip()
+        next_rules = existing_str
+
+        if op == "get":
+            return {
+                "status": "success",
+                "operation": "get",
+                "rules": existing_str,
+                "rules_list": user_rules_list(existing_str),
+                "message": "القواعد الدائمة المحفوظة بحسابك:" if existing_str else "لا توجد قواعد دائمة محفوظة بحسابك حالياً.",
+            }
+
+        elif op == "add":
+            if not rule or not str(rule).strip():
+                return {"status": "error", "message": "يرجى تحديد نص القاعدة المراد حفظها في جملة واضحة."}
+            next_rules = merge_user_rule(existing_str, str(rule).strip())
+            if next_rules == existing_str:
+                return {
+                    "status": "success",
+                    "operation": "add",
+                    "saved": False,
+                    "rules": existing_str,
+                    "message": "هذه القاعدة مسجلة ومحفوظة بالفعل في ذاكرتك الدائمة.",
+                }
+
+        elif op == "delete":
+            if not rule or not str(rule).strip():
+                return {"status": "error", "message": "يرجى تحديد القاعدة أو الكلمة المراد حذفها من الذاكرة."}
+            next_rules, removed = remove_user_rule(existing_str, str(rule).strip())
+            if not removed:
+                return {
+                    "status": "success",
+                    "operation": "delete",
+                    "saved": False,
+                    "rules": existing_str,
+                    "message": "لم أجد قاعدة محفوظة مطابقة للنص المطلوب حذفه.",
+                }
+
+        elif op == "replace":
+            if not rules or not isinstance(rules, list):
+                return {"status": "error", "message": "قائمة القواعد الجديدة فارغة. لحذف كل القواعد استخدم عملية delete."}
+            next_rules = replace_user_rules(rules)
+
+        else:
+            return {"status": "error", "message": f"العملية {op} غير مدعومة. العمليات المدعومة: add, delete, replace, get."}
+
+        # Save to profiles table
+        sb.table("profiles").update({"custom_ai_rules": next_rules if next_rules else None}).eq("id", user_id).execute()
+
+        msg = (
+            "تم حذف القاعدة من ذاكرتك الدائمة بنجاح."
+            if op == "delete"
+            else "تم حفظ وتحديث ذاكرتك الدائمة بنجاح، وسألتزم بهذه القواعد في كل محادثاتنا القادمة."
+        )
+        return {
+            "status": "success",
+            "operation": op,
+            "saved": True,
+            "rules": next_rules,
+            "rules_list": user_rules_list(next_rules),
+            "message": msg,
+        }
+
+    except Exception as e:
+        logger.error(f"[agentic_chat] Error in manage_user_preferences: {e}")
+        return {"status": "error", "message": f"تعذر تحديث الذاكرة الدائمة: {str(e)}"}
+
+
+async def execute_manage_user_preferences(
+    user_id: Optional[str],
+    operation: str,
+    rule: Optional[str] = None,
+    rules: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        _sync_manage_user_preferences,
+        user_id,
+        operation,
+        rule,
+        rules,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4186,6 +4641,12 @@ async def dispatch_tool(
             return await execute_get_market(market=arguments.get("market"))
 
         elif tool_name == "get_recommendations":
+            if not _ALLOW_RECOMMENDATIONS_CTX.get():
+                return {
+                    "status": "disabled",
+                    "message": "تم تعطيل توصيات الشراء والبيع المفتوحة لهذه المجموعة بناءً على إعدادات الإدارة.",
+                    "recommendations": [],
+                }
             return await execute_get_recommendations(
                 status=arguments.get("status", "open"),
                 timeframe=arguments.get("timeframe", "all"),
@@ -4287,6 +4748,14 @@ async def dispatch_tool(
                 "autonomous_recommendations_enabled": False,
                 "message": "تم إيقاف وضع التوصيات الحرة المستقلة والعودة للوضع القياسي.",
             }
+
+        elif tool_name == "manage_user_preferences":
+            return await execute_manage_user_preferences(
+                user_id=user_id,
+                operation=arguments.get("operation", "get"),
+                rule=arguments.get("rule"),
+                rules=arguments.get("rules"),
+            )
 
         else:
             return {"status": "error", "message": f"الأداة {tool_name} غير معروفة"}

@@ -394,4 +394,36 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_user_preferences",
+            "description": (
+                "إدارة ذاكرة المستخدم الدائمة وقواعده المخصصة المحفوظة عبر كل المحادثات في حسابه "
+                "(مثل تفضيل الأسهم الشرعية فقط، استراتيجية التداول، المدى الزمني، أو أسلوب الردود). "
+                "استخدم 'add' لحفظ قاعدة جديدة، 'delete' لحذف قاعدة، 'replace' لاستبدال القائمة بالكامل، أو 'get' لعرض القواعد الحالية. "
+                "استدعها عندما يطلب المستخدم تذكر تفضيل دائم أو تعديل/حذف قاعدة من ذاكرته الدائمة."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["add", "delete", "replace", "get"],
+                        "description": "نوع العملية: 'add' للإضافة، 'delete' للحذف، 'replace' للاستبدال، 'get' لعرض الذاكرة.",
+                    },
+                    "rule": {
+                        "type": "string",
+                        "description": "نص القاعدة المطلوب إضافتها أو جزء من نص القاعدة المراد حذفها.",
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "قائمة القواعد بالكامل عند استخدام operation='replace'.",
+                    },
+                },
+                "required": ["operation"],
+            },
+        },
+    },
 ]

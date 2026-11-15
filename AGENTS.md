@@ -82,3 +82,30 @@ These instructions apply to the entire repository, including AI assistants, revi
 - Before creating or modifying public SEO/GEO routes, consult `gsc_audit.py` to identify high-impression / low-CTR pages (e.g., stock symbols with thousands of impressions on Google page 1).
 
 The current resource review and prioritized implementation candidates are in `docs/resource-usage-review-2026-10-05.md`.
+
+## ⚡ Vercel CPU Conservation & Hugging Face Offloading Playbook
+
+To stay comfortably inside Vercel Hobby limits (Fluid Active CPU, Fast Origin Transfer, and ISR Writes) while keeping latency low, ALL new features and updates MUST follow these architecture, algorithmic, and security standards:
+
+### 1. HF-First Compute & Rewrite Routing (`0` Vercel Active CPU)
+- Keep Vercel focused strictly on SSR/ISR UI pages, auth session cookies, and lightweight Edge/BFF glue that cannot run elsewhere.
+- Route high-traffic API endpoints, webhooks, email campaigns, AI inference, market scanners, candles, symbol search, quota checks, and analytics directly to the FastAPI backend on Hugging Face (`weeasdwee-ai-bot.hf.space`) via `beforeFiles` rewrites in `web/next.config.js` (gated by `OFFLOAD_TO_HF !== "false"`).
+- Using `beforeFiles` rewrites bypasses Next.js App Router serverless functions (`0` Fluid Active CPU) while preserving local `route.ts` fallback files for Jest contract tests and `OFFLOAD_TO_HF=false` debugging.
+- Never call heavy database aggregations or LLM loops inside Vercel Server Functions when Hugging Face + Supabase can execute them once and cache the result.
+
+### 2. Algorithmic Performance & Smart Caching
+- **Bounded LRU + TTL + SingleFlight (`api/perf_utils.py`):** Protect every hot backend read path with `BoundedTTLCache` (O(1) `OrderedDict` LRU eviction, bounded memory, automatic TTL expiry) paired with `SingleFlight` request coalescing so concurrent burst traffic collapses into one upstream query.
+- **Parallel Independent I/O:** Use `ThreadPoolExecutor` / `asyncio.gather` whenever an endpoint needs multiple independent reads (e.g. `user/quota`: profile + subscriptions + usage counters + founding-member count in parallel).
+- **Debounced Revalidation (`api/cache_invalidation.py`):** Deduplicate cache tags and respect `REVALIDATE_COOLDOWN_SECONDS` (default `120s`) before calling Vercel `/api/revalidate` so clustered pipeline steps never trigger redundant ISR rebuilds.
+- **Edge HTTP Caching Headers:** Public unauthenticated daily payloads MUST return `Cache-Control: public, s-maxage=900, stale-while-revalidate=3600` (with appropriate `Vary` when entitlement affects output); authenticated or user-specific payloads MUST return `Cache-Control: private, no-store, max-age=0`.
+
+### 3. Compact Database Queries & Smart Projections
+- **Targeted Column Projections:** Never run `SELECT *` on large or medium tables (`stock_prices`, `recommendations`, `scan_results`, `user_usage`, `telemetry_events`, `market_cache`). Always select only the exact columns serialized in the response.
+- **Strict Bounded Limits & Indexed Filters:** Every list/search query MUST apply indexed equality/range filters and explicit `.limit(n)` caps (clamp user-supplied `limit` parameters server-side).
+- **Zero-Allocation Hot Paths:** Normalize symbols, validate inputs with precompiled regexes, and strip sensitive or unneeded fields before caching or JSON serialization.
+
+### 4. Zero-Trust Request & Entitlement Security
+- **Verified Identity Only (`resolve_verified_viewer`):** Never trust client-supplied `is_pro`, `user_id`, or `tier` query/body flags on HF endpoints. Extract bearer tokens or `@supabase/ssr` cookies via `api/agentic_chat/auth_guard.py`, verify via Supabase Auth (`get_user` cached briefly by SHA-256 token hash), and verify active entitlement (`subscriptions` table + `paymentsEnabled` gate).
+- **Timing-Safe Secrets & Input Sanitization:** Compare internal keys (`x-admin-key`) with `hmac.compare_digest` (failing closed when unset), verify webhook signatures (`svix` HMAC on Resend webhooks), and validate ticker/exchange/metadata keys with strict regex allowlists.
+- **Per-User Isolation:** Never mix user-specific quota, portfolio, or unlocked PRO fields into shared public cache keys.
+

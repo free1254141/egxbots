@@ -105,19 +105,32 @@ def test_short_swings_saudi_cache_isolation_and_snapshot_schema(tmp_path):
 
 
 def test_scanner_alerts_causal_be_and_simulation_contract():
-    # Build two symbols: one surging cleanly above +2.5% then pulling back to entry on close
-    bars_a = _make_ohlcv_bars(start="2024-01-01", periods=60, base_price=10.0, drift=0.0, volume=100_000.0)
-    # Trigger volume_surge on day 40 (+3% gain, 3x vol)
+    # Build symbol passing Saudi institutional quality & liquidity filters (>=10 SAR, >=15M SAR,
+    # strong green close_pos >= 0.70, healthy pre-breakout RSI <= 68), then arming BE (+2.5%)
+    # on day 41 and pulling back on day 42 to lock +0.5% profit.
+    bars_a = _make_ohlcv_bars(start="2024-01-01", periods=60, base_price=10.0, drift=0.0, volume=500_000.0)
+    # Mild pullback sequence on days 34..39 so Wilder RSI stays <= 68 on the breakout bar
+    pre_closes = [10.30, 10.10, 9.90, 9.75, 9.90, 10.00]
+    for offset, px in enumerate(pre_closes):
+        idx = 34 + offset
+        bars_a.iloc[idx, bars_a.columns.get_loc("Open")] = px
+        bars_a.iloc[idx, bars_a.columns.get_loc("Close")] = px
+        bars_a.iloc[idx, bars_a.columns.get_loc("High")] = px + 0.05
+        bars_a.iloc[idx, bars_a.columns.get_loc("Low")] = px - 0.05
+
+    # Trigger volume_surge on day 40 (+4.5% gain, ~4x vol, 20.9M SAR turnover, close_pos=1.0)
     i = 40
-    bars_a.iloc[i, bars_a.columns.get_loc("Close")] = 10.40
+    bars_a.iloc[i, bars_a.columns.get_loc("Open")] = 10.00
+    bars_a.iloc[i, bars_a.columns.get_loc("Close")] = 10.45
     bars_a.iloc[i, bars_a.columns.get_loc("High")] = 10.45
-    bars_a.iloc[i, bars_a.columns.get_loc("Low")] = 10.00
-    bars_a.iloc[i, bars_a.columns.get_loc("Volume")] = 400_000.0
-    # Next day (+3.5% high -> arms BE strictly on previous close if close >= +2.5% when causal)
+    bars_a.iloc[i, bars_a.columns.get_loc("Low")] = 9.98
+    bars_a.iloc[i, bars_a.columns.get_loc("Volume")] = 2_000_000.0
+    # Next day (+2.87% close, High < T1=10.85 -> arms BE strictly on previous close when causal)
+    bars_a.iloc[i + 1, bars_a.columns.get_loc("Open")] = 10.50
     bars_a.iloc[i + 1, bars_a.columns.get_loc("Close")] = 10.75
     bars_a.iloc[i + 1, bars_a.columns.get_loc("High")] = 10.80
     bars_a.iloc[i + 1, bars_a.columns.get_loc("Low")] = 10.42
-    # Day i+2 pulls back below entry_price on Close -> triggers BE stop_hit on close-only
+    # Day i+2 pulls back below +0.5% locked BE floor (10.502) -> closes as target_hit with +0.5% profit
     bars_a.iloc[i + 2, bars_a.columns.get_loc("Close")] = 10.35
     bars_a.iloc[i + 2, bars_a.columns.get_loc("Low")] = 10.30
 
@@ -133,7 +146,18 @@ def test_scanner_alerts_causal_be_and_simulation_contract():
     assert res["currency"] == "SAR"
     assert isinstance(res["signals_kpis"], dict)
     assert res["signals_kpis"]["total_closed"] >= 1
-    assert any(sig["symbol"] == "1120" and sig["status"] == "target_hit" for sig in res["closed_signals"])
+    be_hits = [sig for sig in res["closed_signals"] if sig["symbol"] == "1120" and sig["status"] == "target_hit"]
+    assert be_hits, f"Expected TADAWUL locked-BE target_hit signal, got: {res['closed_signals']}"
+    assert all(sig["return_pct"] > 0 for sig in be_hits)
+
+
+def test_short_swings_saudi_exit_labels_and_profile_separation():
+    from api import short_swings_engine as ss_engine
+
+    assert "ema20_break" in ss_engine.EXIT_REASON_LABELS
+    assert "EMA20" in ss_engine.EXIT_REASON_LABELS["ema20_break"]
+    assert sa_engine.SAUDI_SCANNER_PROFILES["volume_surge"]["be_lock_pct"] == 0.5
+    assert sa_engine.SAUDI_SCANNER_PROFILES["breakout"]["max_sessions"] == 6
 
 
 def test_simulate_radar_strategy_backtest_uses_strategy_engine_and_trailing_stops():

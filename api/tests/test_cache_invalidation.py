@@ -16,6 +16,9 @@ _ENV_KEYS = ("REVALIDATE_URL", "WEB_ORIGIN", "REVALIDATE_SECRET", "ADMIN_SECRET_
 
 
 class SelectCacheTagsTests(unittest.TestCase):
+    def setUp(self):
+        ci.reset_revalidation_cooldown()
+
     def test_independent_news_invalidation_does_not_require_prices(self):
         with mock.patch.dict(os.environ, {key: "" for key in _ENV_KEYS}):
             with mock.patch("api.cache_invalidation._revalidate_endpoint", return_value=None) as endpoint:
@@ -162,6 +165,39 @@ class SelectCacheTagsTests(unittest.TestCase):
         self.assertNotIn(ci.TAG_MARKET, result["invalidated"])
         self.assertIn("daily-market-data:HTTP 500", result["error"])
         self.assertTrue(any(len(t) == 1 for t in seen))
+
+    def test_invalidation_debounces_repeated_calls_within_cooldown(self):
+        steps = [step("sync_prices", "success"), step("calculate_indicators", "success")]
+        calls = []
+
+        class OkResp:
+            status = 200
+            def read(self): return b'{"ok":true}'
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+
+        def fake_urlopen(request, timeout=None):
+            calls.append(request.data)
+            return OkResp()
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "REVALIDATE_URL": "https://example.test/api/revalidate",
+                "REVALIDATE_SECRET": "s3cret",
+                "REVALIDATE_COOLDOWN_SECONDS": "120",
+            },
+        ):
+            with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                first = ci.invalidate_daily_cache(steps)
+                second = ci.invalidate_daily_cache(steps)
+                forced = ci.invalidate_daily_cache(steps, force=True)
+
+        self.assertFalse(first["skipped"])
+        self.assertTrue(second["skipped"])
+        self.assertEqual(second.get("reason"), "cooldown")
+        self.assertFalse(forced["skipped"])
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

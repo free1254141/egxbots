@@ -27,7 +27,13 @@ from api.agentic_chat.tools_execution import (
     _ui_market_label,
     dispatch_tool,
     reset_active_market_context,
+    reset_allow_recommendations_context,
+    reset_group_portfolio_blocked_context,
+    reset_telegram_portfolio_context,
     set_active_market_context,
+    set_allow_recommendations_context,
+    set_group_portfolio_blocked_context,
+    set_telegram_portfolio_context,
 )
 from api.agentic_chat.auth_guard import filter_output, strip_dsml
 from api.agentic_chat.vision import (
@@ -40,6 +46,7 @@ from api.agentic_chat.vision import (
 from api.stock_ai import _init_supabase, supabase
 from api.agentic_chat.analysis_cache import (
     get_vip_analysis_cache,
+    is_recommendation_cache_key,
     set_vip_analysis_cache,
     build_analysis_cache_key,
     resolve_tool_call_to_cache_key,
@@ -308,13 +315,21 @@ async def run_agentic_chat_stream(
     remaining_quota: int = 999,
     quota_limit: int = 999,
     market: Optional[str] = None,
+    allow_recommendations: bool = True,
+    is_b2b: bool = False,
+    telegram_user_id: Optional[int] = None,
+    block_group_portfolio: Optional[bool] = None,
 ):
     """
     Main agentic streaming generator (supports EGX & Saudi TASI simultaneously).
     Yields Server-Sent Events (SSE) formatted as: `data: <json_or_marker>\\n\\n`
     """
     ui_exch = _normalize_market_code(market)
+    eff_block_group_pf = bool(is_b2b) if block_group_portfolio is None else bool(block_group_portfolio)
     mkt_token = set_active_market_context(ui_exch)
+    tg_pf_token = set_telegram_portfolio_context(telegram_user_id)
+    recs_token = set_allow_recommendations_context(allow_recommendations)
+    group_pf_token = set_group_portfolio_blocked_context(eff_block_group_pf)
     try:
         async for ev in _run_agentic_chat_stream_impl(
             message=message,
@@ -328,9 +343,15 @@ async def run_agentic_chat_stream(
             remaining_quota=remaining_quota,
             quota_limit=quota_limit,
             ui_exch=ui_exch,
+            allow_recommendations=allow_recommendations,
+            is_b2b=is_b2b,
+            telegram_user_id=telegram_user_id,
         ):
             yield ev
     finally:
+        reset_group_portfolio_blocked_context(group_pf_token)
+        reset_allow_recommendations_context(recs_token)
+        reset_telegram_portfolio_context(tg_pf_token)
         reset_active_market_context(mkt_token)
 
 
@@ -346,6 +367,9 @@ async def _run_agentic_chat_stream_impl(
     remaining_quota: int = 999,
     quota_limit: int = 999,
     ui_exch: str = "EGX",
+    allow_recommendations: bool = True,
+    is_b2b: bool = False,
+    telegram_user_id: Optional[int] = None,
 ):
     start_time = time.time()
     ui_label = _ui_market_label(ui_exch)
@@ -378,12 +402,23 @@ async def _run_agentic_chat_stream_impl(
         if ui_label == "TASI"
         else "البورصة المصرية (EGX — ج.م)"
     )
-    telegram_channel_guidance = (
-        "السوق النشط الآن هو السعودي TASI: عند الإشارة لقناة تليجرام اذكر قناة VIP السعودية فقط "
-        "(https://web.telegram.org/a/#-1004397045436 ورابطها في /profile#telegram) ولا تذكر القناة المصرية المجانية (t.me/egxbots) لأن السوق السعودي لا يملك قناة مجانية."
-        if ui_label == "TASI"
-        else "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
-    )
+    if is_b2b:
+        telegram_channel_guidance = (
+            "سياق مجموعة شريك (B2B): يُمنع منعاً باتاً الترويج أو ذكر روابط قنوات EGX BOTS (مثل t.me/egxbots أو /profile#telegram أو @egxbots_support أو /pricing) داخل رد المجموعة. "
+            "إذا طلب العضو تسجيل أو تحليل محفظته الخاصة، وجّهه فقط لفتح الشات الخاص مع البوت (https://t.me/egxbots_bot?start=b2b_portfolio) حيث يمكنه حفظ وتحليل محفظته بسرية وبدون تسجيل دخول للموقع."
+        )
+        if not allow_recommendations:
+            telegram_channel_guidance += (
+                " تنبيه صارم: ميزة توصيات الشراء والبيع المفتوحة من EGX BOTS مقفولة نهائياً لهذه المجموعة بأمر الإدارة. "
+                "يُمنع منعاً باتاً إعطاء توصيات شراء/بيع مفتوحة أو ترشيح أسهم للعضو، واقتصر على التحليل الفني، الدعوم والمقاومات، المؤشرات، القيمة العادلة، المقارنات، وكاشف المصائد فقط."
+            )
+    else:
+        telegram_channel_guidance = (
+            "السوق النشط الآن هو السعودي TASI: عند الإشارة لقناة تليجرام اذكر قناة VIP السعودية فقط "
+            "(https://web.telegram.org/a/#-1004397045436 ورابطها في /profile#telegram) ولا تذكر القناة المصرية المجانية (t.me/egxbots) لأن السوق السعودي لا يملك قناة مجانية."
+            if ui_label == "TASI"
+            else "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
+        )
     date_context = (
         f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:%M:%S')} | "
         f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:%M:%S')}. "
@@ -391,9 +426,27 @@ async def _run_agentic_chat_stream_impl(
         "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة أسهم واستفسارات EGX و TASI معاً). "
         f"{telegram_channel_guidance} "
         "التزم بدقة بالعملة: ج.م (EGP) للأسهم المصرية و ر.س (SAR) للأسهم السعودية. "
-        f"وضع التوصيات الحرة: {'مفعل' if autonomous_recommendations else 'غير مفعل'}."
+        f"وضع التوصيات الحرة: {'مفعل' if (autonomous_recommendations and allow_recommendations) else 'غير مفعل'}."
     )
     formatted_messages.append({"role": "system", "content": date_context})
+
+    # Load and inject standing per-user rules / preferences (profiles.custom_ai_rules)
+    user_rules: Optional[str] = None
+    if user_id and user_id != "00000000-0000-0000-0000-000000000000":
+        try:
+            _init_supabase()
+            p_res = supabase.table("profiles").select("custom_ai_rules").eq("id", user_id).limit(1).execute()
+            if p_res and p_res.data:
+                user_rules = p_res.data[0].get("custom_ai_rules")
+        except Exception as e:
+            logger.warning(f"[agentic_chat] Could not load custom_ai_rules: {e}")
+
+    has_user_rules = bool(user_rules and str(user_rules).strip())
+    if has_user_rules:
+        from api.agentic_chat.user_preferences import build_user_rules_prompt
+        user_rules_prompt = build_user_rules_prompt(user_rules)
+        if user_rules_prompt:
+            formatted_messages.append({"role": "system", "content": user_rules_prompt})
 
     # Add bounded conversation history (last 10 turns max)
     has_conversation_history = False
@@ -524,17 +577,26 @@ async def _run_agentic_chat_stream_impl(
     is_saudi_flow = _is_saudi_related_query(message, active_market=ui_exch, hints=hints)
 
     # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
-    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers, multi-turn history, or images are involved.
+    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers, multi-turn history, custom user rules, or images are involved.
     if (
         not is_saudi_flow
         and not has_conversation_history
+        and not has_user_rules
         and not vision_data
         and (not images or len(images) == 0)
     ):
         early_key = build_analysis_cache_key(message)
+        if not allow_recommendations and is_recommendation_cache_key(early_key):
+            early_key = None
         if early_key:
             candidate_cache_key = early_key
-            cached_hit = get_vip_analysis_cache(early_key, user_id=user_id)
+            cached_hit = get_vip_analysis_cache(
+                early_key,
+                user_id=user_id,
+                telegram_user_id=telegram_user_id,
+                is_b2b=is_b2b,
+                allow_recommendations=allow_recommendations,
+            )
             if cached_hit:
                 origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
                 logger.info(f"[agentic_chat] Serving from Early Two-Tier Cache: {early_key} ({cached_hit.get('origin')})")
@@ -577,6 +639,7 @@ async def _run_agentic_chat_stream_impl(
         if (
             candidate_cache_key
             and not has_conversation_history
+            and not has_user_rules
             and not is_saudi_flow
             and not vision_data
             and (not images or len(images) == 0)
@@ -621,6 +684,12 @@ async def _run_agentic_chat_stream_impl(
         tools_executed_count += 3
         max_rounds = 0  # Proceed straight to DeepSeek single-call synthesis without tools schema
 
+    active_tools_schema = (
+        AGENTIC_TOOLS_SCHEMA
+        if allow_recommendations
+        else [t for t in AGENTIC_TOOLS_SCHEMA if (t.get("function") or {}).get("name") != "get_recommendations"]
+    )
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             while round_count < max_rounds:
@@ -629,7 +698,7 @@ async def _run_agentic_chat_stream_impl(
                 req_payload = {
                     "model": "deepseek-chat",
                     "messages": formatted_messages,
-                    "tools": AGENTIC_TOOLS_SCHEMA,
+                    "tools": active_tools_schema,
                     "tool_choice": "auto",
                     "temperature": 0.2,
                     "max_tokens": 4000,
@@ -717,6 +786,7 @@ async def _run_agentic_chat_stream_impl(
                 if (
                     not saudi_tool_call
                     and not has_conversation_history
+                    and not has_user_rules
                     and round_count == 1
                     and len(tool_calls) >= 1
                     and not vision_data
@@ -740,7 +810,19 @@ async def _run_agentic_chat_stream_impl(
                         if not preserved_special:
                             candidate_cache_key = dynamic_key
                         lookup_key = candidate_cache_key
-                        cached_hit = get_vip_analysis_cache(lookup_key, user_id=user_id)
+                        if not allow_recommendations and is_recommendation_cache_key(lookup_key):
+                            lookup_key = None
+                        cached_hit = (
+                            get_vip_analysis_cache(
+                                lookup_key,
+                                user_id=user_id,
+                                telegram_user_id=telegram_user_id,
+                                is_b2b=is_b2b,
+                                allow_recommendations=allow_recommendations,
+                            )
+                            if lookup_key
+                            else None
+                        )
                         if cached_hit and cached_hit.get("reply"):
                             origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
                             logger.info(f"[agentic_chat] Serving from Model-Driven Two-Tier Cache: {lookup_key} ({cached_hit.get('origin')})")
@@ -789,6 +871,9 @@ async def _run_agentic_chat_stream_impl(
                         fn_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
                     except Exception:
                         fn_args = {}
+                    if has_user_rules:
+                        from api.agentic_chat.user_preferences import apply_user_rules_to_tool_args
+                        fn_args = apply_user_rules_to_tool_args(fn_name, fn_args, user_rules)
                     # Pass verified user_id, user_prompt, and active UI default_market tie-breaker
                     tool_tasks.append(
                         dispatch_tool(
@@ -830,7 +915,7 @@ async def _run_agentic_chat_stream_impl(
                     "max_tokens": 4000,
                 }
                 if not fast_stock_match:
-                    synthesis_payload["tools"] = AGENTIC_TOOLS_SCHEMA
+                    synthesis_payload["tools"] = active_tools_schema
                     synthesis_payload["tool_choice"] = "none"  # Forbid tools so DeepSeek produces only synthesis text
 
                 yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'جاري صياغة التقرير والتحليل الفني...'}, ensure_ascii=False)}\n\n"
@@ -888,7 +973,7 @@ async def _run_agentic_chat_stream_impl(
                                 _append_tool_results(dsml_extra_calls, list(extra_results), formatted_messages, tables_data, recommendations_data)
                                 retry_payload = {
                                     **synthesis_payload,
-                                    "tools": AGENTIC_TOOLS_SCHEMA,
+                                    "tools": active_tools_schema,
                                     "tool_choice": "none",
                                 }
                                 retry_resp = await client.post(
@@ -1059,6 +1144,7 @@ async def _run_agentic_chat_stream_impl(
     if (
         not is_saudi_flow
         and not has_conversation_history
+        and not has_user_rules
         and accumulated_reply
         and not vision_data
         and (not images or len(images) == 0)
@@ -1068,7 +1154,7 @@ async def _run_agentic_chat_stream_impl(
             if tools_executed_count > 0
             else (candidate_cache_key or build_analysis_cache_key(message))
         )
-        if effective_key:
+        if effective_key and not (not allow_recommendations and is_recommendation_cache_key(effective_key)):
             saved_cache_key = effective_key
             try:
                 set_vip_analysis_cache(
@@ -1076,6 +1162,8 @@ async def _run_agentic_chat_stream_impl(
                     reply=accumulated_reply,
                     tables=excel_tables if excel_tables else tables_data,
                     recommendations=recommendations_data,
+                    is_b2b=is_b2b,
+                    allow_recommendations=allow_recommendations,
                 )
                 logger.info(f"[agentic_chat] Saved to Two-Tier Cache: {effective_key}")
             except Exception as cache_err:

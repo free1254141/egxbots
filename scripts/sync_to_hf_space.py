@@ -22,6 +22,7 @@ FILES_TO_SYNC = [
     "api/agentic_chat/router.py",
     "api/agentic_chat/tools_execution.py",
     "api/agentic_chat/tools_schema.py",
+    "api/agentic_chat/user_preferences.py",
     "api/agentic_chat/vision.py",
     "api/main.py",
     "api/acceleration_score.py",
@@ -56,15 +57,25 @@ FILES_TO_SYNC = [
     "api/telegram_pro_invites.py",
     "api/routers/short_swings.py",
     "api/routers/scan_ai_fast.py",
+    "api/perf_utils.py",
+    "api/plan_limits.py",
+    "api/routers/offload.py",
     "api/scheduled_automations_worker.py",
     "api/easykash_payments.py",
+    "api/direct_wallet_payments.py",
     "api/daily_report_dispatch.py",
     "api/cache_invalidation.py",
+    "api/telegram_bot.py",
+    "api/telegram_b2b.py",
     "api/telegram_vip_chat.py",
     "api/native_telegram_vip_chat.py",
     "api/support_chat.py",
     "api/support_ai_agent.py",
     "api/routers/support.py",
+    "api/routers/marketing.py",
+    "api/marketing_lifecycle.py",
+    "api/marketing_links.py",
+    "api/web_origin.py",
     "api/jobs/telegram_subscription_reminders.py",
     "api/social_scheduler.py",
     "requirements.txt",
@@ -99,7 +110,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "perf(backend): optimize council evaluation, symbols/payment/macro caches, short-swings JSON sanitization, and Saudi pipeline"
+    commit_msg = "feat(backend): add per-user custom AI rules memory, cache optimizations, B2B/Telegram & Saudi pipeline updates"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

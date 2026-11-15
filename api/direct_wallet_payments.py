@@ -183,14 +183,18 @@ def confirm_direct_wallet_payment(
     if applied_promo:
         aff_val = validate_affiliate_code(applied_promo, track_click=False)
         if aff_val.get("valid"):
-            aff_id = aff_val.get("affiliate_id")
-            disc_pct = float(aff_val.get("discount_percent") or 0)
-            comm_pct = float(aff_val.get("commission_percent") or 0)
-            if disc_pct > 0:
-                discount_amount = round(base_price * (disc_pct / 100.0), 2)
-            final_price = max(1.0, round(base_price - discount_amount, 2))
-            if comm_pct > 0:
-                commission_amount = round(final_price * (comm_pct / 100.0), 2)
+            aff_owner = str(aff_val.get("user_id") or "")
+            if aff_owner and aff_owner == str(user_id):
+                final_price = base_price
+            else:
+                aff_id = aff_val.get("id") or aff_val.get("affiliate_id")
+                disc_pct = float(aff_val.get("discount_percent") or 0)
+                comm_pct = float(aff_val.get("commission_percent") or 0)
+                if disc_pct > 0:
+                    discount_amount = round(base_price * (disc_pct / 100.0), 2)
+                final_price = max(1.0, round(base_price - discount_amount, 2))
+                if aff_id and comm_pct > 0:
+                    commission_amount = round(final_price * (comm_pct / 100.0), 2)
         else:
             final_price = base_price
     else:
@@ -236,43 +240,59 @@ def confirm_direct_wallet_payment(
         payment_order_id=order_id,
     )
 
-    # 7. Fetch Subscription End & Generate VIP Invite Link
-    sub_res = (
-        supabase.table("subscriptions")
-        .select("current_period_end")
-        .eq("user_id", user_id)
-        .in_("plan_id", _ACTIVE_PRO_PLAN_IDS)
-        .eq("status", "active")
-        .order("current_period_end", desc=True)
-        .limit(1)
-        .maybe_single()
-        .execute()
-    )
-    sub_data = (sub_res.data if sub_res else None) or {}
-    subscription_end = sub_data.get("current_period_end")
-
+    # 7. Fetch Subscription End & VIP Invite Link (or B2B Dashboard Info)
+    subscription_end = None
     invite_link = ""
-    if subscription_end:
-        try:
-            invite = ensure_pro_invite(user_id, str(subscription_end))
-            invite_link = str((invite or {}).get("invite_link") or "").strip()
-            if invite_link:
-                supabase.table("local_payment_orders").update({
-                    "telegram_invite_link": invite_link,
-                }).eq("id", order_id).execute()
+    b2b_dashboard_url = ""
+    if requested_plan.startswith("b2b_"):
+        lic_res = (
+            supabase.table("b2b_group_licenses")
+            .select("expires_at")
+            .eq("owner_user_id", user_id)
+            .eq("status", "active")
+            .order("expires_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        subscription_end = ((lic_res.data if lic_res else None) or {}).get("expires_at")
+        b2b_dashboard_url = "https://egxbots.com/b2b/dashboard"
+    else:
+        sub_res = (
+            supabase.table("subscriptions")
+            .select("current_period_end")
+            .eq("user_id", user_id)
+            .in_("plan_id", _ACTIVE_PRO_PLAN_IDS)
+            .eq("status", "active")
+            .order("current_period_end", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        sub_data = (sub_res.data if sub_res else None) or {}
+        subscription_end = sub_data.get("current_period_end")
 
-                # Dispatch Telegram Pro welcome to user if linked
-                try:
-                    send_pro_welcome_to_user_telegram(
-                        user_id,
-                        invite_link=invite_link,
-                        plan_name="Pro",
-                        subscription_end=str(subscription_end),
-                    )
-                except Exception as tg_err:
-                    print(f"[DIRECT_WALLET] User welcome dispatch error: {tg_err}")
-        except Exception as inv_err:
-            print(f"[DIRECT_WALLET] VIP invite generation error: {inv_err}")
+        if subscription_end:
+            try:
+                invite = ensure_pro_invite(user_id, str(subscription_end))
+                invite_link = str((invite or {}).get("invite_link") or "").strip()
+                if invite_link:
+                    supabase.table("local_payment_orders").update({
+                        "telegram_invite_link": invite_link,
+                    }).eq("id", order_id).execute()
+
+                    # Dispatch Telegram Pro welcome to user if linked
+                    try:
+                        send_pro_welcome_to_user_telegram(
+                            user_id,
+                            invite_link=invite_link,
+                            plan_name="Pro",
+                            subscription_end=str(subscription_end),
+                        )
+                    except Exception as tg_err:
+                        print(f"[DIRECT_WALLET] User welcome dispatch error: {tg_err}")
+            except Exception as inv_err:
+                print(f"[DIRECT_WALLET] VIP invite generation error: {inv_err}")
 
     # 8. Update Affiliate Metrics if applicable
     if aff_id:
@@ -312,5 +332,6 @@ def confirm_direct_wallet_payment(
         "plan_id": requested_plan,
         "amount_egp": final_price,
         "telegram_pro_url": invite_link,
+        "b2b_dashboard_url": b2b_dashboard_url,
         "subscription_end": subscription_end,
     }

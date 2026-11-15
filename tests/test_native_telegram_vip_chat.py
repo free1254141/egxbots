@@ -110,7 +110,14 @@ def test_native_vip_chat_b2b_bypass_quota_and_fast_cache():
 
     clear_analysis_cache()
     cached_text = "📊 **تحليل سهم فوري (FWRY):** السعر الحالي 8.50 ج.م، الدعم 8.20 ج.م والمقاومة 8.90 ج.م مع سيولة مؤسسية قوية."
-    set_vip_analysis_cache("vip_stock_FWRY", cached_text, tables=[{"title": "FWRY"}], recommendations=[])
+    set_vip_analysis_cache(
+        "vip_stock_FWRY",
+        cached_text,
+        tables=[{"title": "FWRY"}],
+        recommendations=[],
+        is_b2b=True,
+        allow_recommendations=False,
+    )
 
     with patch("api.native_telegram_vip_chat._resolve_telegram_user") as mock_resolve, \
          patch("api.stock_ai._init_supabase"), \

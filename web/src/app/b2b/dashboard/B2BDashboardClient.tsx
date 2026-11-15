@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import {
@@ -25,6 +26,7 @@ import {
   KeyRound,
   AlertTriangle,
   MessageCircle,
+  Unlink,
 } from "lucide-react";
 
 interface License {
@@ -39,6 +41,7 @@ interface License {
   status: "active" | "expired" | "paused";
   starts_at: string;
   expires_at: string;
+  allow_recommendations?: boolean;
   order_id?: string;
   owner_user_id?: string;
 }
@@ -76,6 +79,8 @@ const TIER_DETAILS = {
 export default function B2BDashboardClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { isSaudi } = useMarket();
+  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
   const { user, loading: authLoading } = useAuth();
 
   const [license, setLicense] = useState<License | null>(null);
@@ -86,7 +91,10 @@ export default function B2BDashboardClient() {
   // Form states
   const [signatureInput, setSignatureInput] = useState("");
   const [groupTitleInput, setGroupTitleInput] = useState("");
+  const [allowRecsInput, setAllowRecsInput] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [togglingRecs, setTogglingRecs] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
 
   // Claim license code state
   const [claimCode, setClaimCode] = useState("");
@@ -132,6 +140,7 @@ export default function B2BDashboardClient() {
         setIsAdmin(Boolean(data.is_admin));
         setSignatureInput(data.license.custom_signature || "");
         setGroupTitleInput(data.license.group_title || "");
+        setAllowRecsInput(Boolean(data.license.allow_recommendations));
       } else {
         setLicense(null);
         setAllLicenses([]);
@@ -174,6 +183,7 @@ export default function B2BDashboardClient() {
           license_id: license.id,
           custom_signature: signatureInput,
           group_title: groupTitleInput,
+          allow_recommendations: allowRecsInput,
         }),
       });
       const data = await res.json();
@@ -191,6 +201,44 @@ export default function B2BDashboardClient() {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleRecommendations = async (nextVal: boolean) => {
+    if (!license) return;
+    const prevVal = allowRecsInput;
+    setAllowRecsInput(nextVal);
+    try {
+      setTogglingRecs(true);
+      const res = await fetch("/api/b2b/license", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          license_id: license.id,
+          allow_recommendations: nextVal,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(
+          nextVal
+            ? isAr
+              ? "تم تشغيل التوصيات المفتوحة للمجموعة"
+              : "Group recommendations enabled"
+            : isAr
+            ? "🔒 تم قفل توصيات EGX BOTS نهائياً للمجموعة (تحليل فني فقط)"
+            : "🔒 Group recommendations locked (Technical analysis only)"
+        );
+        fetchLicense(license.id);
+      } else {
+        setAllowRecsInput(prevVal);
+        toast.error(data.error || (isAr ? "تعذر تحديث الإعداد" : "Failed to update setting"));
+      }
+    } catch (err: any) {
+      setAllowRecsInput(prevVal);
+      toast.error(err.message);
+    } finally {
+      setTogglingRecs(false);
     }
   };
 
@@ -225,6 +273,33 @@ export default function B2BDashboardClient() {
   const copyToClipboard = (text: string, labelAr: string, labelEn: string) => {
     navigator.clipboard.writeText(text);
     toast.success(isAr ? `تم نسخ ${labelAr}` : `Copied ${labelEn}`);
+  };
+
+  const handleUnlinkGroup = async () => {
+    if (!license || !license.telegram_chat_id) return;
+    try {
+      setUnlinking(true);
+      const res = await fetch("/api/b2b/license", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unlink", license_id: license.id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        toast.success(
+          isAr
+            ? "تم فك ربط المجموعة السابقة! يمكنك الآن ربط مجموعة تليجرام جديدة."
+            : "Group unlinked successfully! You can now link a new Telegram group."
+        );
+        fetchLicense(license.id);
+      } else {
+        toast.error(data.error || (isAr ? "تعذر فك ربط المجموعة" : "Failed to unlink group"));
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Network error");
+    } finally {
+      setUnlinking(false);
+    }
   };
 
   const activationCommand = license ? `/activate ${license.id.slice(0, 8)}` : "/activate";
@@ -329,7 +404,9 @@ export default function B2BDashboardClient() {
                   {isAr ? "الخيار الأول: اشتراك جديد" : "OPTION 1: SUBSCRIBE"}
                 </span>
                 <h3 className="text-lg font-black text-zinc-900 dark:text-white">
-                  {isAr ? "اختر باقة لقناتك من 1,000 ج.م/شهر" : "Choose a Plan Starting from 1,000 EGP/mo"}
+                  {isAr
+                    ? `اختر باقة لقناتك ${isSaudi ? "من 99 ر.س/شهر" : "من 1,000 ج.م/شهر"}`
+                    : `Choose a Plan Starting from ${isSaudi ? "99 SAR/mo" : "1,000 EGP/mo"}`}
                 </h3>
                 <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
                   {isAr
@@ -382,23 +459,40 @@ export default function B2BDashboardClient() {
         ) : (
           /* Live Authenticated License State (Real Supabase Data) */
           <>
-            {/* Admin Switcher Bar (If viewing as Admin) */}
-            {isAdmin && allLicenses.length > 1 && (
-              <div className="border-3 border-black dark:border-white bg-fuchsia-200 dark:bg-fuchsia-950/60 p-3 shadow-[3px_3px_0px_#000] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-black">
-                <span className="flex items-center gap-1.5 text-fuchsia-900 dark:text-fuchsia-200">
+            {/* Multi-License / Admin Switcher Bar (Enterprise dual groups or Admin) */}
+            {allLicenses.length > 1 && (
+              <div
+                className={`border-3 border-black dark:border-white p-3 shadow-[3px_3px_0px_#000] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-black ${
+                  isAdmin
+                    ? "bg-fuchsia-200 dark:bg-fuchsia-950/60"
+                    : "bg-purple-100 dark:bg-purple-950/50"
+                }`}
+              >
+                <span
+                  className={`flex items-center gap-1.5 ${
+                    isAdmin
+                      ? "text-fuchsia-900 dark:text-fuchsia-200"
+                      : "text-purple-900 dark:text-purple-200"
+                  }`}
+                >
                   <ShieldCheck className="w-4 h-4" />
-                  {isAr
-                    ? "أنت تشاهد هذه اللوحة بصلاحيات الأدمن — اختر الرخصة المراد فحصها:"
-                    : "Viewing with Administrator Privileges — Select license to inspect:"}
+                  {isAdmin
+                    ? isAr
+                      ? "أنت تشاهد هذه اللوحة بصلاحيات الأدمن — اختر الرخصة المراد فحصها:"
+                      : "Viewing with Administrator Privileges — Select license to inspect:"
+                    : isAr
+                    ? `حسابك يضم ${allLicenses.length} رخص مجموعات (${brandName}) — اختر المجموعة لإدارتها:`
+                    : `Your account has ${allLicenses.length} group licenses — Select a group to manage:`}
                 </span>
                 <select
                   value={license.id}
                   onChange={(e) => fetchLicense(e.target.value)}
                   className="border-2 border-black dark:border-white bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-900 dark:text-white outline-none"
                 >
-                  {allLicenses.map((l) => (
+                  {allLicenses.map((l, idx) => (
                     <option key={l.id} value={l.id}>
-                      {l.group_title || l.order_id || l.id.slice(0, 8)} ({l.tier})
+                      #{idx + 1}: {l.group_title || l.order_id || l.id.slice(0, 8)} (
+                      {l.telegram_chat_id ? (isAr ? "مربوط" : "Linked") : isAr ? "بانتظار الربط" : "Unlinked"} • {l.tier})
                     </option>
                   ))}
                 </select>
@@ -602,13 +696,25 @@ export default function B2BDashboardClient() {
                         dir="ltr"
                       />
                       {license.telegram_chat_id && (
-                        <button
-                          onClick={() => copyToClipboard(String(license.telegram_chat_id), "Chat ID", "Chat ID")}
-                          className="border-2 border-black dark:border-white bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 p-2 text-xs font-bold"
-                          title={isAr ? "نسخ" : "Copy"}
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => copyToClipboard(String(license.telegram_chat_id), "Chat ID", "Chat ID")}
+                            className="border-2 border-black dark:border-white bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 p-2 text-xs font-bold"
+                            title={isAr ? "نسخ" : "Copy"}
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={unlinking}
+                            onClick={handleUnlinkGroup}
+                            className="border-2 border-black dark:border-white bg-red-100 hover:bg-red-200 dark:bg-red-950/60 text-red-700 dark:text-red-300 px-2.5 py-2 text-[11px] font-black inline-flex items-center gap-1 disabled:opacity-50"
+                            title={isAr ? "فك ربط هذه المجموعة لنقل الرخصة لمجموعة أخرى" : "Unlink this group"}
+                          >
+                            {unlinking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlink className="w-3.5 h-3.5" />}
+                            <span>{isAr ? "فك الربط" : "Unlink"}</span>
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -626,7 +732,7 @@ export default function B2BDashboardClient() {
                       {!license.telegram_chat_id && (
                         <div className="p-3 border-2 border-emerald-600 bg-emerald-100 dark:bg-emerald-950/60 space-y-2">
                           <a
-                            href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}`}
+                            href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}&admin=delete_messages+pin_messages`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="w-full flex items-center justify-center gap-2 border-3 border-black bg-emerald-500 hover:bg-emerald-400 text-black py-3 px-4 text-xs font-black uppercase shadow-[3px_3px_0px_#000] hover:-translate-y-0.5 active:translate-y-0 transition-transform text-center"
@@ -653,7 +759,7 @@ export default function B2BDashboardClient() {
                             : "1. Add @egxbots_bot to your group and promote to Admin."}
                         </span>
                         <a
-                          href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}`}
+                          href={`https://t.me/egxbots_bot?startgroup=activate_${license.id.slice(0, 8)}&admin=delete_messages+pin_messages`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="border border-black bg-emerald-500 text-black px-2 py-0.5 text-[10px] font-black shrink-0 hover:bg-emerald-600 inline-flex items-center gap-1"
@@ -679,6 +785,71 @@ export default function B2BDashboardClient() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Recommendations Isolation & Private Portfolio Policy Card */}
+            <div className="border-4 border-black dark:border-white bg-white dark:bg-zinc-900 p-6 shadow-[6px_6px_0px_#000] dark:shadow-[6px_6px_0px_#fff] space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-5 h-5 text-amber-500" />
+                    <h2 className="text-lg font-black text-zinc-900 dark:text-white">
+                      {isAr
+                        ? "التحكم في توصيات EGX BOTS داخل المجموعة"
+                        : "Control EGX BOTS Recommendations in Group"}
+                    </h2>
+                  </div>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold leading-relaxed">
+                    {isAr
+                      ? "عند القفل، يمتنع البوت عن إعطاء توصيات شراء/بيع من EGX BOTS ويكتفي بالتحليل الفني، الدعوم والمقاومات، المؤشرات، القيمة العادلة، وكاشف المصائد فقط. كما يمكن لمشرف الجروب التبديل مباشرة من تليجرام عبر /b2b_recs off أو /b2b_recs on."
+                      : "When locked, the bot disables EGX BOTS open buy/sell recommendations and operates in Technical Analysis Only mode. Admins can also toggle in Telegram via /b2b_recs off or /b2b_recs on."}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    disabled={togglingRecs}
+                    onClick={() => handleToggleRecommendations(false)}
+                    className={`border-2 border-black dark:border-white px-3.5 py-2 text-xs font-black transition-colors ${
+                      !allowRecsInput
+                        ? "bg-amber-400 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
+                    }`}
+                  >
+                    {isAr ? "🔒 قفل التوصيات (تحليل فقط)" : "🔒 Lock Recs (Analysis Only)"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={togglingRecs}
+                    onClick={() => handleToggleRecommendations(true)}
+                    className={`border-2 border-black dark:border-white px-3.5 py-2 text-xs font-black transition-colors ${
+                      allowRecsInput
+                        ? "bg-emerald-500 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
+                    }`}
+                  >
+                    {isAr ? "✅ تشغيل التوصيات" : "✅ Enable Recs"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-2 border-blue-600/40 bg-blue-50 dark:bg-blue-950/30 p-3.5 text-xs font-bold text-blue-900 dark:text-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span>
+                  {isAr
+                    ? "💼 تحليل محافظ الأعضاء: يمكن لأي عضو في مجموعتك مراسلة البوت في الخاص لتسجيل وتحليل محفظته بسرية كاملة بدون الحاجة لتسجيل حساب على الموقع (/portfolio في الجروب أو الضغط على الزر)."
+                    : "💼 Member Portfolios: Group members can message @egxbots_bot privately to save and analyze their portfolio with zero website registration."}
+                </span>
+                <a
+                  href="https://t.me/egxbots_bot?start=b2b_portfolio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-black bg-white text-black px-3 py-1.5 text-[11px] font-black shrink-0 hover:bg-zinc-100 inline-flex items-center gap-1"
+                >
+                  <span>{isAr ? "رابط تحليل المحفظة بالخاص" : "Private Portfolio Link"}</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             </div>
 

@@ -41,8 +41,11 @@ def pro_limits() -> Dict[str, Any]:
     }
 
 
+PRO_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"})
+
+
 def plan_limits(plan_id: str) -> Dict[str, Any]:
-    if (plan_id or "").strip().lower() == "pro":
+    if (plan_id or "").strip().lower() in PRO_PLAN_IDS:
         return pro_limits()
     return free_limits()
 
@@ -56,7 +59,7 @@ def effective_limits(plan_id: str) -> Dict[str, Any]:
     if not is_payments_enabled():
         return {
             "name": "free",
-            "signal_delay_days": int(os.getenv("FREE_SIGNAL_DELAY_DAYS", "15")),
+            "signal_delay_days": 0,
             "chat_messages_daily": 10 ** 9,
             "chat_messages_per_month": 10 ** 9,  # effectively unlimited
             "portfolio_stocks": 10 ** 9,
@@ -80,7 +83,7 @@ def is_pro_user(user_id: str, supabase) -> bool:
             supabase.table("subscriptions")
             .select("plan_id,status,current_period_end")
             .eq("user_id", user_id)
-            .eq("status", "active")
+            .in_("status", ["active", "trialing"])
             .order("updated_at", desc=True)
             .limit(5)
             .execute()
@@ -88,7 +91,7 @@ def is_pro_user(user_id: str, supabase) -> bool:
         now = datetime.now(timezone.utc)
         for row in res.data or []:
             plan = str(row.get("plan_id", "")).lower()
-            if plan != "pro":
+            if plan not in PRO_PLAN_IDS:
                 continue
             end = row.get("current_period_end")
             if end:

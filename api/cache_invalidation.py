@@ -15,10 +15,29 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+_COOLDOWN_LOCK = threading.Lock()
+_LAST_INVALIDATED_AT: Dict[Tuple[str, str], float] = {}
+
+
+def reset_revalidation_cooldown() -> None:
+    """Clear per-tag invalidation timestamps (primarily for deterministic tests)."""
+    with _COOLDOWN_LOCK:
+        _LAST_INVALIDATED_AT.clear()
+
+
+def _cooldown_seconds() -> float:
+    raw = (os.getenv("REVALIDATE_COOLDOWN_SECONDS") or "120").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 120.0
 
 TAG_MARKET = "daily-market-data"
 TAG_NEWS = "daily-news-data"
@@ -94,14 +113,14 @@ def _revalidate_endpoint() -> Optional[str]:
     return f"{origin}/api/revalidate"
 
 
-def invalidate_daily_cache(steps: List[Dict[str, Any]], timeout: float = 310.0) -> Dict[str, Any]:
+def invalidate_daily_cache(steps: List[Dict[str, Any]], timeout: float = 310.0, force: bool = False) -> Dict[str, Any]:
     """Ask Vercel to invalidate the daily cache tags for a completed run."""
     tags = select_cache_tags(steps)
     if not tags:
         print("[CACHE] No cache tags to invalidate (essential step not successful).")
         return {"invalidated": [], "skipped": True}
 
-    return invalidate_cache_tags(tags, timeout)
+    return invalidate_cache_tags(tags, timeout, force=force)
 
 
 def _post_revalidate(endpoint: str, secret: str, tags: List[str], event_id: str, timeout: float) -> Tuple[Optional[int], Optional[str]]:
@@ -133,13 +152,12 @@ def _post_revalidate(endpoint: str, secret: str, tags: List[str], event_id: str,
             last_error = str(error)
             if attempt == 1:
                 return None, last_error
-        import time
         time.sleep(1.5)
     return None, last_error
 
 
-def invalidate_cache_tags(tags: List[str], timeout: float = 310.0) -> Dict[str, Any]:
-    """Refresh explicit datasets after independent successful scheduled jobs."""
+def invalidate_cache_tags(tags: List[str], timeout: float = 310.0, force: bool = False) -> Dict[str, Any]:
+    """Refresh explicit datasets after independent successful scheduled jobs with cooldown dedup."""
     if not tags or any(tag not in TAG_STEP_REQUIREMENTS for tag in tags):
         return {"invalidated": [], "skipped": True}
 
@@ -149,23 +167,55 @@ def invalidate_cache_tags(tags: List[str], timeout: float = 310.0) -> Dict[str, 
         print("[CACHE] Revalidation skipped: REVALIDATE_URL/WEB_ORIGIN or REVALIDATE_SECRET not configured.")
         return {"invalidated": [], "skipped": True}
 
+    deduped_tags = list(dict.fromkeys(tags))
+    cooldown = _cooldown_seconds()
+    cooldown_skipped: List[str] = []
+    if not force and cooldown > 0:
+        now = time.monotonic()
+        with _COOLDOWN_LOCK:
+            active_tags = [
+                t for t in deduped_tags
+                if (now - _LAST_INVALIDATED_AT.get((endpoint, t), float("-inf"))) >= cooldown
+            ]
+            cooldown_skipped = [t for t in deduped_tags if t not in active_tags]
+    else:
+        active_tags = deduped_tags
+
+    if not active_tags:
+        print(f"[CACHE] Revalidation debounced by {int(cooldown)}s cooldown for {deduped_tags}")
+        return {"invalidated": [], "skipped": True, "reason": "cooldown", "debounced": cooldown_skipped}
+
+    def _record_success(succeeded_tags: List[str]) -> None:
+        stamp = time.monotonic()
+        with _COOLDOWN_LOCK:
+            for t in succeeded_tags:
+                _LAST_INVALIDATED_AT[(endpoint, t)] = stamp
+
     # Stable across HTTP retries: Vercel stages data before switching generation.
     event_id = datetime.now(timezone.utc).isoformat()
-    status, error = _post_revalidate(endpoint, secret, tags, event_id, timeout)
+    status, error = _post_revalidate(endpoint, secret, active_tags, event_id, timeout)
     if not error:
-        return {"invalidated": tags, "skipped": False, "status": status}
+        _record_success(active_tags)
+        return {
+            "invalidated": active_tags,
+            "skipped": False,
+            "status": status,
+            **({"debounced": cooldown_skipped} if cooldown_skipped else {}),
+        }
 
     # If a multi-tag batch hit a single-tag upstream glitch (e.g. HTTP 500 on one dataset),
     # fall back to invalidating each tag individually so healthy tags are never blocked.
-    if len(tags) > 1:
+    if len(active_tags) > 1:
         invalidated: List[str] = []
         tag_errors: List[str] = []
-        for single_tag in tags:
+        for single_tag in active_tags:
             s_status, s_err = _post_revalidate(endpoint, secret, [single_tag], datetime.now(timezone.utc).isoformat(), timeout)
             if not s_err:
                 invalidated.append(single_tag)
             else:
                 tag_errors.append(f"{single_tag}:{s_err}")
+        if invalidated:
+            _record_success(invalidated)
         if invalidated and not tag_errors:
             return {"invalidated": invalidated, "skipped": False, "status": 200}
         return {

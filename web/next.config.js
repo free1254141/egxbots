@@ -50,18 +50,46 @@ const nextConfig = {
       : `${BACKEND_URL}/api/ai_chat`;
     console.log(`[next.config] Chatbot backend configured: ${chatbotBackend} (isPython: ${isPythonChatbot}) -> ${pythonChatbotDestination}`);
 
-    const beforeFiles = isPythonChatbot
+    const offloadEnabled = process.env.OFFLOAD_TO_HF !== "false";
+    const offloadBeforeFiles = offloadEnabled
       ? [
-          {
-            source: '/api/ai-chat/:path*',
-            destination: pythonChatbotDestination,
-          },
-          {
-            source: '/api/ai-chat',
-            destination: pythonChatbotExact,
-          },
+          { source: '/api/symbols/search', destination: `${BACKEND_URL}/api/symbols/search` },
+          { source: '/api/symbols/countries', destination: `${BACKEND_URL}/api/symbols/countries` },
+          { source: '/api/recommendations/chart-markers', destination: `${BACKEND_URL}/api/recommendations/chart-markers` },
+          { source: '/api/ai_bot/recommendations', destination: `${BACKEND_URL}/api/ai_bot/recommendations` },
+          { source: '/api/ai_bot/candles', destination: `${BACKEND_URL}/api/ai_bot/candles` },
+          { source: '/api/user/quota', destination: `${BACKEND_URL}/api/user/quota` },
+          { source: '/api/analytics/events', destination: `${BACKEND_URL}/api/analytics/events` },
+          { source: '/api/short-swings/:path*', destination: `${BACKEND_URL}/api/short-swings/:path*` },
+          { source: '/api/short-swings', destination: `${BACKEND_URL}/api/short-swings` },
+          { source: '/api/scanner/intraday-session', destination: `${BACKEND_URL}/api/scanner/intraday-session` },
+          { source: '/api/market/status', destination: `${BACKEND_URL}/api/market/status` },
+          { source: '/api/market/proof', destination: `${BACKEND_URL}/api/market/proof` },
+          { source: '/api/market/fundamentals', destination: `${BACKEND_URL}/api/market/fundamentals` },
+          { source: '/api/market/recommendation-counts', destination: `${BACKEND_URL}/api/market/recommendation-counts` },
+          { source: '/api/scan/signal-performance', destination: `${BACKEND_URL}/api/scan/signal-performance` },
+          { source: '/api/scan/ai', destination: `${BACKEND_URL}/api/scan/ai` },
+          { source: '/api/disclosures/pdf/:path*', destination: `${BACKEND_URL}/api/disclosures/pdf/:path*` },
+          { source: '/api/disclosures', destination: `${BACKEND_URL}/api/disclosures` },
+          { source: '/api/marketing/:path*', destination: `${BACKEND_URL}/marketing/:path*` },
         ]
       : [];
+
+    const beforeFiles = [
+      ...(isPythonChatbot
+        ? [
+            {
+              source: '/api/ai-chat/:path*',
+              destination: pythonChatbotDestination,
+            },
+            {
+              source: '/api/ai-chat',
+              destination: pythonChatbotExact,
+            },
+          ]
+        : []),
+      ...offloadBeforeFiles,
+    ];
 
     return {
       beforeFiles,
@@ -94,6 +122,10 @@ const nextConfig = {
       {
         source: '/api/telegram/:path*',
         destination: `${BACKEND_URL}/api/telegram/:path*`,
+      },
+      {
+        source: '/api/marketing/:path*',
+        destination: `${BACKEND_URL}/marketing/:path*`,
       },
       {
         source: '/api/ai-chat/:path*',

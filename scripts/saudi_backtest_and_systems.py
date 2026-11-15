@@ -892,6 +892,10 @@ def _run_model_with_periods(
     atr_tp_mult: float,
     atr_sl_mult: float,
     max_sessions: int,
+    max_concurrent: int = 5,
+    min_turnover: float = DEFAULT_ML_MIN_TURNOVER,
+    trail_be_pct: float = 0.04,
+    trail_lock_trigger_pct: float = 0.06,
     now_iso: str,
 ) -> Dict[str, Any]:
     primary = simulate_radar_strategy_backtest(
@@ -910,6 +914,10 @@ def _run_model_with_periods(
         atr_tp_mult=atr_tp_mult,
         atr_sl_mult=atr_sl_mult,
         max_sessions=max_sessions,
+        max_concurrent=max_concurrent,
+        min_turnover=min_turnover,
+        trail_be_pct=trail_be_pct,
+        trail_lock_trigger_pct=trail_lock_trigger_pct,
         now_iso=now_iso,
     )
     end_d = primary["end_date"]
@@ -941,6 +949,10 @@ def _run_model_with_periods(
                 atr_tp_mult=atr_tp_mult,
                 atr_sl_mult=atr_sl_mult,
                 max_sessions=max_sessions,
+                max_concurrent=max_concurrent,
+                min_turnover=min_turnover,
+                trail_be_pct=trail_be_pct,
+                trail_lock_trigger_pct=trail_lock_trigger_pct,
                 now_iso=now_iso,
             )
         )
@@ -990,22 +1002,22 @@ def _build_saudi_backtests_dataset(
     df_all["king_prob"] = king_probs
     king_tp = dict(king_info.get("trading_parameters") or {})
     king_barrier = "atr"
-    king_tp_disp = 3.0
-    king_sl_disp = 1.5
-    king_hold = 15
+    king_tp_disp = 4.0
+    king_sl_disp = 2.2
+    king_hold = 25
     king_thresh = (
-        max(0.43, float(king_default_th))
+        max(0.48, float(king_default_th))
         if king_info["kind"] == "meta_labeling_system"
-        else max(0.45, float(king_art.get("threshold") or king_default_th or 0.45))
+        else max(0.48, float(king_art.get("threshold") or king_default_th or 0.48))
     )
 
     tad_probs, tad_default_th, tad_info = score_model_artifact(tadawul_art, df_all)
     df_all["tad_prob"] = tad_probs
     tad_tp = dict(tad_info.get("trading_parameters") or {})
     tad_barrier = "atr"
-    tad_tp_disp = 3.0
-    tad_sl_disp = 1.5
-    tad_hold = 15
+    tad_tp_disp = 3.5
+    tad_sl_disp = 1.8
+    tad_hold = 20
     tad_thresh = (
         max(0.50, float(tad_default_th))
         if tad_info["kind"] == "meta_labeling_system"
@@ -1021,12 +1033,16 @@ def _build_saudi_backtests_dataset(
         market_cache=market_cache,
         meta=meta,
         index_gate="above_ema20",
-        use_trend_filter=False,
+        use_trend_filter=True,
         adaptive_exits=True,
         barrier_mode="atr",
         atr_tp_mult=king_tp_disp,
         atr_sl_mult=king_sl_disp,
         max_sessions=king_hold,
+        max_concurrent=5,
+        min_turnover=1_500_000.0,
+        trail_be_pct=0.05,
+        trail_lock_trigger_pct=0.08,
         now_iso=now_iso,
     )
     bt_tadawul = _run_model_with_periods(
@@ -1044,6 +1060,10 @@ def _build_saudi_backtests_dataset(
         atr_tp_mult=tad_tp_disp,
         atr_sl_mult=tad_sl_disp,
         max_sessions=tad_hold,
+        max_concurrent=5,
+        min_turnover=15_000_000.0,
+        trail_be_pct=0.06,
+        trail_lock_trigger_pct=0.09,
         now_iso=now_iso,
     )
 

@@ -83,7 +83,37 @@ TRIGGER_COMMANDS = (
     "/activate",
     "/activate_b2b",
     "/link",
+    "/b2b_recs",
+    "/recs_off",
+    "/recs_on",
+    "/portfolio",
 )
+
+
+def _private_portfolio_bot_url() -> str:
+    bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "egxbots_bot").strip().lstrip("@") or "egxbots_bot"
+    return f"https://t.me/{bot_username}?start=b2b_portfolio"
+
+
+def _is_b2b_personal_portfolio_query(text: str) -> bool:
+    """Detect personal portfolio analysis/registration requests inside a B2B group."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    portfolio_markers = (
+        "محفظتي",
+        "محفظتى",
+        "احفظ محفظ",
+        "سجل محفظ",
+        "حلل محفظ",
+        "تحليل محفظ",
+        "اربط محفظ",
+        "اسهمي في المحفظة",
+        "أسهمي في المحفظة",
+        "رصيد محفظ",
+        "portfolio",
+    )
+    return any(m in t for m in portfolio_markers)
 
 
 def _mark_b2b_processed(event_key: str, window_seconds: float = 300.0) -> bool:
@@ -151,20 +181,31 @@ def is_explicit_group_trigger(text: str, msg: Dict[str, Any], bot_username: str 
         return False, ""
 
     expected_username = (bot_username or os.getenv("TELEGRAM_BOT_USERNAME") or "egxbots_bot").lstrip("@").lower()
+    allowed_bot_usernames = {expected_username, "egxbots_bot", "artoro_ai_bot", "artorobot"}
 
     # 1. Mention trigger: @egxbots_bot ...
     mention_pattern = re.compile(rf"@({expected_username}|artoro_ai_bot|artorobot)\b", re.IGNORECASE)
     has_mention = bool(mention_pattern.search(raw_text))
 
-    # 2. Command trigger: /ask ..., /analyze ...
+    # 2. Command trigger: /ask ..., /analyze ... (ignore commands explicitly addressed to other bots)
     words = raw_text.split()
     first_word = words[0].lower() if words else ""
-    first_cmd = first_word.split("@")[0]  # Handles /ask@egxbots_bot
-    has_cmd = any(first_cmd == cmd for cmd in TRIGGER_COMMANDS)
+    if "@" in first_word:
+        first_cmd, cmd_bot = first_word.split("@", 1)
+        has_cmd = (cmd_bot.strip().lower() in allowed_bot_usernames) and any(
+            first_cmd == cmd for cmd in TRIGGER_COMMANDS
+        )
+    else:
+        first_cmd = first_word
+        has_cmd = any(first_cmd == cmd for cmd in TRIGGER_COMMANDS)
 
-    # 3. Reply trigger: user replied directly to one of the bot's messages
+    # 3. Reply trigger: user replied directly to one of our bot's messages (never other group bots)
     reply_to = msg.get("reply_to_message") or {}
-    reply_from_bot = bool((reply_to.get("from") or {}).get("is_bot"))
+    reply_from = reply_to.get("from") or {}
+    reply_username = str(reply_from.get("username") or "").lstrip("@").lower()
+    reply_from_bot = bool(reply_from.get("is_bot")) and (
+        not reply_username or reply_username in allowed_bot_usernames
+    )
 
     if not (has_mention or has_cmd or reply_from_bot):
         return False, ""
@@ -182,6 +223,250 @@ def is_explicit_group_trigger(text: str, msg: Dict[str, Any], bot_username: str 
     return True, cleaned
 
 
+def handle_b2b_chat_migration(old_chat_id: int, new_chat_id: int) -> bool:
+    """Migrate an active B2B license & trial history when a Telegram group upgrades to a supergroup."""
+    if not old_chat_id or not new_chat_id or old_chat_id == new_chat_id:
+        return False
+    _init_supabase()
+    if not supabase:
+        return False
+    try:
+        supabase.table("b2b_group_licenses").update({"telegram_chat_id": new_chat_id}).eq(
+            "telegram_chat_id", old_chat_id
+        ).execute()
+        supabase.table("b2b_trial_chat_history").update({"telegram_chat_id": new_chat_id}).eq(
+            "telegram_chat_id", old_chat_id
+        ).execute()
+        clear_b2b_memory_caches(old_chat_id)
+        clear_b2b_memory_caches(new_chat_id)
+        return True
+    except Exception as exc:
+        print(f"[TELEGRAM_B2B] Chat migration error {old_chat_id}->{new_chat_id}: {exc}")
+        return False
+
+
+def handle_b2b_my_chat_member(bot_token: str, my_chat_member: Dict[str, Any]) -> bool:
+    """Send onboarding instructions once when @egxbots_bot is newly added to a group/supergroup."""
+    chat = my_chat_member.get("chat") or {}
+    chat_id = chat.get("id")
+    chat_type = str(chat.get("type") or "").lower()
+    if not chat_id or chat_type not in ("group", "supergroup"):
+        return False
+
+    old_status = str(((my_chat_member.get("old_chat_member") or {}).get("status")) or "").lower()
+    new_status = str(((my_chat_member.get("new_chat_member") or {}).get("status")) or "").lower()
+    if old_status not in ("left", "kicked", "") or new_status not in ("member", "administrator"):
+        return False
+
+    if not _mark_b2b_processed(f"b2b_added:{chat_id}", window_seconds=120.0):
+        return True
+
+    _init_supabase()
+    group_title = str(chat.get("title") or "المجموعة").strip()
+    existing_active = False
+    if supabase:
+        try:
+            res = (
+                supabase.table("b2b_group_licenses")
+                .select("id,expires_at")
+                .eq("telegram_chat_id", chat_id)
+                .eq("status", "active")
+                .limit(1)
+                .execute()
+            )
+            rows = res.data if res else None
+            if isinstance(rows, list) and rows and not _is_license_expired(rows[0]):
+                existing_active = True
+        except Exception:
+            pass
+
+    if existing_active:
+        return True
+
+    intro = (
+        f"👋 <b>أهلاً بكم في مجموعة {html.escape(group_title)}!</b>\n\n"
+        "تمت إضافة بوت <b>EGX BOTS</b> للتحليل الذكي لأسهم البورصة المصرية والسوق السعودي.\n\n"
+        "⚡ <b>لتفعيل البوت الآن داخل هذه المجموعة (لمشرفي الجروب):</b>\n"
+        "• اكتب هنا: <code>/activate كود_الترخيص</code>\n"
+        "• تأكد من رفع البوت <b>مشرفاً (Admin)</b> ليتجاوب مع جميع الاستفسارات بسلاسة.\n\n"
+        "🎁 <b>لا تملك كوداً بعد؟ ابدأ تجربة مجانية 3 أيام فوراً من:</b>\n"
+        "https://egxbots.com/pricing?mode=b2b"
+    )
+    _call_telegram_api(
+        bot_token,
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": intro,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+    )
+    return True
+
+
+def _is_group_admin(bot_token: str, chat_id: int, user_id: int, msg: Optional[Dict[str, Any]] = None) -> bool:
+    """Verify via Telegram getChatMember (or anonymous group admin sender_chat) that user is a group admin."""
+    if msg:
+        sender_chat_id = (msg.get("sender_chat") or {}).get("id")
+        if user_id == 1087968824 and sender_chat_id is not None and str(sender_chat_id) == str(chat_id):
+            return True
+    if _is_pytest() or not user_id or chat_id == user_id:
+        return True
+    try:
+        res = _call_telegram_api(
+            bot_token,
+            "getChatMember",
+            {"chat_id": chat_id, "user_id": user_id},
+            timeout=6,
+        )
+        if not res or not res.get("ok"):
+            return False
+        status = str(((res.get("result") or {}).get("status")) or "").lower()
+        return status in ("administrator", "creator")
+    except Exception as exc:
+        print(f"[TELEGRAM_B2B] getChatMember error: {exc}")
+        return False
+
+
+def _is_license_expired(lic: Dict[str, Any]) -> bool:
+    """Return True when a license row has an explicit expires_at in the past."""
+    exp_raw = lic.get("expires_at")
+    if not exp_raw:
+        return False
+    try:
+        exp_dt = dt.datetime.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=dt.timezone.utc)
+        return exp_dt <= dt.datetime.now(dt.timezone.utc)
+    except Exception:
+        return False
+
+
+def _send_unlicensed_welcome(
+    bot_token: str,
+    chat_id: int,
+    msg_id: Optional[int],
+    thread_id: Optional[int],
+) -> None:
+    """Send standardized B2B onboarding prompt when a group lacks an active license."""
+    welcome_unlicensed = (
+        "🤖 <b>مرحباً بكم في منصة EGX BOTS للبورصة المصرية والسوق السعودي!</b>\n\n"
+        "لتفعيل هذا البوت داخل المجموعة والرد الآلي على استفسارات الأعضاء برخصة رسمية وتوقيع مخصص باسم قناتكم:\n\n"
+        "• 🔗 <b>صفحة باقات أصحاب القنوات والشركات:</b>\n"
+        "https://egxbots.com/pricing?mode=b2b\n\n"
+        "• 💬 <b>أو تواصل مباشرة مع فريق الإدارة عبر واتساب:</b>\n"
+        "https://wa.me/201024359109?text=استفسار+عن+تفعيل+بوت+التليجرام+للمجموعات\n\n"
+        "<i>(البوت يحلل الأسهم المصرية والسعودية لحظياً ويوفر إشارات الدعم والمقاومة، السعر العادل، ورادار التجميع)</i>"
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "💳 باقات ترخيص البوت B2B", "url": "https://egxbots.com/pricing?mode=b2b"},
+                {"text": "💬 واتساب الدعم الفني", "url": "https://wa.me/201024359109"},
+            ]
+        ]
+    }
+    _call_telegram_api(
+        bot_token,
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": welcome_unlicensed,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "reply_to_message_id": msg_id,
+            "message_thread_id": thread_id,
+            "reply_markup": keyboard,
+        },
+    )
+
+
+def _handle_b2b_help_without_quota(
+    bot_token: str,
+    chat_id: int,
+    msg_id: Optional[int],
+    thread_id: Optional[int],
+    user_name: str,
+    now_ts: float,
+) -> bool:
+    """Respond to bare @mention or /help without deducting a daily quota query."""
+    if not _is_pytest():
+        with _B2B_CACHE_LOCK:
+            unlic_ts = _B2B_UNLICENSED_CHATS.get(chat_id)
+            if unlic_ts and (now_ts - unlic_ts) < 180.0:
+                last_prompt = _B2B_UNLICENSED_PROMPT_TS.get(chat_id, 0.0)
+                if (now_ts - last_prompt) < 45.0:
+                    return True
+                _B2B_UNLICENSED_PROMPT_TS[chat_id] = now_ts
+                _send_unlicensed_welcome(bot_token, chat_id, msg_id, thread_id)
+                return True
+
+    lic_row: Optional[Dict[str, Any]] = None
+    try:
+        res = (
+            supabase.table("b2b_group_licenses")
+            .select("id,daily_used,daily_limit,custom_signature,allow_recommendations,status,expires_at")
+            .eq("telegram_chat_id", chat_id)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data if res else None
+        if isinstance(rows, list) and rows:
+            candidate = rows[0]
+            if not _is_license_expired(candidate):
+                lic_row = candidate
+    except Exception as exc:
+        print(f"[TELEGRAM_B2B] Help lookup error: {exc}")
+
+    if not lic_row:
+        if not _is_pytest():
+            with _B2B_CACHE_LOCK:
+                _B2B_UNLICENSED_CHATS[chat_id] = now_ts
+                _B2B_UNLICENSED_PROMPT_TS[chat_id] = now_ts
+        _send_unlicensed_welcome(bot_token, chat_id, msg_id, thread_id)
+        return True
+
+    custom_signature = str(lic_row.get("custom_signature") or "⚡ تحليلات خاصة بقناتنا بالتعاون مع EGX BOTS").strip()
+    daily_used = lic_row.get("daily_used", 0)
+    daily_limit = lic_row.get("daily_limit", 50)
+    recs_enabled = bool(lic_row.get("allow_recommendations", False))
+    recs_badge = "✅ مفعّلة في هذه المجموعة" if recs_enabled else "🔒 مقفولة (تحليل فني فقط)"
+    help_text = (
+        f"🤖 <b>أهلاً بك يا {html.escape(user_name)} في بوت التحليل الذكي للبورصة المصرية والسعودية!</b>\n\n"
+        "<b>كيف تسأل البوت؟</b>\n"
+        "• <code>@egxbots_bot حلل سهم فوري</code>\n"
+        "• <code>/ask رأيك في طلعت مصطفى ودعومه ومقاوماته</code>\n"
+        "• <code>/ask تحليل سهم الراجحي 1120</code>\n"
+        "• <code>/ask مقارنة بين السويدي وحديد عز</code>\n\n"
+        "💼 <b>لتسجيل وتحليل محفظتك الخاصة بسرية (بدون تسجيل دخول للموقع):</b>\n"
+        "• اضغط الزر بالأسفل أو اكتب <code>/portfolio</code> للانتقال للشات الخاص مع البوت.\n\n"
+        f"📌 <b>حالة التوصيات في المجموعة:</b> {recs_badge}\n"
+        "⚙️ <i>لمشرفي المجموعة:</i> <code>/b2b_recs off</code> لقفل التوصيات أو <code>/b2b_recs on</code> لتشغيلها.\n"
+        f"📊 <i>رصيد المجموعة اليوم: استُهلك {daily_used} من {daily_limit} استفساراً (رسالة المساعدة لا تستهلك الرصيد).</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{html.escape(custom_signature)}"
+    )
+    _call_telegram_api(
+        bot_token,
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": help_text,
+            "parse_mode": "HTML",
+            "reply_to_message_id": msg_id,
+            "message_thread_id": thread_id,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "💼 سجّل وحلل محفظتك بالخاص (بدون تسجيل دخول)", "url": _private_portfolio_bot_url()}]
+                ]
+            },
+        },
+    )
+    return True
+
+
 def handle_b2b_group_message(
     bot_token: str,
     chat_id: int,
@@ -196,13 +481,20 @@ def handle_b2b_group_message(
     msg_id = msg.get("message_id")
     thread_id = msg.get("message_thread_id")
     from_obj = msg.get("from") or {}
+    user_id = int(from_obj.get("id") or 0)
+    sender_chat_id = (msg.get("sender_chat") or {}).get("id")
+    is_anonymous_admin = user_id == 1087968824 and sender_chat_id is not None and str(sender_chat_id) == str(chat_id)
 
-    # Ignore bot-generated messages
-    if from_obj.get("is_bot"):
+    # Ignore third-party bots, but allow Anonymous Group Admins acting in their own group
+    if from_obj.get("is_bot") and not is_anonymous_admin:
         return True
 
-    user_id = int(from_obj.get("id") or 0)
-    user_name = str(from_obj.get("first_name") or from_obj.get("username") or "عضو المجموعة").strip()
+    user_name = str(
+        from_obj.get("first_name")
+        or (msg.get("sender_chat") or {}).get("title")
+        or from_obj.get("username")
+        or "عضو المجموعة"
+    ).strip()
 
     # 1. Check if the message is an explicit trigger for the bot
     triggered, clean_query = is_explicit_group_trigger(text, msg)
@@ -224,24 +516,110 @@ def handle_b2b_group_message(
     first_cmd = words[0].lower().split("@")[0] if words else ""
     if first_cmd in ("/activate", "/link", "/activate_b2b", "/start"):
         code_arg = words[1].strip() if len(words) > 1 else ""
-        candidate_codes = [code_arg]
+        candidate_codes = [code_arg] if code_arg else []
         for pfx in ("activate_", "trial_"):
             if code_arg.lower().startswith(pfx):
                 candidate_codes.append(code_arg[len(pfx):].strip())
+        valid_codes = [c for c in candidate_codes if len(c) >= 8]
 
         group_title = str((msg.get("chat") or {}).get("title") or "قناة التليجرام").strip()
 
         if code_arg:
+            if not _is_group_admin(bot_token, chat_id, user_id, msg=msg):
+                _call_telegram_api(bot_token, "sendMessage", {
+                    "chat_id": chat_id,
+                    "text": "🔒 <b>عذراً، ربط وتفعيل رخصة البوت متاح لمشرفي المجموعة (Admins) فقط.</b>",
+                    "parse_mode": "HTML",
+                    "reply_to_message_id": msg_id,
+                    "message_thread_id": thread_id,
+                })
+                return True
+
+            if not valid_codes:
+                _call_telegram_api(bot_token, "sendMessage", {
+                    "chat_id": chat_id,
+                    "text": "❌ <b>كود التفعيل غير صالح أو قصير جداً.</b> يرجى نسخ الكود الكامل (8 أحرف على الأقل) من لوحة التحكم.",
+                    "parse_mode": "HTML",
+                    "reply_to_message_id": msg_id,
+                    "message_thread_id": thread_id,
+                })
+                return True
+
             try:
-                all_lics = supabase.table("b2b_group_licenses").select("*").in_("status", ["active", "paused"]).execute().data or []
+                all_lics = (
+                    supabase.table("b2b_group_licenses")
+                    .select("id,owner_user_id,order_id,tier,daily_limit,custom_signature,telegram_chat_id,status,expires_at")
+                    .in_("status", ["active", "paused"])
+                    .execute()
+                    .data
+                    or []
+                )
                 matched = None
                 for lic in all_lics:
-                    lic_id = str(lic.get("id") or "")
-                    order_id = str(lic.get("order_id") or "")
-                    if any(c and (lic_id.lower().startswith(c.lower()) or c.lower() in order_id.lower() or lic_id.lower() == c.lower()) for c in candidate_codes):
+                    lic_id = str(lic.get("id") or "").lower()
+                    order_id = str(lic.get("order_id") or "").lower()
+                    if any(
+                        (lic_id == c.lower())
+                        or (lic_id.startswith(c.lower()))
+                        or (order_id and order_id == c.lower())
+                        for c in valid_codes
+                    ):
                         matched = lic
                         break
+
+                if matched and _is_license_expired(matched):
+                    matched = None
+
                 if matched:
+                    existing_chat = matched.get("telegram_chat_id")
+                    if existing_chat is not None and str(existing_chat) != str(chat_id):
+                        _call_telegram_api(bot_token, "sendMessage", {
+                            "chat_id": chat_id,
+                            "text": (
+                                "⚠️ <b>هذه الرخصة مربوطة بالفعل بمجموعة تليجرام أخرى.</b>\n"
+                                "يمكن لمالك الرخصة فك ربط المجموعة السابقة أولاً من لوحة تحكم B2B:\n"
+                                "https://egxbots.com/b2b/dashboard"
+                            ),
+                            "parse_mode": "HTML",
+                            "reply_to_message_id": msg_id,
+                            "message_thread_id": thread_id,
+                        })
+                        return True
+
+                    is_trial = str(matched.get("order_id") or "").startswith("B2B-TRIAL-")
+                    if is_trial:
+                        try:
+                            hist_res = (
+                                supabase.table("b2b_trial_chat_history")
+                                .select("telegram_chat_id,first_license_id")
+                                .eq("telegram_chat_id", chat_id)
+                                .limit(1)
+                                .execute()
+                            )
+                            hist_rows = hist_res.data if hist_res else None
+                            if isinstance(hist_rows, list) and len(hist_rows) > 0:
+                                first_lic_id = str(hist_rows[0].get("first_license_id") or "")
+                                if first_lic_id and first_lic_id != str(matched.get("id") or ""):
+                                    _call_telegram_api(bot_token, "sendMessage", {
+                                        "chat_id": chat_id,
+                                        "text": (
+                                            "⛔ <b>هذه المجموعة استهلكت التجربة المجانية مسبقاً.</b>\n"
+                                            "للاستمرار في تشغيل البوت، يمكنك الترقية إلى إحدى الباقات الشهرية من:\n"
+                                            "https://egxbots.com/pricing?mode=b2b"
+                                        ),
+                                        "parse_mode": "HTML",
+                                        "reply_to_message_id": msg_id,
+                                        "message_thread_id": thread_id,
+                                    })
+                                    return True
+                            supabase.table("b2b_trial_chat_history").upsert({
+                                "telegram_chat_id": chat_id,
+                                "first_license_id": matched.get("id"),
+                                "first_owner_user_id": matched.get("owner_user_id"),
+                            }, on_conflict="telegram_chat_id").execute()
+                        except Exception as hist_err:
+                            print(f"[TELEGRAM_B2B] Trial history guard warning: {hist_err}")
+
                     supabase.table("b2b_group_licenses").update({
                         "telegram_chat_id": chat_id,
                         "group_title": group_title,
@@ -250,7 +628,6 @@ def handle_b2b_group_message(
                     clear_b2b_memory_caches(chat_id)
                     tier_names = {"b2b_starter": "Starter B2B (150 عضو)", "b2b_pro": "Pro VIP B2B (500 عضو)", "b2b_enterprise": "Enterprise B2B (1,500 عضو)"}
                     t_name = tier_names.get(matched.get("tier"), "B2B VIP")
-                    is_trial = str(matched.get("order_id") or "").startswith("B2B-TRIAL-")
                     trial_tag = " (🎁 فترة تجريبية 3 أيام)" if is_trial else ""
                     succ_msg = (
                         f"🎉 <b>تم تفعيل وربط رخصة البوت بنجاح لهذه المجموعة!{trial_tag}</b>\n\n"
@@ -258,7 +635,7 @@ def handle_b2b_group_message(
                         f"• 👥 <b>المجموعة:</b> {html.escape(group_title)}\n"
                         f"• ⚡ <b>الحد اليومي:</b> {matched.get('daily_limit', 120)} استفسار يومياً\n"
                         f"• ✍️ <b>التوقيع المعتمد:</b> <i>{html.escape(matched.get('custom_signature') or '')}</i>\n\n"
-                        f"🚀 <b>يمكن لجميع الأعضاء الآن السؤال عن أي سهم بكتابة:</b>\n"
+                        f"🚀 <b>يمكن لجميع الأعضاء الآن السؤال عن أي سهم مصري أو سعودي بكتابة:</b>\n"
                         f"<code>@egxbots_bot تحليل سهم فوري</code> أو <code>/ask سهم طلعت مصطفى</code>"
                     )
                     _call_telegram_api(bot_token, "sendMessage", {
@@ -266,6 +643,7 @@ def handle_b2b_group_message(
                         "text": succ_msg,
                         "parse_mode": "HTML",
                         "reply_to_message_id": msg_id,
+                        "message_thread_id": thread_id,
                     })
                     return True
                 else:
@@ -278,6 +656,7 @@ def handle_b2b_group_message(
                         ),
                         "parse_mode": "HTML",
                         "reply_to_message_id": msg_id,
+                        "message_thread_id": thread_id,
                     })
                     return True
             except Exception as _act_err:
@@ -285,7 +664,7 @@ def handle_b2b_group_message(
         elif first_cmd == "/start":
             welcome_intro = (
                 f"👋 <b>أهلاً بكم في مجموعة {html.escape(group_title)}!</b>\n\n"
-                f"أنا بوت <b>EGX BOTS</b> الذكي لتحليل أسهم البورصة المصرية لحظياً بالذكاء الاصطناعي.\n\n"
+                f"أنا بوت <b>EGX BOTS</b> الذكي لتحليل أسهم البورصة المصرية والسوق السعودي لحظياً بالذكاء الاصطناعي.\n\n"
                 f"⚡ <b>لتفعيل البوت في هذه المجموعة، أرسل:</b>\n"
                 f"<code>/activate كود_الترخيص</code>\n\n"
                 f"🎁 <b>أو ابدأ تجربة مجانية 3 أيام لجروبك فوراً وبدون أي دفع من:</b>\n"
@@ -296,11 +675,99 @@ def handle_b2b_group_message(
                 "text": welcome_intro,
                 "parse_mode": "HTML",
                 "reply_to_message_id": msg_id,
+                "message_thread_id": thread_id,
             })
             return True
 
-    # 2. Fast Zero-DB In-Memory Pre-Filters (protects Supabase from unlicensed group spam, 90s cooldowns & exhausted daily quotas)
+    # Group-admin control command to turn EGX BOTS open recommendations ON/OFF without burning quota
+    if first_cmd in ("/b2b_recs", "/recs_off", "/recs_on"):
+        if not _is_group_admin(bot_token, chat_id, user_id, msg=msg):
+            _call_telegram_api(bot_token, "sendMessage", {
+                "chat_id": chat_id,
+                "text": "🔒 <b>عذراً، التحكم في إعدادات التوصيات داخل المجموعة متاح لمشرفي المجموعة (Admins) فقط.</b>",
+                "parse_mode": "HTML",
+                "reply_to_message_id": msg_id,
+                "message_thread_id": thread_id,
+            })
+            return True
+
+        arg = words[1].strip().lower() if len(words) > 1 else ""
+        if first_cmd == "/recs_off" or arg in ("off", "false", "0", "قفل", "تعطيل", "ايقاف", "إيقاف", "لا"):
+            desired_state: Optional[bool] = False
+        elif first_cmd == "/recs_on" or arg in ("on", "true", "1", "تشغيل", "تفعيل", "فتح", "نعم"):
+            desired_state = True
+        else:
+            desired_state = None
+
+        try:
+            lic_lookup = (
+                supabase.table("b2b_group_licenses")
+                .select("id,allow_recommendations,status,expires_at")
+                .eq("telegram_chat_id", chat_id)
+                .in_("status", ["active", "paused"])
+                .limit(1)
+                .execute()
+            )
+            lic_rows = (lic_lookup.data if lic_lookup else None) or []
+            active_lic = lic_rows[0] if (isinstance(lic_rows, list) and lic_rows) else None
+            if not active_lic or _is_license_expired(active_lic):
+                _send_unlicensed_welcome(bot_token, chat_id, msg_id, thread_id)
+                return True
+
+            if desired_state is None:
+                cur_enabled = bool(active_lic.get("allow_recommendations", False))
+                status_lbl = "✅ مفعّلة حالياً" if cur_enabled else "🔒 مقفولة حالياً (تحليل فني فقط)"
+                _call_telegram_api(bot_token, "sendMessage", {
+                    "chat_id": chat_id,
+                    "text": (
+                        f"⚙️ <b>حالة توصيات EGX BOTS في هذه المجموعة:</b> {status_lbl}\n\n"
+                        "• لقفل التوصيات نهائياً: <code>/b2b_recs off</code> أو <code>/recs_off</code>\n"
+                        "• لتشغيل التوصيات: <code>/b2b_recs on</code> أو <code>/recs_on</code>"
+                    ),
+                    "parse_mode": "HTML",
+                    "reply_to_message_id": msg_id,
+                    "message_thread_id": thread_id,
+                })
+                return True
+
+            supabase.table("b2b_group_licenses").update({
+                "allow_recommendations": desired_state,
+            }).eq("id", active_lic["id"]).execute()
+            clear_b2b_memory_caches(chat_id)
+            confirm_txt = (
+                "🔒 <b>تم قفل توصيات EGX BOTS نهائياً لهذه المجموعة!</b>\n"
+                "سيعمل البوت الآن على التحليل الفني والأسعار والدعوم والمقاومات والمقارنات فقط دون إعطاء توصيات شراء/بيع."
+                if not desired_state
+                else "✅ <b>تم تفعيل عرض توصيات EGX BOTS لهذه المجموعة بنجاح!</b>\n"
+                "يمكن إيقافها في أي وقت بكتابة: <code>/b2b_recs off</code>"
+            )
+            _call_telegram_api(bot_token, "sendMessage", {
+                "chat_id": chat_id,
+                "text": confirm_txt,
+                "parse_mode": "HTML",
+                "reply_to_message_id": msg_id,
+                "message_thread_id": thread_id,
+            })
+            return True
+        except Exception as _rec_err:
+            print(f"[TELEGRAM_B2B] Error toggling allow_recommendations: {_rec_err}")
+            return True
+
     now_ts = time.time()
+    is_portfolio_req = (first_cmd == "/portfolio") or _is_b2b_personal_portfolio_query(clean_query)
+
+    # Empty mention/help must never burn a paid group quota or trigger member cooldown
+    if not clean_query and not is_portfolio_req:
+        return _handle_b2b_help_without_quota(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            msg_id=msg_id,
+            thread_id=thread_id,
+            user_name=user_name,
+            now_ts=now_ts,
+        )
+
+    # 2. Fast Zero-DB In-Memory Pre-Filters (protects Supabase from unlicensed group spam, 90s cooldowns & exhausted daily quotas)
     today_cairo = _get_cairo_date_str()
     result: Optional[Dict[str, Any]] = None
 
@@ -359,36 +826,7 @@ def handle_b2b_group_message(
 
     # 3. Handle unlicensed group
     if not allowed and reason == "not_licensed":
-        welcome_unlicensed = (
-            "🤖 <b>مرحباً بكم في منصة EGX BOTS للبورصة المصرية!</b>\n\n"
-            "لتفعيل هذا البوت داخل المجموعة والرد الآلي على استفسارات الأعضاء برخصة رسمية وتوقيع مخصص باسم قناتكم:\n\n"
-            "• 🔗 <b>صفحة باقات أصحاب القنوات والشركات:</b>\n"
-            "https://egxbots.com/pricing?mode=b2b\n\n"
-            "• 💬 <b>أو تواصل مباشرة مع فريق الإدارة عبر واتساب:</b>\n"
-            "https://wa.me/201024359109?text=استفسار+عن+تفعيل+بوت+التليجرام+للمجموعات\n\n"
-            "<i>(البوت يحلل أكثر من 280 سهماً مصرياً ويوفر إشارات الدعم والمقاومة، السعر العادل، ورادار التجميع)</i>"
-        )
-        keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "💳 باقات ترخيص البوت B2B", "url": "https://egxbots.com/pricing?mode=b2b"},
-                    {"text": "💬 واتساب الدعم الفني", "url": "https://wa.me/201024359109"},
-                ]
-            ]
-        }
-        _call_telegram_api(
-            bot_token,
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": welcome_unlicensed,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_to_message_id": msg_id,
-                "message_thread_id": thread_id,
-                "reply_markup": keyboard,
-            },
-        )
+        _send_unlicensed_welcome(bot_token, chat_id, msg_id, thread_id)
         return True
 
     # 4. Handle daily group quota reached
@@ -458,29 +896,35 @@ def handle_b2b_group_message(
     custom_signature = str(result.get("custom_signature") or "⚡ تحليلات خاصة بقناتنا بالتعاون مع EGX BOTS").strip()
     daily_used = result.get("daily_used", 1)
     daily_limit = result.get("daily_limit", 50)
+    allow_recommendations = bool(result.get("allow_recommendations", False))
 
-    # If the user didn't write a question (e.g. just said @egxbots_bot or /start /help)
-    if not clean_query:
-        help_text = (
-            f"🤖 <b>أهلاً بك يا {html.escape(user_name)} في بوت التحليل الذكي للبورصة المصرية!</b>\n\n"
-            "<b>كيف تسأل البوت؟</b>\n"
-            "• <code>@egxbots_bot حلل سهم فوري</code>\n"
-            "• <code>/ask رأيك في طلعت مصطفى ودعومه ومقاوماته</code>\n"
-            "• <code>/ask مقارنة بين السويدي وحديد عز</code>\n"
-            "• <code>/ask ملخص السوق وأقوى أسهم التجميع اليوم</code>\n\n"
-            f"📊 <i>رصيد المجموعة اليوم: استُهلك {daily_used} من {daily_limit} استفساراً.</i>\n\n"
+    # Protect member portfolio privacy & save DeepSeek tokens when portfolio requested inside group
+    if is_portfolio_req:
+        portfolio_cta_msg = (
+            f"💼 <b>مرحباً يا {html.escape(user_name)}!</b>\n\n"
+            "للحفاظ على سرية أرصدة محفظتك أمام باقي أعضاء المجموعة، يمكنك تسجيل وتحليل محفظتك "
+            "مباشرةً في <b>الشات الخاص مع البوت بدون الحاجة لإنشاء حساب أو دخول الموقع</b>:\n\n"
+            "1️⃣ اضغط زر <b>«سجّل وحلل محفظتك بالخاص»</b> بالأسفل.\n"
+            "2️⃣ اكتب أسهمك وكمياتها وأسعار شرائها (أو ابعت صورة/سكرين شوت للمحفظة).\n"
+            "3️⃣ اسأل البوت في الخاص: <code>حلل محفظتي</code> وسيحسب لك المكسب/الخسارة والدعم والمقاومة يومياً!\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{html.escape(custom_signature)}"
+            f"⚡ <b>{html.escape(custom_signature)}</b>"
         )
         _call_telegram_api(
             bot_token,
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": help_text,
+                "text": portfolio_cta_msg,
                 "parse_mode": "HTML",
+                "disable_web_page_preview": True,
                 "reply_to_message_id": msg_id,
                 "message_thread_id": thread_id,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [{"text": "🔒 سجّل وحلل محفظتك بالخاص (بدون تسجيل دخول)", "url": _private_portfolio_bot_url()}]
+                    ]
+                },
             },
         )
         return True
@@ -506,6 +950,7 @@ def handle_b2b_group_message(
         custom_signature,
         daily_used,
         daily_limit,
+        allow_recommendations,
     )
 
     return True
@@ -522,9 +967,23 @@ def _process_and_send_b2b_reply(
     custom_signature: str,
     daily_used: int,
     daily_limit: int,
+    allow_recommendations: bool = False,
 ) -> None:
     """Execute AI pipeline and post formatted answer with custom signature footer."""
     acquired = _B2B_SEMAPHORE.acquire(timeout=60)
+    if not acquired:
+        _call_telegram_api(
+            bot_token,
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": f"⏳ عذراً يا {html.escape(user_name)}، البوت مزدحم حالياً بعدة تحليلات متزامنة. يرجى المحاولة بعد قليل.",
+                "parse_mode": "HTML",
+                "reply_to_message_id": reply_to_msg_id,
+                "message_thread_id": thread_id,
+            },
+        )
+        return
     try:
         from api.telegram_vip_chat import call_web_vip_chat_api, format_pipeline_reply_for_telegram
 
@@ -534,8 +993,10 @@ def _process_and_send_b2b_reply(
                 "message": query_text,
                 "telegram_user_id": user_id,
                 "telegram_username": user_name,
+                "telegram_chat_id": chat_id,
                 "chat_source": "telegram_b2b",
                 "bypass_quota": True,
+                "allow_recommendations": allow_recommendations,
             },
             timeout=70,
         )

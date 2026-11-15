@@ -39,6 +39,7 @@ interface B2BLicense {
   daily_used: number;
   last_used_date: string | null;
   custom_signature: string | null;
+  allow_recommendations?: boolean;
   status: "active" | "expired" | "paused";
   starts_at: string;
   expires_at: string;
@@ -95,6 +96,7 @@ export default function B2BTab() {
     duration_days: 30,
     daily_limit: 120,
     owner_email: "",
+    allow_recommendations: false,
   });
 
   const fetchLicenses = async () => {
@@ -221,6 +223,7 @@ export default function B2BTab() {
           duration_days: 30,
           daily_limit: 120,
           owner_email: "",
+          allow_recommendations: false,
         });
         fetchLicenses();
       } else {
@@ -250,6 +253,7 @@ export default function B2BTab() {
           tier: editingLicense.tier,
           telegram_chat_id: editingLicense.telegram_chat_id,
           status: editingLicense.status,
+          allow_recommendations: Boolean(editingLicense.allow_recommendations),
         }),
       });
       const data = await res.json();
@@ -553,6 +557,17 @@ export default function B2BTab() {
                         <div className="bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 p-1.5 text-[11px] text-zinc-700 dark:text-zinc-300 line-clamp-2 italic">
                           {lic.custom_signature || "لا يوجد توقيع"}
                         </div>
+                        <div className="mt-1">
+                          <span
+                            className={`inline-block px-1.5 py-0.5 text-[10px] font-black border ${
+                              lic.allow_recommendations
+                                ? "bg-emerald-100 text-emerald-800 border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                : "bg-amber-100 text-amber-800 border-amber-500 dark:bg-amber-950/60 dark:text-amber-300"
+                            }`}
+                          >
+                            {lic.allow_recommendations ? "✅ توصيات مفعلة" : "🔒 تحليل فقط (بدون توصيات)"}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Expiry and Remaining Days */}
@@ -743,6 +758,18 @@ export default function B2BTab() {
                 <span className="text-[10px] text-zinc-400">الحد الأقصى 150 حرفاً</span>
               </div>
 
+              <label className="flex items-center gap-2 p-2.5 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={createForm.allow_recommendations}
+                  onChange={(e) => setCreateForm({ ...createForm, allow_recommendations: e.target.checked })}
+                  className="w-4 h-4 accent-emerald-600"
+                />
+                <span className="text-xs font-black text-zinc-800 dark:text-zinc-200">
+                  السماح بعرض توصيات EGX BOTS المفتوحة داخل المجموعة (إيقاف = تحليل فني فقط)
+                </span>
+              </label>
+
               <div>
                 <label className="block text-zinc-700 dark:text-zinc-300 mb-1">مدة الترخيص (بالأيام)</label>
                 <input
@@ -857,6 +884,23 @@ export default function B2BTab() {
                   className="w-full border-2 border-black dark:border-white p-2.5 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white outline-none"
                 />
                 <span className="text-[10px] text-zinc-400">الحد الأقصى 150 حرفاً</span>
+              </div>
+
+              <div>
+                <label className="block text-zinc-700 dark:text-zinc-300 mb-1">حالة التوصيات داخل المجموعة</label>
+                <label className="flex items-center gap-2 p-2.5 border-2 border-black dark:border-white bg-zinc-50 dark:bg-zinc-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingLicense.allow_recommendations)}
+                    onChange={(e) =>
+                      setEditingLicense({ ...editingLicense, allow_recommendations: e.target.checked })
+                    }
+                    className="w-4 h-4 accent-emerald-600"
+                  />
+                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-200">
+                    تفعيل توصيات EGX BOTS المفتوحة (إلغاء التحديد = قفل التوصيات نهائياً والاكتفاء بالتحليل الفني)
+                  </span>
+                </label>
               </div>
 
               <div>

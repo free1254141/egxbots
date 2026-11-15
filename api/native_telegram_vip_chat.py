@@ -198,7 +198,9 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     tg_user_id = payload.get("telegram_user_id")
     user_name = payload.get("telegram_username", "المستثمر")
     chat_source = payload.get("chat_source") or "telegram_topic"
-    bypass_quota = bool(payload.get("bypass_quota")) or (chat_source == "telegram_b2b" and action == "chat")
+    is_b2b = chat_source == "telegram_b2b"
+    allow_recommendations = bool(payload.get("allow_recommendations", False if is_b2b else True))
+    bypass_quota = bool(payload.get("bypass_quota")) or (is_b2b and action == "chat")
 
     if not tg_user_id:
         return {"ok": False, "error": "Missing telegram_user_id"}
@@ -282,7 +284,11 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "Empty message"}
 
     audit_user_id = user_info["linked_user_id"] or deterministic_session_uuid(f"tg-user-{tg_user_id}")
-    session_id = deterministic_session_uuid(f"tg-{chat_source}-{audit_user_id}")
+    b2b_chat_id = payload.get("telegram_chat_id")
+    if chat_source == "telegram_b2b" and b2b_chat_id:
+        session_id = deterministic_session_uuid(f"tg-b2b-group-{b2b_chat_id}")
+    else:
+        session_id = deterministic_session_uuid(f"tg-{chat_source}-{audit_user_id}")
     if chat_source == "telegram_private":
         room_prefix = "🔒 [بوت تليجرام الخاص]"
     elif chat_source == "telegram_b2b":
@@ -334,22 +340,52 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     tables: List[Dict[str, Any]] = []
     was_cached: bool = False
     used_cache_key: Optional[str] = None
+    unlinked_tg_pf_id: Optional[int] = (
+        int(tg_user_id)
+        if (chat_source == "telegram_private" and not user_info.get("linked_user_id"))
+        else None
+    )
+
+    if is_b2b and not allow_recommendations and query:
+        try:
+            from api.telegram_vip_chat import is_topic_recommendation_query
+            if is_topic_recommendation_query(query):
+                reply_text = (
+                    "🚫 **تم إيقاف عرض توصيات الشراء والبيع المفتوحة داخل هذه المجموعة بناءً على إعدادات إدارة المجموعة.**\n\n"
+                    "يمكنك استخدام البوت داخل المجموعة في:\n"
+                    "• 📊 التحليل الفني الشامل للأسهم المصرية والسعودية (`@egxbots_bot حلل سهم فوري`)\n"
+                    "• 📐 مستويات الدعم والمقاومة والمؤشرات والقيمة العادلة\n"
+                    "• ⚖️ مقارنة الأسهم واكتشاف المصائد السعرية\n"
+                    "• 💼 تحليل محفظتك الشخصية بسرية بالخاص (بدون تسجيل دخول) عبر `@egxbots_bot`"
+                )
+        except Exception:
+            pass
 
     # Fast-Path + Single-Flight Coalescing via Two-Tier Analysis Cache
     # Avoids spinning up an asyncio loop or firing duplicate DeepSeek requests when multiple users ask the same stock question
     early_cache_key: Optional[str] = None
     inflight_lock: Optional[threading.Lock] = None
-    if not images:
+    if not images and not reply_text:
         try:
             from api.agentic_chat.analysis_cache import (
                 build_analysis_cache_key,
                 get_vip_analysis_cache,
                 get_inflight_cache_lock,
+                is_recommendation_cache_key,
+                resolve_scoped_cache_key,
             )
             early_cache_key = build_analysis_cache_key(query)
+            if not allow_recommendations and is_recommendation_cache_key(early_cache_key):
+                early_cache_key = None
             used_cache_key = early_cache_key
             if early_cache_key:
-                cached_hit = get_vip_analysis_cache(early_cache_key, user_id=user_info.get("linked_user_id"))
+                cached_hit = get_vip_analysis_cache(
+                    early_cache_key,
+                    user_id=user_info.get("linked_user_id"),
+                    telegram_user_id=unlinked_tg_pf_id,
+                    is_b2b=is_b2b,
+                    allow_recommendations=allow_recommendations,
+                )
                 if cached_hit and cached_hit.get("reply"):
                     reply_text = cached_hit["reply"]
                     tables = cached_hit.get("tables") or []
@@ -357,11 +393,14 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     used_cache_key = cached_hit.get("key") or early_cache_key
                     logger.info(f"[NATIVE_VIP_CHAT] Instant Fast-Path Cache Hit for {early_cache_key} (0 DeepSeek tokens)")
                 else:
-                    inflight_lock = get_inflight_cache_lock(early_cache_key)
+                    scoped_lock_key = resolve_scoped_cache_key(
+                        early_cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+                    )
+                    inflight_lock = get_inflight_cache_lock(scoped_lock_key)
         except Exception as cache_init_err:
             logger.warning(f"[NATIVE_VIP_CHAT] Fast-path cache check warning: {cache_init_err}")
 
-    # Run the full Agentic Chat Pipeline with all 9 tools (DeepSeek-V3) if not already served by fast-path cache
+    # Run the full Agentic Chat Pipeline with all tools (DeepSeek-V3) if not already served by fast-path cache
     if not reply_text:
         acquired_inflight = False
         try:
@@ -370,7 +409,13 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Double-check cache after acquiring single-flight lock (another concurrent worker may have just populated it!)
                 if early_cache_key:
                     from api.agentic_chat.analysis_cache import get_vip_analysis_cache
-                    cached_after_wait = get_vip_analysis_cache(early_cache_key, user_id=user_info.get("linked_user_id"))
+                    cached_after_wait = get_vip_analysis_cache(
+                        early_cache_key,
+                        user_id=user_info.get("linked_user_id"),
+                        telegram_user_id=unlinked_tg_pf_id,
+                        is_b2b=is_b2b,
+                        allow_recommendations=allow_recommendations,
+                    )
                     if cached_after_wait and cached_after_wait.get("reply"):
                         reply_text = cached_after_wait["reply"]
                         tables = cached_after_wait.get("tables") or []
@@ -397,11 +442,15 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                         history=formatted_history,
                         images=images,
                         session_id=session_id,
-                        user_id=audit_user_id,
+                        user_id=user_info.get("linked_user_id"),
                         model="deepseek-chat",
                         is_pro=user_info["is_pro"],
                         remaining_quota=user_info["remaining"],
                         quota_limit=user_info["limit"],
+                        allow_recommendations=allow_recommendations,
+                        is_b2b=is_b2b,
+                        telegram_user_id=unlinked_tg_pf_id,
+                        block_group_portfolio=(chat_source != "telegram_private"),
                     ):
                         line = sse_chunk.strip()
                         if line.startswith("data:"):

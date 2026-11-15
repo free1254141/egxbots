@@ -570,8 +570,16 @@ class TelegramBot:
                             handle_vip_chat_update(update, self.token)
                             continue
                         msg = update.get("message", {})
-                        text = msg.get("text", "")
                         chat_id = msg.get("chat", {}).get("id")
+                        migrate_to = msg.get("migrate_to_chat_id")
+                        if chat_id and migrate_to:
+                            try:
+                                from api.telegram_b2b import handle_b2b_chat_migration
+                                handle_b2b_chat_migration(int(chat_id), int(migrate_to))
+                            except Exception:
+                                pass
+                            continue
+                        text = msg.get("text") or msg.get("caption") or ""
                         if chat_id and text:
                             self._dispatch_command(chat_id, text, msg, raw_update=update)
                 else:
@@ -609,12 +617,29 @@ class TelegramBot:
                 self._log(f"Processed VIP chat update: {uid}")
                 return
 
+            if data.get("my_chat_member"):
+                try:
+                    from api.telegram_b2b import handle_b2b_my_chat_member
+                    handle_b2b_my_chat_member(self.token, data["my_chat_member"])
+                except Exception as mcm_err:
+                    self._log(f"B2B my_chat_member error: {mcm_err}")
+                return
+
             msg = data.get("message", {})
-            text = msg.get("text", "")
             chat_id = msg.get("chat", {}).get("id")
             if not chat_id:
                 return
 
+            migrate_to = msg.get("migrate_to_chat_id")
+            if migrate_to:
+                try:
+                    from api.telegram_b2b import handle_b2b_chat_migration
+                    handle_b2b_chat_migration(int(chat_id), int(migrate_to))
+                except Exception as mig_err:
+                    self._log(f"B2B chat migration error: {mig_err}")
+                return
+
+            text = msg.get("text") or msg.get("caption") or ""
             self._dispatch_command(chat_id, text, msg, raw_update=data)
             self._log(f"Processed update: {uid}")
         except Exception as e:
@@ -662,7 +687,28 @@ class TelegramBot:
             parts = text.split()
             if len(parts) > 1:
                 user_id_param = parts[1].strip()
-                if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot"):
+                if user_id_param.lower().startswith(("activate_", "trial_")):
+                    bot_username = (os.getenv("TELEGRAM_BOT_USERNAME") or "egxbots_bot").lstrip("@")
+                    group_url = f"https://t.me/{bot_username}?startgroup={user_id_param}&admin=delete_messages+pin_messages"
+                    clean_code = user_id_param.split("_", 1)[1] if "_" in user_id_param else user_id_param
+                    send_vip_message(
+                        bot_token=self.token,
+                        chat_id=chat_id,
+                        text=(
+                            "🏢 <b>ربط رخصة B2B بمجموعتك على تليجرام</b>\n\n"
+                            "هذا الرابط مخصص لربط البوت <b>داخل مجموعة/جروب تليجرام</b> وليس في المحادثة الخاصة.\n\n"
+                            "👇 اضغط الزر بالأسفل لاختيار مجموعتك ورفع البوت كمشرف، أو انسخ هذا الأمر وأرسله داخل الجروب:\n"
+                            f"<code>/activate {clean_code}</code>"
+                        ),
+                        reply_markup={
+                            "inline_keyboard": [
+                                [{"text": "🚀 اختيار المجموعة وربط البوت الآن", "url": group_url}],
+                                [{"text": "📊 لوحة تحكم B2B", "url": "https://egxbots.com/b2b/dashboard"}],
+                            ]
+                        },
+                    )
+                    return
+                if user_id_param.lower() not in ("artoro_chat", "artoro", "chat", "vip", "alerts", "start", "connect", "bot", "b2b_portfolio", "portfolio"):
                     self._handle_start_with_user_id(chat_id, user_id_param, msg)
                     send_vip_message(
                         bot_token=self.token,

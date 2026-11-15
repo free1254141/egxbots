@@ -190,12 +190,21 @@ async def get_chat_root(
 
     if action == "settings":
         _used, remaining, limit = get_user_chat_quota(user_id, user_is_pro)
+        custom_rules = None
+        if user_id:
+            try:
+                p_res = supabase.table("profiles").select("custom_ai_rules").eq("id", user_id).limit(1).execute()
+                if p_res and p_res.data:
+                    custom_rules = p_res.data[0].get("custom_ai_rules")
+            except Exception:
+                pass
         return JSONResponse({
             "status": "ok",
             "remaining_quota": remaining,
             "quota_limit": limit,
             "is_pro": user_is_pro,
             "unlimited": user_is_pro,
+            "custom_ai_rules": custom_rules,
         })
 
     target_sid = session_id or request.query_params.get("session_id") or request.query_params.get("sessionId")
@@ -248,22 +257,29 @@ async def get_chat_root(
 @router.put("")
 @router.put("/")
 async def update_session(request: Request):
-    """Update session title: PUT /api/ai-chat { session_id, title } (authenticated user only)"""
+    """Update session title or custom AI rules: PUT /api/ai-chat (authenticated user only)"""
     try:
         body = await request.json()
+        _init_supabase()
+        auth_user = get_authenticated_user(request)
+        uid = auth_user.get("id") if auth_user else None
+        if not uid:
+            return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+
+        if "custom_ai_rules" in body:
+            new_rules = body.get("custom_ai_rules")
+            supabase.from_("profiles").update({"custom_ai_rules": new_rules or None}).eq("id", uid).execute()
+            return {"status": "ok", "custom_ai_rules": new_rules}
+
         sid = body.get("session_id") or body.get("sessionId")
         new_title = (body.get("title") or "").strip()
         if sid and new_title:
-            _init_supabase()
-            auth_user = get_authenticated_user(request)
-            uid = auth_user.get("id") if auth_user else None
-            if not uid:
-                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
             supabase.from_("ai_chat_sessions").update({"title": new_title}).eq("id", sid).eq("user_id", uid).execute()
             return {"status": "ok", "updated": sid, "title": new_title}
     except Exception as e:
-        logger.warning(f"[agentic_chat] Failed to update session title: {e}")
+        logger.warning(f"[agentic_chat] Failed to update session or custom rules: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    return {"status": "ok"}
     return {"status": "ok"}
 
 

@@ -53,6 +53,7 @@ import { useMarket } from "@/contexts/MarketContext";
 function formatShortSwingExitReason(trade: { reason?: string; exit_reason?: string }): string {
   if (trade.reason === "take_profit") return "جني أرباح المستهدف (+13%)";
   if (trade.reason === "ema10_break") return "إغلاق تحت EMA10 (ركوب اتجاه)";
+  if (trade.reason === "ema20_break") return "إغلاق تحت EMA20 (ركوب اتجاه)";
   if (trade.reason === "stop_be") return "وقف حماية الأرباح والتعادل";
   if (trade.reason === "stop_loss") return "وقف خسارة -4%";
   return trade.exit_reason || trade.reason || "انتهاء المدة";
@@ -141,7 +142,8 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
   const { language } = useLanguage();
   const isAr = language === "ar";
   const { theme } = useTheme();
-  const { market, currencyLabel } = useMarket();
+  const { market, isSaudi, currencyLabel } = useMarket();
+  const trailLabel = isSaudi ? "EMA20" : "EMA10";
 
   const [data, setData] = useState<ShortSwingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -746,7 +748,15 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                 <span>{isAr ? "قواعد واستراتيجية الصفقات القصيرة" : "Short Swings Strategy Rules"}</span>
               </div>
               <p className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-relaxed max-w-4xl">
-                استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة في اتجاه صاعد (EMA50 صاعد واتساع سوق متماسك). يتم تأمين الصفقة على مرحلتين (+5.0% لحجز +0.8%، ثم +9.0% لحجز +4.0% بدءاً من الجلسة التالية مع إغلاق إيجابي)، مع مستهدف جني أرباح <strong>+13%</strong> أو تتبع الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
+                {isSaudi ? (
+                  <>
+                    استراتيجية رقمية انتقائية لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> واتساع السوق وتصفيته للتقلبات الحادة (ATR ≤ 2.8% ومسافة من EMA20 ≤ 9%) في اتجاه صاعد (EMA50 صاعد). يتم تأمين الصفقة على مرحلتين (+5.0% لحجز +0.8%، ثم +9.0% لحجز +4.0% بدءاً من الجلسة التالية مع إغلاق إيجابي)، مع تتبع الوقف المتحرك <strong>EMA20</strong> بدون سقف ربح ثابت؛ النتائج التاريخية لا تضمن النتائج المقبلة.
+                  </>
+                ) : (
+                  <>
+                    استراتيجية رقمية صارمة لا تدخل إلا مع <strong>انفجار السيولة المؤسسية (&gt;140%)</strong> بعد كسر قمم تماسك 20 جلسة في اتجاه صاعد (EMA50 صاعد واتساع سوق متماسك). يتم تأمين الصفقة على مرحلتين (+5.0% لحجز +0.8%، ثم +9.0% لحجز +4.0% بدءاً من الجلسة التالية مع إغلاق إيجابي)، مع مستهدف جني أرباح <strong>+13%</strong> أو تتبع الوقف المتحرك <strong>EMA10</strong>؛ النتائج التاريخية لا تضمن النتائج المقبلة.
+                  </>
+                )}
               </p>
             </div>
 
@@ -827,7 +837,12 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
-                      <span><strong>جني الأرباح وركوب الاتجاه:</strong> مستهدف جني أرباح مباشر عند +13.0%، والوقف المتحرك يتبع متوسط 10 أيام (EMA10) ما دامت الموجة مستمرة.</span>
+                      <span>
+                        <strong>جني الأرباح وركوب الاتجاه:</strong>{" "}
+                        {isSaudi
+                          ? "تتبع الاتجاه بدون سقف ربح ثابت، والوقف المتحرك يتبع متوسط 20 يوماً (EMA20) ما دامت الموجة مستمرة."
+                          : "مستهدف جني أرباح مباشر عند +13.0%، والوقف المتحرك يتبع متوسط 10 أيام (EMA10) ما دامت الموجة مستمرة."}
+                      </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-amber-500 font-black">•</span>
@@ -996,7 +1011,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
               +{safeNum(kpis.top_win_pct, 86.1).toFixed(1)}%
             </div>
             <p className="text-[10px] font-bold text-zinc-500 mt-1">
-              ركوب كامل لموجة الصعود عبر EMA10
+              ركوب كامل لموجة الصعود عبر {trailLabel}
             </p>
           </div>
         </div>
@@ -1789,7 +1804,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         </div>
                         <div>
                           <span className="text-zinc-500 block text-[10px]">
-                            {trade.is_pending_entry ? "الوقف المبدئي (-4%):" : "الوقف المتحرك (EMA10):"}
+                            {trade.is_pending_entry ? "الوقف المبدئي (-4%):" : `الوقف المتحرك (${trailLabel}):`}
                           </span>
                           <span className="font-mono font-black text-amber-600 dark:text-amber-400">
                             {trade.trailing_stop != null ? safeNum(trade.trailing_stop).toFixed(2) : "—"} {currencyLabel}
@@ -1877,7 +1892,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         className="px-4 py-3.5 text-center border-r border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors select-none"
                       >
                         <div className="flex items-center justify-center gap-1">
-                          <span>الوقف المتحرك (EMA10)</span>
+                          <span>الوقف المتحرك ({trailLabel})</span>
                           {renderSortIcon("trailing_stop")}
                         </div>
                       </th>
@@ -2832,7 +2847,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
                         <div>
                           <span className="text-zinc-500 text-[10px] block">الوقف المتحرك</span>
                           <span className="font-mono text-indigo-600 dark:text-indigo-400">
-                            {t.is_locked ? "🔒 مشفر" : `${t.trailing_stop != null ? safeNum(t.trailing_stop).toFixed(2) : "تتبع EMA10"}`}
+                            {t.is_locked ? "🔒 مشفر" : `${t.trailing_stop != null ? safeNum(t.trailing_stop).toFixed(2) : `تتبع ${trailLabel}`}`}
                           </span>
                         </div>
                       </div>

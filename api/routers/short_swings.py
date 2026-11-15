@@ -1,11 +1,21 @@
 import os
 import hmac
 import datetime as dt
-from fastapi import APIRouter, Query, Request, HTTPException, Header
+from fastapi import APIRouter, Query, Request, HTTPException, Header, Response
 from typing import Optional
+from api.perf_utils import (
+    BoundedTTLCache,
+    SingleFlight,
+    get_market_supabase,
+    resolve_request_market,
+    resolve_verified_viewer,
+)
 from api.short_swings_engine import get_cached_short_swings, compute_short_swings
 
 router = APIRouter(prefix="/api/short-swings", tags=["Short Swings"])
+
+_SAUDI_SWINGS_CACHE = BoundedTTLCache(max_entries=4, default_ttl=300.0)
+_SAUDI_SWINGS_SF = SingleFlight()
 
 
 def _is_internal_authorized(x_admin_key: Optional[str]) -> bool:
@@ -17,48 +27,52 @@ def _is_internal_authorized(x_admin_key: Optional[str]) -> bool:
 
 
 def _get_saudi_short_swings(refresh: bool = False) -> dict:
-    """Read or recompute Saudi short swings payload using the shared engine & cache."""
+    """Read or recompute Saudi short swings payload using bounded TTL + SingleFlight cache."""
     if refresh:
+        _SAUDI_SWINGS_CACHE.clear()
         return compute_short_swings(exchange="TADAWUL")
 
-    from supabase import create_client
-    url = (os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or "").strip()
-    key = (
-        os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SAUDI_SUPABASE_ANON_KEY")
-        or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
-    if url and key:
-        try:
-            sb = create_client(url, key)
-            res = (
-                sb.table("market_cache")
-                .select("payload")
-                .eq("cache_key", "saudi_short_swings_v1")
-                .eq("country", "Saudi Arabia")
-                .limit(1)
-                .execute()
-            )
-            rows = res.data or []
-            if rows and isinstance(rows[0].get("payload"), dict):
-                return rows[0]["payload"]
-        except Exception as exc:
-            print(f"[SHORT_SWINGS] Saudi market_cache read error: {exc}")
+    found, cached = _SAUDI_SWINGS_CACHE.get("saudi_short_swings_v1")
+    if found:
+        return cached
 
-    local_cached = get_cached_short_swings(exchange="TADAWUL")
-    if isinstance(local_cached, dict) and local_cached.get("status") != "unavailable":
-        return local_cached
-    return {"status": "unavailable", "kpis": {}, "active_trades": [], "closed_trades": [], "market": "TASI", "currency": "SAR"}
+    def _fetch() -> dict:
+        sb = get_market_supabase("tasi")
+        if sb is not None:
+            try:
+                res = (
+                    sb.table("market_cache")
+                    .select("payload")
+                    .eq("cache_key", "saudi_short_swings_v1")
+                    .eq("country", "Saudi Arabia")
+                    .limit(1)
+                    .execute()
+                )
+                rows = res.data or []
+                if rows and isinstance(rows[0].get("payload"), dict):
+                    return rows[0]["payload"]
+            except Exception as exc:
+                print(f"[SHORT_SWINGS] Saudi market_cache read error: {exc}")
+
+        local_cached = get_cached_short_swings(exchange="TADAWUL")
+        if isinstance(local_cached, dict) and local_cached.get("status") != "unavailable":
+            return local_cached
+        return {"status": "unavailable", "kpis": {}, "active_trades": [], "closed_trades": [], "market": "TASI", "currency": "SAR"}
+
+    payload = _SAUDI_SWINGS_SF.do("saudi_short_swings_v1", _fetch)
+    if isinstance(payload, dict) and payload.get("status") != "unavailable":
+        _SAUDI_SWINGS_CACHE.set("saudi_short_swings_v1", payload)
+    return payload
 
 
 @router.get("")
 @router.get("/")
 def get_short_swings(
     request: Request,
+    response: Response = None,
     is_pro: bool = Query(False, description="Whether the requesting user has an active PRO subscription"),
     refresh: bool = Query(False, description="Force recompute signals"),
-    market: Optional[str] = Query("egx", description="Target market: egx or tasi/tadawul"),
+    market: Optional[str] = Query(None, description="Target market: egx or tasi/tadawul"),
     x_admin_key: Optional[str] = Header(None, alias="x-admin-key"),
 ):
     """
@@ -69,16 +83,23 @@ def get_short_swings(
       - Active (open) trades: locked (is_locked=True) for free users ONLY IF entry_date is
         within the last 15 days (the signal is still fresh & actionable) or pending for tomorrow.
         Active trades older than 15 days are shown freely.
-      - PRO unmasking and cache refresh require authenticated internal request (x-admin-key header).
-        Unauthenticated callers requesting is_pro=True or refresh=True are safely coerced to is_pro=False.
+      - PRO unmasking requires either an authenticated internal secret (x-admin-key) OR a
+        cryptographically verified Supabase session belonging to an active PRO subscriber.
+        refresh=True is restricted strictly to internal x-admin-key requests.
     """
     is_internal = _is_internal_authorized(x_admin_key)
     if not is_internal:
-        is_pro = False
         refresh = False
+        viewer = resolve_verified_viewer(request)
+        is_pro = bool(viewer.get("authenticated") and viewer.get("pro"))
 
-    mkt_norm = (market or "egx").strip().lower()
-    if mkt_norm in ("tasi", "tadawul", "sa", "saudi"):
+    if response is not None:
+        response.headers["Cache-Control"] = "private, no-cache, no-store, max-age=0"
+        response.headers["Vercel-CDN-Cache-Control"] = "private, no-store"
+        response.headers["Vary"] = "Cookie, Authorization, X-Admin-Key, X-Egxbots-Market"
+
+    mkt_norm = resolve_request_market(request, market)
+    if mkt_norm == "tasi":
         data = _get_saudi_short_swings(refresh=refresh)
     else:
         data = compute_short_swings() if refresh else get_cached_short_swings()

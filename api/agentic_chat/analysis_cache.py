@@ -243,34 +243,55 @@ def personalize_cached_analysis(
     base_reply: str,
     user_id: Optional[str],
     symbol: Optional[str],
+    telegram_user_id: Optional[int] = None,
 ) -> str:
     """
     Re-inject the requesting user's real position into a cached stock analysis.
     User A's holdings can never reach user B: the cache only stores the neutral line.
+    Supports both website-linked accounts (`positions`) and unlinked Telegram private
+    accounts (`telegram_vip_chat_state.portfolio_state`).
     """
     if not base_reply or not re.search(PORTFOLIO_LINE_SOURCE, base_reply):
         return base_reply
 
     user_portfolio_line = NEUTRAL_PORTFOLIO_LINE
 
-    if user_id and symbol:
+    if symbol and (telegram_user_id is not None or user_id):
         try:
             from api.stock_ai import _init_supabase, supabase
             _init_supabase()
             sym = symbol.upper().strip()
-            res = (
-                supabase.table("positions")
-                .select("quantity, entry_price, status_price")
-                .eq("user_id", user_id)
-                .eq("symbol", sym)
-                .eq("status", "open")
-                .limit(1)
-                .execute()
-            )
-            positions = res.data or []
-            if positions and float(positions[0].get("quantity") or 0) > 0:
-                pos = positions[0]
-                qty = int(pos.get("quantity") or 0)
+            pos: Optional[Dict[str, Any]] = None
+            if telegram_user_id is not None:
+                tg_res = (
+                    supabase.table("telegram_vip_chat_state")
+                    .select("portfolio_state")
+                    .eq("telegram_user_id", int(telegram_user_id))
+                    .limit(1)
+                    .execute()
+                )
+                tg_rows = tg_res.data or []
+                raw_pf = (tg_rows[0].get("portfolio_state") if tg_rows and isinstance(tg_rows[0], dict) else None) or {}
+                for item in raw_pf.get("positions") or []:
+                    if isinstance(item, dict) and str(item.get("symbol", "")).upper() == sym:
+                        pos = item
+                        break
+            elif user_id:
+                res = (
+                    supabase.table("positions")
+                    .select("quantity, entry_price, status_price")
+                    .eq("user_id", user_id)
+                    .eq("symbol", sym)
+                    .eq("status", "open")
+                    .limit(1)
+                    .execute()
+                )
+                positions = res.data or []
+                if positions:
+                    pos = positions[0]
+
+            if pos and float(pos.get("quantity") or 0) > 0:
+                qty = int(float(pos.get("quantity") or 0))
                 entry = float(pos.get("entry_price") or 0)
 
                 price_match = re.search(r"السعر الأخير:\s*`?([0-9.]+)", base_reply)
@@ -648,9 +669,35 @@ def get_minimum_required_length(cache_key: str) -> int:
     return 300  # Market summary / scanner tables
 
 
+def is_recommendation_cache_key(cache_key: Optional[str]) -> bool:
+    """Return True if cache_key represents public open/weekly recommendations output."""
+    return bool(cache_key and (cache_key == "vip_open_recommendations" or cache_key.startswith("vip_recs_")))
+
+
+def resolve_scoped_cache_key(
+    cache_key: str,
+    *,
+    is_b2b: bool = False,
+    allow_recommendations: bool = True,
+) -> str:
+    """
+    Isolate Two-Tier cache entries across contexts so Web/VIP replies (which may contain
+    open recommendations or t.me/egxbots promos) never contaminate B2B or recommendation-locked groups,
+    and vice versa.
+    """
+    if not is_b2b and allow_recommendations:
+        return cache_key
+    scope_prefix = f"{'b2b' if is_b2b else 'std'}_{'recs' if allow_recommendations else 'norecs'}"
+    return f"{scope_prefix}:{cache_key}"
+
+
 def get_vip_analysis_cache(
     cache_key: str,
     user_id: Optional[str] = None,
+    telegram_user_id: Optional[int] = None,
+    *,
+    is_b2b: bool = False,
+    allow_recommendations: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Query Two-Tier Cache:
@@ -660,21 +707,26 @@ def get_vip_analysis_cache(
     """
     if not cache_key:
         return None
+    if not allow_recommendations and is_recommendation_cache_key(cache_key):
+        return None
 
     now_ts = time.time()
     min_length = get_minimum_required_length(cache_key)
+    storage_key = resolve_scoped_cache_key(
+        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+    )
 
     # 1. Tier 1: In-Memory Check
     with _memory_lock:
-        mem = _memory_cache.get(cache_key)
+        mem = _memory_cache.get(storage_key)
         if mem:
             computed_at = mem.get("computed_at", 0.0)
             if resolve_cache_validity(computed_at, now_ts):
                 reply = mem.get("reply", "")
                 if reply and len(reply) >= min_length:
-                    logger.info(f"[analysis_cache] Tier 1 Memory Hit for key: {cache_key}")
+                    logger.info(f"[analysis_cache] Tier 1 Memory Hit for key: {storage_key}")
                     target_sym = cache_key.replace("vip_stock_", "").split("_")[0] if cache_key.startswith("vip_stock_") else None
-                    personalized = personalize_cached_analysis(reply, user_id, target_sym)
+                    personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id)
                     return {
                         "reply": personalized,
                         "tables": mem.get("tables") or [],
@@ -684,7 +736,7 @@ def get_vip_analysis_cache(
                         "key": cache_key,
                     }
             else:
-                _memory_cache.pop(cache_key, None)
+                _memory_cache.pop(storage_key, None)
 
     # 2. Tier 2: Supabase market_cache Table Check
     if is_test_environment():
@@ -696,7 +748,7 @@ def get_vip_analysis_cache(
         res = (
             supabase.table("market_cache")
             .select("payload, computed_at")
-            .eq("cache_key", cache_key)
+            .eq("cache_key", storage_key)
             .limit(1)
             .execute()
         )
@@ -712,7 +764,7 @@ def get_vip_analysis_cache(
                 if resolve_cache_validity(computed_at_ts, now_ts):
                     reply = payload.get("reply", "")
                     if reply and len(reply) >= min_length:
-                        logger.info(f"[analysis_cache] Tier 2 Supabase Hit for key: {cache_key}")
+                        logger.info(f"[analysis_cache] Tier 2 Supabase Hit for key: {storage_key}")
                         # Populate Tier 1 Memory
                         entry = {
                             "reply": reply,
@@ -722,11 +774,11 @@ def get_vip_analysis_cache(
                             "key": cache_key,
                         }
                         with _memory_lock:
-                            _memory_cache[cache_key] = entry
+                            _memory_cache[storage_key] = entry
                             prune_memory_cache()
 
                         target_sym = cache_key.replace("vip_stock_", "").split("_")[0] if cache_key.startswith("vip_stock_") else None
-                        personalized = personalize_cached_analysis(reply, user_id, target_sym)
+                        personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id)
                         return {
                             "reply": personalized,
                             "tables": entry["tables"],
@@ -736,7 +788,7 @@ def get_vip_analysis_cache(
                             "key": cache_key,
                         }
     except Exception as err:
-        logger.warning(f"[analysis_cache] Tier 2 query warning for {cache_key}: {err}")
+        logger.warning(f"[analysis_cache] Tier 2 query warning for {storage_key}: {err}")
 
     return None
 
@@ -747,6 +799,9 @@ def set_vip_analysis_cache(
     tables: Optional[List[Any]] = None,
     recommendations: Optional[List[Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
+    *,
+    is_b2b: bool = False,
+    allow_recommendations: bool = True,
 ) -> None:
     """
     Persist an analysis to the Two-Tier shared cache:
@@ -754,6 +809,8 @@ def set_vip_analysis_cache(
     2. Tier 2: Supabase `market_cache` table (persists permanently across restarts).
     """
     if not cache_key or not reply:
+        return
+    if not allow_recommendations and is_recommendation_cache_key(cache_key):
         return
 
     min_length = get_minimum_required_length(cache_key)
@@ -765,6 +822,9 @@ def set_vip_analysis_cache(
     if len(sanitized_reply) < min_length:
         return
 
+    storage_key = resolve_scoped_cache_key(
+        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+    )
     now_ts = time.time()
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -779,7 +839,7 @@ def set_vip_analysis_cache(
 
     # 1. Store in Tier 1 RAM
     with _memory_lock:
-        _memory_cache[cache_key] = entry
+        _memory_cache[storage_key] = entry
         prune_memory_cache()
 
     # 2. Store in Tier 2 Supabase market_cache Table (cross-instance, survives restarts)
@@ -790,7 +850,7 @@ def set_vip_analysis_cache(
             from api.stock_ai import _init_supabase, supabase
             _init_supabase()
             supabase.table("market_cache").upsert({
-                "cache_key": cache_key,
+                "cache_key": storage_key,
                 "country": "Egypt",
                 "payload": {
                     "reply": sanitized_reply,
@@ -800,9 +860,9 @@ def set_vip_analysis_cache(
                 },
                 "computed_at": now_iso,
             }).execute()
-            logger.info(f"[analysis_cache] Saved to Tier 2 market_cache: {cache_key}")
+            logger.info(f"[analysis_cache] Saved to Tier 2 market_cache: {storage_key}")
         except Exception as e:
-            logger.warning(f"[analysis_cache] Tier 2 upsert error for {cache_key}: {e}")
+            logger.warning(f"[analysis_cache] Tier 2 upsert error for {storage_key}: {e}")
 
     threading.Thread(target=_bg_upsert, daemon=True).start()
 

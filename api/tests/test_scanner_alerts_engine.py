@@ -206,3 +206,120 @@ def test_compute_scanner_signals_kpis_excludes_flat_breakeven_from_losses():
     assert kpis["total_closed"] == 6
     # 2 wins / (2 wins + 1 loss) = 66.7% (not 2/6 = 33.3%)
     assert kpis["win_rate_pct"] == pytest.approx(66.7, abs=0.1)
+
+
+def test_saudi_evaluate_scanner_candidates_filters_and_caps():
+    """TADAWUL scanner enforces >=10 SAR, >=15M SAR, close_pos>=0.70, EMA50 trend, ch<=6.5%, RSI<=68, no RSI oversold, max 1/cat."""
+    rows = {
+        "SUB10": {"open": 9.1, "high": 9.6, "low": 9.0, "close": 9.5, "change_pct": 4.8, "volume": 3_000_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 9.0, "ema_50": 8.8, "bb_upper": 9.6},
+        "LOWSAR": {"open": 19.0, "high": 20.0, "low": 18.9, "close": 20.0, "change_pct": 4.8, "volume": 500_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 19.0, "ema_50": 18.5, "bb_upper": 20.5},
+        "WICKY": {"open": 48.0, "high": 52.0, "low": 48.0, "close": 50.0, "change_pct": 4.8, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 51.0},
+        "DOWN50": {"open": 48.0, "high": 50.0, "low": 47.9, "close": 50.0, "change_pct": 4.8, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 52.0, "bb_upper": 51.0},
+        "CHASE": {"open": 46.5, "high": 50.0, "low": 46.5, "close": 50.0, "change_pct": 7.2, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 46.0, "ema_50": 44.0, "bb_upper": 49.0},
+        "HOTRSI": {"open": 47.8, "high": 50.0, "low": 47.7, "close": 50.0, "change_pct": 4.5, "volume": 600_000, "r_vol": 3.5, "rsi_14": 71.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 51.0},
+        "OVERSOLD": {"open": 31.0, "high": 31.5, "low": 30.0, "close": 30.5, "change_pct": -1.5, "volume": 800_000, "r_vol": 2.5, "rsi_14": 25.0, "ema_20": 33.0, "ema_50": 35.0, "bb_upper": 34.0},
+        "VALID1": {"open": 47.8, "high": 50.0, "low": 47.7, "close": 50.0, "change_pct": 4.6, "volume": 600_000, "r_vol": 3.2, "rsi_14": 62.0, "ema_20": 47.5, "ema_50": 45.0, "bb_upper": 51.0},
+        "VALID2": {"open": 28.7, "high": 30.0, "low": 28.6, "close": 30.0, "change_pct": 4.4, "volume": 800_000, "r_vol": 2.6, "rsi_14": 60.0, "ema_20": 28.5, "ema_50": 27.0, "bb_upper": 31.0},
+        "VALIDBO": {"open": 38.8, "high": 40.0, "low": 38.7, "close": 40.0, "change_pct": 3.0, "volume": 600_000, "r_vol": 2.4, "rsi_14": 61.0, "ema_20": 38.0, "ema_50": 36.0, "bb_upper": 39.5},
+    }
+    res = evaluate_scanner_candidates(rows, force=True, limit_per_category=3, exchange="TADAWUL")
+    assert [s["symbol"] for s in res["final_vol"]] == ["VALID1"]
+    assert [s["symbol"] for s in res["final_bo"]] == ["VALIDBO"]
+    assert res["final_os"] == []
+
+
+def test_saudi_scanner_lifecycle_be_lock_and_six_session_expiry():
+    """TADAWUL arms locked BE at +0.5% (while keeping stop_loss_pct=0.0 for UI badge) and expires at 6 sessions."""
+    active, closed, _, _ = step_scanner_lifecycle(
+        [],
+        [],
+        {},
+        final_vol=[_sample_cand("1120", 100.0)],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-10",
+        action_date="2026-11-10",
+        action_time="14:40",
+        now_iso="2026-11-10T11:40:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        exchange="TADAWUL",
+    )
+    assert len(active) == 1
+    assert active[0]["max_sessions"] == 6
+
+    # Day 2 reaches +3.0% (below T1=3.8%) -> next session has BE armed at 100.5 (+0.5%)
+    active, closed, _, _ = step_scanner_lifecycle(
+        active,
+        closed,
+        {"1120": {"close": 103.0, "high": 103.2, "low": 100.1}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-11",
+        action_date="2026-11-11",
+        action_time="14:40",
+        now_iso="2026-11-11T11:40:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        exchange="TADAWUL",
+    )
+    assert len(active) == 1
+    assert active[0]["stop_loss"] == pytest.approx(100.5, abs=0.01)
+    assert active[0]["stop_loss_pct"] == 0.0
+
+    # Day 3 pulls back below 100.5 -> exits at 100.5 (+0.5%)
+    active, closed, hits, _ = step_scanner_lifecycle(
+        active,
+        closed,
+        {"1120": {"close": 100.1, "high": 101.0, "low": 99.8}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-12",
+        action_date="2026-11-12",
+        action_time="14:40",
+        now_iso="2026-11-12T11:40:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        exchange="TADAWUL",
+    )
+    assert active == []
+    assert len(hits) == 1
+    assert closed[0]["return_pct"] == pytest.approx(0.5, abs=0.05)
+
+    # Expiry label at session 6 must dynamically read "6 جلسات"
+    exp_sig = [{
+        "id": "2222_2026-11-01_breakout",
+        "symbol": "2222",
+        "scanner_type": "breakout",
+        "entry_price": 30.0,
+        "entry_date": "2026-11-01",
+        "target_1": 31.35,
+        "stop_loss": 28.95,
+        "stop_loss_pct": 3.5,
+        "current_price": 30.2,
+        "highest_price": 30.5,
+        "lowest_price": 29.8,
+        "sessions_count": 5,
+        "max_sessions": 6,
+    }]
+    active2, closed2, _, _ = step_scanner_lifecycle(
+        exp_sig,
+        [],
+        {"2222": {"close": 29.8, "high": 30.1, "low": 29.7}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-12",
+        action_date="2026-11-12",
+        action_time="14:40",
+        now_iso="2026-11-12T11:40:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+        exchange="TADAWUL",
+    )
+    assert active2 == []
+    assert len(closed2) == 1
+    assert closed2[0]["status"] == "expired"
+    assert "6 جلسات" in closed2[0]["exit_reason"]

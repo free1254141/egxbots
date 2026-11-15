@@ -127,7 +127,7 @@ export default function B2BLandingClient() {
           code: data.activation_code || String(data.license?.id || "").slice(0, 8),
           connectUrl:
             data.connect_url ||
-            `https://t.me/${B2B_CONTACT.telegramBotHandle}?startgroup=activate_${String(data.license?.id || "").slice(0, 8)}`,
+            `https://t.me/${B2B_CONTACT.telegramBotHandle}?startgroup=activate_${String(data.license?.id || "").slice(0, 8)}&admin=delete_messages+pin_messages`,
           tier,
         });
         if (data.license) {

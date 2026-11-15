@@ -19,20 +19,15 @@ export async function POST(req: Request) {
 
     const supabase = getMarketSupabaseClient(market);
 
+    const selectCols =
+      market === 'tasi'
+        ? 'symbol, exchange, name, last_close, precision, signal, top_reasons, council_score, consensus_ratio'
+        : 'symbol, exchange, name, last_close, precision, signal, top_reasons, rich_details';
+
     // Get AI scan results from Supabase scoped to the active exchange
     const { data: scanResults, error } = await supabase
       .from('scan_results')
-      .select(`
-        symbol,
-        exchange,
-        name,
-        last_close,
-        precision,
-        signal,
-        top_reasons,
-        council_score,
-        consensus_ratio
-      `)
+      .select(selectCols)
       .eq('exchange', exchange)
       .gte('precision', minPrecision)
       .order('precision', { ascending: false })
@@ -44,18 +39,21 @@ export async function POST(req: Request) {
     }
 
     // Transform to expected format
-    const results = scanResults?.map((scan: any) => ({
-      symbol: scan.symbol,
-      exchange: scan.exchange,
-      name: scan.name || scan.symbol,
-      last_close: toNumber(scan.last_close),
-      precision: toNumber(scan.precision),
-      signal: scan.signal || 'HOLD',
-      confidence: toNumber(scan.precision) >= 0.8 ? 'High' : toNumber(scan.precision) >= 0.6 ? 'Medium' : 'Low',
-      top_reasons: scan.top_reasons || [],
-      council_score: toNumber(scan.council_score),
-      consensus_ratio: scan.consensus_ratio
-    })) || [];
+    const results = scanResults?.map((scan: any) => {
+      const rich = scan.rich_details && typeof scan.rich_details === 'object' ? scan.rich_details : {};
+      return {
+        symbol: scan.symbol,
+        exchange: scan.exchange,
+        name: scan.name || scan.symbol,
+        last_close: toNumber(scan.last_close),
+        precision: toNumber(scan.precision),
+        signal: scan.signal || 'HOLD',
+        confidence: toNumber(scan.precision) >= 0.8 ? 'High' : toNumber(scan.precision) >= 0.6 ? 'Medium' : 'Low',
+        top_reasons: scan.top_reasons || [],
+        council_score: toNumber(scan.council_score ?? rich.council_score),
+        consensus_ratio: scan.consensus_ratio ?? rich.consensus_ratio ?? null,
+      };
+    }) || [];
 
     return NextResponse.json({
       results,

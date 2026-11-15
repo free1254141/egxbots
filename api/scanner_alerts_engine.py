@@ -40,6 +40,7 @@ SCANNER_PROFILES = {
         "t2_pct": 7.5,
         "sl_pct": 3.0,
         "max_sessions": 4,
+        "be_lock_pct": 0.0,
         "title_ar": "السيولة الفائقة",
     },
     "breakout": {
@@ -47,6 +48,7 @@ SCANNER_PROFILES = {
         "t2_pct": 9.5,
         "sl_pct": 3.5,
         "max_sessions": 5,
+        "be_lock_pct": 0.0,
         "title_ar": "اختراق فني",
     },
     "rsi_oversold": {
@@ -54,9 +56,42 @@ SCANNER_PROFILES = {
         "t2_pct": 6.5,
         "sl_pct": 2.8,
         "max_sessions": 3,
+        "be_lock_pct": 0.0,
         "title_ar": "تشبع بيعي",
     },
 }
+
+SAUDI_SCANNER_PROFILES = {
+    "volume_surge": {
+        "t1_pct": 3.8,
+        "t2_pct": 6.0,
+        "sl_pct": 3.5,
+        "max_sessions": 6,
+        "be_lock_pct": 0.5,
+        "title_ar": "السيولة الفائقة",
+    },
+    "breakout": {
+        "t1_pct": 4.5,
+        "t2_pct": 7.0,
+        "sl_pct": 3.5,
+        "max_sessions": 6,
+        "be_lock_pct": 0.5,
+        "title_ar": "اختراق فني",
+    },
+    "rsi_oversold": {
+        "t1_pct": 3.5,
+        "t2_pct": 5.5,
+        "sl_pct": 3.0,
+        "max_sessions": 5,
+        "be_lock_pct": 0.5,
+        "title_ar": "تشبع بيعي",
+    },
+}
+
+
+def _is_saudi_exchange(exchange: Optional[str]) -> bool:
+    ex = (exchange or "EGX").strip().upper()
+    return ex in ("TASI", "TADAWUL", "SA", "SAUDI")
 
 def get_cairo_now():
     now_cairo = datetime.now(CAIRO_TZ)
@@ -300,8 +335,9 @@ def send_telegram_alert(chat_id: str, text: str, timeout: int = 15) -> bool:
 
     return False
 
-def calculate_trade_plan(close: float, scanner_type: str) -> Dict[str, Any]:
-    prof = SCANNER_PROFILES.get(scanner_type, SCANNER_PROFILES["volume_surge"])
+def calculate_trade_plan(close: float, scanner_type: str, exchange: str = "EGX") -> Dict[str, Any]:
+    profiles = SAUDI_SCANNER_PROFILES if _is_saudi_exchange(exchange) else SCANNER_PROFILES
+    prof = profiles.get(scanner_type, profiles["volume_surge"])
     t1 = round(close * (1 + prof["t1_pct"] / 100.0), 2)
     t2 = round(close * (1 + prof["t2_pct"] / 100.0), 2)
     sl = round(close * (1 - prof["sl_pct"] / 100.0), 2)
@@ -313,6 +349,7 @@ def calculate_trade_plan(close: float, scanner_type: str) -> Dict[str, Any]:
         "stop_loss": sl,
         "stop_loss_pct": prof["sl_pct"],
         "max_sessions": prof["max_sessions"],
+        "be_lock_pct": float(prof.get("be_lock_pct") or 0.0),
         "risk_reward_ratio": round(prof["t1_pct"] / max(0.1, prof["sl_pct"]), 2),
     }
 
@@ -343,8 +380,10 @@ def evaluate_scanner_candidates(
     sent_keys: Optional[Set[str]] = None,
     force: bool = True,
     limit_per_category: int = 2,
+    exchange: str = "EGX",
 ) -> Dict[str, Any]:
-    """Exact EGX scanner classification, breadth-adaptive sniper gate, and deduplication."""
+    """Scanner classification, breadth-adaptive sniper gate, and deduplication per exchange."""
+    is_saudi = _is_saudi_exchange(exchange)
     sent = sent_keys or set()
     volume_matches: List[Dict[str, Any]] = []
     breakout_matches: List[Dict[str, Any]] = []
@@ -370,16 +409,22 @@ def evaluate_scanner_candidates(
     else:
         is_market_healthy = True
 
-    effective_limit = min(limit_per_category, 1) if not is_market_healthy else limit_per_category
+    if is_saudi:
+        effective_limit = min(limit_per_category, 1)
+    else:
+        effective_limit = min(limit_per_category, 1) if not is_market_healthy else limit_per_category
 
     for sym, row in latest_by_symbol.items():
         close = float(row.get("close") or 0.0)
         open_p = float(row.get("open") or close)
+        high_p = float(row.get("high") or close)
+        low_p = float(row.get("low") or close)
         ch_pct = float(row.get("change_pct") or 0.0)
         vol = float(row.get("volume") or 0.0)
         rsi = float(row.get("rsi_14") or 50.0)
         r_vol = float(row.get("r_vol") or 0.0)
         ema_20 = float(row.get("ema_20") or 0.0)
+        ema_50 = float(row.get("ema_50") or 0.0)
         bb_upper = float(row.get("bb_upper") or 0.0)
         has_bb_upper = "bb_upper" in row
         turnover = close * vol
@@ -394,7 +439,52 @@ def evaluate_scanner_candidates(
         else:
             neutral_stocks += 1
 
-        # Exclude penny stock traps (< 1.50) and red distribution candles
+        if is_saudi:
+            candle_range = high_p - low_p
+            close_pos = (close - low_p) / candle_range if candle_range > 0 else 1.0
+            # TADAWUL institutional quality gate: >= 10 SAR, green strong-close candle, rising EMA20/EMA50 alignment.
+            if (
+                close < 10.0
+                or turnover < 15_000_000.0
+                or vol < 50_000
+                or (open_p > 0 and close <= open_p)
+                or (candle_range > 0 and close_pos < 0.70)
+            ):
+                continue
+            is_uptrend = (ema_20 <= 0 or close > ema_20) and (ema_50 <= 0 or close > ema_50)
+            if (
+                r_vol >= 2.2
+                and 4.0 <= ch_pct <= 6.5
+                and is_uptrend
+                and 35.0 <= rsi <= 68.0
+            ):
+                volume_matches.append({
+                    "symbol": sym,
+                    "close": close,
+                    "change_pct": ch_pct,
+                    "r_vol": r_vol,
+                    "rsi_14": rsi,
+                })
+
+            bb_ok = (bb_upper > 0 and close >= bb_upper * 0.998) if has_bb_upper else True
+            if (
+                bb_ok
+                and r_vol >= 2.0
+                and 2.5 <= ch_pct <= 6.5
+                and is_uptrend
+                and rsi <= 68.0
+            ):
+                breakout_matches.append({
+                    "symbol": sym,
+                    "close": close,
+                    "change_pct": ch_pct,
+                    "r_vol": r_vol,
+                    "rsi_14": rsi,
+                })
+            # Disable RSI oversold knife-catching on TADAWUL.
+            continue
+
+        # Exclude penny stock traps (< 1.50) and red distribution candles (EGX)
         if close < 1.5 or (open_p > 0 and close < open_p * 0.995):
             continue
 
@@ -507,8 +597,10 @@ def step_scanner_lifecycle(
     causal_be_prev_only: bool = False,
     intraday_live: bool = False,
     allow_new_entries: bool = True,
+    exchange: str = "EGX",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Advance tracked scanner signals using the exact EGX breakeven, target, stop, and expiry rules."""
+    """Advance tracked scanner signals using exchange-calibrated breakeven, target, stop, and expiry rules."""
+    is_saudi = _is_saudi_exchange(exchange)
     hit_target_signals: List[Dict[str, Any]] = []
     stopped_out_signals: List[Dict[str, Any]] = []
     still_active_signals: List[Dict[str, Any]] = []
@@ -555,16 +647,26 @@ def step_scanner_lifecycle(
             "updated_at": now_iso,
         })
 
-        # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry price.
+        # Breakeven Trail: If stock reached >= +2.5% gain, raise stop loss to entry (or +0.5% net lock on TADAWUL).
         # In daily OHLC replay (causal_be_prev_only=True) and live intraday ticks (intraday_live=True),
         # only arm BE from prior observations so intra-bar/pre-entry high/low never creates false breakevens.
+        be_lock_pct = (
+            float(sig.get("be_lock_pct"))
+            if sig.get("be_lock_pct") is not None
+            else (0.5 if is_saudi else 0.0)
+        )
+        be_stop_floor = (
+            round(entry_price * (1.0 + be_lock_pct / 100.0), 3 if entry_price < 20 else 2)
+            if be_lock_pct > 0
+            else entry_price
+        )
         strict_causal_be = causal_be_prev_only or intraday_live
         be_reference_high = prev_highest if strict_causal_be else highest_price
         has_breakeven = be_reference_high >= entry_price * 1.025
-        effective_stop = max(float(sig.get("stop_loss", 0.0)), entry_price) if has_breakeven else float(sig.get("stop_loss", 0.0))
+        effective_stop = max(float(sig.get("stop_loss", 0.0)), be_stop_floor) if has_breakeven else float(sig.get("stop_loss", 0.0))
 
         if highest_price >= entry_price * 1.025 and (not strict_causal_be or has_breakeven):
-            updated_sig["stop_loss"] = max(float(sig.get("stop_loss", 0.0)), entry_price)
+            updated_sig["stop_loss"] = max(float(sig.get("stop_loss", 0.0)), be_stop_floor)
             updated_sig["stop_loss_pct"] = 0.0
         elif strict_causal_be and highest_price >= entry_price * 1.025:
             # Arm for the next tick/session once today survives without stopping out
@@ -604,6 +706,7 @@ def step_scanner_lifecycle(
                 stopped_out_signals.append(updated_sig)
             current_closed.insert(0, updated_sig)
         elif updated_sig["sessions_count"] >= int(sig.get("max_sessions", 5)):
+            max_s = int(sig.get("max_sessions", 5))
             exit_price = curr_price
             realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
             updated_sig.update({
@@ -612,12 +715,12 @@ def step_scanner_lifecycle(
                 "return_pct": realized_return,
                 "exit_date": action_date,
                 "exit_time": action_time,
-                "exit_reason": "تحقق هدف جزئي 🎯" if realized_return > 0 else "انتهاء مدة الاحتفاظ (5 جلسات) ⏱️",
+                "exit_reason": "تحقق هدف جزئي 🎯" if realized_return > 0 else f"انتهاء مدة الاحتفاظ ({max_s} جلسات) ⏱️",
             })
             current_closed.insert(0, updated_sig)
         else:
             if (causal_be_prev_only or intraday_live) and updated_sig.pop("be_armed_next", False):
-                updated_sig["stop_loss"] = max(float(updated_sig.get("stop_loss", 0.0)), entry_price)
+                updated_sig["stop_loss"] = max(float(updated_sig.get("stop_loss", 0.0)), be_stop_floor)
                 updated_sig["stop_loss_pct"] = 0.0
             still_active_signals.append(updated_sig)
 
@@ -635,8 +738,8 @@ def step_scanner_lifecycle(
                     break
                 if _is_symbol_active_or_closed_today(cand["symbol"]):
                     continue
-                plan = calculate_trade_plan(cand["close"], scanner_type)
-                still_active_signals.append({
+                plan = calculate_trade_plan(cand["close"], scanner_type, exchange=exchange)
+                new_sig = {
                     "id": f"{cand['symbol']}_{action_date}_{scanner_type}",
                     "symbol": cand["symbol"],
                     "scanner_type": scanner_type,
@@ -658,7 +761,10 @@ def step_scanner_lifecycle(
                     "sessions_count": 1,
                     "max_sessions": plan["max_sessions"],
                     "updated_at": now_iso,
-                })
+                }
+                if plan.get("be_lock_pct", 0.0) > 0:
+                    new_sig["be_lock_pct"] = plan["be_lock_pct"]
+                still_active_signals.append(new_sig)
 
     return still_active_signals, current_closed, hit_target_signals, stopped_out_signals
 
@@ -727,6 +833,7 @@ def run_scanner_alerts_simulation(
         vol_sma20 = vol_s.rolling(20, min_periods=20).mean()
         r_vol = vol_s / vol_sma20.replace(0, np.nan)
         ema20 = close_s.ewm(span=20, adjust=False).mean()
+        ema50 = close_s.ewm(span=50, adjust=False).mean()
         sma20 = close_s.rolling(20, min_periods=20).mean()
         std20 = close_s.rolling(20, min_periods=20).std()
         bb_upper = (sma20 + 2.0 * std20).fillna(0.0)
@@ -752,6 +859,7 @@ def run_scanner_alerts_simulation(
             "r_vol": r_vol.values,
             "rsi_14": rsi14.values,
             "ema_20": ema20.values,
+            "ema_50": ema50.values,
             "bb_upper": bb_upper.values,
         })
         part = part[part["date"] >= start_date].dropna(subset=["close", "change_pct", "r_vol"])
@@ -799,12 +907,18 @@ def run_scanner_alerts_simulation(
                 "r_vol": round(float(r.r_vol), 2),
                 "rsi_14": round(float(r.rsi_14), 1),
                 "ema_20": float(r.ema_20),
+                "ema_50": float(r.ema_50),
                 "bb_upper": float(r.bb_upper),
                 "high": float(r.high),
                 "low": float(r.low),
             }
 
-        cands = evaluate_scanner_candidates(latest_by_symbol, force=True, limit_per_category=2)
+        cands = evaluate_scanner_candidates(
+            latest_by_symbol,
+            force=True,
+            limit_per_category=1 if is_saudi else 2,
+            exchange=ex_norm,
+        )
         final_vol = cands["final_vol"]
         final_bo = cands["final_bo"]
         final_os = cands["final_os"]
@@ -821,6 +935,7 @@ def run_scanner_alerts_simulation(
             action_time=action_time,
             now_iso=now_str,
             causal_be_prev_only=causal_be_prev_only,
+            exchange=ex_norm,
         )
 
         last_stage_results = {

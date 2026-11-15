@@ -1189,51 +1189,55 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # roll the paid order back to pending or re-activate the same payment.
 
-    try:
+    is_b2b_order = str(order.get("plan_id") or "").strip().lower().startswith("b2b_")
 
-        sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", order["user_id"]).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
+    if not is_b2b_order:
 
-        subscription_end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
+        try:
 
-        if subscription_end:
+            sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", order["user_id"]).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
 
-            invite = ensure_pro_invite(order["user_id"], str(subscription_end))
+            subscription_end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
 
-            invite_link = str((invite or {}).get("invite_link") or "").strip()
+            if subscription_end:
 
-            try:
+                invite = ensure_pro_invite(order["user_id"], str(subscription_end))
 
-                from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
+                invite_link = str((invite or {}).get("invite_link") or "").strip()
 
-                sent = send_pro_welcome_to_user_telegram(
+                try:
 
-                    order["user_id"],
+                    from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
 
-                    invite_link=invite_link,
+                    sent = send_pro_welcome_to_user_telegram(
 
-                    plan_name="Pro",
+                        order["user_id"],
 
-                    subscription_end=str(subscription_end),
+                        invite_link=invite_link,
 
-                )
+                        plan_name="Pro",
 
-                if sent:
+                        subscription_end=str(subscription_end),
 
-                    note = str(order.get("customer_note") or "")
+                    )
 
-                    supabase.table("local_payment_orders").update({
+                    if sent:
 
-                        "customer_note": f"{note} | tg_welcomed".strip(" |")
+                        note = str(order.get("customer_note") or "")
 
-                    }).eq("id", order_id).execute()
+                        supabase.table("local_payment_orders").update({
 
-            except Exception as tg_err:
+                            "customer_note": f"{note} | tg_welcomed".strip(" |")
 
-                print(f"[EASYKASH] Welcome telegram dispatch warning: {tg_err}")
+                        }).eq("id", order_id).execute()
 
-    except Exception as exc:
+                except Exception as tg_err:
 
-        print(f"[EASYKASH] VIP invite deferred for order {order_id}: {type(exc).__name__}")
+                    print(f"[EASYKASH] Welcome telegram dispatch warning: {tg_err}")
+
+        except Exception as exc:
+
+            print(f"[EASYKASH] VIP invite deferred for order {order_id}: {type(exc).__name__}")
 
 
 
@@ -1375,39 +1379,53 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
     invite_link = ""
 
+    b2b_dashboard_url = ""
+
+    is_b2b_order = str(order.get("plan_id") or "").strip().lower().startswith("b2b_")
+
     if order.get("status") == "approved":
 
-        sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", user_id).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
+        if is_b2b_order:
 
-        end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
+            lic = supabase.table("b2b_group_licenses").select("expires_at").eq("owner_user_id", user_id).eq("status", "active").order("expires_at", desc=True).limit(1).maybe_single().execute()
 
-        if end:
+            end = (lic.data or {}).get("expires_at") if lic and lic.data else None
 
-            invite = ensure_pro_invite(user_id, str(end))
+            b2b_dashboard_url = "https://egxbots.com/b2b/dashboard"
 
-            invite_link = str(invite.get("invite_link") or "")
+        else:
 
-            note = str(order.get("customer_note") or "")
+            sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", user_id).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
 
-            if "tg_welcomed" not in note:
+            end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
 
-                try:
+            if end:
 
-                    from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
+                invite = ensure_pro_invite(user_id, str(end))
 
-                    sent = send_pro_welcome_to_user_telegram(user_id, invite_link=invite_link, subscription_end=str(end))
+                invite_link = str(invite.get("invite_link") or "")
 
-                    if sent:
+                note = str(order.get("customer_note") or "")
 
-                        supabase.table("local_payment_orders").update({
+                if "tg_welcomed" not in note:
 
-                            "customer_note": f"{note} | tg_welcomed".strip(" |")
+                    try:
 
-                        }).eq("id", order_id).execute()
+                        from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
 
-                except Exception as tg_status_err:
+                        sent = send_pro_welcome_to_user_telegram(user_id, invite_link=invite_link, subscription_end=str(end))
 
-                    print(f"[EASYKASH] Status welcome telegram dispatch warning: {tg_status_err}")
+                        if sent:
 
-    return {**order, "subscription": {"current_period_end": end} if end else None, "telegram_pro_url": invite_link}
+                            supabase.table("local_payment_orders").update({
+
+                                "customer_note": f"{note} | tg_welcomed".strip(" |")
+
+                            }).eq("id", order_id).execute()
+
+                    except Exception as tg_status_err:
+
+                        print(f"[EASYKASH] Status welcome telegram dispatch warning: {tg_status_err}")
+
+    return {**order, "subscription": {"current_period_end": end} if end else None, "telegram_pro_url": invite_link, "b2b_dashboard_url": b2b_dashboard_url}
 
