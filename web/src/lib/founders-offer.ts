@@ -109,7 +109,7 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
       }
       if (plan.id === "pro_1y") {
         const backend1y = plan.amount_egp != null ? Number(plan.amount_egp) : 1800;
-        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1850));
+        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1800));
         return {
           ...plan,
           amount_egp: hasSpecialRate ? 1000 : backend1y,
@@ -118,8 +118,8 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
             ? {
                 active: true,
                 kind: "founders",
-                label_ar: "عرض المؤسسين (1,000 بدل 1,850 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                label_en: "Founders Offer (1,000 instead of 1,850 EGP + locks 100 EGP/mo for life) 🔥",
+                label_ar: `عرض المؤسسين (1,000 بدل ${orig1y.toLocaleString()} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥`,
+                label_en: `Founders Offer (1,000 instead of ${orig1y.toLocaleString()} EGP + locks 100 EGP/mo for life) 🔥`,
                 original_amount_egp: orig1y,
                 ends_at: isOpen ? configEndsAt : null,
               }

@@ -14,6 +14,15 @@ const config = {
 };
 const offer = { enabled: true, limit: 100, count: 99, remaining: 1, is_open: true, price_egp: 100, regular_price_egp: 200, ends_at: null };
 
+beforeEach(() => {
+  // Pin test clock before default fallback expiry ("2026-11-14T01:00:00Z") so time does not rot assertions.
+  jest.useFakeTimers({ now: new Date("2026-11-10T00:00:00Z") });
+});
+
+afterEach(() => {
+  jest.useRealTimers();
+});
+
 it("applies 50% founders offer to pro, pro_6m, and pro_1y while keeping lifetime at 2250", () => {
   const result = applyFoundersOffer(config, offer);
   expect(result.plans[0]).toMatchObject({

@@ -13,7 +13,7 @@ import json
 import math
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import urllib.error
 from urllib.parse import urljoin, urlparse
 import urllib.request
@@ -54,36 +54,85 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _REMOVED_EXCHANGES = frozenset({"binance", "crypto", "forex", "lse"})
 _ALLOWED_EVENTS = frozenset({"page_view", "feature_use"})
 
-_SYMBOLS_CACHE = BoundedTTLCache(max_entries=64, default_ttl=1800.0)
+_RUN_TO_RUN_TTL = 86400.0
+
+_SYMBOLS_CACHE = BoundedTTLCache(max_entries=64, default_ttl=_RUN_TO_RUN_TTL)
 _SYMBOLS_SF = SingleFlight()
-_COUNTRIES_CACHE = BoundedTTLCache(max_entries=8, default_ttl=3600.0)
+_COUNTRIES_CACHE = BoundedTTLCache(max_entries=8, default_ttl=_RUN_TO_RUN_TTL)
 _COUNTRIES_SF = SingleFlight()
-_MARKERS_CACHE = BoundedTTLCache(max_entries=256, default_ttl=900.0)
+_MARKERS_CACHE = BoundedTTLCache(max_entries=256, default_ttl=_RUN_TO_RUN_TTL)
 _MARKERS_SF = SingleFlight()
-_RECS_CACHE = BoundedTTLCache(max_entries=16, default_ttl=600.0)
+_RECS_CACHE = BoundedTTLCache(max_entries=16, default_ttl=_RUN_TO_RUN_TTL)
 _RECS_SF = SingleFlight()
-_CANDLES_CACHE = BoundedTTLCache(max_entries=256, default_ttl=900.0)
+_CANDLES_CACHE = BoundedTTLCache(max_entries=256, default_ttl=_RUN_TO_RUN_TTL)
 _CANDLES_SF = SingleFlight()
 _FOUNDERS_CACHE = BoundedTTLCache(max_entries=2, default_ttl=900.0)
 _FOUNDERS_SF = SingleFlight()
 _QUOTA_CACHE = BoundedTTLCache(max_entries=512, default_ttl=15.0)
 _QUOTA_SF = SingleFlight()
-_MARKET_STATUS_CACHE = BoundedTTLCache(max_entries=8, default_ttl=300.0)
+_MARKET_STATUS_CACHE = BoundedTTLCache(max_entries=8, default_ttl=_RUN_TO_RUN_TTL)
 _MARKET_STATUS_SF = SingleFlight()
-_PROOF_CACHE = BoundedTTLCache(max_entries=4, default_ttl=900.0)
+_PROOF_CACHE = BoundedTTLCache(max_entries=4, default_ttl=_RUN_TO_RUN_TTL)
 _PROOF_SF = SingleFlight()
-_FUNDAMENTALS_CACHE = BoundedTTLCache(max_entries=512, default_ttl=1800.0)
+_FUNDAMENTALS_CACHE = BoundedTTLCache(max_entries=512, default_ttl=_RUN_TO_RUN_TTL)
 _FUNDAMENTALS_SF = SingleFlight()
-_REC_COUNTS_CACHE = BoundedTTLCache(max_entries=16, default_ttl=1800.0)
+_REC_COUNTS_CACHE = BoundedTTLCache(max_entries=16, default_ttl=_RUN_TO_RUN_TTL)
 _REC_COUNTS_SF = SingleFlight()
-_SIG_PERF_CACHE = BoundedTTLCache(max_entries=4, default_ttl=1800.0)
+_SIG_PERF_CACHE = BoundedTTLCache(max_entries=4, default_ttl=_RUN_TO_RUN_TTL)
 _SIG_PERF_SF = SingleFlight()
-_SCAN_AI_CACHE = BoundedTTLCache(max_entries=16, default_ttl=600.0)
+_SCAN_AI_CACHE = BoundedTTLCache(max_entries=16, default_ttl=_RUN_TO_RUN_TTL)
 _SCAN_AI_SF = SingleFlight()
-_DISCLOSURES_CACHE = BoundedTTLCache(max_entries=128, default_ttl=900.0)
+_DISCLOSURES_CACHE = BoundedTTLCache(max_entries=128, default_ttl=_RUN_TO_RUN_TTL)
 _DISCLOSURES_SF = SingleFlight()
 _PDF_CACHE = BoundedTTLCache(max_entries=12, default_ttl=3600.0)
 _PDF_SF = SingleFlight()
+
+_TAG_TO_CACHES: Dict[str, Tuple[Tuple[str, BoundedTTLCache], ...]] = {
+    "daily-symbols": (
+        ("symbols", _SYMBOLS_CACHE),
+        ("countries", _COUNTRIES_CACHE),
+        ("fundamentals", _FUNDAMENTALS_CACHE),
+    ),
+    "daily-market-data": (
+        ("symbols", _SYMBOLS_CACHE),
+        ("candles", _CANDLES_CACHE),
+        ("market_status", _MARKET_STATUS_CACHE),
+        ("fundamentals", _FUNDAMENTALS_CACHE),
+        ("recommendations", _RECS_CACHE),
+        ("signal_performance", _SIG_PERF_CACHE),
+        ("scan_ai", _SCAN_AI_CACHE),
+    ),
+    "daily-recommendations": (
+        ("markers", _MARKERS_CACHE),
+        ("recommendations", _RECS_CACHE),
+        ("candles", _CANDLES_CACHE),
+        ("proof", _PROOF_CACHE),
+        ("rec_counts", _REC_COUNTS_CACHE),
+        ("signal_performance", _SIG_PERF_CACHE),
+        ("scan_ai", _SCAN_AI_CACHE),
+    ),
+    "daily-disclosures": (
+        ("disclosures", _DISCLOSURES_CACHE),
+        ("disclosures_pdf", _PDF_CACHE),
+    ),
+}
+
+
+def invalidate_offload_caches(tags: Optional[Iterable[str]] = None) -> List[str]:
+    """Selectively clear in-memory HF caches for the refreshed daily tags."""
+    if not tags:
+        return []
+    cleared: List[str] = []
+    seen_ids = set()
+    for tag in tags:
+        for name, cache in _TAG_TO_CACHES.get(tag, ()):
+            cid = id(cache)
+            if cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            cache.clear()
+            cleared.append(name)
+    return cleared
 
 
 def clear_offload_caches() -> None:
@@ -1022,7 +1071,18 @@ async def api_ai_bot_candles(
         if market == "egx":
             from api.routers.bot import get_candles as bot_get_candles
 
-            payload = bot_get_candles(symbol=clean_symbol, bot_id=bot_id, limit=eff_limit, exchange="EGX")
+            egx_key = f"egx:{clean_symbol}:{bot_id}:{eff_limit}"
+            found, cached = _CANDLES_CACHE.get(egx_key)
+            if not found:
+                def _load_egx():
+                    data = bot_get_candles(symbol=clean_symbol, bot_id=bot_id, limit=eff_limit, exchange="EGX")
+                    if isinstance(data, dict):
+                        _CANDLES_CACHE.set(egx_key, data)
+                    return data
+
+                payload = _CANDLES_SF.do(egx_key, _load_egx)
+            else:
+                payload = cached
             if isinstance(payload, dict) and not with_markers:
                 payload = {**payload, "markers": []}
             return JSONResponse(payload, headers=headers)

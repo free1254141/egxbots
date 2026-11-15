@@ -991,3 +991,124 @@ def test_qa_hardening_redirect_ssrf_cache_poison_and_or_sanitization():
         assert "CIBinjected=true" in or_clauses[0]
 
 
+def test_hf_history_cache_background_warmup_and_singleflight(tmp_path, monkeypatch):
+    import gzip
+    from api import hf_history_cache
+
+    hf_history_cache.reset_history_cache()
+    monkeypatch.setenv("HF_HISTORY_DATASET_REPO", "")
+    assert hf_history_cache.warm_history_snapshot_async("EGX") is False
+
+    gz_path = tmp_path / "stock_prices.json.gz"
+    meta_path = tmp_path / "metadata.json"
+    gz_path.write_bytes(
+        gzip.compress(
+            json.dumps(
+                [
+                    {"symbol": "COMI", "exchange": "EGX", "date": "2026-11-12", "open": 80, "high": 82, "low": 79, "close": 81, "volume": 1000},
+                    {"symbol": "TMGH", "exchange": "EGX", "date": "2026-11-12", "open": 50, "high": 51, "low": 49, "close": 50.5, "volume": 500},
+                ]
+            ).encode("utf-8")
+        )
+    )
+    meta_path.write_text(json.dumps({"last_date": "2026-11-12"}), encoding="utf-8")
+
+    data_downloads = 0
+    lock = threading.Lock()
+
+    def _fake_download(**kwargs):
+        nonlocal data_downloads
+        fn = kwargs.get("filename", "")
+        if fn.endswith("stock_prices.json.gz"):
+            with lock:
+                data_downloads += 1
+            time.sleep(0.05)
+            return str(gz_path)
+        return str(meta_path)
+
+    monkeypatch.setenv("HF_HISTORY_DATASET_REPO", "weeasdwee/egx-historical-prices")
+    try:
+        with mock.patch("huggingface_hub.hf_hub_download", side_effect=_fake_download):
+            assert hf_history_cache.warm_history_snapshot_async("EGX") is True
+            # Immediate duplicate call must not spawn another thread
+            assert hf_history_cache.warm_history_snapshot_async("EGX") is False
+            # Concurrent foreground symbol read coalesces via SingleFlight into the single download
+            comi_df = hf_history_cache.load_symbol_history_snapshot("EGX", "COMI")
+            assert len(comi_df) == 1
+            assert comi_df.iloc[0]["close"] == 81
+            assert data_downloads == 1
+            # Cached call triggers zero extra downloads
+            assert hf_history_cache.warm_history_snapshot_async("EGX") is False
+            assert len(hf_history_cache.load_symbol_history_snapshot("EGX", "TMGH")) == 1
+            assert data_downloads == 1
+    finally:
+        hf_history_cache.reset_history_cache()
+
+
+def test_run_to_run_cache_ttl_and_selective_tag_invalidation():
+    from api import cache_invalidation as ci
+
+    _reset_all_caches()
+    ci.reset_revalidation_cooldown()
+
+    # Daily-run caches retain 24h TTL ceiling; user/live caches remain short-lived
+    for cache in (
+        offload._SYMBOLS_CACHE,
+        offload._COUNTRIES_CACHE,
+        offload._MARKERS_CACHE,
+        offload._RECS_CACHE,
+        offload._CANDLES_CACHE,
+        offload._MARKET_STATUS_CACHE,
+        offload._PROOF_CACHE,
+        offload._FUNDAMENTALS_CACHE,
+        offload._REC_COUNTS_CACHE,
+        offload._SIG_PERF_CACHE,
+        offload._SCAN_AI_CACHE,
+        offload._DISCLOSURES_CACHE,
+        short_swings._SAUDI_SWINGS_CACHE,
+    ):
+        assert cache._default_ttl == 86400.0
+    assert offload._QUOTA_CACHE._default_ttl == 15.0
+    assert offload._FOUNDERS_CACHE._default_ttl == 900.0
+
+    # Seed caches
+    offload._RECS_CACHE.set("egx:EGX:50", {"rows": [1]})
+    offload._DISCLOSURES_CACHE.set("d1", {"data": [1]})
+    offload._MARKET_STATUS_CACHE.set("egx", {"egx30": []})
+    short_swings._SAUDI_SWINGS_CACHE.set("saudi_short_swings_v1", {"active_trades": []})
+
+    # Invalidating disclosures only clears disclosures without wiping recommendations/market status
+    with mock.patch("api.cache_invalidation._revalidate_endpoint", return_value=None):
+        ci.invalidate_cache_tags(["daily-disclosures"])
+    assert offload._DISCLOSURES_CACHE.get("d1")[0] is False
+    assert offload._RECS_CACHE.get("egx:EGX:50")[0] is True
+    assert offload._MARKET_STATUS_CACHE.get("egx")[0] is True
+
+    # Invalidating recommendations + short-swings clears only those caches (even if remote revalidate skipped)
+    offload._DISCLOSURES_CACHE.set("d2", {"data": [2]})
+    with mock.patch("api.cache_invalidation._revalidate_endpoint", return_value=None):
+        ci.invalidate_cache_tags(["daily-recommendations", "daily-short-swings"])
+    assert offload._RECS_CACHE.get("egx:EGX:50")[0] is False
+    assert short_swings._SAUDI_SWINGS_CACHE.get("saudi_short_swings_v1")[0] is False
+    assert offload._DISCLOSURES_CACHE.get("d2")[0] is True
+    assert offload._MARKET_STATUS_CACHE.get("egx")[0] is True
+
+    # EGX candles route caches full payload in _CANDLES_CACHE and masks markers only when include_markers=false
+    egx_calls = 0
+
+    def _fake_bot_candles(symbol, bot_id="primary", limit=150, exchange=None):
+        nonlocal egx_calls
+        egx_calls += 1
+        return {"candles": [{"time": 1, "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100}], "markers": [{"time": 1}]}
+
+    client = _make_client()
+    with mock.patch("api.routers.bot.get_candles", side_effect=_fake_bot_candles):
+        r1 = client.get("/api/ai_bot/candles?symbol=COMI.CA&limit=5")
+        r2 = client.get("/api/ai_bot/candles?symbol=COMI.CA&limit=5&include_markers=false")
+    assert r1.status_code == 200 and len(r1.json()["markers"]) == 1
+    assert r2.status_code == 200 and r2.json()["markers"] == []
+    assert egx_calls == 1
+
+
+
+

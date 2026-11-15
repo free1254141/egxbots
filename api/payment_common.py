@@ -301,7 +301,7 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
         return base_6m
     if plan == "pro_1y":
         settings = billing_settings()
-        base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1850)
+        base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1800)
         is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
         if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
             return 1000.0

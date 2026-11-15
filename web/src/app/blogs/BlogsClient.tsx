@@ -2,6 +2,7 @@
 import Link from "next/link";
 
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import {
   BookOpen,
   Calendar,
@@ -34,6 +35,7 @@ interface Post {
 
 export default function BlogsPage() {
   const { t, language } = useLanguage();
+  const { isSaudi } = useMarket();
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const isAr = language === "ar";
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -863,157 +865,132 @@ export default function BlogsPage() {
         <div className="flex items-center gap-2 mb-6">
           <Sparkles className="w-5 h-5 text-amber-500" />
           <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white">
-            {isAr ? "أدلة التداول والذكاء الاصطناعي الأكثر قراءة" : "Featured Trading & AI Guides"}
+            {isSaudi
+              ? (isAr ? "أدلة السوق السعودي (تاسي) والذكاء الاصطناعي الأكثر قراءة" : "Featured Saudi (TASI) & AI Trading Guides")
+              : (isAr ? "أدلة التداول والذكاء الاصطناعي الأكثر قراءة" : "Featured Trading & AI Guides")}
           </h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Link
-            href="/blogs/best-egx-stock-analysis-software"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-amber-300 text-black text-xs font-black mb-3">
-                {isAr ? "دليل البرامج 2026" : "Software Guide"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "أفضل برنامج تحليل الأسهم المصرية لعام 2026: مقارنة شاملة" : "Best EGX Stock Analysis Software 2026"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "مقارنة عملية بين برامج الشارت اليدوي ورادار الذكاء الاصطناعي وكشف السيولة اللحظية." : "Comparing manual charting platforms with AI scanners and real-time liquidity detection."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/ai-egyptian-stock-market-analysis"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-emerald-300 text-black text-xs font-black mb-3">
-                {isAr ? "خوارزميات AI" : "Machine Learning"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "تحليل الأسهم المصرية بالذكاء الاصطناعي: الرصد الكمي للسيولة" : "AI Egyptian Stock Market Analysis"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "كيف تعمل نماذج التعلم الآلي على قياس AI Score ورصد مؤشرات التجميع في EGX30 و EGX70." : "How machine learning models compute AI Score and detect accumulation indicators in EGX."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/egx-telegram-stock-recommendations"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-cyan-300 text-black text-xs font-black mb-3">
-                {isAr ? "تنبيهات تليجرام" : "Telegram Alerts"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "قنوات البورصة المصرية على تليجرام: مقارنة التحليل الآلي" : "EGX Telegram Market Alerts & Quantitative Analysis"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "كيف تتجنب القنوات العشوائية وتعتمد على مؤشرات فنية آلية منضبطة بمستويات الدعم والمقاومة." : "Avoid speculative channels and rely on systematic technical indicators and support/resistance levels."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-blue-700 dark:text-blue-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/how-to-invest-in-egyptian-stock-market-beginners"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-purple-300 text-black text-xs font-black mb-3">
-                {isAr ? "دليل المبتدئين" : "Beginner Guide"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "كيفية الاستثمار في البورصة المصرية للمبتدئين 2026: خطوة بخطوة" : "How to Invest in the Egyptian Stock Market (EGX) for Beginners"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "من التكويد وفتح الحساب لدى شركة سمسرة مرخصة حتى فهم مؤشرات EGX30 و EGX70 وقراءة الدعوم." : "From opening an FRA-licensed brokerage account to understanding EGX30, EGX70, and technical indicators."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-purple-700 dark:text-purple-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/egx33-sharia-compliant-stocks-egypt-guide"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-lime-300 text-black text-xs font-black mb-3">
-                {isAr ? "مؤشر الشريعة EGX33" : "EGX33 Shariah"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "دليل الأسهم المتوافقة مع الشريعة في البورصة المصرية وتطهير الكوبونات" : "EGX33 Sharia-Compliant Stocks & Dividend Purification Guide"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "معايير مؤشر الشريعة EGX33، الضوابط المالية، وكيفية حساب تطهير التوزيعات وزكاة الأسهم آلياً." : "EGX33 Shariah screening rules, financial thresholds, and automated dividend purification & Zakat calculation."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/undervalued-egx-stocks-fair-value-calculation"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-orange-300 text-black text-xs font-black mb-3">
-                {isAr ? "السعر العادل" : "Fair Value"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة (معادلة جراهام)" : "Fair Value of Egyptian Stocks: Undervalued Screener & Graham Formula"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "كيف تكتشف الأسهم التي تتداول بأقل من قيمتها الدفترية ومضاعف ربحيتها العادل مع تجنب فخاخ القيمة." : "Discover stocks trading below intrinsic value using Benjamin Graham's formula and sector P/E multiples."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-orange-700 dark:text-orange-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
-          <Link
-            href="/blogs/real-estate-vs-stocks-egypt-ewanbot-guide"
-            className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
-          >
-            <div>
-              <span className="inline-block px-2.5 py-1 border-2 border-black bg-emerald-300 text-black text-xs font-black mb-3">
-                {isAr ? "عقارات & بورصة" : "Real Estate & Stocks"}
-              </span>
-              <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
-                {isAr ? "الاستثمار العقاري أم البورصة المصرية في 2026؟ دليلك الذكي مع Ewan Bot و EGX BOTS" : "Real Estate vs. Egyptian Stocks 2026: AI Guide with Ewan Bot & EGX BOTS"}
-              </h3>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
-                {isAr ? "مقارنة العوائد والتحوط ضد التضخم، والبحث في 2,800+ كمبوند بدون سماسرة أو مكالمات مزعجة عبر إيوان بوت (ewanbot.com)." : "Comparing ROI and inflation hedging in Egypt, and scanning 2,800+ verified compounds with Ewanbot."}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-black">
-              <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
-              <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
-            </div>
-          </Link>
-
+          {[
+            {
+              href: "/blogs/best-tasi-ai-stock-analysis-software",
+              market: "tasi",
+              badgeBg: "bg-emerald-300",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "السوق السعودي 2026" : "TASI Software 2026",
+              title: isAr ? "أفضل برنامج تحليل الأسهم السعودية (تاسي) بالذكاء الاصطناعي 2026" : "Best Saudi TASI AI Stock Analysis Software 2026",
+              desc: isAr ? "مقارنة عملية بين أدوات الشارت التقليدية ورادار TASI BOTS الذكي لرصد السيولة باشتراك يبدأ من 20 ر.س شهرياً." : "Comparing legacy charting apps with TASI BOTS AI Radar for institutional liquidity flows starting at 20 SAR/mo.",
+            },
+            {
+              href: "/blogs/aramco-2222-rajhi-1120-ai-stock-analysis-guide",
+              market: "tasi",
+              badgeBg: "bg-amber-300",
+              linkColor: "text-amber-600 dark:text-amber-400",
+              badge: isAr ? "القياديات — تداول" : "TASI Leaders",
+              title: isAr ? "دليل تحليل سهم أرامكو (2222) والراجحي (1120) وسابك بالذكاء الاصطناعي" : "AI Analysis Guide for Aramco (2222), Al Rajhi (1120) & SABIC",
+              desc: isAr ? "منهج قراءة السيولة المؤسسية ومناطق الدعم والمقاومة والقيمة العادلة لأهم قياديات السوق السعودي." : "Tracking institutional volume, key technical zones, and fair value multiples across Tadawul blue chips.",
+            },
+            {
+              href: "/blogs/saudi-tasi-sharia-compliant-stocks-purification-guide",
+              market: "tasi",
+              badgeBg: "bg-lime-300",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "الأسهم النقية تاسي" : "TASI Shariah",
+              title: isAr ? "دليل الأسهم النقية في السوق السعودي وحساب التطهير والزكاة آلياً" : "Saudi TASI Sharia-Compliant Stocks & Purification Guide",
+              desc: isAr ? "ضوابط الأسهم النقية والمختلطة في تداول وكيفية حساب مبلغ تطهير التوزيعات بالريال آلياً." : "Saudi Shariah screening criteria and automated SAR dividend purification calculations.",
+            },
+            {
+              href: "/blogs/best-egx-stock-analysis-software",
+              market: "egx",
+              badgeBg: "bg-amber-300",
+              linkColor: "text-amber-600 dark:text-amber-400",
+              badge: isAr ? "دليل البرامج 2026" : "Software Guide",
+              title: isAr ? "أفضل برنامج تحليل الأسهم المصرية لعام 2026: مقارنة شاملة" : "Best EGX Stock Analysis Software 2026",
+              desc: isAr ? "مقارنة عملية بين برامج الشارت اليدوي ورادار الذكاء الاصطناعي وكشف السيولة اللحظية." : "Comparing manual charting platforms with AI scanners and real-time liquidity detection.",
+            },
+            {
+              href: "/blogs/ai-egyptian-stock-market-analysis",
+              market: "egx",
+              badgeBg: "bg-emerald-300",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "خوارزميات AI" : "Machine Learning",
+              title: isAr ? "تحليل الأسهم المصرية بالذكاء الاصطناعي: الرصد الكمي للسيولة" : "AI Egyptian Stock Market Analysis",
+              desc: isAr ? "كيف تعمل نماذج التعلم الآلي على قياس AI Score ورصد مؤشرات التجميع في EGX30 و EGX70." : "How machine learning models compute AI Score and detect accumulation indicators in EGX.",
+            },
+            {
+              href: "/blogs/egx-telegram-stock-recommendations",
+              market: "egx",
+              badgeBg: "bg-cyan-300",
+              linkColor: "text-blue-700 dark:text-blue-400",
+              badge: isAr ? "تنبيهات تليجرام" : "Telegram Alerts",
+              title: isAr ? "قنوات البورصة المصرية على تليجرام: مقارنة التحليل الآلي" : "EGX Telegram Market Alerts & Quantitative Analysis",
+              desc: isAr ? "كيف تتجنب القنوات العشوائية وتعتمد على مؤشرات فنية آلية منضبطة بمستويات الدعم والمقاومة." : "Avoid speculative channels and rely on systematic technical indicators and support/resistance levels.",
+            },
+            {
+              href: "/blogs/how-to-invest-in-egyptian-stock-market-beginners",
+              market: "egx",
+              badgeBg: "bg-purple-300",
+              linkColor: "text-purple-700 dark:text-purple-400",
+              badge: isAr ? "دليل المبتدئين" : "Beginner Guide",
+              title: isAr ? "كيفية الاستثمار في البورصة المصرية للمبتدئين 2026: خطوة بخطوة" : "How to Invest in the Egyptian Stock Market (EGX) for Beginners",
+              desc: isAr ? "من التكويد وفتح الحساب لدى شركة سمسرة مرخصة حتى فهم مؤشرات EGX30 و EGX70 وقراءة الدعوم." : "From opening an FRA-licensed brokerage account to understanding EGX30, EGX70, and technical indicators.",
+            },
+            {
+              href: "/blogs/egx33-sharia-compliant-stocks-egypt-guide",
+              market: "egx",
+              badgeBg: "bg-lime-300",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "مؤشر الشريعة EGX33" : "EGX33 Shariah",
+              title: isAr ? "دليل الأسهم المتوافقة مع الشريعة في البورصة المصرية وتطهير الكوبونات" : "EGX33 Sharia-Compliant Stocks & Dividend Purification Guide",
+              desc: isAr ? "معايير مؤشر الشريعة EGX33، الضوابط المالية، وكيفية حساب تطهير التوزيعات وزكاة الأسهم آلياً." : "EGX33 Shariah screening rules, financial thresholds, and automated dividend purification & Zakat calculation.",
+            },
+            {
+              href: "/blogs/undervalued-egx-stocks-fair-value-calculation",
+              market: "egx",
+              badgeBg: "bg-orange-300",
+              linkColor: "text-orange-700 dark:text-orange-400",
+              badge: isAr ? "السعر العادل" : "Fair Value",
+              title: isAr ? "حساب السعر العادل للأسهم المصرية وأرخص أسهم البورصة (معادلة جراهام)" : "Fair Value of Egyptian Stocks: Undervalued Screener & Graham Formula",
+              desc: isAr ? "كيف تكتشف الأسهم التي تتداول بأقل من قيمتها الدفترية ومضاعف ربحيتها العادل مع تجنب فخاخ القيمة." : "Discover stocks trading below intrinsic value using Benjamin Graham's formula and sector P/E multiples.",
+            },
+            {
+              href: "/blogs/real-estate-vs-stocks-egypt-ewanbot-guide",
+              market: "egx",
+              badgeBg: "bg-emerald-300",
+              linkColor: "text-emerald-700 dark:text-emerald-400",
+              badge: isAr ? "عقارات & بورصة" : "Real Estate & Stocks",
+              title: isAr ? "الاستثمار العقاري أم البورصة المصرية في 2026؟ دليلك الذكي مع Ewan Bot و EGX BOTS" : "Real Estate vs. Egyptian Stocks 2026: AI Guide with Ewan Bot & EGX BOTS",
+              desc: isAr ? "مقارنة العوائد والتحوط ضد التضخم، والبحث في 2,800+ كمبوند بدون سماسرة أو مكالمات مزعجة عبر إيوان بوت (ewanbot.com)." : "Comparing ROI and inflation hedging in Egypt, and scanning 2,800+ verified compounds with Ewanbot.",
+            },
+          ]
+            .sort((a, b) => {
+              const target = isSaudi ? "tasi" : "egx";
+              if (a.market === b.market) return 0;
+              return a.market === target ? -1 : 1;
+            })
+            .map((guide) => (
+              <Link
+                key={guide.href}
+                href={guide.href}
+                className="group p-6 bg-white dark:bg-zinc-950 border-4 border-black dark:border-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_0px_rgba(255,255,255,1)] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all duration-200 flex flex-col justify-between"
+              >
+                <div>
+                  <span className={`inline-block px-2.5 py-1 border-2 border-black ${guide.badgeBg} text-black text-xs font-black mb-3`}>
+                    {guide.badge}
+                  </span>
+                  <h3 className="font-black text-black dark:text-white text-base group-hover:underline leading-snug">
+                    {guide.title}
+                  </h3>
+                  <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mt-2 line-clamp-3 leading-relaxed">
+                    {guide.desc}
+                  </p>
+                </div>
+                <div className={`mt-4 pt-4 border-t-2 border-black dark:border-zinc-700 flex items-center justify-between text-xs ${guide.linkColor} font-black`}>
+                  <span>{isAr ? "قراءة الدليل الكامل" : "Read Full Guide"}</span>
+                  <ArrowRight className={`w-4 h-4 transition-transform ${isAr ? "rotate-180 group-hover:translate-x-[-4px]" : "group-hover:translate-x-1"}`} />
+                </div>
+              </Link>
+            ))}
         </div>
       </div>
 

@@ -380,6 +380,14 @@ async def startup_event():
     except Exception as e:
         print(f"DEBUG ERROR: Failed to start Scheduled Automations Worker: {e}")
 
+    # Pre-warm compressed HF historical price snapshot in background so first chart request has zero cold load lag
+    try:
+        from api.hf_history_cache import warm_history_snapshot_async
+        if warm_history_snapshot_async("EGX"):
+            print("DEBUG: HF historical price snapshot warmup scheduled in background.")
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to start HF history warmup: {e}")
+
 
 
 

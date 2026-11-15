@@ -14,10 +14,12 @@ export async function POST(req: NextRequest) {
   const rawMobile = String(body?.mobile || "").trim().replace(/[\s\-()]/g, "");
   // Accept Egyptian numbers (01XXXXXXXXX or +201XXXXXXXXX -> normalize to 01XXXXXXXXX)
   // as well as international GCC/global E.164 numbers (+CCXXXXXXXXX).
-  let mobile = rawMobile;
-  if (/^\+?20(1[0125]\d{8})$/.test(rawMobile)) {
-    mobile = `0${rawMobile.replace(/^\+?20/, "")}`;
+  let mobile = rawMobile.startsWith("00") ? `+${rawMobile.slice(2)}` : rawMobile;
+  if (/^\+?20(?:20)?0?(1[0125]\d{8})$/.test(mobile)) {
+    mobile = `0${mobile.replace(/^\+?20(?:20)?0?/, "")}`;
   }
+  // Collapse accidentally duplicated GCC dial prefixes (e.g. +9669665... -> +9665...)
+  mobile = mobile.replace(/^\+(966|971|965|974|973|968|962|961)\1/, "+$1");
   const isEgyptianMobile = /^01[0125]\d{8}$/.test(mobile);
   const isInternationalMobile =
     (/^\+[1-9]\d{6,14}$/.test(mobile)) ||
@@ -29,6 +31,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const promoCode = typeof body?.promo_code === "string" ? body.promo_code.trim().toUpperCase().slice(0, 32) : "";
+  const market = String(body?.market || "").trim().toLowerCase() === "tasi" ? "tasi" : "egx";
 
   // Save/update phone number in profiles so the user never has to enter it again
   try {
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest) {
         name: String(user.user_metadata?.full_name || user.user_metadata?.name || "EGX Bots user").slice(0, 100),
         mobile,
         promo_code: promoCode,
+        market,
       }),
       cache: "no-store",
     });

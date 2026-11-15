@@ -106,6 +106,27 @@ _PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime"
 
 _ACTIVE_PRO_PLAN_IDS = list(_PLANS)
 
+_EGP_PER_SAR = Decimal("12.75")
+_SAUDI_SAR_EXCHANGE_MAP = {
+    50: 5,
+    100: 10,
+    200: 20,
+    500: 50,
+    1000: 100,
+    1500: 150,
+    1800: 180,
+    1850: 185,
+    2250: 225,
+    2500: 250,
+}
+
+
+def _saudi_sar_amount(amount_egp: Decimal | float) -> int:
+    rounded = int(round(float(amount_egp)))
+    if rounded in _SAUDI_SAR_EXCHANGE_MAP:
+        return _SAUDI_SAR_EXCHANGE_MAP[rounded]
+    return max(1, int(round(float(amount_egp) / 10.0)))
+
 
 
 
@@ -282,17 +303,19 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Di
 
         }
 
+        base_1y_orig = int(round(float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else float(os.getenv("PRO_1Y_PRICE_EGP", "1800"))))
+
         plan_1y["discount"] = {
 
             "active": True,
 
             "kind": "founders",
 
-            "label_ar": "عرض المؤسسين (1,000 بدل 1,850 ج.م) 🔥",
+            "label_ar": f"عرض المؤسسين (1,000 بدل {base_1y_orig:,} ج.م) 🔥",
 
-            "label_en": "Founders Offer (1,000 instead of 1,850 EGP) 🔥",
+            "label_en": f"Founders Offer (1,000 instead of {base_1y_orig:,} EGP) 🔥",
 
-            "original_amount_egp": 1850,
+            "original_amount_egp": base_1y_orig,
 
             "ends_at": _founders_ends_at_str,
 
@@ -686,7 +709,7 @@ def validate_affiliate_code(code: str, track_click: bool = False) -> Dict[str, A
 
 
 
-def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "") -> Dict[str, Any]:
+def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "", market: str = "egx") -> Dict[str, Any]:
 
     if not is_payments_enabled():
 
@@ -701,6 +724,8 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
     if plan_id not in _PLANS:
 
         raise ValueError("Unsupported Pro plan")
+
+    clean_market = "tasi" if str(market or "").strip().lower() in {"tasi", "sa", "sar", "saudi"} else "egx"
 
     mobile = "".join(ch for ch in str(mobile or "") if ch.isdigit() or ch == "+")
 
@@ -776,6 +801,11 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
         amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id))).quantize(Decimal("0.01"))
 
+    display_sar: int | None = None
+    if clean_market == "tasi":
+        display_sar = _saudi_sar_amount(amount)
+        amount = (Decimal(str(display_sar)) * _EGP_PER_SAR).quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
+
 
 
     clean_promo = (promo_code or "").strip().upper()
@@ -841,6 +871,10 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
         "payment_review_status": "pending_review",
 
     }
+
+    if clean_market == "tasi":
+
+        row["customer_note"] = f"Market: tasi (~{display_sar} SAR)"
 
     if affiliate_info:
 
@@ -910,11 +944,17 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
                     plan_days = _PLANS.get(plan_id, 30)
 
+                    market_label = f"TASI (~{display_sar} SAR)" if clean_market == "tasi" else "EGX"
+
+                    plan_label = f"{plan_id.upper()} ({plan_days} يوم)" if plan_id.startswith("b2b_") else f"Pro ({plan_days} يوم)"
+
                     msg = (
 
                         f"🛒 <b>طلب اشتراك جديد (قيد الدفع)</b>\n\n"
 
-                        f"<b>الخطة:</b> Pro ({plan_days} يوم)\n"
+                        f"<b>السوق:</b> {market_label}\n"
+
+                        f"<b>الخطة:</b> {plan_label}\n"
 
                         f"<b>المبلغ:</b> {float(amount):,.0f} ج.م\n"
 
@@ -938,7 +978,23 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
                 print(f"[EASYKASH] Telegram admin checkout notification error: {notify_err}")
 
-        return {"order_id": order_id, "plan_id": plan_id, "amount_egp": float(amount), "url": redirect_url, "status": "pending"}
+        return {
+
+            "order_id": order_id,
+
+            "plan_id": plan_id,
+
+            "amount_egp": float(amount),
+
+            "market": clean_market,
+
+            **({"display_amount_sar": display_sar} if display_sar is not None else {}),
+
+            "url": redirect_url,
+
+            "status": "pending",
+
+        }
 
     except Exception:
 
@@ -1191,7 +1247,21 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     is_b2b_order = str(order.get("plan_id") or "").strip().lower().startswith("b2b_")
 
-    if not is_b2b_order:
+    subscription_end = None
+
+    if is_b2b_order:
+
+        try:
+
+            lic = supabase.table("b2b_group_licenses").select("expires_at").eq("owner_user_id", order["user_id"]).eq("status", "active").order("expires_at", desc=True).limit(1).maybe_single().execute()
+
+            subscription_end = (lic.data or {}).get("expires_at") if lic and lic.data else None
+
+        except Exception:
+
+            subscription_end = None
+
+    else:
 
         try:
 
@@ -1259,11 +1329,15 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 easykash_ref = str(payload.get("easykashRef") or "—")
 
+                activation_title = f"تم تأكيد الدفع وتفعيل رخصة {str(plan_id).upper()} بنجاح!" if is_b2b_order else "تم تأكيد الدفع وتفعيل Pro بنجاح!"
+
+                activation_footer = "✅ تم تفعيل رخصة القنوات (B2B) تلقائياً." if is_b2b_order else "✅ تم تفعيل الاشتراك تلقائياً ورابط VIP متاح للمشترك."
+
                 msg = (
 
-                    f"🎉 <b>تم تأكيد الدفع وتفعيل Pro بنجاح!</b>\n\n"
+                    f"🎉 <b>{activation_title}</b>\n\n"
 
-                    f"<b>الخطة:</b> Pro ({plan_days} يوم)\n"
+                    f"<b>الخطة:</b> {str(plan_id).upper() if is_b2b_order else 'Pro'} ({plan_days} يوم)\n"
 
                     f"<b>المبلغ المدفوع:</b> {float(expected_amount):,.0f} ج.م\n"
 
@@ -1275,7 +1349,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                     f"<b>نهاية الاشتراك:</b> {subscription_end or 'مفعل'}\n\n"
 
-                    f"✅ تم تفعيل الاشتراك تلقائياً ورابط VIP متاح للمشترك."
+                    f"{activation_footer}"
 
                 )
 
@@ -1391,7 +1465,7 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
             end = (lic.data or {}).get("expires_at") if lic and lic.data else None
 
-            b2b_dashboard_url = "https://egxbots.com/b2b/dashboard"
+            b2b_dashboard_url = "/b2b/dashboard"
 
         else:
 

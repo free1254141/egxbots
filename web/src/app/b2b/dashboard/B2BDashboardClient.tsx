@@ -6,6 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { toDisplayAmount } from "@/lib/saudi-pricing";
 import {
   Bot,
   Zap,
@@ -405,8 +406,8 @@ export default function B2BDashboardClient() {
                 </span>
                 <h3 className="text-lg font-black text-zinc-900 dark:text-white">
                   {isAr
-                    ? `اختر باقة لقناتك ${isSaudi ? "من 99 ر.س/شهر" : "من 1,000 ج.م/شهر"}`
-                    : `Choose a Plan Starting from ${isSaudi ? "99 SAR/mo" : "1,000 EGP/mo"}`}
+                    ? `اختر باقة لقناتك من ${toDisplayAmount(1000, isSaudi).toLocaleString()} ${isSaudi ? "ر.س" : "ج.م"}/شهر`
+                    : `Choose a Plan Starting from ${toDisplayAmount(1000, isSaudi).toLocaleString()} ${isSaudi ? "SAR/mo" : "EGP/mo"}`}
                 </h3>
                 <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
                   {isAr

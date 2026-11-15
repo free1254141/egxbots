@@ -24,6 +24,7 @@ class CheckoutRequest(BaseModel):
     name: str = ""
     mobile: str
     promo_code: str = ""
+    market: str = "egx"
 
 
 def _authenticated_user_id(authorization: str | None) -> str:
@@ -69,7 +70,7 @@ def create(req: CheckoutRequest, authorization: str | None = Header(default=None
     if not req.user_id:
         raise HTTPException(status_code=400, detail="Missing user_id")
     try:
-        return create_checkout(req.user_id, req.plan_id, req.email, req.name, req.mobile, promo_code=req.promo_code)
+        return create_checkout(req.user_id, req.plan_id, req.email, req.name, req.mobile, promo_code=req.promo_code, market=req.market)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:

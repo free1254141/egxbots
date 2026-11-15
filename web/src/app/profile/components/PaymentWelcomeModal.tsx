@@ -21,6 +21,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useMarket } from "@/contexts/MarketContext";
 import type { TelegramProInvite } from "@/contexts/TelegramProContext";
 import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 
@@ -47,12 +48,14 @@ export default function PaymentWelcomeModal({
   onRefreshInvite,
   onRefreshProfile,
 }: Props) {
+  const { isSaudi } = useMarket();
   const [copied, setCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [orderData, setOrderData] = useState<{
     status?: string;
     plan_id?: string;
     telegram_pro_url?: string;
+    b2b_dashboard_url?: string;
     customer_note?: string;
     subscription?: { current_period_end?: string | null };
   } | null>(null);
@@ -136,6 +139,8 @@ export default function PaymentWelcomeModal({
   const isApproved = orderData?.status === "approved";
   const isFailed = orderData?.status === "failed" || orderData?.status === "expired";
   const isVerifying = !isApproved && !isFailed;
+  const isB2BOrder = Boolean(orderData?.plan_id?.startsWith("b2b_"));
+  const b2bDashboardUrl = orderData?.b2b_dashboard_url || "/b2b/dashboard";
 
   const vipLink =
     proInvite.invite_link ||
@@ -285,13 +290,21 @@ export default function PaymentWelcomeModal({
               <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 shadow-[3px_3px_0px_#000]">
                 <h4 className="font-black text-xs sm:text-sm text-zinc-900 dark:text-white flex items-center gap-1.5 mb-2">
                   <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>{isAr ? "💡 طرق دفع بديلة ومضمونة فورياً:" : "💡 Recommended alternative payment methods:"}</span>
+                  <span>{isAr ? "💡 طرق دفع وحلول مضمونة:" : "💡 Recommended payment solutions:"}</span>
                 </h4>
-                <ul className="text-xs text-zinc-700 dark:text-zinc-300 space-y-1.5 font-bold list-disc list-inside">
-                  <li>{isAr ? "محافظ الموبايل (فودافون كاش، أورنج، اتصالات، وي كاش) — نسبة نجاح 100% فورية." : "Mobile Wallets (Vodafone Cash, Orange, Etisalat, WE)."}</li>
-                  <li>{isAr ? "الدفع النقدي بكود فوري (Fawry) من أي منفذ أو كشك." : "Cash through Fawry code."}</li>
-                  <li>{isAr ? "استخدام بطاقة بنكية أخرى مفعّلة للشراء أونلاين." : "Try another valid debit/credit card."}</li>
-                </ul>
+                {isSaudi ? (
+                  <ul className="text-xs text-zinc-700 dark:text-zinc-300 space-y-1.5 font-bold list-disc list-inside">
+                    <li>{isAr ? "بطاقة فيزا أو ماستركارد مفعّلة للشراء الدولي أونلاين (تُخصم بالريال تلقائياً)." : "Visa or Mastercard enabled for international online purchases."}</li>
+                    <li>{isAr ? "تأكد من تفعيل استقبال رمز التحقق (3D Secure / OTP) في تطبيق البنك أو استخدم بطاقة رقمية (مثل STC Pay / urpay Visa)." : "Ensure international 3D Secure (OTP) is enabled in your bank app or use a virtual Visa card."}</li>
+                    <li>{isAr ? "تواصل معنا مباشرة على واتساب +201024359109 لتسهيل التفعيل الفوري." : "Message our WhatsApp support (+201024359109) for instant checkout assistance."}</li>
+                  </ul>
+                ) : (
+                  <ul className="text-xs text-zinc-700 dark:text-zinc-300 space-y-1.5 font-bold list-disc list-inside">
+                    <li>{isAr ? "محافظ الموبايل (فودافون كاش، أورنج، اتصالات، وي كاش) — نسبة نجاح 100% فورية." : "Mobile Wallets (Vodafone Cash, Orange, Etisalat, WE)."}</li>
+                    <li>{isAr ? "الدفع النقدي بكود فوري (Fawry) من أي منفذ أو كشك." : "Cash through Fawry code."}</li>
+                    <li>{isAr ? "استخدام بطاقة بنكية أخرى مفعّلة للشراء أونلاين." : "Try another valid debit/credit card."}</li>
+                  </ul>
+                )}
               </div>
 
               <div className="pt-1">
@@ -342,7 +355,9 @@ export default function PaymentWelcomeModal({
                         {isAr ? "الخطة المفعّلة" : "Active Plan"}
                       </span>
                       <span className="text-sm font-black text-zinc-900 dark:text-white">
-                        {isAr ? "باقة Pro المتقدمة" : "Pro Plan"}
+                        {isB2BOrder
+                          ? (isAr ? "رخصة بوت القنوات والمجموعات (B2B)" : "Channel Bot License (B2B)")
+                          : (isAr ? "باقة Pro المتقدمة" : "Pro Plan")}
                       </span>
                     </div>
                   </div>
@@ -362,6 +377,35 @@ export default function PaymentWelcomeModal({
                 )}
               </div>
 
+              {isB2BOrder ? (
+                /* B2B Group License Activation & Dashboard CTA */
+                <div className="p-4 bg-purple-50 dark:bg-purple-950/40 border-2 border-purple-600 dark:border-purple-400 shadow-[3px_3px_0px_#7c3aed] space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 bg-purple-600 text-white flex items-center justify-center shrink-0 border border-black shadow-[1px_1px_0px_#000]">
+                      <Crown className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-sm text-purple-950 dark:text-purple-200">
+                        {isAr ? "🤖 تم تفعيل رخصة بوت التليجرام لقناتك بنجاح!" : "🤖 Channel Bot License Activated!"}
+                      </h3>
+                      <p className="text-xs text-purple-900 dark:text-purple-300 font-bold mt-0.5 leading-relaxed">
+                        {isAr
+                          ? "افتح لوحة تحكم B2B الآن لربط مجموعتك على تليجرام وتخصيص التوقيع الخاص بقناتك ومراقبة الاستهلاك اليومي."
+                          : "Open your B2B Dashboard now to bind your Telegram group, customize your brand signature, and monitor daily usage."}
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href={b2bDashboardUrl.startsWith("http") ? "/b2b/dashboard" : b2bDashboardUrl}
+                    onClick={onClose}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                  >
+                    <span>{isAr ? "فتح لوحة تحكم البوت (B2B) الآن ←" : "Open B2B Bot Dashboard →"}</span>
+                    <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+                  </Link>
+                </div>
+              ) : (
+                <>
               {/* Section 1: Telegram VIP Channel */}
               <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-600 dark:border-emerald-500 shadow-[3px_3px_0px_#059669]">
                 <div className="flex items-start gap-2.5 mb-2.5">
@@ -380,45 +424,63 @@ export default function PaymentWelcomeModal({
                   </div>
                 </div>
 
-                {vipLink ? (
+                {vipLink || isSaudi ? (
                   <div className="space-y-2 mt-3">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={vipLink}
-                        dir="ltr"
-                        className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-zinc-900 border-2 border-black dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 truncate select-all focus:outline-hidden"
-                      />
-                      <button
-                        onClick={handleCopyLink}
-                        className="px-3 py-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white border-2 border-black dark:border-zinc-500 font-black text-xs flex items-center gap-1 shrink-0 shadow-[2px_2px_0px_#000] active:translate-x-0.5 active:translate-y-0.5"
-                        title={isAr ? "نسخ الرابط" : "Copy Link"}
+                    {vipLink && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={vipLink}
+                          dir="ltr"
+                          className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-zinc-900 border-2 border-black dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 truncate select-all focus:outline-hidden"
+                        />
+                        <button
+                          onClick={handleCopyLink}
+                          className="px-3 py-2 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white border-2 border-black dark:border-zinc-500 font-black text-xs flex items-center gap-1 shrink-0 shadow-[2px_2px_0px_#000] active:translate-x-0.5 active:translate-y-0.5"
+                          title={isAr ? "نسخ الرابط" : "Copy Link"}
+                        >
+                          {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                          <span>{copied ? (isAr ? "تم النسخ" : "Copied") : (isAr ? "نسخ" : "Copy")}</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {isSaudi && (
+                      <a
+                        href={saudiVipLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
                       >
-                        {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                        <span>{copied ? (isAr ? "تم النسخ" : "Copied") : (isAr ? "نسخ" : "Copy")}</span>
-                      </button>
-                    </div>
+                        <span>{isAr ? "قناة VIP للسوق السعودي (تاسي) 🇸🇦 🚀" : "Saudi Market (TASI) VIP Channel 🇸🇦 🚀"}</span>
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
 
-                    <a
-                      href={vipLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                    >
-                      <span>{isAr ? "الانضمام لقناة VIP الآن 🚀" : "Join VIP Channel Now 🚀"}</span>
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
+                    {vipLink && (
+                      <a
+                        href={vipLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 ${isSaudi ? "bg-emerald-800 hover:bg-emerald-700" : "bg-emerald-600 hover:bg-emerald-500"} text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all`}
+                      >
+                        <span>{isAr ? (isSaudi ? "قناة VIP العامة والمصرية 🚀" : "الانضمام لقناة VIP الآن 🚀") : (isSaudi ? "Main & EGX VIP Channel 🚀" : "Join VIP Channel Now 🚀")}</span>
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
 
-                    <a
-                      href={saudiVipLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                    >
-                      <span>{isAr ? "قناة VIP للسوق السعودي (تاسي) 🇸🇦" : "Saudi Market (TASI) VIP Channel 🇸🇦"}</span>
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
+                    {!isSaudi && (
+                      <a
+                        href={saudiVipLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                      >
+                        <span>{isAr ? "قناة VIP للسوق السعودي (تاسي) 🇸🇦" : "Saudi Market (TASI) VIP Channel 🇸🇦"}</span>
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-2 p-2.5 bg-white dark:bg-zinc-900 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center justify-between gap-2">
@@ -511,6 +573,8 @@ export default function PaymentWelcomeModal({
                   </div>
                 </div>
               )}
+                </>
+              )}
             </>
           )}
         </div>
@@ -533,13 +597,22 @@ export default function PaymentWelcomeModal({
               <span>{isAr ? "اختيار وسيلة دفع أخرى" : "Choose Another Payment Method"}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
             </Link>
+          ) : isB2BOrder ? (
+            <Link
+              href={b2bDashboardUrl.startsWith("http") ? "/b2b/dashboard" : b2bDashboardUrl}
+              onClick={onClose}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+            >
+              <span>{isAr ? "إدارة رخصة البوت (B2B)" : "Manage B2B License"}</span>
+              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+            </Link>
           ) : (
             <Link
-              href="/reports"
+              href={isSaudi ? "/scanner/backtests?tab=bots" : "/reports"}
               onClick={onClose}
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-black text-white hover:bg-zinc-800 dark:bg-emerald-500 dark:text-black dark:hover:bg-emerald-400 font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
             >
-              <span>{isAr ? "تصفح تقارير السوق اليومية" : "Browse Market Reports"}</span>
+              <span>{isAr ? (isSaudi ? "تصفح أنظمة التداول والرادار" : "تصفح تقارير السوق اليومية") : (isSaudi ? "Open Trading Bots & Radar" : "Browse Market Reports")}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
             </Link>
           )}

@@ -18,10 +18,15 @@ from typing import Any, Dict, Mapping, Optional
 
 import pandas as pd
 
+from api.perf_utils import SingleFlight
+
 
 _CACHE_LOCK = threading.RLock()
 _FRAME_CACHE: Dict[str, pd.DataFrame] = {}
 _META_CACHE: Dict[str, Dict[str, Any]] = {}
+_LOAD_SF = SingleFlight()
+_WARM_LOCK = threading.Lock()
+_WARMING_EXCHANGES: set[str] = set()
 
 _PRICE_COLUMNS = ["symbol", "exchange", "date", "open", "high", "low", "close", "volume"]
 
@@ -76,13 +81,8 @@ def _normalise_frame(value: pd.DataFrame) -> pd.DataFrame:
     return frame.drop_duplicates(["symbol", "exchange", "date"], keep="last").sort_values(["symbol", "date"])
 
 
-def load_history_snapshot(exchange: str) -> pd.DataFrame:
-    """Load a full, versioned history snapshot without querying Supabase.
-
-    Failures intentionally return an empty frame. Callers then use their
-    existing Supabase loading path, so an unavailable HF Hub never blocks the
-    daily job or scanner.
-    """
+def _ensure_history_snapshot(exchange: str) -> pd.DataFrame:
+    """Populate the in-memory snapshot once via SingleFlight and return cached reference."""
     exchange = (exchange or "").upper()
     repo_id = _repo_id()
     if not exchange or not repo_id:
@@ -91,9 +91,14 @@ def load_history_snapshot(exchange: str) -> pd.DataFrame:
     with _CACHE_LOCK:
         cached = _FRAME_CACHE.get(exchange)
         if cached is not None:
-            return cached.copy()
+            return cached
 
-    try:
+    def _download() -> pd.DataFrame:
+        with _CACHE_LOCK:
+            existing = _FRAME_CACHE.get(exchange)
+            if existing is not None:
+                return existing
+
         from huggingface_hub import hf_hub_download
 
         downloaded = hf_hub_download(
@@ -122,14 +127,27 @@ def load_history_snapshot(exchange: str) -> pd.DataFrame:
             _FRAME_CACHE[exchange] = frame
             _META_CACHE[exchange] = metadata if isinstance(metadata, dict) else {}
         print(f"[HF-HISTORY] Loaded {len(frame)} {exchange} history rows from {repo_id}.")
-        return frame.copy()
+        return frame
+
+    try:
+        return _LOAD_SF.do(exchange, _download)
     except Exception as exc:
         print(f"[HF-HISTORY] Snapshot unavailable for {exchange}; using Supabase fallback: {exc}")
         return _empty_frame()
 
 
+def load_history_snapshot(exchange: str) -> pd.DataFrame:
+    """Load a full, versioned history snapshot without querying Supabase.
+
+    Failures intentionally return an empty frame. Callers then use their
+    existing Supabase loading path, so an unavailable HF Hub never blocks the
+    daily job or scanner.
+    """
+    return _ensure_history_snapshot(exchange).copy()
+
+
 def snapshot_metadata(exchange: str) -> Dict[str, Any]:
-    load_history_snapshot(exchange)
+    _ensure_history_snapshot(exchange)
     with _CACHE_LOCK:
         return dict(_META_CACHE.get((exchange or "").upper(), {}))
 
@@ -142,8 +160,35 @@ def load_symbol_history_snapshot(exchange: str, symbol: str) -> pd.DataFrame:
         cached = _FRAME_CACHE.get(exchange)
         if cached is not None:
             return cached.loc[cached["symbol"] == symbol].copy()
-    frame = load_history_snapshot(exchange)
-    return frame.loc[frame["symbol"] == symbol].copy()
+    frame = _ensure_history_snapshot(exchange)
+    with _CACHE_LOCK:
+        cached = _FRAME_CACHE.get(exchange)
+        target = cached if cached is not None else frame
+        return target.loc[target["symbol"] == symbol].copy()
+
+
+def warm_history_snapshot_async(exchange: str = "EGX") -> bool:
+    """Pre-warm the compressed HF history snapshot in a daemon thread at startup."""
+    ex = (exchange or "").strip().upper()
+    if not ex or not _repo_id():
+        return False
+    with _CACHE_LOCK:
+        if ex in _FRAME_CACHE:
+            return False
+    with _WARM_LOCK:
+        if ex in _WARMING_EXCHANGES:
+            return False
+        _WARMING_EXCHANGES.add(ex)
+
+    def _run() -> None:
+        try:
+            _ensure_history_snapshot(ex)
+        finally:
+            with _WARM_LOCK:
+                _WARMING_EXCHANGES.discard(ex)
+
+    threading.Thread(target=_run, name=f"hf-history-warm-{ex}", daemon=True).start()
+    return True
 
 
 def merge_snapshot_with_live(snapshot: pd.DataFrame, live_rows: Any) -> pd.DataFrame:
@@ -278,3 +323,5 @@ def reset_history_cache() -> None:
     with _CACHE_LOCK:
         _FRAME_CACHE.clear()
         _META_CACHE.clear()
+    with _WARM_LOCK:
+        _WARMING_EXCHANGES.clear()

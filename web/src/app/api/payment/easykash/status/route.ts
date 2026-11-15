@@ -6,16 +6,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 
+const NO_STORE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
+
 // Short 8-second in-memory cache to debounce rapid consecutive status requests for the same order
 const orderStatusCache = new Map<string, { payload: any; expiresAt: number }>();
 
 export async function GET(req: NextRequest) {
   const auth = await createSupabaseServerClient(req);
   const { data: { user } } = await auth.auth.getUser();
-  if (!user) return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
+  if (!user) return NextResponse.json({ detail: "Unauthorized" }, { status: 401, headers: NO_STORE_HEADERS });
 
   const orderId = req.nextUrl.searchParams.get("order_id") || "";
-  if (!orderId) return NextResponse.json({ detail: "Missing order_id" }, { status: 400 });
+  if (!orderId) return NextResponse.json({ detail: "Missing order_id" }, { status: 400, headers: NO_STORE_HEADERS });
 
   const now = Date.now();
   const cacheKey = `${user.id}:${orderId}`;
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest) {
     }
   }
   if (cached && now < cached.expiresAt) {
-    return NextResponse.json(cached.payload);
+    return NextResponse.json(cached.payload, { headers: NO_STORE_HEADERS });
   }
 
   try {
@@ -115,94 +117,110 @@ export async function GET(req: NextRequest) {
           }
         );
         if (response.ok) {
-        const data = await response.json();
-        orderStatusCache.set(cacheKey, { payload: data, expiresAt: now + 8000 });
-        return NextResponse.json(data);
+          const data = await response.json();
+          orderStatusCache.set(cacheKey, { payload: data, expiresAt: now + 8000 });
+          return NextResponse.json(data, { headers: NO_STORE_HEADERS });
+        }
       }
-      }
-      return NextResponse.json({ detail: "Payment order not found" }, { status: 404 });
+      return NextResponse.json({ detail: "Payment order not found" }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
     let end: string | null = null;
     let inviteLink = order.telegram_invite_link || "";
+    let b2bDashboardUrl = "";
+    const isB2BOrder = String(order.plan_id || "").trim().toLowerCase().startsWith("b2b_");
 
     if (order.status === "approved") {
-      const { data: sub } = await service
-        .from("subscriptions")
-        .select("current_period_end")
-        .eq("user_id", user.id)
-        .in("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
-        .eq("status", "active")
-        .order("current_period_end", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      if (isB2BOrder) {
+        const { data: lic } = await service
+          .from("b2b_group_licenses")
+          .select("expires_at")
+          .eq("owner_user_id", user.id)
+          .eq("status", "active")
+          .order("expires_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      end = sub?.current_period_end || null;
-
-      if (!inviteLink) {
-        const { data: invite } = await service
-          .from("pro_telegram_invites")
-          .select("invite_link")
+        end = lic?.expires_at || null;
+        b2bDashboardUrl = "/b2b/dashboard";
+      } else {
+        const { data: sub } = await service
+          .from("subscriptions")
+          .select("current_period_end")
           .eq("user_id", user.id)
-          .maybeSingle();
-        inviteLink = invite?.invite_link || "";
-      }
-
-      const customerNote = String(order.customer_note || "");
-      if (!customerNote.includes("tg_welcomed")) {
-        const { data: profile } = await service
-          .from("profiles")
-          .select("telegram_chat_id, display_name, username")
-          .eq("id", user.id)
+          .in("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
+          .eq("status", "active")
+          .order("current_period_end", { ascending: false })
+          .limit(1)
           .maybeSingle();
 
-        const tgChatId = profile?.telegram_chat_id ? String(profile.telegram_chat_id).trim() : null;
-        if (tgChatId) {
-          const botToken = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
-          const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
-          if (botToken) {
-            const rawDisplayName = profile?.display_name || profile?.username || "المستثمر";
-            const displayName = rawDisplayName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            const buttons: { text: string; url: string }[][] = [];
-            if (inviteLink) {
-              buttons.push([{ text: "💎 الانضمام لقناة VIP", url: inviteLink }]);
-            }
-            buttons.push([{ text: "🌐 فتح حسابك والتقارير", url: "https://egxbots.com/reports" }]);
+        end = sub?.current_period_end || null;
 
-            const welcomeMsg = `🎉 <b>أهلاً وسهلاً بك يا ${displayName}!</b>\n\n` +
-              `✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة Pro بنجاح!</b> 🚀\n\n` +
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              (inviteLink ? `💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n${inviteLink}\n<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n` : "") +
-              `📊 <b>مزايا باقتك المفعّلة الآن:</b>\n` +
-              `• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n` +
-              `• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n` +
-              `• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n` +
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              `💡 <b>كيف تبدأ؟</b>\n` +
-              `1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n` +
-              `2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n` +
-              `نتمنى لك تداولات موفقة ومربحة دائماً! 📈`;
+        if (!inviteLink) {
+          const { data: invite } = await service
+            .from("pro_telegram_invites")
+            .select("invite_link")
+            .eq("user_id", user.id)
+            .maybeSingle();
+          inviteLink = invite?.invite_link || "";
+        }
 
-            try {
-              const tgResp = await fetch(`${relayUrl}/bot${botToken}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  chat_id: tgChatId,
-                  text: welcomeMsg,
-                  parse_mode: "HTML",
-                  reply_markup: { inline_keyboard: buttons },
-                }),
-                signal: AbortSignal.timeout(5000),
-              });
-              if (tgResp.ok) {
-                await service
-                  .from("local_payment_orders")
-                  .update({ customer_note: `${customerNote} | tg_welcomed`.trim() })
-                  .eq("id", orderId);
+        const customerNote = String(order.customer_note || "");
+        if (!customerNote.includes("tg_welcomed")) {
+          const { data: profile } = await service
+            .from("profiles")
+            .select("telegram_chat_id, display_name, username")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          const tgChatId = profile?.telegram_chat_id ? String(profile.telegram_chat_id).trim() : null;
+          if (tgChatId) {
+            const botToken = (process.env.ARTORO_AI_BOT || process.env.TELEGRAM_BOT_TOKEN)?.trim();
+            const relayUrl = (process.env.TELEGRAM_RELAY_URL || "https://api.telegram.org").replace(/\/$/, "");
+            if (botToken) {
+              const rawDisplayName = profile?.display_name || profile?.username || "المستثمر";
+              const displayName = rawDisplayName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              const buttons: { text: string; url: string }[][] = [];
+              if (inviteLink) {
+                buttons.push([{ text: "💎 الانضمام لقناة VIP", url: inviteLink }]);
               }
-            } catch (err) {
-              console.warn("[easykash/status] Telegram welcome dispatch error:", err);
+              buttons.push([{ text: "🌐 فتح حسابك والتقارير", url: "https://egxbots.com/reports" }]);
+
+              const welcomeMsg = `🎉 <b>أهلاً وسهلاً بك يا ${displayName}!</b>\n\n` +
+                `✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة Pro بنجاح!</b> 🚀\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                (inviteLink ? `💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n${inviteLink}\n<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n` : "") +
+                `📊 <b>مزايا باقتك المفعّلة الآن:</b>\n` +
+                `• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n` +
+                `• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n` +
+                `• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `💡 <b>كيف تبدأ؟</b>\n` +
+                `1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n` +
+                `2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n` +
+                `نتمنى لك تداولات موفقة ومربحة دائماً! 📈`;
+
+              try {
+                const tgResp = await fetch(`${relayUrl}/bot${botToken}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: tgChatId,
+                    text: welcomeMsg,
+                    parse_mode: "HTML",
+                    reply_markup: { inline_keyboard: buttons },
+                  }),
+                  signal: AbortSignal.timeout(5000),
+                });
+                if (tgResp.ok) {
+                  await service
+                    .from("local_payment_orders")
+                    .update({ customer_note: `${customerNote} | tg_welcomed`.trim() })
+                    .eq("id", orderId);
+                }
+              } catch (err) {
+                console.warn("[easykash/status] Telegram welcome dispatch error:", err);
+              }
             }
           }
         }
@@ -213,12 +231,13 @@ export async function GET(req: NextRequest) {
       ...order,
       subscription: end ? { current_period_end: end } : null,
       telegram_pro_url: inviteLink,
+      b2b_dashboard_url: b2bDashboardUrl,
     };
     orderStatusCache.set(cacheKey, { payload: result, expiresAt: now + 8000 });
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: NO_STORE_HEADERS });
   } catch (err: any) {
     console.error("[api/payment/easykash/status] error:", err);
-    return NextResponse.json({ detail: "Payment status is unavailable" }, { status: 503 });
+    return NextResponse.json({ detail: "Payment status is unavailable" }, { status: 503, headers: NO_STORE_HEADERS });
   }
 }
 

@@ -14,8 +14,13 @@ from api.short_swings_engine import get_cached_short_swings, compute_short_swing
 
 router = APIRouter(prefix="/api/short-swings", tags=["Short Swings"])
 
-_SAUDI_SWINGS_CACHE = BoundedTTLCache(max_entries=4, default_ttl=300.0)
+_SAUDI_SWINGS_CACHE = BoundedTTLCache(max_entries=4, default_ttl=86400.0)
 _SAUDI_SWINGS_SF = SingleFlight()
+
+
+def clear_saudi_swings_cache() -> None:
+    """Clear Saudi short-swings in-memory cache when daily runner refreshes data."""
+    _SAUDI_SWINGS_CACHE.clear()
 
 
 def _is_internal_authorized(x_admin_key: Optional[str]) -> bool:

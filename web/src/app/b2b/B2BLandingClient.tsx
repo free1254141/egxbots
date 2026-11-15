@@ -183,7 +183,9 @@ export default function B2BLandingClient() {
       desc: isAr
         ? "أعضاء جروبك يسألون عن عشرات الأسهم يومياً وأنت لا تملك وقتاً للرد على كل عضو؟ البوت يرد في ثوانٍ بتوقيع قناتك الرسمي ويمنع السبام بمهلة 90 ثانية."
         : "Turn repetitive member stock questions into instant 24/7 value with your group brand signature and built-in anti-spam controls.",
-      priceHint: isAr ? "من 1,000 إلى 2,500 ج.م / شهر" : "1,000 – 2,500 EGP / mo",
+      priceHint: isAr
+        ? `من ${toB2BDisplayAmount(1000, isSaudi).toLocaleString()} إلى ${toB2BDisplayAmount(2500, isSaudi).toLocaleString()} ${currencyLabel} / شهر`
+        : `${toB2BDisplayAmount(1000, isSaudi).toLocaleString()} – ${toB2BDisplayAmount(2500, isSaudi).toLocaleString()} ${currencyCode} / mo`,
       accent: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40",
     },
     {
@@ -596,7 +598,7 @@ export default function B2BLandingClient() {
               {isAr ? "باقات ترخيص القنوات والمجموعات" : "TELEGRAM GROUP LICENSING PLANS"}
             </span>
             <h2 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white">
-              {isAr ? "خطط واضحة تبدأ من 1,000 ج.م شهرياً + 3 أيام تجربة مجانية" : "Transparent Plans With 3-Day Free Trial"}
+              {isAr ? `خطط واضحة تبدأ من ${formatPrice(1000)} شهرياً + 3 أيام تجربة مجانية` : `Transparent Plans Starting at ${toB2BDisplayAmount(1000, isSaudi).toLocaleString()} ${currencyCode}/mo + 3-Day Free Trial`}
             </h2>
             <p className="text-xs sm:text-sm font-bold text-zinc-600 dark:text-zinc-400">
               {isAr

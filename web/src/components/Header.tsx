@@ -405,8 +405,6 @@ export default function Header() {
         const isEgxOnlyRoute =
             pathname === "/reports" ||
             pathname.startsWith("/reports/") ||
-            pathname === "/blogs" ||
-            pathname.startsWith("/blogs/") ||
             (pathname === "/scanner/backtests" && currentTab === "similarity");
         if (isEgxOnlyRoute) {
             router.replace("/scanner/backtests?tab=bots");

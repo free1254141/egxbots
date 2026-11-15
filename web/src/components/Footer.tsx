@@ -284,16 +284,14 @@ export default function Footer() {
               {t("footer.resources")}
             </h4>
             <ul className="space-y-2">
-              {!isSaudi && (
-                <li>
-                  <Link
-                    href="/blogs"
-                    className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
-                  >
-                    {t("footer.blogs")}
-                  </Link>
-                </li>
-              )}
+              <li>
+                <Link
+                  href="/blogs"
+                  className="text-sm text-zinc-500 dark:text-zinc-500 light:text-gray-600 hover:text-indigo-400 dark:hover:text-indigo-400 light:hover:text-indigo-600 transition-colors"
+                >
+                  {t("footer.blogs")}
+                </Link>
+              </li>
               {!isSaudi && (
                 <li><Link href="/reports" className="text-sm text-zinc-500 hover:text-amber-500">تقارير السوق والتجميع · Daily reports</Link></li>
               )}
@@ -493,7 +491,7 @@ export default function Footer() {
 
         {/* ── SEO Internal Linking Hub: Top Stocks & Pillar Guides (Market-Aware) ── */}
         <div className="border-2 border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/50 p-5 sm:p-6 mb-8 shadow-xs">
-          <div className={`grid grid-cols-1 ${!isSaudi ? "md:grid-cols-2" : ""} gap-6`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
                 {isSaudi
@@ -536,7 +534,47 @@ export default function Footer() {
               </div>
             </div>
 
-            {!isSaudi && (
+            {isSaudi ? (
+            <div>
+              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
+                {isAr ? "📚 الأدلة المرجعية للسوق السعودي (تاسي)" : "📚 Comprehensive Saudi TASI Quantitative Guides"}
+              </h4>
+              <ul className="space-y-2 text-xs font-bold">
+                <li>
+                  <Link
+                    href="/blogs/best-tasi-ai-stock-analysis-software"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "أفضل بوت وأداة ذكاء اصطناعي لتحليل الأسهم السعودية تاسي 2026" : "Best AI Software & Bot for Saudi TASI Stock Analysis (2026)"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/aramco-2222-rajhi-1120-ai-stock-analysis-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "دليل التحليل الفني والكمي لسهم أرامكو (2222) والراجحي (1120)" : "Aramco (2222) & Al Rajhi (1120) AI Technical Analysis Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs/saudi-tasi-sharia-compliant-stocks-purification-guide"
+                    className="text-zinc-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors block"
+                  >
+                    • {isAr ? "قائمة الأسهم السعودية النقية شرعياً وحاسبة تطهير الأرباح في تاسي 2026" : "Saudi TASI Sharia-Compliant Stocks & Dividend Purification Guide"}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/blogs"
+                    className="text-emerald-700 dark:text-emerald-400 hover:underline transition-colors block pt-1"
+                  >
+                    ← {isAr ? "تصفح جميع أدلة ومقالات السوق" : "Browse All Market Guides & Blog"}
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            ) : (
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
                 {isAr ? "📚 الأدلة المرجعية لتحليل السوق المصري" : "📚 Comprehensive EGX Quantitative Guides"}

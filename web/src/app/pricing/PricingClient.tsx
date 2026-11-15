@@ -42,29 +42,28 @@ import { trackEvent } from "@/lib/gtm";
 
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
+import {
+  computeCheckoutPricing,
+  lifetimeBreakevenMonths,
+  toDisplayAmount,
+} from "@/lib/saudi-pricing";
+import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 export { broadcastEntitlements };
 
 type Step = "plans" | "payment" | "submitted";
 
-const SAR_EXCHANGE_MAP: Record<number, number> = {
-  50: 4,
-  100: 8,
-  200: 16,
-  500: 40,
-  1000: 79,
-  1500: 118,
-  1800: 141,
-  1850: 145,
-  2250: 176,
-  2500: 196,
-};
-
-/** Converts an internal EGP price to the active market's display currency (SAR for TASI, EGP for EGX). */
-function toDisplayAmount(amountEgp: number, isSaudi: boolean): number {
-  if (!isSaudi) return amountEgp;
-  const rounded = Math.round(amountEgp);
-  if (SAR_EXCHANGE_MAP[rounded] !== undefined) return SAR_EXCHANGE_MAP[rounded];
-  return Math.max(1, Math.round(amountEgp / 12.75));
+/** Strip an accidentally repeated or pasted leading dial prefix from local phone digits. */
+function stripDialPrefix(digits: string, dialCode: string): string {
+  let clean = digits.replace(/[^\d]/g, "");
+  const dialDigits = dialCode.replace(/^\+/, "");
+  if (dialDigits && clean.startsWith(`00${dialDigits}`) && clean.length - dialDigits.length - 2 >= 7) {
+    clean = clean.slice(dialDigits.length + 2);
+  } else if (dialDigits.length >= 2 && clean.startsWith(dialDigits) && clean.length - dialDigits.length >= 7) {
+    clean = clean.slice(dialDigits.length);
+  } else if (dialDigits === "1" && clean.startsWith("1") && clean.length === 11) {
+    clean = clean.slice(1);
+  }
+  return clean.replace(/^0+/, "");
 }
 
 export default function PricingClient() {
@@ -134,6 +133,8 @@ export default function PricingClient() {
   const [orderStatus, setOrderStatus] = useState<string>("submitted");
   const [subscriptionEnd, setSubscriptionEnd] = useState<string | null>(null);
   const [telegramProUrl, setTelegramProUrl] = useState("");
+  const [telegramSaudiProUrl, setTelegramSaudiProUrl] = useState("");
+  const [b2bDashboardUrl, setB2bDashboardUrl] = useState("");
   const [isPro, setIsPro] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("pro");
   const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro");
@@ -226,18 +227,19 @@ export default function PricingClient() {
           .maybeSingle();
         if (active && data?.whatsapp_number && typeof data.whatsapp_number === "string") {
           const cleanSaved = data.whatsapp_number.trim().replace(/[\s\-()]/g, "");
+          const normalizedSaved = cleanSaved.startsWith("00") ? `+${cleanSaved.slice(2)}` : cleanSaved;
           const knownCodes = ["+966", "+971", "+965", "+974", "+973", "+968", "+962", "+961", "+249", "+218", "+216", "+212", "+20", "+44", "+1"];
-          const matchedCode = knownCodes.find((code) => cleanSaved.startsWith(code));
+          const matchedCode = knownCodes.find((code) => normalizedSaved.startsWith(code));
           if (matchedCode) {
             userPickedDialCodeRef.current = true;
             setSelectedDialCode(matchedCode);
-            setCustomerMobile(cleanSaved.slice(matchedCode.length).replace(/^0+/, ""));
-          } else if (/^01[0125]\d{8}$/.test(cleanSaved)) {
+            setCustomerMobile(stripDialPrefix(normalizedSaved.slice(matchedCode.length), matchedCode));
+          } else if (/^01[0125]\d{8}$/.test(normalizedSaved)) {
             userPickedDialCodeRef.current = true;
             setSelectedDialCode("+20");
-            setCustomerMobile(cleanSaved.replace(/^0+/, ""));
+            setCustomerMobile(stripDialPrefix(normalizedSaved, "+20"));
           } else {
-            setCustomerMobile(cleanSaved.replace(/^\+/, ""));
+            setCustomerMobile(stripDialPrefix(normalizedSaved, selectedDialCode));
           }
         }
       } catch {}
@@ -317,7 +319,7 @@ export default function PricingClient() {
   const selectedCountry = DIAL_COUNTRIES.find((c) => c.code === selectedDialCode) ?? DIAL_COUNTRIES[0];
 
   // بناء الرقم الكامل: 01XXXXXXXXX لمصر (للتوافق مع محافظ EasyKash) أو +CCXXXXXXXXX للدولي
-  const localDigits = customerMobile.trim().replace(/[^\d]/g, "").replace(/^0+/, "");
+  const localDigits = stripDialPrefix(customerMobile, selectedDialCode);
   const fullMobileNumber =
     localDigits.length === 0
       ? ""
@@ -361,11 +363,12 @@ export default function PricingClient() {
         setOrderStatus("approved");
         broadcastEntitlements(true);
         // Fetch the invite link if we don't have it yet
-        if (!telegramProUrl) {
+        if (!telegramProUrl || (isSaudi && !telegramSaudiProUrl)) {
           const vip = await fetch("/api/profile/telegram-pro", { cache: "no-store", signal: AbortSignal.timeout(12_000) })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);
           if (!stopped && vip?.invite_link) setTelegramProUrl(vip.invite_link);
+          if (!stopped && vip?.saudi_invite_link) setTelegramSaudiProUrl(vip.saudi_invite_link);
           if (!stopped && vip?.current_period_end) setSubscriptionEnd(vip.current_period_end);
         }
         return;
@@ -392,12 +395,21 @@ export default function PricingClient() {
         if (data.plan_id) setSelectedPlan(data.plan_id);
         setSubscriptionEnd(data.subscription?.current_period_end || null);
         setTelegramProUrl(data.telegram_pro_url || "");
-        if (settledStatus === "approved" && !data.telegram_pro_url) {
+        if (data.telegram_saudi_pro_url) setTelegramSaudiProUrl(data.telegram_saudi_pro_url);
+        setB2bDashboardUrl(String(data.b2b_dashboard_url || "").replace(/^https?:\/\/[^/]+/, ""));
+        const resolvedPlan = String(data.plan_id || selectedPlan || "");
+        const isB2bResolved = resolvedPlan.startsWith("b2b_");
+        if (settledStatus === "approved" && !isB2bResolved && (!data.telegram_pro_url || (isSaudi && !data.telegram_saudi_pro_url))) {
           const vip = await fetch("/api/profile/telegram-pro", { cache: "no-store", signal: AbortSignal.timeout(12_000) })
             .then((response) => (response.ok ? response.json() : null))
             .catch(() => null);
           if (!stopped && vip?.invite_link) {
             setTelegramProUrl(vip.invite_link);
+          }
+          if (!stopped && vip?.saudi_invite_link) {
+            setTelegramSaudiProUrl(vip.saudi_invite_link);
+          }
+          if (!stopped && vip?.current_period_end) {
             setSubscriptionEnd(vip.current_period_end || data.subscription?.current_period_end || null);
           }
         }
@@ -421,7 +433,7 @@ export default function PricingClient() {
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [step, localOrder, pollRestart, isPro, telegramProUrl]);
+  }, [step, localOrder, pollRestart, isPro, isSaudi, telegramProUrl, telegramSaudiProUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -663,6 +675,7 @@ export default function PricingClient() {
           plan_id: planId,
           mobile: normalizedMobile,
           promo_code: appliedPromo?.code || "",
+          market: isSaudi ? "tasi" : "egx",
         }),
       });
       const data = await res.json();
@@ -763,7 +776,7 @@ export default function PricingClient() {
   const paidPlans = [
     { id: "pro", name_ar: "شهر واحد", name_en: "1 Month", days: 30, amount_egp: 200, badge: null, isLifetime: false },
     { id: "pro_6m", name_ar: "6 شهور", name_en: "6 Months", days: 180, amount_egp: 1000, badge: isAr ? "الأكثر طلباً ⭐" : "Most Popular ⭐", isLifetime: false },
-    { id: "pro_1y", name_ar: "سنة كاملة", name_en: "1 Year", days: 365, amount_egp: 1850, badge: isAr ? "أكبر توفير 💎" : "Max Value 💎", isLifetime: false },
+    { id: "pro_1y", name_ar: "سنة كاملة", name_en: "1 Year", days: 365, amount_egp: 1800, badge: isAr ? "أكبر توفير 💎" : "Max Value 💎", isLifetime: false },
     {
       id: "lifetime",
       name_ar: "مدى الحياة (VIP)",
@@ -804,7 +817,7 @@ export default function PricingClient() {
       } else if (plan.id === "pro_1y") {
         const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
         amount = hasFounder1y ? 1000 : 1800;
-        originalAmount = hasFounder1y ? 1850 : null;
+        originalAmount = hasFounder1y ? 1800 : null;
       }
     }
     const days = Number(configured?.days ?? plan.days);
@@ -829,6 +842,10 @@ export default function PricingClient() {
   });
 
   const annualPlan = paidPlans.find((p) => p.id === "pro_1y");
+  const regular1yEgp = Number(
+    annualPlan?.original_amount_egp ?? (annualPlan?.amount_egp && annualPlan.amount_egp > 1200 ? annualPlan.amount_egp : 1800)
+  );
+  const breakevenMonths = lifetimeBreakevenMonths(2250, monthlyPrice || 200);
   const annualCostEgp = annualPlan?.amount_egp ?? 1800;
   const roiPortfolioEgp = annualCostEgp > 1200 ? 40000 : 25000;
   const roiTradeProfitEgp = Math.round(roiPortfolioEgp * 0.05);
@@ -948,7 +965,10 @@ export default function PricingClient() {
 
   const baseProPrice = selectedPlanDetails?.amount_egp ?? (paidPlans[0]?.amount_egp || 100);
   const { discountEgp: promoDiscountAmount, finalEgp: proPrice } = promoPriceForPlan(baseProPrice);
-  const promoDiscountDisplay = Math.max(0, displayAmount(baseProPrice) - displayAmount(proPrice));
+  const checkoutPricing = computeCheckoutPricing(baseProPrice, appliedPromo?.discount_percent || 0, isSaudi);
+  const proDisplayAmount = checkoutPricing.finalDisplay;
+  const promoDiscountDisplay = checkoutPricing.discountDisplay;
+  const easyKashChargeEgp = checkoutPricing.chargeEgp;
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
   const freeFeatures = [
@@ -1040,6 +1060,35 @@ export default function PricingClient() {
 
   // ── STEP 3: SUBMITTED / PAYMENT RESULT ─────────────────────────────────────
   if (step === "submitted") {
+    const isB2bSubmitted = Boolean(selectedPlanDetails?.id?.startsWith("b2b_"));
+    const isLifetimeSubmitted = selectedPlanDetails?.id === "lifetime";
+    const approvedBadgeText = isB2bSubmitted
+      ? (isAr ? "تم تفعيل رخصة القنوات (B2B) 💼" : "B2B License Activated 💼")
+      : isLifetimeSubmitted
+      ? (isAr ? "تم تفعيل باقة مدى الحياة (LIFETIME VIP) 👑" : "Lifetime VIP Activated 👑")
+      : (isAr ? "تم التفعيل بنجاح" : "Pro Activated");
+    const approvedTitleText = isB2bSubmitted
+      ? (isAr ? `أهلاً بك في شركاء ${brandName} (B2B)! 💼🎉` : `Welcome to ${brandName} B2B Partners! 💼🎉`)
+      : isLifetimeSubmitted
+      ? (isAr ? `أهلاً بك في نخبة ${brandName} مدى الحياة! 👑🎉` : `Welcome to ${brandName} Lifetime VIP! 👑🎉`)
+      : (isAr ? `أهلاً بك في ${brandName} Pro! 🎉` : `Welcome to ${brandName} Pro! 🎉`);
+    const approvedDescText = isB2bSubmitted
+      ? (isAr
+          ? `تم تفعيل باقة القنوات (${selectedPlanDetails?.name_ar || selectedPlanDetails?.id}) بنجاح لمدة ${selectedPlanDetails?.days || 30} يوماً! يمكنك الآن ربط البوت بجروب التليجرام وتخصيص التوقيع فوراً من لوحة تحكم القنوات.`
+          : `Your ${selectedPlanDetails?.name_en || selectedPlanDetails?.id} license is active for ${selectedPlanDetails?.days || 30} days! Connect your Telegram group and configure your custom signature from the B2B dashboard.`)
+      : isLifetimeSubmitted
+      ? (isAr
+          ? "تم تفعيل اشتراكك الدائم في باقة مدى الحياة (Lifetime VIP) بنجاح للأبد! حسابك نشط الآن بكامل الصلاحيات مدى الحياة وبدون أي تجديدات شهرية."
+          : "Your Lifetime VIP subscription is now active forever! Full access granted for life with zero recurring renewals.")
+      : (isAr
+          ? `تم تأكيد اشتراكك في باقة Pro لمدة ${selectedPlanDetails?.days || 30} يوماً بنجاح. حسابك نشط الآن بكامل الصلاحيات!`
+          : `Your Pro plan is now active for ${selectedPlanDetails?.days || 30} days with full benefits!`);
+    const waFailureMsg = encodeURIComponent(
+      isSaudi
+        ? `مرحباً، واجهت مشكلة في الدفع على ${brandName} وأريد المساعدة في إتمام الاشتراك`
+        : "مرحباً، واجهت مشكلة في الدفع على EGX BOTS وأريد المساعدة والدفع بالمحفظة"
+    );
+
     return (
       <div className="min-h-[75vh] flex items-center justify-center py-12 px-4" dir={isAr ? "rtl" : "ltr"}>
         <div className="max-w-xl w-full border-4 border-black dark:border-white bg-white dark:bg-zinc-950 p-6 sm:p-8 space-y-6 text-center shadow-[8px_8px_0px_rgba(0,0,0,1)] dark:shadow-[8px_8px_0px_#10b981]">
@@ -1071,7 +1120,7 @@ export default function PricingClient() {
                 orderStatus === "failed"
                   ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
                   : orderStatus === "approved"
-                  ? selectedPlanDetails?.id === "lifetime"
+                  ? isLifetimeSubmitted
                     ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                     : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                   : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
@@ -1080,33 +1129,23 @@ export default function PricingClient() {
               {orderStatus === "failed"
                 ? isAr ? "فشلت العملية" : "Payment Incomplete"
                 : orderStatus === "approved"
-                ? selectedPlanDetails?.id === "lifetime"
-                  ? isAr ? "تم تفعيل باقة مدى الحياة (LIFETIME VIP) 👑" : "Lifetime VIP Activated 👑"
-                  : isAr ? "تم التفعيل بنجاح" : "Pro Activated"
+                ? approvedBadgeText
                 : isAr ? "جاري التحقق من الدفع" : "Verifying Payment"}
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white">
               {orderStatus === "failed"
                 ? isAr ? "لم تكتمل عملية الدفع" : "Payment was not completed"
                 : orderStatus === "approved"
-                ? selectedPlanDetails?.id === "lifetime"
-                  ? isAr ? `أهلاً بك في نخبة ${brandName} مدى الحياة! 👑🎉` : `Welcome to ${brandName} Lifetime VIP! 👑🎉`
-                  : isAr ? `أهلاً بك في ${brandName} Pro! 🎉` : `Welcome to ${brandName} Pro! 🎉`
+                ? approvedTitleText
                 : isAr ? "في انتظار إشعار تأكيد الدفع ⏳" : "Awaiting payment confirmation ⏳"}
             </h1>
             <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300 leading-relaxed max-w-md mx-auto">
               {orderStatus === "failed"
                 ? isAr
-                  ? "لم نتلقَ تأكيد إتمام الدفع من EasyKash. يمكنك المحاولة مجددًا باختيار وسيلة أخرى أو التواصل معنا للمساعدة."
+                  ? "لم نتلقَ تأكيد إتمام الدفع من EasyKash. يمكنك المحاولة مجددًا أو التواصل معنا للمساعدة."
                   : "We didn't receive payment confirmation from EasyKash. You can try again or reach out to our team."
                 : orderStatus === "approved"
-                ? isAr
-                  ? selectedPlanDetails?.id === "lifetime"
-                    ? "تم تفعيل اشتراكك الدائم في باقة مدى الحياة (Lifetime VIP) بنجاح للأبد! حسابك نشط الآن بكامل الصلاحيات مدى الحياة وبدون أي تجديدات شهرية."
-                    : `تم تأكيد اشتراكك في باقة Pro لمدة ${selectedPlanDetails?.days || 30} يوماً بنجاح. حسابك نشط الآن بكامل الصلاحيات!`
-                  : selectedPlanDetails?.id === "lifetime"
-                  ? "Your Lifetime VIP subscription is now active forever! Full access granted for life with zero recurring renewals."
-                  : `Your Pro plan is now active for ${selectedPlanDetails?.days || 30} days with full benefits!`
+                ? approvedDescText
                 : isAr
                 ? "تم استلام طلبك وجاري انتظار تأكيد السداد من EasyKash تلقائياً. الصفحة ستُحدّث الحالة فور وصول الإشعار."
                 : "Checkout initiated. We are listening for EasyKash confirmation and will update automatically."}
@@ -1135,12 +1174,12 @@ export default function PricingClient() {
             </div>
           )}
 
-          {/* Approved VIP Actions */}
+          {/* Approved Actions */}
           {orderStatus === "approved" && (
             <div className="space-y-4 pt-2">
               {subscriptionEnd && (
                 <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">
-                  {selectedPlanDetails?.id === "lifetime"
+                  {isLifetimeSubmitted
                     ? isAr
                       ? "مدة الاشتراك: مدى الحياة للأبد (اشتراك دائم) 👑"
                       : "Subscription Duration: Lifetime Forever 👑"
@@ -1149,7 +1188,38 @@ export default function PricingClient() {
                     : `Valid until: ${new Date(subscriptionEnd).toLocaleDateString()}`}
                 </p>
               )}
-              {telegramProUrl ? (
+              {isB2bSubmitted ? (
+                <Link
+                  href={(b2bDashboardUrl || "/b2b/dashboard").replace(/^https?:\/\/[^/]+/, "") || "/b2b/dashboard"}
+                  className="flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-500 hover:bg-emerald-600 text-black font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  {isAr ? "فتح لوحة تحكم القنوات (B2B) وتفعيل البوت" : "Open B2B Dashboard & Connect Bot"}
+                </Link>
+              ) : isSaudi ? (
+                <div className="space-y-2">
+                  <a
+                    href={telegramSaudiProUrl || SAUDI_VIP_TELEGRAM_WEB_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {isAr ? "انضم الآن إلى قناة TASI VIP على تليجرام" : "Join Saudi TASI VIP Telegram Channel"}
+                  </a>
+                  {telegramProUrl && (
+                    <a
+                      href={telegramProUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center gap-2 border-2 border-black dark:border-white bg-indigo-600 hover:bg-indigo-700 text-white font-black py-2.5 px-4 uppercase tracking-wider text-xs"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      {isAr ? "قناة VIP العامة والمصرية" : "Main & EGX VIP Channel"}
+                    </a>
+                  )}
+                </div>
+              ) : telegramProUrl ? (
                 <a
                   href={telegramProUrl}
                   target="_blank"
@@ -1166,10 +1236,12 @@ export default function PricingClient() {
               )}
               <button
                 type="button"
-                onClick={() => router.push("/profile")}
+                onClick={() => router.push(isB2bSubmitted ? "/b2b/dashboard" : "/profile")}
                 className="w-full border-2 border-black dark:border-white bg-white dark:bg-zinc-900 py-3 text-xs font-black hover:bg-zinc-100 transition-all"
               >
-                {isAr ? "الانتقال إلى الملف الشخصي والكوتا ←" : "Go to Profile & Quota Dashboard →"}
+                {isB2bSubmitted
+                  ? (isAr ? "إدارة جروب التليجرام والكود ←" : "Manage Group License & Bot →")
+                  : (isAr ? "الانتقال إلى الملف الشخصي والكوتا ←" : "Go to Profile & Quota Dashboard →")}
               </button>
             </div>
           )}
@@ -1183,13 +1255,17 @@ export default function PricingClient() {
                   <span>{isAr ? "واجهتك مشكلة أثناء الدفع؟ احكيلنا ونساعدك فوراً 💬" : "Had an issue during checkout? Talk to us 💬"}</span>
                 </div>
                 <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                  {isAr
+                  {isSaudi
+                    ? isAr
+                      ? "تأكد من تفعيل الشراء الدولي/الإنترنت على بطاقة Visa أو Mastercard (أو استخدم البطاقة الرقمية/Apple Pay عبر البطاقة البنكية) وإدخال رمز التحقق (3D Secure / OTP). كما يمكنك مراسلتنا لتفعيل الاشتراك يدوياً خلال دقائق."
+                      : "Ensure international/online payments are enabled on your Visa or Mastercard (including digital bank cards) and complete the 3D Secure OTP step, or message us for fast manual activation."
+                    : isAr
                     ? "إذا رفض البنك المعاملة أو تأخر كود التأكيد (OTP) أو لا تتوفر معك بطاقة فيزا، يمكنك أيضاً التحويل المباشر عبر أي محفظة إلكترونية أو إنستاباي والتفعيل الفوري لحسابك بدون أي انتظار."
                     : "If your bank declined the transaction or OTP was delayed, you can also pay directly via mobile wallet / InstaPay for instant activation."}
                 </p>
                 <div className="pt-2 flex flex-col sm:flex-row gap-2">
                   <a
-                    href="https://wa.me/201024359100?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7%D8%8C%20%D9%88%D8%A7%D8%AC%D9%87%D8%AA%20%D9%85%D8%B4%D9%83%D9%84%D8%A9%20%D9%81%D9%8A%20%D8%A7%D9%84%D8%AF%D9%81%D8%B9%20%D8%B9%D9%84%D9%89%20EGX%20BOTS%20%D9%88%D8%A3%D8%B1%D9%8A%D8%AF%20%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D8%B9%D8%AF%D8%A9%20%D9%88%D8%A7%D9%84%D8%AF%D9%81%D8%B9%20%D8%A8%D8%A7%D9%84%D9%85%D8%AD%D9%81%D8%B8%D8%A9"
+                    href={`https://wa.me/201024359100?text=${waFailureMsg}`}
                     target="_blank"
                     rel="noreferrer"
                     className="flex-1 inline-flex items-center justify-center gap-1.5 border-2 border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5 px-4 text-xs transition-colors"
@@ -1475,15 +1551,15 @@ export default function PricingClient() {
                         ? isAr ? "سجّل الدخول للمتابعة" : "Sign in to Continue"
                         : selectedPlan === "lifetime" && !lifetimeIsOpen
                         ? isAr ? "عذراً، اكتملت جميع مقاعد باقة مدى الحياة (20/20)" : "Lifetime Deal is Sold Out"
-                        : isAr ? `المتابعة للدفع الآمن (${formatPrice(proPrice)}) 🔒` : `Proceed to Secure Checkout (${formatPrice(proPrice)}) 🔒`}
+                        : isAr ? `المتابعة للدفع الآمن (${proDisplayAmount.toLocaleString()} ${currencyLabel}) 🔒` : `Proceed to Secure Checkout (${proDisplayAmount.toLocaleString()} ${currencyLabel}) 🔒`}
                     </>
                   )}
                 </button>
                 {isSaudi && (
                   <p className="text-[11px] font-bold text-center text-zinc-600 dark:text-zinc-400">
                     {isAr
-                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س — تُعالج الفاتورة على بوابة EasyKash بقيمة ${proPrice.toLocaleString()} ج.م ويتم التحويل تلقائياً من بطاقتك`
-                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR — EasyKash charges ${proPrice.toLocaleString()} EGP with automatic card conversion`}
+                      ? `يُعادل ${proDisplayAmount.toLocaleString()} ر.س — تُعالج الفاتورة على بوابة EasyKash بقيمة ${easyKashChargeEgp.toLocaleString()} ج.م ويتم التحويل تلقائياً من بطاقتك`
+                      : `Approx. ${proDisplayAmount.toLocaleString()} SAR — EasyKash charges ${easyKashChargeEgp.toLocaleString()} EGP with automatic card conversion`}
                   </p>
                 )}
                 <div className="flex items-center justify-center gap-3 text-[11px] font-bold text-zinc-500">
@@ -1501,13 +1577,22 @@ export default function PricingClient() {
 
             {/* Sidebar Summary Column */}
             <div className="lg:col-span-4 border-4 border-black dark:border-white bg-zinc-950 text-white p-6 space-y-6 shadow-[6px_6px_0px_rgba(0,0,0,1)] dark:shadow-[6px_6px_0px_#10b981] lg:sticky lg:top-24">
+              {(() => {
+                const isB2bCheckout = selectedPlanDetails.id.startsWith("b2b_");
+                const b2bSelected = isB2bCheckout ? (b2bPlans.find((item) => item.id === selectedPlanDetails.id) ?? null) : null;
+                return (
+                  <>
               <div className="border-b border-zinc-800 pb-4">
                 <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 block mb-1">
                   {isAr ? "فاتورة الاشتراك" : "ORDER INVOICE"}
                 </span>
                 <h3 className="text-2xl font-black flex items-center gap-2">
                   {selectedPlanDetails.isLifetime && <Crown className="w-6 h-6 text-yellow-400" />}
-                  {selectedPlanDetails.isLifetime ? `${brandName} Lifetime VIP` : `${brandName} Pro`}
+                  {isB2bCheckout
+                    ? (isAr ? `${brandName} B2B للـ Telegram` : `${brandName} B2B License`)
+                    : selectedPlanDetails.isLifetime
+                    ? `${brandName} Lifetime VIP`
+                    : `${brandName} Pro`}
                 </h3>
                 <p className="text-xs font-semibold text-zinc-400 mt-1">
                   {isAr ? selectedPlanDetails.name_ar : selectedPlanDetails.name_en}
@@ -1519,7 +1604,11 @@ export default function PricingClient() {
                 <div className="flex justify-between">
                   <span className="text-zinc-400">{isAr ? "الخطة:" : "Plan:"}</span>
                   <span className="font-black text-emerald-400">
-                    {selectedPlanDetails.isLifetime ? (isAr ? "مدى الحياة (Lifetime VIP)" : "Lifetime VIP") : "Pro VIP"}
+                    {isB2bCheckout
+                      ? (b2bSelected?.tag || "B2B VIP")
+                      : selectedPlanDetails.isLifetime
+                      ? (isAr ? "مدى الحياة (Lifetime VIP)" : "Lifetime VIP")
+                      : "Pro VIP"}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1551,7 +1640,7 @@ export default function PricingClient() {
 
               {/* Total */}
               <div className="space-y-2 border-b border-zinc-800 pb-5">
-                {promoDiscountAmount > 0 && appliedPromo && (
+                {promoDiscountDisplay > 0 && appliedPromo && (
                   <div className="space-y-1 text-xs font-bold">
                     <div className="flex justify-between text-zinc-400">
                       <span>{isAr ? "السعر قبل كود الخصم:" : "Subtotal:"}</span>
@@ -1566,15 +1655,15 @@ export default function PricingClient() {
                 <div className="flex items-baseline justify-between">
                   <span className="text-sm font-black">{isAr ? "المبلغ الإجمالي:" : "Total Amount:"}</span>
                   <div className="text-end">
-                    <span className="text-3xl font-black text-emerald-400">{displayAmount(proPrice).toLocaleString()}</span>
+                    <span className="text-3xl font-black text-emerald-400">{proDisplayAmount.toLocaleString()}</span>
                     <span className="text-xs font-bold text-zinc-400 ms-1">{currencyLabel}</span>
                   </div>
                 </div>
                 {isSaudi && (
                   <p className="text-[11px] font-semibold text-amber-300/90 leading-relaxed pt-1">
                     {isAr
-                      ? `يُعادل ~${displayAmount(proPrice).toLocaleString()} ر.س — قيمة الفاتورة الفعلية على بوابة EasyKash هي ${proPrice.toLocaleString()} ج.م (تحويل تلقائي بالبطاقة)`
-                      : `Approx. ~${displayAmount(proPrice).toLocaleString()} SAR — EasyKash processes ${proPrice.toLocaleString()} EGP (auto-converted by your card)`}
+                      ? `يُعادل ${proDisplayAmount.toLocaleString()} ر.س — قيمة الفاتورة الفعلية على بوابة EasyKash هي ${easyKashChargeEgp.toLocaleString()} ج.م (تحويل تلقائي بالبطاقة)`
+                      : `Approx. ${proDisplayAmount.toLocaleString()} SAR — EasyKash processes ${easyKashChargeEgp.toLocaleString()} EGP (auto-converted by your card)`}
                   </p>
                 )}
               </div>
@@ -1582,11 +1671,22 @@ export default function PricingClient() {
               {/* Included Benefits List */}
               <div className="space-y-2 text-xs font-bold">
                 <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider block">
-                  {selectedPlanDetails.isLifetime
+                  {isB2bCheckout
+                    ? (isAr ? "ميزات رخصة القنوات B2B:" : "INCLUDED WITH B2B LICENSE:")
+                    : selectedPlanDetails.isLifetime
                     ? (isAr ? "ميزات باقة مدى الحياة VIP:" : "INCLUDED WITH LIFETIME VIP:")
                     : (isAr ? "الميزات المشمولة فوراً:" : "INCLUDED WITH PRO:")}
                 </span>
-                {selectedPlanDetails.isLifetime ? (
+                {isB2bCheckout ? (
+                  <>
+                    {(b2bSelected?.features || []).map((feat, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{feat.text}</span>
+                      </div>
+                    ))}
+                  </>
+                ) : selectedPlanDetails.isLifetime ? (
                   <>
                     <div className="flex items-center gap-2 text-yellow-300 font-black">
                       <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
@@ -1638,6 +1738,9 @@ export default function PricingClient() {
                   </>
                 )}
               </div>
+                  </>
+                );
+              })()}
 
               {/* Secure Notice */}
               <div className="p-3 border-2 border-emerald-500/50 bg-emerald-950/30 text-[11px] font-semibold text-zinc-300 leading-relaxed">
@@ -1819,7 +1922,7 @@ export default function PricingClient() {
                   id: "pro_1y" as const,
                   name_ar: "سنة كاملة",
                   name_en: "1 Year",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)} 💎 (تثبيت مدى الحياة)` : `توفير ${annualPlan?.savingsPct || 25}% 💎`,
+                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)} 💎 (تثبيت مدى الحياة)` : `توفير ${annualPlan?.savingsPct || 25}% 💎`,
                   badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(1000)} (Locked for life) 💎` : `Save ${annualPlan?.savingsPct || 25}% 💎`,
                   badgeBg: "bg-sky-400 text-black",
                 },
@@ -1978,9 +2081,12 @@ export default function PricingClient() {
             const isFeatured = activeProDuration === "pro_6m";
             const isAnnual = activeProDuration === "pro_1y";
             const isMonthly = activeProDuration === "pro";
-            const { discountEgp: proCardPromoDiscount, finalEgp: proCardFinalEgp } = promoPriceForPlan(
-              activeProDetails.amount_egp
+            const proCardPricing = computeCheckoutPricing(
+              activeProDetails.amount_egp,
+              appliedPromo?.discount_percent || 0,
+              isSaudi,
             );
+            const proCardHasPromo = proCardPricing.discountDisplay > 0;
             const planDiscount =
               isMonthly && monthlyDiscount?.active && (foundersIsOpen || isGrandfathered || isGrandfathered100)
                 ? monthlyDiscount
@@ -1990,7 +2096,7 @@ export default function PricingClient() {
                     original_amount_egp: activeProDetails.original_amount_egp,
                     label_ar: isFeatured
                       ? `عرض المؤسسين خصم 50% (${displayAmount(500).toLocaleString()} بدل ${formatPrice(1000)}) ⭐`
-                      : `عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)}) 💎`,
+                      : `عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)}) 💎`,
                   }
                 : null;
 
@@ -2015,7 +2121,7 @@ export default function PricingClient() {
                         : (isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular")
                     ) : (
                       foundersIsOpen
-                        ? (isAr ? `💎 أكبر توفير · عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(1850)})` : "💎 Max Value · Founders Offer")
+                        ? (isAr ? `💎 أكبر توفير · عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)})` : "💎 Max Value · Founders Offer")
                         : (isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value")
                     )}
                   </span>
@@ -2041,22 +2147,20 @@ export default function PricingClient() {
                   <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                     <div className="flex flex-wrap items-baseline gap-2">
                       <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
-                        {displayAmount(proCardFinalEgp).toLocaleString()}
+                        {proCardPricing.finalDisplay.toLocaleString()}
                       </span>
                       <span className="text-sm font-bold text-zinc-500">{currencyLabel}</span>
-                      {(proCardPromoDiscount > 0 || planDiscount) && (
+                      {(proCardHasPromo || planDiscount) && (
                         <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
                           {isAr ? "بدل " : "was "}
-                          {formatPrice(
-                            proCardPromoDiscount > 0
-                              ? activeProDetails.amount_egp
-                              : Number(planDiscount?.original_amount_egp)
-                          )}
+                          {proCardHasPromo
+                            ? formatPrice(activeProDetails.amount_egp)
+                            : formatPrice(Number(planDiscount?.original_amount_egp))}
                         </span>
                       )}
                     </div>
 
-                    {proCardPromoDiscount > 0 && appliedPromo && (
+                    {proCardHasPromo && appliedPromo && (
                       <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
                         <Sparkles className="w-3 h-3 shrink-0" />
                         <span>
@@ -2095,8 +2199,8 @@ export default function PricingClient() {
                             : `Subscribing to the 6-Month plan (${formatPrice(500)} instead of ${formatPrice(1000)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(500)}/6m) rate upon renewal!`)
                           : isAnnual
                           ? (isAr
-                            ? `باشتراكك في باقة السنة الكاملة (${formatPrice(1000)} بدلاً من ${formatPrice(1850)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(1000)} للسنة) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
-                            : `Subscribing to the 1-Year plan (${formatPrice(1000)} instead of ${formatPrice(1850)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(1000)}/yr) rate upon renewal!`)
+                            ? `باشتراكك في باقة السنة الكاملة (${formatPrice(1000)} بدلاً من ${formatPrice(regular1yEgp)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(1000)} للسنة) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
+                            : `Subscribing to the 1-Year plan (${formatPrice(1000)} instead of ${formatPrice(regular1yEgp)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(1000)}/yr) rate upon renewal!`)
                           : isGrandfathered
                           ? (isAr
                             ? `${formatPrice(50)} شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة).`
@@ -2137,8 +2241,8 @@ export default function PricingClient() {
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
                     {isPro
-                      ? (isAr ? `تجديد باقة Pro (${formatPrice(proCardFinalEgp)})` : `Renew Pro (${formatPrice(proCardFinalEgp)})`)
-                      : (isAr ? `اشترك في Pro (${formatPrice(proCardFinalEgp)})` : `Subscribe to Pro (${formatPrice(proCardFinalEgp)})`)}
+                      ? (isAr ? `تجديد باقة Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Renew Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                      : (isAr ? `اشترك في Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Subscribe to Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
                   </button>
                   <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
@@ -2151,7 +2255,8 @@ export default function PricingClient() {
 
           {/* ── 03. Lifetime VIP Card ── */}
           {(() => {
-            const { discountEgp: lifetimePromoDiscount, finalEgp: lifetimeFinalEgp } = promoPriceForPlan(2250);
+            const lifetimePricing = computeCheckoutPricing(2250, appliedPromo?.discount_percent || 0, isSaudi);
+            const lifetimeHasPromo = lifetimePricing.discountDisplay > 0;
             return (
           <div className="relative rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/40 dark:from-amber-950/30 dark:via-zinc-900/95 dark:to-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-xl shadow-amber-500/10 dark:shadow-amber-500/5 transition-all">
             {/* Floating Top Badge */}
@@ -2184,16 +2289,16 @@ export default function PricingClient() {
               {/* Price Section */}
               <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{displayAmount(lifetimeFinalEgp).toLocaleString()}</span>
+                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{lifetimePricing.finalDisplay.toLocaleString()}</span>
                   <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">{currencyLabel}</span>
-                  {lifetimePromoDiscount > 0 && (
+                  {lifetimeHasPromo && (
                     <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
                       {isAr ? "بدل " : "was "}
                       {formatPrice(2250)}
                     </span>
                   )}
                 </div>
-                {lifetimePromoDiscount > 0 && appliedPromo && (
+                {lifetimeHasPromo && appliedPromo && (
                   <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
                     <Sparkles className="w-3 h-3 shrink-0" />
                     <span>
@@ -2222,8 +2327,8 @@ export default function PricingClient() {
                 </div>
                 <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
                   {isAr
-                    ? `سعر الباقة (${formatPrice(2250)}) تعود قيمته بعد 22.5 شهر فقط في باقة Pro — أي بعد أقل من عامين تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!`
-                    : `At ${formatPrice(2250)}, this breaks even in just ~22 months of Pro. After less than 2 years, all platform AI models, alerts, and updates are 100% free forever!`}
+                    ? `سعر الباقة (${formatPrice(2250)}) تعود قيمته خلال ${breakevenMonths} شهر فقط من باقة Pro — أي ${breakevenMonths <= 12 ? "في أقل من سنة واحدة" : "خلال أقل من عامين"} تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!`
+                    : `At ${formatPrice(2250)}, this breaks even in just ${breakevenMonths} months of Pro — ${breakevenMonths <= 12 ? "under 1 year" : "under 2 years"} — after which all platform AI models, alerts, and updates are 100% free forever!`}
                 </p>
               </div>
 
@@ -2282,8 +2387,8 @@ export default function PricingClient() {
                 <Crown className="w-4 h-4 fill-current" />
                 {lifetimeIsOpen
                   ? isPro
-                    ? (isAr ? `ترقية لحساب مدى الحياة (${formatPrice(lifetimeFinalEgp)})` : `Upgrade to Lifetime (${formatPrice(lifetimeFinalEgp)})`)
-                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${formatPrice(lifetimeFinalEgp)}) 👑` : `Get Lifetime Deal (${formatPrice(lifetimeFinalEgp)}) 👑`)
+                    ? (isAr ? `ترقية لحساب مدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Upgrade to Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑` : `Get Lifetime Deal (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑`)
                   : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
               </button>
               <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">

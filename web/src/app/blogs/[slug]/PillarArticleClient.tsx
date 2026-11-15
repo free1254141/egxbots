@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMarket } from "@/contexts/MarketContext";
 import { PillarArticle } from "@/lib/seo/pillar-articles";
 import BrandedPageHeader from "@/components/BrandedPageHeader";
 import {
@@ -26,6 +27,11 @@ interface PillarArticleClientProps {
 export default function PillarArticleClient({ article }: PillarArticleClientProps) {
   const { language } = useLanguage();
   const isAr = language === "ar";
+  const { isSaudi } = useMarket();
+  const isTasiContext = article.market ? article.market === "tasi" : isSaudi;
+  const brandName = isTasiContext ? "TASI BOTS" : "EGX BOTS";
+  const scannerHref = isTasiContext ? "/scanner/ai?market=tasi" : "/scanner/ai";
+  const pricingHref = isTasiContext ? "/pricing?market=tasi" : "/pricing";
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const toggleFaq = (idx: number) => {
@@ -87,18 +93,24 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
             </div>
             <div>
               <h3 className="font-black text-black dark:text-white text-base sm:text-lg">
-                {isAr ? "تداول بذكاء في البورصة المصرية" : "Trade Smart on the Egyptian Exchange"}
+                {isTasiContext
+                  ? (isAr ? "تداول بذكاء في السوق السعودي (تداول TASI)" : "Trade Smart on Saudi Tadawul (TASI)")
+                  : (isAr ? "تداول بذكاء في البورصة المصرية" : "Trade Smart on the Egyptian Exchange")}
               </h3>
               <p className="text-xs sm:text-sm text-zinc-900 dark:text-zinc-200 mt-1 font-medium leading-relaxed">
-                {isAr
-                  ? "امسح أكثر من 200 سهم مصري واكتشف إشارات التجميع والدعم والمقاومة والسيولة لحظياً."
-                  : "Scan 200+ Egyptian stocks and uncover real-time accumulation and volume signals."}
+                {isTasiContext
+                  ? (isAr
+                    ? "امسح أسهم السوق السعودي (تاسي) واكتشف إشارات التجميع والدعم والمقاومة والسيولة لحظياً."
+                    : "Scan 200+ Saudi TASI stocks and uncover real-time accumulation and institutional liquidity signals.")
+                  : (isAr
+                    ? "امسح أكثر من 200 سهم مصري واكتشف إشارات التجميع والدعم والمقاومة والسيولة لحظياً."
+                    : "Scan 200+ Egyptian stocks and uncover real-time accumulation and volume signals.")}
               </p>
             </div>
           </div>
 
           <Link
-            href="/scanner/ai"
+            href={scannerHref}
             className="whitespace-nowrap px-6 py-3 bg-black text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 font-black text-sm border-2 border-black dark:border-white shadow-[3px_3px_0px_0px_#f59e0b] transition-all flex items-center gap-2 shrink-0"
           >
             <span>{isAr ? "فتح الرادار مجاناً" : "Open Radar Free"}</span>
@@ -164,23 +176,29 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
         <div className="p-8 sm:p-12 bg-amber-400 dark:bg-amber-500 border-4 border-black text-black shadow-[8px_8px_0px_0px_#000] text-center">
           <TrendingUp className="w-12 h-12 mx-auto mb-4 text-black stroke-[2.5]" />
           <h2 className="text-2xl sm:text-3xl font-black tracking-tight mb-3 uppercase">
-            {isAr ? "جاهز للتداول بقرارات مدروسة في البورصة المصرية؟" : "Ready to Trade with Precision on EGX?"}
+            {isTasiContext
+              ? (isAr ? "جاهز للتداول بقرارات مدروسة في السوق السعودي (تاسي)؟" : "Ready to Trade with Precision on Saudi TASI?")
+              : (isAr ? "جاهز للتداول بقرارات مدروسة في البورصة المصرية؟" : "Ready to Trade with Precision on EGX?")}
           </h2>
           <p className="text-sm sm:text-base font-bold text-zinc-900 max-w-xl mx-auto mb-8 leading-relaxed">
-            {isAr
-              ? "انضم لمئات المتداولين الذين يعتمدون على الذكاء الاصطناعي لرصد السيولة والصفقات اللحظية في السوق المصري."
-              : "Join hundreds of traders leveraging quantitative AI algorithms to track institutional liquidity and breakouts."}
+            {isTasiContext
+              ? (isAr
+                ? "انضم للمتداولين الذين يعتمدون على الذكاء الاصطناعي لرصد السيولة والفرص في السوق السعودي وتنقية الأسهم الشرعية."
+                : "Join traders leveraging quantitative AI algorithms to track institutional liquidity and Sharia-compliant setups on TASI.")
+              : (isAr
+                ? "انضم لمئات المتداولين الذين يعتمدون على الذكاء الاصطناعي لرصد السيولة والصفقات اللحظية في السوق المصري."
+                : "Join hundreds of traders leveraging quantitative AI algorithms to track institutional liquidity and breakouts.")}
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-4">
             <Link
-              href="/scanner/ai"
+              href={scannerHref}
               className="px-8 py-3.5 bg-black text-white hover:bg-zinc-800 font-black text-base border-2 border-black shadow-[4px_4px_0px_0px_#fff] transition-all"
             >
               {isAr ? "جرب الرادار الآن مجاناً" : "Try Radar Free Now"}
             </Link>
             <Link
-              href="/pricing"
+              href={pricingHref}
               className="px-8 py-3.5 bg-white text-black hover:bg-zinc-100 font-black text-base border-2 border-black shadow-[4px_4px_0px_0px_#000] transition-all"
             >
               {isAr ? "باقات البرمجيات وتنبيهات تليجرام" : "SaaS Plans & Telegram Alerts"}
@@ -188,11 +206,15 @@ export default function PillarArticleClient({ article }: PillarArticleClientProp
           </div>
         </div>
 
-        {/* Mandatory FRA Regulatory Disclaimer */}
+        {/* Mandatory Regulatory Disclaimer */}
         <div className="mt-8 p-4 border-2 border-zinc-300 dark:border-zinc-700 bg-zinc-100/80 dark:bg-zinc-900/80 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed text-center font-medium">
-          {isAr
-            ? "⚠️ تنويه هام: مخرجات النماذج الكمية والخوارزميات المعروضة على منصة EGX BOTS هي مؤشرات فنية وإحصائية عامة لأغراض الدراسة والبحث فقط، ولا تمثل توصية استثمارية أو دعوة للشراء أو البيع. قرار التداول مسؤوليتك المستقلة عبر شركة سمسرة مرخصة من الهيئة العامة للرقابة المالية."
-            : "⚠️ Legal Disclaimer: All quantitative models and algorithmic outputs on EGX BOTS are general technical and statistical indicators for educational and research purposes only, and do not constitute investment advice or a solicitation to buy or sell. Trading decisions are your sole responsibility through an FRA-licensed brokerage."}
+          {isTasiContext
+            ? (isAr
+              ? `⚠️ تنويه هام: مخرجات النماذج الكمية والخوارزميات المعروضة على منصة ${brandName} هي مؤشرات فنية وإحصائية عامة لأغراض الدراسة والبحث فقط، ولا تمثل توصية استثمارية أو دعوة للشراء أو البيع. قرار التداول مسؤوليتك المستقلة عبر وسيط مالي مرخص من هيئة السوق المالية السعودية (CMA).`
+              : `⚠️ Legal Disclaimer: All quantitative models and algorithmic outputs on ${brandName} are general technical and statistical indicators for educational and research purposes only, and do not constitute investment advice or a solicitation to buy or sell. Trading decisions are your sole responsibility through a CMA-licensed brokerage.`)
+            : (isAr
+              ? `⚠️ تنويه هام: مخرجات النماذج الكمية والخوارزميات المعروضة على منصة ${brandName} هي مؤشرات فنية وإحصائية عامة لأغراض الدراسة والبحث فقط، ولا تمثل توصية استثمارية أو دعوة للشراء أو البيع. قرار التداول مسؤوليتك المستقلة عبر شركة سمسرة مرخصة من الهيئة العامة للرقابة المالية.`
+              : `⚠️ Legal Disclaimer: All quantitative models and algorithmic outputs on ${brandName} are general technical and statistical indicators for educational and research purposes only, and do not constitute investment advice or a solicitation to buy or sell. Trading decisions are your sole responsibility through an FRA-licensed brokerage.`)}
         </div>
       </div>
     </div>

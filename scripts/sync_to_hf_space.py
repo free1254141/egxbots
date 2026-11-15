@@ -60,11 +60,13 @@ FILES_TO_SYNC = [
     "api/perf_utils.py",
     "api/plan_limits.py",
     "api/routers/offload.py",
+    "api/routers/easykash.py",
     "api/scheduled_automations_worker.py",
     "api/easykash_payments.py",
     "api/direct_wallet_payments.py",
     "api/daily_report_dispatch.py",
     "api/cache_invalidation.py",
+    "api/hf_history_cache.py",
     "api/telegram_bot.py",
     "api/telegram_b2b.py",
     "api/telegram_vip_chat.py",
@@ -110,7 +112,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(backend): add per-user custom AI rules memory, cache optimizations, B2B/Telegram & Saudi pipeline updates"
+    commit_msg = "feat(backend): sync EasyKash Saudi pricing, offload router & cache optimizations"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

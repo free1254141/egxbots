@@ -156,18 +156,39 @@ def _post_revalidate(endpoint: str, secret: str, tags: List[str], event_id: str,
     return None, last_error
 
 
+def invalidate_local_hf_caches(tags: List[str]) -> List[str]:
+    """Clear in-process HF memory caches for refreshed daily tags immediately on run completion."""
+    cleared: List[str] = []
+    try:
+        from api.routers.offload import invalidate_offload_caches
+        cleared.extend(invalidate_offload_caches(tags))
+    except Exception as exc:
+        print(f"[CACHE] Offload cache invalidation warning: {exc}")
+    if TAG_SHORT_SWINGS in tags:
+        try:
+            from api.routers.short_swings import clear_saudi_swings_cache
+            clear_saudi_swings_cache()
+            cleared.append("saudi_short_swings")
+        except Exception as exc:
+            print(f"[CACHE] Short swings cache invalidation warning: {exc}")
+    return cleared
+
+
 def invalidate_cache_tags(tags: List[str], timeout: float = 310.0, force: bool = False) -> Dict[str, Any]:
     """Refresh explicit datasets after independent successful scheduled jobs with cooldown dedup."""
     if not tags or any(tag not in TAG_STEP_REQUIREMENTS for tag in tags):
         return {"invalidated": [], "skipped": True}
+
+    deduped_tags = list(dict.fromkeys(tags))
+    local_cleared = invalidate_local_hf_caches(deduped_tags)
+    if local_cleared:
+        print(f"[CACHE] Cleared local HF caches {local_cleared} for tags {deduped_tags}")
 
     endpoint = _revalidate_endpoint()
     secret = (os.getenv("REVALIDATE_SECRET") or os.getenv("ADMIN_SECRET_KEY") or "").strip()
     if not endpoint or not secret:
         print("[CACHE] Revalidation skipped: REVALIDATE_URL/WEB_ORIGIN or REVALIDATE_SECRET not configured.")
         return {"invalidated": [], "skipped": True}
-
-    deduped_tags = list(dict.fromkeys(tags))
     cooldown = _cooldown_seconds()
     cooldown_skipped: List[str] = []
     if not force and cooldown > 0:

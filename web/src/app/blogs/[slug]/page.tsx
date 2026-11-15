@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { Metadata } from "next";
 import { PILLAR_ARTICLES } from "@/lib/seo/pillar-articles";
 import PillarArticleClient from "./PillarArticleClient";
-import { EgxOnlyGuard } from "@/contexts/MarketContext";
 
 export const revalidate = 86400;
 
@@ -20,7 +19,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!article) return {};
 
   const url = `https://egxbots.com/blogs/${slug}`;
-  const title = `${article.title.ar} | EGX BOTS`;
+  const brandLabel = article.market === "tasi" ? "TASI BOTS" : "EGX BOTS";
+  const title = `${article.title.ar} | ${brandLabel}`;
   const description = article.description.ar;
 
   return {
@@ -87,7 +87,7 @@ export default async function PillarArticlePage({ params }: PageProps) {
         },
         "publisher": {
           "@type": "Organization",
-          "name": "EGX BOTS",
+          "name": article.market === "tasi" ? "TASI BOTS" : "EGX BOTS",
           "logo": {
             "@type": "ImageObject",
             "url": "https://egxbots.com/icon-512.png",
@@ -116,9 +116,7 @@ export default async function PillarArticlePage({ params }: PageProps) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaGraph).replace(/</g, "\\u003c") }}
       />
-      <EgxOnlyGuard sectionNameAr="المدونة والأدلة التعليمية" sectionNameEn="Blog & Educational Guides">
-        <PillarArticleClient article={article} />
-      </EgxOnlyGuard>
+      <PillarArticleClient article={article} />
     </>
   );
 }

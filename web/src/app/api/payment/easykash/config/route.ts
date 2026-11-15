@@ -10,10 +10,11 @@ export const runtime = "nodejs";
 export const preferredRegion = "fra1"; // Prevent multi-region cold starts
 const BACKEND_URL = (process.env.PYTHON_BACKEND_URL || process.env.TRADING_SIGNALS_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
-// Cache-Control: 5-min Edge CDN cache, 30-min stale-while-revalidate for public
+// Signed-in responses include user-specific grandfathered/eligibility pricing,
+// so keep this authenticated endpoint strictly private and uncached.
+// Anonymous visitors use /api/payment/public-config which is Edge CDN cached.
 const PAYMENT_CONFIG_HEADERS = {
-  "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=1800",
-  "Vary": "Cookie, Authorization",
+  "Cache-Control": "private, no-store, max-age=0",
 };
 
 export async function GET(req: NextRequest) {

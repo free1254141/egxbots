@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { trackEvent } from "@/lib/gtm";
+import { toDisplayAmount } from "@/lib/saudi-pricing";
 import RecommendationsTable from "@/components/RecommendationsTable";
 
 const STATS = [
@@ -292,8 +293,7 @@ export default function LandingClient() {
                 if (!plan) return null;
                 const meta = PRO_PLAN_META[id];
                 const rawEgp = Number(plan.amount_egp || 0);
-                const sarMap: Record<number, number> = { 50: 4, 100: 8, 200: 16, 500: 40, 1000: 79, 1500: 118, 1800: 141, 1850: 145, 2250: 176, 2500: 196 };
-                const displayAmt = isSaudi ? (sarMap[Math.round(rawEgp)] ?? Math.max(1, Math.round(rawEgp / 12.75))) : rawEgp;
+                const displayAmt = toDisplayAmount(rawEgp, isSaudi);
                 return {
                     id,
                     label: isAr ? meta.labelAr : meta.labelEn,

@@ -96,6 +96,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.90,
     },
     {
+      url: `${baseUrl}/blogs/best-tasi-ai-stock-analysis-software`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/aramco-2222-rajhi-1120-ai-stock-analysis-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
+      url: `${baseUrl}/blogs/saudi-tasi-sharia-compliant-stocks-purification-guide`,
+      changeFrequency: 'weekly',
+      priority: 0.90,
+    },
+    {
       url: `${baseUrl}/news`,
       changeFrequency: 'hourly',
       priority: 0.8,

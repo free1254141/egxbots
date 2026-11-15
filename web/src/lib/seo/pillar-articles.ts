@@ -1,5 +1,6 @@
 export interface PillarArticle {
   slug: string;
+  market?: "egx" | "tasi" | "both";
   title: { ar: string; en: string };
   subtitle: { ar: string; en: string };
   description: { ar: string; en: string };
@@ -901,6 +902,293 @@ export const PILLAR_ARTICLES: Record<string, PillarArticle> = {
             Visit Ewanbot (ewanbot.com) ↗
           </a>
         </div>
+      `
+    }
+  },
+
+  "best-tasi-ai-stock-analysis-software": {
+    slug: "best-tasi-ai-stock-analysis-software",
+    market: "tasi",
+    title: {
+      ar: "أفضل برنامج تحليل الأسهم السعودية (تاسي) بالذكاء الاصطناعي 2026: مقارنة شاملة",
+      en: "Best Saudi Stock Market (TASI) AI Analysis Software 2026: Complete Guide"
+    },
+    subtitle: {
+      ar: "مقارنة عملية بين أدوات التحليل التقليدية ورادار TASI BOTS الذكي لرصد السيولة والفرص في تداول السعودية",
+      en: "A practical comparison between legacy charting platforms and TASI BOTS AI Radar for tracking liquidity on Saudi Tadawul"
+    },
+    description: {
+      ar: "تعرف على أفضل برنامج تحليل الأسهم السعودية تاسي 2026 بالذكاء الاصطناعي. كيف يرصد TASI BOTS تدفقات السيولة المؤسسية لأسهم أرامكو والراجحي وسابك والأسهم النقية باشتراك يبدأ من 20 ر.س شهرياً.",
+      en: "Discover the best Saudi TASI stock analysis software in 2026. Learn how TASI BOTS uses quantitative AI to track institutional flows across Aramco, Al Rajhi, SABIC, and Sharia-compliant stocks starting at 20 SAR/mo."
+    },
+    keywords: [
+      "أفضل برنامج تحليل الأسهم السعودية",
+      "تحليل تاسي بالذكاء الاصطناعي",
+      "برنامج تحليل تداول السعودية",
+      "TASI AI stock screener",
+      "TASI BOTS",
+      "رصد السيولة تاسي"
+    ],
+    readingTime: { ar: "7 دقائق قراءة", en: "7 min read" },
+    publishedAt: "2026-11-15",
+    author: { ar: "فريق الأبحاث الكمية — TASI BOTS", en: "Quantitative Research Desk — TASI BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "ما الفرق بين برامج الشارت اليدوية ومنصة TASI BOTS؟",
+          en: "How does TASI BOTS differ from traditional manual charting apps?"
+        },
+        answer: {
+          ar: "أدوات مثل TradingView وTickerChart توفر رسوماً بيانية ممتازة لكنها تتطلب فحصاً يدوياً لمئات الأسهم يومياً. بينما يقوم رادار TASI BOTS بمسح أكثر من 200 شركة في السوق السعودي آلياً لحساب نقاط التجميع والسيولة الشاذة (RVOL) ومستويات الدعم والمقاومة وإرسالها فوراً على تليجرام والموقع.",
+          en: "Charting tools like TradingView or TickerChart excel at manual technical drawing, whereas TASI BOTS automatically scans 200+ Tadawul listings with quantitative AI models to rank liquidity inflows (RVOL), accumulation regimes, and key technical zones."
+        }
+      },
+      {
+        question: {
+          ar: "كم سعر باقة TASI BOTS Pro للسوق السعودي؟",
+          en: "How much does TASI BOTS Pro cost in Saudi Riyals?"
+        },
+        answer: {
+          ar: "تبدأ باقة Pro بسعر أساسي 20 ريالاً سعودياً فقط شهرياً (وباقات موفرة: 100 ر.س لـ 6 شهور، 180 ر.س للسنة، و225 ر.س لباقة VIP مدى الحياة)، مع إمكانية الدفع المباشر بالبطاقة البنكية أو تطبيق خصم المؤسسين والأكواد الترويجية.",
+          en: "Standard Pro starts at just 20 SAR/month, with discounted multi-period plans (100 SAR for 6 months, 180 SAR/year, and 225 SAR Lifetime VIP), supporting Visa/Mastercard checkout."
+        }
+      },
+      {
+        question: {
+          ar: "هل يغطي التحليل مؤشرات تاسي الشرعية والسعر العادل؟",
+          en: "Does the platform include TASI Sharia screening and fair value analysis?"
+        },
+        answer: {
+          ar: "نعم، تشمل المنصة فاحص الأسهم الشرعية للسوق السعودي وحاسبة التطهير والزكاة إلى جانب نماذج القيمة العادلة والتقارير اليومية الآلية.",
+          en: "Yes, TASI BOTS includes an automated Saudi Sharia-compliance screener with dividend purification calculations alongside fair-value valuation models."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>مع اتساع قاعدة المتداولين الأفراد والمؤسسات في <strong>سوق الأسهم السعودية (تداول TASI)</strong> وزيادة سرعة دوران السيولة بين قطاعات الطاقة والمصارف والبتروكيماويات والتقنية، لم يعد الاعتماد على قراءة عشرات الشموع يدوياً أو متابعة مجموعات التوصيات العشوائية كافياً لاتخاذ قرار استثماري منضبط.</p>
+
+        <h3>1. التحدي الحقيقي أمام متداول السوق السعودي</h3>
+        <p>أغلب المتداولين يقعون في فخ الدخول المتأخر بعد ارتفاع السهم بنسبة كبيرة بسبب نقص أدوات <strong>المسح الكمي اللحظي (Quantitative AI Screening)</strong>. الفحص اليدوي لأكثر من 200 شركة يومياً مستحيل عملياً بدون محرك حوسبة يعالج الحجم النسبي (RVOL)، الزخم، وتقاطع المتوسطات في ثوانٍ.</p>
+
+        <h3>2. مقارنة سريعة: التداول اليدوي مقابل رادار TASI BOTS</h3>
+        <ul>
+          <li><strong>الشموع التقليدية:</strong> ممتازة لرسم الترندات يدوياً، لكنها لا تصنف السوق آلياً ولا تنبهك بالأسهم التي تشهد دخول سيولة مؤسسية قبل الانطلاقة.</li>
+          <li><strong>محرك TASI BOTS AI:</strong> يدمج 3 أنظمة قراءة (فني وزخم، كشف التجميع وحركة السيولة، ونموذج القيمة العادلة)، بالإضافة إلى <strong>Vision AI</strong> لقراءة صور الشارت أو لقطات المحفظة خلال ثوانٍ.</li>
+          <li><strong>تنقية شرعية مدمجة:</strong> فلترة فورية للأسهم النقية وحساب نسبة التطهير بدون الحاجة لملفات Excel منفصلة.</li>
+        </ul>
+
+        <h3>3. كيف تستفيد من المنصة بسعر 20 ر.س شهرياً فقط؟</h3>
+        <p>صُممت خطط الأسعار لتكون متاحة لكل متداول في المملكة بنفس هيكل الباقات المرن:</p>
+        <ul>
+          <li><strong>الخطة الشهرية (Pro):</strong> 20 ر.س شهرياً (وتتوفر فترات 6 شهور بـ 100 ر.س، وسنة بـ 180 ر.س، وVIP مدى الحياة بـ 225 ر.س لمرة واحدة).</li>
+          <li><strong>الأدوات التفاعلية المباشرة:</strong> تصفح ملف <a href="/stocks/2222" class="text-emerald-600 font-bold underline">تحليل سهم أرامكو (2222)</a> أو <a href="/stocks/1120" class="text-emerald-600 font-bold underline">تحليل سهم الراجحي (1120)</a>، أو افتح <a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">رادار الأسهم السعودية AI</a> مباشرة.</li>
+        </ul>
+
+        <div class="p-4 mt-4 border-2 border-black bg-emerald-50 dark:bg-emerald-950/30 font-bold text-sm">
+          ابدأ بمسح السوق السعودي الآن عبر <a href="/scanner/ai?market=tasi" class="underline text-emerald-700 dark:text-emerald-300">رادار TASI BOTS AI</a> أو اطلع على <a href="/pricing?market=tasi" class="underline text-emerald-700 dark:text-emerald-300">باقات السوق السعودي (تبدأ من 20 ر.س)</a>.
+        </div>
+      `,
+      en: `
+        <p>As participation deepens across the <strong>Saudi Exchange (Tadawul / TASI)</strong> and liquidity rotates rapidly between energy, banking, materials, and growth sectors, manual chart checking alone no longer keeps pace with institutional capital flows.</p>
+
+        <h3>1. Why Traditional Charting Isn't Enough for TASI</h3>
+        <p>Legacy charting platforms help visualize individual tickers, but manually screening 200+ Tadawul listings every session leaves traders reacting late to breakouts. Quantitative AI scanning surfaces abnormal volume ratios (RVOL), structured support/resistance zones, and risk bounds instantly.</p>
+
+        <h3>2. Core Capabilities Built for Saudi Traders</h3>
+        <ul>
+          <li><strong>3-System AI Scanner:</strong> Combines momentum, accumulation flow detection, and risk-managed technical setups across TASI leaders such as <a href="/stocks/2222" class="text-emerald-600 font-bold underline">Saudi Aramco (2222)</a> and <a href="/stocks/1120" class="text-emerald-600 font-bold underline">Al Rajhi Bank (1120)</a>.</li>
+          <li><strong>Vision AI Chart & Portfolio Reader:</strong> Upload a chart screenshot or brokerage snapshot to extract structured support/resistance and concentration insights.</li>
+          <li><strong>Built-In Sharia Screening & Fair Value:</strong> Filter pure/mixed listings and compute dividend purification directly alongside valuation benchmarks.</li>
+        </ul>
+
+        <h3>3. Transparent Saudi Pricing Starting at 20 SAR/Month</h3>
+        <p>Explore live analytics free or unlock Pro starting at <strong>20 SAR/month</strong> (with 6-month 100 SAR, 1-year 180 SAR, and Lifetime VIP 225 SAR tiers) on our <a href="/pricing?market=tasi" class="text-emerald-600 font-bold underline">Saudi Pricing Page</a>.</p>
+      `
+    }
+  },
+
+  "aramco-2222-rajhi-1120-ai-stock-analysis-guide": {
+    slug: "aramco-2222-rajhi-1120-ai-stock-analysis-guide",
+    market: "tasi",
+    title: {
+      ar: "دليل تحليل سهم أرامكو (2222) ومصرف الراجحي (1120) وسابك بالذكاء الاصطناعي والسيولة",
+      en: "AI Stock Analysis Guide for Aramco (2222), Al Rajhi Bank (1120) & SABIC on TASI"
+    },
+    subtitle: {
+      ar: "كيف تقرأ حركة الصناديق والسيولة ومناطق الدعم والمقاومة في الأسهم القيادية بالسوق السعودي",
+      en: "How to track institutional volume, trend structure, and fair valuation across Tadawul's flagship heavyweights"
+    },
+    description: {
+      ar: "منهج عملي لتحليل سهم أرامكو 2222 وسهم الراجحي 1120 وسابك 2010 في تاسي باستخدام مؤشرات السيولة المؤسسية، القيمة العادلة، وقراءة الاتجاه بالذكاء الاصطناعي.",
+      en: "Practical framework for analyzing Saudi Aramco (2222), Al Rajhi Bank (1120), and SABIC (2010) on TASI using AI flow indicators, support/resistance levels, and fair value multiples."
+    },
+    keywords: [
+      "تحليل سهم أرامكو 2222",
+      "تحليل سهم الراجحي 1120",
+      "تحليل سهم سابك 2010",
+      "الأسهم القيادية تاسي",
+      "سيولة تاسي بالذكاء الاصطناعي"
+    ],
+    readingTime: { ar: "8 دقائق قراءة", en: "8 min read" },
+    publishedAt: "2026-11-15",
+    author: { ar: "قسم التحليل المؤسسي — TASI BOTS", en: "Institutional Analytics — TASI BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "لماذا يؤثر سهما أرامكو (2222) والراجحي (1120) على اتجاه مؤشر تاسي العام؟",
+          en: "Why do Aramco (2222) and Al Rajhi (1120) drive the broader TASI index?"
+        },
+        answer: {
+          ar: "لأنهما يمثلان أكبر وزن نسبي في المؤشر العام تاسي؛ متابعة تغير السيولة فيهما تكشف مبكراً شهية المخاطرة لدى الصناديق والمؤسسات قبل انعكاسها على أسهم السوق الموازية والمتوسطة.",
+          en: "Due to their dominant index weight in TASI, liquidity rotation in Aramco (2222) and Al Rajhi (1120) frequently signals broader institutional risk appetite before mid-caps react."
+        }
+      },
+      {
+        question: {
+          ar: "كيف أتابع التحديث اللحظي لمستويات الدعم والمقاومة لسهم 2222 أو 1120؟",
+          en: "Where can I check live support, resistance, and AI Score for 2222 or 1120?"
+        },
+        answer: {
+          ar: "خصصت المنصة صفحة تحليل شاملة ومحدثة يومياً لكل شركة، تشمل مناطق الطلب والعرض الآلية والتقييم الأساسي، متاحة مجاناً عبر صفحات الأسهم داخل الموقع.",
+          en: "Dedicated daily-updated stock pages provide automated support/resistance zones, momentum metrics, and valuation ratios for every TASI ticker."
+        }
+      },
+      {
+        question: {
+          ar: "هل يُستخدم الذكاء الاصطناعي كبديل عن التقييم المالي ومكرر الربحية؟",
+          en: "Does AI analysis replace fundamental metrics like P/E and dividend yield?"
+        },
+        answer: {
+          ar: "لا؛ أفضل النتائج تتحقق بدمج قراءة التوقيت الفني والسيولة من رادار الذكاء الاصطناعي مع القيمة العادلة والتوزيعات النقدية، وهو ما تجمعه شاشات القيمة العادلة لدينا.",
+          en: "No — combining AI liquidity/timing signals with P/E, P/B, and cash-dividend fundamentals delivers stronger discipline than relying on a single signal."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>تشكل الأسهم القيادية في السوق السعودي — وعلى رأسها <strong>أرامكو السعودية (2222)</strong> و<strong>مصرف الراجحي (1120)</strong> و<strong>سابك (2010)</strong> و<strong>stc (7010)</strong> — البوصلة الرئيسية لتوجه المحافظ الاستثمارية والصناديق الكبرى في <strong>تداول (TASI)</strong>.</p>
+
+        <h3>1. منهجية القراءة المزدوجة: السيولة + التقييم</h3>
+        <p>أثناء التقلبات، لا يكفي سؤال «هل السهم جيد استثمارياً؟»؛ السؤال الأدق هو «هل تشهد هذه المستويات تجميعاً مؤسسياً هادئاً أم تصريفاً؟». تعتمد خوارزميات <strong>TASI BOTS</strong> على 3 ركائز عند قراءة القياديات:</p>
+        <ul>
+          <li><strong>مؤشر السيولة النسبية (RVOL):</strong> يقارن سيولة الجلسة الحالية بمتوسط 20 جلسة لرصد دخول الأوامر الكبيرة مبكراً.</li>
+          <li><strong>هيكلة الدعوم والمقاومات الآلية:</strong> تحديد نقاط الارتداد الحقيقية ومناطق إيقاف الخسارة الصارم بدل الأرقام العشوائية.</li>
+          <li><strong>هامش القيمة العادلة:</strong> مقارنة السعر السوقي بمضاعفات القطاع والنمو المتوقع في الأرباح.</li>
+        </ul>
+
+        <h3>2. صفحات التحليل المباشرة لأهم القياديات السعودية</h3>
+        <ul>
+          <li><a href="/stocks/2222" class="text-emerald-600 font-bold underline">تحليل سهم أرامكو السعودية (2222)</a> — متابعة التوزيعات، التدفقات، والدعوم الحيوية لقطاع الطاقة.</li>
+          <li><a href="/stocks/1120" class="text-emerald-600 font-bold underline">تحليل سهم مصرف الراجحي (1120)</a> — رصد تفاعلات القطاع المصرفي وأسعار الفائدة والزخم الفني.</li>
+          <li><a href="/stocks/2010" class="text-emerald-600 font-bold underline">تحليل سهم سابك (2010)</a> و<a href="/stocks/7010" class="text-emerald-600 font-bold underline">تحليل سهم stc (7010)</a> — مؤشرات التحول في البتروكيماويات والاتصالات.</li>
+        </ul>
+
+        <h3>3. دمج شات التحليل الذكي وتقارير القيمة العادلة</h3>
+        <p>يمكنك مقارنة أي سهمين في تاسي بضغطة زر أو التحقق من السعر العادل عبر صفحة <a href="/fair-value?market=tasi" class="text-emerald-600 font-bold underline">تقييم السعر العادل للسوق السعودي</a> قبل بناء مراكزك.</p>
+      `,
+      en: `
+        <p>Saudi Tadawul heavyweights — led by <strong>Saudi Aramco (2222)</strong>, <strong>Al Rajhi Bank (1120)</strong>, <strong>SABIC (2010)</strong>, and <strong>stc (7010)</strong> — act as the primary liquidity barometer for the entire <strong>TASI</strong> market.</p>
+
+        <h3>1. Dual Framework: Institutional Flow + Intrinsic Valuation</h3>
+        <ul>
+          <li><strong>Relative Volume (RVOL):</strong> Benchmarks session turnover against 20-day baselines to detect quiet accumulation early.</li>
+          <li><strong>Automated Key Levels:</strong> Calculates objective support, breakout resistance, and invalidation stops cleanly.</li>
+          <li><strong>Fair Value Cushion:</strong> Pairs technical timing with earnings multiples and cash-yield sustainability via our <a href="/fair-value?market=tasi" class="text-emerald-600 font-bold underline">TASI Fair Value Screener</a>.</li>
+        </ul>
+
+        <h3>2. Jump Straight to Live Leader Profiles</h3>
+        <p>Inspect live technicals and AI scores on dedicated stock pages for <a href="/stocks/2222" class="text-emerald-600 font-bold underline">Saudi Aramco (2222)</a>, <a href="/stocks/1120" class="text-emerald-600 font-bold underline">Al Rajhi Bank (1120)</a>, <a href="/stocks/2010" class="text-emerald-600 font-bold underline">SABIC (2010)</a>, and <a href="/stocks/7010" class="text-emerald-600 font-bold underline">stc (7010)</a>.</p>
+      `
+    }
+  },
+
+  "saudi-tasi-sharia-compliant-stocks-purification-guide": {
+    slug: "saudi-tasi-sharia-compliant-stocks-purification-guide",
+    market: "tasi",
+    title: {
+      ar: "دليل الأسهم النقية في السوق السعودي (تاسي) وحساب التطهير والزكاة آلياً 2026",
+      en: "Saudi TASI Sharia-Compliant Stocks & Automated Dividend Purification Guide 2026"
+    },
+    subtitle: {
+      ar: "ضوابط الأسهم المباحة والنقية في تداول وكيفية حساب مبلغ تطهير التوزيعات والأسهم بضغطة زر",
+      en: "Understanding Saudi Sharia screening criteria and calculating exact SAR dividend purification automatically"
+    },
+    description: {
+      ar: "دليلك الشامل لمعرفة الأسهم النقية والمختلطة في السوق السعودي تاسي 2026 وفق المعايير الشرعية المعتمدة، مع أداة TASI BOTS لحساب التطهير والزكاة بالريال السعودي آلياً.",
+      en: "Complete 2026 guide to Saudi TASI Sharia-compliant stocks, permissible ratios, and TASI BOTS automated SAR purification & Zakat calculator."
+    },
+    keywords: [
+      "الأسهم النقية في السوق السعودي",
+      "القائمة النقية تاسي 2026",
+      "حاسبة تطهير الأسهم السعودية",
+      "أسهم حلال في تداول",
+      "زكاة الأسهم السعودية"
+    ],
+    readingTime: { ar: "6 دقائق قراءة", en: "6 min read" },
+    publishedAt: "2026-11-15",
+    author: { ar: "وحدة الفلترة الشرعية — TASI BOTS", en: "Shariah Research Unit — TASI BOTS" },
+    faqs: [
+      {
+        question: {
+          ar: "ما الفرق بين الأسهم النقية والأسهم المختلطة في السوق السعودي؟",
+          en: "What is the difference between pure and mixed Sharia-compliant Saudi stocks?"
+        },
+        answer: {
+          ar: "الأسهم النقية هي شركات نشاطها مباح وخالية من القروض أو الإيداعات الربوية وتجاوز النسب المقررة، فلا يلزمها تطهير عادةً. أما الأسهم المختلطة فنُشاطها الأصلي مباح مع وجود نسبة هامشية من التمويل أو الإيراد غير المباح ضمن الضوابط المعتبرة (مثل حد 30% للديون و5% للإيراد)، وتخضع لتطهير العوائد بنسبة محددة لكل سهم.",
+          en: "Pure stocks have halal core operations with negligible/zero interest-bearing debt or revenue. Mixed permissible stocks operate in halal sectors within recognized financial limits (e.g., <= 30% debt-to-market-cap and <= 5% non-compliant revenue) and require deducting a small purification amount."
+        }
+      },
+      {
+        question: {
+          ar: "كيف تساعدني أداة الشريعة والتطهير في TASI BOTS؟",
+          en: "How does the TASI BOTS Sharia & Purification tool help?"
+        },
+        answer: {
+          ar: "تعرض لك حالة كل شركة في تاسي، ومعامل التطهير المقدر بالريال السعودي حسب عدد أسهمك وتوزيعاتك، دون الحاجة للبحث في عدة قوائم متفرقة كل ربع سنة.",
+          en: "It flags Sharia compliance status per TASI ticker and computes estimated SAR purification figures automatically based on your share count."
+        }
+      },
+      {
+        question: {
+          ar: "هل تتغير قائمة الأسهم النقية كل عام؟",
+          en: "Does Sharia compliance status change over time?"
+        },
+        answer: {
+          ar: "نعم، قد تتغير حالة السهم بناءً على أحدث القوائم المالية الربعية أو السنوية المنشورة على تداول؛ لذا يُنصح بمراجعة الفاحص الدوري قبل بناء المراكز طويلة الأجل.",
+          en: "Yes, compliance can shift with quarterly or annual balance sheet filings on Tadawul, so periodic re-verification is essential."
+        }
+      }
+    ],
+    content: {
+      ar: `
+        <p>يمثل الالتزام بالضوابط الشرعية ركيزة أساسية لدى غالبية المستثمرين في <strong>سوق الأسهم السعودية (تداول TASI)</strong>. ومع تعدد القوائم الفصلية وتغير المراكز المالية للشركات مع كل إعلان ربعي، تبرز الحاجة لأداة تجمع بين <strong>التحليل الكمي بالذكاء الاصطناعي</strong> و<strong>التنقية الشرعية الدقيقة</strong>.</p>
+
+        <h3>1. الضوابط الشائعة لتصنيف الأسهم السعودية</h3>
+        <ul>
+          <li><strong>سلامة النشاط الأساسي:</strong> أن يكون النشاط الرئيسي للشركة مباحاً (مثل <a href="/stocks/1120" class="text-emerald-600 font-bold underline">مصرف الراجحي 1120</a>، الصناعات الغذائية، الطاقة، والاتصالات المتوافقة).</li>
+          <li><strong>الضابط التمويلي (نسبة الديون):</strong> ألا تتجاوز القروض أو التمويلات التقليدية ذات الفائدة النسبة المعيارية المتداولة لدى الهيئات واللجان الشرعية (غالباً 30% من متوسط القيمة السوقية أو إجمالي الموجودات حسب المنهج المعتمد).</li>
+          <li><strong>ضابط الإيرادات غير المباحة:</strong> ألا تتعدى الإيرادات العرضية غير المباحة نسبة 5% من إجمالي الإيرادات، مع إخراج ما يقابلها تطهيراً.</li>
+        </ul>
+
+        <h3>2. تطهير الأرباح والتوزيعات النقدية بدون تعقيد</h3>
+        <p>بدلاً من مراجعة القوائم المالية وحساب معامل التطهير لكل شركة يدوياً، توفر لك منصة <strong>TASI BOTS</strong> شاشة <a href="/sharia?market=tasi" class="text-emerald-600 font-bold underline">الأسهم الشرعية وحاسبة التطهير السعودية</a> التي تعرض حالة السهم وحساب مبلغ التطهير التقديري بالريال السعودي فوراً.</p>
+
+        <h3>3. التكامل بين الفلتر الشرعي والرادار الذكي</h3>
+        <p>يمكنك استعراض الأسهم المتوافقة مع الضوابط الشرعية بالتوازي مع إشارات <a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">رادار TASI BOTS AI</a> وقراءة تقييم <a href="/fair-value?market=tasi" class="text-emerald-600 font-bold underline">السعر العادل</a> لبناء محفظة نقية وموزونة المخاطر.</p>
+      `,
+      en: `
+        <p>Sharia compliance is a foundational criterion for most retail and institutional investors across the <strong>Saudi Exchange (Tadawul / TASI)</strong>. As corporate debt and non-operating income fluctuate with quarterly disclosures, automated screening saves hours of manual verification.</p>
+
+        <h3>1. Core Financial & Activity Benchmarks</h3>
+        <ul>
+          <li><strong>Halal Core Operations:</strong> Permissible business lines across Islamic banking, energy, industrials, and telecoms.</li>
+          <li><strong>Debt Threshold:</strong> Conventional interest-bearing debt capped within recognized committee ceilings (typically <= 30% of market cap/assets).</li>
+          <li><strong>Incidental Income Ceiling:</strong> Non-permissible interest income <= 5% of total revenue, subject to dividend purification.</li>
+        </ul>
+
+        <h3>2. Instant SAR Purification & Integrated AI Screening</h3>
+        <p>Verify compliance status and estimate SAR dividend purification automatically inside our <a href="/sharia?market=tasi" class="text-emerald-600 font-bold underline">TASI Sharia Screener</a>, then cross-check institutional momentum on the <a href="/scanner/ai?market=tasi" class="text-emerald-600 font-bold underline">Saudi AI Radar</a>.</p>
       `
     }
   }
