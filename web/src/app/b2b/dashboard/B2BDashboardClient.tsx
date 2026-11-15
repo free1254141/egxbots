@@ -265,10 +265,10 @@ export default function B2BDashboardClient() {
                 {isAr ? "تسجيل الدخول الآن" : "Sign In Now"}
               </Link>
               <Link
-                href="/pricing?mode=b2b"
+                href="/b2b"
                 className="border-3 border-black dark:border-white bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-black px-6 py-3 text-xs uppercase shadow-[3px_3px_0px_#000] active:translate-y-0.5"
               >
-                {isAr ? "استعراض باقات أصحاب القنوات (B2B)" : "Browse B2B Channel Plans"}
+                {isAr ? "استعراض صفحة عروض الشركات (B2B)" : "Browse B2B Solutions & Plans"}
               </Link>
             </div>
           </div>

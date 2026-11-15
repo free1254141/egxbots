@@ -341,13 +341,21 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link
+                  href="/b2b"
+                  className="inline-flex items-center gap-1.5 text-sm font-black text-amber-500 hover:text-amber-400 transition-colors"
+                >
+                  <span>🤖 {isAr ? "حلول الشركات وبوت القنوات (B2B)" : "Enterprise & Channel Bot (B2B)"}</span>
+                </Link>
+              </li>
+              <li>
                 <a
                   href="https://wa.me/201024359109?text=مرحباً، أنا صاحب موقع / معلن وأود الاستفسار عن الشراكات الإعلانية والتبادل التسويقي مع منصاتكم"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm font-bold text-amber-500 hover:text-amber-400 transition-colors"
+                  className="inline-flex items-center gap-1.5 text-sm font-bold text-amber-500/80 hover:text-amber-400 transition-colors"
                 >
-                  <span>📢 {isAr ? "للإعلان وشراكات المواقع (B2B)" : "Advertise & Partnerships (B2B)"}</span>
+                  <span>📢 {isAr ? "للإعلان وشراكات المواقع" : "Advertise & Media Partnerships"}</span>
                 </a>
               </li>
               <li>

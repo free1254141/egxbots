@@ -142,6 +142,7 @@ export default function DisclosuresClient({
 
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
+  const prevMarketRef = useRef<string>(market);
 
   // Debounce search input
   useEffect(() => {
@@ -201,6 +202,14 @@ export default function DisclosuresClient({
 
   // Trigger fresh fetch when filters, search, or active market change
   useEffect(() => {
+    const marketChanged = prevMarketRef.current !== market;
+    if (marketChanged) {
+      prevMarketRef.current = market;
+      setDisclosures(isSaudi ? [] : initialDisclosures);
+      setTotalCount(isSaudi ? 0 : (initialStats.total || initialDisclosures.length));
+      setHasMore(false);
+    }
+
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       if (
@@ -213,6 +222,11 @@ export default function DisclosuresClient({
       ) {
         return;
       }
+      if (isSaudi) {
+        setDisclosures([]);
+        setTotalCount(0);
+        setHasMore(false);
+      }
     }
     const controller = new AbortController();
     fetchBatch(0, false, controller.signal).catch(() => {});
@@ -221,7 +235,7 @@ export default function DisclosuresClient({
         controller.abort();
       } catch {}
     };
-  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isSaudi, fetchBatch]);
+  }, [debouncedSearch, selectedType, selectedSentiment, selectedTimeframe, selectedSector, market, isSaudi, initialDisclosures, initialStats.total, fetchBatch]);
 
   // Progressive infinite scroll observer ("يحمل شوية بشوية")
   useEffect(() => {
@@ -322,7 +336,7 @@ export default function DisclosuresClient({
   // Analytical pool (all available disclosures in the dataset, merged and deduplicated)
   const basePool = useMemo(() => {
     const map = new Map<string, DisclosureItem>();
-    if (initialPool) {
+    if (!isSaudi && initialPool) {
       for (const item of initialPool) {
         map.set(item.id, item);
       }
@@ -331,7 +345,7 @@ export default function DisclosuresClient({
       map.set(item.id, item);
     }
     return Array.from(map.values());
-  }, [initialPool, disclosures]);
+  }, [initialPool, disclosures, isSaudi]);
 
   // Filter pool by active timeframe and sector
   const filteredPool = useMemo(() => {
@@ -342,16 +356,18 @@ export default function DisclosuresClient({
     );
   }, [basePool, selectedTimeframe, selectedSector]);
 
+  const activePriceMap = useMemo(() => (isSaudi ? {} : (priceMap || {})), [isSaudi, priceMap]);
+
   // Dynamically compute active analytics for the selected timeframe and sector (with daily netting & offset)
   const activeAnalytics = useMemo(() => {
-    return analyzeDisclosures(filteredPool, priceMap || {});
-  }, [filteredPool, priceMap]);
+    return analyzeDisclosures(filteredPool, activePriceMap);
+  }, [filteredPool, activePriceMap]);
 
   // Cumulative historical analytics (ignores short timeframe filter so older uncancelled insider positions are ALWAYS preserved)
   const cumulativeAnalytics = useMemo(() => {
     const sectorPool = filterDisclosuresByTimeframeAndSector(basePool, "all", selectedSector);
-    return analyzeDisclosures(sectorPool, priceMap || {});
-  }, [basePool, selectedSector, priceMap]);
+    return analyzeDisclosures(sectorPool, activePriceMap);
+  }, [basePool, selectedSector, activePriceMap]);
 
   // Timeframe label in Arabic / English
   const timeframeLabel = useMemo(() => {

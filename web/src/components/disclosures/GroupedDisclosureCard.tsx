@@ -15,6 +15,7 @@ import {
   Scale,
 } from "lucide-react";
 import StockLogo from "@/components/StockLogo";
+import { useMarket } from "@/contexts/MarketContext";
 import type {
   GroupedStockDisclosure,
   DisclosureItem,
@@ -42,6 +43,8 @@ export default function GroupedDisclosureCard({
   onDiscussInFloatingChat,
   onPreviewPdf,
 }: GroupedDisclosureCardProps) {
+  const { isSaudi } = useMarket();
+  const fallbackSymbol = isSaudi ? "TASI" : "EGX";
   const [activeIdx, setActiveIdx] = useState<number>(0);
   const [showInlinePdf, setShowInlinePdf] = useState<boolean>(false);
 
@@ -127,7 +130,7 @@ export default function GroupedDisclosureCard({
           <div className="flex items-center justify-between gap-2 pb-2.5 border-b-2 border-black/15 dark:border-white/15">
             <div className="flex items-center gap-2">
               <StockLogo
-                symbol={group.symbol || "EGX"}
+                symbol={group.symbol || fallbackSymbol}
                 size="sm"
                 className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
               />
@@ -142,7 +145,7 @@ export default function GroupedDisclosureCard({
                 </button>
               ) : (
                 <span className="px-2 py-0.5 text-xs font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black">
-                  EGX
+                  {fallbackSymbol}
                 </span>
               )}
               {group.items.length > 1 ? (
@@ -401,7 +404,7 @@ export default function GroupedDisclosureCard({
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b-2 border-black/15 dark:border-white/15 mb-2">
               <div className="flex items-center gap-2">
                 <StockLogo
-                  symbol={group.symbol || "EGX"}
+                  symbol={group.symbol || fallbackSymbol}
                   size="sm"
                   className="border-2 border-black dark:border-white rounded-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
                 />
@@ -416,7 +419,7 @@ export default function GroupedDisclosureCard({
                   </button>
                 ) : (
                   <span className="px-2.5 py-0.5 text-xs font-black uppercase bg-zinc-200 dark:bg-zinc-800 text-black dark:text-white border-2 border-black">
-                    EGX
+                    {fallbackSymbol}
                   </span>
                 )}
                 <span className="font-black text-black dark:text-white text-xs">
@@ -692,7 +695,9 @@ export default function GroupedDisclosureCard({
 
           <div className="p-2 bg-zinc-50 dark:bg-zinc-900 border-t-2 border-black dark:border-white flex items-center justify-between gap-2 text-xs">
             <span className="text-[11px] font-black text-zinc-700 dark:text-zinc-300 truncate">
-              {isAr ? "ملف الإفصاح الأصلي - البورصة المصرية" : "Authentic EGX Filing Document"}
+              {isSaudi
+                ? (isAr ? "ملف الإفصاح الرسمي - السوق السعودي (تداول)" : "Official Saudi Tadawul Filing")
+                : (isAr ? "ملف الإفصاح الأصلي - البورصة المصرية" : "Authentic EGX Filing Document")}
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <a

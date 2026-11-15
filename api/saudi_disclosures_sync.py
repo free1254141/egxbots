@@ -238,7 +238,13 @@ def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
                 except Exception:
                     pass
 
+            raw_title_lower = raw_title.lower()
+            if any(bad in raw_title_lower for bad in ["جنيه", "البورصة المصرية", "egx", "القاهرة للدواجن", "الرقابة المالية"]):
+                continue
+
             sym, company_name = _match_symbol(raw_title, matcher)
+            if not sym:
+                continue
             d_type, sentiment, action_type, ai_summary = _classify_disclosure(raw_title)
 
             seen_urls.add(link)

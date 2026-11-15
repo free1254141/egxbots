@@ -114,6 +114,12 @@ export default function NewsPage() {
         setPage(1);
     }, [dateFilter, monthFilter, period]);
 
+    // Reset pagination & sector when switching market
+    useEffect(() => {
+        setPage(1);
+        setSelectedSector("");
+    }, [market]);
+
     // Trigger fetch when fetchNews callback changes
     useEffect(() => {
         const controller = new AbortController();
