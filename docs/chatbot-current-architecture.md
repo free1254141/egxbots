@@ -7,6 +7,8 @@
 هذه الوثيقة تصف المسار الفعلي، وحدوده واختباراته؛ نجاح اختبار لا يثبت انعدام أخطاء الإنتاج.
 قبل تعديل الشات، اقرأها مع `AGENTS.md`. حدّث سجل التغييرات والقياسات والرجوع بعد كل تعديل معماري.
 
+> **تحديث 15 نوفمبر 2026:** تفعيل الكاش الذكي داخل المحادثات المتعددة (Web و Telegram `chat_history`) بشكل Model-Driven بدون أي Regex عبر معامل `is_contextual_followup` في مخطط الأدوات (`tools_schema.py` و`pipeline.py` و`analysis_cache.py`)؛ بحيث تمر الأسئلة المستقلة (`is_contextual_followup=false`) إلى كاش الجولة الأولى (مع عزل presets في `get_technical_scan` وتطبيع الرموز العربية)، بينما تحتفظ أسئلة المتابعة الضيقة (`is_contextual_followup=true`) بكامل سياق الحوار وتتجاوز الكاش بالكامل. كما أُضيف دعم القواعد المخصصة الدائمة لكل مستخدم (`profiles.custom_ai_rules` و`manage_user_preferences`) مع عزل تام عن الكاش العام.
+> 
 > **تحديث 12 نوفمبر 2026:** بناء نظام الكاش الذكي ثنائي الطبقات (Two-Tier Model-Driven Cache) بمحرك بايثون (`api/agentic_chat/analysis_cache.py`) مع حفظ دائم في جدول `market_cache` في Supabase، واستنباط النية بدون Regex عبر استدعاءات الأدوات، ودعم معالج شامل لوسوم DeepSeek DSML لمنع أي تسريب للأكواد. التفاصيل في القسم التالي أدناه.
 > 
 > **تحديث 10 نوفمبر 2026:** بناء معمارية خادم بايثون الوكيل المنفصل (Python Agentic Chatbot Engine) للقضاء على استهلاك Vercel Active CPU، مع التوجيه الشفاف عبر `CHATBOT_BACKEND` في `next.config.js`. التوثيق التفصيلي المستقل في [chatbot-python-agentic-architecture-2026-11-10.md](chatbot-python-agentic-architecture-2026-11-10.md) وملخص التغييرات في القسم الأول أدناه.

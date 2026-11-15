@@ -112,7 +112,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(backend): sync EasyKash Saudi pricing, offload router & cache optimizations"
+    commit_msg = "perf(ai-chat): enable model-driven multi-turn analysis cache & Telegram cache parity"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

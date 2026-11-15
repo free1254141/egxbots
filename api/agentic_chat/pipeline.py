@@ -49,6 +49,7 @@ from api.agentic_chat.analysis_cache import (
     is_recommendation_cache_key,
     set_vip_analysis_cache,
     build_analysis_cache_key,
+    inspect_tool_calls_followup_flags,
     resolve_tool_call_to_cache_key,
     resolve_tool_calls_to_cache_key,
     get_cached_analysis,
@@ -450,6 +451,7 @@ async def _run_agentic_chat_stream_impl(
 
     # Add bounded conversation history (last 10 turns max)
     has_conversation_history = False
+    history_start_idx = len(formatted_messages)
     if history and isinstance(history, list):
         for msg in history[-10:]:
             role = msg.get("role", "user")
@@ -467,6 +469,7 @@ async def _run_agentic_chat_stream_impl(
                     })
                 else:
                     formatted_messages.append({"role": role, "content": str(content)[:2000]})
+    history_end_idx = len(formatted_messages)
 
     # 1. Vision Analysis Pipeline (Ported 1:1 from legacy Vercel system)
     valid_images = [img for img in (images or []) if img and isinstance(img, str) and img.strip()]
@@ -574,6 +577,8 @@ async def _run_agentic_chat_stream_impl(
     recommendations_data: List[Any] = []
     tools_executed_count = 0
     candidate_cache_key: Optional[str] = None
+    has_followup_flag = False
+    model_confirmed_standalone = False
     is_saudi_flow = _is_saudi_related_query(message, active_market=ui_exch, hints=hints)
 
     # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
@@ -774,8 +779,8 @@ async def _run_agentic_chat_stream_impl(
 
                 # -------------------------------------------------------------------
                 # Dynamic Model-Driven Cache Check (Zero-Regex Intent Resolution)
-                # When DeepSeek decides the tool call in Round 1, check if this canonical
-                # read query has already been analyzed and cached in Supabase market_cache / memory.
+                # Works in both single-turn AND multi-turn conversations without Regex:
+                # DeepSeek decides the tool call AND sets is_contextual_followup.
                 # -------------------------------------------------------------------
                 saudi_tool_call = is_saudi_flow or _is_saudi_related_query(
                     message, active_market=ui_exch, hints=hints, tool_calls=tool_calls
@@ -783,10 +788,27 @@ async def _run_agentic_chat_stream_impl(
                 if saudi_tool_call:
                     is_saudi_flow = True
 
+                batch_followup_true, batch_explicit_standalone = inspect_tool_calls_followup_flags(tool_calls)
+                if batch_followup_true:
+                    has_followup_flag = True
+                    candidate_cache_key = None
+                    model_confirmed_standalone = False
+
+                if round_count >= 2 and candidate_cache_key:
+                    round2_key = resolve_tool_calls_to_cache_key(tool_calls)
+                    if not round2_key or round2_key != candidate_cache_key:
+                        candidate_cache_key = None
+                        model_confirmed_standalone = False
+
+                cache_allowed_for_turn = (
+                    (not has_followup_flag and not has_conversation_history)
+                    or (has_conversation_history and not has_followup_flag and batch_explicit_standalone)
+                )
+
                 if (
                     not saudi_tool_call
-                    and not has_conversation_history
                     and not has_user_rules
+                    and cache_allowed_for_turn
                     and round_count == 1
                     and len(tool_calls) >= 1
                     and not vision_data
@@ -795,6 +817,7 @@ async def _run_agentic_chat_stream_impl(
                     dynamic_key = resolve_tool_calls_to_cache_key(tool_calls)
                     if not dynamic_key:
                         candidate_cache_key = None
+                        model_confirmed_standalone = False
                     else:
                         preserved_special = False
                         if candidate_cache_key and candidate_cache_key.startswith("vip_stock_"):
@@ -812,6 +835,10 @@ async def _run_agentic_chat_stream_impl(
                         lookup_key = candidate_cache_key
                         if not allow_recommendations and is_recommendation_cache_key(lookup_key):
                             lookup_key = None
+                            candidate_cache_key = None
+                        model_confirmed_standalone = bool(candidate_cache_key) and (
+                            batch_explicit_standalone or not has_conversation_history
+                        )
                         cached_hit = (
                             get_vip_analysis_cache(
                                 lookup_key,
@@ -854,6 +881,9 @@ async def _run_agentic_chat_stream_impl(
                             yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
                             yield "data: [DONE]\n\n"
                             return
+                elif round_count == 1:
+                    candidate_cache_key = None
+                    model_confirmed_standalone = False
 
                 # Tool calls requested:
                 tools_executed_count += len(tool_calls)
@@ -871,6 +901,8 @@ async def _run_agentic_chat_stream_impl(
                         fn_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
                     except Exception:
                         fn_args = {}
+                    if isinstance(fn_args, dict):
+                        fn_args.pop("is_contextual_followup", None)
                     if has_user_rules:
                         from api.agentic_chat.user_preferences import apply_user_rules_to_tool_args
                         fn_args = apply_user_rules_to_tool_args(fn_name, fn_args, user_rules)
@@ -890,6 +922,22 @@ async def _run_agentic_chat_stream_impl(
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
                 _append_tool_results(tool_calls, list(tool_results), formatted_messages, tables_data, recommendations_data)
+
+                # For confirmed standalone requests inside a multi-turn session, strip prior turns
+                # before Round 2 synthesis so saved shared cache contains zero cross-stock bleed and saves input tokens.
+                if (
+                    round_count == 1
+                    and has_conversation_history
+                    and model_confirmed_standalone
+                    and candidate_cache_key
+                    and not has_user_rules
+                    and not is_saudi_flow
+                    and history_end_idx > history_start_idx
+                ):
+                    formatted_messages = (
+                        formatted_messages[:history_start_idx] + formatted_messages[history_end_idx:]
+                    )
+                    history_end_idx = history_start_idx
 
                 # If Round 1 already fetched both stock price/indicators & levels, go straight to synthesis
                 called_names = {tc.get("function", {}).get("name", "") for tc in tool_calls}
@@ -1141,9 +1189,13 @@ async def _run_agentic_chat_stream_impl(
     # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
     # Placed after excel_tables formatting so cached hits return structured ExcelTable objects ready for Web & Telegram.
     saved_cache_key: Optional[str] = None
+    can_save_for_history = (
+        (not has_conversation_history and not has_followup_flag)
+        or (has_conversation_history and model_confirmed_standalone and tools_executed_count > 0)
+    )
     if (
         not is_saudi_flow
-        and not has_conversation_history
+        and can_save_for_history
         and not has_user_rules
         and accumulated_reply
         and not vision_data
@@ -1151,7 +1203,7 @@ async def _run_agentic_chat_stream_impl(
     ):
         effective_key = (
             candidate_cache_key
-            if tools_executed_count > 0
+            if (tools_executed_count > 0 or has_conversation_history)
             else (candidate_cache_key or build_analysis_cache_key(message))
         )
         if effective_key and not (not allow_recommendations and is_recommendation_cache_key(effective_key)):

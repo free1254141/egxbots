@@ -115,7 +115,7 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
     state_rows = _supabase_request(f"telegram_vip_chat_state?telegram_user_id=eq.{telegram_user_id}&select=*") or []
     state_row = state_rows[0] if state_rows else None
 
-    profile_rows = _supabase_request(f"profiles?telegram_chat_id=eq.{tg_id_str}&select=id,display_name,username&limit=10") or []
+    profile_rows = _supabase_request(f"profiles?telegram_chat_id=eq.{tg_id_str}&select=id,display_name,username,custom_ai_rules&limit=10") or []
     invite_rows = _supabase_request(f"pro_telegram_invites?vip_telegram_user_id=eq.{telegram_user_id}&select=user_id&limit=10") or []
 
     candidate_ids = []
@@ -130,8 +130,10 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
 
     linked_user_id = candidate_ids[0] if candidate_ids else None
     display_name = telegram_username or "المستثمر"
+    has_user_rules = False
     if profile_rows:
         display_name = profile_rows[0].get("display_name") or profile_rows[0].get("username") or display_name
+        has_user_rules = bool(str(profile_rows[0].get("custom_ai_rules") or "").strip())
     is_pro = is_admin
 
     if candidate_ids:
@@ -164,6 +166,7 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
         "display_name": display_name,
         "is_pro": is_pro,
         "is_admin": is_admin,
+        "has_user_rules": has_user_rules,
         "used": used,
         "limit": limit,
         "remaining": remaining,
@@ -365,7 +368,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Avoids spinning up an asyncio loop or firing duplicate DeepSeek requests when multiple users ask the same stock question
     early_cache_key: Optional[str] = None
     inflight_lock: Optional[threading.Lock] = None
-    if not images and not reply_text:
+    if not images and not reply_text and not user_info.get("has_user_rules"):
         try:
             from api.agentic_chat.analysis_cache import (
                 build_analysis_cache_key,

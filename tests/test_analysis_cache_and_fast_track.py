@@ -747,3 +747,264 @@ def test_scheduled_worker_ai_score_rvol_limit_and_live_screen_prompt():
     assert "تقييم AI: 1/100" not in brief
     assert "السيولة النسبية: 0.03x" in brief
     assert any("limit=10" in u for u in seen_urls)
+
+
+def test_model_driven_followup_flag_and_preset_cache_isolation():
+    from api.agentic_chat.analysis_cache import inspect_tool_calls_followup_flags
+
+    # Contextual follow-up flagged by model must NEVER hit or pollute shared cache
+    assert resolve_tool_calls_to_cache_key(
+        [{"function": {"name": "get_stock", "arguments": '{"symbols": ["AMES"], "is_contextual_followup": true}'}}]
+    ) is None
+    assert resolve_tool_calls_to_cache_key(
+        [
+            {"function": {"name": "get_stock", "arguments": '{"symbols": ["AMES"], "is_contextual_followup": false}'}},
+            {"function": {"name": "get_stock_levels", "arguments": '{"symbols": ["AMES"], "is_contextual_followup": true}'}},
+        ]
+    ) is None
+
+    # Arabic symbol alias inside tool call normalizes to canonical ASCII ticker key
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [{"function": {"name": "get_stock", "arguments": '{"symbols": ["فوري"], "is_contextual_followup": false}'}}]
+        )
+        == "vip_stock_FWRY"
+    )
+
+    # Technical scan presets isolate cache keys cleanly (top_losers != rsi_oversold)
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [{"function": {"name": "get_technical_scan", "arguments": '{"preset": "top_losers", "is_contextual_followup": false}'}}]
+        )
+        == "vip_tech_screener_top_losers"
+    )
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [{"function": {"name": "get_technical_scan", "arguments": '{"preset": "rsi_oversold", "is_contextual_followup": false}'}}]
+        )
+        == "vip_tech_screener_rsi_oversold"
+    )
+
+    assert inspect_tool_calls_followup_flags(
+        [{"function": {"name": "get_stock", "arguments": '{"symbols": ["AMES"], "is_contextual_followup": false}'}}]
+    ) == (False, True)
+    assert inspect_tool_calls_followup_flags(
+        [{"function": {"name": "get_stock", "arguments": '{"symbols": ["AMES"], "is_contextual_followup": true}'}}]
+    ) == (True, False)
+    assert inspect_tool_calls_followup_flags(
+        [{"function": {"name": "get_stock", "arguments": '{"symbols": ["AMES"]}'}}]
+    ) == (False, False)
+
+
+@pytest.mark.anyio
+async def test_multi_turn_standalone_caches_and_prunes_and_followup_bypasses(monkeypatch):
+    clear_analysis_cache()
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test_key")
+
+    dispatched_args = []
+
+    async def fake_dispatch(tool_name, args, **_kwargs):
+        dispatched_args.append((tool_name, dict(args)))
+        return {"status": "success", "symbol": "AMES", "close": 54.97, "change_pct": 5.92, "rsi_14": 91.82}
+
+    seen_synth_messages = []
+    llm_call_idx = 0
+
+    async def fake_post_standalone(self, url, *args, **kwargs):
+        nonlocal llm_call_idx
+        llm_call_idx += 1
+        payload = kwargs.get("json", {})
+        if llm_call_idx == 1:
+            # Round 1: Model reads history and explicitly signals is_contextual_followup=False
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "tc_ames_1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_stock",
+                                            "arguments": '{"symbols": ["AMES"], "is_contextual_followup": false}',
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            )
+        seen_synth_messages.append(payload.get("messages", []))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "### 📊 تحليل سهم اميس (AMES) — EGX\n**السعر الأخير:** 54.97 ج.م " + ("تفاصيل فنية موثقة " * 10),
+                        }
+                    }
+                ]
+            },
+        )
+
+    fake_history = [{"role": "user", "content": "سؤال قديم عن COMI"}, {"role": "assistant", "content": "تحليل COMI السابق"}]
+
+    # 1. First call with history (MISS -> populates cache cleanly and prunes prior history from synthesis)
+    with patch.object(httpx.AsyncClient, "post", new=fake_post_standalone), patch(
+        "api.agentic_chat.pipeline.dispatch_tool", side_effect=fake_dispatch
+    ), patch("api.agentic_chat.pipeline._init_supabase"), patch.object(
+        pipeline, "supabase", SimpleNamespace()
+    ), patch("api.agentic_chat.analysis_cache.set_vip_analysis_cache") as mock_set_cache, patch(
+        "api.agentic_chat.pipeline.set_vip_analysis_cache"
+    ) as mock_pipe_set:
+        done1 = None
+        async for chunk in pipeline.run_agentic_chat_stream(
+            message="حلل سهم AMES",
+            history=fake_history,
+            images=[],
+            session_id="mt_1",
+            user_id="11111111-1111-1111-1111-111111111111",
+        ):
+            line = chunk.strip()
+            if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                ev = json.loads(line[5:].strip())
+                if ev.get("type") == "done":
+                    done1 = ev
+
+    assert done1 is not None
+    assert done1["cached"] is False
+    assert done1["cache_key"] == "vip_stock_AMES"
+    # is_contextual_followup must be stripped before dispatching tool
+    assert dispatched_args == [("get_stock", {"symbols": ["AMES"]})]
+    # Prior history turns must be pruned from Round 2 synthesis to prevent cross-stock bleed
+    assert seen_synth_messages and not any("سؤال قديم عن COMI" in str(m.get("content", "")) for m in seen_synth_messages[0])
+    assert mock_pipe_set.called or mock_set_cache.called
+
+    # 2. Seed cache and verify Round-1 HIT even with history present (0 Round-2 calls!)
+    set_vip_analysis_cache(
+        cache_key="vip_stock_AMES",
+        reply="### 📊 تحليل سهم اميس (AMES) مخزن بالكاش " + ("بيانات " * 15),
+        tables=[],
+    )
+    hit_calls = 0
+
+    async def fake_post_hit(self, url, *args, **kwargs):
+        nonlocal hit_calls
+        hit_calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "tc_ames_2",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "get_stock",
+                                        "arguments": '{"symbols": ["AMES"], "is_contextual_followup": false}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+
+    with patch.object(httpx.AsyncClient, "post", new=fake_post_hit), patch(
+        "api.agentic_chat.pipeline._init_supabase"
+    ), patch.object(pipeline, "supabase", SimpleNamespace()):
+        done2 = None
+        async for chunk in pipeline.run_agentic_chat_stream(
+            message="حلل سهم AMES",
+            history=fake_history,
+            images=[],
+            session_id="mt_2",
+            user_id="11111111-1111-1111-1111-111111111111",
+        ):
+            line = chunk.strip()
+            if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                ev = json.loads(line[5:].strip())
+                if ev.get("type") == "done":
+                    done2 = ev
+
+    assert hit_calls == 1  # Only Round 1 LLM call, ZERO Round 2 synthesis!
+    assert done2 is not None
+    assert done2["cached"] is True
+    assert done2["cache_key"] == "vip_stock_AMES"
+
+    # 3. Contextual follow-up flagged is_contextual_followup=True MUST bypass cache AND keep full history
+    followup_synth_msgs = []
+    f_call = 0
+
+    async def fake_post_followup(self, url, *args, **kwargs):
+        nonlocal f_call
+        f_call += 1
+        payload = kwargs.get("json", {})
+        if f_call == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "tc_ames_3",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "get_stock",
+                                            "arguments": '{"symbols": ["AMES"], "is_contextual_followup": true}',
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            )
+        followup_synth_msgs.append(payload.get("messages", []))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "سبب ارتفاع RSI إلى 91 هو الزخم المتسارع مقارنة بجلسة COMI."}}]},
+        )
+
+    with patch.object(httpx.AsyncClient, "post", new=fake_post_followup), patch(
+        "api.agentic_chat.pipeline.dispatch_tool", side_effect=fake_dispatch
+    ), patch("api.agentic_chat.pipeline._init_supabase"), patch.object(
+        pipeline, "supabase", SimpleNamespace()
+    ), patch("api.agentic_chat.pipeline.set_vip_analysis_cache") as mock_skip_set:
+        done3 = None
+        async for chunk in pipeline.run_agentic_chat_stream(
+            message="ليه RSI بتاعه عالي أوي كده مقارنة باللي قبله؟",
+            history=fake_history,
+            images=[],
+            session_id="mt_3",
+            user_id="11111111-1111-1111-1111-111111111111",
+        ):
+            line = chunk.strip()
+            if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                ev = json.loads(line[5:].strip())
+                if ev.get("type") == "done":
+                    done3 = ev
+
+    assert f_call == 2
+    assert done3 is not None
+    assert done3["cached"] is False
+    assert done3["cache_key"] is None
+    assert not mock_skip_set.called
+    # Full history must remain intact in synthesis for contextual follow-up
+    assert any("سؤال قديم عن COMI" in str(m.get("content", "")) for m in followup_synth_msgs[0])

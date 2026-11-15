@@ -11,6 +11,16 @@ _MARKET_PARAM_SCHEMA: Dict[str, Any] = {
     "description": "السوق المطلوب: 'EGX' للبورصة المصرية أو 'TASI' للسوق السعودي (تداول). اتركه فارغاً لاستخدام السوق النشط أو التوجيه التلقائي حسب الرموز.",
 }
 
+_FOLLOWUP_PARAM_SCHEMA: Dict[str, Any] = {
+    "type": "boolean",
+    "description": (
+        "إلزامي: اضبطه على false إذا كان المستخدم يطلب تحليلاً أو مستويات أو ترشيحات أو أخباراً أو مقارنة قياسية مستقلة "
+        "(حتى في منتصف المحادثة، مثل: حلل COMI، Ggrn، بنك القاهرة، طيب وأموك، رشح لي 3 أسهم). "
+        "اضبطه على true فقط إذا كان السؤال تساؤل متابعة ضيقاً ومحدداً يعتمد على الحوار السابق ولا يطلب تقريراً قياسياً "
+        "(مثل: ليه السهم هبط؟، أشتري ولا أبيع؟، اشرح لي الفرق، ركز على النقطة السابقة)."
+    ),
+}
+
 AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
     {
         "type": "function",
@@ -28,9 +38,10 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "قائمة بأكواد أو أسماء الأسهم مثل ['FWRY', 'COMI', '2222', '1120'] أو ['أرامكو', 'الراجحي', 'فوري']",
-                    }
+                    },
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
-                "required": ["symbols"],
+                "required": ["symbols", "is_contextual_followup"],
             },
         },
     },
@@ -50,9 +61,10 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "قائمة بأكواد الأسهم مثل ['FWRY', 'COMI', '2222', '1120']",
-                    }
+                    },
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
-                "required": ["symbols"],
+                "required": ["symbols", "is_contextual_followup"],
             },
         },
     },
@@ -68,7 +80,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
+                "required": ["is_contextual_followup"],
             },
         },
     },
@@ -108,7 +122,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "الحد الأقصى للتوصيات المعروضة",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
+                "required": ["is_contextual_followup"],
             },
         },
     },
@@ -134,8 +150,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "تصفية حصرية للأسهم المتوافقة مع الشريعة",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
-                "required": ["preset"],
+                "required": ["preset", "is_contextual_followup"],
             },
         },
     },
@@ -155,7 +172,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "تصفية حصرية للأسهم المتوافقة مع الشريعة",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
+                "required": ["is_contextual_followup"],
             },
         },
     },
@@ -175,7 +194,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "أكواد الأسهم المطلوبة، أو اتركها فارغة لأخبار السوق العامة",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
+                "required": ["is_contextual_followup"],
             },
         },
     },
@@ -194,9 +215,10 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "أكواد أو أسماء الأسهم المراد مقارنتها، مثل ['2222', 'COMI'] أو ['1120', '2010'] أو ['ETEL', 'COMI']",
-                    }
+                    },
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
-                "required": ["symbols"],
+                "required": ["symbols", "is_contextual_followup"],
             },
         },
     },
@@ -230,7 +252,9 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "الحد الأقصى لعدد النتائج",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
+                "required": ["is_contextual_followup"],
             },
         },
     },

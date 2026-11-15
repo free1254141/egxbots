@@ -317,6 +317,64 @@ def personalize_cached_analysis(
 # Model-Driven Tool Call Resolver (The Core Intelligence)
 # ---------------------------------------------------------------------------
 
+_TICKER_ALNUM_RE = re.compile(r"^[A-Z0-9]{2,8}$")
+_MARKET_KEYWORDS = frozenset({"EGX", "MARKET", "ALL", "TASI", "SAUDI"})
+
+
+def _normalize_ticker_for_cache(raw_sym: Any) -> Optional[str]:
+    """Normalize a symbol or Arabic/English company name to an ASCII uppercase EGX ticker."""
+    if not isinstance(raw_sym, str) or not raw_sym.strip():
+        return None
+    sym = raw_sym.strip().upper().replace(".CA", "")
+    if sym in _MARKET_KEYWORDS:
+        return None
+    if _TICKER_ALNUM_RE.fullmatch(sym):
+        resolved = resolve_stock_symbol(sym)
+        if resolved and _TICKER_ALNUM_RE.fullmatch(resolved.strip().upper()):
+            return resolved.strip().upper()
+        return sym
+    resolved = resolve_stock_symbol(raw_sym)
+    if resolved:
+        clean = resolved.strip().upper().replace(".CA", "")
+        if clean not in _MARKET_KEYWORDS and _TICKER_ALNUM_RE.fullmatch(clean):
+            return clean
+    return None
+
+
+def parse_tool_call_arguments(tc: Any) -> Dict[str, Any]:
+    """Safely parse a DeepSeek tool call's arguments into a dict."""
+    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+    raw_args = fn.get("arguments", "{}")
+    if isinstance(raw_args, dict):
+        return dict(raw_args)
+    try:
+        parsed = json.loads(raw_args or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def inspect_tool_calls_followup_flags(tool_calls: List[Dict[str, Any]]) -> Tuple[bool, bool]:
+    """
+    Inspect model-driven `is_contextual_followup` markers across Round-1 tool calls.
+    Returns `(has_followup_true, explicit_standalone)`:
+      - `has_followup_true`: True if any tool call explicitly set `is_contextual_followup=True`.
+      - `explicit_standalone`: True iff non-empty, zero True flags, and >=1 tool explicitly set False.
+    """
+    if not tool_calls or not isinstance(tool_calls, list):
+        return False, False
+    has_true = False
+    has_false = False
+    for tc in tool_calls:
+        t_args = parse_tool_call_arguments(tc)
+        flag = t_args.get("is_contextual_followup")
+        if flag is True:
+            has_true = True
+        elif flag is False:
+            has_false = True
+    return has_true, (not has_true and has_false)
+
+
 def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Optional[str]:
     """
     Zero-Regex Intent Resolution:
@@ -326,6 +384,8 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
     if not tool_name:
         return None
     safe_args = args if isinstance(args, dict) else {}
+    if safe_args.get("is_contextual_followup") is True:
+        return None
 
     # 1. Single Stock Analysis & Levels (reject multi-symbol batches)
     if tool_name in ("get_stock", "get_stock_levels"):
@@ -335,10 +395,8 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
         raw_sym = safe_args.get("symbol")
         if not raw_sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
             raw_sym = raw_symbols_list[0]
-        if not raw_sym or not isinstance(raw_sym, str):
-            return None
-        sym = raw_sym.strip().upper().replace(".CA", "")
-        if len(sym) < 2 or len(sym) > 8:
+        sym = _normalize_ticker_for_cache(raw_sym)
+        if not sym:
             return None
         return f"vip_stock_{sym}"
 
@@ -376,7 +434,7 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             return "vip_top_sectors"
         return "vip_market_summary"
 
-    # 5. Technical Screener / Scans
+    # 5. Technical Screener / Scans (scoped by preset so top_losers never collides with rsi_oversold)
     if tool_name in ("get_technical_scan", "screen_stocks"):
         if (
             safe_args.get("sharia_only")
@@ -385,16 +443,18 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             or safe_args.get("symbol")
         ):
             return None
-        return "vip_tech_screener"
+        raw_preset = str(safe_args.get("preset") or "").strip().lower()
+        preset_slug = re.sub(r"[^a-z0-9_]+", "_", raw_preset).strip("_")
+        return f"vip_tech_screener_{preset_slug}" if preset_slug else "vip_tech_screener"
 
     # 6. Two-Stock Comparison
     if tool_name == "get_comparison":
         raw_symbols = safe_args.get("symbols") or [safe_args.get("symbol1"), safe_args.get("symbol2")]
-        valid_symbols = [
-            s.strip().upper().replace(".CA", "")
-            for s in (raw_symbols or [])
-            if isinstance(s, str) and len(s.strip()) >= 2
-        ]
+        valid_symbols = []
+        for s in (raw_symbols or []):
+            ns = _normalize_ticker_for_cache(s)
+            if ns and ns not in valid_symbols:
+                valid_symbols.append(ns)
         if len(valid_symbols) == 2:
             valid_symbols.sort()
             return f"vip_compare_{valid_symbols[0]}_{valid_symbols[1]}"
@@ -407,25 +467,25 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
         raw_symbols_list = safe_args.get("symbols")
         if isinstance(raw_symbols_list, list) and len(raw_symbols_list) > 1:
             return None
-        sym = safe_args.get("symbol")
-        if not sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
-            sym = raw_symbols_list[0]
-        return (
-            f"vip_fair_value_{str(sym).strip().upper().replace('.CA', '')}"
-            if sym
-            else "vip_fair_value_undervalued"
-        )
+        raw_sym = safe_args.get("symbol")
+        if not raw_sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
+            raw_sym = raw_symbols_list[0]
+        if raw_sym:
+            sym = _normalize_ticker_for_cache(raw_sym)
+            return f"vip_fair_value_{sym}" if sym else None
+        return "vip_fair_value_undervalued"
 
     # 8. Market News (supports both singular symbol and plural symbols list)
     if tool_name == "get_news":
         raw_symbols_list = safe_args.get("symbols")
         if isinstance(raw_symbols_list, list) and len(raw_symbols_list) > 1:
             return None
-        sym = safe_args.get("symbol")
-        if not sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
-            sym = raw_symbols_list[0]
-        if sym and str(sym).strip().upper() not in ("EGX", "MARKET", "ALL", "TASI", "SAUDI", ""):
-            return f"vip_news_{str(sym).strip().upper().replace('.CA', '')}"
+        raw_sym = safe_args.get("symbol")
+        if not raw_sym and isinstance(raw_symbols_list, list) and len(raw_symbols_list) == 1:
+            raw_sym = raw_symbols_list[0]
+        if raw_sym and str(raw_sym).strip().upper() not in _MARKET_KEYWORDS:
+            sym = _normalize_ticker_for_cache(raw_sym)
+            return f"vip_news_{sym}" if sym else None
         return "vip_market_news"
 
     return None
@@ -434,7 +494,8 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
 def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
     """
     Resolve 1 or more DeepSeek Round-1 tool calls into a single canonical cache key.
-    Rejects compound batches if any tool call is non-cacheable (e.g. portfolio, sharia, filtered scan).
+    Rejects compound batches if any tool call is non-cacheable (e.g. portfolio, sharia, filtered scan)
+    or explicitly flagged as a contextual follow-up.
     """
     if not tool_calls or not isinstance(tool_calls, list):
         return None
@@ -443,14 +504,9 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
     for tc in tool_calls:
         fn = tc.get("function", {}) if isinstance(tc, dict) else {}
         t_name = fn.get("name", "") or ""
-        raw_args = fn.get("arguments", "{}")
-        if isinstance(raw_args, dict):
-            t_args = raw_args
-        else:
-            try:
-                t_args = json.loads(raw_args or "{}")
-            except Exception:
-                t_args = {}
+        t_args = parse_tool_call_arguments(tc)
+        if t_args.get("is_contextual_followup") is True:
+            return None
         k = resolve_tool_call_to_cache_key(t_name, t_args)
         parsed.append((t_name, t_args, k))
 
@@ -477,16 +533,12 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
             raw_sym = t_args.get("symbol")
             if not raw_sym and isinstance(t_args.get("symbols"), list) and len(t_args["symbols"]) == 1:
                 raw_sym = t_args["symbols"][0]
-            if not isinstance(raw_sym, str) or not raw_sym.strip():
-                return None
-            clean_sym = raw_sym.strip().upper().replace(".CA", "")
-            if clean_sym in ("EGX", "MARKET", "ALL", "TASI", "SAUDI"):
+            clean_sym = _normalize_ticker_for_cache(raw_sym)
+            if not clean_sym:
                 return None
             syms.add(clean_sym)
         if len(syms) == 1:
-            sym = next(iter(syms))
-            if 2 <= len(sym) <= 8:
-                return f"vip_stock_{sym}"
+            return f"vip_stock_{next(iter(syms))}"
 
     # Parallel open recommendations discovery (get_recommendations + get_technical_scan / get_accumulation_stocks)
     if "get_recommendations" in names_set and names_set.issubset(
