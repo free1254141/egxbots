@@ -113,7 +113,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "fix(vision,telegram,aliases): deterministic P&L vs entry_price, CRST krismark alias, and 25s button cooldown"
+    commit_msg = "fix(quota): atomic per-message Telegram quota deduction & instant web/app sync"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

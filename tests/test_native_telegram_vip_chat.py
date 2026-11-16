@@ -137,4 +137,92 @@ def test_native_vip_chat_b2b_bypass_quota_and_fast_cache():
         mock_resolve.assert_not_called()
 
 
+def test_native_vip_chat_deducts_every_message_for_linked_and_unlinked_users():
+    from unittest.mock import patch
+    from api import native_telegram_vip_chat as ntvc
+
+    ntvc._USER_RESOLVE_CACHE.clear()
+
+    # 1. Unlinked user: consecutive turns MUST deduct 1 every message synchronously and enforce limit=10
+    unlinked_state = {"daily_count": 0, "quota_date": ntvc.get_cairo_date_str(), "chat_history": []}
+
+    def fake_unlinked_supa(endpoint, method="GET", payload=None, **_kwargs):
+        if method == "GET" and endpoint.startswith("telegram_vip_chat_state"):
+            return [dict(unlinked_state)]
+        if method == "POST" and endpoint.startswith("telegram_vip_chat_state"):
+            if payload and "daily_count" in payload:
+                unlinked_state["daily_count"] = payload["daily_count"]
+            if payload and "chat_history" in payload:
+                unlinked_state["chat_history"] = payload["chat_history"]
+            return [dict(unlinked_state)]
+        return []
+
+    async def fake_stream(**_kwargs):
+        yield 'data: {"type": "done", "reply": "رد تجريبي", "tables": [], "cached": false}\n\n'
+        yield "data: [DONE]\n\n"
+
+    with patch.object(ntvc, "_supabase_request", side_effect=fake_unlinked_supa), patch(
+        "api.agentic_chat.pipeline.run_agentic_chat_stream", side_effect=fake_stream
+    ), patch("api.stock_ai._init_supabase"), patch("api.stock_ai.supabase"):
+        for expected_used in (1, 2, 3):
+            res = ntvc.handle_native_vip_chat(
+                {
+                    "action": "chat",
+                    "telegram_user_id": 445566,
+                    "telegram_username": "unlinked_user",
+                    "message": f"سؤال رقم {expected_used}",
+                    "chat_source": "telegram_private",
+                }
+            )
+            assert res["ok"] is True
+            assert res["used"] == expected_used
+            assert res["remaining"] == 10 - expected_used
+            assert unlinked_state["daily_count"] == expected_used
+
+        q = ntvc.handle_native_vip_chat(
+            {"action": "check_quota", "telegram_user_id": 445566, "telegram_username": "unlinked_user"}
+        )
+        assert q["used"] == 3
+        assert q["remaining"] == 7
+
+    # 2. Linked user (even admin/pro): every Telegram turn must call check_and_consume_quota and reflect live count
+    consume_calls = []
+
+    def fake_consume(uid, is_pro):
+        consume_calls.append((uid, is_pro))
+        rem = 350 - len(consume_calls)
+        return True, rem, 350, ""
+
+    def fake_linked_supa(endpoint, method="GET", payload=None, **_kwargs):
+        if "profiles?" in endpoint:
+            return [{"id": "admin-uid-1", "display_name": "Admin", "custom_ai_rules": None}]
+        if "subscriptions?" in endpoint:
+            return [{"user_id": "admin-uid-1", "plan_id": "pro", "status": "active", "current_period_end": "2099-01-01"}]
+        if "ai_chatbot_limits?" in endpoint:
+            return [{"chat_count": len(consume_calls)}]
+        return []
+
+    with patch.object(ntvc, "_supabase_request", side_effect=fake_linked_supa), patch(
+        "api.agentic_chat.auth_guard.check_and_consume_quota", side_effect=fake_consume
+    ), patch("api.agentic_chat.pipeline.run_agentic_chat_stream", side_effect=fake_stream), patch(
+        "api.stock_ai._init_supabase"
+    ), patch("api.stock_ai.supabase"):
+        for step in (1, 2):
+            res = ntvc.handle_native_vip_chat(
+                {
+                    "action": "chat",
+                    "telegram_user_id": 5149631436,
+                    "telegram_username": "admin_user",
+                    "message": f"سؤال أدمن {step}",
+                    "chat_source": "telegram_topic",
+                }
+            )
+            assert res["ok"] is True
+            assert res["used"] == step
+            assert res["remaining"] == 350 - step
+
+    assert len(consume_calls) == 2
+
+
+
 

@@ -773,13 +773,16 @@ def _update_user_quota_cache(tg_user_id: int, data: Dict[str, Any]) -> None:
             }
 
 
-def _get_cached_user_quota(tg_user_id: int, max_age_sec: float = 300.0) -> Optional[Dict[str, Any]]:
+def _get_cached_user_quota(tg_user_id: int, max_age_sec: float = 10.0) -> Optional[Dict[str, Any]]:
     # In unit tests where call_web_vip_chat_api is mocked, always call the mock directly
     if getattr(call_web_vip_chat_api, "__name__", "") != "call_web_vip_chat_api":
         return None
     with _DEDUP_LOCK:
         entry = _USER_QUOTA_CACHE.get(int(tg_user_id))
         if not entry:
+            return None
+        if int(entry.get("remaining") or 0) <= 2:
+            _USER_QUOTA_CACHE.pop(int(tg_user_id), None)
             return None
         if time.time() - float(entry.get("ts", 0)) > max_age_sec:
             _USER_QUOTA_CACHE.pop(int(tg_user_id), None)
@@ -1571,6 +1574,8 @@ def _execute_and_reply_vip_chat_inner(
     if image_storage_url:
         api_payload["image_storage_url"] = image_storage_url
 
+    with _DEDUP_LOCK:
+        _USER_QUOTA_CACHE.pop(int(tg_user_id), None)
     api_res = call_web_vip_chat_api(api_payload)
 
     # Delete temporary waiting message

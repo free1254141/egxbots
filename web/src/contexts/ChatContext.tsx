@@ -14,6 +14,8 @@ import { createChatRequest } from "@/lib/chat-request.cjs";
 
 import { orderChatMessages } from "@/lib/ai/chat-order";
 
+import { invalidateUserQuotaCache } from "@/lib/user-quota-client";
+
 
 
 export type ChatMessage = {
@@ -1152,7 +1154,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
-    // Refresh on a real return to an open chat, not on every token event or a timer.
+    // Refresh on a real return to an open chat (or when opening the chat drawer) so Telegram quota deductions reflect right away.
+
+    useEffect(() => {
+
+        if (!authLoading && userId && isOpen && Date.now() - accessCheckedAtRef.current >= 4_000) {
+
+            void fetchSessions(userId, true);
+
+        }
+
+    }, [isOpen, authLoading, userId, fetchSessions]);
 
     useEffect(() => {
 
@@ -1162,7 +1174,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
             if (!isOpen && !window.location.pathname.startsWith("/chat")) return;
 
-            if (Date.now() - accessCheckedAtRef.current < 60_000) return;
+            if (Date.now() - accessCheckedAtRef.current < 4_000) return;
 
             void fetchSessions(userId, true);
 
@@ -1775,6 +1787,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     setRemainingQuota(data.remaining_quota);
 
+                    invalidateUserQuotaCache(userId);
+
+                    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("egx:chat-quota-updated"));
+
                 }
 
                 if (data.quota_limit !== undefined) {
@@ -2007,6 +2023,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                                     setRemainingQuota(parsed.remaining_quota);
 
+                                    invalidateUserQuotaCache(userId);
+
+                                    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("egx:chat-quota-updated"));
+
                                 }
 
                                 if (parsed.quota_limit !== undefined) {
@@ -2054,6 +2074,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 if (parsed.remaining_quota !== undefined) {
 
                                     setRemainingQuota(parsed.remaining_quota);
+
+                                    invalidateUserQuotaCache(userId);
+
+                                    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("egx:chat-quota-updated"));
 
                                 }
 

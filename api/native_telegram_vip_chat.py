@@ -46,7 +46,7 @@ _VIP_CHAT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=12, threa
 # Short-lived in-memory cache for _resolve_telegram_user (reduces 5 Supabase calls per message to 0 on repeat turns)
 _USER_RESOLVE_CACHE: Dict[int, Dict[str, Any]] = {}
 _USER_RESOLVE_LOCK = threading.Lock()
-_USER_CACHE_TTL_SECONDS = 90.0
+_USER_CACHE_TTL_SECONDS = 10.0
 
 
 def _is_pytest() -> bool:
@@ -243,6 +243,9 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             "state_row": None,
         }
     else:
+        if action in ("check_quota", "chat", "set_test_mode"):
+            with _USER_RESOLVE_LOCK:
+                _USER_RESOLVE_CACHE.pop(int(tg_user_id), None)
         user_info = _resolve_telegram_user(tg_user_id, user_name)
 
     # 1. Action: check_quota
@@ -319,40 +322,86 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     title_text = query[:24] if query else ("صورة مرفقة" if images else "محادثة جديدة")
     session_title = f"{room_prefix} {img_tag}{title_text}"
 
-    if not bypass_quota and not user_info["is_admin"] and user_info["remaining"] <= 0:
-        return {
-            "ok": False,
-            "error_code": "LIMIT_REACHED",
-            "linked": bool(user_info["linked_user_id"]),
-            "display_name": user_info["display_name"],
-            "is_pro": user_info["is_pro"],
-            "used": user_info["used"],
-            "limit": user_info["limit"],
-            "remaining": 0,
-            "period": user_info["period"],
-            "detail": "لقد استهلكت رصيد أسئلتك المتاح. يرجى الترقية لباقة PRO للمتابعة والاستفسار اللامحدود.",
-        }
+    new_limit = int(user_info["limit"])
+    new_used = int(user_info["used"])
+    new_remaining = int(user_info["remaining"])
 
-    # Consume quota if linked account exists (unless bypassed by B2B group quota)
-    if not bypass_quota and user_info["linked_user_id"] and not user_info["is_admin"]:
-        try:
-            from api.agentic_chat.auth_guard import check_and_consume_quota
-            allowed, rem, lim, err = check_and_consume_quota(user_info["linked_user_id"], user_info["is_pro"])
-            if not allowed:
+    if not bypass_quota:
+        if not user_info["is_admin"] and user_info["remaining"] <= 0:
+            return {
+                "ok": False,
+                "error_code": "LIMIT_REACHED",
+                "linked": bool(user_info["linked_user_id"]),
+                "display_name": user_info["display_name"],
+                "is_pro": user_info["is_pro"],
+                "used": new_used,
+                "limit": new_limit,
+                "remaining": 0,
+                "period": user_info["period"],
+                "detail": "لقد استهلكت رصيد أسئلتك المتاح. يرجى الترقية لباقة PRO للمتابعة والاستفسار اللامحدود.",
+            }
+
+        # Consume quota synchronously BEFORE LLM for BOTH linked and unlinked Telegram users (including admin usage tracking)
+        if user_info["linked_user_id"]:
+            try:
+                from api.agentic_chat.auth_guard import check_and_consume_quota
+                allowed, rem, lim, err = check_and_consume_quota(user_info["linked_user_id"], user_info["is_pro"])
+                if not allowed and not user_info["is_admin"]:
+                    return {
+                        "ok": False,
+                        "error_code": "LIMIT_REACHED",
+                        "linked": True,
+                        "display_name": user_info["display_name"],
+                        "is_pro": user_info["is_pro"],
+                        "used": lim,
+                        "limit": lim,
+                        "remaining": 0,
+                        "period": user_info["period"],
+                        "detail": err or "لقد استهلكت رصيدك المتاح.",
+                    }
+                new_limit = int(lim)
+                new_remaining = int(rem)
+                new_used = (
+                    max(0, new_limit - new_remaining)
+                    if user_info["is_pro"]
+                    else min(new_limit, max(int(user_info["used"]) + 1, new_limit - new_remaining))
+                )
+            except Exception as e:
+                logger.warning(f"[NATIVE_VIP_CHAT] Quota check warning: {e}")
+        else:
+            # Unlinked Telegram user: deduct synchronously in telegram_vip_chat_state so rapid turns cannot double-spend
+            fresh_used = int(user_info["used"])
+            if not user_info["is_admin"] and fresh_used >= new_limit:
                 return {
                     "ok": False,
                     "error_code": "LIMIT_REACHED",
-                    "linked": True,
+                    "linked": False,
                     "display_name": user_info["display_name"],
                     "is_pro": user_info["is_pro"],
-                    "used": lim,
-                    "limit": lim,
+                    "used": fresh_used,
+                    "limit": new_limit,
                     "remaining": 0,
                     "period": user_info["period"],
-                    "detail": err or "لقد استهلكت رصيدك المتاح.",
+                    "detail": "لقد استهلكت رصيد أسئلتك المتاح. يرجى الترقية لباقة PRO للمتابعة والاستفسار اللامحدود.",
                 }
-        except Exception as e:
-            logger.warning(f"[NATIVE_VIP_CHAT] Quota check warning: {e}")
+            new_used = fresh_used + 1
+            new_remaining = max(0, new_limit - new_used)
+            now_sync_iso = datetime.now(timezone.utc).isoformat()
+            _supabase_request(
+                "telegram_vip_chat_state?on_conflict=telegram_user_id",
+                method="POST",
+                payload={
+                    "telegram_user_id": tg_user_id,
+                    "telegram_username": user_name,
+                    "linked_user_id": None,
+                    "quota_date": today,
+                    "daily_count": new_used,
+                    "updated_at": now_sync_iso,
+                },
+            )
+
+        with _USER_RESOLVE_LOCK:
+            _USER_RESOLVE_CACHE.pop(int(tg_user_id), None)
 
     user_created_dt = datetime.now(timezone.utc)
     start_time = time.time()
@@ -595,13 +644,10 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         _VIP_CHAT_EXECUTOR.submit(_persist_admin_audit)
 
-    # Increment quota & save Telegram state (skip for B2B group messages since group quota is tracked in b2b_group_licenses)
+    # Save Telegram chat history state (daily_count was already synchronously consumed above)
     if not bypass_quota:
         state_row = user_info["state_row"] or {}
-        if user_info["is_pro"]:
-            new_daily_count = (int(state_row.get("daily_count") or 0) + 1) if str(state_row.get("quota_date") or "")[:7] == today[:7] else 1
-        else:
-            new_daily_count = int(state_row.get("daily_count") or 0) + 1
+        new_daily_count = new_used
 
         chat_history = list(state_row.get("chat_history") or [])
         chat_history.append({"role": "user", "content": query, "created_at": user_now_iso})
@@ -630,9 +676,6 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         else:
             _VIP_CHAT_EXECUTOR.submit(_persist_tg_state)
 
-    new_used = user_info["used"] + (0 if bypass_quota else 1)
-    new_remaining = max(0, int(user_info["remaining"]) - (0 if bypass_quota else 1))
-
     return {
         "ok": True,
         "reply": reply_text,
@@ -640,7 +683,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
         "display_name": user_info["display_name"],
         "is_pro": user_info["is_pro"],
         "used": new_used,
-        "limit": user_info["limit"],
+        "limit": new_limit,
         "remaining": new_remaining,
         "period": user_info["period"],
     }

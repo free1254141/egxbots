@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -76,6 +76,7 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
   const [data, setData] = useState<QuotaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const lastReturnSyncRef = useRef<number>(0);
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -134,11 +135,24 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
         void fetchQuota(false, true);
       }
     };
+    const handleReturnSync = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastReturnSyncRef.current < 4000) return;
+      lastReturnSyncRef.current = now;
+      void fetchQuota(true, false, true);
+    };
     window.addEventListener("egx:entitlements-updated", handleUpdate);
+    window.addEventListener("egx:chat-quota-updated", handleUpdate);
     window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleReturnSync);
+    document.addEventListener("visibilitychange", handleReturnSync);
     return () => {
       window.removeEventListener("egx:entitlements-updated", handleUpdate);
+      window.removeEventListener("egx:chat-quota-updated", handleUpdate);
       window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleReturnSync);
+      document.removeEventListener("visibilitychange", handleReturnSync);
     };
   }, [fetchQuota, refreshTrigger]);
 
