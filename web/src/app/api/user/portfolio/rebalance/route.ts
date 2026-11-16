@@ -89,7 +89,8 @@ export async function POST(req: NextRequest) {
         .from("ai_chatbot_limits")
         .select("date, chat_count")
         .eq("user_id", user.id)
-        .gte("date", calMonthStartStr),
+        .order("date", { ascending: false })
+        .limit(1000),
     ]);
 
     let openPositions = (posRes.data || []).map((p: any) => ({
@@ -140,9 +141,9 @@ export async function POST(req: NextRequest) {
     const userMonthlyCap = limits.chat_messages_per_month;
     const monthStartStr = userIsPro ? quotaWin.effectiveMonthStartStr : calMonthStartStr;
 
-    const effectiveLimitRows = (limitRowsRes.data || []).filter(
-      (r: any) => String(r.date || "") >= monthStartStr
-    );
+    const effectiveLimitRows = userIsPro
+      ? (limitRowsRes.data || []).filter((r: any) => String(r.date || "") >= monthStartStr)
+      : (limitRowsRes.data || []);
     let monthlyUsed = effectiveLimitRows.reduce(
       (acc: number, row: any) => acc + (Number(row.chat_count) || 0),
       0
@@ -163,17 +164,17 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        const effectiveDailyLimit = userIsPro
-          ? Math.max(AI_CONFIG.limits.dailyMessages, userMonthlyCap)
-          : Math.max(10, userMonthlyCap);
-        const { data: quotaRows, error: quotaError } = await serviceClient.rpc(
-          "consume_ai_chat_quota",
-          {
-            p_user_id: user.id,
-            p_date: today,
-            p_limit: effectiveDailyLimit,
-          }
-        );
+        const priorUsed = effectiveLimitRows
+          .filter((r: any) => String(r.date || "") < today)
+          .reduce((acc: number, row: any) => acc + (Number(row.chat_count) || 0), 0);
+        const todayCap = Math.max(0, userMonthlyCap - priorUsed);
+        const { data: quotaRows, error: quotaError } = todayCap > 0
+          ? await serviceClient.rpc("consume_ai_chat_quota", {
+              p_user_id: user.id,
+              p_date: today,
+              p_limit: todayCap,
+            })
+          : { data: [{ allowed: false }], error: null };
         if (quotaError) {
           return NextResponse.json({ error: "تعذر خصم الكوتا حالياً" }, { status: 503 });
         }

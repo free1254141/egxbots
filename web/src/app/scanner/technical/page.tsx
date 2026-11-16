@@ -54,12 +54,17 @@ const structuredData = {
     {
       "@type": "SoftwareApplication",
       "@id": "https://egxbots.com/scanner/technical#tool",
-      "name": "EGX Technical Screener",
-      "alternateName": "الماسح الفني للبورصة المصرية",
+      "name": "EGX & TASI Technical Stock Screener",
+      "alternateName": "الماسح الفني المجاني للأسهم المصرية والسعودية",
       "applicationCategory": "FinanceApplication",
       "operatingSystem": "Web",
-      "description": "ماسح فني للأسهم المصرية بمؤشرات التحليل الفني وفلاتر السيولة، وفق آخر بيانات محفوظة وتاريخها.",
-      "url": "https://egxbots.com/scanner/technical"
+      "description": "ماسح فني مجاني لأسهم البورصة المصرية (EGX) والسوق السعودي تداول (TASI) بمؤشرات التحليل الفني وفلاتر السيولة.",
+      "url": "https://egxbots.com/scanner/technical",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "EGP"
+      }
     },
     {
       "@type": "BreadcrumbList",

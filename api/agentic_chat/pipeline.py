@@ -119,9 +119,10 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
     if not message:
         return []
     try:
-        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, resolve_stock_symbol
+        from api.stock_aliases import ARABIC_STOCK_MAPPINGS, _KNOWN_SYMBOLS, resolve_stock_symbol
     except Exception:
         ARABIC_STOCK_MAPPINGS = {}
+        _KNOWN_SYMBOLS = frozenset()
         resolve_stock_symbol = lambda x: None  # noqa: E731
 
     norm_msg = _norm_ar_hint(message)
@@ -171,16 +172,19 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
                 seen_symbols.add(s_upper)
                 hints.append({"name": sa_name, "symbols": [s_upper], "market": "TASI"})
 
-    # 2. Match Latin tickers (2-6 uppercase letters for EGX, e.g. COMI, TMGH)
-    latin_matches = re.findall(r"\b[A-Za-z]{2,6}\b", message)
+    # 2. Match known EGX Latin tickers (ignore slash commands such as /value RACC and arbitrary English words)
+    latin_matches = re.findall(r"(?<!/)\b[A-Za-z]{2,6}\b", message)
     stopwords = {
         "EGX", "TASI", "KSA", "BUY", "SELL", "HOLD", "THE", "AND", "FOR",
         "RSI", "MACD", "EMA", "SMA", "VIP", "PRO", "API", "NOW", "TODAY",
-        "NEWS", "USD", "EGP", "SAR",
+        "NEWS", "USD", "EGP", "SAR", "VALUE", "FAIR", "SCAN", "HELP",
+        "START", "PRICE", "LEVEL", "SWING", "OTC",
     }
     for tok in latin_matches:
         u = tok.upper()
         if u in stopwords:
+            continue
+        if u not in _KNOWN_SYMBOLS and u not in ARABIC_STOCK_MAPPINGS:
             continue
         res = resolve_stock_symbol(u)
         if res and res not in seen_symbols:

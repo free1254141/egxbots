@@ -240,15 +240,19 @@ compress: true,
         ],
       },
       {
-        // Static pricing page
+        // Static pricing page (revalidate in browser on deploy, keep 7d Vercel Edge CDN cache)
         source: '/pricing',
         headers: [
           {
             key: 'Cache-Control',
-            value: 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+            value: 'public, max-age=0, must-revalidate',
           },
           {
             key: 'Vercel-CDN-Cache-Control',
+            value: 'public, s-maxage=604800, stale-while-revalidate=86400',
+          },
+          {
+            key: 'CDN-Cache-Control',
             value: 'public, s-maxage=604800, stale-while-revalidate=86400',
           },
         ],

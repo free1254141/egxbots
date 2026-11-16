@@ -50,8 +50,8 @@ const structuredData = {
     {
       "@type": "WebPage",
       "@id": "https://egxbots.com/scanner/market#webpage",
-      "name": "تحليل سوق البورصة المصرية ومؤشر EGX30",
-      "description": "تحليل مؤشري EGX30 وEGX100 واتجاه السوق والسيولة وفق آخر بيانات محفوظة.",
+      "name": "تحليل سوق البورصة المصرية ومؤشر تاسي السعودي (EGX30 & TASI)",
+      "description": "أداة مجانية لتحليل مؤشرات EGX30 وEGX100 ومؤشر تاسي السعودي TASI واتساع السوق والسيولة وفق آخر بيانات محفوظة.",
       "url": "https://egxbots.com/scanner/market"
     },
     {

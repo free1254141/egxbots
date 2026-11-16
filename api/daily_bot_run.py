@@ -969,10 +969,12 @@ def _send_telegram_exit(
                        if closed_on and closed_on < dt.datetime.now(dt.timezone.utc).date().isoformat() else "")
         promo_hook = ""
         if status == "win" or exit_reason == "target_hit":
+            from api.payment_common import format_pro_cta_sentence
+
             promo_hook = (
                 "\n━━━━━━━━━━━━━━━━━━━━\n"
                 "🔥 *الصفقة دي وصلت لمشتركي VIP لحظياً وقت انطلاق السهم!*\n"
-                "⚡ اشترك في باقة المؤسسين بـ 100 ج.م شهرياً (عرض 15 يوم) واستقبل صفقات السوينج أولاً بأول:\n"
+                f"{format_pro_cta_sentence(is_html=False)}\n"
                 f"👉 {telegram_tracked_url('/pricing', 'tg_exit')}"
             )
 

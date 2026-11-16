@@ -30,31 +30,33 @@ def eligibility_scope():
 
 
 def founders_offer_ends_at() -> datetime | None:
-    """Return the founders offer expiry datetime (UTC), or None if unlimited.
+    """Return the founders offer expiry datetime (UTC).
 
     Priority:
     1. local_billing_settings.founders_offer_ends_at (if configured in DB).
     2. FOUNDERS_OFFER_ENDS_AT env var (ISO 8601 string).
-    3. If neither is set, returns None (no time limit).
+    3. Closed historical default ("2026-11-14T01:00:00Z") so DB/env outages fail closed.
     """
     settings = billing_settings()
-    raw = (settings.get("founders_offer_ends_at") or os.getenv("FOUNDERS_OFFER_ENDS_AT", "") or "").strip()
-    if not raw:
-        return None
+    raw = (
+        settings.get("founders_offer_ends_at")
+        or os.getenv("FOUNDERS_OFFER_ENDS_AT", "")
+        or "2026-11-14T01:00:00Z"
+    ).strip()
     try:
         dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
     except (ValueError, TypeError):
-        return None
+        return datetime(2026, 11, 14, 1, 0, 0, tzinfo=timezone.utc)
 
 
 def founders_offer_is_open() -> bool:
     """Return True if the founders offer is still within its active time window."""
     ends = founders_offer_ends_at()
     if ends is None:
-        return True  # No expiry set = always open
+        return True
     return datetime.now(timezone.utc) < ends
 
 
@@ -322,6 +324,34 @@ def pro_regular_amount_egp() -> float:
     if settings.get("pro_price_egp") is not None:
         return float(settings["pro_price_egp"])
     return _env_price("PRO_REGULAR_PRICE_EGP", _env_price("PRO_PRICE_EGP", 200.0))
+
+
+def current_pro_offer_copy() -> tuple[int, bool]:
+    """Return (current_pro_price_egp, founders_is_open), failing closed to (200, False)."""
+    try:
+        is_open = bool(founders_offer_is_open())
+        price = int(round(plan_amount_egp("pro")))
+        return price, is_open
+    except Exception:
+        return 200, False
+
+
+def format_pro_cta_sentence(is_html: bool = True) -> str:
+    """Return a concise Pro subscription CTA reflecting live offer status."""
+    price, is_open = current_pro_offer_copy()
+    if is_open:
+        if is_html:
+            return (
+                f"🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ {price} ج.م فقط شهرياً</b> "
+                f"بدلاً من {int(round(pro_regular_amount_egp()))} ج.م (لفترة محدودة)!"
+            )
+        return (
+            f"⚡ اشترك في باقة المؤسسين بـ {price} ج.م شهرياً (لفترة محدودة) "
+            "واستقبل صفقات السوينج أولاً بأول:"
+        )
+    if is_html:
+        return f"🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>باقة Pro بـ {price} ج.م شهرياً</b> واحصل على الإشارات لحظة بلحظة!"
+    return f"⚡ اشترك الآن في باقة Pro بـ {price} ج.م شهرياً واستقبل صفقات السوينج أولاً بأول:"
 
 
 def subscription_days(plan_id: str) -> int:

@@ -360,10 +360,10 @@ async def chat_stream_endpoint(
     auth_user = get_authenticated_user(request)
     verified_user_id = auth_user.get("id") if auth_user else None
 
-    # Allow local development fallback only if explicitly local/dev or body userId provided in non-production
+    # Allow explicit local dev override only when opted in (never trust raw body.user_id in production containers)
     if not verified_user_id:
         dev_override = body.user_id or body.userId
-        if dev_override and os.getenv("NODE_ENV") != "production":
+        if dev_override and os.getenv("ALLOW_DEV_USER_ID_OVERRIDE", "").strip().lower() == "true":
             verified_user_id = dev_override
 
     # If still unauthenticated, return 401 Unauthorized (matching frontend login modal)

@@ -19,6 +19,7 @@ import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
 import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
 import { broadcastEntitlements } from "@/lib/entitlements";
+import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 
 export default function TrialWelcomePrompt() {
   const { user } = useAuth();
@@ -119,10 +120,11 @@ export default function TrialWelcomePrompt() {
     setLoadingTrial(true);
     try {
       const variant = prepareTrialAutostart();
+      const device_fp = await getTrialDeviceFingerprint();
       const res = await fetch("/api/subscription/trial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variant }),
+        body: JSON.stringify({ variant, device_fp }),
       });
       const data = await res.json();
       if (res.ok && data?.success) {
@@ -134,7 +136,11 @@ export default function TrialWelcomePrompt() {
         window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
       } else {
         clearTrialAutostart();
-        toast.error(data?.message || (isAr ? "تعذر تفعيل التجربة" : "Could not activate trial"));
+        notifyTrialActivationError(data, isAr, user?.id);
+        if (data?.error === "TELEGRAM_LINK_REQUIRED") {
+          setEligible(false);
+          setTelegramUnlinked(true);
+        }
       }
     } catch {
       clearTrialAutostart();
@@ -248,14 +254,16 @@ export default function TrialWelcomePrompt() {
               </div>
 
               <div className="pt-1">
-                <Link
-                  href="/profile#telegram"
+                <a
+                  href={user?.id ? `https://t.me/egxbots_bot?start=${user.id}` : "/profile#telegram"}
+                  target={user?.id ? "_blank" : undefined}
+                  rel={user?.id ? "noopener noreferrer" : undefined}
                   onClick={() => setDismissed(true)}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-purple-600/30"
                 >
                   <BellRing className="w-3.5 h-3.5" />
                   <span>{isAr ? "ربط تليجرام الآن (ثانية واحدة) 💬" : "Link Telegram Now 💬"}</span>
-                </Link>
+                </a>
               </div>
             </div>
           ) : null}

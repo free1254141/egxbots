@@ -445,7 +445,9 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             return None
         raw_preset = str(safe_args.get("preset") or "").strip().lower()
         preset_slug = re.sub(r"[^a-z0-9_]+", "_", raw_preset).strip("_")
-        return f"vip_tech_screener_{preset_slug}" if preset_slug else "vip_tech_screener"
+        if not preset_slug or preset_slug == "momentum_and_volume":
+            return "vip_tech_screener"
+        return f"vip_tech_screener_{preset_slug}"
 
     # 6. Two-Stock Comparison
     if tool_name == "get_comparison":
@@ -542,11 +544,27 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
 
     # Parallel open recommendations discovery (get_recommendations + get_technical_scan / get_accumulation_stocks)
     if "get_recommendations" in names_set and names_set.issubset(
-        {"get_recommendations", "get_technical_scan", "screen_stocks", "get_accumulation_stocks"}
+        {"get_recommendations", "get_technical_scan", "screen_stocks", "get_accumulation_stocks", "get_market"}
     ):
         recs_keys = [p[2] for p in parsed if p[0] == "get_recommendations"]
-        if recs_keys and all(rk == "vip_open_recommendations" for rk in recs_keys):
-            return "vip_open_recommendations"
+        market_ok = all(p[2] == "vip_market_summary" for p in parsed if p[0] == "get_market")
+        if recs_keys and market_ok and len(set(recs_keys)) == 1:
+            if "get_market" in names_set and names_set == {"get_recommendations", "get_market"}:
+                return recs_keys[0]
+            if recs_keys[0] == "vip_open_recommendations":
+                return "vip_open_recommendations"
+
+    # Parallel Market Overview + Screener/Accumulation (e.g. "أفضل الأسهم فنياً اليوم حسب المسح الفني والمؤشرات")
+    if "get_market" in names_set and len(names_set) == 2:
+        market_keys = [p[2] for p in parsed if p[0] == "get_market"]
+        if market_keys and all(mk == "vip_market_summary" for mk in market_keys):
+            if "get_accumulation_stocks" in names_set:
+                acc_keys = [p[2] for p in parsed if p[0] == "get_accumulation_stocks"]
+                if acc_keys and len(set(acc_keys)) == 1:
+                    return acc_keys[0]
+            scan_keys = [p[2] for p in parsed if p[0] in ("get_technical_scan", "screen_stocks")]
+            if scan_keys and len(set(scan_keys)) == 1:
+                return scan_keys[0]
 
     return None
 
@@ -582,8 +600,18 @@ DIALOGUE_WORDS = {
     for w in {
         "ليه", "لماذا", "ازاي", "كيف", "اشمعني", "اشمعنا", "امتي", "امتى", "متي", "متى",
         "لو", "اذا", "افرض", "تفتكر", "تتوقع", "اشرح", "اشرحلي", "فهمني", "باك", "backtest",
+        "غلط", "خطا", "تفهم", "تفهمني", "فهمتني", "اقصد", "قصدي", "مقصود", "اخبرتك",
     }
 }
+
+_MARKET_CONSTRAINT_PHRASES = tuple(
+    _normalize_ar_for_cache(p)
+    for p in (
+        " خارج المقصور", " المقصور", " otc ", " سعود", " تاسي", " تداول",
+        " شرعي", " شريعه", " حلال", " egx33", " قطاع ", " اقل من ",
+        " تحت سعر", " فوق سعر", " مضاربه لحظ", " غير ", " ماعدا ", " بدون ",
+    )
+)
 
 
 def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> Optional[str]:
@@ -593,13 +621,15 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     """
     if not query or (images and len(images) > 0):
         return None
+    if query.strip().startswith("/"):
+        return None
 
     cleaned = _normalize_ar_for_cache(query)
     norm = " " + re.sub(r"[^\w\s]", " ", cleaned).strip() + " "
     norm = re.sub(r"\s+", " ", norm)
     tokens = set(norm.split())
 
-    # Skip personal & dialogue questions
+    # Skip personal & dialogue/correction questions
     if any(w in tokens or w in norm for w in PERSONAL_WORDS):
         return None
     if any(w in tokens for w in DIALOGUE_WORDS):
@@ -610,25 +640,28 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     if has_number and re.search(r"(?:زكاه|تطهير|حساب|احسب|احسبلي|مبلغ|كميه)", norm):
         return None
 
-    # Canonical Market-Wide Buttons & Direct Queries (normalized Arabic forms)
-    if any(k in norm for k in (" ملخص السوق ", " حاله السوق ", " وضع السوق ", " market summary ")):
-        return "vip_market_summary"
-    if any(k in norm for k in (" اسهم التجميع ", " تجميع وايكوف ", " السيوله الذكيه ", " accumulation ")):
-        return "vip_accumulation"
-    if any(k in norm for k in (" المسح الفني ", " مسح فني ", " الماسح الذكي ", " tech screener ")):
-        return "vip_tech_screener"
-    if any(k in norm for k in (" اقوي الاسهم ", " افضل الاسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "قطاع", "مسح")):
-        return "vip_top_stocks"
-    if any(k in norm for k in (" اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ")):
-        return "vip_market_news"
-    if any(k in norm for k in (" التوصيات المفتوحه ", " كل التوصيات المفتوحه ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ")):
-        return "vip_open_recommendations"
-    if any(k in norm for k in (" توصيات الاسبوع الحالي ", " توصيات هذا الاسبوع ")):
-        return "vip_recs_this_week"
-    if any(k in norm for k in (" توصيات الاسبوع الماضي ", " توصيات الاسبوع السابق ")):
-        return "vip_recs_last_week"
-    if any(k in norm for k in (" اقوي القطاعات ", " افضل القطاعات ")):
-        return "vip_top_sectors"
+    has_scope_constraint = any(phrase in norm for phrase in _MARKET_CONSTRAINT_PHRASES)
+
+    # Canonical Market-Wide Buttons & Direct Queries (only when NOT narrowed by OTC/Sharia/Saudi/sector/price filters)
+    if not has_scope_constraint:
+        if any(k in norm for k in (" ملخص السوق ", " حاله السوق ", " وضع السوق ", " market summary ")):
+            return "vip_market_summary"
+        if any(k in norm for k in (" اسهم التجميع ", " تجميع وايكوف ", " السيوله الذكيه ", " accumulation ")):
+            return "vip_accumulation"
+        if any(k in norm for k in (" المسح الفني ", " مسح فني ", " الماسح الذكي ", " tech screener ")):
+            return "vip_tech_screener"
+        if any(k in norm for k in (" اقوي الاسهم ", " افضل الاسهم ", " top stocks ")) and not any(k in norm for k in ("تجميع", "قطاع", "مسح")):
+            return "vip_top_stocks"
+        if any(k in norm for k in (" اخبار البورصه ", " اخبار السوق ", " افصاحات السوق ")):
+            return "vip_market_news"
+        if any(k in norm for k in (" التوصيات المفتوحه ", " كل التوصيات المفتوحه ", " صفقات السوينغ ", " صفقات السوينج ", " توصيات اليوم ")):
+            return "vip_open_recommendations"
+        if any(k in norm for k in (" توصيات الاسبوع الحالي ", " توصيات هذا الاسبوع ")):
+            return "vip_recs_this_week"
+        if any(k in norm for k in (" توصيات الاسبوع الماضي ", " توصيات الاسبوع السابق ")):
+            return "vip_recs_last_week"
+        if any(k in norm for k in (" اقوي القطاعات ", " افضل القطاعات ")):
+            return "vip_top_sectors"
 
     # Single or Two-Stock Comparison query
     is_comparison_query = bool(re.search(r"\b(?:قارن|مقارن|مقارنه|ايهما|مقابل|vs|versus)\b", norm))
@@ -676,8 +709,10 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     if found_sym and has_number and re.search(r"(?:سهم|اسهم|جنيه|زكاه|تطهير|حساب|احسب|مبلغ)", norm):
         return None
 
-    # Canonical recommendation prompts without a specific stock symbol
-    if not found_sym and any(k in norm for k in (" رشح لي ", " رشحلي ", " فرص شراء ", " فرصه شراء ", " افضل فرص الشراء ")):
+    # Canonical recommendation prompts without a specific stock symbol (block if narrowed by constraints)
+    if not found_sym and not has_scope_constraint and any(
+        k in norm for k in (" رشح لي ", " رشحلي ", " فرص شراء ", " فرصه شراء ", " افضل فرص الشراء ")
+    ):
         return "vip_open_recommendations"
 
     if found_sym:

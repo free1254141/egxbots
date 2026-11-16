@@ -2,7 +2,7 @@
 Telegram VIP Chat Room & ARTORO Interactive Hub (https://t.me/egxbots/1680).
 
 Connects the public/VIP Telegram chat topic directly to the website's Agentic AI
-Pipeline (/api/telegram/vip-chat), enforcing per-user Free (5/day) and Pro (350/month)
+Pipeline (/api/telegram/vip-chat), enforcing per-user Free (10 once/email) and Pro (350/month)
 quotas, preserving multi-turn session state & memory, providing 1-click quick tools
 and interactive prompts (ForceReply + state), and displaying private modal alert
 dialogs + pricing upgrade cards when a user reaches their plan limit.
@@ -332,12 +332,60 @@ def build_vip_chat_keyboard(is_private: bool = False) -> Dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
+def _pro_offer_state() -> Tuple[int, bool]:
+    try:
+        from api.payment_common import current_pro_offer_copy
+        return current_pro_offer_copy()
+    except Exception:
+        return 200, False
+
+
+def _limit_reached_alert_text() -> str:
+    price, is_open = _pro_offer_state()
+    promo = f"({price} ج.م عرض المؤسسين)" if is_open else f"({price} ج.م/شهر)"
+    return (
+        "⚠️ انتهى رصيدك المجاني (10/10 رسائل)!\n"
+        f"💎 باقة PRO {promo}:\n"
+        "• 350 سؤال/شهر\n"
+        "• توصيات فورية + قناة VIP\n"
+        "• متابعة 15 سهماً\n"
+        "👇 اضغط التسعير للاشتراك"
+    )
+
+
+def _pro_only_tool_alert_text() -> str:
+    price, is_open = _pro_offer_state()
+    suffix = " للمؤسسين" if is_open else ""
+    return (
+        "🔒 التوصيات اللحظية لمشتركي PRO فقط!\n"
+        f"💎 باقة PRO ({price} ج.م/شهر{suffix}):\n"
+        "• إشارات فورية بدون تأخير 15 يوم\n"
+        "• 350 سؤال/شهر لأرتورو\n"
+        "• متابعة 15 سهماً\n"
+        "👇 اشترك من صفحة التسعير"
+    )
+
+
+def _pricing_features_alert_text() -> str:
+    price, is_open = _pro_offer_state()
+    price_line = f"🔥 عرض المؤسسين: {price} ج.م/شهر!" if is_open else f"💎 الاشتراك: {price} ج.م/شهر"
+    return (
+        "👑 مميزات EGX Bots PRO:\n"
+        "✅ 350 سؤال شهرياً مع أرتورو\n"
+        "✅ توصيات فورية بدون تأخير 15 يوم\n"
+        "✅ قناة توصيات VIP الخاصة\n"
+        "✅ محفظة ذكية لـ 15 سهماً\n"
+        f"{price_line}"
+    )
+
+
 def build_pricing_upgrade_keyboard(is_private: bool = False) -> Dict[str, Any]:
     """Inline keyboard for the Limit Reached / Pro Upgrade dialog card."""
+    price, _ = _pro_offer_state()
     rows: List[List[Dict[str, Any]]] = [
         [
             {
-                "text": "👑 اشترك في PRO الآن — صفحة التسعير (100 ج.م)",
+                "text": f"👑 اشترك في PRO الآن — صفحة التسعير ({price} ج.م)",
                 "url": _pricing_url(),
             }
         ],
@@ -373,32 +421,9 @@ def build_pricing_upgrade_keyboard(is_private: bool = False) -> Dict[str, Any]:
 
 
 # Native Telegram modal popup dialog text (max 200 characters for show_alert=True)
-LIMIT_REACHED_ALERT_TEXT = (
-    "⚠️ انتهى رصيدك المجاني اليوم (5/5 أسئلة)!\n"
-    "💎 اشترك في باقة PRO (100 ج.م للمؤسسين بدلاً من 200):\n"
-    "• 350 سؤال ذكي/شهر\n"
-    "• توصيات شراء فورية + قناة VIP\n"
-    "• متابعة 10 أسهم بمحفظتك\n"
-    "👇 اضغط زر التسعير للاشتراك"
-)
-
-PRO_ONLY_TOOL_ALERT_TEXT = (
-    "🔒 التوصيات المفتوحة اللحظية متاحة لمشتركي PRO فقط!\n"
-    "💎 باقة PRO (100 ج.م/شهر للمؤسسين):\n"
-    "• إشارات شراء فورية بدون تأخير 15 يوم\n"
-    "• 350 سؤال ذكي شهرياً لأرتورو\n"
-    "• متابعة 10 أسهم بمحفظتك\n"
-    "👇 اشترك الآن من صفحة التسعير"
-)
-
-PRICING_FEATURES_ALERT_TEXT = (
-    "👑 مميزات باقة EGX Bots PRO:\n"
-    "✅ 350 سؤال وتحليل شهرياً مع أرتورو\n"
-    "✅ توصيات شراء فورية بدون تأخير 15 يوم\n"
-    "✅ دخول قناة توصيات VIP الخاصة\n"
-    "✅ محفظة ذكية لمتابعة 10 أسهم\n"
-    "🔥 عرض المؤسسين: 100 ج.م/شهر (15 يوم فقط)!"
-)
+LIMIT_REACHED_ALERT_TEXT = _limit_reached_alert_text()
+PRO_ONLY_TOOL_ALERT_TEXT = _pro_only_tool_alert_text()
+PRICING_FEATURES_ALERT_TEXT = _pricing_features_alert_text()
 
 TOPIC_RECS_RESTRICTED_ALERT_TEXT = (
     "🔒 توصيات الشراء اللحظية حصرية لمشتركي PRO وتظهر فقط في الشات الخاص أو على الموقع."
@@ -430,6 +455,7 @@ def build_topic_recs_restricted_html(user_name: str, tg_user_id: int) -> str:
 
 
 def build_topic_recs_restricted_keyboard() -> Dict[str, Any]:
+    price, _ = _pro_offer_state()
     return {
         "inline_keyboard": [
             [
@@ -444,7 +470,7 @@ def build_topic_recs_restricted_keyboard() -> Dict[str, Any]:
                     "url": "https://egxbots.com/scanner/ai",
                 },
                 {
-                    "text": "💎 باقة PRO والتسعير (100 ج.م)",
+                    "text": f"💎 باقة PRO والتسعير ({price} ج.م)",
                     "url": _pricing_url(),
                 },
             ],
@@ -465,8 +491,8 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
             "• <b>اكتب مباشرةً:</b> يمكنك كتابة سؤالك أو اسم أي سهم مباشرة في الرسائل (مثل: <code>حلل فوري</code> أو <code>قارن بين التجاري الدولي وطلعت مصطفى</code>).\n"
             "• <b>أو استخدم الأزرار السريعة بالأسفل:</b> لتحليل سهم، مقارنة سهمين، ملخص السوق، أسهم التجميع، المسح الفني، التوصيات المفتوحة، وتحليل محفظتك بضغطة واحدة!\n\n"
             "🎫 <b>نظام الباقات والرصيد:</b>\n"
-            "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
-            "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 10 أسهم بمحفظتك."
+            "• <b>الباقة المجانية:</b> <code>10 أسئلة مجانية</code> (مرة واحدة لكل إيميل — لا تتجدد شهرياً + 10 رسائل هدية عند ربط تليجرام).\n"
+            "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية + متابعة 15 سهماً بمحفظتك."
             f"{chat_id_line}\n\n"
             "👇 <b>اكتب سؤالك الآن أو اختر الأداة المطلوبة من الأزرار بالأسفل:</b>"
         )
@@ -484,8 +510,8 @@ def build_welcome_panel_html(is_private: bool = False, chat_id: Optional[Any] = 
         "🔒 <b>تفضل الخصوصية الكاملة؟ (شات خاص 1-on-1):</b>\n"
         "• إذا كنت لا ترغب في كتابة أسهمك أو محفظتك في الشات العام، اضغط على زر <b>«🔒 تحدث مع أرتورو في شات خاص (@egxbots_bot)»</b> بالأسفل أو راسل البوت <a href=\"https://t.me/egxbots_bot?start=artoro_chat\">@egxbots_bot</a> مباشرة للتحدث معه على انفراد وبخصوصية تامة!\n\n"
         "🎫 <b>نظام الباقات والرصيد:</b>\n"
-        "• <b>الباقة المجانية:</b> <code>5 أسئلة يومياً</code>.\n"
-        "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية (في الخاص والموقع) + متابعة 10 أسهم بمحفظتك.\n\n"
+        "• <b>الباقة المجانية:</b> <code>10 أسئلة مجانية</code> (مرة واحدة لكل إيميل — لا تتجدد شهرياً + 10 رسائل هدية عند ربط تليجرام).\n"
+        "• <b>باقة PRO VIP:</b> <code>350 سؤالاً شهرياً</code> + التوصيات المفتوحة اللحظية (في الخاص والموقع) + متابعة 15 سهماً بمحفظتك.\n\n"
         "👇 <b>اختر الأداة المطلوبة من الأزرار بالأسفل أو افتح الشات الخاص:</b>"
     )
 
@@ -494,12 +520,13 @@ def build_pricing_dialog_html(
     user_name: str,
     tg_user_id: int,
     reason: str = "limit_reached",
-    used: int = 5,
-    limit: int = 5,
+    used: int = 10,
+    limit: int = 10,
 ) -> str:
     """Build the rich Pricing & Upgrade Dialog card with direct link to /pricing."""
     safe_name = html.escape(user_name or "المستثمر")
     user_mention = f'<a href="tg://user?id={tg_user_id}">{safe_name}</a>'
+    price, is_open = _pro_offer_state()
 
     if reason == "pro_required":
         header = (
@@ -521,22 +548,31 @@ def build_pricing_dialog_html(
         )
     else:
         header = (
-            f"⚠️ <b>وصلت للحد الأقصى لرصيدك اليومي ({used}/{limit}) — أهلاً {user_mention}</b>\n"
+            f"⚠️ <b>وصلت للحد الأقصى لرصيدك المجاني ({used}/{limit}) — أهلاً {user_mention}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"لقد استهلكت كامل رصيدك المجاني اليوم في سؤال <b>أرتورو AI</b>. "
+            f"لقد استهلكت كامل رصيدك المجاني في سؤال <b>أرتورو AI</b> (10 رسائل مجانية لمرة واحدة لكل إيميل). "
             f"للاستمرار في التحليل الفوري والوصول الكامل لجميع الأدوات، قم بالترقية إلى <b>باقة PRO VIP</b>:"
         )
+
+    price_section = (
+        f"🔥 <b>عرض المؤسسين الحصري:</b>\n"
+        f"💰 <b>{price} ج.م فقط شهرياً</b> (بدلاً من <s>200 ج.م</s>) مع مهلة 72 ساعة لتثبيت السعر — الدفع فوري عبر فودافون كاش / إنستاباي / فوري / البطاقات البنكية.\n\n"
+        if is_open
+        else (
+            f"💎 <b>قيمة الاشتراك في باقة PRO:</b>\n"
+            f"💰 <b>{price} ج.م شهرياً</b> (وتتوفر باقات 6 شهور وسنة وباقة VIP مدى الحياة) — الدفع فوري عبر فودافون كاش / إنستاباي / فوري / البطاقات البنكية.\n\n"
+        )
+    )
 
     return (
         f"{header}\n\n"
         "👑 <b>مميزات الاشتراك في باقة PRO VIP:</b>\n"
-        "1️⃣ <b>350 سؤال وتحليل ذكي شهرياً</b> مع أرتورو في الموقع والتليجرام (بدلاً من 5 يومياً).\n"
+        "1️⃣ <b>350 سؤال وتحليل ذكي شهرياً</b> مع أرتورو في الموقع والتليجرام (بدلاً من 10 لمرة واحدة في المجاني).\n"
         "2️⃣ <b>توصيات وإشارات الشراء اللحظية</b> فور صدورها (بدون تأخير 15 يوماً في الباقة المجانية).\n"
         "3️⃣ <b>دخول قناة التليجرام VIP الخاصة</b> لإشارات الدخول والأهداف ووقف الخسارة.\n"
-        "4️⃣ <b>محفظة استثمارية ذكية لمتابعة حتى 10 أسهم</b> مع تحليل مستمر لمراكزك.\n"
+        "4️⃣ <b>محفظة استثمارية ذكية لمتابعة حتى 15 سهماً</b> مع تحليل مستمر لمراكزك.\n"
         "5️⃣ <b>دعم فني مباشر VIP</b> وأولوية قصوى في الخوادم.\n\n"
-        "🔥 <b>عرض المؤسسين الحصري (لفترة محدودة 15 يوماً فقط):</b>\n"
-        "💰 <b>100 ج.م فقط شهرياً</b> (بدلاً من <s>200 ج.م</s>) مع مهلة 72 ساعة لتثبيت السعر — الدفع فوري عبر فودافون كاش / إنستاباي / فوري / البطاقات البنكية.\n\n"
+        f"{price_section}"
         "👇 <b>اضغط على الزر بالأسفل للانتقال إلى صفحة التسعير وتفعيل اشتراكك فوراً:</b>"
     )
 
@@ -700,14 +736,17 @@ def _update_user_quota_cache(tg_user_id: int, data: Dict[str, Any]) -> None:
     if "remaining" in data or "is_pro" in data or data.get("error_code") == "LIMIT_REACHED":
         with _DEDUP_LOCK:
             prev = _USER_QUOTA_CACHE.get(int(tg_user_id)) or {}
+            is_pro_val = bool(data.get("is_pro", prev.get("is_pro", False)))
+            default_limit = 350 if is_pro_val else 10
+            default_period = "monthly" if is_pro_val else "lifetime"
             _USER_QUOTA_CACHE[int(tg_user_id)] = {
                 "ok": True,
                 "linked": bool(data.get("linked", prev.get("linked", False))),
-                "is_pro": bool(data.get("is_pro", prev.get("is_pro", False))),
+                "is_pro": is_pro_val,
                 "used": int(data.get("used") if data.get("used") is not None else prev.get("used", 0)),
-                "limit": int(data.get("limit") if data.get("limit") is not None else prev.get("limit", 5)),
-                "remaining": 0 if data.get("error_code") == "LIMIT_REACHED" else int(data.get("remaining") if data.get("remaining") is not None else prev.get("remaining", 5)),
-                "period": str(data.get("period") or prev.get("period") or "monthly"),
+                "limit": int(data.get("limit") if data.get("limit") is not None else prev.get("limit", default_limit)),
+                "remaining": 0 if data.get("error_code") == "LIMIT_REACHED" else int(data.get("remaining") if data.get("remaining") is not None else prev.get("remaining", default_limit)),
+                "period": str(data.get("period") or prev.get("period") or default_period),
                 "ts": time.time(),
             }
 
@@ -1144,7 +1183,13 @@ def format_pipeline_reply_for_telegram(
     safe_user = html.escape(user_name or "المستثمر")
     user_link = f'<a href="tg://user?id={tg_user_id}">{safe_user}</a>'
     plan_badge = "👑 PRO VIP" if is_pro else "🎫 مجاني (Free)"
-    period_label = "شهرياً" if period == "monthly" else "اليوم"
+    period_norm = str(period or "").strip().lower()
+    if period_norm == "monthly":
+        period_label = "شهرياً"
+    elif period_norm == "daily":
+        period_label = "اليوم"
+    else:
+        period_label = "إجمالي — مرة واحدة"
 
     site_origin = (get_web_origin() or "https://egxbots.com").rstrip("/")
     if "localhost" in site_origin or "127.0.0.1" in site_origin:
@@ -1226,13 +1271,13 @@ def _show_limit_or_upgrade_dialog(
     """
     if callback_query_id:
         if reason == "pro_required":
-            alert_text = PRO_ONLY_TOOL_ALERT_TEXT
+            alert_text = _pro_only_tool_alert_text()
         elif reason == "account_link":
             alert_text = ACCOUNT_LINK_ALERT_TEXT
         elif reason == "pricing_info":
-            alert_text = PRICING_FEATURES_ALERT_TEXT
+            alert_text = _pricing_features_alert_text()
         else:
-            alert_text = LIMIT_REACHED_ALERT_TEXT
+            alert_text = _limit_reached_alert_text()
         answer_vip_callback(bot_token, callback_query_id, alert_text, show_alert=True)
 
     dialog_html = build_pricing_dialog_html(
@@ -1633,7 +1678,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
 
         # A) Pure Pricing Alert Popup Dialog
         if cb_data == "vip_pricing_alert":
-            answer_vip_callback(bot_token, cb_id, PRICING_FEATURES_ALERT_TEXT, show_alert=True)
+            answer_vip_callback(bot_token, cb_id, _pricing_features_alert_text(), show_alert=True)
             return True
 
         # B) Show Pricing Dialog + Card
@@ -1674,11 +1719,12 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             is_pro = bool(q_res.get("is_pro"))
             linked = bool(q_res.get("linked"))
             used = int(q_res.get("used") or 0)
-            limit = int(q_res.get("limit") or (350 if is_pro else 5))
+            limit = int(q_res.get("limit") or (350 if is_pro else 10))
             remaining = int(q_res.get("remaining") if q_res.get("remaining") is not None else max(0, limit - used))
             plan_txt = "👑 باقة PRO VIP" if is_pro else "🎫 الباقة المجانية (Free)"
             link_txt = "مربوط بالموقع ✅" if linked else "غير مربوط (اربطه من البروفايل)"
-            period_txt = "شهرياً" if is_pro else "اليوم"
+            period_norm = str(q_res.get("period") or ("monthly" if is_pro else "lifetime")).strip().lower()
+            period_txt = "شهرياً" if period_norm == "monthly" else ("اليوم" if period_norm == "daily" else "إجمالي — مرة واحدة")
 
             quota_alert = (
                 f"📊 حالة حسابك يا {user_name[:22]}:\n"
@@ -1955,7 +2001,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         )
         if mode_arg == "limit_reached":
             msg_txt = (
-                "🧪 <b>تم تفعيل وضع اختبار انتهاء الكوتا (Limit Reached 5/5):</b>\n"
+                "🧪 <b>تم تفعيل وضع اختبار انتهاء الكوتا (Limit Reached 10/10):</b>\n"
                 "اضغط الآن على أي زر في اللوحة بالأسفل (مثل <code>🔍 حلل سهم</code> أو <code>📈 ملخص السوق</code>) "
                 "لترى كيف تظهر <b>النافذة المنبثقة الخاصة (Dialog)</b> وكارت التسعير للمستخدم حين ينتهي رصيده!\n"
                 "• للعودة لحسابك الطبيعي اكتب: <code>/test_normal</code>"
@@ -1963,7 +2009,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
         elif mode_arg == "free_plan":
             msg_txt = (
                 "🧪 <b>تم تفعيل وضع اختبار الباقة المجانية (Free Plan):</b>\n"
-                "يمكنك الآن الضغط على زر <code>🎯 التوصيات المفتوحة (PRO)</code> لاختبار قفل الميزة، أو اختبار خصم الـ 5 رسائل اليومية.\n"
+                "يمكنك الآن الضغط على زر <code>🎯 التوصيات المفتوحة (PRO)</code> لاختبار قفل الميزة، أو اختبار خصم رصيد الـ 10 رسائل.\n"
                 "• للعودة لباقتك الطبيعية اكتب: <code>/test_normal</code>"
             )
         else:
@@ -1997,7 +2043,7 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
             "<code>احفظ في محفظتي 1000 سهم فوري بسعر 7.5 و 500 طلعت مصطفى بسعر 55 والكاش 20000</code>\n\n"
             "2️⃣ <b>بصورة المحفظة (سكرين شوت):</b> ارفع صورة محفظتك من تطبيق التداول واكتب معها: <code>احفظ المحفظة وحللها</code>\n\n"
             "3️⃣ <b>للتحليل والمتابعة في أي وقت:</b> اكتب <code>حلل محفظتي</code> أو اضغط زر <b>💼 تحليل محفظتي</b> بالأسفل.\n\n"
-            "⚡ <i>متاح لك حالياً رصيد مجاني يومي بالخاص (10 استفسارات/يوم) لتسجيل ومتابعة محفظتك فوراً.</i>"
+            "⚡ <i>متاح لك حالياً رصيد ترحيبي مجاني (10 استفسارات مرة واحدة لكل حساب + 10 رسائل هدية عند ربط تليجرام) لتسجيل ومتابعة محفظتك فوراً.</i>"
         )
         send_vip_message(
             bot_token=bot_token,

@@ -167,14 +167,26 @@ def _record_line(s: Dict[str, Any]) -> str:
     return f"🚀 <b>{s['winners']} رابح من أصل {s['total']} إشارة ({s['winners'] / s['total'] * 100:.0f}%)</b>\n\n"
 
 
-_OFFER_HTML = (
-    "👑 <b>عرض المؤسسين: باقة Pro بـ 100 ج.م شهرياً مدى الحياة!</b>\n"
-    "✅ إشارات الرادار اللحظية والماسح الفني\n"
-    "✅ كاشف المصائد اليومي + قناة VIP الفورية\n"
-    "✅ رادار إفصاحات الشركات ومستندات الـ PDF\n"
-    "✅ مساعدك الذكي ARTORO بدون قيود\n"
-    "💳 <i>فودافون كاش / انستاباي / فوري / بطاقات بنكية وميزة</i>"
-)
+def _offer_html() -> str:
+    from api.payment_common import current_pro_offer_copy
+
+    price, is_open = current_pro_offer_copy()
+    headline = (
+        f"👑 <b>عرض المؤسسين: باقة Pro بـ {price} ج.م شهرياً مدى الحياة!</b>\n"
+        if is_open
+        else f"👑 <b>اشترك في باقة Pro بـ {price} ج.م شهرياً!</b>\n"
+    )
+    return (
+        headline
+        + "✅ إشارات الرادار اللحظية والماسح الفني\n"
+        "✅ كاشف المصائد اليومي + قناة VIP الفورية\n"
+        "✅ رادار إفصاحات الشركات ومستندات الـ PDF\n"
+        "✅ مساعدك الذكي ARTORO بدون قيود\n"
+        "💳 <i>فودافون كاش / انستاباي / فوري / بطاقات بنكية وميزة</i>"
+    )
+
+
+_OFFER_HTML = _offer_html()
 
 
 def build_vip_html(s: Dict[str, Any]) -> str:
@@ -221,7 +233,7 @@ def build_free_telegram_html(s: Dict[str, Any]) -> str:
         f"📈 <b>نماذج أخرى صعدت من إشارات الرادار:</b>\n{_movers_lines(s, 5)}\n\n"
         f"🪤 <b>مصائد الغد:</b> رصد الكاشف <b>{len(s['bear'])}</b> نموذج ارتداد و<b>{len(s['bull'])}</b> مصيدة قمة.\n\n"
         f"📑 <b>إفصاحات اليوم:</b>\n{_disclosures_lines(s, 3)}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n{_OFFER_HTML}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n{_offer_html()}\n\n"
         f"🔗 <b>استكشف الأدوات مجاناً:</b>\n"
         f"• رادار الإفصاحات: {LINK_DISCLOSURES}\n"
         f"• كاشف المصائد: {LINK_TECHNICAL}"
@@ -229,6 +241,15 @@ def build_free_telegram_html(s: Dict[str, Any]) -> str:
 
 
 def build_email_html(s: Dict[str, Any], unsub_url: str, app_url: str) -> str:
+    from api.payment_common import current_pro_offer_copy
+
+    price, is_open = current_pro_offer_copy()
+    email_offer_title = (
+        f"ثبّت باقة Pro بـ {price} ج.م شهرياً مدى الحياة"
+        if is_open
+        else f"اشترك في باقة Pro بـ {price} ج.م شهرياً"
+    )
+
     def br(text: str) -> str:
         return text.replace("\n", "<br>").replace("<b>", "<strong>").replace("</b>", "</strong>")
 
@@ -247,7 +268,7 @@ def build_email_html(s: Dict[str, Any], unsub_url: str, app_url: str) -> str:
 🔴 {len(s['bull'])} مصيدة قمة (Upthrust) — تجنب الشراء عند القمم.<br><br>
 <strong style="color:#10b981;">📑 إفصاحات وتعاملات الداخليين اليوم:</strong><br>{br(_disclosures_lines(s, 4))}</div>
 <div style="background:rgba(16,185,129,.12);border:2px solid #10b981;border-radius:16px;padding:22px;text-align:center;margin:18px 0;">
-<div style="font-size:19px;font-weight:900;color:#fff;margin-bottom:8px;">ثبّت باقة Pro بـ 100 ج.م شهرياً مدى الحياة</div>
+<div style="font-size:19px;font-weight:900;color:#fff;margin-bottom:8px;">{email_offer_title}</div>
 <div style="font-size:13px;color:#d1d5db;margin-bottom:14px;">إشارات لحظية + كاشف المصائد + رادار الإفصاحات + قناة VIP + ARTORO بدون قيود<br>💳 فودافون كاش / انستاباي / فوري / بطاقات بنكية وميزة</div>
 <a href="{LINK_PRICING}" style="display:inline-block;background:#10b981;color:#000;font-weight:900;font-size:15px;padding:14px 30px;border-radius:12px;text-decoration:none;">⚡ تفعيل باقة Pro الآن ↗</a></div>
 <div style="text-align:center;font-size:13px;">
@@ -448,8 +469,11 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
             {"text": "📈 النماذج المتكررة ↗", "url": LINK_SIMILARITY},
         ],
     ]
+    from api.payment_common import current_pro_offer_copy
+
+    pro_price, _ = current_pro_offer_copy()
     free_buttons = [
-        [{"text": "⚡ اشترك في Pro بـ 100 ج.م ↗", "url": LINK_PRICING}],
+        [{"text": f"⚡ اشترك في Pro بـ {pro_price} ج.م ↗", "url": LINK_PRICING}],
         [
             {"text": "📑 رادار الإفصاحات ↗", "url": LINK_DISCLOSURES},
             {"text": "🔍 كاشف المصائد ↗", "url": LINK_TECHNICAL},

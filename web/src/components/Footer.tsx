@@ -489,39 +489,55 @@ export default function Footer() {
         </div>
         )}
 
-        {/* ── SEO Internal Linking Hub: Top Stocks & Pillar Guides (Market-Aware) ── */}
-        <div className="border-2 border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/50 p-5 sm:p-6 mb-8 shadow-xs">
+        {/* ── SEO Internal Linking Hub: Top Stocks, Free Tools & Pillar Guides (Dual-Market SSR) ── */}
+        <div className="border-2 border-black/15 dark:border-white/15 bg-white/70 dark:bg-zinc-900/50 p-5 sm:p-6 mb-8 shadow-xs space-y-6">
+          {/* Free Tools Quick Bar */}
+          <div className="pb-4 border-b border-black/10 dark:border-white/10">
+            <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-2.5">
+              {isAr ? "🛠️ أدوات التحليل المجانية (EGX & TASI)" : "🛠️ Free Market & AI Analysis Tools (EGX & TASI)"}
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { href: "/disclosures", ar: "📄 رادار الإفصاحات والداخليين (مجاناً)", en: "📄 Disclosures & Insider Radar (Free)" },
+                { href: "/fair-value", ar: "💎 حاسبة السعر العادل ومؤشر الرخص", en: "💎 Fair Value & Undervalued Screener" },
+                { href: "/sharia", ar: "⚖️ الأسهم الحلال وحاسبة التطهير (EGX33 & TASI)", en: "⚖️ Sharia Stocks & Dividend Cleanser" },
+                { href: "/scanner/technical", ar: "📈 الماسح الفني للأسهم (RSI & MACD)", en: "📈 Technical Stock Screener" },
+                { href: "/scanner/market", ar: "🧭 اتساع السوق ومؤشرات EGX30 & TASI", en: "🧭 Market Breadth & Liquidity" },
+                { href: "/reports", ar: "🗓️ تقارير السوق والتجميع اليومية", en: "🗓️ Daily Market & Accumulation Reports" },
+              ].map((tool) => (
+                <Link
+                  key={tool.href}
+                  href={tool.href}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 hover:border-emerald-500 transition-colors"
+                >
+                  {isAr ? tool.ar : tool.en}
+                </Link>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
-                {isSaudi
-                  ? (isAr ? "📊 أبرز أسهم السوق السعودي تاسي (تحليل فني و AI)" : "📊 Most Searched Saudi TASI Stocks (AI & Technical Analysis)")
-                  : (isAr ? "📊 أبرز أسهم البورصة المصرية (تحليل فني و AI)" : "📊 Most Searched EGX Stocks (AI & Technical Analysis)")}
+                {isAr ? "📊 أبرز أسهم البورصة المصرية (تحليل فني و AI)" : "📊 Most Searched EGX Stocks (AI & Technical Analysis)"}
               </h4>
-              <div className="flex flex-wrap gap-2">
-                {(isSaudi ? [
-                  { sym: "2222", ar: "أرامكو السعودية 2222", en: "Saudi Aramco (2222)" },
-                  { sym: "1120", ar: "مصرف الراجحي 1120", en: "Al Rajhi Bank (1120)" },
-                  { sym: "2010", ar: "سابك 2010", en: "SABIC (2010)" },
-                  { sym: "7010", ar: "إس تي سي STC 7010", en: "stc (7010)" },
-                  { sym: "1180", ar: "البنك الأهلي SNB 1180", en: "SNB Bank (1180)" },
-                  { sym: "1211", ar: "معادن 1211", en: "Maaden (1211)" },
-                  { sym: "2082", ar: "أكوا باور 2082", en: "ACWA Power (2082)" },
-                  { sym: "1150", ar: "مصرف الإنماء 1150", en: "Alinma Bank (1150)" },
-                  { sym: "2280", ar: "المراعي 2280", en: "Almarai (2280)" },
-                  { sym: "4030", ar: "البحري 4030", en: "Bahri (4030)" },
-                ] : [
-                  { sym: "comi", ar: "البنك التجاري الدولي COMI", en: "CIB Bank (COMI)" },
+              <div className="flex flex-wrap gap-1.5 mb-5">
+                {[
+                  { sym: "alum", ar: "العربية للألومنيوم ALUM", en: "Arab Aluminum (ALUM)" },
+                  { sym: "auto", ar: "جي بي أوتو AUTO", en: "GB Auto (AUTO)" },
+                  { sym: "gbco", ar: "جي بي كورب GBCO", en: "GB Corp (GBCO)" },
+                  { sym: "ames", ar: "إسكندرية للخدمات الطبية AMES", en: "Alex Medical (AMES)" },
+                  { sym: "kora", ar: "كوبر للاستثمار KORA", en: "Copper Investment (KORA)" },
+                  { sym: "aalr", ar: "العامة لاستصلاح الأراضي AALR", en: "AALR" },
+                  { sym: "mfpc", ar: "موبكو للأسمدة MFPC", en: "MOPCO (MFPC)" },
+                  { sym: "abuk", ar: "أبو قير للأسمدة ABUK", en: "Abu Qir Fertilizers (ABUK)" },
+                  { sym: "swdy", ar: "السويدي إليكتريك SWDY", en: "Elsewedy Electric (SWDY)" },
+                  { sym: "comi", ar: "التجاري الدولي COMI", en: "CIB Bank (COMI)" },
                   { sym: "fwry", ar: "فوري FWRY", en: "Fawry (FWRY)" },
                   { sym: "tmgh", ar: "طلعت مصطفى TMGH", en: "Talaat Moustafa (TMGH)" },
-                  { sym: "abuk", ar: "أبو قير للأسمدة ABUK", en: "Abu Qir Fertilizers (ABUK)" },
-                  { sym: "esrs", ar: "حديد عز ESRS", en: "Ezz Steel (ESRS)" },
                   { sym: "etel", ar: "المصرية للاتصالات ETEL", en: "Telecom Egypt (ETEL)" },
-                  { sym: "swdy", ar: "السويدي إليكتريك SWDY", en: "Elsewedy Electric (SWDY)" },
-                  { sym: "hrho", ar: "إي إف جي القابضة HRHO", en: "EFG Holding (HRHO)" },
                   { sym: "amoc", ar: "أموك AMOC", en: "AMOC" },
-                  { sym: "btfh", ar: "بلتون القابضة BTFH", en: "Beltone (BTFH)" },
-                ]).map((s) => (
+                ].map((s) => (
                   <Link
                     key={s.sym}
                     href={`/stocks/${s.sym}`}
@@ -532,12 +548,40 @@ export default function Footer() {
                   </Link>
                 ))}
               </div>
+
+              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
+                {isAr ? "🇸🇦 أبرز أسهم السوق السعودي تاسي (TASI)" : "🇸🇦 Top Saudi TASI Stocks (AI & Technical Analysis)"}
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { sym: "2222", ar: "أرامكو السعودية 2222", en: "Saudi Aramco (2222)" },
+                  { sym: "1120", ar: "مصرف الراجحي 1120", en: "Al Rajhi Bank (1120)" },
+                  { sym: "2010", ar: "سابك 2010", en: "SABIC (2010)" },
+                  { sym: "7010", ar: "إس تي سي STC 7010", en: "stc (7010)" },
+                  { sym: "1180", ar: "البنك الأهلي SNB 1180", en: "SNB Bank (1180)" },
+                  { sym: "1211", ar: "معادن 1211", en: "Maaden (1211)" },
+                  { sym: "2082", ar: "أكوا باور 2082", en: "ACWA Power (2082)" },
+                  { sym: "1150", ar: "مصرف الإنماء 1150", en: "Alinma Bank (1150)" },
+                  { sym: "2280", ar: "المراعي 2280", en: "Almarai (2280)" },
+                  { sym: "4013", ar: "سليمان الحبيب 4013", en: "Sulaiman Al Habib (4013)" },
+                  { sym: "4030", ar: "البحري 4030", en: "Bahri (4030)" },
+                  { sym: "4190", ar: "جرير 4190", en: "Jarir (4190)" },
+                ].map((s) => (
+                  <Link
+                    key={s.sym}
+                    href={`/stocks/${s.sym}`}
+                    prefetch={false}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-zinc-100 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-800 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                  >
+                    {isAr ? s.ar : s.en}
+                  </Link>
+                ))}
+              </div>
             </div>
 
-            {isSaudi ? (
             <div>
               <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
-                {isAr ? "📚 الأدلة المرجعية للسوق السعودي (تاسي)" : "📚 Comprehensive Saudi TASI Quantitative Guides"}
+                {isAr ? "📚 الأدلة المرجعية للسوق المصري والسعودي (تاسي)" : "📚 Comprehensive EGX & Saudi TASI Quantitative Guides"}
               </h4>
               <ul className="space-y-2 text-xs font-bold">
                 <li>
@@ -564,22 +608,6 @@ export default function Footer() {
                     • {isAr ? "قائمة الأسهم السعودية النقية شرعياً وحاسبة تطهير الأرباح في تاسي 2026" : "Saudi TASI Sharia-Compliant Stocks & Dividend Purification Guide"}
                   </Link>
                 </li>
-                <li>
-                  <Link
-                    href="/blogs"
-                    className="text-emerald-700 dark:text-emerald-400 hover:underline transition-colors block pt-1"
-                  >
-                    ← {isAr ? "تصفح جميع أدلة ومقالات السوق" : "Browse All Market Guides & Blog"}
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            ) : (
-            <div>
-              <h4 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider mb-3">
-                {isAr ? "📚 الأدلة المرجعية لتحليل السوق المصري" : "📚 Comprehensive EGX Quantitative Guides"}
-              </h4>
-              <ul className="space-y-2 text-xs font-bold">
                 <li>
                   <Link
                     href="/blogs/best-egx-stock-analysis-software"
@@ -636,10 +664,8 @@ export default function Footer() {
                     • {isAr ? "الاستثمار العقاري vs البورصة في مصر: دليل Ewan Bot و EGX BOTS" : "Real Estate vs. Stocks in Egypt: Ewanbot & EGX BOTS Guide"}
                   </Link>
                 </li>
-
               </ul>
             </div>
-            )}
           </div>
         </div>
 

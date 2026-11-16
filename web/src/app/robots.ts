@@ -25,6 +25,7 @@ export default function robots(): MetadataRoute.Robots {
           '/stocks/*',
           '/fair-value',
           '/sharia',
+          '/disclosures',
           '/scanner/ai',
           '/scanner/technical',
           '/scanner/market',

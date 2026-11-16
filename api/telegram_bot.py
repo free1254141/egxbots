@@ -805,8 +805,43 @@ class TelegramBot:
                     profile.get("display_name") or profile.get("username") or "المستثمر"
                 )
 
-                # Unlink any other profiles with this telegram_chat_id so 1 Telegram account is uniquely 1-to-1
+                # Check if this Telegram chat ID was already linked/used for bonus on another account
+                prior_tg_uid = None
                 try:
+                    prev_prof = (
+                        supabase.table("profiles")
+                        .select("id")
+                        .eq("telegram_chat_id", str(chat_id))
+                        .neq("id", uid)
+                        .limit(1)
+                        .execute()
+                    )
+                    if prev_prof and prev_prof.data:
+                        prior_tg_uid = prev_prof.data[0].get("id")
+                    if not prior_tg_uid:
+                        prev_ev = (
+                            supabase.table("user_activity_events")
+                            .select("user_id")
+                            .in_("event_name", ["telegram_linked", "trial_started"])
+                            .contains("metadata", {"telegram_chat_id": str(chat_id)})
+                            .neq("user_id", uid)
+                            .limit(1)
+                            .execute()
+                        )
+                        if prev_ev and prev_ev.data:
+                            prior_tg_uid = prev_ev.data[0].get("user_id")
+                except Exception as e:
+                    self._log(f"Could not check prior telegram_chat_id links: {e}")
+
+                # Unlink any other profiles with this telegram_chat_id (preserving audit trail first)
+                try:
+                    if prior_tg_uid:
+                        supabase.table("user_activity_events").insert({
+                            "user_id": prior_tg_uid,
+                            "event_name": "telegram_linked",
+                            "path": "/telegram-bot",
+                            "metadata": {"telegram_chat_id": str(chat_id), "source": "unlink_preserve"},
+                        }).execute()
                     supabase.table("profiles").update({"telegram_chat_id": None}).eq("telegram_chat_id", str(chat_id)).neq("id", uid).execute()
                 except Exception as e:
                     self._log(f"Could not clear duplicate telegram_chat_id: {e}")
@@ -819,6 +854,23 @@ class TelegramBot:
                     .execute()
                 )
                 if res.data:
+                    # Persist permanent link audit event so unlinking cannot bypass trial/bonus anti-abuse
+                    try:
+                        supabase.table("user_activity_events").insert({
+                            "user_id": uid,
+                            "event_name": "telegram_linked",
+                            "path": "/telegram-bot",
+                            "metadata": {"telegram_chat_id": str(chat_id)},
+                        }).execute()
+                    except Exception as e:
+                        self._log(f"Could not record telegram_linked event: {e}")
+
+                    # Prevent multi-account bonus farming: 1 Telegram account = max one +10 bonus
+                    if prior_tg_uid:
+                        try:
+                            supabase.table("chat_bonus_credits").delete().eq("user_id", uid).eq("source", "telegram_link").eq("credits_used", 0).execute()
+                        except Exception as e:
+                            self._log(f"Could not revoke duplicate telegram_link bonus: {e}")
                     try:
                         supabase.table("bot_subscriptions").update(
                             {"telegram_chat_id": str(chat_id)}

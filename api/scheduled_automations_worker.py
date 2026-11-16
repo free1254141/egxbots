@@ -305,15 +305,28 @@ def _resolve_user_telegram(user_id: str, custom_chat_id: Optional[str]) -> Optio
 
 
 def _consume_user_quota(user_id: str, today_cairo: str) -> bool:
-    """Atomically consumes 1 credit from the user's monthly chat quota."""
+    """Atomically consumes 1 credit from the user's monthly chat quota (350/month)."""
     url, key = _get_supabase_config()
     if not url or not key:
         return False
+
+    month_start = f"{today_cairo[:7]}-01"
+    prior_rows = (
+        _supabase_request(
+            f"ai_chatbot_limits?user_id=eq.{user_id}&date=gte.{month_start}&date=lt.{today_cairo}&select=chat_count"
+        )
+        or []
+    )
+    prior_used = sum(int(r.get("chat_count") or 0) for r in prior_rows if isinstance(r, dict))
+    today_cap = max(0, 350 - prior_used)
+    if today_cap <= 0:
+        return False
+
     rpc_url = f"{url}/rest/v1/rpc/consume_ai_chat_quota"
     payload = {
         "p_user_id": user_id,
         "p_date": today_cairo,
-        "p_limit": 350,  # Pro monthly limit
+        "p_limit": today_cap,
     }
     req = urllib.request.Request(
         rpc_url,

@@ -54,12 +54,17 @@ const structuredData = {
     {
       "@type": "SoftwareApplication",
       "@id": "https://egxbots.com/scanner/backtests#app",
-      "name": "EGX Bots Backtesting Engine",
-      "alternateName": "محرك المحاكاة التاريخية للأسهم المصرية",
+      "name": "EGX & TASI Bots Backtesting Engine",
+      "alternateName": "محرك المحاكاة التاريخية للأسهم المصرية والسعودية",
       "applicationCategory": "FinanceApplication",
       "operatingSystem": "Web",
-      "description": "محرك محاكاة تاريخية واختبار استراتيجيات التداول الآلي لأسهم البورصة المصرية بنماذج الذكاء الاصطناعي.",
-      "url": "https://egxbots.com/scanner/backtests"
+      "description": "محرك محاكاة تاريخية واختبار استراتيجيات التداول الآلي لأسهم البورصة المصرية (EGX) والسوق السعودي (TASI) بنماذج الذكاء الاصطناعي.",
+      "url": "https://egxbots.com/scanner/backtests",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "EGP"
+      }
     },
     {
       "@type": "BreadcrumbList",

@@ -1008,3 +1008,52 @@ async def test_multi_turn_standalone_caches_and_prunes_and_followup_bypasses(mon
     assert not mock_skip_set.called
     # Full history must remain intact in synthesis for contextual follow-up
     assert any("سؤال قديم عن COMI" in str(m.get("content", "")) for m in followup_synth_msgs[0])
+
+
+def test_otc_constraint_efih_alias_slash_command_and_market_scan_cache():
+    # 1. Constrained recommendation/scan prompts ("خارج المقصورة", "شرعي") must NOT hijack generic cache
+    assert (
+        build_analysis_cache_key(
+            "رشح لى افضل سهمين من اسهم خارج المقصوره اضارب عليهم غدا ونقاط الدخول والخروج ووقف الخساره ارجو الدقه"
+        )
+        is None
+    )
+    assert build_analysis_cache_key("انت لم تفهمنى لقد اخبرتك انى اريد سهمين من خارج المقصوره") is None
+    assert build_analysis_cache_key("رشح لي اسهم شرعية اليوم") is None
+    assert build_analysis_cache_key("/value RACC") is None
+
+    # 2. Combined get_market + get_technical_scan(momentum_and_volume) collapses cleanly to vip_tech_screener
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_market", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+                {
+                    "function": {
+                        "name": "get_technical_scan",
+                        "arguments": '{"preset": "momentum_and_volume", "market": "EGX", "is_contextual_followup": false}',
+                    }
+                },
+            ]
+        )
+        == "vip_tech_screener"
+    )
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_market", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+                {"function": {"name": "get_accumulation_stocks", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+            ]
+        )
+        == "vip_accumulation"
+    )
+
+    # 3. "اى فايننس" resolves to EFIH and "/value RACC" does NOT inject fake ticker VALUE
+    efih_hints = pipeline.known_symbol_hints("قارن بين اى فايننس و فورى")
+    efih_syms = [s for h in efih_hints for s in h.get("symbols", [])]
+    assert "EFIH" in efih_syms
+    assert "FWRY" in efih_syms
+
+    racc_hints = pipeline.known_symbol_hints("/value RACC")
+    racc_syms = [s for h in racc_hints for s in h.get("symbols", [])]
+    assert "RACC" in racc_syms
+    assert "VALUE" not in racc_syms

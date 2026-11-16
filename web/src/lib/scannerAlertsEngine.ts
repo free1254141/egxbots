@@ -1127,9 +1127,23 @@ export async function executeScannerEngine(options: RunScannerOptions = {}) {
               `   • <b>صافي العائد المحقق: ${retStr}</b> 📈 (أعلى قمة وصلها: <b>${peakGainStr}</b>)`
             );
           }
+          let proMonthlyEgp = 200;
+          let foundersOpen = false;
+          try {
+            const { data: offerStatus } = await serviceClient.rpc("founders_offer_status");
+            const endsAt = offerStatus?.ends_at ? new Date(offerStatus.ends_at).getTime() : 0;
+            foundersOpen = Boolean(offerStatus?.enabled && offerStatus?.is_open && (!endsAt || endsAt > Date.now()));
+            if (foundersOpen && Number(offerStatus?.price_egp) > 0) {
+              proMonthlyEgp = Math.round(Number(offerStatus.price_egp));
+            }
+          } catch {}
           freeLines.push(`━━━━━━━━━━━━━━━━━━━━`);
           freeLines.push(`⚡ <i>تم رصد هذه الإشارة الفنية الخوارزمية لحظياً لمشتركي VIP وقت انطلاق السهم بمستويات الرصد والوقف المحسوبة آلياً.</i>\n`);
-          freeLines.push(`🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ 100 ج.م فقط شهرياً</b> بدلاً من 200 ج.م (لفترة محدودة 15 يوماً فقط)!`);
+          freeLines.push(
+            foundersOpen
+              ? `🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ ${proMonthlyEgp} ج.م فقط شهرياً</b> بدلاً من 200 ج.م!`
+              : `🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>باقة Pro بـ ${proMonthlyEgp} ج.م شهرياً</b> واستقبل الإشارات لحظة بلحظة!`
+          );
           freeLines.push(`👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing`);
           await sendTelegramAlert(FREE_CHANNEL_CHAT_ID, freeLines.join("\n"));
         }

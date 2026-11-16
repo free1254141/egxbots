@@ -48,6 +48,7 @@ import {
   toDisplayAmount,
 } from "@/lib/saudi-pricing";
 import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
+import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 export { broadcastEntitlements };
 
 type Step = "plans" | "payment" | "submitted";
@@ -156,10 +157,11 @@ export default function PricingClient() {
     setTrialLoading(true);
     try {
       const variant = prepareTrialAutostart();
+      const device_fp = await getTrialDeviceFingerprint();
       const res = await fetch("/api/subscription/trial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variant }),
+        body: JSON.stringify({ variant, device_fp }),
       });
       const data = await res.json();
       if (res.ok && data?.success) {
@@ -174,7 +176,7 @@ export default function PricingClient() {
         window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
       } else {
         clearTrialAutostart();
-        toast.error(data?.message || (isAr ? "تعذر تفعيل التجربة" : "Could not activate trial"));
+        notifyTrialActivationError(data, isAr, user?.id);
       }
     } catch {
       clearTrialAutostart();
@@ -973,7 +975,7 @@ export default function PricingClient() {
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
   const freeFeatures = [
     { icon: <Zap className="w-4 h-4" />, text: isAr ? `تأخير الإشارات والتوصيات ${freeLimits.signal_delay_days} يوماً (أرشيف تاريخي فقط)` : `Trading signals delayed ${freeLimits.signal_delay_days} days (historical archive only)`, included: true },
-    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 استشارات شات بوت شهرياً (لتجربة التحليل الآلي)" : "10 AI chatbot consultations / month", included: true },
+    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 استشارات شات بوت مجانية (مرة واحدة لكل إيميل — لا تتجدد شهرياً)" : "10 free AI chatbot consultations (one-time per email — non-renewing)", included: true },
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حفظ حتى ${freeLimits.portfolio_stocks} أسهم في محفظتك المتابعة` : `Up to ${freeLimits.portfolio_stocks} tracked portfolio stocks`, included: true },
     { icon: <Zap className="w-4 h-4" />, text: isAr ? "التوصيات اللحظية والصفقات القصيرة الحية 🔒 PRO" : "Live Short Swings & Real-Time Signals 🔒 PRO", included: false },
     { icon: <BellRing className="w-4 h-4" />, text: isAr ? "تنبيهات ورادار تليجرام الفوري على هاتفك 🔒 PRO" : "Instant Mobile Telegram Scanner Alerts 🔒 PRO", included: false },

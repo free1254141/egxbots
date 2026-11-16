@@ -15,7 +15,7 @@ import pytz
 
 from api.stock_ai import _init_supabase, supabase
 from api.plan_limits import is_pro_user, effective_limits
-from api.payment_common import is_payments_enabled
+from api.payment_common import is_payments_enabled, plan_amount_egp, founders_offer_is_open
 
 CAIRO_TZ = pytz.timezone("Africa/Cairo")
 
@@ -152,12 +152,60 @@ def get_authenticated_user(request: Request) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _monthly_quota_start(user_id: Optional[str], is_pro: bool, today: str) -> str:
+    """Return effective YYYY-MM-DD quota start date.
+
+    Free users receive 10 messages ONCE per account lifetime (no monthly reset),
+    whereas Pro subscribers reset per subscription/calendar month (350/month).
+    """
+    if not is_pro:
+        return "1970-01-01"
+    cal_month_start = f"{today[:7]}-01"
+    if not user_id or not supabase:
+        return cal_month_start
+    try:
+        from api.perf_utils import resolve_subscription_quota_window
+
+        sub_res = (
+            supabase.table("subscriptions")
+            .select("plan_id, status, current_period_start, current_period_end")
+            .eq("user_id", user_id)
+            .in_("status", ["active", "trialing"])
+            .order("current_period_end", desc=True)
+            .limit(5)
+            .execute()
+        )
+        win = resolve_subscription_quota_window(sub_res.data or [])
+        return str(win.get("effective_month_start_str") or cal_month_start)
+    except Exception:
+        return cal_month_start
+
+
+def _fetch_bonus_balance(user_id: Optional[str]) -> int:
+    """Return remaining telegram/referral bonus chat credits for the user."""
+    if not user_id or not supabase:
+        return 0
+    try:
+        res = supabase.rpc("get_chat_bonus_balance", {"p_user_id": user_id}).execute()
+        return max(0, int(getattr(res, "data", 0) or 0))
+    except Exception:
+        return 0
+
+
+def _invalidate_quota_cache(user_id: str) -> None:
+    try:
+        from api.routers.offload import _QUOTA_CACHE
+        _QUOTA_CACHE.delete(user_id)
+    except Exception:
+        pass
+
+
 def check_and_consume_quota(
     user_id: Optional[str],
     is_pro: bool,
 ) -> Tuple[bool, int, int, str]:
     """
-    Check and deduct chat quota for the user.
+    Check and deduct monthly chat quota (with bonus-credit fallback for Free users).
     Returns:
       (allowed: bool, remaining_quota: int, quota_limit: int, error_message: str)
     """
@@ -168,7 +216,6 @@ def check_and_consume_quota(
     if not is_payments_enabled():
         return True, 999, 999, ""
 
-    # Billing is enabled:
     quota_limit = 350 if is_pro else 10
 
     if not user_id:
@@ -176,48 +223,75 @@ def check_and_consume_quota(
 
     today = get_cairo_date_string()
     _init_supabase()
+    month_start = _monthly_quota_start(user_id, is_pro, today)
 
     try:
-        res = supabase.rpc(
-            "consume_ai_chat_quota",
-            {
-                "p_user_id": user_id,
-                "p_date": today,
-                "p_limit": quota_limit,
-            }
-        ).execute()
+        prior_res = (
+            supabase.from_("ai_chatbot_limits")
+            .select("date, chat_count")
+            .eq("user_id", user_id)
+            .gte("date", month_start)
+            .lt("date", today)
+            .execute()
+        )
+        prior_used = sum(int(r.get("chat_count") or 0) for r in (prior_res.data or []))
+        today_cap = max(0, quota_limit - prior_used)
 
-        quota_data = res.data
-        if isinstance(quota_data, list) and quota_data:
-            quota_data = quota_data[0]
+        allowed = False
+        total_used = prior_used
 
-        allowed = bool(quota_data.get("allowed", False)) if isinstance(quota_data, dict) else False
-        chat_count = int(quota_data.get("chat_count", 0)) if isinstance(quota_data, dict) else quota_limit
+        if today_cap > 0:
+            res = supabase.rpc(
+                "consume_ai_chat_quota",
+                {
+                    "p_user_id": user_id,
+                    "p_date": today,
+                    "p_limit": today_cap,
+                }
+            ).execute()
+            quota_data = res.data
+            if isinstance(quota_data, list) and quota_data:
+                quota_data = quota_data[0]
+            allowed = bool(quota_data.get("allowed", False)) if isinstance(quota_data, dict) else False
+            today_count = int(quota_data.get("chat_count", 0)) if isinstance(quota_data, dict) else today_cap
+            total_used = prior_used + today_count
 
-        if not allowed:
-            # Check bonus credits
+        if not allowed and not is_pro:
             try:
                 bonus_res = supabase.rpc("consume_chat_bonus", {"p_user_id": user_id}).execute()
-                if bonus_res.data and bonus_res.data.get("allowed") is True:
-                    allowed = True
+                bonus_data = getattr(bonus_res, "data", None)
+                if isinstance(bonus_data, list) and bonus_data:
+                    bonus_data = bonus_data[0]
+                if isinstance(bonus_data, dict) and bonus_data.get("allowed") is True:
+                    _invalidate_quota_cache(user_id)
+                    bonus_left = _fetch_bonus_balance(user_id)
+                    return True, bonus_left, quota_limit, ""
             except Exception:
                 pass
 
         if not allowed:
-            msg = (
-                f"لقد استهلكت باقتك ({quota_limit}/{quota_limit} رسائل). "
-                "🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة "
-                "واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!"
-            ) if not is_pro else (
-                f"لقد استهلكت حد الرسائل الشهري لباقة Pro ({quota_limit} رسالة)."
-            )
+            if not is_pro:
+                if founders_offer_is_open():
+                    offer_line = "🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة "
+                else:
+                    pro_egp = int(plan_amount_egp("pro"))
+                    offer_line = f"اشترك الآن في باقة Pro بـ {pro_egp} ج.م شهرياً "
+                msg = (
+                    f"لقد استهلكت باقتك المجانية ({quota_limit}/{quota_limit} رسائل — الرصيد المجاني لمرة واحدة لكل حساب). "
+                    + offer_line
+                    + "واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!"
+                )
+            else:
+                msg = f"لقد استهلكت حد الرسائل الشهري لباقة Pro ({quota_limit} رسالة)."
             return False, 0, quota_limit, msg
 
-        remaining = max(0, quota_limit - chat_count)
-        return True, remaining, quota_limit, ""
+        base_remaining = max(0, quota_limit - total_used)
+        bonus_left = 0 if is_pro else _fetch_bonus_balance(user_id)
+        _invalidate_quota_cache(user_id)
+        return True, base_remaining + bonus_left, quota_limit, ""
 
-    except Exception as e:
-        # If DB check fails, default to allowing with warning to avoid breaking active UX
+    except Exception:
+        # If DB check fails, default to allowing to avoid breaking active UX on transient DB hiccups
         return True, quota_limit, quota_limit, ""
 
 
@@ -245,27 +319,28 @@ def sanitize_user_input(text: str) -> Tuple[bool, str]:
 
 def get_user_chat_quota(user_id: Optional[str], is_pro: bool) -> Tuple[int, int, int]:
     """
-    Calculate (used, remaining, limit) exactly matching web/src/app/api/user/quota/route.ts.
+    Calculate (used, remaining, limit) on a monthly window matching /api/user/quota.
     """
     limit = 350 if is_pro else 10
     if not user_id or user_id == "00000000-0000-0000-0000-000000000000":
         return 0, limit, limit
 
     today = get_cairo_date_string()
-    month_start = f"{today[:7]}-01"
     try:
         _init_supabase()
+        month_start = _monthly_quota_start(user_id, is_pro, today)
         res = (
             supabase.from_("ai_chatbot_limits")
             .select("date, chat_count")
             .eq("user_id", user_id)
-            .gte("date", month_start if is_pro else today)
+            .gte("date", month_start)
             .execute()
         )
         used = sum(int(r.get("chat_count") or 0) for r in (res.data or []))
-        remaining = max(0, limit - used)
-        return used, remaining, limit
-    except Exception as e:
+        base_remaining = max(0, limit - used)
+        bonus_left = 0 if is_pro else _fetch_bonus_balance(user_id)
+        return used, base_remaining + bonus_left, limit
+    except Exception:
         return 0, limit, limit
 
 

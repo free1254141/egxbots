@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { consumeTrialAutostart, prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
+import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 
 function ArtoroBrandMark({ size = "header" }: { size?: "header" | "launcher" | "hero" }) {
     return (
@@ -80,6 +81,7 @@ export default function ChatWidget() {
 
     const { language } = useLanguage();
     const [foundersEndsAt, setFoundersEndsAt] = useState<string | null>(null);
+    const [foundersIsOpen, setFoundersIsOpen] = useState<boolean>(false);
     const [foundersCountdown, setFoundersCountdown] = useState<string | null>(null);
 
     useEffect(() => {
@@ -225,8 +227,11 @@ export default function ChatWidget() {
                 const parsedCfg = JSON.parse(rawCfg) as { ts: number; data: any };
                 if (parsedCfg?.ts && Date.now() - parsedCfg.ts < 60 * 60 * 1000 && parsedCfg.data) {
                     usedCachedCfg = true;
-                    if (active && parsedCfg.data?.founders?.ends_at) {
-                        setFoundersEndsAt(parsedCfg.data.founders.ends_at);
+                    if (active && parsedCfg.data?.founders) {
+                        setFoundersIsOpen(Boolean(parsedCfg.data.founders.is_open));
+                        if (parsedCfg.data.founders.ends_at) {
+                            setFoundersEndsAt(parsedCfg.data.founders.ends_at);
+                        }
                     }
                 }
             }
@@ -243,8 +248,11 @@ export default function ChatWidget() {
                             window.sessionStorage.setItem(PUBLIC_CFG_KEY, JSON.stringify({ ts: Date.now(), data: cfg }));
                         } catch { /* ignore */ }
                     }
-                    if (active && cfg?.founders?.ends_at) {
-                        setFoundersEndsAt(cfg.founders.ends_at);
+                    if (active && cfg?.founders) {
+                        setFoundersIsOpen(Boolean(cfg.founders.is_open));
+                        if (cfg.founders.ends_at) {
+                            setFoundersEndsAt(cfg.founders.ends_at);
+                        }
                     }
                 })
                 .catch(() => {});
@@ -257,10 +265,11 @@ export default function ChatWidget() {
         setTrialStartingModal(true);
         try {
             const variant = prepareTrialAutostart();
+            const device_fp = await getTrialDeviceFingerprint();
             const res = await fetch("/api/subscription/trial", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ variant }),
+                body: JSON.stringify({ variant, device_fp }),
             });
             const data = await res.json();
             if (res.ok && data?.success) {
@@ -271,7 +280,7 @@ export default function ChatWidget() {
                 window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
             } else {
                 clearTrialAutostart();
-                toast.error(data?.message || "تعذر تفعيل التجربة");
+                notifyTrialActivationError(data, true, user?.id);
             }
         } catch {
             clearTrialAutostart();
@@ -1664,9 +1673,11 @@ export default function ChatWidget() {
                                     ? `لقد استهلكت باقتك المجانية (${quotaLimit || 10}/${quotaLimit || 10})`
                                     : "ميزة حصرية لمشتركي باقة Pro 👑"}
                             </h3>
-                            <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
-                                🔥 <strong>عرض المؤسسين:</strong> اشترك الآن بـ <strong>100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — {foundersCountdown ? `متبقي ⏰ ${foundersCountdown}` : "متاح لمدة 15 يوماً فقط!"} وثبّت سعرك طول ما بتجدد!
-                            </div>
+                            {foundersIsOpen && foundersCountdown && foundersCountdown !== "00:00:00" && (
+                                <div className="p-3 bg-amber-300 border-2 border-black text-black text-xs font-bold shadow-[2px_2px_0_0_#000]">
+                                    🔥 <strong>عرض المؤسسين:</strong> اشترك الآن بـ <strong>100 ج.م فقط شهرياً مدى الحياة</strong> (بدلاً من 200 ج.م) — متبقي ⏰ {foundersCountdown} وثبّت سعرك طول ما بتجدد!
+                                </div>
+                            )}
                             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 font-medium leading-relaxed">
                                 تريد تحليلاً غير محدود لمحفظتك وتوصيات الأسهم لحظة بلحظة؟ انضم الآن لقناة الـ VIP واحصل على جميع مميزات Pro بدون قيود.
                             </p>
@@ -1731,7 +1742,7 @@ export default function ChatWidget() {
                                 }}
                                 className="w-full py-3 px-4 bg-[#FFE600] hover:bg-yellow-300 text-black font-black text-sm border-3 border-black shadow-[4px_4px_0_0_#000] active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center justify-center gap-2 cursor-pointer"
                             >
-                                <span>اشترك في عرض المؤسسين بـ 100 ج.م شهرياً (تثبيت مدى الحياة) ⚡</span>
+                                <span>اشترك الآن في باقة Pro (350 رسالة/شهر + VIP) ⚡</span>
                                 <span>←</span>
                             </button>
 

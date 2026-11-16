@@ -1,5 +1,5 @@
 import { Metadata } from "next";
-import { getPublicStockDirectory } from "@/lib/seo/stock-directory";
+import { getPublicStockDirectory, getPublicTasiStockDirectory } from "@/lib/seo/stock-directory";
 import StocksClient from "./StocksClient";
 
 export const revalidate = 86400; // Cache for 24 hours (daily market job cadence)
@@ -50,7 +50,21 @@ export const metadata: Metadata = {
 };
 
 export default async function StocksPage() {
-  const stocks = await getPublicStockDirectory();
+  const [stocks, tasiStocks] = await Promise.all([
+    getPublicStockDirectory(),
+    getPublicTasiStockDirectory().catch(() => []),
+  ]);
+
+  const combinedForSchema = [
+    ...stocks.slice(0, 60).map((s) => ({
+      name: `${s.name} (${s.symbol})`,
+      url: `https://egxbots.com/stocks/${s.symbol.toLowerCase()}`,
+    })),
+    ...tasiStocks.slice(0, 60).map((s) => ({
+      name: `${s.nameAr || s.name} (${s.symbol})`,
+      url: `https://egxbots.com/stocks/${s.symbol.toLowerCase()}`,
+    })),
+  ];
 
   const structuredData = {
     "@context": "https://schema.org",
@@ -58,8 +72,8 @@ export default async function StocksPage() {
       {
         "@type": "CollectionPage",
         "@id": "https://egxbots.com/stocks#webpage",
-        "name": "دليل أسهم وشركات البورصة المصرية",
-        "description": "قائمة كاملة لأسهم البورصة المصرية والتحليل الفني والذكاء الاصطناعي.",
+        "name": "دليل أسهم وشركات البورصة المصرية والسوق السعودي تاسي (EGX & TASI)",
+        "description": "قائمة كاملة لأسهم البورصة المصرية (EGX) والسوق السعودي تداول (TASI) مع التحليل الفني والذكاء الاصطناعي.",
         "url": "https://egxbots.com/stocks",
         "breadcrumb": {
           "@type": "BreadcrumbList",
@@ -73,7 +87,7 @@ export default async function StocksPage() {
             {
               "@type": "ListItem",
               "position": 2,
-              "name": "دليل الأسهم",
+              "name": "دليل الأسهم المصرية والسعودية",
               "item": "https://egxbots.com/stocks"
             }
           ]
@@ -82,13 +96,13 @@ export default async function StocksPage() {
       {
         "@type": "ItemList",
         "@id": "https://egxbots.com/stocks#itemlist",
-        "name": "Egyptian Exchange (EGX) Listed Stocks",
-        "numberOfItems": stocks.length,
-        "itemListElement": stocks.slice(0, 100).map((s, idx) => ({
+        "name": "Egyptian Exchange (EGX) & Saudi Tadawul (TASI) Listed Stocks",
+        "numberOfItems": stocks.length + tasiStocks.length,
+        "itemListElement": combinedForSchema.map((s, idx) => ({
           "@type": "ListItem",
           "position": idx + 1,
-          "name": `${s.name} (${s.symbol})`,
-          "url": `https://egxbots.com/stocks/${s.symbol.toLowerCase()}`
+          "name": s.name,
+          "url": s.url,
         }))
       }
     ]
@@ -98,9 +112,9 @@ export default async function StocksPage() {
     <div className="w-full pt-5 sm:pt-7">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
       />
-      <StocksClient initialStocks={stocks} />
+      <StocksClient initialStocks={stocks} initialTasiStocks={tasiStocks} />
     </div>
   );
 }

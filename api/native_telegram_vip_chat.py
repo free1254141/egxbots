@@ -145,19 +145,36 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
             is_pro = True
 
     limit = 350 if is_pro else 10
-    period = "monthly"
+    period = "monthly" if is_pro else "lifetime"
     used = 0
+    bonus_left = 0
 
     if linked_user_id:
-        quota_rows = _supabase_request(f"ai_chatbot_limits?user_id=eq.{linked_user_id}&date=gte.{today[:7]}-01&select=chat_count") or []
+        query_filter = (
+            f"ai_chatbot_limits?user_id=eq.{linked_user_id}&date=gte.{today[:7]}-01&select=chat_count"
+            if is_pro
+            else f"ai_chatbot_limits?user_id=eq.{linked_user_id}&select=chat_count"
+        )
+        quota_rows = _supabase_request(query_filter) or []
         used = sum(int(r.get("chat_count") or 0) for r in quota_rows)
+        if not is_pro:
+            try:
+                from api.agentic_chat.auth_guard import _fetch_bonus_balance
+                bonus_left = _fetch_bonus_balance(linked_user_id)
+            except Exception:
+                bonus_left = 0
     else:
         limit = 350 if is_pro else 10
-        period = "monthly" if is_pro else "daily"
-        if state_row and state_row.get("quota_date") == today:
-            used = int(state_row.get("daily_count") or 0)
+        period = "monthly" if is_pro else "lifetime"
+        if state_row:
+            if is_pro:
+                if str(state_row.get("quota_date") or "")[:7] == today[:7]:
+                    used = int(state_row.get("daily_count") or 0)
+            else:
+                # Cumulative lifetime limit (10 total) for unlinked Free Telegram users
+                used = int(state_row.get("daily_count") or 0)
 
-    remaining = max(0, limit - used)
+    remaining = max(0, limit - used) + bonus_left
 
     resolved = {
         "telegram_user_id": telegram_user_id,
@@ -581,7 +598,10 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Increment quota & save Telegram state (skip for B2B group messages since group quota is tracked in b2b_group_licenses)
     if not bypass_quota:
         state_row = user_info["state_row"] or {}
-        new_daily_count = (int(state_row.get("daily_count") or 0) + 1) if state_row.get("quota_date") == today else 1
+        if user_info["is_pro"]:
+            new_daily_count = (int(state_row.get("daily_count") or 0) + 1) if str(state_row.get("quota_date") or "")[:7] == today[:7] else 1
+        else:
+            new_daily_count = int(state_row.get("daily_count") or 0) + 1
 
         chat_history = list(state_row.get("chat_history") or [])
         chat_history.append({"role": "user", "content": query, "created_at": user_now_iso})
@@ -611,7 +631,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
             _VIP_CHAT_EXECUTOR.submit(_persist_tg_state)
 
     new_used = user_info["used"] + (0 if bypass_quota else 1)
-    new_remaining = max(0, user_info["limit"] - new_used)
+    new_remaining = max(0, int(user_info["remaining"]) - (0 if bypass_quota else 1))
 
     return {
         "ok": True,

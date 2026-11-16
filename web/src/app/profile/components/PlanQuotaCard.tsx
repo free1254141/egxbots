@@ -6,6 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { fetchUserQuotaCached } from "@/lib/user-quota-client";
+import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 import {
   Zap,
   MessageSquare,
@@ -46,7 +47,7 @@ interface QuotaData {
       limit: number;
       remaining: number;
       percent: number;
-      period?: "daily" | "monthly";
+      period?: "daily" | "monthly" | "lifetime";
     };
     portfolio_stocks: {
       used: number;
@@ -279,11 +280,18 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
               type="button"
               onClick={async () => {
                 try {
-                  const res = await fetch("/api/subscription/trial", { method: "POST" });
+                  const device_fp = await getTrialDeviceFingerprint();
+                  const res = await fetch("/api/subscription/trial", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ device_fp }),
+                  });
                   const body = await res.json();
                   if (res.ok && body?.success) {
                     broadcastEntitlements(true);
                     void fetchQuota(true);
+                  } else {
+                    notifyTrialActivationError(body, isAr, user?.id);
                   }
                 } catch {}
               }}
@@ -346,7 +354,9 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
               </span>
             </div>
             <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-              {chat?.period === "daily"
+              {chat?.period === "lifetime"
+                ? isAr ? "إجمالي (مرة واحدة)" : "Lifetime (One-time)"
+                : chat?.period === "daily"
                 ? isAr ? "يوميًا" : "Daily"
                 : isAr ? "شهريًا" : "Monthly"}
             </span>

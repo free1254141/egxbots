@@ -43,14 +43,22 @@ const FALLBACK_TASI_STOCKS: StockItem[] = (() => {
   return Array.from(bySymbol.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
 })();
 
-export default function StocksClient({ initialStocks }: { initialStocks: StockItem[] }) {
+export default function StocksClient({
+  initialStocks,
+  initialTasiStocks = [],
+}: {
+  initialStocks: StockItem[];
+  initialTasiStocks?: StockItem[];
+}) {
   const { language } = useLanguage();
   const { market, isSaudi } = useMarket();
   const isAr = language === "ar";
 
   const [query, setQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState("all");
-  const [tasiStocks, setTasiStocks] = useState<StockItem[] | null>(null);
+  const [tasiStocks, setTasiStocks] = useState<StockItem[] | null>(
+    initialTasiStocks.length > 0 ? initialTasiStocks : null
+  );
   const [isLoadingTasi, setIsLoadingTasi] = useState(false);
 
   useEffect(() => {
@@ -318,6 +326,52 @@ export default function StocksClient({ initialStocks }: { initialStocks: StockIt
           </p>
         </div>
       )}
+
+      {/* Companion Market SSR Directory for Dual-Market Discovery & SEO */}
+      <section
+        aria-label={
+          isSaudi
+            ? (isAr ? "تصفح أسهم البورصة المصرية EGX" : "Browse Egyptian Exchange EGX Stocks")
+            : (isAr ? "تصفح أسهم السوق السعودي تاسي TASI" : "Browse Saudi Tadawul TASI Stocks")
+        }
+        className="mt-12 border-2 border-black/15 dark:border-white/15 bg-white/75 dark:bg-zinc-900/60 p-5 sm:p-6"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <h2 className="text-sm font-black text-zinc-900 dark:text-white">
+            {isSaudi
+              ? (isAr ? "🇪🇬 دليل أسهم البورصة المصرية (EGX)" : "🇪🇬 Egyptian Exchange (EGX) Directory")
+              : (isAr ? "🇸🇦 دليل أسهم السوق السعودي (تداول / تاسي TASI)" : "🇸🇦 Saudi Tadawul (TASI) Stocks Directory")}
+          </h2>
+          <Link
+            href={isSaudi ? "/stocks?market=egx" : "/stocks?market=tasi"}
+            className="text-xs font-black text-emerald-700 dark:text-emerald-400 hover:underline"
+          >
+            {isSaudi
+              ? (isAr ? "عرض الدليل المصري الكامل ←" : "Switch to full EGX directory ←")
+              : (isAr ? "عرض دليل السوق السعودي الكامل ←" : "Switch to full TASI directory ←")}
+          </Link>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {(isSaudi ? initialStocks : (tasiStocks ?? FALLBACK_TASI_STOCKS)).map((s) => {
+            const cleanSym = s.symbol.toUpperCase().replace(/\.(SR|SA|TADAWUL)$/i, "");
+            const canonical = !isSaudi ? null : getCanonicalStockName(cleanSym);
+            const labelAr = isSaudi
+              ? (canonical && canonical.name_ar !== cleanSym ? canonical.name_ar : (s.nameAr || s.name || cleanSym))
+              : (s.nameAr || SAUDI_STOCK_NAMES_AR[cleanSym] || s.name || cleanSym);
+            const labelEn = s.name || cleanSym;
+            return (
+              <Link
+                key={cleanSym}
+                href={`/stocks/${cleanSym.toLowerCase()}`}
+                prefetch={false}
+                className="px-2 py-1 text-[11px] font-bold bg-zinc-100 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-800 hover:border-amber-500 transition-colors"
+              >
+                {isAr ? `${labelAr} (${cleanSym})` : `${labelEn} (${cleanSym})`}
+              </Link>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

@@ -1197,9 +1197,11 @@ def execute_scanner_alerts_native(force: bool = False, force_dispatch: bool = Fa
                     f"   • سعر الإغلاق / المستهدف: <b>{exit_price:.2f} ج.م</b>\n"
                     f"   • <b>صافي العائد المحقق: {ret_str}</b> 📈 (أعلى قمة وصلها: <b>{peak_str}</b>)"
                 )
+            from api.payment_common import format_pro_cta_sentence
+
             free_lines.append("━━━━━━━━━━━━━━━━━━━━")
             free_lines.append("⚡ <i>تم رصد هذه الإشارة الفنية الخوارزمية لحظياً لمشتركي VIP وقت انطلاق السهم بمستويات الرصد والوقف المحسوبة آلياً.</i>\n")
-            free_lines.append("🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ 100 ج.م فقط شهرياً</b> بدلاً من 200 ج.م (لفترة محدودة 15 يوماً فقط)!")
+            free_lines.append(format_pro_cta_sentence(is_html=True))
             free_lines.append("👉 <b>اشترك الآن وفعل اشتراكك الفوري:</b> https://egxbots.com/pricing")
             send_telegram_alert(free_channel, "\n".join(free_lines))
 

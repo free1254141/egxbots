@@ -74,7 +74,8 @@ export async function GET(req: NextRequest) {
         .from("ai_chatbot_limits")
         .select("date, chat_count")
         .eq("user_id", user.id)
-        .gte("date", calMonthStartStr),
+        .order("date", { ascending: false })
+        .limit(1000),
       supabase
         .from("positions")
         .select("symbol")
@@ -120,9 +121,11 @@ export async function GET(req: NextRequest) {
     const planName = pro ? (activeSub?.plan_id === "lifetime" || isUnlimited ? "lifetime" : "pro") : "free";
     const limits = planLimits(planName);
 
-    // Derive chat quota (filtered to effective subscription window start)
+    // Derive chat quota (Pro = monthly subscription window; Free = 10 once per account lifetime)
     const today = quotaWin.todayStr;
-    const effectiveLimitRows = (limitRowsRes.data || []).filter((r: any) => String(r.date || "") >= monthStartStr);
+    const effectiveLimitRows = pro
+      ? (limitRowsRes.data || []).filter((r: any) => String(r.date || "") >= monthStartStr)
+      : (limitRowsRes.data || []);
     const todayLimitRow = effectiveLimitRows.find((r: any) => r.date === today);
     const todayChatCount = Number(todayLimitRow?.chat_count || 0);
     const monthlyLimitsCount = effectiveLimitRows.reduce(
@@ -131,7 +134,7 @@ export async function GET(req: NextRequest) {
     );
     const chatUsed = monthlyLimitsCount;
     const chatLimit = limits.chat_messages_per_month;
-    const quotaPeriod = "monthly";
+    const quotaPeriod = pro ? "monthly" : "lifetime";
 
     // Derive portfolio count
     const positionRows = posResult.data;

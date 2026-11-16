@@ -1176,8 +1176,8 @@ async def api_user_quota(request: Request):
                         sb.table("ai_chatbot_limits")
                         .select("date, chat_count")
                         .eq("user_id", uid)
-                        .gte("date", cal_month_start)
-                        .limit(100)
+                        .order("date", desc=True)
+                        .limit(1000)
                         .execute(),
                         "data",
                         None,
@@ -1287,11 +1287,16 @@ async def api_user_quota(request: Request):
         plan_name = ("lifetime" if (plan_id in ("lifetime", "pro_lifetime") or is_unlimited) else "pro") if pro else "free"
         limits = effective_limits(plan_name)
 
-        chat_used = sum(
-            int(r.get("chat_count") or 0)
-            for r in limit_rows
-            if str(r.get("date") or "") >= month_start
+        chat_used = (
+            sum(
+                int(r.get("chat_count") or 0)
+                for r in limit_rows
+                if str(r.get("date") or "") >= month_start
+            )
+            if pro
+            else sum(int(r.get("chat_count") or 0) for r in limit_rows)
         )
+        quota_period = "monthly" if pro else "lifetime"
         chat_limit = int(limits["chat_messages_per_month"])
         unique_syms = {str(p.get("symbol") or "").strip().upper() for p in pos_rows if p.get("symbol")}
         portfolio_count = len(unique_syms)
@@ -1342,7 +1347,7 @@ async def api_user_quota(request: Request):
                     "bonus_credits": bonus_balance,
                     "remaining": max(0, chat_limit - chat_used) + (0 if pro else bonus_balance),
                     "percent": min(100, round((chat_used / max(1, chat_limit)) * 100)),
-                    "period": "monthly",
+                    "period": quota_period,
                 },
                 "portfolio_stocks": {
                     "used": portfolio_count,
