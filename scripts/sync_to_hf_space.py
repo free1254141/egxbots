@@ -113,7 +113,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "feat(api): pro 200 EGP revert, 10 lifetime free quota, bonus consume, tg-linked trial & ai-chat cache/alias fixes"
+    commit_msg = "fix(vision,telegram,aliases): deterministic P&L vs entry_price, CRST krismark alias, and 25s button cooldown"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)

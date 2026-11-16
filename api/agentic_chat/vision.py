@@ -373,16 +373,33 @@ def reconcile_vision_with_market(vision: Dict[str, Any], sb_client: Any) -> Dict
         )
         data = res.data or []
         close_by_symbol = {}
+        date_by_symbol = {}
         for row in data:
             sym = str(row.get("symbol") or "").upper()
             close_val = coerce_number_or_null(row.get("close"))
             if sym and close_val and close_val > 0 and sym not in close_by_symbol:
                 close_by_symbol[sym] = close_val
+                if row.get("date"):
+                    date_by_symbol[sym] = str(row.get("date"))
 
         for entry in vision["symbols"]:
             sym = entry.get("symbol")
             close = close_by_symbol.get(sym)
-            price = entry.get("visible_values", {}).get("price")
+            vis_vals = entry.get("visible_values") or {}
+            price = vis_vals.get("price")
+            avg_price = vis_vals.get("average_price")
+            qty = vis_vals.get("quantity")
+            if close and avg_price and avg_price > 0:
+                pnl_pct = round(((close - avg_price) / avg_price) * 100.0, 2)
+                reconciled_info: Dict[str, Any] = {
+                    "market_close": close,
+                    "market_date": date_by_symbol.get(sym),
+                    "pnl_vs_entry_pct": pnl_pct,
+                    "is_profitable_vs_entry": bool(close > avg_price),
+                }
+                if qty and qty > 0:
+                    reconciled_info["pnl_vs_entry_egp"] = round((close - avg_price) * qty, 2)
+                entry["market_reconciled"] = reconciled_info
             if close and price and price > 0:
                 ratio = price / close
                 if ratio > 3.0 or ratio < 0.33:
@@ -623,6 +640,15 @@ def safe_image_evidence_reply(vision: Dict[str, Any], request: str = "") -> str:
     return "\n".join(lines)
 
 
+def _fmt_price_exact(val: float) -> str:
+    """Preserve up to 4 decimals cleanly (e.g. 3.1274 stays 3.1274, 128.50 stays 128.50)."""
+    s = f"{val:.4f}".rstrip("0").rstrip(".")
+    if "." not in s:
+        return f"{val:.2f}"
+    dec = s.split(".")[1]
+    return f"{val:.2f}" if len(dec) <= 2 else s
+
+
 def format_vision_context_for_prompt(vision: Dict[str, Any]) -> str:
     """Renders the extracted vision evidence as a structured prompt instruction for DeepSeek V3 synthesis."""
     if not vision:
@@ -647,17 +673,29 @@ def format_vision_context_for_prompt(vision: Dict[str, Any]) -> str:
             if v.get("quantity") is not None:
                 details.append(f"الكمية: {v['quantity']:,.0f}")
             if v.get("average_price") is not None:
-                details.append(f"متوسط الشراء: {v['average_price']:.2f} ج.م")
+                details.append(f"متوسط الشراء: {_fmt_price_exact(v['average_price'])} ج.م")
             if v.get("price") is not None:
-                details.append(f"السعر الظاهر: {v['price']:.2f} ج.م")
+                details.append(f"السعر الظاهر بالصورة: {_fmt_price_exact(v['price'])} ج.م")
             if v.get("cost_basis") is not None:
                 details.append(f"التكلفة: {v['cost_basis']:,.2f} ج.م")
             if v.get("market_value") is not None:
                 details.append(f"القيمة السوقية: {v['market_value']:,.2f} ج.م")
             if v.get("profit_loss") is not None:
-                details.append(f"الربح/الخسارة: {v['profit_loss']:+,.2f} ج.م")
+                details.append(f"الربح/الخسارة بالصورة: {v['profit_loss']:+,.2f} ج.م")
             if v.get("return_pct") is not None:
-                details.append(f"العائد: {v['return_pct']:+.2f}%")
+                details.append(f"العائد بالصورة: {v['return_pct']:+.2f}%")
+            rec = s.get("market_reconciled") or {}
+            if rec.get("market_close") is not None and rec.get("pnl_vs_entry_pct") is not None:
+                state_label = "رابح" if rec.get("is_profitable_vs_entry") else "خاسر"
+                egp_part = (
+                    f" ({rec['pnl_vs_entry_egp']:+,.2f} ج.م)"
+                    if rec.get("pnl_vs_entry_egp") is not None
+                    else ""
+                )
+                details.append(
+                    f"صافي المركز الحقيقي مقارنة بمتوسط الشراء عند إغلاق السوق {_fmt_price_exact(rec['market_close'])} ج.م: "
+                    f"[{state_label} {rec['pnl_vs_entry_pct']:+.2f}%{egp_part}]"
+                )
             desc = "، ".join(details) if details else "لم تظهر أرقام تفصيلية"
             lines.append(f"  * **{s['symbol']}** ({s.get('asset_type', 'stock')}): {desc}")
 
@@ -685,7 +723,8 @@ def format_vision_context_for_prompt(vision: Dict[str, Any]) -> str:
             "\nتوجيه صارم للإجابة:\n"
             "1. اعتمد الأرقام والأسهم المستخرجة أعلاه كحقائق مؤكدة من الصورة.\n"
             "2. قارن أسعار الشراء المستخرجة من الصورة بأسعار السوق اللحظية الحالية في البورصة المصرية ومستويات الدعم والمقاومة المستدعاة من الأدوات.\n"
-            "3. قدم تحليلاً مالياً وفنياً دقيقاً ووافياً للمحفظة أو الشارت باللغة العربية بأسلوب استثماري احترافي."
+            "3. تحذير حسابي حاسم: الربح أو الخسارة الحقيقيان للمركز يُحسبان حصراً بمقارنة **سعر السوق/الإغلاق الحالي** مع **متوسط الشراء (average_price)** وليس مقارنة بالسعر الظاهر بالصورة؛ إذا كان الإغلاق أقل من متوسط الشراء فالسهم ما زال خاسراً حتى لو ارتفع عن سعر اللقطة.\n"
+            "4. قدم تحليلاً مالياً وفنياً دقيقاً ووافياً للمحفظة أو الشارت باللغة العربية بأسلوب استثماري احترافي."
         )
 
     return "\n".join(lines)

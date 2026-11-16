@@ -262,3 +262,44 @@ async def test_end_to_end_vision_pipeline_streaming():
 
         # 3. LLM reply streamed successfully
         assert "قرأت محفظتك بنجاح" in full_output
+
+
+def test_reconcile_vision_computes_exact_loss_vs_entry_price():
+    from api.agentic_chat.vision import reconcile_vision_with_market, format_vision_context_for_prompt
+
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.in_.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"symbol": "CRST", "close": 3.05, "date": "2026-11-15"}]
+    )
+
+    vision = {
+        "image_type": "portfolio",
+        "symbols": [
+            {
+                "symbol": "CRST",
+                "name": "كريستمارك",
+                "asset_type": "stock",
+                "visible_values": {
+                    "price": 2.97,
+                    "average_price": 3.1274,
+                    "quantity": 5367,
+                    "profit_loss": -844.76,
+                    "return_pct": -5.03,
+                },
+            }
+        ],
+        "technical_observations": [],
+        "uncertainties": [],
+    }
+
+    out = reconcile_vision_with_market(vision, mock_sb)
+    rec = out["symbols"][0]["market_reconciled"]
+    assert rec["market_close"] == 3.05
+    assert rec["is_profitable_vs_entry"] is False
+    assert rec["pnl_vs_entry_pct"] == -2.47
+    assert round(rec["pnl_vs_entry_egp"], 2) == -415.41
+
+    prompt_ctx = format_vision_context_for_prompt(out)
+    assert "3.1274 ج.م" in prompt_ctx
+    assert "خاسر -2.47%" in prompt_ctx
+    assert "تحذير حسابي حاسم" in prompt_ctx

@@ -794,3 +794,51 @@ def test_topic_keyboard_shows_restricted_label():
     kb_private = build_vip_chat_keyboard(is_private=True)
     all_private = [btn["text"] for row in kb_private["inline_keyboard"] for btn in row]
     assert any("🎯 التوصيات المفتوحة (PRO)" in b for b in all_private)
+
+
+def test_crst_krismark_alias_and_button_double_click_cooldown():
+    from api.stock_aliases import resolve_stock_symbol
+    from api.agentic_chat.pipeline import known_symbol_hints
+    from api import telegram_vip_chat as tvc
+
+    assert resolve_stock_symbol("كريسمارك") == "CRST"
+    hints = known_symbol_hints("ماذا افعل مع سهم كريسمارك اليوم")
+    assert any("CRST" in h.get("symbols", []) for h in hints)
+
+    tvc._BUTTON_COOLDOWNS.clear()
+    tvc._PROCESSED_EVENTS.clear()
+    spawned = []
+    tg_calls = []
+
+    class FakeThread:
+        def __init__(self, target=None, kwargs=None, daemon=None):
+            spawned.append((target, kwargs))
+
+        def start(self):
+            pass
+
+    def fake_tg_api(bot_token, method, payload, timeout=15):
+        tg_calls.append((method, payload))
+        return {"ok": True}
+
+    with patch.object(tvc, "_call_telegram_api", side_effect=fake_tg_api), patch.object(
+        tvc, "call_web_vip_chat_api", return_value={"ok": True, "is_pro": True, "remaining": 50, "limit": 350}
+    ), patch.object(tvc.threading, "Thread", FakeThread):
+        for idx, cb_id in enumerate(("cb_scan_1", "cb_scan_2", "cb_scan_3")):
+            upd = {
+                "callback_query": {
+                    "id": cb_id,
+                    "from": {"id": 5054833757, "first_name": "Mohamed"},
+                    "message": {
+                        "message_id": 100 + idx,
+                        "chat": {"id": -1002083067817, "type": "supergroup"},
+                        "message_thread_id": 1680,
+                    },
+                    "data": "vip_tool_scan",
+                }
+            }
+            assert tvc.handle_vip_chat_update(upd, "TEST_TOKEN") is True
+
+    # Only ONE execution thread should spawn for 3 rapid taps within 25s
+    assert len(spawned) == 1
+    assert any("قيد التجهيز" in p.get("text", "") for m, p in tg_calls if m == "answerCallbackQuery")

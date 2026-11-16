@@ -36,6 +36,7 @@ DEFAULT_VIP_TOPIC_ID = 1680
 # In-memory deduplication & pending prompt state (backed by Supabase telegram_vip_chat_state)
 _DEDUP_LOCK = threading.Lock()
 _PROCESSED_EVENTS: Dict[str, float] = {}
+_BUTTON_COOLDOWNS: Dict[Tuple[str, int, str], float] = {}
 _PENDING_PROMPTS: Dict[Tuple[str, int], Dict[str, Any]] = {}
 _USER_QUOTA_CACHE: Dict[int, Dict[str, Any]] = {}
 _WEB_SESSION = requests.Session()
@@ -57,7 +58,7 @@ def _get_egx_symbols_set() -> Set[str]:
         "ABUK", "ADCI", "ADIB", "AFMC", "AIND", "AJWA", "ALCN", "ALUM", "AMER", "AMOC",
         "ANFI", "ARAB", "ARCC", "AREH", "AREHA", "ARVA", "ASCM", "ASPI", "ATLC", "ATQA",
         "AUTO", "AXPH", "BINV", "BIOC", "BONY", "BTFH", "CAED", "CANA", "CCRS", "CEFM",
-        "CERA", "CFGH", "CICH", "CLHO", "CNFN", "COMI", "COPR", "COSG", "CPCI", "CSAG",
+        "CERA", "CFGH", "CICH", "CLHO", "CNFN", "COMI", "COPR", "COSG", "CPCI", "CRST", "CSAG",
         "DTPP", "EAST", "EBSC", "EFIC", "EGAL", "EGAS", "EGCH", "EGSA", "EGTS", "EHDR",
         "EKHO", "EKHOA", "ELNA", "ELSH", "EMFD", "EPCO", "ESRS", "ETEL", "ETRS", "EXPA",
         "FIRE", "FWRY", "GBCO", "GDWA", "GECE", "GGCC", "GMCB", "GOCO", "GOUR", "GRCA",
@@ -94,6 +95,7 @@ EGX_ARABIC_NAMES: List[str] = [
     "بي انفستمنتس", "بي إنفستمنتس", "قرة", "قره", "أوراسكوم كونستراكشون", "اسكندرية لتداول الحاويات",
     "الحاويات", "حاويات اسكندرية", "الاسكندرية لتداول الحاويات", "الإسكندرية لتداول الحاويات",
     "جورميه", "جورمية", "جورميه ايجيبت", "جورميه للأغذية",
+    "كريستمارك", "كريست مارك", "كريسمارك", "كريس مارك",
 ]
 
 
@@ -588,6 +590,26 @@ def _mark_event_processed(event_key: str) -> bool:
         if event_key in _PROCESSED_EVENTS:
             return False
         _PROCESSED_EVENTS[event_key] = now
+        return True
+
+
+def _acquire_button_cooldown(
+    chat_id: Any, tg_user_id: int, action_key: str, cooldown_sec: float = 25.0
+) -> bool:
+    """
+    Prevent accidental double-clicks or spam taps on Telegram quick-tool buttons within `cooldown_sec`.
+    Returns True if execution is allowed, False if identical click occurred within cooldown window.
+    """
+    now = time.time()
+    ck = (str(chat_id), int(tg_user_id), str(action_key))
+    with _DEDUP_LOCK:
+        expired = [k for k, ts in _BUTTON_COOLDOWNS.items() if now - ts > 60.0]
+        for k in expired:
+            _BUTTON_COOLDOWNS.pop(k, None)
+        last_ts = _BUTTON_COOLDOWNS.get(ck)
+        if last_ts is not None and (now - last_ts) < cooldown_sec:
+            return False
+        _BUTTON_COOLDOWNS[ck] = now
         return True
 
 
@@ -1924,6 +1946,10 @@ def handle_vip_chat_update(data: Dict[str, Any], bot_token: str) -> bool:
                         callback_query_id=cb_id,
                     )
                     return True
+
+            if not _acquire_button_cooldown(chat_id, tg_user_id, cb_data, cooldown_sec=25.0):
+                answer_vip_callback(bot_token, cb_id, "⏳ طلبك قيد التجهيز بالفعل، لحظات ويصلك الرد...")
+                return True
 
             answer_vip_callback(bot_token, cb_id, "⏳ جاري تجهيز التحليل من أرتورو...")
             threading.Thread(
