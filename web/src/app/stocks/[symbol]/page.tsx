@@ -31,17 +31,29 @@ const ALL_FALLBACK_EGX_SYMBOLS = [
 
 export async function generateStaticParams() {
   const symbolSet = new Set<string>();
-  try {
-    const directory = await getPublicStockDirectory();
-    if (Array.isArray(directory) && directory.length > 0) {
-      for (const stock of directory) {
-        if (stock.symbol) {
-          symbolSet.add(stock.symbol.toLowerCase());
-        }
+  const [egxResult, tasiResult] = await Promise.allSettled([
+    getPublicStockDirectoryWeekly(),
+    getPublicTasiStockDirectoryWeekly(),
+  ]);
+
+  if (egxResult.status === "fulfilled" && Array.isArray(egxResult.value)) {
+    for (const stock of egxResult.value) {
+      if (stock.symbol) {
+        symbolSet.add(stock.symbol.toLowerCase());
       }
     }
-  } catch (err) {
-    console.warn("[stocks] Failed to load full directory for static params, falling back to all catalog symbols:", err);
+  } else if (egxResult.status === "rejected") {
+    console.warn("[stocks] Failed to load EGX directory for static params:", egxResult.reason);
+  }
+
+  if (tasiResult.status === "fulfilled" && Array.isArray(tasiResult.value)) {
+    for (const stock of tasiResult.value) {
+      if (stock.symbol) {
+        symbolSet.add(stock.symbol.toLowerCase().replace(/\.(sr|sa|tadawul)$/i, ""));
+      }
+    }
+  } else if (tasiResult.status === "rejected") {
+    console.warn("[stocks] Failed to load TASI directory for static params:", tasiResult.reason);
   }
 
   // Ensure 100% catalog coverage even if live directory query failed or was incomplete

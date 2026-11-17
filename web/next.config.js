@@ -14,6 +14,11 @@ const nextConfig = {
         destination: '/profile#portfolio',
         permanent: false,
       },
+      {
+        source: '/stocks/:symbol.:ext(sr|sa|tadawul|SR|SA|TADAWUL)',
+        destination: '/stocks/:symbol',
+        permanent: true,
+      },
     ];
   },
 
