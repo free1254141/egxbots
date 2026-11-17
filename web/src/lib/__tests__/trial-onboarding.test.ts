@@ -1,4 +1,12 @@
-import { consumeTrialAutostart, pickTrialVariant, prepareTrialAutostart, TRIAL_PROMPTS } from "../trial-onboarding";
+/** @jest-environment jsdom */
+import {
+  consumeTrialAutostart,
+  pickTrialVariant,
+  prepareTrialAutostart,
+  TRIAL_PROMPTS,
+  TRIAL_SUCCESS_EVENT,
+  triggerTrialSuccessModal,
+} from "../trial-onboarding";
 
 class MemoryStorage {
   private store = new Map<string, string>();
@@ -32,5 +40,26 @@ describe("trial onboarding autostart", () => {
     delete (globalThis as any).sessionStorage;
     expect(pickTrialVariant()).toBe("A");
     expect(consumeTrialAutostart()).toBeNull();
+  });
+
+  it("dispatches trial success event with invite link and metadata", () => {
+    const handler = jest.fn();
+    window.addEventListener(TRIAL_SUCCESS_EVENT, handler);
+
+    triggerTrialSuccessModal({
+      invite_link: "https://t.me/+mock_vip_link",
+      expires_at: "2026-11-20T00:00:00.000Z",
+      telegram_sent: true,
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const event = handler.mock.calls[0][0] as CustomEvent;
+    expect(event.detail).toEqual({
+      invite_link: "https://t.me/+mock_vip_link",
+      expires_at: "2026-11-20T00:00:00.000Z",
+      telegram_sent: true,
+    });
+
+    window.removeEventListener(TRIAL_SUCCESS_EVENT, handler);
   });
 });

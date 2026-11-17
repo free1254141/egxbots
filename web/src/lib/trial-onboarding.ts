@@ -8,6 +8,19 @@
  */
 
 export const TRIAL_AUTOSTART_EVENT = "trial-autostart";
+export const TRIAL_SUCCESS_EVENT = "trial-success-modal";
+
+export type TrialSuccessEventDetail = {
+  invite_link?: string | null;
+  expires_at?: string | null;
+  telegram_sent?: boolean;
+};
+
+export function triggerTrialSuccessModal(detail: TrialSuccessEventDetail): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(TRIAL_SUCCESS_EVENT, { detail }));
+  }
+}
 
 const AUTOSTART_KEY = "egxbots_trial_autostart_v1";
 const VARIANT_KEY = "egxbots_trial_variant_v1";

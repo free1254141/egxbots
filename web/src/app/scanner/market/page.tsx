@@ -1,7 +1,7 @@
 import MarketClient from "./MarketClient";
 import { Metadata } from "next";
 
-export const revalidate = 86400;
+export const revalidate = 604800;
 
 export const metadata: Metadata = {
   title: "تحليل البورصة المصرية والسعودية (EGX30 & TASI)",

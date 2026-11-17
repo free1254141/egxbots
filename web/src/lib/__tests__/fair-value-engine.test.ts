@@ -1,4 +1,4 @@
-import { computeFairValueReport } from "../market/fair-value";
+import { computeFairValueReport, shouldPreferFreshFairValueReport } from "../market/fair-value";
 
 describe("computeFairValueReport (3-Tier Fair Value Engine)", () => {
   it("computes Tier 1 Graham + Sector Multiples for profitable stocks with book value", () => {
@@ -89,5 +89,37 @@ describe("computeFairValueReport (3-Tier Fair Value Engine)", () => {
     expect(smlc.modelType).toBe("quant_vwap");
     expect(smlc.fairValue).toBeCloseTo(0.6 * 2.6 + 0.4 * 2.4, 2);
     expect(smlc.status).toBe("undervalued");
+  });
+});
+
+describe("shouldPreferFreshFairValueReport", () => {
+  const sampleReport = (updatedAt: string, latestSessionDate: string | null) => ({
+    updatedAt,
+    latestSessionDate,
+    summary: {
+      totalEvaluated: 1,
+      undervaluedCount: 1,
+      fairCount: 0,
+      overvaluedCount: 0,
+      fundamentalCoverageCount: 1,
+    },
+    sectors: ["بنوك"],
+    stocks: [{ symbol: "COMI" } as any],
+  });
+
+  it("prefers newer Run-2 timestamp within the same session date", () => {
+    const run1 = sampleReport("2026-11-16T09:00:00Z", "2026-11-16");
+    const run2 = sampleReport("2026-11-16T13:30:00Z", "2026-11-16");
+    expect(shouldPreferFreshFairValueReport(run2, run1)).toBe(true);
+    expect(shouldPreferFreshFairValueReport(run1, run2)).toBe(false);
+    expect(shouldPreferFreshFairValueReport(run2, run2)).toBe(false);
+  });
+
+  it("prefers newer session date and rejects empty payloads", () => {
+    const older = sampleReport("2026-11-16T15:00:00Z", "2026-11-15");
+    const newer = sampleReport("2026-11-16T08:00:00Z", "2026-11-16");
+    expect(shouldPreferFreshFairValueReport(newer, older)).toBe(true);
+    expect(shouldPreferFreshFairValueReport(older, newer)).toBe(false);
+    expect(shouldPreferFreshFairValueReport({ ...newer, stocks: [] }, older)).toBe(false);
   });
 });

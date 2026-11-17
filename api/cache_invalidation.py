@@ -164,6 +164,16 @@ def invalidate_local_hf_caches(tags: List[str]) -> List[str]:
         cleared.extend(invalidate_offload_caches(tags))
     except Exception as exc:
         print(f"[CACHE] Offload cache invalidation warning: {exc}")
+    try:
+        from api.routers.offload_public import invalidate_public_offload_caches
+        cleared.extend(invalidate_public_offload_caches(tags))
+    except Exception as exc:
+        print(f"[CACHE] Public offload cache invalidation warning: {exc}")
+    try:
+        from api.routers.offload_user import invalidate_user_router_public_caches
+        cleared.extend(invalidate_user_router_public_caches(tags))
+    except Exception as exc:
+        print(f"[CACHE] User offload cache invalidation warning: {exc}")
     if TAG_SHORT_SWINGS in tags:
         try:
             from api.routers.short_swings import clear_saudi_swings_cache

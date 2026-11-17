@@ -2440,11 +2440,12 @@ async function fetchDailyPublicJsonCached<T>(
   url: string,
   ttlMs = DAILY_PUBLIC_JSON_TTL_MS,
   signal?: AbortSignal,
+  forceRefresh = false,
 ): Promise<T> {
   if (signal?.aborted) {
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
-  if (typeof window !== "undefined") {
+  if (!forceRefresh && typeof window !== "undefined") {
     try {
       const raw = window.sessionStorage.getItem(storageKey);
       if (raw) {
@@ -2457,13 +2458,14 @@ async function fetchDailyPublicJsonCached<T>(
       // ignore storage errors
     }
   }
-  const existing = dailyPublicJsonInFlight.get(storageKey);
+  const inFlightKey = forceRefresh ? `${storageKey}:fresh` : storageKey;
+  const existing = dailyPublicJsonInFlight.get(inFlightKey);
   if (existing) {
     return raceWithAbort(existing, signal);
   }
   const run = (async () => {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, forceRefresh ? { cache: "no-cache" } : undefined);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const data = (await res.json()) as T;
       if (typeof window !== "undefined" && data) {
@@ -2475,22 +2477,24 @@ async function fetchDailyPublicJsonCached<T>(
       }
       return data;
     } finally {
-      dailyPublicJsonInFlight.delete(storageKey);
+      dailyPublicJsonInFlight.delete(inFlightKey);
     }
   })();
-  dailyPublicJsonInFlight.set(storageKey, run);
+  dailyPublicJsonInFlight.set(inFlightKey, run);
   return raceWithAbort(run, signal);
 }
 
 export async function fetchFairValueReportCached<T = any>(
   market: "egx" | "tasi",
   signal?: AbortSignal,
+  options?: { forceRefresh?: boolean },
 ): Promise<T> {
   return fetchDailyPublicJsonCached<T>(
     `egxbots_fair_value_v1:${market}`,
     `/api/market/fair-value?market=${market}`,
     DAILY_PUBLIC_JSON_TTL_MS,
     signal,
+    Boolean(options?.forceRefresh),
   );
 }
 

@@ -3,8 +3,9 @@ import { getPublicMarketClient } from '@/lib/supabase/route-data'
 import { getPublicStockDirectory, getPublicTasiStockDirectory } from '@/lib/seo/stock-directory'
 import { canonicalSitemap, publishedBlogEntries, validLastModified } from '@/lib/seo/sitemap-entries'
 import { getPublicReports, reportUrl } from '@/lib/social/public-reports'
+import { fetchHfPublicJson } from '@/lib/hf-public-read'
 
-export const revalidate = 86400;
+export const revalidate = 604800;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = 'https://egxbots.com'
@@ -175,10 +176,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // about today's close. Do not manufacture timestamps for unknown updates.
     lastModified: validLastModified('updatedAt' in stock ? stock.updatedAt : undefined), changeFrequency: 'daily', priority: .7,
   }));
-  const { data: posts, error, count } = await getPublicMarketClient().from('shared_chat_posts')
-    .select('slug,is_published,updated_at,created_at', { count: 'exact' }).eq('is_published', true)
-    .order('slug', { ascending: true }).limit(2001);
-  if (error || !Array.isArray(posts) || posts.length > 2000 || typeof count === 'number' && count > posts.length)
-    throw new Error('Unable to load complete published blog sitemap');
+  const hfPosts = await fetchHfPublicJson<{ posts?: any[] }>(
+    '/api/public/sitemap-posts',
+    604800,
+    5000,
+    ['daily-public-reports']
+  );
+  let posts: any[] | null = Array.isArray(hfPosts?.posts) ? hfPosts.posts : null;
+  if (!posts) {
+    const { data, error, count } = await getPublicMarketClient().from('shared_chat_posts')
+      .select('slug,is_published,updated_at,created_at', { count: 'exact' }).eq('is_published', true)
+      .order('slug', { ascending: true }).limit(2001);
+    if (error || !Array.isArray(data) || data.length > 2000 || (typeof count === 'number' && count > data.length))
+      throw new Error('Unable to load complete published blog sitemap');
+    posts = data;
+  }
   return canonicalSitemap([...staticPages, ...saudiLandingPages, ...stockPages, ...publishedBlogEntries(posts, baseUrl), ...reportPages]);
 }

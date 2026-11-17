@@ -6,10 +6,20 @@ import {
 } from "@/lib/supabase/route-data";
 import { DAILY_CACHE_TAGS } from "@/lib/cache/daily";
 import { computeFairValueReport, type FairValueReport } from "./fair-value";
+import { fetchHfPublicJson } from "@/lib/hf-public-read";
 
 async function fetchAndComputeFairValueReport(
   market: MarketMode = "egx"
 ): Promise<FairValueReport> {
+  const hf = await fetchHfPublicJson<FairValueReport>(
+    `/api/public/fair-value-report?market=${market}`,
+    604800,
+    5000,
+    [DAILY_CACHE_TAGS.market]
+  );
+  if (hf && Array.isArray(hf.stocks) && hf.stocks.length > 0) {
+    return hf;
+  }
   const isTasi = market === "tasi";
   const client = isTasi
     ? getMarketSupabaseClient("tasi")
@@ -54,7 +64,7 @@ const getCachedEgxFairValueReport = unstable_cache(
   () => fetchAndComputeFairValueReport("egx"),
   ["fair-value-egx-daily-v3"],
   {
-    revalidate: 86400,
+    revalidate: 604800,
     tags: [DAILY_CACHE_TAGS.market],
   }
 );
@@ -63,7 +73,7 @@ const getCachedTasiFairValueReport = unstable_cache(
   () => fetchAndComputeFairValueReport("tasi"),
   ["fair-value-tasi-daily-v1"],
   {
-    revalidate: 86400,
+    revalidate: 604800,
     tags: [DAILY_CACHE_TAGS.market],
   }
 );

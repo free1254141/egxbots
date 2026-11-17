@@ -26,10 +26,11 @@ import {
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { fetchFairValueReportCached } from "@/lib/api";
-import type {
-  FairValueReport,
-  FairValueStockItem,
-  FairValueStatus,
+import {
+  shouldPreferFreshFairValueReport,
+  type FairValueReport,
+  type FairValueStockItem,
+  type FairValueStatus,
 } from "@/lib/market/fair-value";
 
 type QuickPreset =
@@ -71,33 +72,53 @@ export default function FairValueClient({
   const [showAllRows, setShowAllRows] = useState(false);
 
   useEffect(() => {
-    if (initialReport && (initialReport.market ?? "egx") === market) {
+    const hasMatchingInitial = Boolean(
+      initialReport && (initialReport.market ?? "egx") === market
+    );
+    if (hasMatchingInitial && initialReport) {
       setReport(initialReport);
       setError(null);
       setLoading(false);
       setSectorFilter("all");
-      if (initialReport.stocks?.length) {
-        setSelectedChartStock(initialReport.stocks[0]);
-      } else {
-        setSelectedChartStock(null);
-      }
-      return;
+      setSelectedChartStock(initialReport.stocks?.[0] ?? null);
+    } else {
+      setSectorFilter("all");
     }
     let active = true;
     const controller = new AbortController();
     async function load() {
       try {
-        setLoading(true);
+        if (!hasMatchingInitial) {
+          setLoading(true);
+        }
         setError(null);
-        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(market, controller.signal);
-        if (active) {
+        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(
+          market,
+          controller.signal,
+          hasMatchingInitial ? { forceRefresh: true } : undefined,
+        );
+        if (!active) return;
+        if (hasMatchingInitial) {
+          if (shouldPreferFreshFairValueReport(data, initialReport)) {
+            setReport(data);
+            setSectorFilter((prev) =>
+              prev !== "all" && !data.sectors?.includes(prev) ? "all" : prev
+            );
+            setSelectedChartStock((prev) => {
+              if (!prev) return data.stocks?.[0] ?? null;
+              return data.stocks?.find((s) => s.symbol === prev.symbol) ?? data.stocks?.[0] ?? null;
+            });
+          }
+        } else {
           setReport(data);
           setSectorFilter("all");
           setSelectedChartStock(data.stocks?.[0] ?? null);
         }
       } catch (err: any) {
         if (controller.signal.aborted || err?.name === "AbortError") return;
-        if (active) setError(err?.message || (isAr ? "حدث خطأ غير متوقع" : "Unexpected error occurred"));
+        if (active && !hasMatchingInitial) {
+          setError(err?.message || (isAr ? "حدث خطأ غير متوقع" : "Unexpected error occurred"));
+        }
       } finally {
         if (active) setLoading(false);
       }

@@ -894,8 +894,10 @@ class TelegramBot:
                             .execute()
                         )
                         if sub_res and sub_res.data:
-                            sub_end = sub_res.data.get("current_period_end")
-                            is_pro = True
+                            from api.perf_utils import has_active_pro_subscription
+                            if has_active_pro_subscription([sub_res.data]):
+                                sub_end = sub_res.data.get("current_period_end")
+                                is_pro = True
                     except Exception as e:
                         self._log(f"Error checking user subscription: {e}")
 

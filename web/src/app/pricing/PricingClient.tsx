@@ -7,7 +7,12 @@ import Image from "next/image";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useMarket } from "@/contexts/MarketContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import {
+  prepareTrialAutostart,
+  clearTrialAutostart,
+  TRIAL_AUTOSTART_EVENT,
+  triggerTrialSuccessModal,
+} from "@/lib/trial-onboarding";
 import {
   Loader2,
   Rocket,
@@ -171,9 +176,12 @@ export default function PricingClient() {
         broadcastEntitlements(true);
         setTrialEligible(false);
         setTrialExpiresAt(data.expires_at || null);
-        // Open the assistant and ask the first question instead of leaving the
-        // new subscriber on the pricing page with an unused trial.
-        window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
+        // Show celebratory success modal with VIP Telegram channel join link
+        triggerTrialSuccessModal({
+          invite_link: data.invite_link,
+          expires_at: data.expires_at,
+          telegram_sent: data.telegram_sent,
+        });
       } else {
         clearTrialAutostart();
         notifyTrialActivationError(data, isAr, user?.id);

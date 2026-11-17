@@ -5,8 +5,17 @@ import { getPublicReports, reportNames, reportUrl, type PublicReport } from '@/l
 import { EgxOnlyGuard } from '@/contexts/MarketContext';
 
 export const revalidate = 604800;
-// Generate on first request, then serve the entire HTML route from ISR.
-export async function generateStaticParams() { return []; }
+export const dynamicParams = true;
+// Pre-build existing reports at deploy time (0 runtime Vercel CPU on historical crawls);
+// newly generated daily reports after the 2nd run build on first request & stay cached 1w.
+export async function generateStaticParams() {
+  try {
+    const reports = await getPublicReports();
+    return reports.slice(0, 60).map((r) => ({ date: r.session_date, kind: r.kind }));
+  } catch {
+    return [];
+  }
+}
 type Props = { params: Promise<{ date: string; kind: string }> };
 async function load(params: Props['params']) {
   const { date, kind } = await params;

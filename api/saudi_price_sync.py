@@ -9,7 +9,9 @@ from __future__ import annotations
 import datetime as dt
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import threading
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -17,8 +19,10 @@ import pandas as pd
 
 RIYADH_TZ = ZoneInfo("Asia/Riyadh")
 DEFAULT_YAHOO_CHUNK_SIZE = 60
-DEFAULT_TV_FALLBACK_LIMIT = 40
-DEFAULT_TV_SYMBOL_TIMEOUT_S = 8
+DEFAULT_TV_FALLBACK_LIMIT = 300
+DEFAULT_TV_WORKERS = 4
+DEFAULT_TV_SYMBOL_TIMEOUT_S = 12
+DEFAULT_TV_BATCH_TIMEOUT_S = 240
 MAX_ABS_DAILY_RET = 0.35
 
 
@@ -143,7 +147,13 @@ def _default_yf_fetcher(symbols: List[str], lookback_days: int, max_date_str: st
     return out
 
 
-def _default_tv_fetcher(symbols: List[str], lookback_days: int, max_date_str: str) -> Dict[str, List[Dict[str, Any]]]:
+def _default_tv_fetcher(
+    symbols: List[str],
+    lookback_days: int,
+    max_date_str: str,
+    symbol_timeout_s: float = DEFAULT_TV_SYMBOL_TIMEOUT_S,
+    batch_timeout_s: float = DEFAULT_TV_BATCH_TIMEOUT_S,
+) -> Dict[str, List[Dict[str, Any]]]:
     if not symbols:
         return {}
     try:
@@ -151,44 +161,84 @@ def _default_tv_fetcher(symbols: List[str], lookback_days: int, max_date_str: st
     except Exception:
         return {}
 
-    tv = TvDatafeed()
-    out: Dict[str, List[Dict[str, Any]]] = {}
     n_bars = max(5, int(lookback_days))
-    for sym in symbols[:DEFAULT_TV_FALLBACK_LIMIT]:
-        try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                fut = pool.submit(tv.get_hist, symbol=sym, exchange="TADAWUL", interval=Interval.in_daily, n_bars=n_bars)
-                df = fut.result(timeout=DEFAULT_TV_SYMBOL_TIMEOUT_S)
-            if df is None or df.empty:
-                continue
-            rows: List[Dict[str, Any]] = []
-            for idx, row in df.iterrows():
-                close = _clean_float(row.get("close"))
-                if close is None or close <= 0:
+    thread_local = threading.local()
+
+    def _get_tv() -> TvDatafeed:
+        tv = getattr(thread_local, "tv", None)
+        if tv is None:
+            tv = TvDatafeed()
+            thread_local.tv = tv
+        return tv
+
+    def _fetch_one(sym: str) -> Tuple[str, List[Dict[str, Any]]]:
+        for attempt in range(2):
+            try:
+                df = _get_tv().get_hist(symbol=sym, exchange="TADAWUL", interval=Interval.in_daily, n_bars=n_bars)
+                if df is None or df.empty:
+                    if attempt == 0:
+                        thread_local.tv = TvDatafeed()
+                        continue
+                    return sym, []
+                rows: List[Dict[str, Any]] = []
+                for idx, row in df.iterrows():
+                    close = _clean_float(row.get("close"))
+                    if close is None or close <= 0:
+                        continue
+                    date_val = idx.date().isoformat() if hasattr(idx, "date") else str(idx)[:10]
+                    if date_val > max_date_str:
+                        continue
+                    open_p = _clean_float(row.get("open")) or close
+                    high_p = _clean_float(row.get("high")) or close
+                    low_p = _clean_float(row.get("low")) or close
+                    vol = _clean_volume(row.get("volume"))
+                    rows.append(
+                        {
+                            "date": date_val,
+                            "open": round(open_p if open_p > 0 else close, 4),
+                            "high": round(max(high_p, close, open_p), 4),
+                            "low": round(min(low_p if low_p > 0 else close, close, open_p), 4),
+                            "close": round(close, 4),
+                            "adjusted_close": round(close, 4),
+                            "volume": vol,
+                            "source": "tvdatafeed",
+                        }
+                    )
+                return sym, rows
+            except Exception:
+                if attempt == 0:
+                    thread_local.tv = None
                     continue
-                date_val = idx.date().isoformat() if hasattr(idx, "date") else str(idx)[:10]
-                if date_val > max_date_str:
+                return sym, []
+        return sym, []
+
+    targets = list(symbols[:DEFAULT_TV_FALLBACK_LIMIT])
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    pool = ThreadPoolExecutor(max_workers=DEFAULT_TV_WORKERS)
+    try:
+        pending = {pool.submit(_fetch_one, sym) for sym in targets}
+        deadline = time.monotonic() + max(float(symbol_timeout_s), float(batch_timeout_s))
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            done, pending = wait(
+                pending,
+                timeout=min(float(symbol_timeout_s), remaining),
+                return_when=FIRST_COMPLETED,
+            )
+            if not done:
+                # All remaining workers stalled for a full symbol timeout; avoid blocking the pipeline.
+                break
+            for fut in done:
+                try:
+                    sym, rows = fut.result()
+                    if rows:
+                        out[sym] = rows
+                except Exception:
                     continue
-                open_p = _clean_float(row.get("open")) or close
-                high_p = _clean_float(row.get("high")) or close
-                low_p = _clean_float(row.get("low")) or close
-                vol = _clean_volume(row.get("volume"))
-                rows.append(
-                    {
-                        "date": date_val,
-                        "open": round(open_p if open_p > 0 else close, 4),
-                        "high": round(max(high_p, close, open_p), 4),
-                        "low": round(min(low_p if low_p > 0 else close, close, open_p), 4),
-                        "close": round(close, 4),
-                        "adjusted_close": round(close, 4),
-                        "volume": vol,
-                        "source": "tvdatafeed",
-                    }
-                )
-            if rows:
-                out[sym] = rows
-        except (FuturesTimeoutError, Exception):
-            continue
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     return out
 
 
@@ -422,18 +472,25 @@ def sync_saudi_daily_prices(
     prior_max_idx_date = str((prior_idx_res.data or [{}])[0].get("date") or "")[:10]
     dates_to_index = [
         d for d in sorted(synced_dates)
-        if not prior_max_idx_date or d > prior_max_idx_date or d == today_riyadh
+        if not prior_max_idx_date or d > prior_max_idx_date or d in {today_riyadh, latest_date}
     ]
     index_rows = _update_equal_weight_market_index(sb, bars_by_sym, dates_to_index)
 
     if upsert_rows:
         invalidate_saudi_history_cache()
 
-    failed_symbols = [s for s in symbols if s not in synced_syms]
+    if latest_date:
+        latest_synced_syms = {
+            s for s in synced_syms
+            if any(str(b.get("date") or "")[:10] == latest_date for b in bars_by_sym.get(s, []))
+        }
+    else:
+        latest_synced_syms = synced_syms
+    failed_symbols = [s for s in symbols if s not in latest_synced_syms]
     return {
-        "success": len(synced_syms) > 0,
+        "success": len(latest_synced_syms) > 0,
         "phase": phase,
-        "synced": len(synced_syms),
+        "synced": len(latest_synced_syms),
         "total": len(symbols),
         "bars_upserted": len(upsert_rows),
         "latest_date": latest_date,

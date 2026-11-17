@@ -3,7 +3,7 @@ import Link from "next/link";
 import ShariaCleanserClient from "./ShariaCleanserClient";
 import { getCachedFairValueReport } from "@/lib/market/fair-value-server";
 
-export const revalidate = 86400;
+export const revalidate = 604800;
 export const preferredRegion = "fra1";
 
 export const metadata: Metadata = {

@@ -40,6 +40,8 @@ import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
 import RevenueDetailsModal from "./RevenueDetailsModal";
 import TrialUsersModal, { type TrialUserItem } from "./TrialUsersModal";
+import FoundersStatsModal from "./FoundersStatsModal";
+import UsersEngagementModal from "./UsersEngagementModal";
 import { withDailyActiveUsers } from "./user-chart-data";
 import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
 
@@ -226,6 +228,8 @@ export default function UsersTab() {
     const [chartDays, setChartDays] = useState<14 | 30 | 90 | 180>(90);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showTrialModal, setShowTrialModal] = useState(false);
+    const [showFoundersModal, setShowFoundersModal] = useState(false);
+    const [showEngagementModal, setShowEngagementModal] = useState(false);
 
     // Modal States
     const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
@@ -419,13 +423,31 @@ export default function UsersTab() {
                         <BarChart3 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                         {isAr ? "تحليلات المستخدمين والرؤى" : "USER ANALYTICS & INSIGHTS"}
                     </h2>
-                    <button
-                        onClick={() => { loadAnalytics(); fetchUsers(); }}
-                        className="h-9 px-3 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 font-black text-xs uppercase tracking-wider hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)]"
-                    >
-                        <RefreshCw className={`w-3.5 h-3.5 ${statsLoading ? "animate-spin" : ""}`} />
-                        {analyticsLoaded ? (isAr ? "تحديث التحليلات" : "REFRESH ANALYTICS") : (isAr ? "تحميل التحليلات" : "LOAD ANALYTICS")}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowFoundersModal(true)}
+                            className="h-9 px-3 border-4 border-black dark:border-white bg-amber-300 hover:bg-amber-400 text-black font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] cursor-pointer transition-colors"
+                        >
+                            <Crown className="w-3.5 h-3.5" />
+                            <span>{isAr ? "إحصائيات المدفوعين والاحتفاظ" : "PAID & RETENTION"}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setShowEngagementModal(true)}
+                            className="h-9 px-3 border-4 border-black dark:border-white bg-sky-300 hover:bg-sky-400 text-black font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] cursor-pointer transition-colors"
+                        >
+                            <PieChart className="w-3.5 h-3.5" />
+                            <span>{isAr ? "اهتمامات الشات والتوصيات (350)" : "INTERESTS & 350 CAP"}</span>
+                        </button>
+                        <button
+                            onClick={() => { loadAnalytics(); fetchUsers(); }}
+                            className="h-9 px-3 border-4 border-black dark:border-white bg-zinc-100 dark:bg-zinc-800 font-black text-xs uppercase tracking-wider hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center gap-2 shadow-[2px_2px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_rgba(255,255,255,1)] cursor-pointer"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${statsLoading ? "animate-spin" : ""}`} />
+                            {analyticsLoaded ? (isAr ? "تحديث التحليلات" : "REFRESH ANALYTICS") : (isAr ? "تحميل التحليلات" : "LOAD ANALYTICS")}
+                        </button>
+                    </div>
                 </div>
 
                 {!analyticsLoaded ? (
@@ -1622,6 +1644,32 @@ export default function UsersTab() {
                     }
                     setPage(0);
                     setShowTrialModal(false);
+                }}
+                isAr={isAr}
+            />
+
+            {/* Paid & Founders Retention Statistics Dialog */}
+            <FoundersStatsModal
+                isOpen={showFoundersModal}
+                onClose={() => setShowFoundersModal(false)}
+                onFilterUser={(email) => {
+                    setSearch(email);
+                    setPlanFilter("ALL");
+                    setPage(0);
+                    setShowFoundersModal(false);
+                }}
+                isAr={isAr}
+            />
+
+            {/* User Engagement Segments & 350/mo Chat Limit Dialog */}
+            <UsersEngagementModal
+                isOpen={showEngagementModal}
+                onClose={() => setShowEngagementModal(false)}
+                onFilterUser={(email) => {
+                    setSearch(email);
+                    setPlanFilter("ALL");
+                    setPage(0);
+                    setShowEngagementModal(false);
                 }}
                 isAr={isAr}
             />

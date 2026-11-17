@@ -1,8 +1,12 @@
-import { getPublicStockSnapshot } from "@/lib/seo/stock-snapshot";
+import { getPublicStockSnapshot, getPublicStockPageBundle } from "@/lib/seo/stock-snapshot";
 import { notFound, redirect } from "next/navigation";
 import StockDetailClient from "./StockDetailClient";
 import { Metadata } from "next";
-import { getPublicStockDirectory, getPublicTasiStockDirectory } from "@/lib/seo/stock-directory";
+import {
+  getPublicStockDirectory,
+  getPublicStockDirectoryWeekly,
+  getPublicTasiStockDirectoryWeekly,
+} from "@/lib/seo/stock-directory";
 import { selectStockLinks } from "@/lib/seo/sitemap-entries";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
 import { SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
@@ -86,7 +90,9 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
   const { cleanSymbol: symbol, marketMode } = resolveSymbolAndMarket(raw);
   const isSaudi = marketMode === "tasi";
-  const snapshot = await getPublicStockSnapshot(symbol, marketMode);
+  const { snapshot } = typeof getPublicStockPageBundle === "function"
+    ? await getPublicStockPageBundle(symbol, marketMode)
+    : { snapshot: await getPublicStockSnapshot(symbol, marketMode) };
   if (!snapshot.fundamentals && !snapshot.latestPrice) notFound();
   const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
@@ -180,7 +186,10 @@ export default async function StockDetailPage({ params }: PageProps) {
     redirect(`/stocks/${symbol.toLowerCase()}`);
   }
 
-  const snapshot = await getPublicStockSnapshot(symbol, marketMode);
+  const bundle = typeof getPublicStockPageBundle === "function"
+    ? await getPublicStockPageBundle(symbol, marketMode)
+    : { snapshot: await getPublicStockSnapshot(symbol, marketMode), related: null };
+  const snapshot = bundle.snapshot;
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
   if (!fundRow && !latestPrice) notFound();
   const exchange = isSaudi ? "TADAWUL" : "EGX";
@@ -199,11 +208,15 @@ export default async function StockDetailPage({ params }: PageProps) {
       ? canonical.name_en
       : String(fund.name || fund.Name || symbol));
 
-  const directory =
-    isSaudi && typeof getPublicTasiStockDirectory === "function"
-      ? await getPublicTasiStockDirectory().catch(() => [])
-      : await getPublicStockDirectory();
-  const related = selectStockLinks(directory, symbol, String(fund.sector || fund.Sector || canonical.sector || ""));
+  const related = bundle.related ?? selectStockLinks(
+    isSaudi && typeof getPublicTasiStockDirectoryWeekly === "function"
+      ? await getPublicTasiStockDirectoryWeekly().catch(() => [])
+      : typeof getPublicStockDirectoryWeekly === "function"
+      ? await getPublicStockDirectoryWeekly()
+      : await getPublicStockDirectory(),
+    symbol,
+    String(fund.sector || fund.Sector || canonical.sector || "")
+  );
   const priceDate = (latestPrice as any)?.date || (latestTech as any)?.date;
 
   const lastPriceVal = Number((latestPrice as any)?.close ?? 0);
@@ -290,6 +303,7 @@ export default async function StockDetailPage({ params }: PageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredDataGraph).replace(/</g, '\\u003c') }}
       />
       <StockDetailClient
+        key={symbol}
         symbol={symbol}
         exchange={exchange}
         market={marketMode}

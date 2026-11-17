@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { fetchUserQuotaCached } from "@/lib/user-quota-client";
 import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
+import { triggerTrialSuccessModal } from "@/lib/trial-onboarding";
 import {
   Zap,
   MessageSquare,
@@ -304,6 +305,11 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                   if (res.ok && body?.success) {
                     broadcastEntitlements(true);
                     void fetchQuota(true);
+                    triggerTrialSuccessModal({
+                      invite_link: body.invite_link,
+                      expires_at: body.expires_at,
+                      telegram_sent: body.telegram_sent,
+                    });
                   } else {
                     notifyTrialActivationError(body, isAr, user?.id);
                   }

@@ -530,3 +530,23 @@ export function computeFairValueReport(
     stocks: items,
   };
 }
+
+/** Return true only when `candidate` carries newer fair-value data than `baseline`. */
+export function shouldPreferFreshFairValueReport(
+  candidate: FairValueReport | null | undefined,
+  baseline: FairValueReport | null | undefined
+): boolean {
+  if (!candidate?.stocks?.length) return false;
+  if (!baseline?.stocks?.length) return true;
+  const candSession = candidate.latestSessionDate || "";
+  const baseSession = baseline.latestSessionDate || "";
+  if (candSession && baseSession && candSession !== baseSession) {
+    return candSession > baseSession;
+  }
+  const candMs = Date.parse(candidate.updatedAt || "");
+  const baseMs = Date.parse(baseline.updatedAt || "");
+  if (Number.isFinite(candMs) && Number.isFinite(baseMs)) {
+    return candMs > baseMs;
+  }
+  return Boolean(candSession && !baseSession) || !Number.isFinite(baseMs);
+}

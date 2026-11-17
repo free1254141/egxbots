@@ -371,59 +371,87 @@ def run_saudi_daily_job(
         )
 
         tg_details: List[str] = []
+        tg_errors: List[str] = []
         tg_count = 0
         if swings_payload:
-            sw_tg = dispatch_saudi_short_swings_vip(swings_payload, phase=norm_phase, sb=saudi_sb, dry_run=dry_run)
-            tg_count += int(sw_tg.get("entries_sent") or 0) + int(sw_tg.get("exits_sent") or 0)
-            tg_details.append(f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')})")
-            if not sw_tg.get("ok"):
-                errors.append(f"saudi_short_swings_vip: {sw_tg.get('errors')}")
+            try:
+                sw_tg = dispatch_saudi_short_swings_vip(swings_payload, phase=norm_phase, sb=saudi_sb, dry_run=dry_run)
+                tg_count += int(sw_tg.get("entries_sent") or 0) + int(sw_tg.get("exits_sent") or 0)
+                tg_details.append(f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')})")
+                if not sw_tg.get("ok"):
+                    tg_errors.append(f"saudi_short_swings_vip: {sw_tg.get('errors')}")
+            except Exception as sw_exc:
+                tg_errors.append(f"saudi_short_swings_vip: {sw_exc}")
 
         if norm_phase == "close":
-            rec_tg = dispatch_saudi_open_recommendations(dedup_date=latest_date, sb=saudi_sb, dry_run=dry_run)
-            if rec_tg.get("ok") and not rec_tg.get("skipped"):
-                tg_count += 1
-            tg_details.append(f"recs_vip(ok={rec_tg.get('ok')}, skipped={bool(rec_tg.get('skipped'))})")
+            rec_count = 0
+            try:
+                rec_tg = dispatch_saudi_open_recommendations(dedup_date=latest_date, sb=saudi_sb, dry_run=dry_run)
+                rec_count = int(rec_tg.get("sent_count") or 0)
+                if rec_tg.get("ok") and not rec_tg.get("skipped"):
+                    tg_count += 1
+                elif not rec_tg.get("ok"):
+                    tg_errors.append(f"recs_vip: {rec_tg.get('error')}")
+                tg_details.append(f"recs_vip(ok={rec_tg.get('ok')}, skipped={bool(rec_tg.get('skipped'))})")
+            except Exception as rec_exc:
+                tg_errors.append(f"recs_vip: {rec_exc}")
 
             # Read market_status & latest indicators from SAUDI_SUPABASE if not already in memory
-            if not market_status_payload:
-                ms_res = (
-                    saudi_sb.table("market_cache")
-                    .select("payload")
-                    .eq("cache_key", f"market_status_{SAUDI_COUNTRY}")
-                    .eq("country", SAUDI_COUNTRY)
-                    .maybe_single()
-                    .execute()
-                )
-                market_status_payload = (getattr(ms_res, "data", None) or {}).get("payload") or {}
-            if not ind_rows:
-                ind_res = (
-                    saudi_sb.table("stock_technical_indicators")
-                    .select("symbol,close,change_pct")
-                    .eq("exchange", "TADAWUL")
-                    .limit(300)
-                    .execute()
-                )
-                ind_rows = list(ind_res.data or [])
+            try:
+                if not market_status_payload:
+                    ms_res = (
+                        saudi_sb.table("market_cache")
+                        .select("payload")
+                        .eq("cache_key", f"market_status_{SAUDI_COUNTRY}")
+                        .eq("country", SAUDI_COUNTRY)
+                        .maybe_single()
+                        .execute()
+                    )
+                    market_status_payload = (getattr(ms_res, "data", None) or {}).get("payload") or {}
+                if not ind_rows:
+                    ind_res = (
+                        saudi_sb.table("stock_technical_indicators")
+                        .select("symbol,close,change_pct")
+                        .eq("exchange", "TADAWUL")
+                        .eq("date", latest_date)
+                        .limit(300)
+                        .execute()
+                    )
+                    ind_rows = list(ind_res.data or [])
+                    if not ind_rows:
+                        ind_res = (
+                            saudi_sb.table("stock_technical_indicators")
+                            .select("symbol,close,change_pct")
+                            .eq("exchange", "TADAWUL")
+                            .limit(300)
+                            .execute()
+                        )
+                        ind_rows = list(ind_res.data or [])
 
-            outlook_tg = dispatch_saudi_market_outlook_vip(
-                market_status=market_status_payload,
-                ind_rows=ind_rows,
-                recommendations_count=int(rec_tg.get("sent_count") or 0),
-                market_date=latest_date,
-                sb=saudi_sb,
-                dry_run=dry_run,
-            )
-            if outlook_tg.get("ok") and not outlook_tg.get("skipped"):
-                tg_count += 1
-            tg_details.append(f"outlook_vip(ok={outlook_tg.get('ok')}, skipped={bool(outlook_tg.get('skipped'))})")
+                outlook_tg = dispatch_saudi_market_outlook_vip(
+                    market_status=market_status_payload,
+                    ind_rows=ind_rows,
+                    recommendations_count=rec_count,
+                    market_date=latest_date,
+                    sb=saudi_sb,
+                    dry_run=dry_run,
+                )
+                if outlook_tg.get("ok") and not outlook_tg.get("skipped"):
+                    tg_count += 1
+                elif not outlook_tg.get("ok"):
+                    tg_errors.append(f"outlook_vip: {outlook_tg.get('error')}")
+                tg_details.append(f"outlook_vip(ok={outlook_tg.get('ok')}, skipped={bool(outlook_tg.get('skipped'))})")
+            except Exception as out_exc:
+                tg_errors.append(f"outlook_vip: {out_exc}")
 
+        if tg_errors:
+            errors.extend(tg_errors)
         _record_step(
             steps_log,
             "saudi_telegram_vip",
-            "success",
+            "failed" if tg_errors and tg_count == 0 else "success",
             count=tg_count,
-            details="; ".join(tg_details) or "no_vip_messages_needed",
+            details="; ".join(tg_details + tg_errors) or "no_vip_messages_needed",
         )
     except Exception as exc:
         _record_step(steps_log, "saudi_telegram_vip", "failed", details=str(exc))
@@ -461,7 +489,11 @@ def run_saudi_daily_job(
     # 6. Cache Revalidation
     try:
         cache_res = _invalidate_saudi_caches(norm_phase)
-        cache_ok = bool(cache_res.get("success") or cache_res.get("ok"))
+        cache_ok = not cache_res.get("error") and (
+            bool(cache_res.get("invalidated"))
+            or bool(cache_res.get("skipped"))
+            or cache_res.get("status") == 200
+        )
         _record_step(
             steps_log,
             "cache_revalidation",

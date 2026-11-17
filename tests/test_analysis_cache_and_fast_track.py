@@ -1057,3 +1057,175 @@ def test_otc_constraint_efih_alias_slash_command_and_market_scan_cache():
     racc_syms = [s for h in racc_hints for s in h.get("symbols", [])]
     assert "RACC" in racc_syms
     assert "VALUE" not in racc_syms
+
+
+def test_quick_buttons_news_disclosures_and_accumulation_volume_cache_keys():
+    # Exact web quick button + telegram topic button phrasing
+    assert (
+        build_analysis_cache_key("أهم أخبار وإفصاحات البورصة المصرية اليوم")
+        == "vip_market_news"
+    )
+    assert (
+        build_analysis_cache_key("إيه أقوى الأسهم اللي بتجمع سيولة وأحجام تداول النهاردة؟")
+        == "vip_accumulation"
+    )
+
+    # Round 1 model-driven batch resolution for get_news + get_disclosures
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_news", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+                {"function": {"name": "get_disclosures", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+            ]
+        )
+        == "vip_market_news"
+    )
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_news", "arguments": '{"symbols": ["AMES"], "market": "EGX", "is_contextual_followup": false}'}},
+                {"function": {"name": "get_disclosures", "arguments": '{"symbol": "AMES", "market": "EGX", "is_contextual_followup": false}'}},
+            ]
+        )
+        == "vip_news_AMES"
+    )
+    # Filtered disclosure_type must not leak into shared vip_market_news
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_disclosures", "arguments": '{"disclosure_type": "insider_trading", "market": "EGX", "is_contextual_followup": false}'}},
+            ]
+        )
+        is None
+    )
+
+    # Combined get_accumulation_stocks + get_technical_scan collapses to vip_accumulation
+    assert (
+        resolve_tool_calls_to_cache_key(
+            [
+                {"function": {"name": "get_accumulation_stocks", "arguments": '{"market": "EGX", "is_contextual_followup": false}'}},
+                {"function": {"name": "get_technical_scan", "arguments": '{"preset": "momentum_and_volume", "market": "EGX", "is_contextual_followup": false}'}},
+            ]
+        )
+        == "vip_accumulation"
+    )
+
+
+def test_ui_chart_payload_stripped_for_llm_but_preserved_for_tables():
+    from api.agentic_chat.tools_execution import _build_ui_chart_payload
+    from api.agentic_chat.pipeline import _append_tool_results
+
+    assert _build_ui_chart_payload([{"date": "2026-11-16", "close": 100.0}]) is None
+
+    rows_desc = [
+        {"date": "2026-11-16", "close": 108.5, "volume": 1500000},
+        {"date": "2026-11-15", "close": 106.0, "volume": 1200000},
+        {"date": "2026-11-12", "close": 104.0, "volume": 900000},
+    ]
+    chart = _build_ui_chart_payload(rows_desc, ema_50=102.5, support_1=103.0, resistance_1=114.0)
+    assert chart is not None
+    assert [p["d"] for p in chart["series"]] == ["2026-11-12", "2026-11-15", "2026-11-16"]
+    assert chart["ema50"] == 102.5
+
+    tables_data = []
+    formatted_messages = []
+    _append_tool_results(
+        [{"id": "tc_chart"}],
+        [{"status": "success", "stocks": [{"symbol": "COMI", "close": 108.5, "_ui_chart": chart}]}],
+        formatted_messages,
+        tables_data,
+        [],
+    )
+    assert tables_data[0]["_ui_chart"] == chart
+    assert "_ui_chart" not in formatted_messages[0]["content"]
+
+
+def test_collect_structured_outputs_populates_common_visuals():
+    from api.agentic_chat.pipeline import _collect_structured_outputs
+
+    tables_data = []
+    recs_data = []
+    visuals = {}
+
+    _collect_structured_outputs(
+        {
+            "status": "success",
+            "market": "EGX (البورصة المصرية)",
+            "index_name": "EGX30",
+            "egx30_close": 52199.8,
+            "egx30_change_pct": 0.02,
+            "breadth": {"advancing": 70, "declining": 100, "unchanged": 20, "total_stocks": 190},
+        },
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {
+            "status": "success",
+            "accumulation_stocks": [
+                {"symbol": "TMGH", "accumulation_score": 90, "r_vol": 2.2, "consecutive_acc_days": 4},
+                {"symbol": "HRHO", "accumulation_score": 85, "r_vol": 1.8, "consecutive_acc_days": 3},
+            ],
+        },
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {
+            "status": "success",
+            "fair_value_stocks": [
+                {"symbol": "RACC", "current_price": 7.17, "fair_value": 9.8, "upside_pct": 36.68, "status": "undervalued"}
+            ],
+        },
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {
+            "status": "success",
+            "operation": "view",
+            "cash_balance": 4500.0,
+            "positions": [{"symbol": "VALU", "market": "EGX", "currency": "ج.م", "market_value": 5000.0, "profit_pct": 2.0}],
+        },
+        tables_data,
+        recs_data,
+        visuals,
+    )
+
+    assert visuals["market_breadth"]["advancing"] == 70
+    assert len(visuals["accumulation"]) == 2
+    assert visuals["fair_value"][0]["symbol"] == "RACC"
+    assert visuals["portfolio"]["positions"][0]["symbol"] == "VALU"
+
+    _collect_structured_outputs(
+        {"status": "success", "recommendations": [{"symbol": "AMES", "entry_price": 51.1, "last_close": 50.1, "stop_loss": 48.0, "target_price": 56.5}]},
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {"status": "success", "symbol": "ABUK", "is_sharia_compliant": True, "purification_rate_pct": 5.0, "coupon_per_share": 2.0, "shares_count": 1000},
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {"status": "success", "bearTraps": [{"symbol": "HRHO", "close": 24.5, "conviction": 84}], "bullTraps": []},
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    _collect_structured_outputs(
+        {"status": "success", "news": [{"symbol": "AMES", "title": "إفصاح طبي", "sentiment": "positive", "date": "2026-11-16"}]},
+        tables_data,
+        recs_data,
+        visuals,
+    )
+    assert visuals["recommendations"][0]["last_close"] == 50.1
+    assert visuals["sharia"]["symbol"] == "ABUK"
+    assert visuals["price_traps"]["bearTraps"][0]["symbol"] == "HRHO"
+    assert visuals["disclosures"][0]["symbol"] == "AMES"
+

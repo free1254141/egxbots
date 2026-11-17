@@ -8,6 +8,7 @@ import {
 import { DAILY_CACHE_TAGS } from '@/lib/cache/daily';
 import { normalizeStockDirectory } from './sitemap-entries';
 import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from '@/lib/saudi-stocks';
+import { fetchHfPublicJson } from '@/lib/hf-public-read';
 
 export interface TasiStockDirectoryEntry {
     symbol: string;
@@ -49,7 +50,16 @@ function normalizeTasiStockDirectory(rows: any[]): TasiStockDirectoryEntry[] {
 
 // The public directory and sitemap share one cookie-free, anonymous-RLS read.
 // A failed read throws so ISR can retain the last healthy HTML/XML response.
-export const getPublicStockDirectory = unstable_cache(async () => {
+async function fetchEgxDirectoryUncached(tags?: string[]) {
+    const hf = await fetchHfPublicJson<{ stocks?: ReturnType<typeof normalizeStockDirectory> }>(
+        '/api/public/stock-directory?market=egx',
+        604800,
+        5000,
+        tags
+    );
+    if (Array.isArray(hf?.stocks) && hf.stocks.length > 0) {
+        return hf.stocks;
+    }
     const { data, error } = await getPublicMarketClient().from('stock_fundamentals')
         .select('symbol,exchange,updated_at,name:data->>name,name_legacy:data->>Name,sector:data->>sector,sector_legacy:data->>Sector,market_cap:data->marketCap').eq('exchange', 'EGX')
         .order('symbol', { ascending: true }).limit(501);
@@ -58,9 +68,24 @@ export const getPublicStockDirectory = unstable_cache(async () => {
     const stocks = normalizeStockDirectory(data);
     if (!stocks.length) throw new Error('Public stock directory contains no valid EGX symbols');
     return stocks;
-}, ['public-egx-stock-directory-v1'], { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.symbols] });
+}
 
-export const getPublicTasiStockDirectory = unstable_cache(async () => {
+export const getPublicStockDirectory = unstable_cache(
+    () => fetchEgxDirectoryUncached([DAILY_CACHE_TAGS.symbols]),
+    ['public-egx-stock-directory-v1'],
+    { revalidate: 604800, tags: [DAILY_CACHE_TAGS.symbols] }
+);
+
+async function fetchTasiDirectoryUncached(tags?: string[]): Promise<TasiStockDirectoryEntry[]> {
+    const hf = await fetchHfPublicJson<{ stocks?: TasiStockDirectoryEntry[] }>(
+        '/api/public/stock-directory?market=tasi',
+        604800,
+        5000,
+        tags
+    );
+    if (Array.isArray(hf?.stocks) && hf.stocks.length > 0) {
+        return hf.stocks;
+    }
     const client = getMarketSupabaseClient('tasi');
     const fundPromise = client
         .from('stock_fundamentals')
@@ -106,7 +131,27 @@ export const getPublicTasiStockDirectory = unstable_cache(async () => {
         exchange: 'TADAWUL',
         currency: 'SAR',
     }));
-}, ['public-tasi-stock-directory-v1'], { revalidate: 86400, tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.symbols] });
+}
+
+export const getPublicTasiStockDirectory = unstable_cache(
+    () => fetchTasiDirectoryUncached([DAILY_CACHE_TAGS.symbols]),
+    ['public-tasi-stock-directory-v1'],
+    { revalidate: 604800, tags: [DAILY_CACHE_TAGS.symbols] }
+);
+
+// Weekly untagged caches for /stocks/[symbol] related links so daily pipeline runs
+// do not cascade-invalidate all 250+ individual stock ISR pages.
+export const getPublicStockDirectoryWeekly = unstable_cache(
+    () => fetchEgxDirectoryUncached(),
+    ['public-egx-stock-directory-weekly-v1'],
+    { revalidate: 604800 }
+);
+
+export const getPublicTasiStockDirectoryWeekly = unstable_cache(
+    () => fetchTasiDirectoryUncached(),
+    ['public-tasi-stock-directory-weekly-v1'],
+    { revalidate: 604800 }
+);
 
 export async function getPublicStockDirectoryByMarket(market: MarketMode = 'egx') {
     return market === 'tasi' ? getPublicTasiStockDirectory() : getPublicStockDirectory();

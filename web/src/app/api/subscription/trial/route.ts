@@ -8,6 +8,10 @@ import {
   isDisposableEmail,
   normalizeCanonicalEmail,
 } from "@/lib/trial-anti-abuse";
+import {
+  createProTelegramInvite,
+  sendProWelcomeDirectMessage,
+} from "@/lib/telegramProInvite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -427,11 +431,58 @@ export async function POST(request: Request) {
       console.warn("[api/subscription/trial] trial_started log skipped:", logError);
     }
 
+    // Provision or reuse Telegram VIP invite link and dispatch instant welcome message
+    let inviteLink: string | null = null;
+    let telegramSent = false;
+    try {
+      const trialExpiresAt = data.expires_at || new Date(Date.now() + 3 * 86400 * 1000).toISOString();
+      const { data: existingInvite } = await client
+        .from("pro_telegram_invites")
+        .select("invite_link, invite_expires_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const existingEnd = existingInvite?.invite_expires_at ? new Date(existingInvite.invite_expires_at).getTime() : 0;
+      if (existingInvite?.invite_link && existingEnd > Date.now()) {
+        inviteLink = existingInvite.invite_link;
+      } else {
+        inviteLink = await createProTelegramInvite(user.id, trialExpiresAt);
+        if (inviteLink) {
+          await client.from("pro_telegram_invites").upsert(
+            {
+              user_id: user.id,
+              invite_link: inviteLink,
+              invite_expires_at: trialExpiresAt,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" }
+          );
+        }
+      }
+
+      if (telegramChatId && inviteLink) {
+        const displayName = (profileRow as any)?.display_name || user.email?.split("@")[0] || "";
+        telegramSent = await sendProWelcomeDirectMessage({
+          chatId: telegramChatId,
+          inviteLink,
+          planTitle: "تجربة Pro المجانية (3 أيام)",
+          displayName,
+        }).catch((tgErr) => {
+          console.warn("[api/subscription/trial] Telegram welcome dispatch skipped:", tgErr);
+          return false;
+        });
+      }
+    } catch (inviteError) {
+      console.warn("[api/subscription/trial] Invite generation skipped:", inviteError);
+    }
+
     return NextResponse.json({
       ok: true,
       success: true,
       message: data.message || "تم تفعيل تجربة Pro بنجاح!",
       expires_at: data.expires_at,
+      invite_link: inviteLink,
+      telegram_sent: telegramSent,
     });
   } catch (err: any) {
     console.error("[api/subscription/trial] POST error:", err);

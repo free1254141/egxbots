@@ -460,3 +460,33 @@ def test_causal_take_profit_exits_cleanly_at_13_pct(monkeypatch, tmp_path):
     assert len(closed) == 1
     assert closed[0]["reason"] == "take_profit"
     assert closed[0]["return_pct"] == pytest.approx(12.83, abs=0.05)
+
+
+def test_vip_update_message_includes_profit_and_loss_pct():
+    from api.short_swings_daily import build_vip_update_message
+
+    msg = build_vip_update_message(
+        [
+            {
+                "symbol": "AJWA",
+                "name_ar": "أجواء للصناعات الغذائية",
+                "current_price": 267.600,
+                "entry_price": 258.387,
+                "trailing_stop": 260.454,
+                "status": "مؤمنة بربح",
+            },
+            {
+                "symbol": "LOSER",
+                "name_ar": "سهم هابط",
+                "current_price": 97.500,
+                "entry_price": 100.000,
+                "stop_loss": 96.000,
+                "return_pct": -2.50,
+                "status": "قيد التداول",
+            },
+        ],
+        "2026-11-16",
+        "https://egxbots.com",
+    )
+    assert "نسبة الربح/الخسارة: 🟢 `+3.57%`" in msg
+    assert "نسبة الربح/الخسارة: 🔴 `-2.50%`" in msg

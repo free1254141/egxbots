@@ -63,8 +63,9 @@ def _collect_structured_outputs(
     result: Any,
     tables_data: List[Any],
     recommendations_data: List[Any],
+    visuals_data: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Collect structured stock/recommendation rows from a single tool output."""
+    """Collect structured stock/recommendation/visual rows from a single tool output."""
     if not isinstance(result, dict):
         return
     if "stocks" in result and isinstance(result["stocks"], list):
@@ -74,6 +75,211 @@ def _collect_structured_outputs(
     if "recommendations" in result and isinstance(result["recommendations"], list):
         recommendations_data.extend(result["recommendations"])
 
+    if visuals_data is None:
+        return
+
+    # 1. Portfolio Donut & Per-Position P&L Visuals (view operation)
+    if result.get("operation") == "view" and isinstance(result.get("positions"), list) and result["positions"]:
+        visuals_data["portfolio"] = {
+            "cash_balance": result.get("cash_balance") or 0.0,
+            "totals": result.get("totals") or {},
+            "totals_by_market": result.get("totals_by_market"),
+            "positions": [
+                {
+                    "symbol": p.get("symbol"),
+                    "name": p.get("name"),
+                    "market": p.get("market") or "EGX",
+                    "currency": p.get("currency") or "ج.م",
+                    "quantity": p.get("quantity"),
+                    "market_value": p.get("market_value"),
+                    "cost_basis": p.get("cost_basis"),
+                    "profit_value": p.get("profit_value"),
+                    "profit_pct": p.get("profit_pct"),
+                }
+                for p in result["positions"][:20]
+                if isinstance(p, dict) and p.get("symbol")
+            ],
+        }
+
+    # 2. Market Breadth Visual (EGX & TASI)
+    breadth = result.get("breadth")
+    if isinstance(breadth, dict) and breadth.get("total_stocks"):
+        visuals_data["market_breadth"] = {
+            "market": result.get("market"),
+            "index_name": result.get("index_name"),
+            "index_close": result.get("egx30_close") or result.get("tasi_close"),
+            "index_change_pct": result.get("egx30_change_pct") or result.get("tasi_change_pct"),
+            "currency": result.get("currency") or "ج.م",
+            "date": result.get("date"),
+            "advancing": breadth.get("advancing") or 0,
+            "declining": breadth.get("declining") or 0,
+            "unchanged": breadth.get("unchanged") or 0,
+            "total_stocks": breadth.get("total_stocks") or 0,
+        }
+
+    # 3. Accumulation Heatmap Visual
+    acc_list = result.get("accumulation_stocks")
+    if isinstance(acc_list, list) and len(acc_list) >= 2:
+        visuals_data["accumulation"] = [
+            {
+                "symbol": item.get("symbol"),
+                "name_ar": item.get("name_ar") or item.get("name") or item.get("symbol"),
+                "accumulation_score": item.get("accumulation_score") or item.get("acc_score"),
+                "r_vol": item.get("r_vol") or item.get("vol_ratio"),
+                "consecutive_acc_days": item.get("consecutive_acc_days"),
+                "close": item.get("close"),
+                "change_pct": item.get("change_pct"),
+                "currency": item.get("currency") or "ج.م",
+            }
+            for item in acc_list[:8]
+            if isinstance(item, dict) and item.get("symbol")
+        ]
+
+    # 4. Fair Value Gauge Visual
+    fv_list = result.get("fair_value_stocks")
+    if isinstance(fv_list, list) and fv_list:
+        fv_clean = [
+            {
+                "symbol": item.get("symbol"),
+                "currency": item.get("currency") or "ج.م",
+                "current_price": item.get("current_price"),
+                "fair_value": item.get("fair_value"),
+                "upside_pct": item.get("upside_pct"),
+                "status": item.get("status"),
+                "model": item.get("model"),
+                "pe_ratio": item.get("pe_ratio"),
+                "sector": item.get("sector"),
+            }
+            for item in fv_list[:6]
+            if isinstance(item, dict) and item.get("symbol") and item.get("current_price") and item.get("fair_value")
+        ]
+        if fv_clean:
+            visuals_data["fair_value"] = fv_clean
+
+    # 5. Recommendations Progress Tracker Visual
+    recs_list = result.get("recommendations")
+    if isinstance(recs_list, list) and recs_list:
+        recs_clean = [
+            {
+                "symbol": r.get("symbol"),
+                "currency": r.get("currency") or "ج.م",
+                "entry_price": r.get("entry_price"),
+                "target_price": r.get("target_price"),
+                "stop_loss": r.get("stop_loss"),
+                "last_close": r.get("last_close"),
+                "date": r.get("date"),
+                "status": r.get("status"),
+                "timeframe": r.get("timeframe"),
+            }
+            for r in recs_list[:8]
+            if isinstance(r, dict) and r.get("symbol") and r.get("entry_price")
+        ]
+        if recs_clean:
+            visuals_data["recommendations"] = recs_clean
+
+    # 6. Sharia & Purification Visual
+    if "purification_rate_pct" in result and result.get("symbol"):
+        visuals_data["sharia"] = {
+            "symbol": result.get("symbol"),
+            "currency": result.get("currency") or "ج.م",
+            "is_sharia_compliant": result.get("is_sharia_compliant"),
+            "sharia_index": result.get("sharia_index"),
+            "shares_count": result.get("shares_count"),
+            "coupon_per_share": result.get("coupon_per_share"),
+            "total_dividends": result.get("total_dividends"),
+            "purification_rate_pct": result.get("purification_rate_pct"),
+            "purification_amount": result.get("purification_amount"),
+            "zakat_amount": result.get("zakat_amount"),
+        }
+
+    # 7. Price Traps Radar Visual
+    if "bearTraps" in result or "bullTraps" in result:
+        bears = [
+            {
+                "symbol": t.get("symbol"),
+                "close": t.get("close"),
+                "wickPct": t.get("wickPct"),
+                "relativeVolume": t.get("relativeVolume"),
+                "changePct": t.get("changePct"),
+                "conviction": t.get("conviction"),
+            }
+            for t in (result.get("bearTraps") or [])[:5]
+            if isinstance(t, dict) and t.get("symbol")
+        ]
+        bulls = [
+            {
+                "symbol": t.get("symbol"),
+                "close": t.get("close"),
+                "wickPct": t.get("wickPct"),
+                "relativeVolume": t.get("relativeVolume"),
+                "changePct": t.get("changePct"),
+                "conviction": t.get("conviction"),
+            }
+            for t in (result.get("bullTraps") or [])[:5]
+            if isinstance(t, dict) and t.get("symbol")
+        ]
+        if bears or bulls:
+            visuals_data["price_traps"] = {
+                "market": result.get("market"),
+                "currency": result.get("currency") or "ج.م",
+                "asOf": result.get("asOf"),
+                "bearTraps": bears,
+                "bullTraps": bulls,
+            }
+
+    # 8. Disclosures / News Sentiment Timeline Visual
+    disc_list = result.get("disclosures")
+    news_list = result.get("news")
+    if isinstance(disc_list, list) and disc_list:
+        visuals_data["disclosures"] = [
+            {
+                "symbol": d.get("symbol"),
+                "company_name": d.get("company_name"),
+                "disclosure_type": d.get("disclosure_type"),
+                "disclosure_date": str(d.get("disclosure_date") or "")[:10],
+                "title": d.get("title"),
+                "sentiment": d.get("sentiment"),
+                "source_url": d.get("source_url"),
+            }
+            for d in disc_list[:8]
+            if isinstance(d, dict) and (d.get("title") or d.get("symbol"))
+        ]
+    elif isinstance(news_list, list) and news_list and "disclosures" not in visuals_data:
+        visuals_data["disclosures"] = [
+            {
+                "symbol": n.get("symbol"),
+                "company_name": n.get("company_name"),
+                "disclosure_type": n.get("type") or "news",
+                "disclosure_date": str(n.get("date") or "")[:10],
+                "title": n.get("title"),
+                "sentiment": n.get("sentiment") or n.get("sentiment_score"),
+                "source_url": n.get("source_url"),
+            }
+            for n in news_list[:8]
+            if isinstance(n, dict) and (n.get("title") or n.get("symbol"))
+        ]
+
+
+def _strip_ui_only_fields_for_llm(result: Any) -> Any:
+    """Strip client-only chart payloads before serializing tool output to the LLM (saves tokens)."""
+    if not isinstance(result, dict):
+        return result
+    stocks = result.get("stocks")
+    if not isinstance(stocks, list):
+        return result
+    sanitized_stocks = []
+    changed = False
+    for item in stocks:
+        if isinstance(item, dict) and "_ui_chart" in item:
+            copy_item = {k: v for k, v in item.items() if k != "_ui_chart"}
+            sanitized_stocks.append(copy_item)
+            changed = True
+        else:
+            sanitized_stocks.append(item)
+    if not changed:
+        return result
+    return {**result, "stocks": sanitized_stocks}
+
 
 def _append_tool_results(
     tool_calls: List[Dict[str, Any]],
@@ -81,6 +287,7 @@ def _append_tool_results(
     formatted_messages: List[Dict[str, Any]],
     tables_data: List[Any],
     recommendations_data: List[Any],
+    visuals_data: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Serialize tool outputs into DeepSeek tool messages and collect structured table rows."""
     for tc, result in zip(tool_calls, tool_results):
@@ -88,8 +295,8 @@ def _append_tool_results(
         if isinstance(result, Exception):
             content_str = json.dumps({"status": "error", "message": str(result)}, ensure_ascii=False)
         else:
-            content_str = json.dumps(result, ensure_ascii=False)
-            _collect_structured_outputs(result, tables_data, recommendations_data)
+            _collect_structured_outputs(result, tables_data, recommendations_data, visuals_data)
+            content_str = json.dumps(_strip_ui_only_fields_for_llm(result), ensure_ascii=False)
 
         formatted_messages.append({
             "role": "tool",
@@ -579,6 +786,7 @@ async def _run_agentic_chat_stream_impl(
     accumulated_reply = ""
     tables_data: List[Any] = []
     recommendations_data: List[Any] = []
+    visuals_data: Dict[str, Any] = {}
     tools_executed_count = 0
     candidate_cache_key: Optional[str] = None
     has_followup_flag = False
@@ -669,7 +877,7 @@ async def _run_agentic_chat_stream_impl(
         logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}): Tools(3)={t_tools:.2f}s (skipped Round 1 LLM)")
         for r in fast_results:
             if not isinstance(r, Exception):
-                _collect_structured_outputs(r, tables_data, recommendations_data)
+                _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
 
         fast_ctx_payload = {
             "get_stock": fast_results[0] if not isinstance(fast_results[0], Exception) else {"status": "error", "message": str(fast_results[0])},
@@ -925,7 +1133,7 @@ async def _run_agentic_chat_stream_impl(
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
-                _append_tool_results(tool_calls, list(tool_results), formatted_messages, tables_data, recommendations_data)
+                _append_tool_results(tool_calls, list(tool_results), formatted_messages, tables_data, recommendations_data, visuals_data)
 
                 # For confirmed standalone requests inside a multi-turn session, strip prior turns
                 # before Round 2 synthesis so saved shared cache contains zero cross-stock bleed and saves input tokens.
@@ -1022,7 +1230,7 @@ async def _run_agentic_chat_stream_impl(
                                     return_exceptions=True,
                                 )
                                 formatted_messages.append({"role": "assistant", "content": None, "tool_calls": dsml_extra_calls})
-                                _append_tool_results(dsml_extra_calls, list(extra_results), formatted_messages, tables_data, recommendations_data)
+                                _append_tool_results(dsml_extra_calls, list(extra_results), formatted_messages, tables_data, recommendations_data, visuals_data)
                                 retry_payload = {
                                     **synthesis_payload,
                                     "tools": active_tools_schema,
@@ -1148,7 +1356,29 @@ async def _run_agentic_chat_stream_impl(
                             merged_stocks[sym][k] = v
 
         stocks_with_symbol = list(merged_stocks.values())[:10]  # Cap at 10 columns for clean UI display
+        charts_map = {
+            str(item.get("symbol")).upper().strip(): item["_ui_chart"]
+            for item in stocks_with_symbol
+            if item.get("symbol") and isinstance(item.get("_ui_chart"), dict)
+        }
         if len(stocks_with_symbol) >= 2:
+            visuals_data["comparison"] = [
+                {
+                    "symbol": s.get("symbol"),
+                    "name_ar": (s.get("name_ar") or s.get("name") or s.get("symbol")).split(",")[0].strip(),
+                    "close": s.get("close"),
+                    "change_pct": s.get("change_pct"),
+                    "rsi_14": s.get("rsi_14"),
+                    "r_vol": s.get("r_vol"),
+                    "king_ai_score": s.get("king_ai_score"),
+                    "support_1": s.get("support_1"),
+                    "resistance_1": s.get("resistance_1"),
+                    "currency": _row_currency(s),
+                    "is_sharia_compliant": s.get("is_sharia_compliant"),
+                }
+                for s in stocks_with_symbol[:4]
+                if s.get("symbol")
+            ]
             headers = ["المعيار"] + [f"{(s.get('name_ar') or s.get('symbol')).split(',')[0].strip()} ({s.get('symbol')})" for s in stocks_with_symbol]
             rows_list = [
                 ["السعر الحالي"] + [f"{s.get('close', '—')} {_row_currency(s)}" if s.get('close') is not None else "—" for s in stocks_with_symbol],
@@ -1160,14 +1390,17 @@ async def _run_agentic_chat_stream_impl(
                 ["مؤشر King AI"] + [str(s.get('king_ai_score', '—')) for s in stocks_with_symbol],
                 ["التوافق الشرعي"] + [_row_sharia_label(s) for s in stocks_with_symbol],
             ]
-            excel_tables.append({
+            comp_tbl: Dict[str, Any] = {
                 "id": f"comparison_{int(time.time())}",
                 "title": "مقارنة الأسهم الفنية والمالية",
                 "headers": headers,
                 "rows": rows_list,
                 "source": "EGX BOTS",
                 "data_time": time.strftime("%Y-%m-%d"),
-            })
+            }
+            if charts_map:
+                comp_tbl["charts"] = charts_map
+            excel_tables.append(comp_tbl)
         elif len(stocks_with_symbol) == 1:
             s = stocks_with_symbol[0]
             sym = s.get("symbol") or ""
@@ -1181,13 +1414,32 @@ async def _run_agentic_chat_stream_impl(
             r1_str = f"{s.get('resistance_1', '—')} {curr}" if s.get('resistance_1') is not None else "—"
             king_str = str(s.get('king_ai_score', '—'))
             sharia_str = _row_sharia_label(s)
-            excel_tables.append({
+            single_tbl: Dict[str, Any] = {
                 "id": f"table_{int(time.time())}",
                 "title": f"التحليل الفني لسهم {name} ({sym})",
                 "headers": ["الكود", "اسم الشركة", "السعر", "التغير %", "RSI", "الدعم الأول", "المقاومة الأولى", "مؤشر King AI", "التقييم الفني", "التوافق الشرعي"],
                 "rows": [[sym, name, close_str, chg_str, rsi_str, s1_str, r1_str, king_str, verdict_str, sharia_str]],
                 "source": "EGX BOTS",
                 "data_time": time.strftime("%Y-%m-%d"),
+            }
+            if charts_map:
+                single_tbl["charts"] = charts_map
+            excel_tables.append(single_tbl)
+
+    # Attach non-empty client-side SVG visual payloads onto excel_tables
+    clean_visuals = {k: v for k, v in visuals_data.items() if v}
+    if clean_visuals:
+        if excel_tables:
+            excel_tables[0]["visuals"] = clean_visuals
+        else:
+            excel_tables.append({
+                "id": f"visuals_{int(time.time())}",
+                "title": "",
+                "headers": [],
+                "rows": [],
+                "source": "EGX BOTS",
+                "data_time": time.strftime("%Y-%m-%d"),
+                "visuals": clean_visuals,
             })
 
     # Cache repeatable public analyses in Two-Tier Cache (Tier 1 RAM + Tier 2 Supabase market_cache)
@@ -1201,6 +1453,7 @@ async def _run_agentic_chat_stream_impl(
         not is_saudi_flow
         and can_save_for_history
         and not has_user_rules
+        and not visuals_data.get("portfolio")
         and accumulated_reply
         and not vision_data
         and (not images or len(images) == 0)

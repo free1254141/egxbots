@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -90,7 +91,7 @@ def _send_telegram_message(
     if target_chat_id.startswith("-100"):
         candidate_ids.append("-" + target_chat_id[4:])
 
-    last_resp: Dict[str, Any] = {}
+    last_error = "Telegram send failed"
     for cid in candidate_ids:
         payload: Dict[str, Any] = {
             "chat_id": cid,
@@ -99,24 +100,40 @@ def _send_telegram_message(
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json=payload,
-            timeout=15,
-        )
-        data = resp.json()
-        last_resp = data
-        if data.get("ok"):
-            return {
-                "ok": True,
-                "chat_id": cid,
-                "message_id": data.get("result", {}).get("message_id"),
-            }
+
+        for attempt in range(3):
+            try:
+                resp = requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json=payload,
+                    timeout=25,
+                )
+                try:
+                    data = resp.json() or {}
+                except ValueError:
+                    data = {}
+                status_code = getattr(resp, "status_code", 200)
+                if data.get("ok"):
+                    return {
+                        "ok": True,
+                        "chat_id": cid,
+                        "message_id": data.get("result", {}).get("message_id"),
+                    }
+                last_error = str(data.get("description") or f"HTTP {status_code}")
+                if status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                break
+            except requests.exceptions.RequestException as exc:
+                last_error = str(exc)
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                    continue
 
     return {
         "ok": False,
         "chat_id": target_chat_id,
-        "error": last_resp.get("description") or "Telegram send failed",
+        "error": last_error,
     }
 
 
@@ -183,7 +200,7 @@ def build_saudi_open_recommendations_message(open_rows: List[Dict[str, Any]]) ->
             lines.extend(
                 [
                     f"\n{idx}️⃣ <b>{name} ({sym})</b>{prec_str}",
-                    f"   💵 <b>الدخول:</b> {_fmt_price(entry)} ر.س | <b>الإغلاق الحالي:</b> {_fmt_price(last_close)} ر.س",
+                    f"   💵 <b>الدخول:</b> {_fmt_price(entry)} ر.س | <b>الإغلاق الحالي:</b> {_fmt_price(last_close)} ر.س{_pct_diff(entry, last_close)}",
                     f"   🎯 <b>الهدف:</b> {_fmt_price(target)} ر.س{_pct_diff(entry, target)} | 🛑 <b>الوقف:</b> {_fmt_price(stop)} ر.س{_pct_diff(entry, stop)}",
                 ]
             )

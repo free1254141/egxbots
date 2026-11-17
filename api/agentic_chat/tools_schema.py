@@ -336,6 +336,7 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "description": "الحد الأقصى",
                     },
                     "market": dict(_MARKET_PARAM_SCHEMA),
+                    "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
             },
         },
@@ -351,7 +352,7 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     "operation": {
                         "type": "string",
                         "enum": ["view", "add", "update", "remove", "sell", "set_cash", "add_cash"],
-                        "description": "نوع العملية (استخدم set_cash لتحديد رصيد الكاش/السيولة الكلي، و add_cash لإضافة سيولة على الرصيد الحالي)",
+                        "description": "نوع العملية (استخدم view عند طلب عرض أو «تحديث المحفظة» لمتابعة الأسعار؛ ولا تكرر add/buy لأسهم مسجلة سابقاً بلا شراء جديد صريح؛ واستخدم set_cash لتحديد رصيد الكاش الكلي، و add_cash لإضافة سيولة)",
                     },
                     "symbol": {
                         "type": "string",

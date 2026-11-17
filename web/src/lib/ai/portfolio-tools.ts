@@ -590,7 +590,7 @@ export async function sellPortfolioPosition(
         const { error } = await supabase
             .from("positions")
             .update({
-                status: "closed",
+                status: "closed_manual",
                 status_at: new Date().toISOString(),
                 status_price: price,
             })

@@ -16,7 +16,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { toast } from "sonner";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
-import { prepareTrialAutostart, clearTrialAutostart, TRIAL_AUTOSTART_EVENT } from "@/lib/trial-onboarding";
+import {
+  prepareTrialAutostart,
+  clearTrialAutostart,
+  TRIAL_AUTOSTART_EVENT,
+  triggerTrialSuccessModal,
+} from "@/lib/trial-onboarding";
 import { fetchUserQuotaCached, invalidateUserQuotaCache } from "@/lib/user-quota-client";
 import { broadcastEntitlements } from "@/lib/entitlements";
 import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
@@ -133,7 +138,11 @@ export default function TrialWelcomePrompt() {
         toast.success(isAr ? "🎉 مبروك! تم تفعيل تجربة Pro المجانية لمدة 3 أيام بنجاح!" : "🎉 Congrats! 3-day Pro trial activated!");
         setEligible(false);
         setDismissed(true);
-        window.dispatchEvent(new CustomEvent(TRIAL_AUTOSTART_EVENT));
+        triggerTrialSuccessModal({
+          invite_link: data.invite_link,
+          expires_at: data.expires_at,
+          telegram_sent: data.telegram_sent,
+        });
       } else {
         clearTrialAutostart();
         notifyTrialActivationError(data, isAr, user?.id);

@@ -140,9 +140,13 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
         id_filter = ",".join(candidate_ids)
         sub_rows = _supabase_request(f"subscriptions?user_id=in.({id_filter})&status=in.(active,trialing)&select=user_id,plan_id,status,current_period_end&order=current_period_end.desc&limit=5") or []
         if sub_rows:
-            active_sub = sub_rows[0]
-            linked_user_id = active_sub.get("user_id") or linked_user_id
-            is_pro = True
+            from api.perf_utils import has_active_pro_subscription
+            now_utc = datetime.now(timezone.utc)
+            active_pro_subs = [r for r in sub_rows if has_active_pro_subscription([r], now_utc)]
+            if active_pro_subs:
+                active_sub = active_pro_subs[0]
+                linked_user_id = active_sub.get("user_id") or linked_user_id
+                is_pro = True
 
     limit = 350 if is_pro else 10
     period = "monthly" if is_pro else "lifetime"

@@ -2,7 +2,7 @@ import { Metadata } from "next";
 import { getPublicStockDirectory, getPublicTasiStockDirectory } from "@/lib/seo/stock-directory";
 import StocksClient from "./StocksClient";
 
-export const revalidate = 86400; // Cache for 24 hours (daily market job cadence)
+export const revalidate = 604800; // Weekend-proof ISR; invalidated on inventory change (daily-symbols)
 
 export const metadata: Metadata = {
   title: "دليل أسهم البورصة المصرية والسعودية (EGX & TASI) وتحليل الشركات",

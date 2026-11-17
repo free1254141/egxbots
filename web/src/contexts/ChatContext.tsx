@@ -76,6 +76,144 @@ export type ChatTable = {
 
     data_time?: string;
 
+    charts?: Record<string, {
+        series: Array<{ d: string; c: number; v?: number | null }>;
+        ema50?: number | null;
+        support1?: number | null;
+        resistance1?: number | null;
+    }>;
+
+    visuals?: {
+        comparison?: Array<{
+            symbol: string;
+            name_ar?: string;
+            close?: number | null;
+            change_pct?: number | null;
+            rsi_14?: number | null;
+            r_vol?: number | null;
+            king_ai_score?: number | null;
+            support_1?: number | null;
+            resistance_1?: number | null;
+            currency?: string;
+            is_sharia_compliant?: boolean | null;
+        }>;
+        portfolio?: {
+            cash_balance?: number;
+            totals?: {
+                positions_count?: number;
+                cost_basis?: number | null;
+                market_value?: number | null;
+                profit_value?: number | null;
+                profit_pct?: number | null;
+                equity?: number | null;
+            };
+            totals_by_market?: Record<string, {
+                currency?: string;
+                positions_count?: number;
+                cost_basis?: number | null;
+                market_value?: number | null;
+                profit_value?: number | null;
+            }>;
+            positions?: Array<{
+                symbol: string;
+                name?: string;
+                market?: string;
+                currency?: string;
+                quantity?: number | null;
+                market_value?: number | null;
+                cost_basis?: number | null;
+                profit_value?: number | null;
+                profit_pct?: number | null;
+            }>;
+        };
+        market_breadth?: {
+            market?: string;
+            index_name?: string;
+            index_close?: number | null;
+            index_change_pct?: number | null;
+            currency?: string;
+            date?: string | null;
+            advancing: number;
+            declining: number;
+            unchanged: number;
+            total_stocks: number;
+        };
+        accumulation?: Array<{
+            symbol: string;
+            name_ar?: string;
+            accumulation_score?: number | null;
+            r_vol?: number | null;
+            consecutive_acc_days?: number | null;
+            close?: number | null;
+            change_pct?: number | null;
+            currency?: string;
+        }>;
+        fair_value?: Array<{
+            symbol: string;
+            currency?: string;
+            current_price: number;
+            fair_value: number;
+            upside_pct?: number | null;
+            status?: string;
+            model?: string;
+            pe_ratio?: number | null;
+            sector?: string | null;
+        }>;
+        recommendations?: Array<{
+            symbol: string;
+            currency?: string;
+            entry_price: number;
+            target_price?: number | null;
+            stop_loss?: number | null;
+            last_close?: number | null;
+            date?: string | null;
+            status?: string | null;
+            timeframe?: string | null;
+        }>;
+        sharia?: {
+            symbol: string;
+            currency?: string;
+            is_sharia_compliant?: boolean;
+            sharia_index?: string;
+            shares_count?: number;
+            coupon_per_share?: number;
+            total_dividends?: number;
+            purification_rate_pct?: number;
+            purification_amount?: number;
+            zakat_amount?: number;
+        };
+        price_traps?: {
+            market?: string;
+            currency?: string;
+            asOf?: string | null;
+            bearTraps?: Array<{
+                symbol: string;
+                close?: number | null;
+                wickPct?: number | null;
+                relativeVolume?: number | null;
+                changePct?: number | null;
+                conviction?: number | null;
+            }>;
+            bullTraps?: Array<{
+                symbol: string;
+                close?: number | null;
+                wickPct?: number | null;
+                relativeVolume?: number | null;
+                changePct?: number | null;
+                conviction?: number | null;
+            }>;
+        };
+        disclosures?: Array<{
+            symbol?: string | null;
+            company_name?: string | null;
+            disclosure_type?: string | null;
+            disclosure_date?: string | null;
+            title?: string | null;
+            sentiment?: string | number | null;
+            source_url?: string | null;
+        }>;
+    };
+
 };
 
 

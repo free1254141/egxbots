@@ -176,13 +176,13 @@ export default function StockDetailClient({
   symbol,
   exchange,
   market,
-  fundamentals,
-  latestPrice,
-  latestTech,
-  historicalPrices,
-  latestScan,
-  relatedStocks = [],
-  relatedBasis = "directory"
+  fundamentals: initialFundamentals,
+  latestPrice: initialLatestPrice,
+  latestTech: initialLatestTech,
+  historicalPrices: initialHistoricalPrices,
+  latestScan: initialLatestScan,
+  relatedStocks: initialRelatedStocks = [],
+  relatedBasis: initialRelatedBasis = "directory"
 }: StockDetailClientProps) {
   const { language } = useLanguage();
   const t = localDict[language] || localDict.en;
@@ -196,6 +196,54 @@ export default function StockDetailClient({
   );
   const isSaudiStock = market === "tasi" || exchange === "TADAWUL" || isSaudiSymbol(cleanSymbol);
   const resolvedExchange = isSaudiStock ? "TADAWUL" : (exchange || "EGX");
+
+  // Non-blocking browser hydration from HF backend (0ms Vercel CPU) so weekly-cached
+  // ISR HTML shells automatically reflect today's latest close, indicators, and AI signal.
+  const [livePageData, setLivePageData] = useState<{
+    fundamentals: any;
+    latestPrice: any;
+    latestTech: any;
+    historicalPrices: HistoricalPrice[];
+    latestScan: any;
+    relatedStocks?: Array<{ symbol: string; name: string }>;
+    relatedBasis?: "sector" | "directory";
+  } | null>(null);
+
+  useEffect(() => {
+    setLivePageData(null);
+    const controller = new AbortController();
+    const targetMarket = isSaudiStock ? "tasi" : "egx";
+    fetch(
+      `/api/public/stock-page-data?symbol=${encodeURIComponent(cleanSymbol)}&market=${targetMarket}`,
+      { signal: controller.signal }
+    )
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.snapshot || controller.signal.aborted) return;
+        const s = data.snapshot;
+        setLivePageData({
+          fundamentals: s.fundamentals ?? initialFundamentals,
+          latestPrice: s.latestPrice ?? initialLatestPrice,
+          latestTech: s.latestTech ?? initialLatestTech,
+          historicalPrices: Array.isArray(s.historicalPrices) && s.historicalPrices.length > 0
+            ? s.historicalPrices
+            : initialHistoricalPrices,
+          latestScan: s.latestScan ?? initialLatestScan,
+          relatedStocks: Array.isArray(data.related?.stocks) ? data.related.stocks : initialRelatedStocks,
+          relatedBasis: data.related?.basis === "sector" ? "sector" : initialRelatedBasis,
+        });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [cleanSymbol, isSaudiStock]);
+
+  const fundamentals = livePageData?.fundamentals ?? initialFundamentals;
+  const latestPrice = livePageData?.latestPrice ?? initialLatestPrice;
+  const latestTech = livePageData?.latestTech ?? initialLatestTech;
+  const historicalPrices = livePageData?.historicalPrices ?? initialHistoricalPrices;
+  const latestScan = livePageData?.latestScan ?? initialLatestScan;
+  const relatedStocks = livePageData?.relatedStocks ?? initialRelatedStocks;
+  const relatedBasis = livePageData?.relatedBasis ?? initialRelatedBasis;
 
   // Watchlist toast state
   const [watchToast, setWatchToast] = useState<{ msg: string; type: "success" | "info" } | null>(null);

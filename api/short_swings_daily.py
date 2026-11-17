@@ -224,12 +224,28 @@ def build_free_exit_message(exits: List[Dict[str, Any]], as_of_date: str, web_or
     return "\n".join(lines)
 
 
+def _format_trade_pnl_line(trade: Dict[str, Any]) -> str:
+    """Format profit/loss percentage relative to model entry for VIP tracking."""
+    entry_price = float(trade.get("entry_price") or 0.0)
+    current_price = float(trade.get("current_price") or 0.0)
+    raw_ret = trade.get("return_pct")
+    if raw_ret is not None:
+        ret_pct = float(raw_ret)
+    elif entry_price > 0 and current_price > 0:
+        ret_pct = ((current_price - entry_price) / entry_price) * 100.0
+    else:
+        return "• نسبة الربح/الخسارة: `—`"
+    icon = "🟢" if ret_pct > 0 else ("🔴" if ret_pct < 0 else "⚪")
+    return f"• نسبة الربح/الخسارة: {icon} `{ret_pct:+.2f}%`"
+
+
 def build_vip_update_message(trades, as_of_date, web_origin):
     lines = ["📊 *متابعة الصفقات القصيرة ⚡ PRO*", f"📅 بيانات جلسة: `{as_of_date}`", "━━━━━━━━━━━━━━━━━━━━"]
     for trade in trades:
         lines.extend([f"🔹 *{trade.get('name_ar') or trade.get('symbol')}* (`{trade.get('symbol')}`)",
                       f"• السعر المسجل: `{float(trade.get('current_price') or 0):.3f}` ج.م",
                       f"• دخول النموذج: `{float(trade.get('entry_price') or 0):.3f}` ج.م",
+                      _format_trade_pnl_line(trade),
                       f"• الوقف الحالي: `{float(trade.get('trailing_stop') or trade.get('stop_loss') or 0):.3f}` ج.م",
                       f"• الحالة: {trade.get('status') or 'قيد المتابعة'}", ""])
     lines.extend([f"🔗 {web_origin}/scanner/backtests?tab=short_swings",

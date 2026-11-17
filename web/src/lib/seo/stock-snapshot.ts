@@ -6,13 +6,51 @@ import {
     getMarketSupabaseClient,
     type MarketMode,
 } from '@/lib/supabase/route-data';
-import { DAILY_CACHE_TAGS } from '@/lib/cache/daily';
 import { SAUDI_STOCK_NAMES_AR } from '@/lib/saudi-stocks';
+import { fetchHfPublicJson } from '@/lib/hf-public-read';
 
-// Keep origin reads inside the shared Next cache boundary. The market-query
-// cache's cold-fill fetch uses no-store; executing it directly while generating
-// an ISR stock page can otherwise turn a static-render bailout into a 503.
-const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string) => {
+export type PublicStockSnapshotData = {
+    fundamentals: any;
+    latestPrice: any;
+    latestTech: any;
+    latestScan: any;
+    historicalPrices: any[];
+};
+
+export type PublicStockPageBundle = {
+    snapshot: PublicStockSnapshotData;
+    related: {
+        basis: 'sector' | 'directory';
+        stocks: Array<{ symbol: string; name: string }>;
+    } | null;
+};
+
+async function fetchSnapshotBundleFromHf(
+    symbol: string,
+    market: MarketMode
+): Promise<PublicStockPageBundle | null> {
+    const payload = await fetchHfPublicJson<{
+        snapshot?: PublicStockSnapshotData;
+        related?: { basis?: 'sector' | 'directory'; stocks?: Array<{ symbol: string; name: string }> };
+    }>(`/api/public/stock-page-data?symbol=${encodeURIComponent(symbol)}&market=${market}`, 604800);
+    if (!payload?.snapshot) return null;
+    return {
+        snapshot: payload.snapshot,
+        related: payload.related?.stocks
+            ? {
+                  basis: payload.related.basis === 'sector' ? 'sector' : 'directory',
+                  stocks: payload.related.stocks,
+              }
+            : null,
+    };
+}
+
+// Keep SSR stock pages decoupled from DAILY_CACHE_TAGS so daily pipeline runs
+// do not mass-invalidate 250+ static HTML stock pages and trigger Vercel CPU spikes.
+// StockDetailClient hydrates fresh market data directly from HF on mount (0ms Vercel CPU).
+const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string): Promise<PublicStockSnapshotData> => {
+    const hf = await fetchSnapshotBundleFromHf(symbol, 'egx');
+    if (hf?.snapshot) return hf.snapshot;
     const client = getPublicMarketClient();
     const read = (table: string, fields: string, order: string, limit: number) => client.from(table).select(fields)
         .eq('exchange', 'EGX').eq('symbol', symbol).order(order, { ascending: false }).limit(limit);
@@ -29,10 +67,11 @@ const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string) =>
     return { fundamentals: fund.data?.[0] || null, latestPrice: price.data?.[0] || null,
         latestTech: tech.data?.[0] || null, latestScan: scan.data?.[0] || null,
         historicalPrices: [...(history.data || [])].reverse() };
-}, ['public-egx-stock-snapshot-v1'], { revalidate: 86400,
-    tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.recommendations] }));
+}, ['public-egx-stock-snapshot-v2'], { revalidate: 604800 }));
 
-const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string) => {
+const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string): Promise<PublicStockSnapshotData> => {
+    const hf = await fetchSnapshotBundleFromHf(symbol, 'tasi');
+    if (hf?.snapshot) return hf.snapshot;
     const cleanSymbol = symbol.toUpperCase().replace(/\.(SR|SA|TADAWUL)$/i, '');
     const candidates = Array.from(new Set([cleanSymbol, `${cleanSymbol}.SR`]));
     const client = getMarketSupabaseClient('tasi');
@@ -107,12 +146,24 @@ const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string) =
         latestScan: scan.error ? null : (scan.data?.[0] || null),
         historicalPrices: history.error ? [] : [...(history.data || [])].reverse(),
     };
-}, ['public-tasi-stock-snapshot-v1'], { revalidate: 86400,
-    tags: [DAILY_CACHE_TAGS.market, DAILY_CACHE_TAGS.recommendations] }));
+}, ['public-tasi-stock-snapshot-v2'], { revalidate: 604800 }));
+
+const getCachedStockPageBundle = cache(unstable_cache(async (symbol: string, market: MarketMode): Promise<PublicStockPageBundle> => {
+    const hf = await fetchSnapshotBundleFromHf(symbol, market);
+    if (hf?.snapshot) return hf;
+    const snapshot = market === 'tasi'
+        ? await getPublicTasiStockSnapshot(symbol)
+        : await getPublicEgxStockSnapshot(symbol);
+    return { snapshot, related: null };
+}, ['public-stock-page-bundle-v1'], { revalidate: 604800 }));
 
 export async function getPublicStockSnapshot(symbol: string, market: MarketMode = 'egx') {
     if (market === 'tasi') {
         return getPublicTasiStockSnapshot(symbol);
     }
     return getPublicEgxStockSnapshot(symbol);
+}
+
+export async function getPublicStockPageBundle(symbol: string, market: MarketMode = 'egx'): Promise<PublicStockPageBundle> {
+    return getCachedStockPageBundle(symbol, market);
 }

@@ -27,7 +27,11 @@ import {
 } from "@/lib/shariaStocks";
 import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
 import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR } from "@/lib/saudi-stocks";
-import type { FairValueReport, FairValueStockItem } from "@/lib/market/fair-value";
+import {
+  shouldPreferFreshFairValueReport,
+  type FairValueReport,
+  type FairValueStockItem,
+} from "@/lib/market/fair-value";
 
 const SECTOR_PURIFICATION_RATES: Record<string, number> = {
   "اتصالات": 2.8,
@@ -98,20 +102,35 @@ export default function ShariaCleanserClient({
   }, [isSaudi, market]);
 
   useEffect(() => {
-    if (initialReport && (initialReport.market ?? "egx") === market) {
+    const hasMatchingInitial = Boolean(
+      initialReport && (initialReport.market ?? "egx") === market
+    );
+    if (hasMatchingInitial && initialReport) {
       setReport(initialReport);
       setLoading(false);
-      return;
     }
     let active = true;
     const controller = new AbortController();
     async function load() {
       try {
-        setLoading(true);
-        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(market, controller.signal);
-        if (active) setReport(data);
+        if (!hasMatchingInitial) {
+          setLoading(true);
+        }
+        const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(
+          market,
+          controller.signal,
+          hasMatchingInitial ? { forceRefresh: true } : undefined,
+        );
+        if (!active) return;
+        if (hasMatchingInitial) {
+          if (shouldPreferFreshFairValueReport(data, initialReport)) {
+            setReport(data);
+          }
+        } else if (data?.stocks?.length) {
+          setReport(data);
+        }
       } catch {
-        // Fallback
+        // Fallback keeps initialReport or static list
       } finally {
         if (active) setLoading(false);
       }

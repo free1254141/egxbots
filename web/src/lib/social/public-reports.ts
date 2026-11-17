@@ -2,6 +2,7 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { getSupabaseServiceClient } from '@/lib/supabase/route-data';
 import { socialJobReadiness } from './job-readiness';
+import { fetchHfPublicJson } from '@/lib/hf-public-read';
 
 export const REPORT_CACHE_TAG = 'daily-public-reports';
 export const reportNames: Record<string, string> = { market: 'تقرير وضع السوق', accumulation: 'تقرير إشارات التجميع' };
@@ -12,6 +13,13 @@ export type PublicReport = {
 
 // A single shared daily cache, not one private-table query per visitor or URL.
 export const getPublicReports = unstable_cache(async (): Promise<PublicReport[]> => {
+  const hf = await fetchHfPublicJson<{ reports?: PublicReport[] }>(
+    '/api/public/reports-archive',
+    604800,
+    5000,
+    [REPORT_CACHE_TAG]
+  );
+  if (hf && Array.isArray(hf.reports)) return hf.reports;
   const client = getSupabaseServiceClient();
   const { data, error, count } = await client.from('daily_social_reports')
     .select('session_date,kind,content,created_at,updated_at,evidence,job_run_id', { count: 'exact' })

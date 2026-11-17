@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
@@ -22,8 +22,15 @@ import {
     Building2,
     CheckCircle2,
     Share2,
-    Sparkles
+    Sparkles,
+    Compass
 } from "lucide-react";
+import {
+    MiniPriceChartSvg,
+    MomentumLiquidityGauges,
+    PriceLadderSvg,
+    StockChartSeries,
+} from "./StockVisuals";
 
 export interface StockData {
     symbol: string;
@@ -83,6 +90,9 @@ export interface StockData {
     compositeVerdict?: string;
     composite_verdict?: string;
 
+    // Optional 30-session chart payload from backend (client SVG rendered)
+    chartData?: StockChartSeries;
+
     // Classification & Badges
     sector?: string;
     isShariah?: boolean;
@@ -119,6 +129,15 @@ export function StockCard({
 
     // Support flexible payload formats
     const stockData = stock || data;
+    const hasChartSeries = Boolean(stockData?.chartData?.series && stockData.chartData.series.length >= 3);
+    const [activeVisualTab, setActiveVisualTab] = useState<"none" | "chart" | "gauges">(
+        hasChartSeries ? "chart" : "none"
+    );
+    useEffect(() => {
+        if (hasChartSeries) {
+            setActiveVisualTab((prev) => (prev === "none" ? "chart" : prev));
+        }
+    }, [hasChartSeries]);
 
     if (!stockData || !stockData.symbol) {
         return null;
@@ -142,7 +161,11 @@ export function StockCard({
         ? rawPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : "—";
     
-    const currency = stockData.currency || "ج.م";
+    const currency =
+        stockData.currency ||
+        (stockData.market === "TASI" || stockData.exchange === "TADAWUL" || /^\d{4}$/.test(symbol)
+            ? "ر.س"
+            : "ج.م");
 
     // Parse change percentage
     const rawChangePct = stockData.changePercent ?? stockData.change_percent ?? stockData.change ?? 0;
@@ -199,7 +222,7 @@ export function StockCard({
 
     const entryRange = stockData.entryRange || stockData.entry_range || (
         stockData.entryPrice || stockData.entry_price 
-            ? `${Number(stockData.entryPrice || stockData.entry_price).toFixed(2)} ج.م` 
+            ? `${Number(stockData.entryPrice || stockData.entry_price).toFixed(2)} ${currency}` 
             : undefined
     );
     
@@ -497,7 +520,7 @@ export function StockCard({
                             <span className="truncate">{target1 ? "نطاق الدخول" : "الدعم الأول"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
-                            {entryRange || (support1 ? `${Number(support1).toFixed(2)} ج.م` : (hasValidPrice ? `${formattedPrice} ج.م` : "—"))}
+                            {entryRange || (support1 ? `${Number(support1).toFixed(2)} ${currency}` : (hasValidPrice ? `${formattedPrice} ${currency}` : "—"))}
                         </div>
                     </div>
 
@@ -508,7 +531,7 @@ export function StockCard({
                             <span className="truncate">{target1 ? "المستهدف 1" : "المقاومة الأولى"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
-                            {target1 ? (typeof target1 === "number" ? `${target1.toFixed(2)} ج.م` : String(target1)) : (resistance1 ? `${Number(resistance1).toFixed(2)} ج.م` : "عائق صعود")}
+                            {target1 ? (typeof target1 === "number" ? `${target1.toFixed(2)} ${currency}` : String(target1)) : (resistance1 ? `${Number(resistance1).toFixed(2)} ${currency}` : "عائق صعود")}
                         </div>
                     </div>
 
@@ -519,7 +542,7 @@ export function StockCard({
                             <span className="truncate">{target1 ? "وقف الخسارة" : "الدعم الحاسم (2)"}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-rose-600 dark:text-rose-400 mt-0.5 truncate">
-                            {stopLoss ? (typeof stopLoss === "number" ? `${stopLoss.toFixed(2)} ج.م` : String(stopLoss)) : (support2 ? `${Number(support2).toFixed(2)} ج.م` : "كسر الدعم")}
+                            {stopLoss ? (typeof stopLoss === "number" ? `${stopLoss.toFixed(2)} ${currency}` : String(stopLoss)) : (support2 ? `${Number(support2).toFixed(2)} ${currency}` : "كسر الدعم")}
                         </div>
                     </div>
 
@@ -530,11 +553,23 @@ export function StockCard({
                             <span className="truncate">{target2 ? "المستهدف 2" : (resistance2 ? "المقاومة 2" : "العائد للمخاطرة")}</span>
                         </div>
                         <div className="font-mono font-black text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 mt-0.5 truncate">
-                            {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ج.م` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ج.م` : (calculatedRR || "—"))}
+                            {target2 ? (typeof target2 === "number" ? `${target2.toFixed(2)} ${currency}` : String(target2)) : (resistance2 ? `${Number(resistance2).toFixed(2)} ${currency}` : (calculatedRR || "—"))}
                         </div>
                     </div>
                 </div>
             )}
+
+            {/* Visual Price Ladder & R:R Map (Client-Side SVG, 0 Vercel CPU) */}
+            <PriceLadderSvg
+                price={hasValidPrice ? rawPrice : undefined}
+                stopLoss={parseFirstNum(stopLoss)}
+                support1={parseFirstNum(support1)}
+                support2={parseFirstNum(support2)}
+                resistance1={parseFirstNum(resistance1)}
+                target1={parseFirstNum(target1)}
+                target2={parseFirstNum(target2)}
+                currency={currency}
+            />
 
             {/* Comprehensive Technical Indicators & Liquidity Panel */}
             <div className="mt-2.5 sm:mt-3 p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/10 space-y-2 sm:space-y-2.5 relative z-10">
@@ -618,6 +653,64 @@ export function StockCard({
                             <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 font-mono">
                                 P/E: {typeof peRatio === "number" ? peRatio.toFixed(1) : peRatio}x
                             </span>
+                        )}
+                    </div>
+                )}
+
+                {/* Visual Tabs Switcher: Inline Mini-Chart & RSI/Liquidity Gauges (100% Client SVG) */}
+                {(hasChartSeries || rsiVal !== undefined || parseFirstNum(relativeVol) !== undefined || kingScoreVal !== undefined) && (
+                    <div className="pt-1.5 border-t border-zinc-200/60 dark:border-white/5 space-y-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {hasChartSeries && (
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveVisualTab(activeVisualTab === "chart" ? "none" : "chart")}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
+                                        activeVisualTab === "chart"
+                                            ? "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/50"
+                                            : "bg-white dark:bg-black/40 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-white/15 hover:border-amber-400/50"
+                                    }`}
+                                >
+                                    <BarChart2 className="w-3 h-3 text-amber-500" />
+                                    <span>ميني شارت (30 جلسة)</span>
+                                </button>
+                            )}
+                            {(rsiVal !== undefined || parseFirstNum(relativeVol) !== undefined || kingScoreVal !== undefined || wyckoffPhase) && (
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveVisualTab(activeVisualTab === "gauges" ? "none" : "gauges")}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
+                                        activeVisualTab === "gauges"
+                                            ? "bg-sky-500/20 text-sky-800 dark:text-sky-300 border-sky-500/50"
+                                            : "bg-white dark:bg-black/40 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-white/15 hover:border-sky-400/50"
+                                    }`}
+                                >
+                                    <Compass className="w-3 h-3 text-sky-500" />
+                                    <span>بوصلة الزخم والسيولة</span>
+                                </button>
+                            )}
+                        </div>
+
+                        {activeVisualTab === "chart" && hasChartSeries && stockData.chartData && (
+                            <MiniPriceChartSvg
+                                chartData={stockData.chartData}
+                                currency={currency}
+                                symbol={symbol}
+                                support1={parseFirstNum(support1)}
+                                resistance1={parseFirstNum(resistance1)}
+                            />
+                        )}
+
+                        {activeVisualTab === "gauges" && (
+                            <MomentumLiquidityGauges
+                                rsi={rsiVal}
+                                rVol={parseFirstNum(relativeVol)}
+                                kingScore={kingScoreVal}
+                                wyckoffPhase={wyckoffPhase}
+                                ema50={parseFirstNum(ema50)}
+                                ema200={parseFirstNum(ema200)}
+                                price={hasValidPrice ? rawPrice : undefined}
+                            />
                         )}
                     </div>
                 )}

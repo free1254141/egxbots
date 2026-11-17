@@ -8,6 +8,7 @@ import ChatWidget from "@/components/ChatWidget";
 import SupportChatWidget from "@/components/SupportChatWidget";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import TrialWelcomePrompt from "@/components/TrialWelcomePrompt";
+import TrialSuccessModal from "@/components/TrialSuccessModal";
 import MarketWelcomeDialog from "@/components/MarketWelcomeDialog";
 import { Analytics } from "@vercel/analytics/react";
 import type { Metadata, Viewport } from "next";
@@ -236,6 +237,7 @@ export default function RootLayout({
           <SupportChatWidget />
           <PwaInstallPrompt />
           <TrialWelcomePrompt />
+          <TrialSuccessModal />
           <MarketWelcomeDialog />
           <Analytics />
         </Providers>

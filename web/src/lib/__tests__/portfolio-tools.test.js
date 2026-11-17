@@ -226,7 +226,7 @@ describe("Portfolio tools (محفظتى)", () => {
         });
         const res = await sellPortfolioPosition(sb, "u", "COMI", null, null);
         expect(res.ok).toBe(true);
-        expect(sb._state.positions[0].status).toBe("closed");
+        expect(sb._state.positions[0].status).toBe("closed_manual");
         expect(sb._state.profile.cash_balance).toBe(500 + 100 * 95);
     });
 

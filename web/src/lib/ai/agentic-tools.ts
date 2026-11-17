@@ -750,7 +750,7 @@ async function executeRawTool(
                 const quantity = quantityValue, price = priceValue;
                 if (quantity > held) return portfolioFailure(operation, "sell_quantity_exceeds_holding", "كمية البيع أكبر من الكمية المسجلة؛ لم يتم البيع.");
                 const { data } = await lockPosition(supabase.from("positions").update(quantity === held
-                    ? { status: "closed", status_price: price, status_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+                    ? { status: "closed_manual", status_price: price, status_at: new Date().toISOString(), updated_at: new Date().toISOString() }
                     : { quantity: held - quantity, updated_at: new Date().toISOString() })
                     .eq("user_id",userId).eq("id",existing.id).eq("status","open").eq("quantity",held)
                     ,existing).select("id,symbol,quantity,status").limit(1);

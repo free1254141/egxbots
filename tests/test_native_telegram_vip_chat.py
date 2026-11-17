@@ -67,6 +67,37 @@ def test_native_vip_chat_multi_profile_active_pro_wins():
         assert res["used"] == 5
 
 
+def test_native_vip_chat_expired_trial_subscription_is_not_pro():
+    """Verify that an expired trialing subscription does NOT grant Pro access in Telegram VIP chat."""
+    from unittest.mock import patch
+    from api.native_telegram_vip_chat import _resolve_telegram_user
+
+    def fake_sb(endpoint, method="GET", payload=None):
+        if "profiles" in endpoint:
+            return [{"id": "user_with_expired_trial", "display_name": "Ahmed Alkateb"}]
+        if "pro_telegram_invites" in endpoint:
+            return []
+        if "subscriptions" in endpoint:
+            return [{
+                "user_id": "user_with_expired_trial",
+                "plan_id": "pro",
+                "status": "trialing",
+                "current_period_end": "2026-11-11T02:35:24.887138+00:00",
+            }]
+        if "ai_chatbot_limits" in endpoint:
+            return [{"chat_count": 35}]
+        return []
+
+    with patch("api.native_telegram_vip_chat._supabase_request", side_effect=fake_sb):
+        res = _resolve_telegram_user(8666184860, "Ahmed Alkateb")
+        assert res["is_pro"] is False
+        assert res["linked_user_id"] == "user_with_expired_trial"
+        assert res["limit"] == 10
+        assert res["used"] == 35
+        assert res["remaining"] == 0
+        assert res["period"] == "lifetime"
+
+
 def test_native_vip_chat_admin_unconditionally_pro():
     from unittest.mock import patch
     from api.native_telegram_vip_chat import _resolve_telegram_user

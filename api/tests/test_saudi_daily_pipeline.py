@@ -321,3 +321,93 @@ def test_saudi_scheduler_phases_independent_of_egx(monkeypatch):
 
     daily_job_scheduler._execute_phase("close", "test")
     assert saudi_called == []
+
+
+def test_saudi_telegram_dispatch_retries_on_timeout(monkeypatch):
+    import requests as req_mod
+
+    monkeypatch.setenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+    monkeypatch.setattr(saudi_telegram_dispatch.time, "sleep", lambda *_a: None)
+
+    calls = {"n": 0}
+
+    class _OkResp:
+        status_code = 200
+        content = b'{"ok":true}'
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 888}}
+
+    def flaky_post(_url, json=None, timeout=25):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise req_mod.exceptions.ReadTimeout("timed out")
+        return _OkResp()
+
+    monkeypatch.setattr(saudi_telegram_dispatch.requests, "post", flaky_post)
+    res = saudi_telegram_dispatch._send_telegram_message("hello", chat_id="-1004397045436")
+    assert res["ok"] is True
+    assert res["message_id"] == 888
+    assert calls["n"] == 3
+
+
+def test_saudi_runner_cache_revalidation_success_with_status_200(monkeypatch):
+    from api import saudi_daily_runner
+
+    fake_sb = _FakeSaudiSupabase()
+    monkeypatch.setattr("api.saudi_price_sync.sync_saudi_daily_prices", lambda **_kw: {"success": True, "synced": 264, "total": 264, "latest_date": "2026-11-16"})
+    monkeypatch.setattr(saudi_daily_runner, "_run_intraday_snapshot_and_short_swings", lambda *_a, **_kw: {"indicators_count": 264, "latest_date": "2026-11-16", "market_status": {}, "swings_payload": {}})
+    monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 10, "total_headlines": 20})
+    monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 2, "fetched": 5})
+    monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
+
+    out = saudi_daily_runner.run_saudi_daily_job(phase="midday", trigger="manual", dry_run=True, main_sb=fake_sb, saudi_sb=fake_sb)
+    step_by_name = {s["step"]: s for s in out["steps"]}
+    assert step_by_name["cache_revalidation"]["status"] == "success"
+    assert out["error"] is None
+
+
+def test_saudi_tv_fallback_does_not_hang_on_stalled_symbol(monkeypatch):
+    import sys
+    import threading
+    import time
+    import types
+    import pandas as pd
+    from api import saudi_price_sync
+
+    release = threading.Event()
+
+    class _Interval:
+        in_daily = "1d"
+
+    class _FakeTv:
+        def get_hist(self, symbol, exchange=None, interval=None, n_bars=5):
+            if symbol == "STALL":
+                release.wait(timeout=5.0)
+                return None
+            return pd.DataFrame(
+                {"open": [30.0], "high": [31.0], "low": [29.5], "close": [30.5], "volume": [1_000_000.0]},
+                index=pd.to_datetime(["2026-11-16"]),
+            )
+
+    fake_mod = types.SimpleNamespace(TvDatafeed=_FakeTv, Interval=_Interval)
+    monkeypatch.setitem(sys.modules, "tvDatafeed", fake_mod)
+
+    t0 = time.monotonic()
+    try:
+        out = saudi_price_sync._default_tv_fetcher(
+            ["2222", "STALL"],
+            lookback_days=7,
+            max_date_str="2026-11-16",
+            symbol_timeout_s=0.15,
+            batch_timeout_s=0.5,
+        )
+    finally:
+        release.set()
+
+    elapsed = time.monotonic() - t0
+    assert "2222" in out
+    assert out["2222"][0]["close"] == 30.5
+    assert "STALL" not in out
+    assert elapsed < 1.5

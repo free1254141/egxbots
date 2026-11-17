@@ -5,6 +5,22 @@ import { parseMarkdownTable, exportTableToExcel } from "@/lib/excelExport";
 import { FileSpreadsheet, Download, Check, Sparkles, Copy, Share2, Clock, Zap, Briefcase, Loader2, Crown, Lock, AlertCircle, Volume2, VolumeX, FileText } from "lucide-react";
 import { toast } from "sonner";
 import StockCard, { StockData } from "./StockCard";
+import {
+    ChatVisualsPayload,
+    ComparisonMirrorCard,
+    ConceptDiagramCard,
+    ConceptDiagramKey,
+    detectConceptDiagrams,
+    DisclosuresTimelineCard,
+    FairValueGaugeCard,
+    MarketBreadthAccumulationCard,
+    MiniPriceChartSvg,
+    PortfolioVisualCard,
+    PriceTrapsRadarCard,
+    RecommendationsTrackerCard,
+    ShariaPurificationCard,
+    StockChartSeries,
+} from "./StockVisuals";
 import ScheduleAutomationModal from "./ScheduleAutomationModal";
 import type { ChatTable } from "@/contexts/ChatContext";
 import { sanitizeUiLabel, stripEnvironmentLeak } from "@/lib/ai/sanitizer";
@@ -500,7 +516,7 @@ export function tryParseAnalysisTable(
     if (!symbol) return null;
 
     // Always prioritize the latest live provider price from the header to keep the price 100% unified
-    const liveHeaderPriceMatch = cleanRecent.match(/(?:السعر الأخير|أحدث سعر|السعر اللحظي)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
+    const liveHeaderPriceMatch = cleanRecent.match(/(?:السعر الأخير|أحدث سعر|السعر اللحظي)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*(?:ج\.م|ر\.س)/i);
     if (liveHeaderPriceMatch) {
         const liveHeaderPrice = parseNum(liveHeaderPriceMatch[1]);
         if (liveHeaderPrice && liveHeaderPrice > 0) {
@@ -516,13 +532,13 @@ export function tryParseAnalysisTable(
         }
     }
 
-    // Price extraction fallback from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC)
+    // Price extraction fallback from preceding text if table didn't have it (e.g. ATQA, FWRY, COMI, IEEC, 2222)
     if (!price || price === 0) {
-        const textPriceMatch = cleanRecent.match(/[\—\–\-]\s*([\d\.]+)\s*ج\.م/i)
-                            || cleanRecent.match(/([\d\.]+)\s*ج\.م\s*\([+\-−–]?[\d\.]+%?\)/i)
+        const textPriceMatch = cleanRecent.match(/[\—\–\-]\s*([\d\.]+)\s*(?:ج\.م|ر\.س)/i)
+                            || cleanRecent.match(/([\d\.]+)\s*(?:ج\.م|ر\.س)\s*\([+\-−–]?[\d\.]+%?\)/i)
                             || cleanRecent.match(/(?:السعر الأخير|أحدث سعر|السعر اللحظي|سعر المزود|آخر إغلاق متاح|آخر سعر|سعر الإغلاق|إغلاق):\s*([+\-−–]?[\d\.]+)/i)
-                            || cleanRecent.match(/([+\-−–]?[\d\.]+)\s*ج\.م\s*(?:\(جلسة|\(تغير)/i)
-                            || cleanRecent.match(/(?:سعر السهم|أحدث سعر|السعر اللحظي|سعر|الإغلاق)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*ج\.م/i);
+                            || cleanRecent.match(/([+\-−–]?[\d\.]+)\s*(?:ج\.م|ر\.س)\s*(?:\(جلسة|\(تغير)/i)
+                            || cleanRecent.match(/(?:سعر السهم|أحدث سعر|السعر اللحظي|سعر|الإغلاق)\s*[:=]?\s*([+\-−–]?[\d\.]+)\s*(?:ج\.م|ر\.س)/i);
         if (textPriceMatch) {
             price = parseNum(textPriceMatch[1]);
         }
@@ -624,10 +640,16 @@ export function tryParseAnalysisTable(
         resistance2 = temp;
     }
 
+    const isSaudiAnalysis =
+        /^\d{4}$/.test(symbol) ||
+        /ر\.س|\bSAR\b|\bTASI\b|تاسي|السعود/i.test(`${headers.join(" ")} ${cleanRecent}`);
+
     return {
         symbol,
         name: verifiedName,
         sector: meta?.sector,
+        currency: isSaudiAnalysis ? "ر.س" : "ج.م",
+        market: isSaudiAnalysis ? "TASI" : "EGX",
         price: price || 0,
         changePercent: changePct !== undefined ? changePct : 0,
         entryRange: undefined,
@@ -1399,6 +1421,48 @@ export function FormattedChatMessage({
         if (block.type !== "table") return true;
         return !tables.some(table => JSON.stringify(table.headers) === JSON.stringify(block.headers));
     });
+
+    const chartsBySymbol: Record<string, StockChartSeries> = {};
+    const mergedVisuals: ChatVisualsPayload = {};
+    for (const t of tables) {
+        if (t && t.charts && typeof t.charts === "object") {
+            for (const [symKey, chartVal] of Object.entries(t.charts)) {
+                if (chartVal && Array.isArray(chartVal.series) && chartVal.series.length >= 3) {
+                    chartsBySymbol[symKey.toUpperCase()] = chartVal;
+                }
+            }
+        }
+        if (t && t.visuals && typeof t.visuals === "object") {
+            if (t.visuals.portfolio) mergedVisuals.portfolio = t.visuals.portfolio;
+            if (t.visuals.market_breadth) mergedVisuals.market_breadth = t.visuals.market_breadth;
+            if (t.visuals.accumulation?.length) mergedVisuals.accumulation = t.visuals.accumulation;
+            if (t.visuals.fair_value?.length) mergedVisuals.fair_value = t.visuals.fair_value;
+            if (t.visuals.comparison?.length) mergedVisuals.comparison = t.visuals.comparison;
+            if (t.visuals.recommendations?.length) mergedVisuals.recommendations = t.visuals.recommendations;
+            if (t.visuals.sharia) mergedVisuals.sharia = t.visuals.sharia;
+            if (t.visuals.price_traps) mergedVisuals.price_traps = t.visuals.price_traps;
+            if (t.visuals.disclosures?.length) mergedVisuals.disclosures = t.visuals.disclosures;
+        }
+    }
+    let hasAttachedStockCard = false;
+    for (const block of blocks) {
+        if (block.type === "stock_card") {
+            hasAttachedStockCard = true;
+            const cleanSym = String(block.stock.symbol || "").toUpperCase().replace(".CA", "");
+            if (!block.stock.chartData && chartsBySymbol[cleanSym]) {
+                block.stock.chartData = chartsBySymbol[cleanSym];
+            }
+        } else if (block.type === "stock_cards") {
+            hasAttachedStockCard = true;
+            for (const s of block.stocks) {
+                const cleanSym = String(s.symbol || "").toUpperCase().replace(".CA", "");
+                if (!s.chartData && chartsBySymbol[cleanSym]) {
+                    s.chartData = chartsBySymbol[cleanSym];
+                }
+            }
+        }
+    }
+    const renderedConcepts = new Set<ConceptDiagramKey>();
     const renderedDisclosureIds = new Set<string>();
     const renderFormattedText = (text: string, isLastBlock: boolean) => {
         let cleanText = text
@@ -1704,20 +1768,59 @@ export function FormattedChatMessage({
 
     return (
         <div className="space-y-3 w-full max-w-full min-w-0 text-right overflow-hidden" dir="rtl">
-            {tables.map((table) => (
-                <div key={`${table.id}-${table.data_time || ""}`} className="space-y-1">
-                    <div className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                        {table.title}{table.data_time ? ` (${String(table.data_time).slice(0, 10)})` : ""}
+            {tables
+                .filter((table) => Array.isArray(table.headers) && table.headers.length > 0 && Array.isArray(table.rows) && table.rows.length > 0)
+                .map((table) => (
+                    <div key={`${table.id}-${table.data_time || ""}`} className="space-y-1">
+                        <div className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                            {table.title}{table.data_time ? ` (${String(table.data_time).slice(0, 10)})` : ""}
+                        </div>
+                        <ExportableTable headers={table.headers} rows={table.rows} />
                     </div>
-                    <ExportableTable headers={table.headers} rows={table.rows} />
-                </div>
-            ))}
+                ))}
+            {!isStreaming && mergedVisuals.portfolio && (
+                <PortfolioVisualCard portfolio={mergedVisuals.portfolio} />
+            )}
+            {!isStreaming && (mergedVisuals.market_breadth || (mergedVisuals.accumulation && mergedVisuals.accumulation.length >= 2)) && (
+                <MarketBreadthAccumulationCard
+                    breadth={mergedVisuals.market_breadth}
+                    accumulation={mergedVisuals.accumulation}
+                />
+            )}
+            {!isStreaming && mergedVisuals.fair_value && mergedVisuals.fair_value.length >= 1 && (
+                <FairValueGaugeCard items={mergedVisuals.fair_value} />
+            )}
+            {!isStreaming && mergedVisuals.comparison && mergedVisuals.comparison.length >= 2 && (
+                <ComparisonMirrorCard stocks={mergedVisuals.comparison} />
+            )}
+            {!isStreaming && mergedVisuals.recommendations && mergedVisuals.recommendations.length >= 1 && (
+                <RecommendationsTrackerCard items={mergedVisuals.recommendations} />
+            )}
+            {!isStreaming && mergedVisuals.sharia && (
+                <ShariaPurificationCard sharia={mergedVisuals.sharia} />
+            )}
+            {!isStreaming && mergedVisuals.price_traps && (
+                <PriceTrapsRadarCard traps={mergedVisuals.price_traps} />
+            )}
+            {!isStreaming && mergedVisuals.disclosures && mergedVisuals.disclosures.length >= 1 && (
+                <DisclosuresTimelineCard items={mergedVisuals.disclosures} />
+            )}
             {blocks.map((block, bIdx) => {
                 const isLastBlock = bIdx === blocks.length - 1;
                 if (block.type === "text") {
+                    const blockConcepts = !isStreaming && role === "assistant" && renderedConcepts.size < 2
+                        ? detectConceptDiagrams(block.content).filter((c) => {
+                            if (renderedConcepts.has(c) || renderedConcepts.size >= 2) return false;
+                            renderedConcepts.add(c);
+                            return true;
+                        })
+                        : [];
                     return (
                         <div key={bIdx} className="space-y-1 break-words overflow-wrap-anywhere text-xs sm:text-sm leading-relaxed">
                             {renderFormattedText(block.content, isLastBlock)}
+                            {blockConcepts.map((c) => (
+                                <ConceptDiagramCard key={c} concept={c} />
+                            ))}
                         </div>
                     );
                 } else if (block.type === "table") {
@@ -1841,6 +1944,19 @@ export function FormattedChatMessage({
                 }
                 return null;
             })}
+
+            {!hasAttachedStockCard && Object.keys(chartsBySymbol).length > 0 && !isStreaming && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 my-2">
+                    {Object.entries(chartsBySymbol).slice(0, 2).map(([sym, chartVal]) => (
+                        <MiniPriceChartSvg
+                            key={sym}
+                            symbol={sym}
+                            currency={/^\d{4}$/.test(sym) ? "ر.س" : "ج.م"}
+                            chartData={chartVal}
+                        />
+                    ))}
+                </div>
+            )}
 
             {mermaidCode && (
                 <div className="my-4 p-4 bg-zinc-100 dark:bg-black border border-zinc-200 dark:border-white/20 rounded-xl overflow-x-auto shadow-sm max-w-full">

@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 import pytz
 
@@ -1130,6 +1130,39 @@ def _fetch_saudi_names_map(sb: Any, syms: List[str]) -> Dict[str, Dict[str, str]
 # ---------------------------------------------------------------------------
 # Tool: get_stock
 # ---------------------------------------------------------------------------
+def _build_ui_chart_payload(
+    rows_desc: List[Dict[str, Any]],
+    ema_50: Optional[float] = None,
+    support_1: Optional[float] = None,
+    resistance_1: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build compact 30-session price/volume series for client-side SVG rendering (stripped before LLM prompt)."""
+    if not rows_desc:
+        return None
+    pts: List[Dict[str, Any]] = []
+    for r in reversed(rows_desc[:30]):
+        if not isinstance(r, dict):
+            continue
+        c_val = _safe_price(r.get("close"))
+        if c_val is None or c_val <= 0:
+            continue
+        v_raw = _safe_float(r.get("volume"), 0)
+        v_val = int(v_raw) if (v_raw is not None and v_raw >= 0) else None
+        pts.append({
+            "d": str(r.get("date") or "")[:10],
+            "c": c_val,
+            "v": v_val,
+        })
+    if len(pts) < 3:
+        return None
+    return {
+        "series": pts,
+        "ema50": ema_50,
+        "support1": support_1,
+        "resistance1": resistance_1,
+    }
+
+
 def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
     egx_syms, tasi_syms = _split_symbols_by_market(symbols)
     if not egx_syms and not tasi_syms:
@@ -1152,7 +1185,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
         try:
             res_prices = (
                 sb.from_("stock_prices")
-                .select("symbol,high,low,close,date")
+                .select("symbol,high,low,close,volume,date")
                 .eq("exchange", "EGX")
                 .in_("symbol", egx_syms)
                 .order("date", desc=True)
@@ -1282,7 +1315,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
             else:
                 verdict = "🟡 حيادي للمراقبة"
 
-            stocks_data.append({
+            egx_item: Dict[str, Any] = {
                 "symbol": sym,
                 "market": "EGX",
                 "exchange": "EGX",
@@ -1316,7 +1349,16 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 "consecutive_acc_days": wyckoff_info.get("consecutive_acc_days"),
                 "verdict": verdict,
                 **fundamentals,
-            })
+            }
+            ui_chart = _build_ui_chart_payload(
+                by_sym.get(sym, []) if "by_sym" in locals() else [],
+                _safe_price(latest_tech.get("ema_50")),
+                support_1,
+                resistance_1,
+            )
+            if ui_chart:
+                egx_item["_ui_chart"] = ui_chart
+            stocks_data.append(egx_item)
 
     # ── 2. Saudi TASI symbols (SAUDI_SUPABASE) ───────────────────────────────
     if tasi_syms:
@@ -1521,7 +1563,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     if sharia_sa is not None:
                         sharia_sa = bool(sharia_sa)
 
-                    stocks_data.append({
+                    sa_item: Dict[str, Any] = {
                         "symbol": sym,
                         "market": "TASI",
                         "exchange": "TADAWUL",
@@ -1556,7 +1598,16 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         "market_cap": fd.get("market_cap"),
                         "fund_score": _safe_float(raw_fund.get("fund_score")),
                         "verdict": verdict,
-                    })
+                    }
+                    ui_chart_sa = _build_ui_chart_payload(
+                        sa_ohlcv_map.get(sym, []),
+                        ema_50,
+                        support_1,
+                        resistance_1,
+                    )
+                    if ui_chart_sa:
+                        sa_item["_ui_chart"] = ui_chart_sa
+                    stocks_data.append(sa_item)
 
     res: Dict[str, Any] = {"status": "success", "stocks": stocks_data}
     if errors:
@@ -1966,6 +2017,31 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
         except Exception:
             pass
 
+    breadth = payload.get("breadth")
+    if not breadth:
+        try:
+            b_date = m_date or payload.get("date") or _get_latest_table_date(sb, "stock_technical_indicators", "date", "EGX")
+            if b_date:
+                res_b = (
+                    sb.from_("stock_technical_indicators")
+                    .select("change_pct")
+                    .eq("exchange", "EGX")
+                    .eq("date", b_date)
+                    .not_.is_("change_pct", "null")
+                    .limit(350)
+                    .execute()
+                )
+                vals = [float(r["change_pct"]) for r in (res_b.data or []) if isinstance(r, dict) and r.get("change_pct") is not None]
+                if vals:
+                    breadth = {
+                        "advancing": sum(1 for v in vals if v > 0),
+                        "declining": sum(1 for v in vals if v < 0),
+                        "unchanged": sum(1 for v in vals if v == 0),
+                        "total_stocks": len(vals),
+                    }
+        except Exception:
+            breadth = None
+
     res = {
         "status": "success",
         "market": "EGX (البورصة المصرية)",
@@ -1975,6 +2051,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
         "egx30_close": egx30_close or payload.get("egx30_close"),
         "egx30_change_pct": egx30_change_pct or payload.get("egx30_change_pct"),
         "date": m_date or payload.get("date"),
+        "breadth": breadth,
         "top_gainers": top_gainers,
         "top_losers": top_losers,
         "liquidity_summary": payload.get("liquidity", "سيولة متوازنة في جلسة اليوم"),
@@ -2147,6 +2224,31 @@ def _sync_get_recommendations(
             "date": str(r.get("created_at") or "")[:10],
             "is_sharia_compliant": is_sharia_compliant(sym),
         })
+
+    if recs:
+        try:
+            rec_syms = list({r["symbol"] for r in recs if r.get("symbol")})[:30]
+            if rec_syms:
+                res_lc = (
+                    sb.from_("stock_technical_indicators")
+                    .select("symbol,close,date")
+                    .eq("exchange", "EGX")
+                    .in_("symbol", rec_syms)
+                    .order("date", desc=True)
+                    .limit(len(rec_syms) * 2)
+                    .execute()
+                )
+                lc_map: Dict[str, float] = {}
+                for row in (res_lc.data or []):
+                    if isinstance(row, dict) and row.get("symbol") and row["symbol"] not in lc_map:
+                        cv = _safe_price(row.get("close"))
+                        if cv is not None:
+                            lc_map[row["symbol"]] = cv
+                for rec_item in recs:
+                    if rec_item.get("last_close") is None and rec_item.get("symbol") in lc_map:
+                        rec_item["last_close"] = lc_map[rec_item["symbol"]]
+        except Exception:
+            pass
 
     return {
         "status": "success",
@@ -3805,6 +3907,45 @@ def _save_tg_portfolio_state(sb: Any, telegram_user_id: int, state: Dict[str, An
     ).execute()
 
 
+_PORTFOLIO_REFRESH_ONLY_RE = re.compile(
+    r"^\s*(?:من\s*فضلك\s+|لو\s*سمحت\s+)?(?:حدث|حدثلي|تحديث|اعمل\s*تحديث(?:\s*ل)?|اعرض|اظهر|شوف|راجع|قيم|هات|وريني)\s*(?:لي\s*)?(?:ال)?محفظ(?:ه|تي|ه\s*بتاعتي)?(?:\s*(?:الان|دلوقتي|الحاليه|باسعار\s*اليوم|من\s*فضلك|لو\s*سمحت))?\s*[!.؟?]*\s*$"
+)
+
+_PORTFOLIO_WRITE_INTENT_RE = re.compile(
+    r"(?:احفظ|سجل|اشتريت|شريت|ضف|اضف|اضيف|ضيف|ضيفه|ضيفهم|ضيفلي|"
+    r"حط|حطه|دخل|شيل|بيع|بعت|احذف|امسح|الغي|نقص|زود|تزود|"
+    r"عدل|عدلي|غير|حدث|موافق|تمام|اكد|تاكيد|نفذ|اضافه|تعديل|"
+    r"(?:^|[^\w\u0621-\u064a])شراء(?:$|[^\w\u0621-\u064a]))"
+)
+
+_PORTFOLIO_CONFIRM_RE = re.compile(
+    r"(?:^|[^\w\u0621-\u064a])(?:موافق|اكد|تاكيد|نفذ|تمام|ايوه|نعم)(?:$|[^\w\u0621-\u064a])"
+)
+
+
+def _validate_portfolio_write_intent(op: str, user_prompt: str) -> Optional[Dict[str, Any]]:
+    """Reject accidental portfolio writes on pure refresh/view requests or unconfirmed replays."""
+    norm_prompt = _normalize_arabic_text(user_prompt or "").lower().strip()
+    if _PORTFOLIO_REFRESH_ONLY_RE.match(norm_prompt):
+        return {
+            "status": "blocked",
+            "message": "الرسالة الحالية تطلب عرض أو تحديث أسعار المحفظة فقط، وليس إضافة أو تعديل كميات؛ استخدم operation='view'.",
+        }
+    if not _PORTFOLIO_WRITE_INTENT_RE.search(norm_prompt):
+        return {
+            "status": "blocked",
+            "message": "لم يتم تأكيد طلب تعديل المحفظة من رسالة المستخدم صراحةً.",
+        }
+    if op in ("add", "buy"):
+        has_digits = bool(re.search(r"[\d\u0660-\u0669]", norm_prompt))
+        if not has_digits and not _PORTFOLIO_CONFIRM_RE.search(norm_prompt):
+            return {
+                "status": "blocked",
+                "message": "لم تُذكر كمية أو سعر شراء جديد في رسالتك الحالية لإضافته للمحفظة؛ استخدم operation='view' لعرض المحفظة.",
+            }
+    return None
+
+
 def _manage_tg_json_portfolio(
     sb: Any,
     telegram_user_id: int,
@@ -3830,18 +3971,9 @@ def _manage_tg_json_portfolio(
             return {"status": "error", "message": f"تعذر استرجاع محفظتك: {str(e)}"}
 
     # Anti-injection write check matches website portfolio behavior
-    norm_prompt = _normalize_arabic_text(user_prompt).lower()
-    write_intent_patterns = (
-        r"(?:احفظ|سجل|اشتريت|شريت|ضف|اضف|اضيف|ضيف|ضيفه|ضيفهم|ضيفلي|"
-        r"حط|حطه|دخل|شيل|بيع|بعت|احذف|امسح|الغي|نقص|زود|تزود|"
-        r"عدل|عدلي|غير|حدث|موافق|تمام|اكد|تاكيد|نفذ|اضافه|تعديل|"
-        r"(?:^|[^\w\u0621-\u064a])شراء(?:$|[^\w\u0621-\u064a]))"
-    )
-    if not re.search(write_intent_patterns, norm_prompt):
-        return {
-            "status": "blocked",
-            "message": "لم يتم تأكيد طلب تعديل المحفظة من رسالة المستخدم صراحةً.",
-        }
+    write_guard_err = _validate_portfolio_write_intent(op, user_prompt)
+    if write_guard_err:
+        return write_guard_err
 
     lock = _get_tg_portfolio_lock(int(telegram_user_id))
     with lock:
@@ -4084,18 +4216,9 @@ def _sync_manage_portfolio(
             return {"status": "error", "message": f"تعذر استرجاع المحفظة: {str(e)}"}
 
     # Write operations require explicit intent in user's prompt (anti-injection guard)
-    norm_prompt = _normalize_arabic_text(user_prompt).lower()
-    write_intent_patterns = (
-        r"(?:احفظ|سجل|اشتريت|شريت|ضف|اضف|اضيف|ضيف|ضيفه|ضيفهم|ضيفلي|"
-        r"حط|حطه|دخل|شيل|بيع|بعت|احذف|امسح|الغي|نقص|زود|تزود|"
-        r"عدل|عدلي|غير|حدث|موافق|تمام|اكد|تاكيد|نفذ|اضافه|تعديل|"
-        r"(?:^|[^\w\u0621-\u064a])شراء(?:$|[^\w\u0621-\u064a]))"
-    )
-    if not re.search(write_intent_patterns, norm_prompt):
-        return {
-            "status": "blocked",
-            "message": "لم يتم تأكيد طلب تعديل المحفظة من رسالة المستخدم صراحةً.",
-        }
+    write_guard_err = _validate_portfolio_write_intent(op, user_prompt)
+    if write_guard_err:
+        return write_guard_err
 
     if op in ("set_cash", "add_cash"):
         amount = _safe_float(cash_amount, 2)
@@ -4238,7 +4361,10 @@ def _sync_manage_portfolio(
             if sell_qty <= 0:
                 return {"status": "error", "message": "كمية البيع يجب أن تكون أكبر من الصفر."}
             if sell_qty >= held:
-                update_data: Dict[str, Any] = {"status": "closed"}
+                update_data: Dict[str, Any] = {
+                    "status": "closed_manual",
+                    "status_at": datetime.now(timezone.utc).isoformat(),
+                }
                 if price is not None:
                     update_data["status_price"] = price
                 sb.from_("positions").update(update_data).eq("id", existing["id"]).execute()

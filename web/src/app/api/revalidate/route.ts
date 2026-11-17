@@ -54,14 +54,18 @@ async function handleRevalidate(req: NextRequest) {
     if (tags.some(tag => !DAILY_CACHE_TAG_VALUES.includes(tag as any))) {
       return NextResponse.json({ error: "Unknown daily cache tag" }, { status: 400 });
     }
-    // Refresh first, invalidate responses second. A failure preserves the old
-    // generation and prevents a thundering herd of CDN misses hitting Supabase.
+    // HF owns the canonical market caches; only invoke the expensive Vercel KV
+    // mass-refill if explicitly requested (?refresh_kv=true or body.refresh_kv=true).
     const refreshTags = tags.length ? tags : DAILY_CACHE_TAG_VALUES;
     const eventId = typeof body.event_id === "string" ? body.event_id : new Date().toISOString();
     if (eventId.length > 100 || !Number.isFinite(Date.parse(eventId))) {
       return NextResponse.json({ error: "Invalid event_id" }, { status: 400 });
     }
-    const marketCache = await refreshMarketQueries(refreshTags, eventId);
+    const forceKvRefresh =
+      searchParams.get("refresh_kv") === "true" || body.refresh_kv === true;
+    const marketCache = forceKvRefresh
+      ? await refreshMarketQueries(refreshTags, eventId)
+      : { skipped: true, reason: "Offloaded to HF backend" };
     if (tags.length > 0) {
       for (const tag of tags) {
         revalidateTag(tag);
