@@ -575,3 +575,54 @@ def test_saudi_tv_fallback_does_not_hang_on_stalled_symbol(monkeypatch):
     assert out["2222"][0]["close"] == 30.5
     assert "STALL" not in out
     assert elapsed < 1.5
+
+
+def test_saudi_runner_resumes_only_missing_stages(monkeypatch):
+    import json
+    from api import saudi_daily_runner
+
+    now_riyadh = dt.datetime.now(SAUDI_TZ).isoformat()
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "daily_job_runs": [
+                {
+                    "id": "saudi-resume-1",
+                    "job_type": "saudi_midday",
+                    "status": "failed",
+                    "started_at": now_riyadh,
+                    "total_symbols": 264,
+                    "steps": json.dumps([
+                        {"step": "saudi_price_sync", "status": "success", "count": 263, "details": "synced=263/264"},
+                    ]),
+                }
+            ]
+        }
+    )
+
+    def fail_if_called(**_kw):
+        raise AssertionError("saudi_price_sync must not re-run when already succeeded")
+
+    monkeypatch.setattr("api.saudi_price_sync.sync_saudi_daily_prices", fail_if_called)
+    monkeypatch.setattr(
+        saudi_daily_runner,
+        "_run_intraday_snapshot_and_short_swings",
+        lambda *_a, **_kw: {"indicators_count": 264, "latest_date": "2026-11-17", "market_status": {}, "swings_payload": {}},
+    )
+    monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 5, "total_headlines": 10})
+    monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 1, "fetched": 2})
+    monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
+
+    out = saudi_daily_runner.run_saudi_daily_job(
+        phase="midday",
+        trigger="scheduled",
+        dry_run=True,
+        main_sb=fake_sb,
+        saudi_sb=fake_sb,
+        resume_job_id="saudi-resume-1",
+    )
+    assert out["ok"] is True
+    assert out["job_run_id"] == "saudi-resume-1"
+    step_names = [s["step"] for s in out["steps"]]
+    assert step_names.count("saudi_price_sync") == 1
+    assert "saudi_intraday_refresh" in step_names
+    assert "cache_revalidation" in step_names

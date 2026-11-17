@@ -288,3 +288,68 @@ def retry_failed_daily_stages(now):
             print(f"[DAILY-RECOVERY] Cache invalidation failed: {inv_result['error']}")
     _FINISHED.add(identity)
     return {'phase': phase, 'recovered': changed, 'planned': planned}
+
+
+_SAUDI_EXPECTED_STAGES = {
+    'morning': ('saudi_price_sync', 'saudi_intraday_refresh', 'saudi_short_swings', 'saudi_telegram_vip', 'saudi_news_sync', 'saudi_disclosures_sync', 'cache_revalidation'),
+    'midday': ('saudi_price_sync', 'saudi_intraday_refresh', 'saudi_short_swings', 'saudi_telegram_vip', 'saudi_news_sync', 'saudi_disclosures_sync', 'cache_revalidation'),
+    'close': ('saudi_price_sync', 'saudi_pipeline_bootstrap', 'saudi_systems_backtests', 'saudi_telegram_vip', 'saudi_news_sync', 'saudi_disclosures_sync', 'cache_revalidation'),
+}
+
+
+def retry_failed_saudi_stages(now_riyadh):
+    """Automatically resume an interrupted/incomplete Saudi phase using only its missing stages."""
+    from api.daily_job_scheduler import _due_saudi_phase
+    from api.saudi_daily_runner import run_saudi_daily_job, saudi_job_type_for_phase
+    from api import stock_ai
+
+    phase = _due_saudi_phase(now_riyadh)
+    if not phase:
+        return None
+    stock_ai._init_supabase()
+    client = stock_ai.supabase
+    if not client:
+        return None
+
+    start = now_riyadh.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    job_type = saudi_job_type_for_phase(phase)
+    query = (
+        client.table('daily_job_runs')
+        .select('id,status,steps,started_at')
+        .eq('job_type', job_type)
+        .gte('started_at', start.isoformat())
+        .lt('started_at', (start + timedelta(days=1)).isoformat())
+        .order('started_at', desc=True)
+        .limit(1)
+        .execute()
+    )
+    job = (query.data or [None])[0]
+    if not job or job.get('status') == 'running':
+        return None
+    identity = f"saudi:{job['id']}:{phase}"
+    if identity in _FINISHED:
+        return None
+
+    steps = json.loads(job['steps']) if isinstance(job.get('steps'), str) else job.get('steps') or []
+    completed = {s.get('step') for s in steps if isinstance(s, dict) and s.get('status') == 'success'}
+    missing = [s for s in _SAUDI_EXPECTED_STAGES[phase] if s not in completed]
+    if not missing:
+        _FINISHED.add(identity)
+        return None
+
+    key = f"saudi_continuation_{job['id']}"
+    existing = read_checkpoint(client, key)
+    if existing:
+        _FINISHED.add(identity)
+        return {'phase': phase, 'continuation': 'already_claimed'}
+    claim = replace_checkpoint(client, key, {'status': 'running', 'phase': phase, 'missing': missing, 'attempts': 1}, None)
+    if not claim:
+        return None
+    try:
+        result = run_saudi_daily_job(phase=phase, trigger='scheduled', resume_job_id=job['id'])
+        replace_checkpoint(client, key, {'status': result.get('status', 'failed'), 'phase': phase, 'attempts': 1}, claim)
+        _FINISHED.add(identity)
+        return {'phase': phase, 'missing': missing, 'continuation': result.get('status')}
+    except Exception as error:
+        replace_checkpoint(client, key, {'status': 'failed', 'phase': phase, 'attempts': 1, 'error': type(error).__name__}, claim)
+        raise

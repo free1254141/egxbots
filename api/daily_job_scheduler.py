@@ -384,10 +384,14 @@ def run_startup_catchup() -> bool:
 
     now_saudi = _now_riyadh()
     saudi_phase = _due_saudi_phase(now_saudi)
-    if saudi_phase and _claim_saudi_phase_in_process(now_saudi, saudi_phase):
-        threading.Thread(target=_execute_saudi_phase, args=(saudi_phase, "startup_catchup"),
-                         daemon=True, name="saudi-daily-job-startup-catchup").start()
-        started = True
+    if saudi_phase:
+        if _claim_saudi_phase_in_process(now_saudi, saudi_phase):
+            threading.Thread(target=_execute_saudi_phase, args=(saudi_phase, "startup_catchup"),
+                             daemon=True, name="saudi-daily-job-startup-catchup").start()
+            started = True
+        else:
+            threading.Thread(target=_retry_saudi_stages, args=(now_saudi,),
+                             daemon=True, name="saudi-daily-job-startup-recovery").start()
     return started
 
 
@@ -568,6 +572,27 @@ def _retry_short_swings(now):
             _scheduler_state["status"] = "idle"
 
 
+def _retry_saudi_stages(now_riyadh):
+    if not _saudi_configured() or not _scheduler_state.get("saudi_enabled", True):
+        return
+    if now_riyadh.weekday() not in _scheduler_state.get("saudi_active_days", [0, 1, 2, 3, 6]):
+        return
+    with _saudi_scheduler_lock:
+        if _scheduler_state.get("saudi_status") == "running":
+            return
+        _scheduler_state["saudi_status"] = "running"
+    try:
+        from api.daily_stage_recovery import retry_failed_saudi_stages
+        result = retry_failed_saudi_stages(now_riyadh)
+        if result:
+            print(f"[DAILY-JOB-SCHEDULER] Saudi independent phase recovery: {result}")
+    except Exception as exc:
+        print(f"[DAILY-JOB-SCHEDULER] Saudi stage recovery error: {exc}")
+    finally:
+        with _saudi_scheduler_lock:
+            _scheduler_state["saudi_status"] = "idle"
+
+
 def _scheduler_worker():
     global _scheduler_state, _last_recommendation_retry_at, _last_vip_revocation_at, _last_subscription_reminders_at, _last_marketing_lifecycle_at, _last_short_swings_retry_at
     print("[DAILY-JOB-SCHEDULER] Worker started.")
@@ -662,6 +687,10 @@ def _scheduler_worker():
                     _retry_short_swings(now_cairo)
                 except Exception as error:
                     print(f"[DAILY-JOB-SCHEDULER] Short-swings recovery failed: {error}")
+                try:
+                    _retry_saudi_stages(now_riyadh)
+                except Exception as sa_error:
+                    print(f"[DAILY-JOB-SCHEDULER] Saudi recovery failed: {sa_error}")
                 _last_short_swings_retry_at = now_monotonic
             _stop_event.wait(30)
 
