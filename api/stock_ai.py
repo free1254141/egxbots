@@ -862,8 +862,9 @@ class IndicatorCache:
         last_row = df.iloc[-1]
         close = last_row.get("close", last_row.get("Close", 0))
         vol = last_row.get("volume", last_row.get("Volume", 0))
+        sec_ret = last_row.get("sector_avg_return", "") if "sector_avg_return" in df.columns else ""
         
-        data_str = f"{len(df)}_{close}_{vol}"
+        data_str = f"{len(df)}_{close}_{vol}_{sec_ret}"
         return hashlib.md5(data_str.encode()).hexdigest()[:12]
 
     def get_with_indicators(self, symbol: str, exchange: str, df: pd.DataFrame, indicator_func) -> pd.DataFrame:

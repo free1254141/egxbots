@@ -148,25 +148,25 @@ def build_reminder_email(user_id: str, email: str, target: dict) -> tuple[str, s
         """
         cta_text = "👑 تجديد اشتراكي في باقة Pro"
     elif category.startswith("TRIAL"):
-        subject = f"⏳ فترتك التجريبية في EGX BOTS تنتهي قريباً — ثبّت خصم المؤسسين (100 ج.م)"
+        subject = f"⏳ فترتك التجريبية في EGX BOTS تنتهي قريباً — اشترك الآن في باقة Pro (200 ج.م/شهر)"
         headline = "فترتك التجريبية تشارف على الانتهاء"
-        badge_text = "عرض تثبيت الاشتراك"
+        badge_text = "تذكير نهاية التجربة"
         badge_color = "#f59e0b"
         content_html = f"""
         <p style="font-size: 16px; line-height: 1.8; color: #374151;">
             أهلاً بك <strong>{name}</strong>،<br><br>
             نود إعلامك بأن فترتك التجريبية المجانية ستنتهي <strong>({expires_in})</strong>.<br>
-            حتى لا يتوقف مساعدك الاستثماري وكاشف الفرص، يمكنك الآن تفعيل اشتراكك وتثبيت <strong>عرض المؤسسين بـ 100 ج.م شهرياً فقط مدى الحياة</strong> بدلاً من 250 ج.م.
+            حتى لا يتوقف مساعدك الاستثماري وكاشف الفرص، يمكنك الآن تفعيل اشتراكك في <strong>باقة Pro بـ 200 ج.م شهرياً</strong>.
         </p>
         <p style="font-size: 15px; color: #4b5563;">
-            يشمل الاشتراك فتح كامل إشارات التداول، كاشف المصائد، تقارير القيمة العادلة، والدردشة الذكية بلا حدود.
+            يشمل الاشتراك فتح كامل إشارات التداول، كاشف المصائد، تقارير القيمة العادلة، و350 رسالة ذكية شهرياً.
         </p>
         """
-        cta_text = "⚡ تثبيت عرض المؤسسين بـ 100 ج.م"
+        cta_text = "⚡ اشترك في باقة Pro الآن (200 ج.م)"
     else: # WIN_BACK
-        subject = f"🎁 نتشرف بعودتك! خصم خاص لتجديد باقة Pro في EGX BOTS"
+        subject = f"🎁 نتشرف بعودتك! استأنف اشتراك باقة Pro في EGX BOTS"
         headline = "اشتقنا لتواجدك معنا في EGX BOTS Pro"
-        badge_text = "عرض عودة خاص"
+        badge_text = "دعوة للعودة"
         badge_color = "#8b5cf6"
         content_html = f"""
         <p style="font-size: 16px; line-height: 1.8; color: #374151;">
@@ -175,7 +175,7 @@ def build_reminder_email(user_id: str, email: str, target: dict) -> tuple[str, s
             أطلقنا هذا الأسبوع تحديثات كبرى للمنصة: كاشف مصائد السيولة (Spring & Upthrust)، محرك القيمة العادلة القطاعي، وأداة إعادة تدوير المحفظة.
         </p>
         <p style="font-size: 15px; color: #4b5563;">
-            يسعدنا استئناف اشتراكك بنفس سعر عرض المؤسسين (100 ج.م شهرياً) للاستفادة من كل الميزات الجديدة فوراً:
+            يسعدنا استئناف اشتراكك في باقة Pro (200 ج.م شهرياً) للاستفادة من كل الميزات الجديدة فوراً:
         </p>
         """
         cta_text = "🔄 استئناف اشتراكي في باقة Pro"
@@ -243,27 +243,27 @@ def execute_reminders():
                     f"👑 <b>أهلاً بك {name} في EGX BOTS Pro</b>\n\n"
                     f"نود تذكير سيادتكم بأن اشتراككم في باقة Pro سينتهي في <b>({expires})</b>.\n\n"
                     f"لتجنب انقطاع التوصيات وإشارات <b>كاشف المصائد (Wyckoff Traps)</b> واستشارات الشات بوت، "
-                    f"يمكنك تجديد اشتراكك بسهولة والحفاظ على سعر اشتراكك الحالي عبر الرابط:\n"
-                    f"👉 https://eqxbots.com/pricing"
+                    f"يمكنك تجديد اشتراكك بسهولة عبر الرابط:\n"
+                    f"👉 https://egxbots.com/pricing"
                 )
             elif cat.startswith("TRIAL"):
                 tg_text = (
                     f"⏳ <b>أهلاً بك {name} في EGX BOTS</b>\n\n"
                     f"نود إعلامك بأن فترتك التجريبية ستنتهي <b>({expires})</b>.\n\n"
-                    f"حتى لا تتوقف الاستشارات والتوصيات، يمكنك الآن تثبيت <b>عرض المؤسسين بـ 100 ج.م شهرياً فقط مدى الحياة</b>:\n"
-                    f"👉 https://eqxbots.com/pricing"
+                    f"حتى لا تتوقف الاستشارات والتوصيات، يمكنك الآن تفعيل <b>باقة Pro بـ 200 ج.م شهرياً</b> (350 رسالة شات + التوصيات اللحظية + قناة VIP):\n"
+                    f"👉 https://egxbots.com/pricing"
                 )
             else:
                 tg_text = (
                     f"🎁 <b>أهلاً بك {name} — نتشرف بعودتك لـ EGX BOTS Pro</b>\n\n"
                     f"أطلقنا مؤخراً تحديثات كبرى للمنصة: كاشف مصائد السيولة اللحظي، ومحرك القيمة العادلة المحدث.\n"
-                    f"يسعدنا تجديد اشتراكك بنفس سعر عرض المؤسسين (100 ج.م) عبر الرابط:\n"
-                    f"👉 https://eqxbots.com/pricing"
+                    f"يسعدنا تجديد اشتراكك في باقة Pro (200 ج.م/شهر) عبر الرابط:\n"
+                    f"👉 https://egxbots.com/pricing"
                 )
 
             markup = {
                 "inline_keyboard": [
-                    [{"text": "👑 تجديد الاشتراك في باقة Pro", "url": "https://eqxbots.com/pricing"}]
+                    [{"text": "👑 تجديد الاشتراك في باقة Pro", "url": "https://egxbots.com/pricing"}]
                 ]
             }
             res_tg = send_telegram(tg_id, tg_text, reply_markup=markup)

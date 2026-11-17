@@ -2985,7 +2985,7 @@ async def generate_daily_recommendations(
     # Notify Stocks Score subscribers with beautiful detailed summary card
     try:
         web_origin = get_web_origin()
-        current_date = dt.datetime.now().strftime("%Y-%m-%d")
+        current_date = dt.datetime.now(ZoneInfo("Africa/Cairo")).strftime("%Y-%m-%d")
 
         # Send only recommendations confirmed persisted in scan_results. Never
         # publish a Telegram row the website cannot read from the database.

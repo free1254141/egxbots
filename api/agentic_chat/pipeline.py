@@ -1247,11 +1247,12 @@ async def _run_agentic_chat_stream_impl(
                         accumulated_reply = filtered_synth
                         if accumulated_reply:
                             words = accumulated_reply.split(" ")
-                            chunk_size = 4
+                            chunk_size = 24 if len(words) > 300 else 12
+                            sleep_sec = 0.004 if len(words) > 300 else 0.008
                             for i in range(0, len(words), chunk_size):
                                 chunk = " ".join(words[i : i + chunk_size]) + " "
                                 yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
-                                await asyncio.sleep(0.015)
+                                await asyncio.sleep(sleep_sec)
                 else:
                     status_info = f"HTTP {synth_resp.status_code}" if synth_resp is not None else str(last_synth_err)
                     logger.error(f"[agentic_chat] Synthesis error: {status_info}")

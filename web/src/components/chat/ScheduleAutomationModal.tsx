@@ -46,7 +46,8 @@ interface ScheduleAutomationModalProps {
 const TIME_PRESETS = [
   { label: "08:30 ص (قبل الجلسة)", time: "08:30" },
   { label: "10:30 ص (افتتاح التداول)", time: "10:30" },
-  { label: "02:00 م (ملخص الإغلاق)", time: "14:00" },
+  { label: "12:15 م (منتصف الجلسة)", time: "12:15" },
+  { label: "02:00 م (قبل الإغلاق)", time: "14:00" },
   { label: "08:00 م (التحليل المسائي)", time: "20:00" },
 ];
 
@@ -71,8 +72,9 @@ export default function ScheduleAutomationModal({
   // Form State
   const [name, setName] = useState(initialTitle || "");
   const [prompt, setPrompt] = useState(initialPrompt || "");
-  const [scheduledTime, setScheduledTime] = useState("08:30");
-  const [daysOfWeek, setDaysOfWeek] = useState<"all_days" | "trading_days">("all_days");
+  const [selectedTimes, setSelectedTimes] = useState<string[]>(["08:30"]);
+  const [customTimeInput, setCustomTimeInput] = useState("12:15");
+  const [daysOfWeek, setDaysOfWeek] = useState<"all_days" | "trading_days">("trading_days");
   const [customChatId, setCustomChatId] = useState("");
 
   useEffect(() => {
@@ -145,9 +147,19 @@ export default function ScheduleAutomationModal({
       return;
     }
 
-    if (automations.length >= 5) {
-      toast.error("وصلت للحد الأقصى (5 مهام). يمكنك تعديل أو حذف مهمة من تبويب الإدارة.");
-      setActiveTab("manage");
+    const remainingSlots = Math.max(0, 5 - automations.length);
+    if (selectedTimes.length === 0) {
+      toast.error("يرجى اختيار موعد واحد على الأقل");
+      return;
+    }
+
+    if (remainingSlots === 0 || selectedTimes.length > remainingSlots) {
+      toast.error(
+        remainingSlots === 0
+          ? "وصلت للحد الأقصى (5 مهام). يمكنك تعديل أو حذف مهمة من تبويب الإدارة."
+          : `المتبقي لك ${remainingSlots} خانات فقط، بينما اخترت ${selectedTimes.length} مواعيد.`
+      );
+      if (remainingSlots === 0) setActiveTab("manage");
       return;
     }
 
@@ -159,14 +171,20 @@ export default function ScheduleAutomationModal({
         body: JSON.stringify({
           name: name.trim() || "استشارة مجدولة",
           prompt: prompt.trim(),
-          scheduled_time: scheduledTime,
+          scheduled_times: selectedTimes,
+          scheduled_time: selectedTimes[0],
           days_of_week: daysOfWeek,
           telegram_chat_id: customChatId.trim() || null,
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("تمت جدولة الاستشارة بنجاح! سيصلك التحليل يومياً على تليجرام 🎯");
+        const count = Number(data.created_count || selectedTimes.length);
+        toast.success(
+          count > 1
+            ? `تمت جدولة ${count} مواعيد يومية بنجاح! ستصلك التقارير على تليجرام 🎯`
+            : "تمت جدولة الاستشارة بنجاح! سيصلك التحليل يومياً على تليجرام 🎯"
+        );
         await loadAutomations();
         setActiveTab("manage");
       } else {
@@ -368,34 +386,102 @@ export default function ScheduleAutomationModal({
                 />
               </div>
 
-              {/* Time Picker & Presets (Mobile Grid) */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
-                  ⏰ موعد الإرسال اليومي (بتوقيت القاهرة 🇪🇬):
-                </label>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <input
-                    type="time"
-                    value={scheduledTime}
-                    onChange={(e) => setScheduledTime(e.target.value)}
-                    className="p-2 sm:p-2.5 bg-zinc-50 dark:bg-zinc-900 border-2 border-black dark:border-white font-mono font-black text-sm text-black dark:text-white outline-none rounded-lg text-center shrink-0"
-                    required
-                  />
-                  <div className="grid grid-cols-2 gap-1.5 flex-1">
-                    {TIME_PRESETS.map((p) => (
-                      <button
-                        key={p.time}
-                        type="button"
-                        onClick={() => setScheduledTime(p.time)}
-                        className={`py-1.5 px-2 text-[11px] sm:text-xs font-bold border-2 transition-all rounded-md truncate cursor-pointer ${
-                          scheduledTime === p.time
-                            ? "bg-[#FFE600] text-black border-black font-black shadow-[1px_1px_0_0_#000]"
-                            : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 hover:border-black"
-                        }`}
+              {/* Multi-Time Picker & Presets (Mobile Grid) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-black text-zinc-800 dark:text-zinc-200">
+                    ⏰ مواعيد الإرسال اليومي (بتوقيت القاهرة 🇪🇬 — يمكنك اختيار أكثر من موعد):
+                  </label>
+                  <span className="text-[10px] font-black px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-800 rounded">
+                    المحدد: {selectedTimes.length}
+                  </span>
+                </div>
+
+                {/* Selected Time Chips */}
+                {selectedTimes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedTimes.map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] text-black border border-black rounded-md text-xs font-mono font-black"
                       >
-                        {p.label}
-                      </button>
+                        <span>{t}</span>
+                        {selectedTimes.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTimes((prev) => prev.filter((x) => x !== t))}
+                            className="hover:text-red-600 cursor-pointer"
+                            title="إزالة الموعد"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </span>
                     ))}
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      type="time"
+                      value={customTimeInput}
+                      onChange={(e) => setCustomTimeInput(e.target.value)}
+                      className="p-2 sm:p-2 bg-zinc-50 dark:bg-zinc-900 border-2 border-black dark:border-white font-mono font-black text-sm text-black dark:text-white outline-none rounded-lg text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!customTimeInput) return;
+                        if (selectedTimes.includes(customTimeInput)) {
+                          toast.info(`الموعد ${customTimeInput} محدد بالفعل`);
+                          return;
+                        }
+                        const rem = Math.max(0, 5 - automations.length);
+                        if (selectedTimes.length >= rem) {
+                          toast.error(`لا يمكنك تحديد أكثر من ${rem} مواعيد (الحد الأقصى 5 مهام)`);
+                          return;
+                        }
+                        setSelectedTimes((prev) => [...prev, customTimeInput].sort());
+                      }}
+                      className="px-2.5 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black font-black text-xs border-2 border-black rounded-lg cursor-pointer hover:opacity-90"
+                    >
+                      + إضافة
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 flex-1">
+                    {TIME_PRESETS.map((p) => {
+                      const isSelected = selectedTimes.includes(p.time);
+                      return (
+                        <button
+                          key={p.time}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              if (selectedTimes.length <= 1) {
+                                toast.info("يجب الإبقاء على موعد واحد على الأقل");
+                                return;
+                              }
+                              setSelectedTimes((prev) => prev.filter((x) => x !== p.time));
+                            } else {
+                              const rem = Math.max(0, 5 - automations.length);
+                              if (selectedTimes.length >= rem) {
+                                toast.error(`المتبقي لك ${rem} خانات فقط (الحد الأقصى 5 مهام)`);
+                                return;
+                              }
+                              setSelectedTimes((prev) => [...prev, p.time].sort());
+                            }
+                          }}
+                          className={`py-1.5 px-2 text-[11px] sm:text-xs font-bold border-2 transition-all rounded-md truncate cursor-pointer ${
+                            isSelected
+                              ? "bg-[#FFE600] text-black border-black font-black shadow-[1px_1px_0_0_#000]"
+                              : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700 hover:border-black"
+                          }`}
+                        >
+                          {isSelected ? "✓ " : ""}{p.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

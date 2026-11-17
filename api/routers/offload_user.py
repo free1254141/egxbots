@@ -2199,7 +2199,8 @@ async def create_automation(request: Request):
         )
 
     existing = sb.table("scheduled_chat_automations").select("id").eq("user_id", uid).limit(6).execute()
-    if len(getattr(existing, "data", None) or []) >= 5:
+    existing_count = len(getattr(existing, "data", None) or [])
+    if existing_count >= 5:
         return JSONResponse(
             {"error": "لقد وصلت إلى الحد الأقصى للمهام المجدولة (5 مهام). يمكنك تعديل أو حذف مهمة حالية."},
             status_code=400,
@@ -2211,7 +2212,12 @@ async def create_automation(request: Request):
         body = {}
     name = (str(body.get("name") or "استشارة مجدولة").strip()[:80]) or "استشارة مجدولة"
     prompt = str(body.get("prompt") or "").strip()
-    sched_time = str(body.get("scheduled_time") or "").strip()
+    raw_times = body.get("scheduled_times")
+    if isinstance(raw_times, list) and raw_times:
+        candidate_times = [str(t or "").strip() for t in raw_times if str(t or "").strip()]
+    else:
+        sched_time = str(body.get("scheduled_time") or "").strip()
+        candidate_times = [sched_time] if sched_time else []
     days_of_week = "all_days" if body.get("days_of_week") == "all_days" else "trading_days"
     tg_in = str(body.get("telegram_chat_id") or "").strip() or None
 
@@ -2226,16 +2232,49 @@ async def create_automation(request: Request):
         )
     if len(prompt) < 3:
         return JSONResponse({"error": "يرجى كتابة سؤال أو استفسار واضح للبوت (3 أحرف على الأقل)."}, status_code=400, headers=_PRIVATE_NO_STORE)
-    if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", sched_time):
-        return JSONResponse({"error": "صيغة الوقت غير صالحة. يجب أن تكون بتنسيق HH:MM (مثال 08:30)."}, status_code=400, headers=_PRIVATE_NO_STORE)
+    if not candidate_times:
+        return JSONResponse({"error": "يرجى تحديد موعد واحد على الأقل بتنسيق HH:MM."}, status_code=400, headers=_PRIVATE_NO_STORE)
 
-    c_res = (
-        sb.table("scheduled_chat_automations")
-        .insert({"user_id": uid, "name": name, "prompt": prompt, "scheduled_time": sched_time, "days_of_week": days_of_week, "telegram_chat_id": effective_tg, "is_active": True})
-        .execute()
-    )
+    norm_times: list[str] = []
+    for t in candidate_times:
+        if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", t):
+            return JSONResponse({"error": f"صيغة الوقت '{t}' غير صالحة. يجب أن تكون بتنسيق HH:MM (مثال 08:30)."}, status_code=400, headers=_PRIVATE_NO_STORE)
+        if t not in norm_times:
+            norm_times.append(t)
+
+    remaining = max(0, 5 - existing_count)
+    if len(norm_times) > remaining:
+        return JSONResponse(
+            {"error": f"المتبقي في باقتك {remaining} مهام فقط (الحد الأقصى 5)، بينما حددت {len(norm_times)} مواعيد."},
+            status_code=400,
+            headers=_PRIVATE_NO_STORE,
+        )
+
+    rows_to_insert = [
+        {
+            "user_id": uid,
+            "name": (f"{name[:70]} ({t_str})" if len(norm_times) > 1 else name)[:80],
+            "prompt": prompt,
+            "scheduled_time": t_str,
+            "days_of_week": days_of_week,
+            "telegram_chat_id": effective_tg,
+            "is_active": True,
+        }
+        for t_str in norm_times
+    ]
+    c_res = sb.table("scheduled_chat_automations").insert(rows_to_insert).execute()
+    created_rows = getattr(c_res, "data", None) or rows_to_insert
     _sync_automations_in_process()
-    return JSONResponse({"ok": True, "automation": _first_row(c_res)}, status_code=201, headers=_PRIVATE_NO_STORE)
+    return JSONResponse(
+        {
+            "ok": True,
+            "automation": created_rows[0] if created_rows else None,
+            "automations": created_rows,
+            "created_count": len(created_rows),
+        },
+        status_code=201,
+        headers=_PRIVATE_NO_STORE,
+    )
 
 
 @router.put("/api/automations/{automation_id}")

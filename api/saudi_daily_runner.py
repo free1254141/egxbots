@@ -100,7 +100,11 @@ def _run_intraday_snapshot_and_short_swings(
 ) -> Dict[str, Any]:
     """Lightweight intraday refresh for morning/midday without retraining ML models."""
     from api.short_swings_engine import compute_short_swings
-    from scripts.saudi_backtest_and_systems import _bars_dict_to_short_swings_df, _load_saudi_stocks_meta
+    from scripts.saudi_backtest_and_systems import (
+        ML_WARMUP_START,
+        _bars_dict_to_short_swings_df,
+        _load_saudi_stocks_meta,
+    )
     from scripts.saudi_pipeline_bootstrap import (
         COUNTRY,
         EXCHANGE,
@@ -147,6 +151,8 @@ def _run_intraday_snapshot_and_short_swings(
             "high": float(last_bar["High"]),
             "low": float(last_bar["Low"]),
             "close": float(last_bar["Close"]),
+            "volume": float(last_bar.get("Volume") or 0.0),
+            "date": last_bar.name.strftime("%Y-%m-%d") if hasattr(last_bar.name, "strftime") else str(last_bar.name)[:10],
         }
     traps_payload = detect_daily_traps(ind_rows, bars_map, as_of=latest_date, max_per_side=8)
     for cache_k in (f"scanner_traps_{EXCHANGE}", "daily_traps_snapshot"):
@@ -207,12 +213,27 @@ def _run_intraday_snapshot_and_short_swings(
     ).execute()
 
     _, meta_swings, _ = _load_saudi_stocks_meta(saudi_sb)
-    preloaded_df = _bars_dict_to_short_swings_df(bars_by_symbol, warmup_start="2025-06-01")
+    preloaded_df = _bars_dict_to_short_swings_df(bars_by_symbol, warmup_start=ML_WARMUP_START)
+    now_riyadh = dt.datetime.now(RIYADH_TZ)
+    today_riyadh = now_riyadh.date().isoformat()
+    observed_at = now_riyadh.isoformat()
+    observed_quotes = {
+        sym: {
+            "price": b["close"],
+            "volume": float(b.get("volume") or 0.0),
+            "observed_at": observed_at,
+            "date": b.get("date") or latest_date,
+            "verified": (b.get("date") == today_riyadh and float(b.get("volume") or 0.0) > 0),
+        }
+        for sym, b in bars_map.items()
+        if b.get("close")
+    }
     swings_payload = compute_short_swings(
         phase=phase,
         exchange="TADAWUL",
         preloaded_df=preloaded_df,
         preloaded_meta=meta_swings,
+        observed_quotes=observed_quotes,
     )
     swings_payload.setdefault("market", "TASI")
     swings_payload.setdefault("currency", "SAR")
@@ -343,6 +364,8 @@ def run_saudi_daily_job(
             _record_step(steps_log, "saudi_pipeline_bootstrap", "failed", details=str(exc))
             errors.append(f"saudi_pipeline_bootstrap: {exc}")
 
+        _persist_job_run(main_sb, job_run_id, job_type, "running", started_at, steps_log, total_symbols, trigger)
+
         # 3b. Close: Backtests + Short Swings + Fast Scanner Systems
         try:
             from scripts.saudi_backtest_and_systems import main as run_saudi_systems
@@ -376,8 +399,14 @@ def run_saudi_daily_job(
         if swings_payload:
             try:
                 sw_tg = dispatch_saudi_short_swings_vip(swings_payload, phase=norm_phase, sb=saudi_sb, dry_run=dry_run)
-                tg_count += int(sw_tg.get("entries_sent") or 0) + int(sw_tg.get("exits_sent") or 0)
-                tg_details.append(f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')})")
+                tg_count += (
+                    int(sw_tg.get("entries_sent") or 0)
+                    + int(sw_tg.get("exits_sent") or 0)
+                    + int(sw_tg.get("updates_sent") or 0)
+                )
+                tg_details.append(
+                    f"swings_vip(entries={sw_tg.get('entries_sent')}, exits={sw_tg.get('exits_sent')}, updates={sw_tg.get('updates_sent', 0)})"
+                )
                 if not sw_tg.get("ok"):
                     tg_errors.append(f"saudi_short_swings_vip: {sw_tg.get('errors')}")
             except Exception as sw_exc:

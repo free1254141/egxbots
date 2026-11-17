@@ -17,6 +17,8 @@ _scheduler_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 _last_run_timestamp: float = 0.0
 _scan_lock = threading.Lock()
+_saudi_last_run_timestamp: float = 0.0
+_saudi_scan_lock = threading.Lock()
 
 def _get_cairo_time() -> dt.datetime:
     try:
@@ -24,6 +26,12 @@ def _get_cairo_time() -> dt.datetime:
     except Exception:
         # Fallback to UTC+2
         return dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)
+
+def _get_riyadh_time() -> dt.datetime:
+    try:
+        return dt.datetime.now(ZoneInfo("Asia/Riyadh"))
+    except Exception:
+        return dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3)
 
 def _is_market_session(cairo_dt: dt.datetime) -> bool:
     # Python weekday: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
@@ -34,6 +42,18 @@ def _is_market_session(cairo_dt: dt.datetime) -> bool:
     total_minutes = cairo_dt.hour * 60 + cairo_dt.minute
     # EGX Market hours: 10:00 AM (600m) to 02:35 PM (875m)
     return 600 <= total_minutes <= 875
+
+def _is_saudi_market_session(riyadh_dt: dt.datetime) -> bool:
+    try:
+        from api.saudi_trading_calendar import is_saudi_session
+        if not is_saudi_session(riyadh_dt):
+            return False
+    except Exception:
+        if riyadh_dt.weekday() not in {6, 0, 1, 2, 3}:
+            return False
+    total_minutes = riyadh_dt.hour * 60 + riyadh_dt.minute
+    # Tadawul regular hours: 10:00 AM (600m) to 03:00 PM (900m) Riyadh
+    return 600 <= total_minutes <= 900
 
 def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
     global _last_run_timestamp
@@ -97,8 +117,27 @@ def _trigger_scanner_job(force: bool = False, force_dispatch: bool = False) -> D
 def trigger_scanner_job_now(force: bool = True, force_dispatch: bool = True) -> Dict[str, Any]:
     return _trigger_scanner_job(force=force, force_dispatch=force_dispatch)
 
+def _trigger_saudi_scanner_job(force: bool = False, force_dispatch: bool = False) -> Dict[str, Any]:
+    global _saudi_last_run_timestamp
+    if not _saudi_scan_lock.acquire(blocking=False):
+        return {"ok": False, "skipped": True, "reason": "saudi_concurrency_lock_active"}
+    try:
+        now = time.time()
+        if not force_dispatch and (now - _saudi_last_run_timestamp < 600):
+            return {"ok": True, "skipped": True, "reason": "saudi_cooldown_active"}
+        _saudi_last_run_timestamp = now
+        from api.saudi_scanner_alerts_engine import execute_saudi_scanner_alerts_native
+        res = execute_saudi_scanner_alerts_native(force=force, force_dispatch=force_dispatch)
+        print(f"[SCANNER_SCHEDULER] Saudi native scan result: {res}")
+        return res
+    except Exception as e:
+        print(f"[SCANNER_SCHEDULER] Saudi native scanner error: {e}")
+        return {"ok": False, "error": str(e)}
+    finally:
+        _saudi_scan_lock.release()
+
 def _worker_loop():
-    print("[SCANNER_SCHEDULER] Worker thread started. Monitoring EGX session hours...")
+    print("[SCANNER_SCHEDULER] Worker thread started. Monitoring EGX & Saudi session hours...")
     while not _stop_event.is_set():
         try:
             cairo_now = _get_cairo_time()
@@ -111,6 +150,21 @@ def _worker_loop():
                 if elapsed >= interval_seconds:
                     print(f"[SCANNER_SCHEDULER] EGX session active ({cairo_now.strftime('%H:%M:%S')} Cairo). Triggering scanner...")
                     _trigger_scanner_job()
+
+            riyadh_now = _get_riyadh_time()
+            if (
+                os.getenv("SAUDI_SUPABASE_URL")
+                and os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+                and _is_saudi_market_session(riyadh_now)
+            ):
+                saudi_elapsed = time.time() - _saudi_last_run_timestamp
+                if saudi_elapsed >= 15 * 60:
+                    print(f"[SCANNER_SCHEDULER] Tadawul session active ({riyadh_now.strftime('%H:%M:%S')} Riyadh). Triggering Saudi scanner...")
+                    threading.Thread(
+                        target=_trigger_saudi_scanner_job,
+                        daemon=True,
+                        name="SaudiScannerAlert",
+                    ).start()
             
         except Exception as e:
             print(f"[SCANNER_SCHEDULER] Worker error: {e}")

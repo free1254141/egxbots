@@ -112,6 +112,17 @@ def _get_exchange_fundamentals_map(exchange: str) -> Dict[str, Dict[str, Any]]:
             sample_ex = sorted({str(r.get("exchange") or "").strip() for r in rows[:50]})
             print(f"DEBUG FUND: sample exchanges (first 50 rows)={sample_ex}")
 
+        sector_by_sym: Dict[str, str] = {}
+        try:
+            st_res = sb.table("stocks").select("symbol, sector").eq("exchange", ex).limit(1000).execute()
+            for srow in st_res.data or []:
+                ssym = (srow.get("symbol") or "").upper()
+                ssec = str(srow.get("sector") or "").strip()
+                if ssym and ssec:
+                    sector_by_sym[ssym] = ssec
+        except Exception:
+            pass
+
         for row in rows:
             row_ex = _normalize_exchange(str(row.get("exchange") or ""))
             if row_ex != ex:
@@ -127,12 +138,14 @@ def _get_exchange_fundamentals_map(exchange: str) -> Dict[str, Dict[str, Any]]:
                 except Exception:
                     data = {}
             col_fund_score = row.get("fund_score")
+            sector_val = str(data.get("sector") or data.get("Sector") or sector_by_sym.get(symbol) or "").strip()
             fmap[symbol] = {
                 "peRatio": data.get("peRatio"),
                 "eps": data.get("eps"),
                 "dividendYield": data.get("dividendYield"),
                 "marketCap": data.get("marketCap"),
                 "fund_score": col_fund_score if col_fund_score is not None else data.get("fund_score") or data.get("fundamental_score"),
+                "sector": sector_val or "Unknown",
             }
         _FUNDAMENTALS_CACHE[ex] = {"ts": now, "data": fmap}
         return fmap
@@ -435,19 +448,14 @@ def _process_symbol(
         if sector_returns_df is not None and not sector_returns_df.empty:
             sec_df = sector_returns_df[sector_returns_df["sector"] == symbol_sector]
             if not sec_df.empty:
-                sec_df = sec_df.rename(columns={"daily_return": "sector_avg_return"}).copy()
-                
-                feat = feat.reset_index()
-                idx_col = "timestamp" if "timestamp" in feat.columns else "date" if "date" in feat.columns else "index"
-                if idx_col in feat.columns:
-                    feat["date_only"] = pd.to_datetime(feat[idx_col]).dt.date
-                    feat = feat.merge(sec_df[["date_only", "sector_avg_return"]], on="date_only", how="left")
-                    feat = feat.drop(columns=["date_only"])
-                    feat = feat.set_index(idx_col)
+                sec_map = dict(zip(sec_df["date_only"], sec_df["daily_return"]))
+                if isinstance(feat.index, pd.DatetimeIndex):
+                    date_keys = feat.index.date
+                elif "date" in feat.columns:
+                    date_keys = pd.to_datetime(feat["date"]).dt.date
                 else:
-                    feat["date_only"] = pd.to_datetime(feat.index).dt.date
-                    feat = feat.merge(sec_df[["date_only", "sector_avg_return"]], on="date_only", how="left")
-                    feat = feat.drop(columns=["date_only"])
+                    date_keys = pd.to_datetime(feat.index).date
+                feat["sector_avg_return"] = pd.Series(date_keys, index=feat.index).map(sec_map)
 
         feat = _get_massive_features_cached(sym, ex or "EGX", feat)
 

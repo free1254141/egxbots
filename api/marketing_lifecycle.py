@@ -374,19 +374,24 @@ def process_abandoned_checkouts() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "🔥 تذكير: احجز عرض المؤسسين (خصم 50% وتثبيت السعر مدى الحياة) | EGX BOTS"
+                try:
+                    from api.payment_common import current_pro_offer_copy
+                    pro_price, _ = current_pro_offer_copy()
+                except Exception:
+                    pro_price = 200
+
+                subject = f"⏳ تذكير: استكمل اشتراكك في باقة EGX BOTS Pro ({pro_price} ج.م/شهر) | EGX BOTS"
                 greeting = f"أهلاً {display_name} 👋"
                 paragraphs = [
-                    "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة EGX BOTS Pro للمؤسسين</strong> ولم تستكمل عملية الدفع بعد.",
-                    "نود تذكيرك أن <strong>عرض المؤسسين بخصم 50% متاح لفترة محدودة</strong> قبل عودة الأسعار لطبيعتها (200 ج.م/شهر) مع انتهاء العداد التنازلي يوم 14 نوفمبر:<br>"
-                    "• <strong>شهر واحد:</strong> 100 ج.م بدلاً من 200 ج.م<br>"
-                    "• <strong>6 شهور (الأكثر طلباً):</strong> 500 ج.م فقط (83 ج.م/شهر)<br>"
-                    "• <strong>سنة كاملة (أكبر توفير):</strong> 900 ج.م فقط (75 ج.م/شهر)<br>"
-                    "<em>جميع الباقات تثبّت حسابك كمؤسس بسعر 100 ج.م/شهر مدى الحياة طالما بتجدد!</em>",
-                    "باشتراكك ستحصل فوراً على: <strong>شات بوت الذكاء الاصطناعي ARTORO بدون قيود، الصفقات القصيرة ⚡ PRO ومتابعة الأرباح بدون تشفير، رادار السيولة وكاشف المصائد، وقناة VIP الفورية على تليجرام</strong>.",
-                    "وإذا كنت ترغب في تجربة المنصة أولاً، يمكنك تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> بضغطة زر واحدة من صفحة الباقات!",
+                    "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة EGX BOTS Pro</strong> ولم تستكمل عملية الدفع بعد.",
+                    f"<strong>باقة EGX BOTS Pro متاحة الآن بـ {pro_price} ج.م شهرياً فقط</strong> وتشمل كل المميزات المتقدمة:<br>"
+                    "• <strong>350 رسالة ذكاء اصطناعي شهرياً</strong> مع ARTORO + تحليل صور المحفظة والشارت<br>"
+                    "• <strong>الصفقات القصيرة ⚡ PRO</strong> والتوصيات اللحظية بوقف صارم 4% بدون تأخير<br>"
+                    "• <strong>رادار السيولة وكاشف المصائد</strong> + <strong>قناة VIP الفورية على تليجرام</strong><br>"
+                    "• <strong>متابعة محفظة حتى 15 سهماً</strong> + أتمتة تليجرام اليومية",
+                    "إذا واجهت أي عقبة في خطوة الدفع، يمكنك الإكمال عبر فودافون كاش أو انستاباي أو فوري أو البطاقة البنكية في ثوانٍ.",
                 ]
-                cta_text = "استكمال الاشتراك وتثبيت السعر مدى الحياة"
+                cta_text = f"استكمال الاشتراك في باقة Pro ({pro_price} ج.م/شهر)"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
                 message_id = str(uuid.uuid4())
@@ -468,18 +473,23 @@ def process_trial_expiring() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "⏳ فترتك التجريبية في EGX BOTS Pro تنتهي قريباً — ثبّت عرض المؤسسين (خصم 50% مدى الحياة)"
+                try:
+                    from api.payment_common import current_pro_offer_copy
+                    pro_price, _ = current_pro_offer_copy()
+                except Exception:
+                    pro_price = 200
+
+                subject = f"⏳ فترتك التجريبية في EGX BOTS Pro تنتهي قريباً — اشترك الآن بـ {pro_price} ج.م/شهر"
                 greeting = f"أهلاً {display_name} ⚡"
                 paragraphs = [
                     "نود إعلامك أن <strong>تجربتك المجانية لباقة Pro ستنتهي خلال الساعات القادمة</strong>.",
                     "نتمنى أن تكون قد استفدت من شات بوت الذكاء الاصطناعي ARTORO وصفقات الزخم والإشارات الفورية خلال الأيام الماضية.",
-                    "لتستمر في استخدام الشات بوت واستلام إشعارات النماذج الفنية بدون انقطاع، اشترك الآن في <strong>عرض المؤسسين بخصم 50%</strong> المتاح حتى 14 نوفمبر وثبّت سعرك دائماً طالما تجدد:<br>"
-                    "• <strong>شهر واحد:</strong> 100 ج.م شهرياً (بدلاً من 200 ج.م)<br>"
-                    "• <strong>6 شهور:</strong> 500 ج.م (ما يعادل 83 ج.م/شهر)<br>"
-                    "• <strong>سنة كاملة:</strong> 900 ج.م (ما يعادل 75 ج.م/شهر)<br>"
-                    "<em>اشتراكك في أي باقة يثبت عضويتك كمؤسس مدى الحياة بسعر الـ 100 ج.م عند أي تجديد قادم!</em>",
+                    f"لتستمر في استخدام الشات بوت (<strong>350 رسالة شهرياً</strong>) واستلام إشعارات النماذج الفنية والتوصيات اللحظية بدون انقطاع، فعّل اشتراكك الآن في <strong>باقة EGX BOTS Pro بـ {pro_price} ج.م شهرياً</strong>:<br>"
+                    f"• <strong>اشتراك شهري:</strong> {pro_price} ج.م/شهر<br>"
+                    "• <strong>تشمل أيضاً:</strong> رفع صور المحفظة والشارت (Vision AI)، قناة VIP على تليجرام، ومتابعة محفظة حتى 15 سهماً.<br>"
+                    "💳 متاح الدفع بسهولة عبر فودافون كاش، انستاباي، فوري، أو البطاقة البنكية.",
                 ]
-                cta_text = "تثبيت اشتراك Pro بخصم 50% مدى الحياة"
+                cta_text = f"تفعيل اشتراك Pro الآن ({pro_price} ج.م/شهر)"
                 cta_url = f"{APP_URL}/pricing?plan=pro"
 
                 message_id = str(uuid.uuid4())
@@ -705,6 +715,12 @@ def process_trial_day2() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
+                try:
+                    from api.payment_common import current_pro_offer_copy
+                    pro_price, _ = current_pro_offer_copy()
+                except Exception:
+                    pro_price = 200
+
                 subject = "📊 دراسة حالة سريعة: إزاي الإسكانر بيلتقط صفقات الزخم قبل ما تتحرك؟ | EGX BOTS"
                 greeting = f"أهلاً {display_name} 🎯"
                 paragraphs = [
@@ -713,16 +729,13 @@ def process_trial_day2() -> int:
                     "1️⃣ <strong>رادار السيولة الذكية:</strong> بيفحص تدفقات السيولة غير الطبيعية والاختراقات الفنية اللحظية مع افتتاح الجلسة.<br>"
                     "2️⃣ <strong>إدارة مخاطر صارمة:</strong> كل صفقة بتدخل بوقف خسارة صارم 4% لحماية رأس المال، وتتبع أرباح آلي عبر متوسط EMA10 لركوب الاتجاه الصاعد لأقصى مدى.<br>"
                     "3️⃣ <strong>مساعدك الذكي ARTORO:</strong> بيوضحلك فوراً مناطق التجميع والتصريف ومصائد السيولة (Spring & Upthrust) لأي سهم تطلبه.",
-                    "<strong>عرض المؤسسين متاح الآن بخصم 50% وتثبيت السعر مدى الحياة:</strong><br>"
-                    "• شهر واحد بـ <strong>100 ج.م</strong> (بدلاً من 200)<br>"
-                    "• 6 شهور بـ <strong>500 ج.م</strong> (ما يعادل 83 ج.م/شهر)<br>"
-                    "• سنة كاملة بـ <strong>900 ج.م</strong> (ما يعادل 75 ج.م/شهر)<br>"
-                    "<em>أي باقة تختارها تثبّت عضويتك كمؤسس بسعر 100 ج.م/شهر مدى الحياة طالما بتجدد!</em>",
+                    f"<strong>باقة EGX BOTS Pro متاحة الآن بـ {pro_price} ج.م شهرياً:</strong><br>"
+                    "تشمل <strong>350 رسالة شات ذكي شهرياً</strong>، التوصيات اللحظية المفتوحة، قناة VIP على تليجرام، ورفع صور المحفظة والشارت.",
                 ]
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(
                     subject, greeting, paragraphs,
-                    "استغل آخر ساعات تجربتك وثبّت سعرك",
+                    f"تفعيل باقة Pro الآن ({pro_price} ج.م/شهر)",
                     f"{APP_URL}/pricing?plan=pro",
                     uid, user_email, "trial_day2", message_id,
                 )
@@ -751,23 +764,16 @@ def run_marketing_lifecycle() -> Dict[str, Any]:
     print(f"[MARKETING] Starting marketing lifecycle run. (Sent today: {daily_count}/{MARKETING_DAILY_EMAIL_CAP})")
     abandoned = process_abandoned_checkouts()
     welcome = process_trial_welcome()
-    day1 = process_trial_day1()
-    day2 = process_trial_day2()
+    nudges_enabled = os.getenv("MARKETING_TRIAL_NUDGES_ENABLED", "").strip().lower() in ("1", "true", "yes")
+    day1 = process_trial_day1() if nudges_enabled else 0
+    day2 = process_trial_day2() if nudges_enabled else 0
     trials = process_trial_expiring()
-
     final_48h_sent = 0
-    try:
-        from jobs.send_founders_final_48h_emails import dispatch_final_48h_campaign, is_within_final_48h_window
-        if is_within_final_48h_window():
-            f48_res = dispatch_final_48h_campaign(max_emails=25, dry_run=False, force=False)
-            final_48h_sent = int(f48_res.get("total_sent") or 0)
-    except Exception as f48_err:
-        print(f"[MARKETING] Error in final_48h campaign check: {f48_err}")
 
-    total_sent = abandoned + welcome + day1 + day2 + trials + final_48h_sent
+    total_sent = abandoned + welcome + day1 + day2 + trials
     print(f"[MARKETING] Lifecycle run finished. Sent: {total_sent} "
           f"(Abandoned: {abandoned}, Trial welcome: {welcome}, Trial day1: {day1}, Day2: {day2}, "
-          f"Trials expiring: {trials}, Final 48h: {final_48h_sent})")
+          f"Trials expiring: {trials})")
     return {
         "status": "ok",
         "abandoned_sent": abandoned,

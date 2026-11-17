@@ -1217,78 +1217,99 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
         except Exception:
             pass
 
-        for sym in egx_syms:
-            stock_name_ar = None
-            stock_name_en = sym
-            try:
-                res_stock = sb.from_("stocks").select("symbol,name,name_ar").eq("symbol", sym).limit(1).execute()
-                if res_stock.data and isinstance(res_stock.data[0], dict):
-                    stock_name_ar = res_stock.data[0].get("name_ar")
-                    stock_name_en = res_stock.data[0].get("name") or sym
-            except Exception:
-                pass
+        # Batch-fetch stocks, latest technical indicators, wyckoff scans, and fundamentals in 4 queries (vs 4*N sequential)
+        stocks_meta_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            res_stocks_batch = (
+                sb.from_("stocks")
+                .select("symbol,name,name_ar")
+                .in_("symbol", egx_syms)
+                .limit(len(egx_syms) + 5)
+                .execute()
+            )
+            for row in (res_stocks_batch.data or []):
+                if isinstance(row, dict) and row.get("symbol"):
+                    stocks_meta_map[str(row["symbol"]).upper()] = row
+        except Exception:
+            pass
 
-            if not stock_name_ar:
-                stock_name_ar = _alias_name_for_symbol(sym, market="EGX")
+        tech_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            res_tech_batch = (
+                sb.from_("stock_technical_indicators")
+                .select(
+                    "symbol,date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram,"
+                    "bb_upper,bb_lower,ema_50,ema_200,vwap_20,king_ai_score,egx_ai_score"
+                )
+                .eq("exchange", "EGX")
+                .in_("symbol", egx_syms)
+                .order("date", desc=True)
+                .limit(max(len(egx_syms) * 3, 30))
+                .execute()
+            )
+            for row in (res_tech_batch.data or []):
+                if isinstance(row, dict) and row.get("symbol"):
+                    s_k = str(row["symbol"]).upper()
+                    if s_k not in tech_map:
+                        tech_map[s_k] = row
+        except Exception:
+            pass
+
+        wyckoff_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            res_wyck_batch = (
+                sb.from_("stock_scans_summary")
+                .select("symbol,scan_date,acc_score,dist_score,wyckoff_phase,vol_ratio,signal,consecutive_acc_days,consecutive_dist_days")
+                .in_("symbol", egx_syms)
+                .order("scan_date", desc=True)
+                .limit(max(len(egx_syms) * 3, 30))
+                .execute()
+            )
+            for row in (res_wyck_batch.data or []):
+                if isinstance(row, dict) and row.get("symbol"):
+                    s_k = str(row["symbol"]).upper()
+                    if s_k not in wyckoff_map:
+                        wyckoff_map[s_k] = row
+        except Exception:
+            pass
+
+        fund_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            res_fund_batch = (
+                sb.from_("stock_fundamentals")
+                .select("symbol,data")
+                .eq("exchange", "EGX")
+                .in_("symbol", egx_syms)
+                .limit(len(egx_syms) + 5)
+                .execute()
+            )
+            for row in (res_fund_batch.data or []):
+                if isinstance(row, dict) and row.get("symbol") and isinstance(row.get("data"), dict):
+                    fund_map[str(row["symbol"]).upper()] = row["data"]
+        except Exception:
+            pass
+
+        for sym in egx_syms:
+            meta_row = stocks_meta_map.get(sym, {})
+            stock_name_ar = meta_row.get("name_ar") or _alias_name_for_symbol(sym, market="EGX")
+            stock_name_en = meta_row.get("name") or sym
 
             if stock_name_ar:
                 stock_name_ar = stock_name_ar.split(",")[0].strip()
 
-            latest_tech: Dict[str, Any] = {}
-            try:
-                res_tech = (
-                    sb.from_("stock_technical_indicators")
-                    .select(
-                        "date,close,change_pct,volume,r_vol,rsi_14,macd,macd_signal,macd_histogram,"
-                        "bb_upper,bb_lower,ema_50,ema_200,vwap_20,king_ai_score,egx_ai_score"
-                    )
-                    .eq("exchange", "EGX")
-                    .eq("symbol", sym)
-                    .order("date", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if res_tech.data:
-                    latest_tech = res_tech.data[0]
-            except Exception:
-                pass
-
-            wyckoff_info: Dict[str, Any] = {}
-            try:
-                res_wyckoff = (
-                    sb.from_("stock_scans_summary")
-                    .select("scan_date,acc_score,dist_score,wyckoff_phase,vol_ratio,signal,consecutive_acc_days,consecutive_dist_days")
-                    .eq("symbol", sym)
-                    .order("scan_date", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if res_wyckoff.data:
-                    wyckoff_info = res_wyckoff.data[0]
-            except Exception:
-                pass
+            latest_tech = tech_map.get(sym, {})
+            wyckoff_info = wyckoff_map.get(sym, {})
 
             fundamentals: Dict[str, Any] = {}
-            try:
-                res_fund = (
-                    sb.from_("stock_fundamentals")
-                    .select("data")
-                    .eq("exchange", "EGX")
-                    .eq("symbol", sym)
-                    .limit(1)
-                    .execute()
-                )
-                if res_fund.data and isinstance(res_fund.data[0].get("data"), dict):
-                    fd = res_fund.data[0]["data"]
-                    if stock_name_en == sym and fd.get("name"):
-                        stock_name_en = str(fd["name"]).split(",")[0].strip()
-                    fundamentals = {
-                        "pe_ratio": _safe_float(fd.get("pe_ratio") or fd.get("trailing_pe")),
-                        "eps": _safe_float(fd.get("eps") or fd.get("trailing_eps")),
-                        "market_cap": fd.get("market_cap"),
-                    }
-            except Exception:
-                pass
+            fd = fund_map.get(sym)
+            if isinstance(fd, dict):
+                if stock_name_en == sym and fd.get("name"):
+                    stock_name_en = str(fd["name"]).split(",")[0].strip()
+                fundamentals = {
+                    "pe_ratio": _safe_float(fd.get("pe_ratio") or fd.get("trailing_pe")),
+                    "eps": _safe_float(fd.get("eps") or fd.get("trailing_eps")),
+                    "market_cap": fd.get("market_cap"),
+                }
 
             close_price = _safe_price(latest_tech.get("close"))
             change_pct = _safe_float(latest_tech.get("change_pct"))
@@ -1634,20 +1655,50 @@ def _sync_get_stock_levels_for_market(
     currency = _currency_for_market(exchange_code)
     levels: List[Dict[str, Any]] = []
 
-    for sym in syms:
+    # Batch-fetch price history & open recommendations for all symbols in 2 queries (instead of 2*N)
+    rows_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    if syms:
         try:
             res_p = (
                 sb.from_("stock_prices")
-                .select("high,low,close,date")
+                .select("symbol,high,low,close,date")
                 .eq("exchange", exchange_code)
-                .eq("symbol", sym)
+                .in_("symbol", syms)
                 .order("date", desc=True)
-                .limit(60)
+                .limit(min(len(syms) * 60, 1500))
                 .execute()
             )
-            rows = res_p.data or []
+            for r in (res_p.data or []):
+                s_k = str(r.get("symbol") or "").upper()
+                if s_k:
+                    lst = rows_by_sym.setdefault(s_k, [])
+                    if len(lst) < 60:
+                        lst.append(r)
         except Exception:
-            rows = []
+            pass
+
+    rec_by_sym: Dict[str, Dict[str, Any]] = {}
+    if syms and eff_allow_recs:
+        try:
+            res_rec = (
+                sb.from_("scan_results")
+                .select("symbol,signal,entry_price,target_price,stop_loss,status,created_at")
+                .eq("exchange", exchange_code)
+                .in_("symbol", syms)
+                .in_("status", ["open", "active"])
+                .order("created_at", desc=True)
+                .limit(max(len(syms) * 2, 20))
+                .execute()
+            )
+            for r in (res_rec.data or []):
+                s_k = str(r.get("symbol") or "").upper()
+                if s_k and s_k not in rec_by_sym:
+                    rec_by_sym[s_k] = r
+        except Exception:
+            pass
+
+    for sym in syms:
+        rows = rows_by_sym.get(sym, [])
 
         if not rows:
             levels.append({
@@ -1679,31 +1730,17 @@ def _sync_get_stock_levels_for_market(
 
         has_rec = False
         rec_data = None
-        if eff_allow_recs:
-            try:
-                res_rec = (
-                    sb.from_("scan_results")
-                    .select("signal,entry_price,target_price,stop_loss,status,created_at")
-                    .eq("exchange", exchange_code)
-                    .eq("symbol", sym)
-                    .in_("status", ["open", "active"])
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if res_rec.data:
-                    has_rec = True
-                    r = res_rec.data[0]
-                    rec_data = {
-                        "signal": r.get("signal"),
-                        "entry_price": _safe_price(r.get("entry_price")),
-                        "target_price": _safe_price(r.get("target_price")),
-                        "stop_loss": _safe_price(r.get("stop_loss")),
-                        "status": r.get("status"),
-                        "signal_date": str(r.get("created_at") or "")[:10],
-                    }
-            except Exception:
-                pass
+        if eff_allow_recs and sym in rec_by_sym:
+            has_rec = True
+            r = rec_by_sym[sym]
+            rec_data = {
+                "signal": r.get("signal"),
+                "entry_price": _safe_price(r.get("entry_price")),
+                "target_price": _safe_price(r.get("target_price")),
+                "stop_loss": _safe_price(r.get("stop_loss")),
+                "status": r.get("status"),
+                "signal_date": str(r.get("created_at") or "")[:10],
+            }
 
         levels.append({
             "symbol": sym,
@@ -3740,12 +3777,14 @@ def _build_portfolio_view_payload(
 
     price_map: Dict[str, Optional[float]] = {}
     change_map: Dict[str, Optional[float]] = {}
+    tech_map: Dict[str, Dict[str, Any]] = {}
+    wyckoff_map: Dict[str, Dict[str, Any]] = {}
 
     if egx_syms:
         try:
             tech_res = (
                 sb.from_("stock_technical_indicators")
-                .select("symbol, close, change_pct, date")
+                .select("symbol, close, change_pct, date, rsi_14, ema_50, ema_200, macd_histogram, bb_lower, bb_upper, king_ai_score")
                 .in_("symbol", egx_syms)
                 .order("date", desc=True)
                 .limit(max(len(egx_syms) * 5, 30))
@@ -3756,6 +3795,23 @@ def _build_portfolio_view_payload(
                 if s and s not in price_map:
                     price_map[s] = _safe_price(row.get("close"))
                     change_map[s] = _safe_float(row.get("change_pct"))
+                    tech_map[s] = row
+        except Exception:
+            pass
+
+        try:
+            wyck_res = (
+                sb.from_("stock_scans_summary")
+                .select("symbol, wyckoff_phase, acc_score, dist_score, signal")
+                .in_("symbol", egx_syms)
+                .order("scan_date", desc=True)
+                .limit(max(len(egx_syms) * 3, 20))
+                .execute()
+            )
+            for row in wyck_res.data or []:
+                s = str(row.get("symbol", "")).upper()
+                if s and s not in wyckoff_map:
+                    wyckoff_map[s] = row
         except Exception:
             pass
 
@@ -3807,6 +3863,8 @@ def _build_portfolio_view_payload(
         profit_value = (market_value - cost_basis) if (cost_basis is not None and market_value is not None) else None
         profit_pct = ((profit_value / cost_basis) * 100) if (cost_basis and cost_basis > 0 and profit_value is not None) else None
 
+        t_row = tech_map.get(s) or tech_map.get(norm_s) or {}
+        w_row = wyckoff_map.get(s) or wyckoff_map.get(norm_s) or {}
         enriched.append({
             "id": p.get("id"),
             "symbol": s,
@@ -3821,6 +3879,16 @@ def _build_portfolio_view_payload(
             "cost_basis": round(cost_basis, 2) if cost_basis is not None else None,
             "profit_value": round(profit_value, 2) if profit_value is not None else None,
             "profit_pct": round(profit_pct, 2) if profit_pct is not None else None,
+            "rsi_14": _safe_float(t_row.get("rsi_14")),
+            "ema_50": _safe_price(t_row.get("ema_50")),
+            "ema_200": _safe_price(t_row.get("ema_200")),
+            "macd_histogram": _safe_float(t_row.get("macd_histogram"), 4),
+            "support_est": _safe_price(t_row.get("bb_lower")),
+            "resistance_est": _safe_price(t_row.get("bb_upper")),
+            "king_ai_score": _safe_float(t_row.get("king_ai_score")),
+            "wyckoff_phase": w_row.get("wyckoff_phase"),
+            "acc_score": _safe_float(w_row.get("acc_score")),
+            "dist_score": _safe_float(w_row.get("dist_score")),
             "added_at": p.get("added_at"),
         })
 
@@ -4419,6 +4487,254 @@ async def execute_manage_portfolio(
     )
 
 
+# ---------------------------------------------------------------------------
+# Tool: manage_automations
+# ---------------------------------------------------------------------------
+_TIME_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _normalize_hhmm(raw: str) -> Optional[str]:
+    m = _TIME_HHMM_RE.match((raw or "").strip())
+    if not m:
+        return None
+    return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
+
+
+def _sync_manage_automations(
+    user_id: Optional[str],
+    operation: str = "list",
+    name: Optional[str] = None,
+    prompt: Optional[str] = None,
+    scheduled_times: Optional[List[str]] = None,
+    scheduled_time: Optional[str] = None,
+    days_of_week: str = "trading_days",
+    automation_id: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Create, list, toggle, or delete Scheduled AI Chat Automations directly from chat."""
+    if not user_id:
+        return {
+            "status": "error",
+            "requires_login": True,
+            "message": "يلزم تسجيل الدخول لحسابك على الموقع لإدارة المهام المجدولة (الأتمتة).",
+        }
+
+    sb = _get_sb()
+    op = (operation or "list").lower().strip()
+
+    if op == "list":
+        try:
+            res = (
+                sb.from_("scheduled_chat_automations")
+                .select("id,name,prompt,scheduled_time,days_of_week,is_active,last_run_at,last_status,created_at")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            rows = res.data or []
+            return {
+                "status": "success",
+                "operation": "list",
+                "count": len(rows),
+                "max_allowed": 5,
+                "automations": rows,
+                "message": f"لديك {len(rows)} مهمة مجدولة من أصل 5 مهام متاحة.",
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر جلب المهام المجدولة: {str(e)}"}
+
+    # Verify Pro subscription & Telegram link for write operations
+    is_pro = False
+    try:
+        sub_res = (
+            sb.from_("subscriptions")
+            .select("status")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+        is_pro = bool(sub_res.data)
+    except Exception:
+        is_pro = False
+
+    if not is_pro:
+        return {
+            "status": "pro_required",
+            "message": "ميزة الأتمتة اليومية المجدولة متاحة لمشتركي باقة Pro فقط. يمكنك الترقية عبر https://egxbots.com/pricing",
+        }
+
+    tg_chat_id: Optional[str] = None
+    try:
+        p_res = sb.from_("profiles").select("telegram_chat_id").eq("id", user_id).limit(1).execute()
+        if p_res.data:
+            tg_chat_id = str(p_res.data[0].get("telegram_chat_id") or "").strip() or None
+    except Exception:
+        tg_chat_id = None
+
+    if op == "create":
+        if not tg_chat_id:
+            return {
+                "status": "no_telegram_linked",
+                "connect_url": f"https://t.me/egxbots_bot?start={user_id}",
+                "message": (
+                    "حسابك غير مربوط ببوت تليجرام بعد. "
+                    f"افتح الرابط التالي واضغط Start لربط حسابك واستلام التقارير المجدولة: https://t.me/egxbots_bot?start={user_id}"
+                ),
+            }
+
+        clean_prompt = (prompt or "").strip()
+        if len(clean_prompt) < 3:
+            return {"status": "needs_clarification", "message": "يرجى تحديد نص السؤال المطلوب جدولته بوضوح (3 أحرف على الأقل)."}
+
+        raw_times: List[str] = []
+        if isinstance(scheduled_times, list) and scheduled_times:
+            raw_times.extend(str(t) for t in scheduled_times if t)
+        elif scheduled_time:
+            raw_times.append(str(scheduled_time))
+        else:
+            raw_times.append("08:30")
+
+        norm_times: List[str] = []
+        for rt in raw_times:
+            nt = _normalize_hhmm(rt)
+            if not nt:
+                return {"status": "error", "message": f"صيغة الوقت '{rt}' غير صالحة. استخدم صيغة HH:MM مثل 10:30 أو 14:00."}
+            if nt not in norm_times:
+                norm_times.append(nt)
+
+        try:
+            existing_res = sb.from_("scheduled_chat_automations").select("id,scheduled_time").eq("user_id", user_id).limit(6).execute()
+            existing_rows = existing_res.data or []
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر فحص المهام الحالية: {str(e)}"}
+
+        remaining = max(0, 5 - len(existing_rows))
+        if len(norm_times) > remaining:
+            return {
+                "status": "limit_exceeded",
+                "existing_count": len(existing_rows),
+                "remaining_slots": remaining,
+                "message": (
+                    f"لديك حالياً {len(existing_rows)} مهام مجدولة من الحد الأقصى (5 مهام)، المتبقي {remaining} خانات فقط "
+                    f"بينما طلبت إضافة {len(norm_times)} مواعيد. احذف مهمة قديمة أو قلّل عدد المواعيد."
+                ),
+            }
+
+        eff_days = "all_days" if days_of_week == "all_days" else "trading_days"
+        base_name = (name or "").strip()[:70]
+        if not base_name:
+            snippet = clean_prompt.replace("\n", " ").strip()
+            base_name = f"استشارة: {snippet[:35]}..." if len(snippet) > 35 else f"استشارة: {snippet}"
+
+        rows_to_insert = []
+        for idx, t_str in enumerate(norm_times):
+            row_name = f"{base_name} ({t_str})" if len(norm_times) > 1 else base_name
+            rows_to_insert.append({
+                "user_id": user_id,
+                "name": row_name[:80],
+                "prompt": clean_prompt,
+                "scheduled_time": t_str,
+                "days_of_week": eff_days,
+                "telegram_chat_id": tg_chat_id,
+                "is_active": True,
+            })
+
+        try:
+            ins_res = sb.from_("scheduled_chat_automations").insert(rows_to_insert).execute()
+            created = ins_res.data or rows_to_insert
+            try:
+                from api.scheduled_automations_worker import sync_automations_cache
+                threading.Thread(target=sync_automations_cache, daemon=True).start()
+            except Exception:
+                pass
+            return {
+                "status": "success",
+                "operation": "create",
+                "created_count": len(created),
+                "scheduled_times": norm_times,
+                "days_of_week": eff_days,
+                "automations": created,
+                "message": (
+                    f"تمت جدولة {len(created)} مهمة أتمتة بنجاح بتوقيت القاهرة ({', '.join(norm_times)}) "
+                    f"وسيتم إرسال التقارير تلقائياً إلى تليجرام."
+                ),
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر حفظ الأتمتة في قاعدة البيانات: {str(e)}"}
+
+    elif op == "toggle":
+        if not automation_id:
+            return {"status": "needs_clarification", "message": "يرجى تحديد معرف المهمة المطلوب تفعيلها أو إيقافها."}
+        try:
+            cur = sb.from_("scheduled_chat_automations").select("id,is_active,name").eq("id", automation_id).eq("user_id", user_id).limit(1).execute()
+            if not cur.data:
+                return {"status": "error", "message": "لم يتم العثور على المهمة المحددة."}
+            new_state = (not bool(cur.data[0].get("is_active"))) if is_active is None else bool(is_active)
+            sb.from_("scheduled_chat_automations").update({"is_active": new_state}).eq("id", automation_id).eq("user_id", user_id).execute()
+            try:
+                from api.scheduled_automations_worker import sync_automations_cache
+                threading.Thread(target=sync_automations_cache, daemon=True).start()
+            except Exception:
+                pass
+            return {
+                "status": "success",
+                "operation": "toggle",
+                "automation_id": automation_id,
+                "is_active": new_state,
+                "message": f"تم {'تفعيل' if new_state else 'إيقاف'} المهمة بنجاح.",
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر تحديث حالة المهمة: {str(e)}"}
+
+    elif op == "delete":
+        if not automation_id:
+            return {"status": "needs_clarification", "message": "يرجى تحديد معرف المهمة المطلوب حذفها."}
+        try:
+            sb.from_("scheduled_chat_automations").delete().eq("id", automation_id).eq("user_id", user_id).execute()
+            try:
+                from api.scheduled_automations_worker import sync_automations_cache
+                threading.Thread(target=sync_automations_cache, daemon=True).start()
+            except Exception:
+                pass
+            return {
+                "status": "success",
+                "operation": "delete",
+                "automation_id": automation_id,
+                "message": "تم حذف المهمة المجدولة بنجاح.",
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"تعذر حذف المهمة: {str(e)}"}
+
+    return {"status": "error", "message": f"العملية {op} غير مدعومة في إدارة الأتمتة."}
+
+
+async def execute_manage_automations(
+    user_id: Optional[str],
+    operation: str = "list",
+    name: Optional[str] = None,
+    prompt: Optional[str] = None,
+    scheduled_times: Optional[List[str]] = None,
+    scheduled_time: Optional[str] = None,
+    days_of_week: str = "trading_days",
+    automation_id: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        _sync_manage_automations,
+        user_id,
+        operation,
+        name,
+        prompt,
+        scheduled_times,
+        scheduled_time,
+        days_of_week,
+        automation_id,
+        is_active,
+    )
+
+
 BENCHMARK_FIXTURES: Dict[str, Any] = {
     "get_stock": {
         "status": "success",
@@ -4881,6 +5197,19 @@ async def dispatch_tool(
                 operation=arguments.get("operation", "get"),
                 rule=arguments.get("rule"),
                 rules=arguments.get("rules"),
+            )
+
+        elif tool_name == "manage_automations":
+            return await execute_manage_automations(
+                user_id=user_id,
+                operation=arguments.get("operation", "list"),
+                name=arguments.get("name"),
+                prompt=arguments.get("prompt"),
+                scheduled_times=arguments.get("scheduled_times"),
+                scheduled_time=arguments.get("scheduled_time"),
+                days_of_week=arguments.get("days_of_week", "trading_days"),
+                automation_id=arguments.get("automation_id"),
+                is_active=arguments.get("is_active"),
             )
 
         else:

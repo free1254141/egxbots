@@ -323,3 +323,43 @@ def test_saudi_scanner_lifecycle_be_lock_and_six_session_expiry():
     assert len(closed2) == 1
     assert closed2[0]["status"] == "expired"
     assert "6 جلسات" in closed2[0]["exit_reason"]
+
+
+def test_scanner_lifecycle_stop_checked_conservatively_before_target_and_gap_down():
+    """When a daily bar hits both SL and T1 without gapping above T1, stop-loss wins; gap-down fills at open."""
+    existing = [{
+        "id": "COMI_2026-11-10_volume_surge",
+        "symbol": "COMI",
+        "scanner_type": "volume_surge",
+        "entry_price": 100.0,
+        "entry_date": "2026-11-10",
+        "target_1": 104.5,
+        "stop_loss": 97.0,
+        "stop_loss_pct": 3.0,
+        "current_price": 100.5,
+        "highest_price": 101.0,
+        "lowest_price": 99.0,
+        "sessions_count": 1,
+        "max_sessions": 4,
+    }]
+    # Ambiguous wide candle opens below SL (gap-down 95.0) even though intraday high reaches 105.0
+    active, closed, hits, stops = step_scanner_lifecycle(
+        existing,
+        [],
+        {"COMI": {"open": 95.0, "high": 105.0, "low": 94.0, "close": 104.8}},
+        final_vol=[],
+        final_bo=[],
+        final_os=[],
+        as_of_date="2026-11-11",
+        action_date="2026-11-11",
+        action_time="14:30",
+        now_iso="2026-11-11T12:30:00Z",
+        causal_be_prev_only=True,
+        intraday_live=False,
+    )
+    assert active == []
+    assert hits == []
+    assert len(stops) == 1
+    assert closed[0]["status"] == "stopped_out"
+    assert closed[0]["exit_price"] == pytest.approx(95.0, abs=0.01)
+    assert closed[0]["return_pct"] == pytest.approx(-5.0, abs=0.05)

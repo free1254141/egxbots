@@ -354,6 +354,43 @@ def build_saudi_short_swings_vip_exit_message(
     return "\n".join(lines)
 
 
+def build_saudi_short_swings_vip_update_message(
+    trades: List[Dict[str, Any]],
+    as_of_date: str,
+    web_origin: Optional[str] = None,
+) -> str:
+    """Format active Saudi Short Swings tracking update with P&L % in SAR for VIP only."""
+    from api.short_swings_daily import _format_trade_pnl_line
+
+    origin = web_origin or get_web_origin()
+    lines = [
+        "🇸🇦 📊 *متابعة الصفقات القصيرة — تداول VIP*",
+        f"📅 بيانات جلسة: `{as_of_date}`",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for trade in trades:
+        name = trade.get("name_ar") or trade.get("name") or trade.get("symbol")
+        sym = trade.get("symbol", "")
+        lines.extend(
+            [
+                f"🔹 *{name}* (`{sym}`)",
+                f"• السعر المسجل: `{float(trade.get('current_price') or 0):.2f}` ر.س",
+                f"• دخول النموذج: `{float(trade.get('entry_price') or 0):.2f}` ر.س",
+                _format_trade_pnl_line(trade),
+                f"• الوقف الحالي: `{float(trade.get('trailing_stop') or trade.get('stop_loss') or 0):.2f}` ر.س",
+                f"• الحالة: {trade.get('status') or 'قيد المتابعة'}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"🔗 {origin}/scanner/backtests?market=sa&tab=short_swings",
+            "⚠️ متابعة نموذجية بآخر بيانات متاحة، وليست تأكيد تنفيذ فعلي. التزم بالوقف وإدارة المخاطر.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def dispatch_saudi_short_swings_vip(
     swings_payload: Dict[str, Any],
     phase: str = "close",
@@ -361,13 +398,18 @@ def dispatch_saudi_short_swings_vip(
     sb: Optional[Client] = None,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Send Saudi Short Swings entries & exits exclusively to Saudi VIP Telegram."""
+    """Send Saudi Short Swings entries, exits & active updates exclusively to Saudi VIP Telegram."""
     client = sb or get_saudi_supabase()
-    as_of_date = str(swings_payload.get("as_of_date") or datetime.now(RIYADH_TZ).date().isoformat())[:10]
+    as_of_date = str(
+        swings_payload.get("as_of_date")
+        or swings_payload.get("as_of")
+        or datetime.now(RIYADH_TZ).date().isoformat()
+    )[:10]
     cache_key = f"saudi_short_swings_sent_{as_of_date}"
     sent_state = _read_market_cache(client, cache_key)
     sent_entries = dict(sent_state.get("sent_entries") or {})
     sent_exits = dict(sent_state.get("sent_exits") or {})
+    sent_updates = dict(sent_state.get("sent_updates") or {})
 
     raw_entries = list(swings_payload.get("new_entries") or [])
     if not raw_entries and phase in {"morning", "midday"}:
@@ -382,6 +424,12 @@ def dispatch_saudi_short_swings_vip(
             if str(t.get("exit_date") or "")[:10] == as_of_date
         ]
 
+    entry_syms = {t.get("symbol") for t in raw_entries if t.get("symbol")}
+    raw_updates = [
+        t for t in (swings_payload.get("active_trades") or [])
+        if t.get("symbol") and t.get("symbol") not in entry_syms and not t.get("is_pending_entry")
+    ]
+
     entries_to_send = [t for t in raw_entries if t.get("symbol") and not sent_entries.get(t["symbol"])]
     exits_to_send: List[Dict[str, Any]] = []
     for ex in raw_exits:
@@ -392,8 +440,16 @@ def dispatch_saudi_short_swings_vip(
         if not sent_exits.get(exit_key):
             exits_to_send.append({**ex, "_exit_key": exit_key})
 
+    updates_to_send: List[Dict[str, Any]] = []
+    for up in raw_updates:
+        sym = up.get("symbol")
+        up_key = f"{sym}_{phase}"
+        if sym and not sent_updates.get(up_key):
+            updates_to_send.append({**up, "_up_key": up_key})
+
     entries_sent = 0
     exits_sent = 0
+    updates_sent = 0
     errors: List[str] = []
 
     if entries_to_send:
@@ -416,13 +472,24 @@ def dispatch_saudi_short_swings_vip(
         else:
             errors.append(str(res.get("error") or "exit_send_failed"))
 
-    if (entries_sent or exits_sent) and not dry_run:
+    if updates_to_send:
+        msg = build_saudi_short_swings_vip_update_message(updates_to_send, as_of_date)
+        res = _send_telegram_message(text=msg, chat_id=chat_id, parse_mode="Markdown", dry_run=dry_run)
+        if res.get("ok"):
+            updates_sent = len(updates_to_send)
+            for up in updates_to_send:
+                sent_updates[up["_up_key"]] = True
+        else:
+            errors.append(str(res.get("error") or "update_send_failed"))
+
+    if (entries_sent or exits_sent or updates_sent) and not dry_run:
         _write_market_cache(
             client,
             cache_key,
             {
                 "sent_entries": sent_entries,
                 "sent_exits": sent_exits,
+                "sent_updates": sent_updates,
                 "last_phase": phase,
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             },
@@ -434,7 +501,13 @@ def dispatch_saudi_short_swings_vip(
         "as_of_date": as_of_date,
         "entries_sent": entries_sent,
         "exits_sent": exits_sent,
-        "skipped_duplicates": max(0, (len(raw_entries) - len(entries_to_send)) + (len(raw_exits) - len(exits_to_send))),
+        "updates_sent": updates_sent,
+        "skipped_duplicates": max(
+            0,
+            (len(raw_entries) - len(entries_to_send))
+            + (len(raw_exits) - len(exits_to_send))
+            + (len(raw_updates) - len(updates_to_send)),
+        ),
         "errors": errors,
     }
 

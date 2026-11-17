@@ -73,7 +73,14 @@ def test_saudi_parse_args_and_zero_arg_main_ignores_pytest_argv():
         assert m_bt.call_count == 1
         assert m_ss.call_count == 1
         assert m_sc.call_count == 1
-        assert m_up.call_count == 3
+        assert m_up.call_count == 4
+        upserted_keys = [call.args[1] for call in m_up.call_args_list]
+        assert set(upserted_keys) == {
+            "saudi_backtests_v1",
+            "saudi_scanner_state",
+            "saudi_short_swings_v1",
+            "saudi_scanner_alerts_v1",
+        }
 
 
 def test_short_swings_saudi_cache_isolation_and_snapshot_schema(tmp_path):
@@ -130,7 +137,9 @@ def test_scanner_alerts_causal_be_and_simulation_contract():
     bars_a.iloc[i + 1, bars_a.columns.get_loc("Close")] = 10.75
     bars_a.iloc[i + 1, bars_a.columns.get_loc("High")] = 10.80
     bars_a.iloc[i + 1, bars_a.columns.get_loc("Low")] = 10.42
-    # Day i+2 pulls back below +0.5% locked BE floor (10.502) -> closes as target_hit with +0.5% profit
+    # Day i+2 pulls back intraday below +0.5% locked BE floor (10.502) -> closes as target_hit with +0.5% profit
+    bars_a.iloc[i + 2, bars_a.columns.get_loc("Open")] = 10.70
+    bars_a.iloc[i + 2, bars_a.columns.get_loc("High")] = 10.72
     bars_a.iloc[i + 2, bars_a.columns.get_loc("Close")] = 10.35
     bars_a.iloc[i + 2, bars_a.columns.get_loc("Low")] = 10.30
 
@@ -203,3 +212,54 @@ def test_simulate_radar_strategy_backtest_uses_strategy_engine_and_trailing_stop
     assert bt["exchange"] == "TADAWUL"
     assert bt["total_trades"] >= 1
     assert "exit_reason_code" in bt["trades"][0]
+
+
+def test_saudi_scanner_guards_stale_indicators_and_sent_keys_order(monkeypatch):
+    from api import saudi_scanner_alerts_engine as sa_live
+    from api.tests.test_saudi_daily_pipeline import _FakeSaudiSupabase
+
+    monkeypatch.setattr(
+        sa_live,
+        "get_riyadh_now",
+        lambda: {"date_str": "2026-11-17", "time_str": "11:30", "is_trading_day": True, "is_trading_hours": True},
+    )
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [
+                {"cache_key": "market_status_Saudi Arabia", "country": "Saudi Arabia", "payload": {"regime": "bull", "reject_buys": False}},
+            ],
+            "stock_technical_indicators": [
+                # Today's stock: initially +1.0% at 10:20, now live price jumped to +5.0% with 3x r_vol
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "close": 101.0, "change_pct": 1.0, "volume": 500_000, "vol_sma20": 500_000, "r_vol": 1.0, "rsi_14": 60.0, "ema_20": 95.0, "ema_50": 90.0, "bb_upper": 104.0},
+                # Yesterday's stale row must be excluded from today's signals
+                {"symbol": "2010", "exchange": "TADAWUL", "date": "2026-11-16", "close": 80.0, "change_pct": 5.0, "volume": 2_000_000, "vol_sma20": 500_000, "r_vol": 4.0, "rsi_14": 60.0, "ema_20": 75.0, "ema_50": 70.0, "bb_upper": 79.0},
+            ],
+            "stock_prices": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "open": 100.5, "high": 105.5, "low": 100.0, "close": 105.0, "volume": 1_500_000},
+            ],
+        }
+    )
+
+    out = sa_live.execute_saudi_scanner_alerts_native(force=False, refresh_prices=False, dry_run=True, sb=fake_sb)
+    assert out["ok"] is True
+    assert out["new_signals"] == 1
+    state_row = next(r["payload"] for r in fake_sb.tables["market_cache"] if r["cache_key"] == "saudi_scanner_state")
+    assert {s["symbol"] for s in state_row["active_signals"]} == {"1120"}
+    assert "1120:volume_surge" in state_row["sent_today"]["sent_keys"]
+    assert "volume_surge:1120" not in state_row["sent_today"]["sent_keys"]
+
+
+def test_short_swings_verified_intraday_quote_respects_saudi_close_hour():
+    from zoneinfo import ZoneInfo
+    from api import short_swings_engine as ss_engine
+
+    now_riyadh = dt.datetime(2026, 11, 17, 14, 45, tzinfo=ZoneInfo("Asia/Riyadh"))
+    quote = {
+        "verified": True,
+        "price": 102.0,
+        "volume": 500_000.0,
+        "date": "2026-11-17",
+        "observed_at": (now_riyadh - dt.timedelta(minutes=2)).isoformat(),
+    }
+    assert ss_engine._verified_intraday_quote(quote, now_riyadh, close_minutes=900) is not None
+    assert ss_engine._verified_intraday_quote(quote, now_riyadh, close_minutes=870) is None

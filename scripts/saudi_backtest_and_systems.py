@@ -19,7 +19,7 @@ import pickle
 import sys
 import time
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -424,17 +424,9 @@ def _build_or_load_ml_features_df(
         jobs.append((sym, bdf, market_df, sec_maps.get(str(sec), {}), sec, ind, fm))
 
     parts: List[pd.DataFrame] = []
-    if len(jobs) >= 20:
-        try:
-            workers = min(6, max(2, os.cpu_count() or 2))
-            with ProcessPoolExecutor(max_workers=workers) as pool:
-                parts = [r for r in pool.map(_build_sym_feat_worker, jobs, chunksize=8) if r is not None]
-        except Exception as exc:
-            print(f"[SAUDI-SYSTEMS] ProcessPool fallback to threads: {exc}")
-            parts = []
-
-    if not parts and jobs:
-        with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as pool:
+    if jobs:
+        workers = min(4, max(1, os.cpu_count() or 2), len(jobs))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             parts = [r for r in pool.map(_build_sym_feat_worker, jobs) if r is not None]
 
     df_all = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
@@ -1186,6 +1178,56 @@ def _build_saudi_scanner_alerts_dataset(
     )
 
 
+def _sync_saudi_scanner_state_after_close(sb, ds_scanner: Dict[str, Any], now_iso: str) -> Dict[str, Any]:
+    """Preserve intraday scan history/config while aligning active/closed signals with EOD close."""
+    existing_public: Dict[str, Any] = {}
+    existing_state: Dict[str, Any] = {}
+    try:
+        pub_res = (
+            sb.table("market_cache")
+            .select("payload")
+            .eq("cache_key", "saudi_scanner_alerts_v1")
+            .eq("country", COUNTRY_NAME)
+            .maybe_single()
+            .execute()
+        )
+        existing_public = (getattr(pub_res, "data", None) or {}).get("payload") or {}
+    except Exception:
+        existing_public = {}
+    try:
+        st_res = (
+            sb.table("market_cache")
+            .select("payload")
+            .eq("cache_key", "saudi_scanner_state")
+            .eq("country", COUNTRY_NAME)
+            .maybe_single()
+            .execute()
+        )
+        existing_state = (getattr(st_res, "data", None) or {}).get("payload") or {}
+    except Exception:
+        existing_state = {}
+
+    history = list(ds_scanner.get("history") or existing_public.get("history") or existing_state.get("history") or [])[:60]
+    last_scan = ds_scanner.get("last_scan") or existing_public.get("last_scan") or existing_state.get("last_scan")
+    merged_public = dict(ds_scanner)
+    merged_public["history"] = history
+    if last_scan is not None:
+        merged_public["last_scan"] = last_scan
+
+    merged_state = {
+        "is_active": existing_state.get("is_active", True),
+        "market_hours_only": existing_state.get("market_hours_only", True),
+        "sent_today": existing_state.get("sent_today") or {},
+        "active_signals": list(ds_scanner.get("active_signals") or []),
+        "closed_signals": list(ds_scanner.get("closed_signals") or [])[:1000],
+        "history": history,
+        "last_scan": last_scan or {"timestamp": now_iso, "runner": "saudi-close-sync"},
+        "synced_at": now_iso,
+    }
+    _upsert_market_cache(sb, "saudi_scanner_state", merged_state, now_iso)
+    return merged_public
+
+
 def _upsert_market_cache(sb, cache_key: str, payload: Dict[str, Any], now_iso: str) -> None:
     sb.table("market_cache").upsert(
         {
@@ -1258,6 +1300,7 @@ def main(argv: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     if run_systems:
         ds_swings = _build_saudi_short_swings_dataset(bars_by_symbol, meta, now_iso)
         ds_scanner = _build_saudi_scanner_alerts_dataset(bars_by_symbol, meta, now_iso)
+        ds_scanner = _sync_saudi_scanner_state_after_close(sb, ds_scanner, now_iso)
         _upsert_market_cache(sb, "saudi_short_swings_v1", ds_swings, now_iso)
         _upsert_market_cache(sb, "saudi_scanner_alerts_v1", ds_scanner, now_iso)
         out["short_swings"] = ds_swings

@@ -368,6 +368,170 @@ def test_saudi_runner_cache_revalidation_success_with_status_200(monkeypatch):
     assert out["error"] is None
 
 
+def test_saudi_short_swings_vip_sends_active_updates_with_pnl_pct(monkeypatch):
+    monkeypatch.setenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436")
+    monkeypatch.setenv("TELEGRAM_FREE_CHAT_ID", "-1009999999999")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+
+    sent_calls = []
+
+    class _MockResp:
+        status_code = 200
+        content = b'{"ok":true}'
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 901}}
+
+    monkeypatch.setattr(
+        saudi_telegram_dispatch.requests,
+        "post",
+        lambda _u, json=None, timeout=25: (sent_calls.append(json) or _MockResp()),
+    )
+
+    fake_sb = _FakeSaudiSupabase()
+    payload = {
+        "as_of": "2026-11-17",
+        "active_trades": [
+            {
+                "symbol": "2222",
+                "name_ar": "أرامكو السعودية",
+                "entry_date": "2026-11-15",
+                "entry_price": 27.0,
+                "current_price": 28.08,
+                "trailing_stop": 27.10,
+                "return_pct": 4.0,
+                "status": "مؤمنة بربح",
+            }
+        ],
+    }
+    res = saudi_telegram_dispatch.dispatch_saudi_short_swings_vip(payload, phase="midday", sb=fake_sb)
+    assert res["updates_sent"] == 1
+    assert len(sent_calls) == 1
+    assert sent_calls[0]["chat_id"] == "-1004397045436"
+    assert "🟢 `+4.00%`" in sent_calls[0]["text"]
+    assert "ر.س" in sent_calls[0]["text"]
+
+
+def test_saudi_scanner_alerts_engine_vip_only_and_scheduler_hours(monkeypatch):
+    from api import saudi_scanner_alerts_engine, scanner_alerts_scheduler
+
+    monkeypatch.setenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436")
+    monkeypatch.setenv("TELEGRAM_FREE_CHAT_ID", "-1009999999999")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+
+    # Verify Tadawul hours helper (10:00..15:00 Riyadh Sun..Thu)
+    assert scanner_alerts_scheduler._is_saudi_market_session(dt.datetime(2026, 11, 17, 10, 15, tzinfo=SAUDI_TZ)) is True
+    assert scanner_alerts_scheduler._is_saudi_market_session(dt.datetime(2026, 11, 17, 14, 55, tzinfo=SAUDI_TZ)) is True
+    assert scanner_alerts_scheduler._is_saudi_market_session(dt.datetime(2026, 11, 17, 15, 5, tzinfo=SAUDI_TZ)) is False
+    assert scanner_alerts_scheduler._is_saudi_market_session(dt.datetime(2026, 11, 20, 12, 0, tzinfo=SAUDI_TZ)) is False
+
+    sent_calls = []
+
+    class _MockResp:
+        status_code = 200
+        content = b'{"ok":true}'
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 902}}
+
+    monkeypatch.setattr(
+        saudi_telegram_dispatch.requests,
+        "post",
+        lambda _u, json=None, timeout=25: (sent_calls.append(json) or _MockResp()),
+    )
+
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "stock_technical_indicators": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "close": 95.0, "change_pct": 3.2, "volume": 2_000_000, "vol_sma20": 500_000, "r_vol": 4.0, "rsi_14": 62.0, "ema_20": 90.0, "bb_upper": 94.0},
+                {"symbol": "2222", "exchange": "TADAWUL", "date": "2026-11-17", "close": 28.0, "change_pct": 1.1, "volume": 5_000_000, "vol_sma20": 4_000_000, "r_vol": 1.25, "rsi_14": 54.0, "ema_20": 27.2, "bb_upper": 28.5},
+            ],
+            "stock_prices": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "open": 92.0, "high": 95.5, "low": 91.8, "close": 95.0, "volume": 2_000_000},
+                {"symbol": "2222", "exchange": "TADAWUL", "date": "2026-11-17", "open": 27.7, "high": 28.1, "low": 27.6, "close": 28.0, "volume": 5_000_000},
+            ],
+        }
+    )
+
+    out = saudi_scanner_alerts_engine.execute_saudi_scanner_alerts_native(
+        force=True,
+        refresh_prices=False,
+        sb=fake_sb,
+    )
+    assert out["ok"] is True
+    assert out["vip_only"] is True
+    assert all(c["chat_id"] == "-1004397045436" for c in sent_calls)
+    assert all(c["chat_id"] != "-1009999999999" for c in sent_calls)
+
+
+def test_saudi_scanner_blocks_new_entries_in_bear_regime(monkeypatch):
+    from api import saudi_scanner_alerts_engine
+
+    monkeypatch.setenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-bot-token")
+    monkeypatch.setattr(
+        saudi_scanner_alerts_engine,
+        "get_riyadh_now",
+        lambda: {"date_str": "2026-11-17", "time_str": "12:00", "is_trading_day": True, "is_trading_hours": True},
+    )
+
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [
+                {
+                    "cache_key": "market_status_Saudi Arabia",
+                    "country": "Saudi Arabia",
+                    "payload": {"regime": "bear", "reject_buys": True},
+                }
+            ],
+            "stock_technical_indicators": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "close": 95.0, "change_pct": 4.5, "volume": 2_000_000, "vol_sma20": 500_000, "r_vol": 4.0, "rsi_14": 62.0, "ema_20": 90.0, "ema_50": 88.0, "bb_upper": 94.0},
+            ],
+            "stock_prices": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-17", "open": 91.0, "high": 95.2, "low": 90.9, "close": 95.0, "volume": 2_000_000},
+            ],
+        }
+    )
+
+    out = saudi_scanner_alerts_engine.execute_saudi_scanner_alerts_native(
+        force=False,
+        refresh_prices=False,
+        dry_run=True,
+        sb=fake_sb,
+    )
+    assert out["ok"] is True
+    assert out["new_signals"] == 0
+
+
+def test_saudi_short_swings_ignores_egx_published_signals(monkeypatch):
+    import pandas as pd
+    from api import short_swings_engine as sse
+
+    dates = pd.bdate_range(end="2026-10-16", periods=70)
+    rows = []
+    for i, d in enumerate(dates):
+        base = 50.0 + i * 0.25
+        close = base + (2.5 if i == 68 else 0.1)
+        vol = 1_200_000.0 if i == 68 else 500_000.0
+        rows.append({
+            "symbol": "1120",
+            "exchange": "TADAWUL",
+            "date": d.strftime("%Y-%m-%d"),
+            "open": base,
+            "high": close + 0.1,
+            "low": base - 0.1,
+            "close": close,
+            "volume": vol,
+        })
+    preloaded = pd.DataFrame(rows)
+    monkeypatch.setattr(sse, "_load_published_signals", lambda _sb: [{"symbol": "COMI", "signal_date": "2026-10-01", "reference_close": 80.0}])
+    monkeypatch.setattr(sse, "_persist_saudi_snapshot", lambda _r: True)
+    monkeypatch.setattr(sse, "SAUDI_CACHE_PATHS", [])
+    res = sse.compute_short_swings(phase="close", exchange="TADAWUL", preloaded_df=preloaded, preloaded_meta={"1120": {"name_ar": "الراجحي", "sector": "المصارف"}})
+    assert res["status"] == "ok"
+    assert len(res["active_trades"]) + len(res["closed_trades"]) >= 1
+
+
 def test_saudi_tv_fallback_does_not_hang_on_stalled_symbol(monkeypatch):
     import sys
     import threading

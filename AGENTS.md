@@ -85,6 +85,8 @@ The current resource review and prioritized implementation candidates are in `do
 
 ## ⚡ Vercel CPU Conservation & Hugging Face Offloading Playbook
 
+> **MANDATORY READ:** `docs/VERCEL_ZERO_CPU_ARCHITECTURE.md` is the canonical reference for the zero-CPU Vercel architecture (edge rewrites, 1-week ISR, tag-based Run-1/Run-2 invalidation, client-side freshness guards, HF cache maps, postgrest 0.16.11 rules) and its design-pattern glossary. Every agent must follow its checklist before adding or changing any page, API route, cache, or query.
+
 To stay comfortably inside Vercel Hobby limits (Fluid Active CPU, Fast Origin Transfer, and ISR Writes) while keeping latency low, ALL new features and updates MUST follow these architecture, algorithmic, and security standards:
 
 ### 1. HF-First Compute & Rewrite Routing (`0` Vercel Active CPU)

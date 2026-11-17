@@ -450,4 +450,57 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_automations",
+            "description": (
+                "إنشاء وعرض وتفعيل/إيقاف وحذف مهام الأتمتة اليومية المجدولة (Scheduled AI Automations) التي ترسل تقارير أرتورو تلقائياً إلى تليجرام المستخدم. "
+                "تدعم إنشاء عدة مواعيد يومية في طلب واحد عبر scheduled_times (مثلاً 3 مرات يومياً: ['10:30', '12:15', '14:00']). "
+                "استخدمها فوراً عندما يطلب المستخدم جدولة سؤال أو أتمتة أو إرسال تقرير يومي أو عدة مرات يومياً، "
+                "ولا تقم بتشغيل تحليل المحفظة الثقيل تلقائياً إذا كان طلب المستخدم يقتصر على إضافة/جدولة الأتمتة فقط."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["list", "create", "toggle", "delete"],
+                        "description": "نوع العملية: 'list' لعرض المهام المجدولة الحالية، 'create' لإنشاء مهمة أو عدة مواعيد، 'toggle' لتفعيل أو إيقاف مهمة، 'delete' لحذف مهمة.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "اسم قصير وواضح للمهمة المجدولة (مثل: تحليل المحفظة اليومي).",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "نص السؤال أو الاستشارة المطلوب تنفيذها تلقائياً في الموعد المحدد (بدون عبارات مثل 'أضف هذا للأتمتة' أو '3 مرات يومياً').",
+                    },
+                    "scheduled_times": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "قائمة المواعيد بتوقيت القاهرة بصيغة HH:MM بنظام 24 ساعة (مثل ['10:30', '12:15', '14:00']).",
+                    },
+                    "scheduled_time": {
+                        "type": "string",
+                        "description": "موعد واحد بصيغة HH:MM بتوقيت القاهرة (مثل '08:30') إذا لم تُمرر scheduled_times.",
+                    },
+                    "days_of_week": {
+                        "type": "string",
+                        "enum": ["trading_days", "all_days"],
+                        "description": "أيام التشغيل: 'trading_days' (أيام التداول الأحد-الخميس، وهو الافتراضي لتحليل السوق والمحفظة) أو 'all_days' (يومياً).",
+                    },
+                    "automation_id": {
+                        "type": "string",
+                        "description": "معرف المهمة عند استخدام operation='toggle' أو 'delete'.",
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "description": "الحالة المطلوبة عند استخدام operation='toggle' (true للتفعيل، false للإيقاف المؤقت).",
+                    },
+                },
+                "required": ["operation"],
+            },
+        },
+    },
 ]

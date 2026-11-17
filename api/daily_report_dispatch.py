@@ -484,8 +484,11 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
     plan = [
         ("vip_telegram", lambda: _telegram_send(VIP_CHAT_ID, build_vip_html(s), vip_buttons)),
         ("free_telegram", lambda: _telegram_send(free_chat, build_free_telegram_html(s), free_buttons)),
-        ("active_free_email", lambda: (True, _send_promo_emails(client, s, today))),
     ]
+    if os.getenv("DAILY_PROMO_EMAILS_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        plan.append(("active_free_email", lambda: (True, _send_promo_emails(client, s, today))))
+    else:
+        result["channels"]["active_free_email"] = "disabled"
     for channel, action in plan:
         try:
             if _already_done(client, channel, today):

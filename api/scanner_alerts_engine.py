@@ -672,26 +672,18 @@ def step_scanner_lifecycle(
             # Arm for the next tick/session once today survives without stopping out
             updated_sig["be_armed_next"] = True
 
-        hit_stop = (curr_price <= effective_stop) if has_breakeven else (bar_low <= effective_stop)
+        bar_open = float(p.get("open") or 0.0) if (p and use_daily_ohlc) else 0.0
+        hit_stop = (bar_low <= effective_stop) or (curr_price <= effective_stop)
         target_1 = float(sig.get("target_1") or entry_price * 1.04)
+        gapped_to_target = bar_open > 0 and bar_open >= target_1
 
-        if highest_price >= target_1:
-            exit_price = target_1
+        if hit_stop and is_price_current and not gapped_to_target:
+            if use_daily_ohlc and bar_open > 0 and bar_open <= effective_stop:
+                exit_price = round(min(bar_open, effective_stop), 3 if entry_price < 20 else 2)
+            else:
+                exit_price = effective_stop
             realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            updated_sig.update({
-                "status": "target_hit",
-                "exit_price": exit_price,
-                "return_pct": realized_return,
-                "exit_date": action_date,
-                "exit_time": action_time,
-                "exit_reason": "تحقق الهدف الأول بنجاح 🎯",
-            })
-            hit_target_signals.append(updated_sig)
-            current_closed.insert(0, updated_sig)
-        elif hit_stop and is_price_current:
-            exit_price = effective_stop
-            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            is_be = has_breakeven and (effective_stop >= entry_price)
+            is_be = has_breakeven and (exit_price >= entry_price)
             updated_sig.update({
                 "status": "target_hit" if is_be else "stopped_out",
                 "exit_price": exit_price,
@@ -704,6 +696,19 @@ def step_scanner_lifecycle(
                 hit_target_signals.append(updated_sig)
             else:
                 stopped_out_signals.append(updated_sig)
+            current_closed.insert(0, updated_sig)
+        elif highest_price >= target_1:
+            exit_price = max(target_1, bar_open) if gapped_to_target else target_1
+            realized_return = round(((exit_price - entry_price) / entry_price) * 100, 2)
+            updated_sig.update({
+                "status": "target_hit",
+                "exit_price": exit_price,
+                "return_pct": realized_return,
+                "exit_date": action_date,
+                "exit_time": action_time,
+                "exit_reason": "تحقق الهدف الأول بنجاح 🎯",
+            })
+            hit_target_signals.append(updated_sig)
             current_closed.insert(0, updated_sig)
         elif updated_sig["sessions_count"] >= int(sig.get("max_sessions", 5)):
             max_s = int(sig.get("max_sessions", 5))

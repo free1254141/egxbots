@@ -551,11 +551,11 @@ def load_stock_metadata(exchange: str = "EGX") -> Dict[str, Dict[str, Any]]:
     _METADATA_CACHE = meta_map
     return meta_map
 
-def _verified_intraday_quote(quote, now_cairo):
+def _verified_intraday_quote(quote, now_cairo, close_minutes: int = 870):
     """Only an audited, fresh current-session observation can initiate a live entry."""
     if not isinstance(quote, dict) or quote.get('verified') is not True:
         return None
-    if now_cairo.weekday() in (4, 5) or not 600 <= now_cairo.hour * 60 + now_cairo.minute < 870:
+    if now_cairo.weekday() in (4, 5) or not 600 <= now_cairo.hour * 60 + now_cairo.minute < close_minutes:
         return None
     try:
         observed = dt.datetime.fromisoformat(str(quote.get('observed_at') or '').replace('Z', '+00:00'))
@@ -925,9 +925,8 @@ def compute_short_swings(
                 "ema10": row.ema10
             })
 
-    # Publication is authoritative entry intent. Later history corrections or
-    # market-gate recalculations must not silently erase a delivered signal.
-    published_signals = _load_published_signals(supabase) if supabase else []
+    # Publication is authoritative entry intent (EGX ledger; never contaminate TADAWUL).
+    published_signals = [] if is_saudi else (_load_published_signals(supabase) if supabase else [])
     for published in published_signals:
         signal_date = published['signal_date']
         observed_entry = published.get('entry_kind') == 'intraday_observed' or published.get('entry_mode') == 'intraday'
@@ -954,9 +953,10 @@ def compute_short_swings(
     sig_map[session_date] = [signal for signal in sig_map[session_date]
                              if signal.get('entry_kind') == 'intraday_observed' or signal.get('published')]
     if phase in {"morning", "midday"}:
+        close_minutes = 900 if is_saudi else 870
         for _, row in df[(df['date'] == session_date) & df['signal'] & (df['volume'] > 0)].iterrows():
             quotes = observed_quotes or {}
-            quote = _verified_intraday_quote(quotes.get(row['symbol']) or quotes.get(row['symbol'].upper().split('.')[0]), now_cairo)
+            quote = _verified_intraday_quote(quotes.get(row['symbol']) or quotes.get(row['symbol'].upper().split('.')[0]), now_cairo, close_minutes=close_minutes)
             if quote and not any(s['symbol'] == row['symbol'] for s in sig_map[session_date]):
                 sig_map[session_date].append({'symbol': row['symbol'], 'signal_date': session_date,
                     'date': session_date, 'close': row['close'], 'turnover': row['turnover'],
@@ -1223,7 +1223,8 @@ def compute_short_swings(
         curr_price = b.close if b else p["entry_price"]
         if phase in {"morning", "midday"} and p.get('entry_kind') == 'intraday_observed' and p['date'] == session_date:
             quotes = observed_quotes or {}
-            current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo)
+            close_minutes = 900 if is_saudi else 870
+            current_observation = _verified_intraday_quote(quotes.get(sym) or quotes.get(sym.upper().split('.')[0]), now_cairo, close_minutes=close_minutes)
             curr_price = current_observation['entry_price'] if current_observation else p['entry_price']
         curr_gain = ((curr_price / p["entry_price"] - 1) * 100) if b else 0.0
         active_stop = p["sl_price"]
