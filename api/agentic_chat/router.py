@@ -77,6 +77,7 @@ def _persist_message_background(
     market: str = "EGX",
     cached: bool = False,
     cache_key: Optional[str] = None,
+    tables: Optional[List[Any]] = None,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
@@ -111,6 +112,8 @@ def _persist_message_background(
         }
         if cache_key:
             meta["cache_key"] = cache_key
+        if isinstance(tables, list) and tables:
+            meta["tables"] = tables
         user_row = {
             "session_id": session_id,
             "user_id": user_id,
@@ -229,14 +232,19 @@ async def get_chat_root(
                             ts = int(datetime.fromisoformat(created_at_val.replace("Z", "+00:00")).timestamp() * 1000)
                         except Exception:
                             pass
-                    messages.append({
+                    meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
+                    msg_tables = meta.get("tables") if isinstance(meta.get("tables"), list) else None
+                    msg_item: Dict[str, Any] = {
                         "id": m.get("id"),
                         "role": m.get("role"),
                         "content": m.get("content", ""),
                         "timestamp": ts,
                         "imageUrl": m.get("image_url"),
                         "latencyMs": m.get("latency_ms"),
-                    })
+                    }
+                    if msg_tables:
+                        msg_item["tables"] = msg_tables
+                    messages.append(msg_item)
             except Exception as e:
                 logger.warning(f"[agentic_chat] Error fetching session messages: {e}")
                 messages = []
@@ -415,6 +423,7 @@ async def chat_stream_endpoint(
         # Wrap generator to intercept final reply and persist messages in background
         async def streaming_wrapper():
             final_reply = ""
+            final_tables: List[Any] = []
             latency_ms = 0
             was_cached = False
             used_cache_key: Optional[str] = None
@@ -440,6 +449,8 @@ async def chat_stream_endpoint(
                             event = json.loads(data_part)
                             if event.get("type") == "done":
                                 final_reply = event.get("reply", "")
+                                if isinstance(event.get("tables"), list):
+                                    final_tables = event.get("tables") or []
                                 latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
                                 was_cached = bool(event.get("cached", False))
                                 used_cache_key = event.get("cache_key")
@@ -464,6 +475,7 @@ async def chat_stream_endpoint(
                         market=active_market,
                         cached=was_cached,
                         cache_key=used_cache_key,
+                        tables=final_tables or None,
                     )
                 )
 
@@ -531,6 +543,7 @@ async def chat_stream_endpoint(
                     market=active_market,
                     cached=was_cached,
                     cache_key=used_cache_key,
+                    tables=tables or None,
                 )
             )
 

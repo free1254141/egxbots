@@ -1229,3 +1229,89 @@ def test_collect_structured_outputs_populates_common_visuals():
     assert visuals["price_traps"]["bearTraps"][0]["symbol"] == "HRHO"
     assert visuals["disclosures"][0]["symbol"] == "AMES"
 
+
+def test_router_persists_and_reloads_tables_with_visuals_and_charts():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import asyncio
+    import importlib
+    router_mod = importlib.import_module("api.agentic_chat.router")
+
+    inserted_rows = []
+    sample_tables = [
+        {
+            "id": "table_1",
+            "title": "تحليل COMI",
+            "headers": ["الكود"],
+            "rows": [["COMI"]],
+            "charts": {"COMI": {"series": [{"d": "2026-11-16", "c": 108.5, "v": 1000}] * 3}},
+            "visuals": {"market_breadth": {"advancing": 10, "declining": 5, "unchanged": 2, "total_stocks": 17}},
+        }
+    ]
+
+    class _FakeTable:
+        def __init__(self, tbl):
+            self.tbl = tbl
+            self._sid = None
+
+        def upsert(self, *_args, **_kwargs):
+            return self
+
+        def insert(self, rows):
+            inserted_rows.extend(rows)
+            return self
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, col, val):
+            if col == "session_id":
+                self._sid = val
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            if self.tbl == "ai_chat_messages":
+                return SimpleNamespace(
+                    data=[
+                        r for r in inserted_rows
+                        if not self._sid or r.get("session_id") == self._sid
+                    ]
+                )
+            return SimpleNamespace(data=[])
+
+    class _FakeSB:
+        def from_(self, tbl):
+            return _FakeTable(tbl)
+
+        def table(self, tbl):
+            return _FakeTable(tbl)
+
+    fake_sb = _FakeSB()
+    with patch.object(router_mod, "supabase", fake_sb), patch.object(router_mod, "_init_supabase"):
+        router_mod._persist_message_background(
+            session_id="sess_persist_1",
+            user_id="user_1",
+            user_msg="حلل COMI",
+            reply="تحليل مفصل",
+            latency_ms=1200,
+            tables=sample_tables,
+        )
+        assistant_saved = [r for r in inserted_rows if r.get("role") == "assistant"][0]
+        assert assistant_saved["metadata"]["tables"] == sample_tables
+
+        req = SimpleNamespace(query_params={}, headers={})
+        with patch.object(router_mod, "get_authenticated_user", return_value={"id": "user_1"}), patch.object(
+            router_mod, "is_pro_user", return_value=True
+        ):
+            resp = asyncio.run(router_mod.get_chat_root(req, action=None, session_id="sess_persist_1"))
+            import json
+            payload = json.loads(resp.body.decode("utf-8"))
+            assert len(payload["history"]) == 2
+            assert payload["history"][1]["tables"] == sample_tables
+

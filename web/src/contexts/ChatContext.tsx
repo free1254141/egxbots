@@ -930,8 +930,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                 const localImageMap = new Map<number, { imageUrl?: string; imagePreviewUrl?: string; images?: string[] }>();
                 const localVoiceMap = new Map<number, { voiceAudioUrl?: string; voiceDuration?: number; spokenText?: string; isVoice?: boolean; isVoiceNote?: boolean }>();
+                const localTablesMap = new Map<number, ChatTable[]>();
 
                 existing.forEach((m, idx) => {
+
+                    if (Array.isArray(m.tables) && m.tables.length > 0) {
+
+                        localTablesMap.set(idx, m.tables);
+
+                    }
 
                     if (m.imageUrl || m.imagePreviewUrl || m.images) {
 
@@ -973,12 +980,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     const localImg = localImageMap.get(idx);
                     const localVoice = localVoiceMap.get(idx);
+                    const localTables = localTablesMap.get(idx);
 
                     return {
 
                         ...srvMsg,
 
                         content: cleanChatText(srvMsg.content || ""),
+
+                        tables: Array.isArray(srvMsg.tables) && srvMsg.tables.length > 0 ? srvMsg.tables : localTables,
 
                         suggestedButtons: srvMsg.suggestedButtons?.map(cleanChatText).filter(Boolean),
 
