@@ -1163,13 +1163,154 @@ def _build_ui_chart_payload(
     }
 
 
+def _distinct_secondary_levels(
+    support_1: Optional[float],
+    support_2: Optional[float],
+    resistance_1: Optional[float],
+    resistance_2: Optional[float],
+    bb_low: Optional[float] = None,
+    bb_up: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Ensure S2 < S1 and R2 > R1 when the 20-day and 60-day extremes coincide."""
+    s2 = support_2
+    if support_1 and (s2 is None or s2 >= support_1 * 0.995):
+        if bb_low and bb_low < support_1 * 0.99:
+            s2 = _safe_price(bb_low)
+        else:
+            s2 = _safe_price(support_1 * 0.96)
+
+    r2 = resistance_2
+    if resistance_1 and (r2 is None or r2 <= resistance_1 * 1.005):
+        if bb_up and bb_up > resistance_1 * 1.01:
+            r2 = _safe_price(bb_up)
+        else:
+            r2 = _safe_price(resistance_1 * 1.05)
+
+    return s2, r2
+
+
+def _compute_stock_verdict(
+    close: Optional[float],
+    change_pct: Optional[float],
+    rsi: Optional[float],
+    macd_hist: Optional[float] = None,
+    ema_50: Optional[float] = None,
+    ema_200: Optional[float] = None,
+    acc_score: Optional[float] = None,
+    dist_score: Optional[float] = None,
+) -> str:
+    """Compute a trend-, momentum-, and flow-aware technical verdict."""
+    if close and (ema_50 or ema_200):
+        score = 0.0
+        if ema_50:
+            score += 1.0 if close > ema_50 else -1.0
+        if ema_200:
+            score += 1.0 if close > ema_200 else -1.0
+        if macd_hist is not None:
+            score += 0.5 if macd_hist > 0 else (-0.5 if macd_hist < 0 else 0.0)
+        if rsi is not None:
+            if 50 <= rsi <= 68:
+                score += 0.5
+            elif rsi > 75:
+                score -= 1.0
+            elif rsi < 35:
+                score -= 0.5
+        if acc_score is not None and acc_score >= 50:
+            score += 1.0
+        if dist_score is not None and dist_score >= 50:
+            score -= 1.0
+
+        if score >= 1.5 and (rsi is None or rsi <= 72):
+            return "🟢 إيجابي / اتجاه صاعد"
+        if score <= -1.0 or (rsi is not None and rsi > 78):
+            return "🔴 سلبي / مخاطرة مرتفعة"
+        return "🟡 حيادي للمراقبة"
+
+    if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
+        return "🟢 إيجابي / فرصة جيدة"
+    if (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
+        return "🔴 سلبي / مخاطرة مرتفعة"
+    return "🟡 حيادي للمراقبة"
+
+
+def _compute_stock_context_metrics(
+    close: Optional[float],
+    ema_50: Optional[float],
+    ema_200: Optional[float],
+    vwap_20: Optional[float],
+    support_1: Optional[float],
+    resistance_1: Optional[float],
+    stop_loss: Optional[float],
+) -> Dict[str, Any]:
+    """Pre-compute exact percentage distances and risk/reward to prevent LLM arithmetic errors."""
+    if not close or close <= 0:
+        return {}
+    metrics: Dict[str, Any] = {}
+    if ema_50:
+        metrics["above_ema50"] = close > ema_50
+    if ema_200:
+        metrics["above_ema200"] = close > ema_200
+    if vwap_20:
+        metrics["above_vwap"] = close > vwap_20
+    if support_1:
+        metrics["dist_to_support_pct"] = round(((support_1 - close) / close) * 100.0, 2)
+    if resistance_1:
+        metrics["dist_to_resistance_pct"] = round(((resistance_1 - close) / close) * 100.0, 2)
+    if resistance_1 and stop_loss and resistance_1 > close > stop_loss:
+        risk = close - stop_loss
+        reward = resistance_1 - close
+        if risk > 0:
+            metrics["risk_reward_from_close"] = round(reward / risk, 2)
+    return metrics
+
+
+def _summarize_breadth(breadth: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Compute advance/decline ratio and a concise market breadth verdict."""
+    if not isinstance(breadth, dict):
+        return None
+    adv = next((breadth[k] for k in ("advancing", "up", "gainers") if breadth.get(k) is not None), None)
+    dec = next((breadth[k] for k in ("declining", "down", "losers") if breadth.get(k) is not None), None)
+    try:
+        adv_n = int(adv) if adv is not None else None
+        dec_n = int(dec) if dec is not None else None
+    except Exception:
+        return None
+    if adv_n is None or dec_n is None:
+        return None
+    ratio = round(adv_n / max(dec_n, 1), 2)
+    if ratio >= 1.5:
+        verdict = "🟢 اتساع إيجابي (سيولة شرائية غالبة)"
+    elif ratio <= 0.65:
+        verdict = "🔴 ضغط بيعي واسع (تفضيل الحذر)"
+    else:
+        verdict = "🟡 سوق متوازن / انتقائي"
+    return {"advance_decline_ratio": ratio, "breadth_verdict": verdict}
+
+
+def _enrich_rec_distances(rec_item: Dict[str, Any]) -> None:
+    """Attach unrealized PnL %, remaining upside %, and stop distance % when last_close is known."""
+    lc = _safe_price(rec_item.get("last_close"))
+    ep = _safe_price(rec_item.get("entry_price"))
+    tp = _safe_price(rec_item.get("target_price"))
+    sl = _safe_price(rec_item.get("stop_loss"))
+    if not lc or lc <= 0:
+        return
+    if ep and ep > 0:
+        rec_item["pnl_since_entry_pct"] = round(((lc - ep) / ep) * 100.0, 2)
+    if tp and tp > 0:
+        rec_item["remaining_upside_pct"] = round(((tp - lc) / lc) * 100.0, 2)
+    if sl and sl > 0:
+        rec_item["dist_to_stop_pct"] = round(((sl - lc) / lc) * 100.0, 2)
+
+
 def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
     egx_syms, tasi_syms = _split_symbols_by_market(symbols)
     if not egx_syms and not tasi_syms:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
 
+    allow_recs = _ALLOW_RECOMMENDATIONS_CTX.get()
     cache_parts = [f"EGX:{s}" for s in sorted(egx_syms)] + [f"TADAWUL:{s}" for s in sorted(tasi_syms)]
-    cache_key = f"get_stock:{','.join(cache_parts)}"
+    cache_key = f"get_stock:{','.join(cache_parts)}:rec={1 if allow_recs else 0}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
         return cached
@@ -1289,6 +1430,27 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
         except Exception:
             pass
 
+        rec_by_sym: Dict[str, Dict[str, Any]] = {}
+        if egx_syms and _ALLOW_RECOMMENDATIONS_CTX.get():
+            try:
+                res_rec_batch = (
+                    sb.from_("scan_results")
+                    .select("symbol,signal,entry_price,target_price,stop_loss,status,created_at")
+                    .eq("exchange", "EGX")
+                    .in_("symbol", egx_syms)
+                    .in_("status", ["open", "active"])
+                    .order("created_at", desc=True)
+                    .limit(max(len(egx_syms) * 2, 10))
+                    .execute()
+                )
+                for row in (res_rec_batch.data or []):
+                    if isinstance(row, dict) and row.get("symbol"):
+                        s_k = str(row["symbol"]).upper()
+                        if s_k not in rec_by_sym:
+                            rec_by_sym[s_k] = row
+            except Exception:
+                pass
+
         for sym in egx_syms:
             meta_row = stocks_meta_map.get(sym, {})
             stock_name_ar = meta_row.get("name_ar") or _alias_name_for_symbol(sym, market="EGX")
@@ -1321,20 +1483,45 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
 
             bb_low = _safe_price(latest_tech.get("bb_lower"))
             bb_up = _safe_price(latest_tech.get("bb_upper"))
+            ema_50 = _safe_price(latest_tech.get("ema_50"))
+            ema_200 = _safe_price(latest_tech.get("ema_200"))
+            vwap_20 = _safe_price(latest_tech.get("vwap_20"))
+            macd_hist = _safe_float(latest_tech.get("macd_histogram"), 4)
+            dist_score = _safe_float(wyckoff_info.get("dist_score"))
+
             lvl = levels_map.get(sym, {})
             support_1 = lvl.get("support_1") or (bb_low if bb_low else (_safe_price(close_price * 0.96) if close_price else None))
             resistance_1 = lvl.get("resistance_1") or (bb_up if bb_up else (_safe_price(close_price * 1.05) if close_price else None))
-            support_2 = lvl.get("support_2") or (_safe_price(support_1 * 0.96) if support_1 else None)
-            resistance_2 = lvl.get("resistance_2") or (_safe_price(resistance_1 * 1.05) if resistance_1 else None)
+            support_2, resistance_2 = _distinct_secondary_levels(
+                support_1,
+                lvl.get("support_2"),
+                resistance_1,
+                lvl.get("resistance_2"),
+                bb_low=bb_low,
+                bb_up=bb_up,
+            )
             stop_loss = lvl.get("stop_loss") or (_safe_price(support_1 * 0.98) if support_1 else None)
             entry_zone = lvl.get("entry_zone") or (f"{support_1} – {_safe_price(support_1 * 1.02)}" if support_1 else "غير محدد")
 
-            if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
-                verdict = "🟢 إيجابي / فرصة جيدة"
-            elif (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
-                verdict = "🔴 سلبي / مخاطرة مرتفعة"
-            else:
-                verdict = "🟡 حيادي للمراقبة"
+            verdict = _compute_stock_verdict(
+                close=close_price,
+                change_pct=change_pct,
+                rsi=rsi,
+                macd_hist=macd_hist,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                acc_score=acc_score,
+                dist_score=dist_score,
+            )
+            ctx_metrics = _compute_stock_context_metrics(
+                close=close_price,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                vwap_20=vwap_20,
+                support_1=support_1,
+                resistance_1=resistance_1,
+                stop_loss=stop_loss,
+            )
 
             egx_item: Dict[str, Any] = {
                 "symbol": sym,
@@ -1351,9 +1538,12 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 "rsi_14": rsi,
                 "macd": _safe_float(latest_tech.get("macd"), 4),
                 "macd_signal": _safe_float(latest_tech.get("macd_signal"), 4),
-                "macd_histogram": _safe_float(latest_tech.get("macd_histogram"), 4),
-                "ema_50": _safe_price(latest_tech.get("ema_50")),
-                "ema_200": _safe_price(latest_tech.get("ema_200")),
+                "macd_histogram": macd_hist,
+                "ema_50": ema_50,
+                "ema_200": ema_200,
+                "vwap_20": vwap_20,
+                "bb_upper": bb_up,
+                "bb_lower": bb_low,
                 "r_vol": _safe_float(latest_tech.get("r_vol")),
                 "volume": latest_tech.get("volume"),
                 "support_1": support_1,
@@ -1365,10 +1555,26 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 "king_ai_score": king_score,
                 "egx_ai_score": _safe_float(latest_tech.get("egx_ai_score")),
                 "wyckoff_phase": wyckoff_info.get("wyckoff_phase"),
+                "scan_signal": wyckoff_info.get("signal"),
                 "accumulation_score": acc_score,
-                "distribution_score": _safe_float(wyckoff_info.get("dist_score")),
+                "distribution_score": dist_score,
                 "consecutive_acc_days": wyckoff_info.get("consecutive_acc_days"),
                 "verdict": verdict,
+                "has_active_recommendation": sym in rec_by_sym,
+                **(
+                    {
+                        "active_recommendation": {
+                            "signal": rec_by_sym[sym].get("signal"),
+                            "entry_price": _safe_price(rec_by_sym[sym].get("entry_price")),
+                            "target_price": _safe_price(rec_by_sym[sym].get("target_price")),
+                            "stop_loss": _safe_price(rec_by_sym[sym].get("stop_loss")),
+                            "signal_date": str(rec_by_sym[sym].get("created_at") or "")[:10],
+                        }
+                    }
+                    if sym in rec_by_sym
+                    else {}
+                ),
+                **ctx_metrics,
                 **fundamentals,
             }
             ui_chart = _build_ui_chart_payload(
@@ -1560,8 +1766,14 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
 
                     support_1 = calc_ti.get("support_1") or (bb_low if bb_low else (_safe_price(close_price * 0.96) if close_price else None))
                     resistance_1 = calc_ti.get("resistance_1") or (bb_up if bb_up else (_safe_price(close_price * 1.05) if close_price else None))
-                    support_2 = calc_ti.get("support_2") or (_safe_price(support_1 * 0.96) if support_1 else None)
-                    resistance_2 = calc_ti.get("resistance_2") or (_safe_price(resistance_1 * 1.05) if resistance_1 else None)
+                    support_2, resistance_2 = _distinct_secondary_levels(
+                        support_1,
+                        calc_ti.get("support_2"),
+                        resistance_1,
+                        calc_ti.get("resistance_2"),
+                        bb_low=bb_low,
+                        bb_up=bb_up,
+                    )
                     stop_loss = calc_ti.get("stop_loss") or (_safe_price(support_1 * 0.98) if support_1 else None)
                     entry_zone = calc_ti.get("entry_zone") or (f"{support_1} – {_safe_price(support_1 * 1.02)}" if support_1 else "غير محدد")
 
@@ -1573,12 +1785,23 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         str(db_ti.get("updated_at"))[:10] if db_ti.get("updated_at") else None
                     )
 
-                    if change_pct is not None and change_pct > 0 and rsi is not None and 45 <= rsi <= 68:
-                        verdict = "🟢 إيجابي / فرصة جيدة"
-                    elif (change_pct is not None and change_pct < -2) or (rsi is not None and rsi > 75):
-                        verdict = "🔴 سلبي / مخاطرة مرتفعة"
-                    else:
-                        verdict = "🟡 حيادي للمراقبة"
+                    verdict = _compute_stock_verdict(
+                        close=close_price,
+                        change_pct=change_pct,
+                        rsi=rsi,
+                        macd_hist=macd_h,
+                        ema_50=ema_50,
+                        ema_200=ema_200,
+                    )
+                    ctx_metrics_sa = _compute_stock_context_metrics(
+                        close=close_price,
+                        ema_50=ema_50,
+                        ema_200=ema_200,
+                        vwap_20=_safe_price(db_ti.get("vwap_20")),
+                        support_1=support_1,
+                        resistance_1=resistance_1,
+                        stop_loss=stop_loss,
+                    )
 
                     sharia_sa = fd.get("is_sharia_compliant")
                     if sharia_sa is not None:
@@ -1604,6 +1827,8 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         "ema_20": ema_20,
                         "ema_50": ema_50,
                         "ema_200": ema_200,
+                        "bb_upper": bb_up,
+                        "bb_lower": bb_low,
                         "r_vol": r_vol,
                         "volume": vol_val,
                         "cmf_20": _safe_float(db_ti.get("cmf_20"), 3) or calc_ti.get("cmf_20"),
@@ -1619,6 +1844,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         "market_cap": fd.get("market_cap"),
                         "fund_score": _safe_float(raw_fund.get("fund_score")),
                         "verdict": verdict,
+                        **ctx_metrics_sa,
                     }
                     ui_chart_sa = _build_ui_chart_payload(
                         sa_ohlcv_map.get(sym, []),
@@ -1722,8 +1948,9 @@ def _sync_get_stock_levels_for_market(
 
         support_1 = _safe_price(min(recent_lows)) if recent_lows else None
         resistance_1 = _safe_price(max(recent_highs)) if recent_highs else None
-        support_2 = _safe_price(min(all_lows)) if all_lows else (_safe_price(support_1 * 0.96) if support_1 else None)
-        resistance_2 = _safe_price(max(all_highs)) if all_highs else (_safe_price(resistance_1 * 1.05) if resistance_1 else None)
+        raw_s2 = _safe_price(min(all_lows)) if all_lows else None
+        raw_r2 = _safe_price(max(all_highs)) if all_highs else None
+        support_2, resistance_2 = _distinct_secondary_levels(support_1, raw_s2, resistance_1, raw_r2)
 
         stop_loss = _safe_price(support_1 * 0.98) if support_1 else None
         entry_zone = f"{support_1} – {_safe_price(support_1 * 1.02)}" if support_1 else "غير محدد"
@@ -2005,6 +2232,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
             "index_source": idx_source,
             "date": m_date,
             "breadth": breadth or None,
+            "breadth_summary": _summarize_breadth(breadth),
             "top_gainers": top_gainers,
             "top_losers": top_losers,
         }
@@ -2089,6 +2317,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
         "egx30_change_pct": egx30_change_pct or payload.get("egx30_change_pct"),
         "date": m_date or payload.get("date"),
         "breadth": breadth,
+        "breadth_summary": _summarize_breadth(breadth),
         "top_gainers": top_gainers,
         "top_losers": top_losers,
         "liquidity_summary": payload.get("liquidity", "سيولة متوازنة في جلسة اليوم"),
@@ -2195,6 +2424,7 @@ def _sync_get_recommendations(
                 rec_item["precision"] = _safe_float(r.get("precision"))
             if r.get("top_reasons") is not None:
                 rec_item["top_reasons"] = r.get("top_reasons")
+            _enrich_rec_distances(rec_item)
             recs.append(rec_item)
 
         out: Dict[str, Any] = {
@@ -2286,6 +2516,8 @@ def _sync_get_recommendations(
                         rec_item["last_close"] = lc_map[rec_item["symbol"]]
         except Exception:
             pass
+        for rec_item in recs:
+            _enrich_rec_distances(rec_item)
 
     return {
         "status": "success",
@@ -3046,30 +3278,34 @@ def _sync_get_comparison(symbols: List[str]) -> Dict[str, Any]:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة للمقارنة"}
 
     stock_res = _sync_get_stock(symbols)
-    levels_res = _sync_get_stock_levels(symbols)
-    levels_map = {}
-    for item in levels_res.get("levels", []):
-        if isinstance(item, dict) and item.get("symbol"):
-            levels_map[(item["symbol"], item.get("market"))] = item
-
     stocks = stock_res.get("stocks", [])
-    for s in stocks:
-        key = (s.get("symbol"), s.get("market"))
-        lvl = levels_map.get(key) or {}
-        if not lvl:
-            # fallback lookup by symbol alone
-            for k, v in levels_map.items():
-                if k[0] == s.get("symbol"):
-                    lvl = v
-                    break
-        if lvl.get("support_1") is not None:
-            s["support_1"] = lvl.get("support_1")
-        if lvl.get("resistance_1") is not None:
-            s["resistance_1"] = lvl.get("resistance_1")
-        if lvl.get("support_2") is not None:
-            s["support_2"] = lvl.get("support_2")
-        if lvl.get("resistance_2") is not None:
-            s["resistance_2"] = lvl.get("resistance_2")
+    try:
+        fv_map: Dict[Tuple[str, Any], Dict[str, Any]] = {}
+        for mkt_syms, mkt_code in ((egx_syms, "EGX"), (tasi_syms, "TASI")):
+            if not mkt_syms:
+                continue
+            fv_res = _sync_get_fair_value(
+                symbols=mkt_syms,
+                mode="specific_stocks",
+                limit=len(mkt_syms) + 2,
+                market=mkt_code,
+            )
+            for it in (fv_res.get("fair_value_stocks") or []):
+                if isinstance(it, dict) and it.get("symbol"):
+                    fv_map[(str(it["symbol"]).upper(), it.get("market") or mkt_code)] = it
+
+        for s in stocks:
+            fv_it = fv_map.get((str(s.get("symbol") or "").upper(), s.get("market")))
+            if fv_it:
+                if fv_it.get("fair_value") is not None:
+                    s["fair_value"] = fv_it.get("fair_value")
+                if fv_it.get("upside_pct") is not None:
+                    s["upside_pct"] = fv_it.get("upside_pct")
+                val_status = fv_it.get("status_ar") or fv_it.get("status")
+                if val_status:
+                    s["valuation_status"] = val_status
+    except Exception:
+        pass
 
     mkts_present = sorted(list({s.get("market") for s in stocks if s.get("market")}))
     res: Dict[str, Any] = {
@@ -3528,7 +3764,8 @@ def _sync_get_price_traps(
                 except Exception:
                     pass
 
-        detected = detect_daily_traps(indicators, bars_by_sym, max_per_side=min(limit or 8, 15))
+        latest_bar_by_sym = {s: b_list[-1] for s, b_list in bars_by_sym.items() if b_list}
+        detected = detect_daily_traps(indicators, latest_bar_by_sym, max_per_side=min(limit or 8, 15))
         return {
             "status": "success",
             "market": ui_mkt,
@@ -3556,19 +3793,18 @@ def _sync_get_price_traps(
         if clean_sym:
             bear_list = [t for t in bear_list if str(t.get("symbol", "")).upper() == clean_sym]
             bull_list = [t for t in bull_list if str(t.get("symbol", "")).upper() == clean_sym]
-        if not clean_sym or bear_list or bull_list:
-            return {
-                "status": "success",
-                "market": ui_mkt,
-                "exchange": "EGX",
-                "currency": currency,
-                "symbol": clean_sym,
-                "asOf": payload.get("asOf"),
-                "bearTraps": bear_list[:limit],
-                "bullTraps": bull_list[:limit],
-                "totalBearTraps": len(bear_list),
-                "totalBullTraps": len(bull_list),
-            }
+        return {
+            "status": "success",
+            "market": ui_mkt,
+            "exchange": "EGX",
+            "currency": currency,
+            "symbol": clean_sym,
+            "asOf": payload.get("asOf"),
+            "bearTraps": bear_list[:limit],
+            "bullTraps": bull_list[:limit],
+            "totalBearTraps": len(bear_list),
+            "totalBullTraps": len(bull_list),
+        }
 
     # Fallback: live bounded detection on EGX prices/indicators
     bars_by_sym = {}
@@ -3605,7 +3841,8 @@ def _sync_get_price_traps(
     except Exception:
         pass
 
-    detected = detect_daily_traps(indicators, bars_by_sym, max_per_side=min(limit or 8, 15))
+    latest_bar_by_sym = {s: b_list[-1] for s, b_list in bars_by_sym.items() if b_list}
+    detected = detect_daily_traps(indicators, latest_bar_by_sym, max_per_side=min(limit or 8, 15))
     return {
         "status": "success",
         "market": ui_mkt,

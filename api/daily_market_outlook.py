@@ -59,13 +59,45 @@ def compose_daily_market_outlook_native(
     neg_count = sum(1 for r in market_rows if float(r.get("change_pct") or 0) < -0.1)
     unch_count = len(market_rows) - pos_count - neg_count
 
-    # Try to find EGX30 index or proxy
-    egx30_close = gate.get("latest_close") or gate.get("latestClose")
-    sma50 = gate.get("sma50")
+    # Extract EGX30 & EGX100 numbers and daily/5d % changes
+    mkt_ctx = gate.get("market_context") or {}
+    if not isinstance(mkt_ctx, dict) or not mkt_ctx.get("egx30"):
+        mc_rows = _supabase_get("market_cache?cache_key=eq.market_status_Egypt&select=payload&limit=1") or []
+        if mc_rows and isinstance(mc_rows[0], dict):
+            mc_payload = mc_rows[0].get("payload") or {}
+            if isinstance(mc_payload, dict):
+                mkt_ctx = mc_payload.get("market_context") or mkt_ctx
+
+    egx30 = mkt_ctx.get("egx30") if isinstance(mkt_ctx.get("egx30"), dict) else {}
+    egx100 = mkt_ctx.get("egx100") if isinstance(mkt_ctx.get("egx100"), dict) else {}
+
+    egx30_close = egx30.get("close") or gate.get("latest_close") or gate.get("latestClose")
+    egx30_1d = egx30.get("return_1d_pct")
+    egx30_5d = egx30.get("return_5d_pct")
+    egx100_close = egx100.get("close")
+    egx100_1d = egx100.get("return_1d_pct")
+    egx100_5d = egx100.get("return_5d_pct")
     pct_vs_sma50 = gate.get("percent_vs_sma50") or gate.get("percentVsSma50")
+    if pct_vs_sma50 is None and egx30_close and egx30.get("sma50"):
+        pct_vs_sma50 = ((float(egx30_close) / float(egx30["sma50"])) - 1.0) * 100.0
     regime = gate.get("regime", "neutral")
     is_blocked = bool(gate.get("blocked"))
     gate_reason = gate.get("reason", "")
+
+    def _fmt_idx_line(label: str, close_val: Any, ret1d: Any, ret5d: Any) -> str:
+        if close_val is None:
+            return f"{label}: غير متاح"
+        parts = [f"{float(close_val):,.2f} نقطة"]
+        if ret1d is not None:
+            r1 = float(ret1d)
+            parts.append(f"يومي: {'+' if r1 >= 0 else ''}{r1:.2f}%")
+        if ret5d is not None:
+            r5 = float(ret5d)
+            parts.append(f"5 جلسات: {'+' if r5 >= 0 else ''}{r5:.2f}%")
+        return f"{label}: {' | '.join(parts)}"
+
+    egx30_line = _fmt_idx_line("EGX30", egx30_close, egx30_1d, egx30_5d)
+    egx100_line = _fmt_idx_line("EGX100", egx100_close, egx100_1d, egx100_5d)
 
     # Top gainers
     sorted_gainers = sorted(market_rows, key=lambda x: float(x.get("change_pct") or 0), reverse=True)[:5]
@@ -75,7 +107,7 @@ def compose_daily_market_outlook_native(
         f"تاريخ الجلسة: {market_date}\n"
         f"حالة السوق العام: {regime} (مغلق أمام التوصيات الجديدة: {'نعم' if is_blocked else 'لا'})\n"
         f"سبب حالة السوق: {gate_reason}\n"
-        f"المؤشر الرئيسي EGX30: {egx30_close if egx30_close else 'غير محدد'} (مقارنة بمتوسط 50 يوم: {pct_vs_sma50 or 0:.1f}%)\n"
+        f"أداء المؤشرات:\n- {egx30_line} (مقارنة بمتوسط 50 يوم: {float(pct_vs_sma50 or 0):.1f}%)\n- {egx100_line}\n"
         f"اتساع السوق: الصاعد {pos_count} | الهابط {neg_count} | الثابت {unch_count}\n"
         f"أبرز الأسهم صعوداً: {gainers_summary}\n"
         f"عدد التوصيات الصادرة اليوم: {recommendations_created}"
@@ -91,7 +123,8 @@ def compose_daily_market_outlook_native(
                     "أنت محرر التحليل الفني لأسواق المال في منصة EGX BOTS. "
                     "اكتب رسالة تيليجرام عربية موجزة ورشيقة بعنوان 'نظرة السوق اليومية'. "
                     "استخدم الأدلة والأرقام المرفقة فقط بدون اختلاق أرقام غير موجودة. "
-                    "وضح اتجاه الجلسة، اتساع الصعود والهبوط، وأبرز الأسهم الرابحة، وقرار فلتر التوصيات. "
+                    "يجب أن تتضمن الرسالة قسم 'أداء المؤشرات' بأرقام إغلاق EGX30 وEGX100 ونسب التغير المرفقة بوضوح، "
+                    "واتجاه الجلسة، واتساع الصعود والهبوط، وأبرز الأسهم الرابحة، وقرار فلتر التوصيات. "
                     "لا تقدم نصائح استثمارية ملزمة بل قراءة تحليلية واضحة للمشتركين. "
                     "أخرج نص الرسالة منسقاً برموز تعبيرية راقية تناسب تليجرام."
                 )
@@ -122,6 +155,9 @@ def compose_daily_market_outlook_native(
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
+                    if ("EGX30" not in content or (egx100_close is not None and "EGX100" not in content)) and (egx30_close is not None or egx100_close is not None):
+                        idx_block = f"📌 أداء المؤشرات:\n• {egx30_line}\n• {egx100_line}"
+                        content = f"{idx_block}\n\n{content}"
                     logger.info("[DAILY_OUTLOOK_PY] Composed successfully via DeepSeek direct API.")
                     return content
         except Exception as e:
@@ -133,10 +169,12 @@ def compose_daily_market_outlook_native(
         f"📊 <b>نظرة السوق اليومية — EGX BOTS</b> ({market_date})",
         "━━━━━━━━━━━━━━━━━━━━",
         f"🏛️ <b>حالة المؤشر العام:</b> {regime_ar}",
-        f"📈 اتساع حركة السوق: الصاعد <b>{pos_count}</b> سهم | الهابط <b>{neg_count}</b> سهم | الثابت <b>{unch_count}</b> سهم",
     ]
-    if egx30_close:
-        lines.append(f"📌 إغلاق EGX30: <b>{egx30_close:.2f}</b> نقطة")
+    if egx30_close is not None:
+        lines.append(f"📌 <b>{egx30_line}</b>")
+    if egx100_close is not None:
+        lines.append(f"📌 <b>{egx100_line}</b>")
+    lines.append(f"📈 اتساع حركة السوق: الصاعد <b>{pos_count}</b> سهم | الهابط <b>{neg_count}</b> سهم | الثابت <b>{unch_count}</b> سهم")
     if gainers_summary:
         lines.append(f"🚀 أبرز أسهم الجلسة: {gainers_summary}")
     lines.append("")

@@ -530,8 +530,24 @@ def compose_saudi_market_outlook(
     pos_count = int(breadth.get("advancers") or sum(1 for r in ind_rows if float(r.get("change_pct") or 0) > 0.1))
     neg_count = int(breadth.get("decliners") or sum(1 for r in ind_rows if float(r.get("change_pct") or 0) < -0.1))
     unch_count = int(breadth.get("unchanged") or max(0, len(ind_rows) - pos_count - neg_count))
+    tasi_series = market_status.get("tasi") or []
+    tasi_close = tasi_metrics.get("close")
+    if tasi_close is None and isinstance(tasi_series, list) and tasi_series:
+        tasi_close = tasi_series[-1].get("close")
     ret_1d = tasi_metrics.get("return_1d_pct")
     ret_5d = tasi_metrics.get("return_5d_pct")
+    above_sma50_pct = breadth.get("above_sma50_pct")
+
+    tasi_parts = []
+    if tasi_close is not None:
+        tasi_parts.append(f"{float(tasi_close):,.2f} نقطة")
+    if ret_1d is not None:
+        r1 = float(ret_1d)
+        tasi_parts.append(f"يومي: {'+' if r1 >= 0 else ''}{r1:.2f}%")
+    if ret_5d is not None:
+        r5 = float(ret_5d)
+        tasi_parts.append(f"5 جلسات: {'+' if r5 >= 0 else ''}{r5:.2f}%")
+    tasi_line = " | ".join(tasi_parts) if tasi_parts else "غير متاح"
 
     sorted_gainers = sorted(ind_rows, key=lambda x: float(x.get("change_pct") or 0), reverse=True)[:5]
     gainers_summary = ", ".join(
@@ -545,7 +561,18 @@ def compose_saudi_market_outlook(
         evidence = (
             f"تاريخ جلسة تداول: {market_date}\n"
             f"اتجاه السوق العام (Regime): {regime} | تعليق التوصيات الجديدة: {'نعم' if reject_buys else 'لا'}\n"
-            f"تغير مؤشر تاسي المتساوي الأوزان: يومي {ret_1d or 0:.2f}% | 5 جلسات {ret_5d or 0:.2f}%\n"
+            f"مؤشر تاسي (TASI المتساوي الأوزان): {tasi_line}\n"
+            f"نسبة الأسهم فوق متوسط 50 يوم: {float(above_sma50_pct):.1f}%\n" if above_sma50_pct is not None else ""
+        )
+        if not evidence.endswith("\n"):
+            evidence += "\n"
+        if above_sma50_pct is None:
+            evidence = (
+                f"تاريخ جلسة تداول: {market_date}\n"
+                f"اتجاه السوق العام (Regime): {regime} | تعليق التوصيات الجديدة: {'نعم' if reject_buys else 'لا'}\n"
+                f"مؤشر تاسي (TASI المتساوي الأوزان): {tasi_line}\n"
+            )
+        evidence += (
             f"اتساع السوق: الصاعد {pos_count} | الهابط {neg_count} | الثابت {unch_count}\n"
             f"أبرز الأسهم صعوداً: {gainers_summary or 'لا يوجد'}\n"
             f"عدد التوصيات المفتوحة المتابعة: {recommendations_count}"
@@ -562,9 +589,11 @@ def compose_saudi_market_outlook(
                             "role": "system",
                             "content": (
                                 "أنت محرر التحليل الفني للسوق السعودي (تداول / تاسي) في منصة EGX BOTS VIP. "
-                                "اكتب رسالة تليجرام عربية موجزة ورشيقة بعنوان 'نظرة السوق السعودي اليومية'. "
+                                "اكتب رسالة تيليجرام عربية موجزة ورشيقة بعنوان 'نظرة السوق السعودي اليومية'. "
                                 "استخدم الأرقام المرفقة فقط بالريال السعودي (ر.س) ولا تختلق أرقاماً. "
-                                "وضّح اتجاه الجلسة واتساع السوق وأبرز الأسهم الصاعدة وحالة فلتر المخاطر بدون تقديم نصيحة استثمارية ملزمة."
+                                "يجب أن تتضمن الرسالة رقم إغلاق مؤشر تاسي (TASI) ونسبتي التغير اليومي و5 جلسات المرفقة بوضوح، "
+                                "واتساع السوق، وأبرز الأسهم الصاعدة، وحالة فلتر المخاطر بدون تقديم نصيحة استثمارية ملزمة، "
+                                "وبصيغة نصية نظيفة بدون رموز Markdown مثل **."
                             ),
                         },
                         {
@@ -582,6 +611,9 @@ def compose_saudi_market_outlook(
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if content:
+                    content = content.replace("**", "")
+                    if "TASI" not in content and tasi_parts:
+                        content = f"📌 مؤشر تاسي (TASI): {tasi_line}\n\n{content}"
                     return content
         except Exception as exc:
             print(f"[SAUDI-OUTLOOK] DeepSeek unavailable, using structured fallback: {exc}")
@@ -596,11 +628,11 @@ def compose_saudi_market_outlook(
         f"🇸🇦 📊 <b>نظرة السوق السعودي اليومية — TASI VIP</b> ({market_date})",
         "━━━━━━━━━━━━━━━━━━━━",
         f"🏛️ <b>حالة السوق:</b> {regime_map.get(regime, regime)}",
+        f"📌 <b>مؤشر تاسي (TASI):</b> {tasi_line}",
         f"📈 <b>اتساع التداولات:</b> صاعد <b>{pos_count}</b> | هابط <b>{neg_count}</b> | ثابت <b>{unch_count}</b>",
     ]
-    if ret_1d is not None:
-        sign = "+" if float(ret_1d) >= 0 else ""
-        lines.append(f"📌 <b>أداء الجلسة (متساوي الأوزان):</b> <b>{sign}{float(ret_1d):.2f}%</b>")
+    if above_sma50_pct is not None:
+        lines.append(f"📊 <b>فوق متوسط 50 يوم:</b> <b>{float(above_sma50_pct):.1f}%</b> من الأسهم")
     if gainers_summary:
         lines.append(f"🚀 <b>أبرز الأسهم صعوداً:</b> {gainers_summary}")
     lines.extend(

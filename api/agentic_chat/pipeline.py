@@ -632,8 +632,8 @@ async def _run_agentic_chat_stream_impl(
             else "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
         )
     date_context = (
-        f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:%M:%S')} | "
-        f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:%M:%S')}. "
+        f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:00')} | "
+        f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:00')}. "
         f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
         "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة أسهم واستفسارات EGX و TASI معاً). "
         f"{telegram_channel_guidance} "

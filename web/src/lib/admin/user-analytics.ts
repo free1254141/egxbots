@@ -17,6 +17,12 @@ export type DailyActiveUsage = {
   returningActiveUsers: number;
   unknownSignupUsers: number;
 };
+export type DailyChatUsage = {
+  date: string;
+  fullDate: string;
+  chatUsers: number;
+  questions: number;
+};
 
 export type PaymentOrderRow = {
   user_id: string;
@@ -95,13 +101,7 @@ function percentOfTotal(count: number, total: number): number {
   return total ? Math.round((count / total) * 1000) / 10 : 0;
 }
 
-export function buildDailyActiveUsage(input: {
-  profiles: AnalyticsProfile[];
-  events?: AnalyticsEvent[];
-  chatMessages?: AnalyticsChatMessage[];
-  excludeUserIds?: Set<string>;
-  now: Date;
-}): DailyActiveUsage[] {
+function buildCairoCalendarHelper(profiles: AnalyticsProfile[], now: Date, days = 180) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
   });
@@ -109,18 +109,29 @@ export function buildDailyActiveUsage(input: {
     const parts = Object.fromEntries(formatter.formatToParts(time).map((part) => [part.type, part.value]));
     return `${parts.year}-${parts.month}-${parts.day}`;
   };
-  const signupDays = new Map(input.profiles.map((profile) => [
+  const signupDays = new Map(profiles.map((profile) => [
     String(profile.id), validDate(profile.created_at) ? dayKey(validDate(profile.created_at)) : null,
   ]));
-  const today = dayKey(input.now.getTime());
+  const today = dayKey(now.getTime());
   const calendarDay = new Date(`${today}T12:00:00Z`);
-  const dailyUsers = new Map<string, Set<string>>();
-  // Load up to 180 days (6 months) of activity so full history can be viewed in charts.
-  for (let offset = 179; offset >= 0; offset -= 1) {
+  const dayKeys: string[] = [];
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
     const date = new Date(calendarDay);
     date.setUTCDate(date.getUTCDate() - offset);
-    dailyUsers.set(date.toISOString().slice(0, 10), new Set());
+    dayKeys.push(date.toISOString().slice(0, 10));
   }
+  return { dayKey, signupDays, dayKeys };
+}
+
+export function buildDailyActiveUsage(input: {
+  profiles: AnalyticsProfile[];
+  events?: AnalyticsEvent[];
+  chatMessages?: AnalyticsChatMessage[];
+  excludeUserIds?: Set<string>;
+  now: Date;
+}): DailyActiveUsage[] {
+  const { dayKey, signupDays, dayKeys } = buildCairoCalendarHelper(input.profiles, input.now);
+  const dailyUsers = new Map<string, Set<string>>(dayKeys.map((key) => [key, new Set()]));
   const addActivity = (userId: string, createdAt?: string | null) => {
     const time = validDate(createdAt);
     if (!signupDays.has(userId) || input.excludeUserIds?.has(userId) || !time || time > input.now.getTime()) return;
@@ -147,6 +158,37 @@ export function buildDailyActiveUsage(input: {
     }
     return { date: fullDate.slice(5), fullDate, activeUsers: users.size, newActiveUsers, returningActiveUsers, unknownSignupUsers };
   });
+}
+
+export function buildDailyChatUsage(input: {
+  profiles: AnalyticsProfile[];
+  chatMessages?: AnalyticsChatMessage[];
+  excludeUserIds?: Set<string>;
+  now: Date;
+}): DailyChatUsage[] {
+  const { dayKey, signupDays, dayKeys } = buildCairoCalendarHelper(input.profiles, input.now);
+  const dailyStats = new Map<string, { users: Set<string>; questions: number }>(
+    dayKeys.map((key) => [key, { users: new Set(), questions: 0 }])
+  );
+  for (const message of input.chatMessages || []) {
+    if (message.role && message.role !== "user") continue;
+    const userId = String(message.user_id || "");
+    const time = validDate(message.created_at);
+    if (!signupDays.has(userId) || input.excludeUserIds?.has(userId) || !time || time > input.now.getTime()) continue;
+    const date = dayKey(time);
+    const signupDay = signupDays.get(userId);
+    if (signupDay && signupDay > date) continue;
+    const bucket = dailyStats.get(date);
+    if (!bucket) continue;
+    bucket.users.add(userId);
+    bucket.questions += 1;
+  }
+  return [...dailyStats].map(([fullDate, bucket]) => ({
+    date: fullDate.slice(5),
+    fullDate,
+    chatUsers: bucket.users.size,
+    questions: bucket.questions,
+  }));
 }
 
 export function buildUserAnalytics(input: {
@@ -299,6 +341,7 @@ export function buildUserAnalytics(input: {
 
   return {
     dailyActiveUsage: buildDailyActiveUsage({ profiles, events: input.events, chatMessages: input.chatMessages, excludeUserIds: excludedIds, now }),
+    dailyChatUsage: buildDailyChatUsage({ profiles, chatMessages: input.chatMessages, excludeUserIds: excludedIds, now }),
     activeProUsers: activeProIds.size,
     activeUsers30Days: activeUsers30.size,
     activeUsers7Days: activeUsers7.size,

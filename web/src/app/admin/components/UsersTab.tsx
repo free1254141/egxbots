@@ -38,12 +38,13 @@ import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import styles from "./UsersTab.module.css";
 import DailyUsageChart from "./DailyUsageChart";
+import DailyChatUsageChart from "./DailyChatUsageChart";
 import RevenueDetailsModal from "./RevenueDetailsModal";
 import TrialUsersModal, { type TrialUserItem } from "./TrialUsersModal";
 import FoundersStatsModal from "./FoundersStatsModal";
 import UsersEngagementModal from "./UsersEngagementModal";
 import { withDailyActiveUsers } from "./user-chart-data";
-import type { DailyActiveUsage } from "@/lib/admin/user-analytics";
+import type { DailyActiveUsage, DailyChatUsage } from "@/lib/admin/user-analytics";
 
 interface UserRow {
     id: string;
@@ -125,6 +126,7 @@ interface UserStats {
         egx30?: number | null;
     }[];
     dailyActiveUsage: DailyActiveUsage[];
+    dailyChatUsage?: DailyChatUsage[];
     totalRecommendations?: number;
     currentEgx30?: number | null;
     activeProUsers: number;
@@ -155,6 +157,7 @@ interface UserStats {
     proTopPages: { path: string; views: number; users: number }[];
     activityTelemetryAvailable: boolean;
     engagementDataComplete: boolean;
+    chatDataComplete?: boolean;
     totalRevenue: number;
     totalPaidOrders: number;
     pendingOrders: number;
@@ -756,6 +759,13 @@ export default function UsersTab() {
                     isAr={isAr}
                     loading={statsLoading}
                     complete={stats?.engagementDataComplete ?? true}
+                />
+
+                <DailyChatUsageChart
+                    data={stats?.dailyChatUsage || []}
+                    isAr={isAr}
+                    loading={statsLoading}
+                    complete={stats?.chatDataComplete ?? stats?.engagementDataComplete ?? true}
                 />
 
                 {/* Revenue & Payments + Activity & Engagement */}

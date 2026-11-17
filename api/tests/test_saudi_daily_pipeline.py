@@ -626,3 +626,41 @@ def test_saudi_runner_resumes_only_missing_stages(monkeypatch):
     assert step_names.count("saudi_price_sync") == 1
     assert "saudi_intraday_refresh" in step_names
     assert "cache_revalidation" in step_names
+
+
+def test_market_outlook_includes_index_levels_and_percentages(monkeypatch):
+    from api import daily_market_outlook as egx_outlook
+    from api import saudi_telegram_dispatch as sa_disp
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_OFFICIAL_API_KEY", raising=False)
+
+    monkeypatch.setattr(egx_outlook, "_supabase_get", lambda _ep: [])
+    egx_msg = egx_outlook.compose_daily_market_outlook_native(
+        "2026-11-17",
+        {
+            "regime": "bear",
+            "blocked": True,
+            "reason": "test",
+            "market_context": {
+                "egx30": {"close": 51681.6, "return_1d_pct": -0.99, "return_5d_pct": -1.53, "sma50": 52434.1},
+                "egx100": {"close": 23535.1, "return_1d_pct": -2.03, "return_5d_pct": -3.92},
+            },
+        },
+        recommendations_created=0,
+    )
+    assert "51,681.60" in egx_msg and "-0.99%" in egx_msg
+    assert "23,535.10" in egx_msg and "-2.03%" in egx_msg
+
+    sa_msg = sa_disp.compose_saudi_market_outlook(
+        "2026-11-17",
+        {
+            "regime": "bull",
+            "reject_buys": False,
+            "breadth": {"advancers": 150, "decliners": 90, "unchanged": 24, "above_sma50_pct": 62.5},
+            "tasi_metrics": {"close": 11250.5, "return_1d_pct": 1.1, "return_5d_pct": 2.4},
+        },
+        ind_rows=[{"symbol": "1120", "close": 92.5, "change_pct": 3.4}],
+        recommendations_count=1,
+    )
+    assert "11,250.50" in sa_msg and "+1.10%" in sa_msg and "+2.40%" in sa_msg

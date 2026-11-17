@@ -296,11 +296,16 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
             "name": "get_price_traps",
             "description": (
                 "كاشف المصائد السعرية والانعكاسات الحية بعد إغلاق الجلسة في السوق المصري (EGX) أو السوق السعودي (TASI): "
-                "مصيدة الدببة والكسر الوهمي الارتدادي (Bear Trap / Spring) ومصيدة الثيران والاختراق الكاذب للتصريف (Bull Trap / Upthrust)."
+                "مصيدة الدببة والكسر الوهمي الارتدادي (Bear Trap / Spring) ومصيدة الثيران والاختراق الكاذب للتصريف (Bull Trap / Upthrust). "
+                "يمكن تمرير symbol لفحص سهم محدد أثناء تحليله."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "كود السهم اختياري لفحص مصيدة سعرية على سهم محدد مثل FWRY أو COMI أو 2222",
+                    },
                     "trap_type": {
                         "type": "string",
                         "enum": ["all", "BEAR_TRAP", "BULL_TRAP"],
