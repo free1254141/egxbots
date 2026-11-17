@@ -87,48 +87,51 @@ def _send_telegram_message(
         return {"ok": True, "dry_run": True, "chat_id": target_chat_id, "message_id": None}
 
     token = get_telegram_bot_token()
+    relay = (os.getenv("TELEGRAM_RELAY_URL") or "").strip().rstrip("/")
+    api_bases = [relay, "https://api.telegram.org"] if (relay and "telegram.org" not in relay) else ["https://api.telegram.org"]
     candidate_ids = [target_chat_id]
     if target_chat_id.startswith("-100"):
         candidate_ids.append("-" + target_chat_id[4:])
 
     last_error = "Telegram send failed"
-    for cid in candidate_ids:
-        payload: Dict[str, Any] = {
-            "chat_id": cid,
-            "text": text,
-            "disable_web_page_preview": True,
-        }
-        if parse_mode:
-            payload["parse_mode"] = parse_mode
+    for api_base in api_bases:
+        for cid in candidate_ids:
+            payload: Dict[str, Any] = {
+                "chat_id": cid,
+                "text": text,
+                "disable_web_page_preview": True,
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
 
-        for attempt in range(3):
-            try:
-                resp = requests.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json=payload,
-                    timeout=25,
-                )
+            for attempt in range(3):
                 try:
-                    data = resp.json() or {}
-                except ValueError:
-                    data = {}
-                status_code = getattr(resp, "status_code", 200)
-                if data.get("ok"):
-                    return {
-                        "ok": True,
-                        "chat_id": cid,
-                        "message_id": data.get("result", {}).get("message_id"),
-                    }
-                last_error = str(data.get("description") or f"HTTP {status_code}")
-                if status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                break
-            except requests.exceptions.RequestException as exc:
-                last_error = str(exc)
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
+                    resp = requests.post(
+                        f"{api_base}/bot{token}/sendMessage",
+                        json=payload,
+                        timeout=25,
+                    )
+                    try:
+                        data = resp.json() or {}
+                    except ValueError:
+                        data = {}
+                    status_code = getattr(resp, "status_code", 200)
+                    if data.get("ok"):
+                        return {
+                            "ok": True,
+                            "chat_id": cid,
+                            "message_id": data.get("result", {}).get("message_id"),
+                        }
+                    last_error = str(data.get("description") or f"HTTP {status_code}")
+                    if status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    break
+                except requests.exceptions.RequestException as exc:
+                    last_error = str(exc)
+                    if attempt < 2:
+                        time.sleep(2 * (attempt + 1))
+                        continue
 
     return {
         "ok": False,
