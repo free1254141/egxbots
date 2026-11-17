@@ -171,11 +171,13 @@ async def log_requests(request: Request, call_next):
 
     is_polling = any(p in path for p in ["/api/ai_bot/status", "/bot/status"])
 
-
-
+    from api.perf_utils import SERVER_METRICS
+    SERVER_METRICS.enter_request()
+    status_code = 500
     try:
 
         response = await call_next(request)
+        status_code = response.status_code
 
         duration = (dt.datetime.now() - start_time).total_seconds()
 
@@ -208,6 +210,9 @@ async def log_requests(request: Request, call_next):
         )
 
         raise e
+
+    finally:
+        SERVER_METRICS.record_request(status_code, (dt.datetime.now() - start_time).total_seconds())
 
 
 

@@ -59,12 +59,13 @@ def _verify_admin_key(
       2. OR authorization header contains a valid Supabase JWT for an admin user.
     """
     # 1. Check x-admin-key header
+    import hmac
     secret = os.getenv("ADMIN_SECRET_KEY", "").strip()
-    if secret and x_admin_key == secret:
+    if secret and x_admin_key and hmac.compare_digest(x_admin_key.strip(), secret):
         return
 
     cron_secret = os.getenv("CRON_SECRET", "").strip()
-    if cron_secret and authorization == f"Bearer {cron_secret}":
+    if cron_secret and authorization and hmac.compare_digest(authorization.strip(), f"Bearer {cron_secret}"):
         return
 
     # 2. Check Supabase Authorization token
@@ -5202,5 +5203,16 @@ def reconcile_bot_state(req: RecommendationReconcileRequest):
 
 
 # ─── Historical Similarity Endpoints (moved to similarity_admin.py) ──────
+
+
+@router.get("/server-metrics")
+def get_server_metrics():
+    """Return real-time process CPU/RAM, HTTP request/latency, and cache hit-rate metrics."""
+    from fastapi.responses import JSONResponse
+    from api.perf_utils import SERVER_METRICS
+    return JSONResponse(
+        content=SERVER_METRICS.snapshot(),
+        headers={"Cache-Control": "private, no-store, max-age=0"},
+    )
 
 

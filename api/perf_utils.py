@@ -6,7 +6,7 @@ unified EGX/Saudi market Supabase resolution, and SHA-256 cached JWT verificatio
 
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 import hashlib
 import os
@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+import weakref
 from zoneinfo import ZoneInfo
 
 from fastapi import Request
@@ -34,6 +35,10 @@ _SAUDI_CLIENT_LOCK = threading.Lock()
 _SAUDI_CLIENT = None
 
 
+_CACHE_REGISTRY_LOCK = threading.Lock()
+_CACHE_REGISTRY: "weakref.WeakSet[BoundedTTLCache]" = weakref.WeakSet()
+
+
 class BoundedTTLCache:
     """Thread-safe O(1) bounded LRU + monotonic TTL cache."""
 
@@ -44,6 +49,8 @@ class BoundedTTLCache:
         self._store: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
         self._hits = 0
         self._misses = 0
+        with _CACHE_REGISTRY_LOCK:
+            _CACHE_REGISTRY.add(self)
 
     def get(self, key: str) -> Tuple[bool, Any]:
         now = time.monotonic()
@@ -414,3 +421,122 @@ def resolve_verified_viewer(request: Request) -> Dict[str, Any]:
     email_confirmed = bool(user_info.get("email_confirmed", False))
     pro = _get_user_pro_flag(uid, email, email_confirmed=email_confirmed)
     return {"authenticated": True, "pro": pro, "user_id": uid, "email": email, "email_confirmed": email_confirmed}
+
+
+def get_all_cache_stats() -> Dict[str, Any]:
+    """Aggregate hit/miss/entry counters across all active BoundedTTLCache instances."""
+    with _CACHE_REGISTRY_LOCK:
+        caches = list(_CACHE_REGISTRY)
+    total_entries = 0
+    total_hits = 0
+    total_misses = 0
+    for cache in caches:
+        st = cache.stats()
+        total_entries += st["entries"]
+        total_hits += st["hits"]
+        total_misses += st["misses"]
+    total_lookups = total_hits + total_misses
+    return {
+        "total_caches": len(caches),
+        "total_entries": total_entries,
+        "total_hits": total_hits,
+        "total_misses": total_misses,
+        "overall_hit_rate": round(total_hits / total_lookups, 4) if total_lookups else 0.0,
+    }
+
+
+def get_system_metrics() -> Dict[str, Any]:
+    """Return lightweight process CPU/RAM/thread metrics without requiring external deps."""
+    rss_mb: Optional[float] = None
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        rss_mb = round(int(parts[1]) / 1024.0, 2)
+                    break
+    except Exception:
+        pass
+
+    if rss_mb is None:
+        try:
+            import psutil  # type: ignore
+            rss_mb = round(psutil.Process().memory_info().rss / (1024.0 * 1024.0), 2)
+        except Exception:
+            rss_mb = None
+
+    load_1m = load_5m = load_15m = None
+    if hasattr(os, "getloadavg"):
+        try:
+            l1, l5, l15 = os.getloadavg()
+            load_1m, load_5m, load_15m = round(l1, 3), round(l5, 3), round(l15, 3)
+        except OSError:
+            pass
+
+    return {
+        "cpu_count": os.cpu_count() or 1,
+        "threads": threading.active_count(),
+        "rss_mb": rss_mb,
+        "load_avg_1m": load_1m,
+        "load_avg_5m": load_5m,
+        "load_avg_15m": load_15m,
+    }
+
+
+class ServerMetrics:
+    """Thread-safe, O(1) bounded telemetry for HTTP requests and latencies."""
+
+    def __init__(self, latency_window: int = 500) -> None:
+        self._started_at = time.monotonic()
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self._total = 0
+        self._status_2xx = 0
+        self._status_4xx = 0
+        self._status_5xx = 0
+        self._latencies_ms: deque[float] = deque(maxlen=max(10, int(latency_window)))
+
+    def enter_request(self) -> None:
+        with self._lock:
+            self._in_flight += 1
+
+    def record_request(self, status_code: int, duration_s: float) -> None:
+        ms = max(0.0, float(duration_s) * 1000.0)
+        with self._lock:
+            self._in_flight = max(0, self._in_flight - 1)
+            self._total += 1
+            if 200 <= status_code < 400:
+                self._status_2xx += 1
+            elif 400 <= status_code < 500:
+                self._status_4xx += 1
+            elif status_code >= 500:
+                self._status_5xx += 1
+            self._latencies_ms.append(ms)
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            samples = sorted(self._latencies_ms)
+            count = len(samples)
+            avg_ms = round(sum(samples) / count, 2) if count else 0.0
+            p95_idx = min(count - 1, int(count * 0.95)) if count else 0
+            p95_ms = round(samples[p95_idx], 2) if count else 0.0
+            max_ms = round(samples[-1], 2) if count else 0.0
+            return {
+                "uptime_seconds": round(time.monotonic() - self._started_at, 1),
+                "requests": {
+                    "total": self._total,
+                    "in_flight": self._in_flight,
+                    "status_2xx": self._status_2xx,
+                    "status_4xx": self._status_4xx,
+                    "status_5xx": self._status_5xx,
+                    "avg_latency_ms": avg_ms,
+                    "p95_latency_ms": p95_ms,
+                    "max_latency_ms": max_ms,
+                },
+                "system": get_system_metrics(),
+                "caches": get_all_cache_stats(),
+            }
+
+
+SERVER_METRICS = ServerMetrics()

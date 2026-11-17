@@ -374,6 +374,8 @@ def get_top_reasons(model: Any, predictors: List[str], limit: int = 3) -> List[s
 RF_PREDICTORS = ["Close", "Volume", "SMA_50", "SMA_200", "RSI", "Momentum"]
 
 _supabase_local = threading.local()
+_supabase_log_lock = threading.Lock()
+_supabase_init_logged = False
 
 def _get_thread_local_supabase():
     return getattr(_supabase_local, "client", None)
@@ -421,12 +423,19 @@ class ThreadLocalSupabaseProxy:
 supabase = ThreadLocalSupabaseProxy()
 
 def _init_supabase(force=False):
+    global _supabase_init_logged
     if _get_thread_local_supabase() is None or force:
         url = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         if not key:
             key = os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-        print(f"DEBUG: Init Supabase. URL={'set' if url else 'MISSING'}, KEY={'set' if key else 'MISSING'}")
+        should_log_init = False
+        with _supabase_log_lock:
+            if not _supabase_init_logged:
+                _supabase_init_logged = True
+                should_log_init = True
+        if should_log_init:
+            print(f"DEBUG: Init Supabase. URL={'set' if url else 'MISSING'}, KEY={'set' if key else 'MISSING'}")
         if url and key:
             try:
                 try:
@@ -450,7 +459,8 @@ def _init_supabase(force=False):
                 )
                 new_client = create_client(url, key, options)
                 _set_thread_local_supabase(new_client)
-                print("DEBUG: Supabase client initialized successfully")
+                if should_log_init:
+                    print("DEBUG: Supabase client initialized successfully")
             except Exception as e:
                 print(f"Failed to init Supabase: {e}")
         else:
