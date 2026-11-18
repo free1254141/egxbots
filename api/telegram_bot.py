@@ -901,11 +901,58 @@ class TelegramBot:
                     except Exception as e:
                         self._log(f"Error checking user subscription: {e}")
 
+                    plan_label = "Pro"
+                    # Auto-activate 3-day Pro trial upon Telegram link if user is eligible and hasn't used a trial/paid plan before
+                    if not is_pro and not prior_tg_uid:
+                        try:
+                            prev_trial = supabase.table("subscription_trials").select("user_id").eq("user_id", uid).limit(1).execute()
+                            prev_ord = supabase.table("local_payment_orders").select("id").eq("user_id", uid).eq("status", "approved").limit(1).execute()
+                            prev_fnd = supabase.table("founders_offer_members").select("user_id").eq("user_id", uid).limit(1).execute()
+                            if not (prev_trial and prev_trial.data) and not (prev_ord and prev_ord.data) and not (prev_fnd and prev_fnd.data):
+                                rpc_data = None
+                                try:
+                                    rpc_res = supabase.rpc("start_pro_trial", {
+                                        "p_user_id": uid,
+                                        "p_canonical_email": None,
+                                        "p_ip_hash": None,
+                                        "p_device_hash": None,
+                                        "p_telegram_chat_id": str(chat_id),
+                                    }).execute()
+                                    rpc_data = getattr(rpc_res, "data", None)
+                                except Exception as rpc_exc:
+                                    arg0 = rpc_exc.args[0] if getattr(rpc_exc, "args", None) else None
+                                    if isinstance(arg0, dict) and "success" in arg0:
+                                        rpc_data = arg0
+                                    else:
+                                        try:
+                                            rpc_res2 = supabase.rpc("start_pro_trial", {"p_user_id": uid}).execute()
+                                            rpc_data = getattr(rpc_res2, "data", None)
+                                        except Exception as rpc_exc2:
+                                            arg1 = rpc_exc2.args[0] if getattr(rpc_exc2, "args", None) else None
+                                            if isinstance(arg1, dict) and "success" in arg1:
+                                                rpc_data = arg1
+                                if isinstance(rpc_data, dict) and rpc_data.get("success"):
+                                    is_pro = True
+                                    sub_end = rpc_data.get("expires_at")
+                                    plan_label = "تجربة Pro المجانية (3 أيام)"
+                                    try:
+                                        supabase.table("user_activity_events").insert({
+                                            "user_id": uid,
+                                            "event_name": "trial_started",
+                                            "path": "/telegram-bot",
+                                            "metadata": {"source": "telegram_auto_trial", "telegram_chat_id": str(chat_id)},
+                                        }).execute()
+                                    except Exception:
+                                        pass
+                        except Exception as auto_trial_err:
+                            self._log(f"Auto trial activation on Telegram link skipped: {auto_trial_err}")
+
                     if is_pro:
                         try:
                             from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
                             sent = send_pro_welcome_to_user_telegram(
                                 user_id=uid,
+                                plan_name=plan_label,
                                 subscription_end=str(sub_end) if sub_end else "",
                             )
                             if sent:

@@ -39,12 +39,15 @@ export async function createB2BTrialForUser(user: User, requestedTier?: unknown)
   const tier = normalizeB2BTier(requestedTier, "b2b_pro");
   const adminDb = getB2BServiceClient();
 
+  const botUsername = (process.env.TELEGRAM_BOT_USERNAME || "egxbots_bot").replace(/^@/, "");
+
   if (!isAdmin) {
     const { data: existingTrials, error: checkErr } = await adminDb
       .from("b2b_group_licenses")
-      .select("id, order_id, created_at")
+      .select("*")
       .eq("owner_user_id", user.id)
       .ilike("order_id", "B2B-TRIAL-%")
+      .order("created_at", { ascending: false })
       .limit(1);
 
     if (checkErr) {
@@ -52,6 +55,30 @@ export async function createB2BTrialForUser(user: User, requestedTier?: unknown)
     }
 
     if (existingTrials && existingTrials.length > 0) {
+      const existing = existingTrials[0];
+      // If the user created the trial but hasn't linked their Telegram group yet,
+      // refresh the 3-day window and return the activation modal data so they can link seamlessly!
+      if (!existing.telegram_chat_id) {
+        const refreshedExpiry = new Date(Date.now() + B2B_TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        const { data: updated } = await adminDb
+          .from("b2b_group_licenses")
+          .update({ status: "active", expires_at: refreshedExpiry, updated_at: new Date().toISOString() })
+          .eq("id", existing.id)
+          .select()
+          .single();
+        const activeLic = updated || existing;
+        const code = String(activeLic.id).slice(0, 8);
+        const url = `https://t.me/${botUsername}?startgroup=activate_${code}&admin=delete_messages+pin_messages`;
+        return {
+          ok: true as const,
+          status: 200,
+          license: activeLic,
+          activation_code: code,
+          connect_url: url,
+          message: "رخصتك التجريبية جاهزة! اضغط زر الربط لاختيار مجموعتك على تليجرام وتفعيل البوت فوراً.",
+        };
+      }
+
       return {
         ok: false as const,
         status: 400,
@@ -95,7 +122,6 @@ export async function createB2BTrialForUser(user: User, requestedTier?: unknown)
   }
 
   const activationCode = String(newLicense.id).slice(0, 8);
-  const botUsername = (process.env.TELEGRAM_BOT_USERNAME || "egxbots_bot").replace(/^@/, "");
   const connectUrl = `https://t.me/${botUsername}?startgroup=activate_${activationCode}&admin=delete_messages+pin_messages`;
 
   return {

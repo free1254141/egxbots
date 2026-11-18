@@ -927,7 +927,7 @@ async def _run_agentic_chat_stream_impl(
     round_count = 0
 
     # Single-Stock Fast-Track: when single-turn uncached query maps canonically to vip_stock_<SYM>,
-    # pre-fetch get_stock + get_stock_levels + get_news in parallel in Python so DeepSeek only needs 1 synthesis call.
+    # pre-fetch the 5 enriched single-stock tools in parallel in Python so DeepSeek only needs 1 synthesis call.
     fast_stock_match = (
         re.fullmatch(r"vip_stock_([A-Z0-9]{2,8})", candidate_cache_key)
         if (
@@ -942,29 +942,37 @@ async def _run_agentic_chat_stream_impl(
     )
     if fast_stock_match:
         fast_sym = fast_stock_match.group(1)
-        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': 'جاري جلب أحدث بيانات السوق (3 مصادر)...'}, ensure_ascii=False)}\n\n"
+        fast_tool_specs = [
+            ("get_stock", {"symbols": [fast_sym]}),
+            ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks"}),
+            ("get_news", {"symbols": [fast_sym]}),
+            ("get_disclosures", {"symbol": fast_sym}),
+            ("get_price_traps", {"symbol": fast_sym}),
+        ]
+        yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(fast_tool_specs)} مصادر)...'}, ensure_ascii=False)}\n\n"
         t_tools_start = time.time()
         fast_results = await asyncio.gather(
-            dispatch_tool("get_stock", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
-            dispatch_tool("get_stock_levels", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
-            dispatch_tool("get_news", {"symbols": [fast_sym]}, user_id=user_id, user_prompt=message, default_market=ui_exch),
+            *[
+                dispatch_tool(t_name, t_args, user_id=user_id, user_prompt=message, default_market=ui_exch)
+                for t_name, t_args in fast_tool_specs
+            ],
             return_exceptions=True,
         )
         t_tools = time.time() - t_tools_start
-        logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}): Tools(3)={t_tools:.2f}s (skipped Round 1 LLM)")
-        for r in fast_results:
-            if not isinstance(r, Exception):
+        logger.info(f"[agentic_chat] Single-Stock Fast-Track ({fast_sym}): Tools({len(fast_tool_specs)})={t_tools:.2f}s (skipped Round 1 LLM)")
+        fast_ctx_payload: Dict[str, Any] = {}
+        for (t_name, _), r in zip(fast_tool_specs, fast_results):
+            if isinstance(r, Exception):
+                fast_ctx_payload[t_name] = {"status": "error", "message": str(r)}
+            else:
                 _collect_structured_outputs(r, tables_data, recommendations_data, visuals_data)
+                fast_ctx_payload[t_name] = _strip_ui_only_fields_for_llm(r)
 
-        fast_ctx_payload = {
-            "get_stock": fast_results[0] if not isinstance(fast_results[0], Exception) else {"status": "error", "message": str(fast_results[0])},
-            "get_stock_levels": fast_results[1] if not isinstance(fast_results[1], Exception) else {"status": "error", "message": str(fast_results[1])},
-            "get_news": fast_results[2] if not isinstance(fast_results[2], Exception) else {"status": "error", "message": str(fast_results[2])},
-        }
         fast_ctx_msg = {
             "role": "system",
             "content": (
-                f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات لسهم {fast_sym} (نتائج get_stock و get_stock_levels و get_news):\n"
+                f"بيانات السوق الموثقة المستخرجة فعلياً من قاعدة البيانات لسهم {fast_sym} "
+                f"(نتائج {', '.join(t_name for t_name, _ in fast_tool_specs)}):\n"
                 f"{json.dumps(fast_ctx_payload, ensure_ascii=False)}\n"
                 "تم تنفيذ جميع الأدوات المطلوبة بنجاح. اكتب الآن التقرير التحليلي الكامل مباشرة للمستخدم اعتماداً على هذه الأرقام الموثقة فقط، وبدون كتابة أي وسوم استدعاء أدوات أو DSML."
             ),
@@ -975,8 +983,8 @@ async def _run_agentic_chat_stream_impl(
         if formatted_messages and formatted_messages[-1].get("role") == "user":
             fast_messages.append(formatted_messages[-1])
         formatted_messages = fast_messages
-        tools_executed_count += 3
-        usage_acc["tools_used"].extend(["get_stock", "get_stock_levels", "get_news"])
+        tools_executed_count += len(fast_tool_specs)
+        usage_acc["tools_used"].extend([t_name for t_name, _ in fast_tool_specs])
         max_rounds = 0  # Proceed straight to DeepSeek single-call synthesis without tools schema
 
     active_tools_schema = (
@@ -1236,14 +1244,13 @@ async def _run_agentic_chat_stream_impl(
                     )
                     history_end_idx = history_start_idx
 
-                # If Round 1 already fetched both stock price/indicators & levels, go straight to synthesis
+                # If Round 1 already fetched stock price/indicators/levels (via get_stock), go straight to synthesis
                 called_names = {tc.get("function", {}).get("name", "") for tc in tool_calls}
                 if (
                     round_count == 1
                     and candidate_cache_key
                     and re.fullmatch(r"vip_stock_[A-Z0-9]{2,8}", candidate_cache_key)
                     and "get_stock" in called_names
-                    and "get_stock_levels" in called_names
                 ):
                     break
 

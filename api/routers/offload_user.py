@@ -3344,9 +3344,19 @@ async def post_subscription_trial(request: Request):
         rpc_res = sb.rpc("start_pro_trial", {"p_user_id": uid, "p_canonical_email": abuse["canonical_email"] or None, "p_ip_hash": ip_h, "p_device_hash": dev_h, "p_telegram_chat_id": tg_id}).execute()
         rpc_data = getattr(rpc_res, "data", None)
     except Exception as exc:
-        if "PGRST202" in str(exc) or "start_pro_trial" in str(exc):
-            rpc_res2 = sb.rpc("start_pro_trial", {"p_user_id": uid}).execute()
-            rpc_data = getattr(rpc_res2, "data", None)
+        first_arg = exc.args[0] if getattr(exc, "args", None) else None
+        if isinstance(first_arg, dict) and "success" in first_arg:
+            rpc_data = first_arg
+        elif "PGRST202" in str(exc) or "start_pro_trial" in str(exc):
+            try:
+                rpc_res2 = sb.rpc("start_pro_trial", {"p_user_id": uid}).execute()
+                rpc_data = getattr(rpc_res2, "data", None)
+            except Exception as exc2:
+                arg2 = exc2.args[0] if getattr(exc2, "args", None) else None
+                if isinstance(arg2, dict) and "success" in arg2:
+                    rpc_data = arg2
+                else:
+                    return JSONResponse({"ok": False, "error": str(exc2)}, status_code=400, headers=_PRIVATE_NO_STORE)
         else:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400, headers=_PRIVATE_NO_STORE)
 
@@ -3366,7 +3376,36 @@ async def post_subscription_trial(request: Request):
     except Exception:
         pass
 
-    return JSONResponse({"ok": True, "success": True, "message": rpc_data.get("message") or "تم تفعيل تجربة Pro بنجاح!", "expires_at": rpc_data.get("expires_at")}, headers=_PRIVATE_NO_STORE)
+    invite_link: Optional[str] = None
+    telegram_sent = False
+    trial_expires_at = str(rpc_data.get("expires_at") or (datetime.now(timezone.utc) + timedelta(days=3)).isoformat())
+    try:
+        from api.telegram_pro_invites import ensure_pro_invite, send_pro_welcome_to_user_telegram
+        inv_info = ensure_pro_invite(uid, trial_expires_at) or {}
+        invite_link = str(inv_info.get("invite_link") or "").strip() or None
+        if tg_id:
+            telegram_sent = bool(
+                send_pro_welcome_to_user_telegram(
+                    user_id=uid,
+                    invite_link=invite_link or "",
+                    plan_name="تجربة Pro المجانية (3 أيام)",
+                    subscription_end=trial_expires_at,
+                )
+            )
+    except Exception:
+        pass
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "success": True,
+            "message": rpc_data.get("message") or "تم تفعيل تجربة Pro بنجاح!",
+            "expires_at": rpc_data.get("expires_at"),
+            "invite_link": invite_link,
+            "telegram_sent": telegram_sent,
+        },
+        headers=_PRIVATE_NO_STORE,
+    )
 
 
 # ===========================================================================

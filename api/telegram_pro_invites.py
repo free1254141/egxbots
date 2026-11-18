@@ -279,13 +279,29 @@ def record_vip_channel_join(telegram_user_id: int, invite_link: Optional[str] = 
         .select("current_period_end")
         .eq("user_id", user_id)
         .in_("plan_id", ACTIVE_PRO_PLAN_IDS)
-        .eq("status", "active")
+        .in_("status", ["active", "trialing"])
         .order("current_period_end", desc=True)
         .limit(1)
         .maybe_single()
         .execute()
     )
     end = _parse_dt((sub.data or {}).get("current_period_end") if sub else None)
+    if not end or end <= datetime.now(timezone.utc):
+        try:
+            trial_res = (
+                supabase.table("subscription_trials")
+                .select("expires_at")
+                .eq("user_id", user_id)
+                .order("expires_at", desc=True)
+                .limit(1)
+                .maybe_single()
+                .execute()
+            )
+            trial_end = _parse_dt((trial_res.data or {}).get("expires_at") if trial_res else None)
+            if trial_end and (not end or trial_end > end):
+                end = trial_end
+        except Exception:
+            pass
     existing = _load_invite_row(user_id)
     bound_id = (existing or {}).get("vip_telegram_user_id")
     # A one-member invite can be reused after its first member leaves. Bind it
@@ -359,7 +375,7 @@ def sync_expired_subscriptions_status() -> int:
         res = (
             supabase.table("subscriptions")
             .update({"status": "canceled", "updated_at": now_iso})
-            .eq("status", "active")
+            .in_("status", ["active", "trialing"])
             .lt("current_period_end", now_iso)
             .execute()
         )

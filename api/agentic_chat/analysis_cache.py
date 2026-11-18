@@ -501,6 +501,14 @@ def resolve_tool_call_to_cache_key(tool_name: str, args: Dict[str, Any]) -> Opti
             return f"vip_news_{sym}" if sym else None
         return "vip_market_news"
 
+    # 10. Price Traps Radar (single stock or market-wide)
+    if tool_name == "get_price_traps":
+        raw_sym = safe_args.get("symbol")
+        if raw_sym and str(raw_sym).strip().upper() not in _MARKET_KEYWORDS:
+            sym = _normalize_ticker_for_cache(raw_sym)
+            return f"vip_traps_{sym}" if sym else None
+        return "vip_price_traps"
+
     return None
 
 
@@ -534,14 +542,27 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
     if len(set(keys)) == 1:
         return keys[0]
 
-    # Parallel single-stock tools strictly limited to {get_stock, get_stock_levels, get_news, get_disclosures} for one symbol
-    stock_tool_names = {"get_stock", "get_stock_levels", "get_news", "get_disclosures"}
+    # Parallel single-stock tools for one symbol (technical + fair value + news/disclosures + traps)
+    stock_tool_names = {
+        "get_stock",
+        "get_stock_levels",
+        "get_fair_value",
+        "get_news",
+        "get_disclosures",
+        "get_price_traps",
+    }
     names_set = {p[0] for p in parsed}
-    if names_set.issubset(stock_tool_names):
+    if names_set.issubset(stock_tool_names) and (
+        "get_stock" in names_set or "get_stock_levels" in names_set
+    ):
         syms = set()
         for _t_name, t_args, k in parsed:
-            # Ensure news/disclosures also target the stock itself (not generic market news)
+            # Ensure supporting tools target the stock itself (not market-wide screens)
             if _t_name in ("get_news", "get_disclosures") and k == "vip_market_news":
+                return None
+            if _t_name == "get_fair_value" and k == "vip_fair_value_undervalued":
+                return None
+            if _t_name == "get_price_traps" and k == "vip_price_traps":
                 return None
             raw_sym = t_args.get("symbol")
             if not raw_sym and isinstance(t_args.get("symbols"), list) and len(t_args["symbols"]) == 1:

@@ -140,3 +140,24 @@ def test_deepseek_usage_and_cost_calculation():
     cached_final = _finalize_usage_cost(_new_usage_accumulator(), cached=True)
     assert cached_final["cost_usd"] == 0.0
     assert cached_final["vip_response_cached"] is True
+
+
+def test_resolve_enriched_single_stock_tool_calls_to_cache_key():
+    import json
+    from api.agentic_chat.analysis_cache import resolve_tool_calls_to_cache_key
+
+    batch = [
+        {"function": {"name": "get_stock", "arguments": json.dumps({"symbols": ["SEIG"], "is_contextual_followup": False})}},
+        {"function": {"name": "get_fair_value", "arguments": json.dumps({"symbols": ["SEIG"], "mode": "specific_stocks", "is_contextual_followup": False})}},
+        {"function": {"name": "get_news", "arguments": json.dumps({"symbols": ["SEIG"], "is_contextual_followup": False})}},
+        {"function": {"name": "get_disclosures", "arguments": json.dumps({"symbol": "SEIG", "is_contextual_followup": False})}},
+        {"function": {"name": "get_price_traps", "arguments": json.dumps({"symbol": "SEIG"})}},
+    ]
+    assert resolve_tool_calls_to_cache_key(batch) == "vip_stock_SEIG"
+
+    # Market-wide trap/fair-value mixed with stock should NOT cache under vip_stock_SEIG
+    mixed_batch = [
+        {"function": {"name": "get_stock", "arguments": json.dumps({"symbols": ["SEIG"], "is_contextual_followup": False})}},
+        {"function": {"name": "get_price_traps", "arguments": json.dumps({"market": "EGX"})}},
+    ]
+    assert resolve_tool_calls_to_cache_key(mixed_batch) is None
