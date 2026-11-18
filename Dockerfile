@@ -31,4 +31,4 @@ ENV OMP_NUM_THREADS=1 \
 ENV PORT=7860
 EXPOSE 10000
 
-CMD ["sh", "-c", "python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers --forwarded-allow-ips='*'"]

@@ -1036,6 +1036,33 @@ app.add_middleware(
 )
 
 
+class _StripApiTrailingSlashMiddleware:
+    """Normalize trailing slashes on /api/* paths before FastAPI emits 307 redirects.
+
+    Vercel rewrites can forward `/api/portfolio/` or `/api/automations/` to HF;
+    stripping the trailing slash in-place avoids 307 Location redirects to the
+    backend origin (which would trigger browser Mixed Content / CORS errors).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if len(path) > 5 and path.startswith("/api/") and path.endswith("/"):
+                trimmed = path.rstrip("/")
+                scope = dict(scope)
+                scope["path"] = trimmed
+                raw_path = scope.get("raw_path")
+                if isinstance(raw_path, bytes) and raw_path.endswith(b"/"):
+                    scope["raw_path"] = raw_path.rstrip(b"/")
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_StripApiTrailingSlashMiddleware)
+
+
 
 
 

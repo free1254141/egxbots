@@ -517,10 +517,46 @@ def process_support_message_with_deepseek(
     msg = choice.get("message", {})
     tool_calls = msg.get("tool_calls") or []
 
+    def _strip_dsml(text: Optional[str]) -> Optional[str]:
+        if not text:
+            return None
+        from api.agentic_chat.auth_guard import strip_dsml
+        return strip_dsml(text) or None
+
+    def _coerce_dsml_arg(param_name: str, raw_val: str) -> Any:
+        v = raw_val.strip()
+        if param_name in {"duration_days", "limit"}:
+            try:
+                return int(v)
+            except Exception:
+                return v
+        return v
+
+    # Fallback: if DeepSeek emitted raw DSML markup in content instead of structured tool_calls
+    if not tool_calls and isinstance(msg.get("content"), str) and "dsml" in msg["content"].lower():
+        invokes = re.findall(
+            r'<[\s｜|]*DSML[\s｜|]*invoke\s+name=["\']([^"\']+)["\'][^>]*>(.*?)</[\s｜|]*DSML[\s｜|]*invoke>',
+            msg["content"],
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        for idx, (inv_name, inv_body) in enumerate(invokes):
+            params = re.findall(
+                r'<[\s｜|]*DSML[\s｜|]*parameter\s+name=["\']([^"\']+)["\'][^>]*>(.*?)</[\s｜|]*DSML[\s｜|]*parameter>',
+                inv_body,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            fargs = {k.strip(): _coerce_dsml_arg(k.strip(), v) for k, v in params}
+            tool_calls.append({
+                "id": f"dsml_fallback_{idx}",
+                "type": "function",
+                "function": {"name": inv_name.strip(), "arguments": json.dumps(fargs, ensure_ascii=False)},
+            })
+        if tool_calls:
+            msg = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+
     # If no tools called, return direct synthesis
     if not tool_calls:
-        reply_content = msg.get("content")
-        return reply_content.strip() if reply_content else None
+        return _strip_dsml(msg.get("content"))
 
     # Execute tools iteratively (Round 1)
     messages.append(msg)
@@ -547,6 +583,8 @@ def process_support_message_with_deepseek(
     synthesis_payload = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
+        "tools": SUPPORT_AI_TOOLS,
+        "tool_choice": "none",
         "temperature": 0.2,
         "max_tokens": 1200
     }
@@ -562,7 +600,7 @@ def process_support_message_with_deepseek(
             final_body = json.loads(resp.read().decode("utf-8"))
         final_choice = (final_body.get("choices") or [{}])[0]
         final_text = final_choice.get("message", {}).get("content")
-        return final_text.strip() if final_text else None
+        return _strip_dsml(final_text)
     except Exception as exc:
         print(f"[SUPPORT_AI] DeepSeek synthesis error: {exc}")
         return None
