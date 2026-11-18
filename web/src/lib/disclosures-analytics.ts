@@ -417,8 +417,8 @@ export function analyzeDisclosures(
       }
     }
 
-    // 2. Process Insider Trading Operations (Buys & Sells)
-    if (!sym || (act !== "buy" && act !== "sell")) {
+    // 2. Process Insider Trading Operations (Buys & Sells with verified share counts)
+    if (!sym || (act !== "buy" && act !== "sell") || shares <= 0) {
       continue;
     }
 
@@ -747,11 +747,11 @@ export function groupDisclosuresByStock(
       ? priceInfo.close
       : 1.0;
 
-    if (act === "buy") {
+    if (act === "buy" && shares > 0) {
       group.has_insider_trades = true;
       group.total_buy_shares += shares;
       group.total_buy_value_egp += shares * execPrice;
-    } else if (act === "sell") {
+    } else if (act === "sell" && shares > 0) {
       group.has_insider_trades = true;
       group.total_sell_shares += shares;
       group.total_sell_value_egp += shares * execPrice;

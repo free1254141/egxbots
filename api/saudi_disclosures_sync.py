@@ -21,7 +21,11 @@ import requests
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from api.saudi_stock_aliases import SAUDI_STOCK_NAMES_AR
+from api.saudi_stock_aliases import (
+    SAUDI_STOCK_NAMES_AR,
+    extract_all_saudi_symbols,
+    resolve_saudi_symbol,
+)
 
 _HEADERS = {
     "User-Agent": (
@@ -83,23 +87,63 @@ def _build_stock_matcher(sb: Client) -> List[Tuple[str, str, List[str]]]:
     return entries
 
 
+def _clean_saudi_title(raw_title: str, source_name: str = "") -> str:
+    title = (raw_title or "").strip()
+    if " - " in title:
+        left, right = title.rsplit(" - ", 1)
+        if source_name or any(k in right for k in ("ارقام", "أرقام", "معلومات", "تداول", "مباشر", "العربية")):
+            title = left.strip()
+    title = re.sub(r"\s*-\s*ارقام\s*:.*$", "", title).strip()
+    title = re.sub(r"\s*بواسطة\s+المتداول.*$", "", title).strip()
+    return title
+
+
 def _match_symbol(title: str, matcher: List[Tuple[str, str, List[str]]]) -> Tuple[Optional[str], str]:
+    matcher_names = {sym: disp for sym, disp, _ in matcher}
+
     # 1. Exact 4-digit Tadawul code in title
     m_code = re.search(r"\b([1-8]\d{3})\b", title)
     if m_code:
         code = m_code.group(1)
-        for sym, disp, _ in matcher:
-            if sym == code:
-                return sym, disp
+        if code in matcher_names:
+            return code, matcher_names[code]
+        if code in SAUDI_STOCK_NAMES_AR:
+            return code, SAUDI_STOCK_NAMES_AR[code]
 
-    # 2. Best Arabic/English company name match
+    # 2. Position-ordered word-boundary alias extraction (earliest company in headline wins)
+    extracted = extract_all_saudi_symbols(title)
+    if extracted:
+        sym = extracted[0]
+        return sym, matcher_names.get(sym) or SAUDI_STOCK_NAMES_AR.get(sym, sym)
+
+    resolved = resolve_saudi_symbol(title)
+    if resolved:
+        return resolved, matcher_names.get(resolved) or SAUDI_STOCK_NAMES_AR.get(resolved, resolved)
+
+    # 3. Fallback: DB company aliases scored by earliest position, longest alias on ties
     norm_title = _normalize_ar(title)
+    best_match: Optional[Tuple[int, int, str, str]] = None
     for sym, disp, aliases in matcher:
         for alias in aliases:
-            if len(alias) >= 4 and alias in norm_title:
-                return sym, disp
+            if len(alias) < 4:
+                continue
+            pos = norm_title.find(alias)
+            if pos != -1:
+                cand = (pos, -len(alias), sym, disp)
+                if best_match is None or cand < best_match:
+                    best_match = cand
+
+    if best_match is not None:
+        return best_match[2], best_match[3]
 
     return None, "السوق السعودي (تداول)"
+
+
+_EXPLICIT_BEAR_PHRASES = (
+    "تراجع ارباح", "انخفاض ارباح", "هبوط ارباح", "تراجع صافي", "انخفاض صافي",
+    "هبوط صافي", "تراجعت", "انخفضت", "يهبط", "خسائر", "خساره", "تراجع ", "انخفاض ",
+    "تهبط ", "تنخفض ", "تخفض ارباح",
+)
 
 
 def _classify_disclosure(title: str) -> Tuple[str, str, str, str]:
@@ -120,20 +164,37 @@ def _classify_disclosure(title: str) -> Tuple[str, str, str, str]:
     else:
         d_type = "material_event"
 
-    # Sentiment & action
-    bull_words = ["ارتفاع", "نمو", "قفزه", "توزيع", "عقد", "ترسيه", "فوز", "استحواذ", "ارباح", "ربح", "منحه", "ايجابي"]
-    bear_words = ["خساره", "خسائر", "انخفاض", "تراجع", "هبوط", "خفض راس", "ايقاف", "تعليق", "تسييل", "بيع"]
-    bull_hits = sum(1 for w in bull_words if w in t)
-    bear_hits = sum(1 for w in bear_words if w in t)
+    # Sentiment & action: check explicit earnings-drop / loss phrases BEFORE generic bullish words like "ارباح"
+    explicit_bear_phrases = list(_EXPLICIT_BEAR_PHRASES)
+    explicit_bull_phrases = [
+        "ارتفاع ارباح", "نمو ارباح", "قفزه", "تقفز", "تتجاوز التوقعات", "توزيع ارباح",
+        "توزيعات نقديه", "ترسيه", "توقيع عقد", "توقع عقد", "موافقه على زياده راس المال",
+    ]
+    bull_words = ["ارتفاع", "نمو", "قفزه", "توزيع", "عقد", "ترسيه", "فوز", "استحواذ", "منحه", "ايجابي"]
+    bear_words = ["خساره", "خسائر", "انخفاض", "تراجع", "هبوط", "خفض راس", "ايقاف", "تعليق", "تسييل", "بيع", "ضغوط"]
 
-    if bull_hits > bear_hits:
-        sentiment = "bullish"
-        action_type = "buy" if d_type in ("shareholding_change", "dividend") else "general"
-    elif bear_hits > bull_hits:
+    has_explicit_bear = any(p in t for p in explicit_bear_phrases)
+    has_explicit_bull = any(p in t for p in explicit_bull_phrases)
+
+    if has_explicit_bear and not any(k in t for k in ["تتجاوز التوقعات", "توزيع"]):
         sentiment = "bearish"
-        action_type = "sell" if d_type == "shareholding_change" else "general"
+    elif has_explicit_bull and not has_explicit_bear:
+        sentiment = "bullish"
     else:
-        sentiment = "neutral"
+        bull_hits = sum(1 for w in bull_words if w in t)
+        bear_hits = sum(1 for w in bear_words if w in t)
+        if bull_hits > bear_hits:
+            sentiment = "bullish"
+        elif bear_hits > bull_hits:
+            sentiment = "bearish"
+        else:
+            sentiment = "neutral"
+
+    if d_type == "shareholding_change" and sentiment == "bullish":
+        action_type = "buy"
+    elif d_type == "shareholding_change" and sentiment == "bearish":
+        action_type = "sell"
+    else:
         action_type = "general"
 
     type_labels = {
@@ -147,6 +208,84 @@ def _classify_disclosure(title: str) -> Tuple[str, str, str, str]:
     sent_label = "إيجابي" if sentiment == "bullish" else ("سلبي يستدعي الحذر" if sentiment == "bearish" else "محايد للمتابعة")
     summary = f"{type_labels.get(d_type, 'إعلان تداول')}: {title}. الأثر المبدئي يُصنف كـ {sent_label} ويُستحسن مراجعة تفاصيل الإعلان الكاملة على تداول."
     return d_type, sentiment, action_type, summary
+
+
+_SAUDI_TITLE_STOPWORDS = {
+    "في", "عن", "من", "الي", "على", "خلال", "بقيمه", "نسبه", "بنسبه", "الربع",
+    "الاول", "الثاني", "الثالث", "الرابع", "عام", "السعوديه", "شركه", "تعلن",
+    "ريال", "دولار", "مليون", "مليار", "تداول", "الاسهم", "السعودي",
+}
+
+
+def _extract_event_features(title: str) -> Tuple[str, set, set]:
+    norm = _normalize_ar(title)
+    clean = re.sub(r"[^\w\s\u0600-\u06FF.]", " ", norm)
+    tokens = {
+        tok for tok in clean.split()
+        if len(tok) >= 2 and tok not in _SAUDI_TITLE_STOPWORDS and not tok.isdigit()
+    }
+    nums = {
+        n for n in re.findall(r"\d+(?:\.\d+)?", norm)
+        if n not in {"1", "2", "3", "4", "9", "2024", "2025", "2026", "2027"}
+    }
+    compact = " ".join(clean.split())
+    return compact, tokens, nums
+
+
+def _is_duplicate_saudi_event(candidate: Dict[str, Any], existing_rows: List[Dict[str, Any]]) -> bool:
+    cand_url = (candidate.get("source_url") or "").strip()
+    cand_sym = (candidate.get("symbol") or "").strip().upper()
+    cand_type = (candidate.get("disclosure_type") or "").strip().lower()
+    cand_sent = (candidate.get("sentiment") or "").strip().lower()
+    cand_date_s = (candidate.get("disclosure_date") or "")[:10]
+    cand_compact, cand_tokens, cand_nums = _extract_event_features(candidate.get("title") or "")
+
+    try:
+        cand_dt = dt.date.fromisoformat(cand_date_s) if cand_date_s else None
+    except ValueError:
+        cand_dt = None
+
+    for ex in existing_rows:
+        ex_url = (ex.get("source_url") or "").strip()
+        if cand_url and ex_url and cand_url == ex_url:
+            return True
+
+        ex_sym = (ex.get("symbol") or "").strip().upper()
+        if not cand_sym or cand_sym != ex_sym:
+            continue
+
+        ex_compact, ex_tokens, ex_nums = _extract_event_features(ex.get("title") or "")
+        if cand_compact and cand_compact == ex_compact:
+            return True
+
+        ex_date_s = (ex.get("disclosure_date") or "")[:10]
+        try:
+            ex_dt = dt.date.fromisoformat(ex_date_s) if ex_date_s else None
+        except ValueError:
+            ex_dt = None
+
+        day_diff = abs((cand_dt - ex_dt).days) if (cand_dt and ex_dt) else 0
+        if day_diff > 7:
+            continue
+
+        ex_type = (ex.get("disclosure_type") or "").strip().lower()
+        ex_sent = (ex.get("sentiment") or "").strip().lower()
+        if (
+            cand_type in ("earnings", "dividend", "capital_change", "board_decision")
+            and cand_type == ex_type
+            and cand_sent == ex_sent
+        ):
+            return True
+
+        if day_diff <= 5:
+            if cand_nums and ex_nums and (cand_nums & ex_nums):
+                return True
+            if cand_tokens and ex_tokens:
+                union = cand_tokens | ex_tokens
+                if union and (len(cand_tokens & ex_tokens) / len(union)) >= 0.60:
+                    return True
+
+    return False
 
 
 def _enrich_with_deepseek(items: List[Dict[str, Any]], ds_key: str) -> None:
@@ -183,10 +322,27 @@ def _enrich_with_deepseek(items: List[Dict[str, Any]], ds_key: str) -> None:
             if isinstance(idx, int) and 0 <= idx < len(items):
                 if entry.get("ai_summary"):
                     items[idx]["ai_summary"] = str(entry["ai_summary"]).strip()
+                norm_title = _normalize_ar(items[idx].get("title") or "")
+                is_explicit_bear = (
+                    any(p in norm_title for p in _EXPLICIT_BEAR_PHRASES)
+                    and "تتجاوز التوقعات" not in norm_title
+                )
                 if entry.get("sentiment") in ("bullish", "bearish", "neutral"):
-                    items[idx]["sentiment"] = entry["sentiment"]
+                    if is_explicit_bear and items[idx].get("sentiment") == "bearish":
+                        items[idx]["sentiment"] = "bearish"
+                    else:
+                        items[idx]["sentiment"] = entry["sentiment"]
+                if not items[idx].get("shares_count"):
+                    items[idx]["action_type"] = "general"
     except Exception:
         pass
+
+
+_NON_SAUDI_KEYWORDS = (
+    "جنيه", "البورصة المصرية", "egx", "القاهرة للدواجن", "الرقابة المالية",
+    "الصناعات التحويلية", "بورصة الكويت", "سوق دبي", "سوق أبوظبي", "بورصة قطر",
+    "مسقط", "دينار", "درهم",
+)
 
 
 def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
@@ -219,8 +375,7 @@ def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
 
             raw_title = title_el.text.strip()
             source_name = source_el.text.strip() if source_el is not None and source_el.text else "تداول / أخبار"
-            if " - " in raw_title and source_name:
-                raw_title = raw_title.rsplit(" - ", 1)[0].strip()
+            raw_title = _clean_saudi_title(raw_title, source_name)
             link = link_el.text.strip()
 
             if link in seen_urls or raw_title in seen_titles:
@@ -239,7 +394,7 @@ def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
                     pass
 
             raw_title_lower = raw_title.lower()
-            if any(bad in raw_title_lower for bad in ["جنيه", "البورصة المصرية", "egx", "القاهرة للدواجن", "الرقابة المالية"]):
+            if any(bad in raw_title_lower for bad in _NON_SAUDI_KEYWORDS):
                 continue
 
             sym, company_name = _match_symbol(raw_title, matcher)
@@ -270,13 +425,26 @@ def run_saudi_disclosures_sync(days_back: int = 30) -> Dict[str, Any]:
 
         time.sleep(0.2)
 
-    # Sort newest first and enrich top announcements via DeepSeek
+    # Sort newest first and filter out both DB & cross-source duplicates before LLM enrichment
     rows.sort(key=lambda r: r["disclosure_date"], reverse=True)
-    _enrich_with_deepseek(rows[:20], ds_key)
+    since_45d = (dt.date.today() - dt.timedelta(days=45)).isoformat()
+    existing_res = (
+        sb.table("egx_disclosures")
+        .select("id, symbol, disclosure_type, disclosure_date, title, sentiment, source_url")
+        .gte("disclosure_date", since_45d)
+        .limit(1000)
+        .execute()
+    )
+    existing_pool: List[Dict[str, Any]] = list(existing_res.data or [])
+    new_rows: List[Dict[str, Any]] = []
+    for candidate in rows:
+        if _is_duplicate_saudi_event(candidate, existing_pool):
+            continue
+        existing_pool.append(candidate)
+        new_rows.append(candidate)
 
-    existing_res = sb.table("egx_disclosures").select("source_url").limit(1000).execute()
-    existing_urls = {r.get("source_url") for r in (existing_res.data or []) if r.get("source_url")}
-    new_rows = [r for r in rows if r.get("source_url") not in existing_urls]
+    _enrich_with_deepseek(new_rows[:20], ds_key)
+
     saved = 0
     for i in range(0, len(new_rows), 25):
         chunk = new_rows[i:i + 25]

@@ -438,6 +438,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     # Avoids spinning up an asyncio loop or firing duplicate DeepSeek requests when multiple users ask the same stock question
     early_cache_key: Optional[str] = None
     inflight_lock: Optional[threading.Lock] = None
+    usage_stats: Optional[Dict[str, Any]] = None
     if not images and not reply_text and not user_info.get("has_user_rules"):
         try:
             from api.agentic_chat.analysis_cache import (
@@ -510,6 +511,7 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                     tbls = []
                     stream_cached = False
                     stream_cache_key = None
+                    stream_usage = None
                     async for sse_chunk in run_agentic_chat_stream(
                         message=query,
                         history=formatted_history,
@@ -540,18 +542,20 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
                                             stream_cached = True
                                         if ev.get("cache_key"):
                                             stream_cache_key = ev.get("cache_key")
+                                        if isinstance(ev.get("usage"), dict):
+                                            stream_usage = ev.get("usage")
                                 except Exception:
                                     pass
-                    return full, tbls, stream_cached, stream_cache_key
+                    return full, tbls, stream_cached, stream_cache_key, stream_usage
 
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        reply_text, tables, was_cached, used_cache_key = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
+                        reply_text, tables, was_cached, used_cache_key, usage_stats = _VIP_CHAT_EXECUTOR.submit(lambda: asyncio.run(_run_agentic())).result(timeout=65)
                     else:
-                        reply_text, tables, was_cached, used_cache_key = loop.run_until_complete(_run_agentic())
+                        reply_text, tables, was_cached, used_cache_key, usage_stats = loop.run_until_complete(_run_agentic())
                 except RuntimeError:
-                    reply_text, tables, was_cached, used_cache_key = asyncio.run(_run_agentic())
+                    reply_text, tables, was_cached, used_cache_key, usage_stats = asyncio.run(_run_agentic())
         except Exception as exc:
             logger.warning(f"[NATIVE_VIP_CHAT] Agentic pipeline error: {exc}")
         finally:
@@ -606,6 +610,11 @@ def handle_native_vip_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     if used_cache_key:
         common_meta["cache_key"] = used_cache_key
+    if was_cached and usage_stats is None:
+        from api.agentic_chat.pipeline import _finalize_usage_cost, _new_usage_accumulator
+        usage_stats = _finalize_usage_cost(_new_usage_accumulator(), cached=True)
+    if isinstance(usage_stats, dict) and usage_stats:
+        common_meta["usage"] = usage_stats
 
     # Record session & messages in Supabase for Admin Control Panel visibility (Support & AI tab)
     def _persist_admin_audit():

@@ -150,12 +150,19 @@ STOCK_MAP = {
     'شارم دريمز': ('SDTI', 'شارم دريمز للاستثمار السياحي'),
     'رمكو': ('RTVC', 'رمكو لإنشاء القرى السياحية'),
     'المصرية للمنتجعات': ('EGTS', 'المصرية للمنتجعات السياحية'),
+    'فالمور': ('VLMR', 'فالمور القابضة للاستثمار'),
+    'الحديد والصلب للمناجم': ('ISMQ', 'الحديد والصلب للمناجم والمحاجر'),
+    'القناة للتوكيلات': ('CSAG', 'القناة للتوكيلات الملاحية'),
+    'العبور للاستثمار': ('OBRI', 'العبور للاستثمار العقاري'),
 }
 
 GULF_EXCLUDE_KEYWORDS = [
     'ريال', 'دينار', 'درهم', 'تاسي', 'بورصة الكويت', 'بورصة مسقط',
     'سوق دبي', 'أبوظبي للأوراق', 'مسقط للغازات', 'صافولا', 'ريدان',
-    'أمانة للتأمين', 'تداول السعودية', 'سوق الأسهم السعودية'
+    'أمانة للتأمين', 'تداول السعودية', 'سوق الأسهم السعودية',
+    'إنفيديا', 'انفيديا', 'هوانج', 'هوانغ', 'سيمنز', 'وول ستريت', 'الفيدرالي',
+    'DEWA', 'TABREED', 'ALANSARI', 'سدكو', 'وربة', 'الريان', 'أدنوك',
+    'أخبار تونس', 'أخبار السعودية', 'أخبار الدول', 'يحدث الآن'
 ]
 
 def _norm_ar(s: str) -> str:
@@ -457,22 +464,17 @@ def build_disclosures_dataset(max_count=150):
             
         for title, it in raw_data.items():
             t = re.sub(r'\s*-\s*معلومات مباشر.*$', '', title).strip()
+            if any(g in t for g in GULF_EXCLUDE_KEYWORDS) and '.CA' not in t:
+                continue
             link = it.get('link')
             pub = it.get('pub')
             parsed_d = parse_date(pub)
             
-            # Skip if already added
+            # Skip if already added or has no matched EGX stock symbol
             sym, official_name = match_stock(t)
-            
-            # Action type
-            action_type = 'general'
-            if 'خفض حصته' in t or 'تراجع' in t or 'بيع' in t:
-                action_type = 'sell'
-            elif 'رفع حصته' in t or 'شراء' in t or 'زيادة' in t:
-                action_type = 'buy'
-            elif 'مجلس إدارة' in t or 'قرارات' in t:
-                action_type = 'resolution'
-                
+            if not sym:
+                continue
+
             # Disclosure type
             d_type = 'material_event'
             if 'تعاملات الداخليين' in t:
@@ -483,13 +485,23 @@ def build_disclosures_dataset(max_count=150):
                 d_type = 'board_resolution'
             elif 'أرباح' in t or 'قوائم' in t:
                 d_type = 'financial_results'
+
+            # Action type: only assign buy/sell for verified insider/shareholding disclosures with shares
+            action_type = 'general'
+            if d_type in ('insider_trading', 'major_shareholders'):
+                if any(k in t for k in ('خفض حصته', 'بيع', 'تقليص', 'تخارج')):
+                    action_type = 'sell'
+                elif any(k in t for k in ('رفع حصته', 'شراء', 'زيادة حصة', 'تجميع')):
+                    action_type = 'buy'
+            elif 'مجلس إدارة' in t or 'قرارات' in t:
+                action_type = 'resolution'
                 
             key = (sym, parsed_d, t[:50])
             if key not in seen:
                 seen.add(key)
                 disclosures.append({
                     'symbol': sym,
-                    'company_name': official_name or (sym if sym else 'البورصة المصرية'),
+                    'company_name': official_name or sym,
                     'disclosure_type': d_type,
                     'disclosure_date': parsed_d,
                     'title': t,

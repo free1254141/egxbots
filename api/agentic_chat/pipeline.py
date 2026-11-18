@@ -58,6 +58,80 @@ from api.agentic_chat.analysis_cache import (
 
 logger = logging.getLogger("agentic_chat")
 
+# Official DeepSeek-V3 (deepseek-chat) API pricing in USD per token
+DEEPSEEK_CACHE_HIT_USD_PER_TOKEN = 0.028 / 1_000_000
+DEEPSEEK_CACHE_MISS_USD_PER_TOKEN = 0.28 / 1_000_000
+DEEPSEEK_OUTPUT_USD_PER_TOKEN = 0.42 / 1_000_000
+
+
+def _new_usage_accumulator() -> Dict[str, Any]:
+    return {
+        "llm_rounds": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 0,
+        "tools_used": [],
+    }
+
+
+def _accumulate_deepseek_usage(
+    acc: Dict[str, Any],
+    raw_usage: Optional[Dict[str, Any]],
+    tools_called: Optional[List[str]] = None,
+) -> None:
+    """Aggregate DeepSeek response usage metrics across tool-calling and synthesis rounds."""
+    if isinstance(raw_usage, dict) and raw_usage:
+        acc["llm_rounds"] = int(acc.get("llm_rounds", 0)) + 1
+        prompt_t = int(raw_usage.get("prompt_tokens") or 0)
+        comp_t = int(raw_usage.get("completion_tokens") or 0)
+        total_t = int(raw_usage.get("total_tokens") or (prompt_t + comp_t))
+        hit_t = int(raw_usage.get("prompt_cache_hit_tokens") or 0)
+        miss_raw = raw_usage.get("prompt_cache_miss_tokens")
+        miss_t = int(miss_raw) if miss_raw is not None else max(prompt_t - hit_t, 0)
+
+        acc["prompt_tokens"] += prompt_t
+        acc["completion_tokens"] += comp_t
+        acc["total_tokens"] += total_t
+        acc["prompt_cache_hit_tokens"] += hit_t
+        acc["prompt_cache_miss_tokens"] += miss_t
+
+    if tools_called:
+        existing = acc.setdefault("tools_used", [])
+        for name in tools_called:
+            if name:
+                existing.append(str(name))
+
+
+def _finalize_usage_cost(acc: Dict[str, Any], cached: bool = False) -> Dict[str, Any]:
+    """Compute final USD cost and prefix-cache hit percentage from accumulated token counts."""
+    prompt_t = int(acc.get("prompt_tokens") or 0)
+    comp_t = int(acc.get("completion_tokens") or 0)
+    total_t = int(acc.get("total_tokens") or (prompt_t + comp_t))
+    hit_t = int(acc.get("prompt_cache_hit_tokens") or 0)
+    miss_t = int(acc.get("prompt_cache_miss_tokens") or 0)
+
+    cost_usd = round(
+        (hit_t * DEEPSEEK_CACHE_HIT_USD_PER_TOKEN)
+        + (miss_t * DEEPSEEK_CACHE_MISS_USD_PER_TOKEN)
+        + (comp_t * DEEPSEEK_OUTPUT_USD_PER_TOKEN),
+        6,
+    )
+    prefix_cache_hit_pct = round((hit_t / prompt_t) * 100.0, 1) if prompt_t > 0 else 0.0
+    return {
+        "llm_rounds": int(acc.get("llm_rounds") or 0),
+        "prompt_tokens": prompt_t,
+        "completion_tokens": comp_t,
+        "total_tokens": total_t,
+        "prompt_cache_hit_tokens": hit_t,
+        "prompt_cache_miss_tokens": miss_t,
+        "prefix_cache_hit_pct": prefix_cache_hit_pct,
+        "cost_usd": cost_usd,
+        "tools_used": list(acc.get("tools_used") or []),
+        "vip_response_cached": bool(cached),
+    }
+
 
 def _collect_structured_outputs(
     result: Any,
@@ -584,6 +658,7 @@ async def _run_agentic_chat_stream_impl(
     telegram_user_id: Optional[int] = None,
 ):
     start_time = time.time()
+    usage_acc = _new_usage_accumulator()
     ui_label = _ui_market_label(ui_exch)
     api_key = _get_deepseek_key()
     if not api_key:
@@ -730,6 +805,7 @@ async def _run_agentic_chat_stream_impl(
                 "quota_limit": quota_limit,
                 "vision": None,
                 "vision_error": vision_err or "vision_analysis_failed",
+                "usage": _finalize_usage_cost(usage_acc, cached=False),
             }
             yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -841,6 +917,7 @@ async def _run_agentic_chat_stream_impl(
                     "quota_limit": quota_limit,
                     "cached": True,
                     "cache_key": early_key,
+                    "usage": _finalize_usage_cost(usage_acc, cached=True),
                 }
                 yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -899,6 +976,7 @@ async def _run_agentic_chat_stream_impl(
             fast_messages.append(formatted_messages[-1])
         formatted_messages = fast_messages
         tools_executed_count += 3
+        usage_acc["tools_used"].extend(["get_stock", "get_stock_levels", "get_news"])
         max_rounds = 0  # Proceed straight to DeepSeek single-call synthesis without tools schema
 
     active_tools_schema = (
@@ -967,6 +1045,12 @@ async def _run_agentic_chat_stream_impl(
                         assistant_msg["tool_calls"] = tool_calls
                         cleaned_content = strip_dsml(content_raw)
                         assistant_msg["content"] = cleaned_content if cleaned_content else None
+
+                _accumulate_deepseek_usage(
+                    usage_acc,
+                    res_json.get("usage"),
+                    [tc.get("function", {}).get("name", "") for tc in (tool_calls or []) if isinstance(tc, dict)],
+                )
 
                 # If DeepSeek has NO more tool calls to make:
                 if not tool_calls:
@@ -1089,6 +1173,7 @@ async def _run_agentic_chat_stream_impl(
                                 "quota_limit": quota_limit,
                                 "cached": True,
                                 "cache_key": lookup_key,
+                                "usage": _finalize_usage_cost(usage_acc, cached=True),
                             }
                             yield f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n"
                             yield "data: [DONE]\n\n"
@@ -1208,6 +1293,7 @@ async def _run_agentic_chat_stream_impl(
 
                 if synth_resp is not None and synth_resp.status_code == 200:
                     synth_json = synth_resp.json()
+                    _accumulate_deepseek_usage(usage_acc, synth_json.get("usage"))
                     synth_content = synth_json.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if synth_content:
                         filtered_synth = filter_output(synth_content)
@@ -1242,7 +1328,13 @@ async def _run_agentic_chat_stream_impl(
                                     json=retry_payload,
                                 )
                                 if retry_resp.status_code == 200:
-                                    retry_content = retry_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                                    retry_json = retry_resp.json()
+                                    _accumulate_deepseek_usage(
+                                        usage_acc,
+                                        retry_json.get("usage"),
+                                        [tc.get("function", {}).get("name", "") for tc in dsml_extra_calls if isinstance(tc, dict)],
+                                    )
+                                    retry_content = retry_json.get("choices", [{}])[0].get("message", {}).get("content", "")
                                     filtered_synth = filter_output(retry_content)
                         accumulated_reply = filtered_synth
                         if accumulated_reply:
@@ -1493,6 +1585,7 @@ async def _run_agentic_chat_stream_impl(
         "vision": vision_data,
         "cached": False,
         "cache_key": saved_cache_key or candidate_cache_key,
+        "usage": _finalize_usage_cost(usage_acc, cached=False),
     }
 
     yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"

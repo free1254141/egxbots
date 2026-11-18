@@ -37,13 +37,17 @@ import {
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import styles from "./UsersTab.module.css";
-import DailyUsageChart from "./DailyUsageChart";
-import DailyChatUsageChart from "./DailyChatUsageChart";
 import RevenueDetailsModal from "./RevenueDetailsModal";
 import TrialUsersModal, { type TrialUserItem } from "./TrialUsersModal";
 import FoundersStatsModal from "./FoundersStatsModal";
 import UsersEngagementModal from "./UsersEngagementModal";
-import { withDailyActiveUsers } from "./user-chart-data";
+import {
+    ALL_CHART_LAYERS,
+    buildCombinedDailyDataset,
+    buildMonthlySubscribersAndRenewals,
+    filterByTimeRange,
+    type ChartLayerKey,
+} from "./user-chart-data";
 import type { DailyActiveUsage, DailyChatUsage } from "@/lib/admin/user-analytics";
 
 interface UserRow {
@@ -226,9 +230,25 @@ export default function UsersTab() {
     const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
     const [portfolioLoading, setPortfolioLoading] = useState(false);
 
-    // Clean Tabbed Chart Mode & Range (14d, 30d, 3 months / 90d, 6 months / 180d)
-    const [chartTab, setChartTab] = useState<"growth" | "paid" | "market">("growth");
+    // Clean Multi-Select Tabbed Chart Mode & Range (14d, 30d, 3 months / 90d, 6 months / 180d, or custom date range)
+    const [selectedTabs, setSelectedTabs] = useState<ChartLayerKey[]>(["growth"]);
+    const hasTab = (key: ChartLayerKey) => selectedTabs.includes(key);
+    const isAllTabs = selectedTabs.length === ALL_CHART_LAYERS.length;
+    const toggleChartTab = (key: ChartLayerKey) => {
+        setSelectedTabs((prev) => {
+            if (prev.includes(key)) {
+                return prev.length > 1 ? prev.filter((k) => k !== key) : prev;
+            }
+            return [...prev, key];
+        });
+    };
+    const toggleAllTabs = () => {
+        setSelectedTabs((prev) => (prev.length === ALL_CHART_LAYERS.length ? ["growth"] : [...ALL_CHART_LAYERS]));
+    };
     const [chartDays, setChartDays] = useState<14 | 30 | 90 | 180>(90);
+    const [customStartDate, setCustomStartDate] = useState("");
+    const [customEndDate, setCustomEndDate] = useState("");
+    const isCustomDateRange = Boolean(customStartDate || customEndDate);
     const [showRevenueModal, setShowRevenueModal] = useState(false);
     const [showTrialModal, setShowTrialModal] = useState(false);
     const [showFoundersModal, setShowFoundersModal] = useState(false);
@@ -412,8 +432,33 @@ export default function UsersTab() {
     const filteredUsers = users;
 
     const totalPages = Math.ceil(total / pageSize);
-    const fullGrowthChartData = withDailyActiveUsers(stats?.signupGrowth || [], stats?.dailyActiveUsage || []);
-    const growthChartData = fullGrowthChartData.slice(-chartDays);
+    const combinedDailyData = buildCombinedDailyDataset({
+        growth: stats?.signupGrowth || [],
+        usage: stats?.dailyActiveUsage || [],
+        chatUsage: stats?.dailyChatUsage || [],
+        orders: stats?.approvedOrders || [],
+    });
+    const timeFilter = { days: chartDays, startDate: customStartDate, endDate: customEndDate };
+    const filteredDailyData = filterByTimeRange(combinedDailyData, timeFilter);
+    const chatChartData = filterByTimeRange(stats?.dailyChatUsage || [], timeFilter);
+    const defaultCutoffDate = combinedDailyData.slice(-chartDays)[0]?.fullDate;
+    const monthlyChartData = buildMonthlySubscribersAndRenewals(stats?.approvedOrders || [], {
+        cutoffDate: defaultCutoffDate,
+        startDate: customStartDate,
+        endDate: customEndDate,
+    });
+    const isOnlyMonthly = selectedTabs.length === 1 && selectedTabs[0] === "monthly";
+    const isOnlyChat = selectedTabs.length === 1 && selectedTabs[0] === "chat";
+    const chatComplete = stats?.chatDataComplete ?? stats?.engagementDataComplete ?? true;
+    const activeChartData = isOnlyChat
+        ? chatChartData
+        : isOnlyMonthly
+        ? monthlyChartData
+        : filteredDailyData;
+    const totalChatQuestions = activeChartData.reduce((sum, item) => sum + ("questions" in item ? Number(item.questions || 0) : 0), 0);
+    const peakChatUsers = activeChartData.reduce((max, item) => Math.max(max, "chatUsers" in item ? Number(item.chatUsers || 0) : 0), 0);
+    const totalMonthlyNewSubs = activeChartData.reduce((sum, item) => sum + ("newSubscribers" in item ? Number(item.newSubscribers || 0) : 0), 0);
+    const totalMonthlyRenewals = activeChartData.reduce((sum, item) => sum + ("renewals" in item ? Number(item.renewals || 0) : 0), 0);
 
 
 
@@ -562,29 +607,55 @@ export default function UsersTab() {
                         <div>
                             <h3 className="font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2 text-black dark:text-white">
                                 <Activity className="w-4 h-4 text-blue-500" />
-                                {chartTab === "growth"
+                                {selectedTabs.length > 1
+                                    ? (isAr ? `الشارت المجمع (${selectedTabs.length} مؤشرات على نفس الرسم)` : `Combined Overlay Chart (${selectedTabs.length} layers)`)
+                                    : hasTab("growth")
                                     ? (isAr ? "النمو والنشاط اليومي" : "Daily Growth & Active Users")
-                                    : chartTab === "paid"
+                                    : hasTab("paid")
                                     ? (isAr ? "الاشتراكات المدفوعة (بوابة الدفع مقابل الكاش اليدوي)" : "Paid Subscriptions (Gateway vs Manual Cash)")
+                                    : hasTab("monthly")
+                                    ? (isAr ? "المشتركين الجدد والتجديدات شهرياً" : "Monthly Subscribers & Renewals")
+                                    : hasTab("chat")
+                                    ? (isAr ? "مستخدمو الشات وعدد الأسئلة" : "Daily Chat Users & Questions")
                                     : (isAr ? "التوصيات الصادرة ومؤشر EGX 30" : "Signals Issued & EGX 30 Index")}
                             </h3>
                             <p className="text-[11px] text-zinc-500 font-bold mt-0.5">
-                                {chartTab === "growth"
-                                    ? (isAr ? "مقارنة المسجلين الجدد يومياً بالمستخدمين النشطين (مع استبعاد الأدمن)." : "Daily new signups vs active users (excluding admins).")
-                                    : chartTab === "paid"
+                                {selectedTabs.length > 1
+                                    ? (isAr ? "اضغط على أي تبويب لإضافته أو إزالته فوق نفس الرسم البياني، أو اضغط «الكل معاً» لعرض كل المؤشرات معاً." : "Click any tab to toggle its layer on this chart, or click All to overlay everything.")
+                                    : hasTab("growth")
+                                    ? (isAr ? "مقارنة المسجلين الجدد يومياً بالمستخدمين النشطين (مع استبعاد الأدمن). يمكنك تفعيل أكثر من مؤشر معاً." : "Daily new signups vs active users (excluding admins). Toggle multiple tabs to overlay.")
+                                    : hasTab("paid")
                                     ? (isAr ? "فصل واضح بدون تكرار: مدفوعات البوابة (EasyKash / Kashier) مقابل الكاش اليدوي (فودافون كاش / إنستاباي / تليجرام)." : "Mutually exclusive paid orders: Payment Gateway vs Manual Cash.")
+                                    : hasTab("monthly")
+                                    ? (isAr ? "تفصيل شهري لعدد المشتركين المدفوعين لأول مرة مقابل عمليات التجديد وإجمالي اشتراكات الشهر." : "Monthly breakdown of first-time paid subscribers vs renewals and total monthly orders.")
+                                    : hasTab("chat")
+                                    ? (isAr ? "الأعمدة: إجمالي أسئلة المستخدمين يومياً • الخط: عدد مستخدمي الشات الفريدين كل يوم (بتوقيت القاهرة، مع استبعاد الأدمن)." : "Bars: daily user questions • Line: unique daily chat users (Cairo time, admin accounts excluded).")
                                     : (isAr ? "حجم التوصيات اليومية مقارنة بأداء مؤشر البورصة المصرية EGX 30." : "Daily issued recommendations compared against EGX 30 closing index.")}
                             </p>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                            {/* Focused Chart Mode Tabs */}
-                            <div className="flex border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-0.5">
+                            {/* Multi-Select Chart Layer Tabs */}
+                            <div className="flex flex-wrap border-2 border-black dark:border-white bg-white dark:bg-zinc-950 p-0.5">
                                 <button
                                     type="button"
-                                    onClick={() => setChartTab("growth")}
+                                    aria-pressed={isAllTabs}
+                                    onClick={toggleAllTabs}
                                     className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
-                                        chartTab === "growth"
+                                        isAllTabs
+                                            ? "bg-black text-white dark:bg-white dark:text-black"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <BarChart3 className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "الكل معاً" : "All"}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-pressed={hasTab("growth")}
+                                    onClick={() => toggleChartTab("growth")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        hasTab("growth")
                                             ? "bg-blue-600 text-white"
                                             : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                     }`}
@@ -594,9 +665,10 @@ export default function UsersTab() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setChartTab("paid")}
+                                    aria-pressed={hasTab("paid")}
+                                    onClick={() => toggleChartTab("paid")}
                                     className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
-                                        chartTab === "paid"
+                                        hasTab("paid")
                                             ? "bg-amber-500 text-black"
                                             : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                     }`}
@@ -610,15 +682,42 @@ export default function UsersTab() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setChartTab("market")}
+                                    aria-pressed={hasTab("monthly")}
+                                    onClick={() => toggleChartTab("monthly")}
                                     className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
-                                        chartTab === "market"
+                                        hasTab("monthly")
+                                            ? "bg-cyan-500 text-black"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "المشتركين والتجديد (شهرياً)" : "Monthly Subs & Renewals"}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-pressed={hasTab("market")}
+                                    onClick={() => toggleChartTab("market")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        hasTab("market")
                                             ? "bg-emerald-500 text-black"
                                             : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                     }`}
                                 >
                                     <TrendingUp className="w-3.5 h-3.5" />
                                     <span>{isAr ? "السوق والتوصيات" : "Market"}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-pressed={hasTab("chat")}
+                                    onClick={() => toggleChartTab("chat")}
+                                    className={`px-2.5 py-1 text-xs font-black transition-colors cursor-pointer flex items-center gap-1 ${
+                                        hasTab("chat")
+                                            ? "bg-violet-600 text-white"
+                                            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    }`}
+                                >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>{isAr ? "مستخدمو الشات والأسئلة" : "Chat & Questions"}</span>
                                 </button>
                             </div>
 
@@ -628,9 +727,13 @@ export default function UsersTab() {
                                     <button
                                         key={days}
                                         type="button"
-                                        onClick={() => setChartDays(days)}
+                                        onClick={() => {
+                                            setChartDays(days);
+                                            setCustomStartDate("");
+                                            setCustomEndDate("");
+                                        }}
                                         className={`px-2 py-1 text-[11px] font-black cursor-pointer ${
-                                            chartDays === days
+                                            !isCustomDateRange && chartDays === days
                                                 ? "bg-black text-white dark:bg-white dark:text-black"
                                                 : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                         }`}
@@ -645,12 +748,48 @@ export default function UsersTab() {
                                     </button>
                                 ))}
                             </div>
+
+                            {/* Custom Date Range Filter (Applies to all chart tabs) */}
+                            <div className="flex flex-wrap items-center gap-1 border-2 border-black dark:border-white bg-white dark:bg-zinc-950 px-2 py-0.5 text-[11px] font-black">
+                                <span className="text-zinc-500">{isAr ? "من" : "From"}</span>
+                                <input
+                                    type="date"
+                                    aria-label={isAr ? "من تاريخ" : "From date"}
+                                    value={customStartDate}
+                                    max={customEndDate || undefined}
+                                    onChange={(e) => setCustomStartDate(e.target.value)}
+                                    className="bg-transparent text-black dark:text-white text-[11px] font-mono outline-none cursor-pointer"
+                                />
+                                <span className="text-zinc-500">{isAr ? "إلى" : "To"}</span>
+                                <input
+                                    type="date"
+                                    aria-label={isAr ? "إلى تاريخ" : "To date"}
+                                    value={customEndDate}
+                                    min={customStartDate || undefined}
+                                    onChange={(e) => setCustomEndDate(e.target.value)}
+                                    className="bg-transparent text-black dark:text-white text-[11px] font-mono outline-none cursor-pointer"
+                                />
+                                {isCustomDateRange && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setCustomStartDate("");
+                                            setCustomEndDate("");
+                                        }}
+                                        aria-label={isAr ? "مسح الفلتر الزمني" : "Clear custom date range"}
+                                        title={isAr ? "مسح الفلتر الزمني" : "Clear date range"}
+                                        className="ms-1 p-0.5 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950 cursor-pointer"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
 
-                    {/* Clean Legend Strip for the Active Tab */}
+                    {/* Clean Legend Strip for the Active Layers */}
                     <div className="flex flex-wrap items-center gap-4 mb-3 px-2 py-1.5 bg-white dark:bg-zinc-950 border border-black/15 dark:border-white/15 text-[11px] font-black">
-                        {chartTab === "growth" && (
+                        {hasTab("growth") && (
                             <>
                                 <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
                                     <span className="w-3 h-3 bg-blue-500 inline-block" />
@@ -662,7 +801,7 @@ export default function UsersTab() {
                                 </span>
                             </>
                         )}
-                        {chartTab === "paid" && (
+                        {hasTab("paid") && (
                             <>
                                 <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
                                     <span className="w-3 h-3 bg-amber-400 inline-block" />
@@ -678,7 +817,29 @@ export default function UsersTab() {
                                 </span>
                             </>
                         )}
-                        {chartTab === "market" && (
+                        {hasTab("monthly") && (
+                            <>
+                                <span className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+                                    <span className="w-3 h-3 bg-sky-500 inline-block" />
+                                    {isAr
+                                        ? `مشترك مدفوع جديد (${totalMonthlyNewSubs})`
+                                        : `New Paid Subscribers (${totalMonthlyNewSubs})`}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
+                                    <span className="w-3 h-3 bg-teal-500 inline-block" />
+                                    {isAr
+                                        ? `تجديد اشتراك (${totalMonthlyRenewals})`
+                                        : `Renewals (${totalMonthlyRenewals})`}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                                    <span className="w-4 h-0.5 bg-amber-400 inline-block" />
+                                    {isAr
+                                        ? `${isOnlyMonthly ? "إجمالي المدفوعين بالشهر" : "إجمالي الاشتراكات"} (${totalMonthlyNewSubs + totalMonthlyRenewals})`
+                                        : `${isOnlyMonthly ? "Monthly Total" : "Total Paid"} (${totalMonthlyNewSubs + totalMonthlyRenewals})`}
+                                </span>
+                            </>
+                        )}
+                        {hasTab("market") && (
                             <>
                                 <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
                                     <span className="w-3 h-3 bg-purple-500 inline-block" />
@@ -694,26 +855,72 @@ export default function UsersTab() {
                                 </span>
                             </>
                         )}
+                        {hasTab("chat") && (
+                            <>
+                                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                                    <span className="w-3 h-3 bg-amber-400 inline-block" />
+                                    {isAr
+                                        ? `الأسئلة (${totalChatQuestions.toLocaleString("en-US")})`
+                                        : `Questions (${totalChatQuestions.toLocaleString("en-US")})`}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-violet-600 dark:text-violet-400">
+                                    <span className="w-4 h-0.5 bg-violet-500 inline-block" />
+                                    {isAr
+                                        ? `مستخدمو الشات (الذروة: ${peakChatUsers})`
+                                        : `Chat Users (Peak: ${peakChatUsers})`}
+                                </span>
+                                {!chatComplete && (
+                                    <span className="text-[10px] text-amber-600 dark:text-amber-300">
+                                        {isAr ? "• بيانات جزئية (حد أدنى)" : "• Partial data (lower bound)"}
+                                    </span>
+                                )}
+                            </>
+                        )}
                     </div>
 
                     {statsLoading ? (
                         <div className="h-64 flex items-center justify-center text-xs font-bold text-zinc-400">Loading chart...</div>
+                    ) : activeChartData.length === 0 ? (
+                        <div className="h-64 flex items-center justify-center text-xs font-bold text-zinc-500">
+                            {isAr ? "لا توجد بيانات في المدة الزمنية المحددة." : "No data in the selected date range."}
+                        </div>
                     ) : (
                         <div className="h-64 min-w-0 w-full pt-2" dir="ltr">
                             <ResponsiveContainer width="100%" height={240}>
-                                <ComposedChart data={growthChartData} margin={{ top: 10, right: chartTab === "market" ? 16 : 12, left: -12, bottom: 0 }}>
+                                <ComposedChart
+                                    data={activeChartData}
+                                    margin={{
+                                        top: 10,
+                                        right: hasTab("market") && hasTab("chat") ? 24 : hasTab("market") || hasTab("chat") ? 16 : 12,
+                                        left: -12,
+                                        bottom: 0,
+                                    }}
+                                >
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#52525b" opacity={0.2} />
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} minTickGap={12} />
-                                    <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} allowDecimals={false} />
-                                    {chartTab === "market" && (
+                                    <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isOnlyChat ? '#f59e0b' : '#71717a' }} allowDecimals={false} />
+                                    {hasTab("market") && (
                                         <YAxis
-                                            yAxisId="right"
+                                            yAxisId="egxRight"
                                             orientation="right"
+                                            width={36}
                                             axisLine={false}
                                             tickLine={false}
                                             tick={{ fontSize: 10, fill: '#10b981' }}
                                             domain={['dataMin - 1000', 'dataMax + 1000']}
                                             tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                                        />
+                                    )}
+                                    {hasTab("chat") && (
+                                        <YAxis
+                                            yAxisId="chatRight"
+                                            orientation="right"
+                                            width={28}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            allowDecimals={false}
+                                            domain={[0, "auto"]}
+                                            tick={{ fontSize: 10, fill: '#8b5cf6' }}
                                         />
                                     )}
                                     <RechartsTooltip
@@ -725,48 +932,54 @@ export default function UsersTab() {
                                             if (name === "activeUsers") return [markPartial(value), isAr ? "المستخدمون النشطون" : "Active Users"];
                                             if (name === "gatewayPaidCount") return [value, isAr ? "اشتراك بوابة الدفع" : "Gateway Paid"];
                                             if (name === "cashPaidCount") return [value, isAr ? "اشتراك كاش يدوي" : "Manual Cash"];
+                                            if (name === "newSubscribers") return [value, isAr ? "مشترك مدفوع جديد" : "New Subscribers"];
+                                            if (name === "renewals") return [value, isAr ? "تجديد اشتراك" : "Renewals"];
+                                            if (name === "totalSubscribers") return [value, isOnlyMonthly ? (isAr ? "إجمالي الشهر" : "Monthly Total") : (isAr ? "إجمالي الاشتراكات" : "Total Paid")];
                                             if (name === "recommendationsCount") return [value, isAr ? "توصيات صادرة" : "Recommendations"];
                                             if (name === "egx30") return [value != null ? `${Number(value).toLocaleString("en-US")} ${isAr ? "نقطة" : "pts"}` : "—", isAr ? "مؤشر EGX 30" : "EGX 30 Index"];
+                                            if (name === "questions") return [chatComplete ? value : `≥ ${value}`, isAr ? "عدد الأسئلة" : "Questions"];
+                                            if (name === "chatUsers") return [chatComplete ? value : `≥ ${value}`, isAr ? "مستخدمو الشات" : "Chat users"];
                                             return [value, isAr ? "المسجلون الجدد" : "New Signups"];
                                         }}
                                     />
-                                    {chartTab === "growth" && (
+                                    {hasTab("growth") && (
                                         <Bar yAxisId="left" dataKey="count" name="count" fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
                                     )}
-                                    {chartTab === "growth" && (
+                                    {hasTab("growth") && (
                                         <Line yAxisId="left" type="monotone" dataKey="activeUsers" name="activeUsers" stroke="#06b6d4" strokeWidth={3} dot={{ r: 2.5, fill: '#06b6d4' }} connectNulls={false} activeDot={{ r: 5 }} isAnimationActive={false} />
                                     )}
-                                    {chartTab === "paid" && (
+                                    {hasTab("paid") && (
                                         <Bar yAxisId="left" stackId="paid" dataKey="gatewayPaidCount" name="gatewayPaidCount" fill="#f59e0b" radius={[0, 0, 0, 0]} maxBarSize={28} isAnimationActive={false} />
                                     )}
-                                    {chartTab === "paid" && (
+                                    {hasTab("paid") && (
                                         <Bar yAxisId="left" stackId="paid" dataKey="cashPaidCount" name="cashPaidCount" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} isAnimationActive={false} />
                                     )}
-                                    {chartTab === "market" && (
+                                    {hasTab("monthly") && (
+                                        <Bar yAxisId="left" stackId="monthly" dataKey="newSubscribers" name="newSubscribers" fill="#0ea5e9" radius={[0, 0, 0, 0]} maxBarSize={32} isAnimationActive={false} />
+                                    )}
+                                    {hasTab("monthly") && (
+                                        <Bar yAxisId="left" stackId="monthly" dataKey="renewals" name="renewals" fill="#14b8a6" radius={[3, 3, 0, 0]} maxBarSize={32} isAnimationActive={false} />
+                                    )}
+                                    {hasTab("monthly") && (
+                                        <Line yAxisId="left" type="monotone" dataKey="totalSubscribers" name="totalSubscribers" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} isAnimationActive={false} />
+                                    )}
+                                    {hasTab("market") && (
                                         <Bar yAxisId="left" dataKey="recommendationsCount" name="recommendationsCount" fill="#a855f7" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
                                     )}
-                                    {chartTab === "market" && (
-                                        <Line yAxisId="right" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 5, fill: '#10b981' }} isAnimationActive={false} />
+                                    {hasTab("market") && (
+                                        <Line yAxisId="egxRight" type="monotone" dataKey="egx30" name="egx30" stroke="#10b981" strokeWidth={2.5} dot={false} connectNulls={true} activeDot={{ r: 5, fill: '#10b981' }} isAnimationActive={false} />
+                                    )}
+                                    {hasTab("chat") && (
+                                        <Bar yAxisId="left" dataKey="questions" name="questions" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={24} isAnimationActive={false} />
+                                    )}
+                                    {hasTab("chat") && (
+                                        <Line yAxisId="chatRight" type="linear" dataKey="chatUsers" name="chatUsers" stroke="#8b5cf6" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
                                     )}
                                 </ComposedChart>
                             </ResponsiveContainer>
                         </div>
                     )}
                 </div>
-
-                <DailyUsageChart
-                    data={stats?.dailyActiveUsage || []}
-                    isAr={isAr}
-                    loading={statsLoading}
-                    complete={stats?.engagementDataComplete ?? true}
-                />
-
-                <DailyChatUsageChart
-                    data={stats?.dailyChatUsage || []}
-                    isAr={isAr}
-                    loading={statsLoading}
-                    complete={stats?.chatDataComplete ?? stats?.engagementDataComplete ?? true}
-                />
 
                 {/* Revenue & Payments + Activity & Engagement */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

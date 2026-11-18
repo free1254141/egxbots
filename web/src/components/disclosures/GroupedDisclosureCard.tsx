@@ -58,9 +58,16 @@ export default function GroupedDisclosureCard({
       case "major_shareholders":
         return isAr ? "هيكل مساهمين (مادة 30)" : "Shareholding Structure";
       case "board_resolution":
+      case "board_decision":
         return isAr ? "قرارات مجلس إدارة" : "Board Resolution";
       case "material_event":
         return isAr ? "أحداث جوهرية" : "Material Event";
+      case "earnings":
+        return isAr ? "نتائج مالية" : "Financial Results";
+      case "dividend":
+        return isAr ? "توزيعات أرباح" : "Dividends";
+      case "capital_change":
+        return isAr ? "تغيير رأس المال" : "Capital Change";
       default:
         return isAr ? "إفصاح رسمي" : "Official Disclosure";
     }

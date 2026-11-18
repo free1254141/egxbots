@@ -132,12 +132,6 @@ def run_daily_sync():
                             continue
 
                         seen_titles.add(title)
-                        action_type = 'general'
-                        if 'خفض حصته' in clean_t or 'تراجع' in clean_t or 'بيع' in clean_t:
-                            action_type = 'sell'
-                        elif 'رفع حصته' in clean_t or 'شراء' in clean_t or 'زيادة' in clean_t:
-                            action_type = 'buy'
-
                         d_type = 'material_event'
                         if 'تعاملات الداخليين' in clean_t:
                             d_type = 'insider_trading'
@@ -147,6 +141,20 @@ def run_daily_sync():
                             d_type = 'board_resolution'
 
                         shares_cnt = extract_shares_from_title(clean_t)
+                        is_stake_trade = (
+                            shares_cnt is not None
+                            and shares_cnt > 0
+                            and (
+                                d_type in ('insider_trading', 'major_shareholders')
+                                or any(k in clean_t for k in ('خفض حصته', 'رفع حصته', 'شراء داخلي', 'بيع داخلي'))
+                            )
+                        )
+                        action_type = 'general'
+                        if is_stake_trade:
+                            if any(k in clean_t for k in ('خفض حصته', 'بيع', 'تقليص', 'تخارج')):
+                                action_type = 'sell'
+                            elif any(k in clean_t for k in ('رفع حصته', 'شراء', 'زيادة حصة', 'تجميع')):
+                                action_type = 'buy'
                         meta = {'raw_title': clean_t, 'pub_date': pub, 'synced_by': 'daily_job'}
                         if action_type in ('buy', 'sell') and sym in price_map:
                             meta['execution_price'] = price_map[sym]
@@ -169,15 +177,52 @@ def run_daily_sync():
         except Exception as e:
             print(f"Error querying RSS: {e}")
 
-    # 3. Check for duplicates against existing DB titles
+    # 3. Check for duplicates against existing DB rows (source_url, normalized title, and same-day corporate events)
     if new_items:
         try:
-            titles = [it['title'] for it in new_items]
-            existing_res = sb.table('egx_disclosures').select('title').in_('title', titles).execute()
-            existing_set = set(r['title'] for r in existing_res.data)
-            new_items = [it for it in new_items if it['title'] not in existing_set]
+            since_30d = (datetime.date.today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+            existing_res = (
+                sb.table('egx_disclosures')
+                .select('symbol, disclosure_type, disclosure_date, title, source_url')
+                .gte('disclosure_date', since_30d)
+                .limit(1000)
+                .execute()
+            )
+            existing_rows = existing_res.data or []
+            existing_urls = {r.get('source_url') for r in existing_rows if r.get('source_url')}
+            existing_norm_titles = {
+                re.sub(r'[^\w\s\u0600-\u06FF]', '', (r.get('title') or '').lower()).strip()
+                for r in existing_rows
+                if r.get('title')
+            }
+            existing_event_keys = {
+                (r.get('symbol'), r.get('disclosure_type'), r.get('disclosure_date'))
+                for r in existing_rows
+                if r.get('symbol') and r.get('disclosure_type') not in ('insider_trading', 'major_shareholders')
+            }
+
+            deduped_items = []
+            for it in new_items:
+                norm_t = re.sub(r'[^\w\s\u0600-\u06FF]', '', (it.get('title') or '').lower()).strip()
+                ev_key = (it.get('symbol'), it.get('disclosure_type'), it.get('disclosure_date'))
+                if it.get('source_url') and it.get('source_url') in existing_urls:
+                    continue
+                if norm_t and norm_t in existing_norm_titles:
+                    continue
+                if (
+                    it.get('disclosure_type') not in ('insider_trading', 'major_shareholders')
+                    and ev_key in existing_event_keys
+                ):
+                    continue
+                if not it.get('shares_count'):
+                    it['action_type'] = 'general'
+                existing_urls.add(it.get('source_url'))
+                existing_norm_titles.add(norm_t)
+                existing_event_keys.add(ev_key)
+                deduped_items.append(it)
+            new_items = deduped_items
         except Exception as e:
-            print(f"Warning: Could not filter existing titles: {e}")
+            print(f"Warning: Could not filter existing disclosures: {e}")
 
     print(f"✨ Found {len(new_items)} genuinely new disclosures since {latest_date}.")
 

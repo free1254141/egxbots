@@ -51,6 +51,8 @@ import {
 } from "@/lib/disclosures-analytics";
 import InsiderHeatmap from "@/components/disclosures/InsiderHeatmap";
 import InsiderCharts from "@/components/disclosures/InsiderCharts";
+import SaudiDisclosuresHeatmap from "@/components/disclosures/SaudiDisclosuresHeatmap";
+import SaudiDisclosuresCharts from "@/components/disclosures/SaudiDisclosuresCharts";
 import MajorShareholdersTab from "@/components/disclosures/MajorShareholdersTab";
 import DisclosuresGlossary from "@/components/disclosures/DisclosuresGlossary";
 import StockDetailModal from "@/components/disclosures/StockDetailModal";
@@ -112,7 +114,9 @@ export default function DisclosuresClient({
   const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedSentiment, setSelectedSentiment] = useState<string>("all");
-  const [smartFilter, setSmartFilter] = useState<"all" | "below_cost" | "accumulating" | "distributing">("all");
+  const [smartFilter, setSmartFilter] = useState<
+    "all" | "below_cost" | "accumulating" | "distributing" | "dividends" | "contracts" | "risks"
+  >("all");
   const [layoutMode, setLayoutMode] = useState<"list" | "grid">("list");
 
   // Load layout mode preference from localStorage
@@ -208,6 +212,9 @@ export default function DisclosuresClient({
       setDisclosures(isSaudi ? [] : initialDisclosures);
       setTotalCount(isSaudi ? 0 : (initialStats.total || initialDisclosures.length));
       setHasMore(false);
+      setSelectedSector("all");
+      setSelectedType("all");
+      setSmartFilter("all");
     }
 
     if (isInitialMountRef.current) {
@@ -299,28 +306,36 @@ export default function DisclosuresClient({
       case "major_shareholders":
         return isAr ? "هيكل مساهمين (مادة 30)" : "Shareholding Structure";
       case "board_resolution":
+      case "board_decision":
         return isAr ? "قرارات مجلس إدارة" : "Board Resolution";
       case "material_event":
         return isAr ? "أحداث جوهرية" : "Material Event";
+      case "earnings":
+        return isAr ? "نتائج مالية" : "Financial Results";
+      case "dividend":
+        return isAr ? "توزيعات أرباح" : "Dividends";
+      case "capital_change":
+        return isAr ? "تغيير رأس المال" : "Capital Change";
       default:
         return isAr ? "إفصاح رسمي" : "Official Disclosure";
     }
   };
 
   const getSentimentBadge = (item: DisclosureItem) => {
-    if (item.action_type === "buy" || item.sentiment === "bullish") {
+    const hasInsiderShares = !isSaudi && (item.shares_count ?? 0) > 0;
+    if ((hasInsiderShares && item.action_type === "buy") || item.sentiment === "bullish") {
       return (
         <span className="px-3 py-1 text-xs font-black bg-[#00FF66] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-          {item.action_type === "buy"
+          {hasInsiderShares && item.action_type === "buy"
             ? isAr ? "شراء داخلي / تجميع" : "Insider Buy"
             : isAr ? "إيجابي / محفز" : "Bullish"}
         </span>
       );
     }
-    if (item.action_type === "sell" || item.sentiment === "bearish") {
+    if ((hasInsiderShares && item.action_type === "sell") || item.sentiment === "bearish") {
       return (
         <span className="px-3 py-1 text-xs font-black bg-[#FF3366] text-white border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
-          {item.action_type === "sell"
+          {hasInsiderShares && item.action_type === "sell"
             ? isAr ? "بيع داخلي / تخارج" : "Insider Sell"
             : isAr ? "سلبي / تسييل" : "Bearish"}
         </span>
@@ -406,14 +421,32 @@ export default function DisclosuresClient({
   // Filter disclosures based on smart filter, timeframe, and sector
   const displayedDisclosures = useMemo(() => {
     let list = disclosures;
-    if (selectedTimeframe !== "all" || selectedSector !== "all") {
-      list = filterDisclosuresByTimeframeAndSector(list, selectedTimeframe, selectedSector);
+    if (selectedTimeframe !== "all" || (!isSaudi && selectedSector !== "all")) {
+      list = filterDisclosuresByTimeframeAndSector(list, selectedTimeframe, isSaudi ? "all" : selectedSector);
     }
+    if (smartFilter === "all") return list;
+
+    if (isSaudi) {
+      return list.filter((item) => {
+        const text = `${item.title || ""} ${item.ai_summary || ""} ${item.disclosure_type || ""}`.toLowerCase();
+        if (smartFilter === "dividends") {
+          return /توزيع|أرباح نقدية|أسهم منحة|dividend/.test(text);
+        }
+        if (smartFilter === "contracts") {
+          return /عقد|ترسية|مشروع|اتفاقية|مذكرة|تعاون|contract|award|agreement/.test(text);
+        }
+        if (smartFilter === "risks") {
+          return item.sentiment === "bearish" || /خسارة|تراجع|انخفاض|إنذار|تحذير|إيقاف|risk|loss/.test(text);
+        }
+        return true;
+      });
+    }
+
     const metrics = cumulativeAnalytics.symbolMetrics;
 
     return list.filter((item) => {
       const sym = item.symbol ? item.symbol.toUpperCase() : null;
-      if (!sym || !metrics[sym]) return smartFilter === "all";
+      if (!sym || !metrics[sym]) return false;
 
       const m = metrics[sym];
       if (smartFilter === "below_cost") {
@@ -427,7 +460,7 @@ export default function DisclosuresClient({
       }
       return true;
     });
-  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, cumulativeAnalytics]);
+  }, [disclosures, selectedTimeframe, selectedSector, smartFilter, cumulativeAnalytics, isSaudi]);
 
   // Group disclosures by stock into unified cards (one consolidated card per stock per timeframe!)
   const groupedDisclosures = useMemo(() => {
@@ -687,32 +720,34 @@ export default function DisclosuresClient({
           </div>
         </div>
 
-        {/* Row 2: Sector Selector */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t-2 border-black/10 dark:border-white/10">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span className="text-xs font-black uppercase tracking-wider">
-              {isAr ? "فلتر القطاعات الاقتصادية:" : "Economic Sector:"}
-            </span>
-          </div>
+        {/* Row 2: Sector Selector (EGX only — Saudi uses Tadawul filing categories) */}
+        {!isSaudi && (
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t-2 border-black/10 dark:border-white/10">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span className="text-xs font-black uppercase tracking-wider">
+                {isAr ? "فلتر القطاعات الاقتصادية:" : "Economic Sector:"}
+              </span>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            {EGX_SECTORS.map((sec) => (
-              <button
-                key={sec.id}
-                type="button"
-                onClick={() => setSelectedSector(sec.id)}
-                className={`px-2.5 py-1 text-[11px] font-black border-2 border-black transition-all cursor-pointer whitespace-nowrap ${
-                  selectedSector === sec.id
-                    ? "bg-black text-white dark:bg-white dark:text-black shadow-[2px_2px_0px_#00FF66]"
-                    : "bg-white text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 hover:bg-[#FFE600] hover:text-black"
-                }`}
-              >
-                {isAr ? sec.label_ar : sec.label_en}
-              </button>
-            ))}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {EGX_SECTORS.map((sec) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => setSelectedSector(sec.id)}
+                  className={`px-2.5 py-1 text-[11px] font-black border-2 border-black transition-all cursor-pointer whitespace-nowrap ${
+                    selectedSector === sec.id
+                      ? "bg-black text-white dark:bg-white dark:text-black shadow-[2px_2px_0px_#00FF66]"
+                      : "bg-white text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 hover:bg-[#FFE600] hover:text-black"
+                  }`}
+                >
+                  {isAr ? sec.label_ar : sec.label_en}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Row 3: Active Range & Verified Status Strip */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t-2 border-black/10 dark:border-white/10 text-xs font-bold text-zinc-600 dark:text-zinc-300">
@@ -789,6 +824,27 @@ export default function DisclosuresClient({
       {/* TAB 1: Insider Trading Radar & Smart Money Flow */}
       {(isSaudi || activeTab === "insider_radar") && (
         <>
+          {/* Saudi Tadawul Heatmap & Analytical Charts */}
+          {isSaudi && filteredPool.length > 0 && (
+            <>
+              <div className="mb-6">
+                <SaudiDisclosuresHeatmap
+                  disclosures={filteredPool}
+                  isAr={isAr}
+                  onSelectSymbol={(sym) => setModalSymbol(sym)}
+                  selectedSymbol={modalSymbol || search.trim().toUpperCase()}
+                />
+              </div>
+
+              <SaudiDisclosuresCharts
+                disclosures={filteredPool}
+                isAr={isAr}
+                timeframeLabel={timeframeLabel}
+                onSelectSymbol={(sym) => setModalSymbol(sym)}
+              />
+            </>
+          )}
+
           {/* Smart Money Liquidity Heatmap (requires share counts - EGX only) */}
           {!isSaudi && activeAnalytics && (
             <div className="mb-6">
@@ -857,12 +913,22 @@ export default function DisclosuresClient({
                   <Filter className="w-3.5 h-3.5" />
                   {isAr ? "النوع:" : "Type:"}
                 </span>
-                {[
-                  { id: "all", ar: "الكل", en: "All" },
-                  { id: "insider_trading", ar: "تعاملات داخليين", en: "Insiders" },
-                  { id: "major_shareholders", ar: "مادة 30", en: "Art. 30" },
-                  { id: "board_resolution", ar: "مجلس الإدارة", en: "Board" },
-                ].map((tab) => (
+                {(isSaudi
+                  ? [
+                      { id: "all", ar: "الكل", en: "All" },
+                      { id: "earnings", ar: "نتائج مالية", en: "Earnings" },
+                      { id: "material_event", ar: "أحداث جوهرية", en: "Material" },
+                      { id: "dividend", ar: "توزيعات", en: "Dividends" },
+                      { id: "capital_change", ar: "رأس المال", en: "Capital" },
+                      { id: "board_decision", ar: "مجلس الإدارة", en: "Board" },
+                    ]
+                  : [
+                      { id: "all", ar: "الكل", en: "All" },
+                      { id: "insider_trading", ar: "تعاملات داخليين", en: "Insiders" },
+                      { id: "major_shareholders", ar: "مادة 30", en: "Art. 30" },
+                      { id: "board_resolution", ar: "مجلس الإدارة", en: "Board" },
+                    ]
+                ).map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
@@ -923,44 +989,89 @@ export default function DisclosuresClient({
                 {isAr ? "جميع الإفصاحات" : "All Disclosures"}
               </button>
 
-              <button
-                type="button"
-                onClick={() => setSmartFilter("below_cost")}
-                className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
-                  smartFilter === "below_cost"
-                    ? "bg-amber-400 text-black shadow-[2px_2px_0px_#000]"
-                    : "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 hover:bg-amber-50"
-                }`}
-              >
-                <Target className="w-3.5 h-3.5" />
-                <span>{isAr ? "💎 أسهم تتداول بأقل من تكلفة الداخلي" : "💎 Trading Below Insider Cost"}</span>
-              </button>
+              {isSaudi ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("dividends")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 cursor-pointer ${
+                      smartFilter === "dividends"
+                        ? "bg-amber-400 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 hover:bg-amber-50"
+                    }`}
+                  >
+                    <Target className="w-3.5 h-3.5" />
+                    <span>{isAr ? "💎 توزيعات وأرباح نقدية" : "💎 Dividends & Distributions"}</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setSmartFilter("accumulating")}
-                className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
-                  smartFilter === "accumulating"
-                    ? "bg-emerald-500 text-black shadow-[2px_2px_0px_#000]"
-                    : "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50"
-                }`}
-              >
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>{isAr ? "🟢 أسهم تشهد تجميعاً صامتاً" : "🟢 Accumulating Stocks"}</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("contracts")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 cursor-pointer ${
+                      smartFilter === "contracts"
+                        ? "bg-emerald-500 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50"
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>{isAr ? "🟢 عقود وترسيات ومشاريع" : "🟢 Contracts & Awards"}</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setSmartFilter("distributing")}
-                className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
-                  smartFilter === "distributing"
-                    ? "bg-rose-500 text-white shadow-[2px_2px_0px_#000]"
-                    : "bg-white dark:bg-zinc-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50"
-                }`}
-              >
-                <TrendingDown className="w-3.5 h-3.5" />
-                <span>{isAr ? "🔴 أسهم تشهد تصريفاً" : "🔴 Distributing Stocks"}</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("risks")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 cursor-pointer ${
+                      smartFilter === "risks"
+                        ? "bg-rose-500 text-white shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50"
+                    }`}
+                  >
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    <span>{isAr ? "🔴 تنبيهات وتراجع نتائج" : "🔴 Risk & Earnings Alerts"}</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("below_cost")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
+                      smartFilter === "below_cost"
+                        ? "bg-amber-400 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 hover:bg-amber-50"
+                    }`}
+                  >
+                    <Target className="w-3.5 h-3.5" />
+                    <span>{isAr ? "💎 أسهم تتداول بأقل من تكلفة الداخلي" : "💎 Trading Below Insider Cost"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("accumulating")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
+                      smartFilter === "accumulating"
+                        ? "bg-emerald-500 text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50"
+                    }`}
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>{isAr ? "🟢 أسهم تشهد تجميعاً صامتاً" : "🟢 Accumulating Stocks"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSmartFilter("distributing")}
+                    className={`px-2.5 py-1 text-xs font-black border-2 border-black transition-all flex items-center gap-1 ${
+                      smartFilter === "distributing"
+                        ? "bg-rose-500 text-white shadow-[2px_2px_0px_#000]"
+                        : "bg-white dark:bg-zinc-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50"
+                    }`}
+                  >
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    <span>{isAr ? "🔴 أسهم تشهد تصريفاً" : "🔴 Distributing Stocks"}</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
 

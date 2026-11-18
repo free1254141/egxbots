@@ -92,3 +92,51 @@ def test_summarize_breadth_and_enrich_rec_distances():
     assert rec["pnl_since_entry_pct"] == 10.0
     assert rec["remaining_upside_pct"] == 9.09
     assert rec["dist_to_stop_pct"] == -18.18
+
+
+def test_deepseek_usage_and_cost_calculation():
+    from api.agentic_chat.pipeline import (
+        _accumulate_deepseek_usage,
+        _finalize_usage_cost,
+        _new_usage_accumulator,
+    )
+
+    acc = _new_usage_accumulator()
+    # Round 1: tool selection
+    _accumulate_deepseek_usage(
+        acc,
+        {
+            "prompt_tokens": 5000,
+            "completion_tokens": 80,
+            "total_tokens": 5080,
+            "prompt_cache_hit_tokens": 4500,
+            "prompt_cache_miss_tokens": 500,
+        },
+        tools_called=["get_stock", "get_fair_value"],
+    )
+    # Round 2: synthesis
+    _accumulate_deepseek_usage(
+        acc,
+        {
+            "prompt_tokens": 6000,
+            "completion_tokens": 920,
+            "total_tokens": 6920,
+            "prompt_cache_hit_tokens": 5000,
+        },
+    )
+
+    final = _finalize_usage_cost(acc, cached=False)
+    assert final["llm_rounds"] == 2
+    assert final["prompt_tokens"] == 11000
+    assert final["completion_tokens"] == 1000
+    assert final["prompt_cache_hit_tokens"] == 9500
+    assert final["prompt_cache_miss_tokens"] == 1500
+    assert final["prefix_cache_hit_pct"] == 86.4
+    assert final["tools_used"] == ["get_stock", "get_fair_value"]
+    assert final["vip_response_cached"] is False
+    # 9500 * 0.028/1e6 + 1500 * 0.28/1e6 + 1000 * 0.42/1e6 = 0.000266 + 0.000420 + 0.000420 = 0.001106
+    assert final["cost_usd"] == 0.001106
+
+    cached_final = _finalize_usage_cost(_new_usage_accumulator(), cached=True)
+    assert cached_final["cost_usd"] == 0.0
+    assert cached_final["vip_response_cached"] is True

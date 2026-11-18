@@ -78,6 +78,7 @@ def _persist_message_background(
     cached: bool = False,
     cache_key: Optional[str] = None,
     tables: Optional[List[Any]] = None,
+    usage: Optional[Dict[str, Any]] = None,
 ):
     """Save user and assistant messages to ai_chat_messages in background."""
     if user_id == "00000000-0000-0000-0000-000000000000" or not session_id:
@@ -114,6 +115,8 @@ def _persist_message_background(
             meta["cache_key"] = cache_key
         if isinstance(tables, list) and tables:
             meta["tables"] = tables
+        if isinstance(usage, dict) and usage:
+            meta["usage"] = usage
         user_row = {
             "session_id": session_id,
             "user_id": user_id,
@@ -427,6 +430,7 @@ async def chat_stream_endpoint(
             latency_ms = 0
             was_cached = False
             used_cache_key: Optional[str] = None
+            usage_stats: Optional[Dict[str, Any]] = None
             t_req_start = time.time()
             async for sse_chunk in run_agentic_chat_stream(
                 message=user_msg,
@@ -454,6 +458,8 @@ async def chat_stream_endpoint(
                                 latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
                                 was_cached = bool(event.get("cached", False))
                                 used_cache_key = event.get("cache_key")
+                                if isinstance(event.get("usage"), dict):
+                                    usage_stats = event.get("usage")
                         except Exception:
                             pass
                 yield sse_chunk
@@ -476,6 +482,7 @@ async def chat_stream_endpoint(
                         cached=was_cached,
                         cache_key=used_cache_key,
                         tables=final_tables or None,
+                        usage=usage_stats,
                     )
                 )
 
@@ -496,6 +503,7 @@ async def chat_stream_endpoint(
         latency_ms = 0
         was_cached = False
         used_cache_key: Optional[str] = None
+        usage_stats: Optional[Dict[str, Any]] = None
         t_req_start = time.time()
         async for sse_chunk in run_agentic_chat_stream(
             message=user_msg,
@@ -524,6 +532,8 @@ async def chat_stream_endpoint(
                             latency_ms = event.get("latency_ms") or int((time.time() - t_req_start) * 1000)
                             was_cached = bool(event.get("cached", False))
                             used_cache_key = event.get("cache_key")
+                            if isinstance(event.get("usage"), dict):
+                                usage_stats = event.get("usage")
                     except Exception:
                         pass
 
@@ -544,6 +554,7 @@ async def chat_stream_endpoint(
                     cached=was_cached,
                     cache_key=used_cache_key,
                     tables=tables or None,
+                    usage=usage_stats,
                 )
             )
 
@@ -558,4 +569,5 @@ async def chat_stream_endpoint(
             "quota_limit": quota_limit,
             "cached": was_cached,
             "cache_key": used_cache_key,
+            "usage": usage_stats,
         })
