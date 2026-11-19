@@ -43,6 +43,9 @@ FILES_TO_SYNC = [
     "api/saudi_telegram_dispatch.py",
     "api/saudi_news_sync.py",
     "api/saudi_disclosures_sync.py",
+    "api/gcc_metals_sync.py",
+    "api/gcc_disclosures_sync.py",
+    "api/gcc_news_sync.py",
     "api/short_swings_daily.py",
     "api/short_swings_engine.py",
     "api/scanner_alerts_engine.py",
@@ -120,7 +123,7 @@ def main():
         print("[INFO] No operations to commit.")
         return
 
-    commit_msg = "fix(quota): atomic per-message Telegram quota deduction & instant web/app sync"
+    commit_msg = "feat(gcc,payments,offload): sync updated Python backend files to HF Space"
     print(f"\n[DEPLOY] Committing {len(operations)} files to HF Space '{repo_id}'...")
 
     api = HfApi(token=token)
