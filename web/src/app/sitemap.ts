@@ -1,6 +1,6 @@
 import { MetadataRoute } from 'next'
 import { getPublicMarketClient } from '@/lib/supabase/route-data'
-import { getPublicStockDirectory, getPublicTasiStockDirectory } from '@/lib/seo/stock-directory'
+import { getPublicStockDirectory, getPublicTasiStockDirectory, getPublicGccMetalsDirectory } from '@/lib/seo/stock-directory'
 import { canonicalSitemap, publishedBlogEntries, validLastModified } from '@/lib/seo/sitemap-entries'
 import { getPublicReports, reportUrl } from '@/lib/social/public-reports'
 import { fetchHfPublicJson } from '@/lib/hf-public-read'
@@ -164,13 +164,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/scanner/technical?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
     { url: `${baseUrl}/scanner/market?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
     { url: `${baseUrl}/scanner/backtests?market=tasi`, changeFrequency: 'daily', priority: 0.85 },
+    { url: `${baseUrl}/markets/uae`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/markets/qatar`, changeFrequency: 'daily', priority: 0.90 },
+    { url: `${baseUrl}/markets/gold-silver`, changeFrequency: 'daily', priority: 0.90 },
   ];
 
-  const [stocks, tasiStocks] = await Promise.all([
+  const [stocks, tasiStocks, gccMetals] = await Promise.all([
     getPublicStockDirectory(),
     getPublicTasiStockDirectory().catch(() => []),
+    typeof getPublicGccMetalsDirectory === 'function'
+      ? getPublicGccMetalsDirectory().catch(() => [])
+      : Promise.resolve([]),
   ]);
-  const stockPages: MetadataRoute.Sitemap = [...stocks, ...tasiStocks].map(stock => ({
+  const stockPages: MetadataRoute.Sitemap = [...stocks, ...tasiStocks, ...gccMetals].map(stock => ({
     url: `${baseUrl}/stocks/${stock.symbol.toLowerCase()}`,
     // This is the persisted fundamentals update, not fetch time or a claim
     // about today's close. Do not manufacture timestamps for unknown updates.

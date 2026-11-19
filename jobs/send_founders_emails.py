@@ -17,7 +17,15 @@ if ROOT_DIR not in sys.path:
 sys.stdout.reconfigure(encoding='utf-8')
 
 from api.stock_ai import supabase
-from api.payment_common import is_user_eligible_for_50_egp_renewal
+from api.payment_common import (
+    current_pro_offer_copy,
+    is_user_eligible_for_50_egp_renewal,
+    is_user_eligible_for_100_egp_renewal,
+)
+try:
+    from api.perf_utils import ALL_PAID_PLAN_IDS
+except Exception:  # pragma: no cover
+    ALL_PAID_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"})
 from api.marketing_lifecycle import (
     send_resend_email,
     record_marketing_message,
@@ -26,32 +34,74 @@ from api.marketing_lifecycle import (
     get_user_email,
     get_daily_sent_count,
     _build_email_html,
+    _build_tiers_summary_html,
     APP_URL,
     MARKETING_DAILY_EMAIL_CAP,
 )
 
 
-def send_renewal_reminder_email(user_id: str, email: str, display_name: str, days_left: int, end_date: str) -> bool:
-    """Sends a clear, urgent Pro renewal reminder email."""
+def _safe_pro_price() -> int:
+    try:
+        price, _ = current_pro_offer_copy()
+        return int(round(float(price)))
+    except Exception:
+        return 150
+
+
+def send_renewal_reminder_email(
+    user_id: str,
+    email: str,
+    display_name: str,
+    days_left: int,
+    end_date: str,
+    plan_id: str = "pro",
+) -> bool:
+    """Sends a clear, tier-aware Pro/Split renewal reminder email with Founders 50/100 protection."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "renewal_reminder", cooldown_days=3):
         return False
 
-    is_eligible = is_user_eligible_for_50_egp_renewal(user_id)
+    norm_plan = (plan_id or "pro").strip().lower()
+    is_eligible_50 = is_user_eligible_for_50_egp_renewal(user_id)
+    is_eligible_100 = is_user_eligible_for_100_egp_renewal(user_id)
+    pro_price = _safe_pro_price()
     time_str = "غداً" if days_left <= 1 else f"خلال {days_left} أيام"
-    subject = f"⏳ تذكير: ينتهي اشتراكك في EGX BOTS Pro {time_str} ({end_date[:10]})"
     greeting = f"أهلاً {display_name} 👋"
-    if is_eligible:
-        perk = "💡 <strong>عرض خاص للمجددين:</strong> يمكنك الاستمرار بنفس سعر باقة المؤسسين المخفض <strong>(50 ج.م شهرياً مدى الحياة)</strong> بتجديد اشتراكك قبل انتهاء الفترة أو خلال مهلة السماح (72 ساعة)."
-        cta_text = "تجديد الاشتراك وتثبيت السعر (50 ج.م)"
+
+    if norm_plan == "chat_only":
+        subject = f"⏳ تذكير: ينتهي اشتراكك في باقة الشات الذكي {time_str} ({end_date[:10]}) | EGX BOTS"
+        paragraphs = [
+            f"نود تذكيرك بأن اشتراكك الحالي في <strong>باقة الشات الذكي (100 ج.م/شهر)</strong> سينتهي <strong>{time_str} (بتاريخ {end_date[:10]})</strong>.",
+            "لضمان استمرار وصولك إلى <strong>350 رسالة تحليلية شهرياً مع ARTORO، تحليل صور الشارت والمحفظة (Vision AI)، محفظة حتى 15 سهماً، و5 مهام مجدولة يومياً</strong>، يمكنك التجديد الآن.",
+            f"💡 <strong>خيارات التجديد عبر EasyKash:</strong> جدّد باقة الشات الذكي بـ <strong>100 ج.م/شهر</strong>، أو رقّ إلى <strong>الباقة الشاملة Pro ({pro_price} ج.م/شهر)</strong> لإضافة قنوات تليجرام VIP (EGX + TASI).",
+        ]
+        cta_text = "تجديد باقة الشات الذكي (100 ج.م/شهر)"
+        cta_url = f"{APP_URL}/pricing?plan=chat_only"
+    elif norm_plan == "vip_only":
+        subject = f"⏳ تذكير: ينتهي اشتراكك في باقة تليجرام VIP {time_str} ({end_date[:10]}) | EGX BOTS"
+        paragraphs = [
+            f"نود تذكيرك بأن اشتراكك الحالي في <strong>باقة تليجرام VIP (100 ج.م/شهر)</strong> سينتهي <strong>{time_str} (بتاريخ {end_date[:10]})</strong>.",
+            "لضمان استمرار بقائك داخل <strong>قنوات التنبيهات الفنية الفورية على تليجرام (EGX + TASI) وإلغاء تأخير بيانات الموقع</strong>، يمكنك التجديد الآن عبر بوابة EasyKash.",
+            f"💡 <strong>خيارات التجديد عبر EasyKash:</strong> جدّد باقة تليجرام VIP بـ <strong>100 ج.م/شهر</strong>، أو رقّ إلى <strong>الباقة الشاملة Pro ({pro_price} ج.م/شهر)</strong> لإضافة الشات الذكي (350 رسالة + Vision AI + محفظة 15 سهماً).",
+        ]
+        cta_text = "تجديد باقة تليجرام VIP (100 ج.م/شهر)"
+        cta_url = f"{APP_URL}/pricing?plan=vip_only"
     else:
-        perk = "💡 <strong>عرض المؤسسين لفترة محدودة:</strong> يمكنك تجديد اشتراكك الآن بسعر عرض المؤسسين المخفض <strong>(100 ج.م شهرياً بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط مع مهلة 72 ساعة لتثبيت السعر."
-        cta_text = "تجديد الاشتراك بسعر العرض (100 ج.م)"
-    paragraphs = [
-        f"نود تذكيرك بأن اشتراكك الحالي في <strong>باقة EGX BOTS PRO</strong> سينتهي <strong>{time_str} (بتاريخ {end_date[:10]})</strong>.",
-        "لضمان استمرار وصولك دون انقطاع إلى <strong>مساعد الشات بوت الذكي (AI Chatbot)، إشارات ونماذج السوينج الفنية اللحظية، مستويات المراقبة والأهداف السعرية الاسترشادية، وقناة التنبيهات الفنية على تليجرام</strong>، يمكنك تجديد اشتراكك الآن.",
-        perk,
-    ]
-    cta_url = f"{APP_URL}/pricing?plan=pro"
+        subject = f"⏳ تذكير: ينتهي اشتراكك في الباقة الشاملة EGX BOTS Pro {time_str} ({end_date[:10]})"
+        if is_eligible_50:
+            perk = "💡 <strong>حماية المؤسسين (50 ج.م):</strong> سعرك محفوظ مدى الحياة على الباقة الشاملة بـ <strong>50 ج.م شهرياً</strong> (بدلاً من 150 ج.م)، أو 250 ج.م/6 شهور، أو 450 ج.م/سنة عند التجديد خلال مهلة السماح (72 ساعة)."
+            cta_text = "تجديد الباقة الشاملة وتثبيت السعر (50 ج.م)"
+        elif is_eligible_100:
+            perk = "💡 <strong>حماية المؤسسين (100 ج.م):</strong> سعرك محفوظ مدى الحياة على الباقة الشاملة بـ <strong>100 ج.م شهرياً</strong> (بدلاً من 150 ج.م)، أو 500 ج.م/6 شهور، أو 900 ج.م/سنة عند التجديد خلال مهلة السماح (72 ساعة)."
+            cta_text = "تجديد الباقة الشاملة وتثبيت السعر (100 ج.م)"
+        else:
+            perk = _build_tiers_summary_html(pro_price, None)
+            cta_text = f"تجديد الاشتراك الآن ({pro_price} ج.م/شهر)"
+        paragraphs = [
+            f"نود تذكيرك بأن اشتراكك الحالي في <strong>الباقة الشاملة EGX BOTS PRO</strong> سينتهي <strong>{time_str} (بتاريخ {end_date[:10]})</strong>.",
+            "لضمان استمرار وصولك دون انقطاع إلى <strong>مساعد الشات الذكي (ARTORO)، مؤشرات ونماذج السوينج الفنية اللحظية، مستويات المراقبة الاسترشادية، وقنوات التنبيهات الفنية VIP على تليجرام (EGX + TASI)</strong>، يمكنك تجديد اشتراكك عبر بوابة EasyKash.",
+            perk,
+        ]
+        cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
     send_meta: Dict[str, Any] = {}
@@ -60,35 +110,66 @@ def send_renewal_reminder_email(user_id: str, email: str, display_name: str, day
             user_id,
             email,
             "renewal_reminder",
-            {"days_left": days_left, "end_date": end_date},
+            {"days_left": days_left, "end_date": end_date, "plan_id": norm_plan},
             provider_message_id=send_meta.get("provider_message_id")
         )
         return True
     return False
 
 
-def send_expired_reactivation_email(user_id: str, email: str, display_name: str, end_date: str) -> bool:
-    """Sends an urgent expired reactivation email to users whose subscription recently ended."""
+def send_expired_reactivation_email(
+    user_id: str,
+    email: str,
+    display_name: str,
+    end_date: str,
+    plan_id: str = "pro",
+) -> bool:
+    """Sends an urgent expired reactivation email tailored to tier and Founders 50/100 lock."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "expired_reactivation", cooldown_days=3):
         return False
 
-    is_eligible = is_user_eligible_for_50_egp_renewal(user_id)
+    norm_plan = (plan_id or "pro").strip().lower()
+    is_eligible_50 = is_user_eligible_for_50_egp_renewal(user_id)
+    is_eligible_100 = is_user_eligible_for_100_egp_renewal(user_id)
+    pro_price = _safe_pro_price()
     greeting = f"أهلاً {display_name} 👋"
-    if is_eligible:
-        subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - مهلة 72 ساعة لتثبيت السعر بـ 50 ج.م"
-        perk = "💡 <strong>مهلة سماح 72 ساعة (3 أيام):</strong> لأنك من المشتركين المؤهلين لسعر المؤسسين، أمامك مهلة 72 ساعة فقط لإعادة تفعيل اشتراكك والاحتفاظ بسعر <strong>50 ج.م شهرياً مدى الحياة</strong> قبل أن يرتفع السعر إلى 100 ج.م."
-        cta_text = "إعادة التفعيل خلال مهلة السماح (50 ج.م)"
-    else:
-        subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - يمكنك إعادة التفعيل بسعر العرض (100 ج.م)"
-        perk = "💡 <strong>عرض المؤسسين لفترة محدودة:</strong> يمكنك إعادة تفعيل اشتراكك الآن بسعر عرض المؤسسين المخفض <strong>(100 ج.م شهرياً بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط مع مهلة 72 ساعة لتثبيت السعر عند كل تجديد."
-        cta_text = "إعادة تفعيل الاشتراك بسعر العرض (100 ج.م)"
 
-    paragraphs = [
-        f"نحيطك علماً بأن اشتراكك في <strong>باقة EGX BOTS PRO</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
-        "لقد توقفت صلاحيات الوصول إلى <strong>مساعد الشات بوت الذكي (AI Chatbot)، إشارات ونماذج السوينج الفنية اللحظية، مستويات المراقبة، وقناة التنبيهات الفنية VIP على تليجرام</strong>.",
-        perk,
-    ]
-    cta_url = f"{APP_URL}/pricing?plan=pro"
+    if norm_plan == "chat_only" and not (is_eligible_50 or is_eligible_100):
+        subject = "⚠️ انتهت صلاحية باقة الشات الذكي — أعد التفعيل بـ 100 ج.م/شهر | EGX BOTS"
+        paragraphs = [
+            f"نحيطك علماً بأن اشتراكك في <strong>باقة الشات الذكي</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
+            "يمكنك إعادة التفعيل فوراً عبر بوابة EasyKash بـ <strong>100 ج.م/شهر</strong> (350 رسالة تحليلية + Vision AI + محفظة 15 سهماً + 5 مهام مجدولة)، أو اختيار الباقة الشاملة Pro بـ <strong>150 ج.م/شهر</strong> لضم قنوات تليجرام VIP.",
+        ]
+        cta_text = "إعادة تفعيل باقة الشات الذكي (100 ج.م)"
+        cta_url = f"{APP_URL}/pricing?plan=chat_only"
+    elif norm_plan == "vip_only" and not (is_eligible_50 or is_eligible_100):
+        subject = "⚠️ انتهت صلاحية باقة تليجرام VIP — أعد التفعيل بـ 100 ج.م/شهر | EGX BOTS"
+        paragraphs = [
+            f"نحيطك علماً بأن اشتراكك في <strong>باقة تليجرام VIP</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
+            "يمكنك إعادة التفعيل فوراً عبر بوابة EasyKash بـ <strong>100 ج.م/شهر</strong> للعودة إلى قنوات EGX + TASI الفورية، أو الترقية للباقة الشاملة Pro بـ <strong>150 ج.م/شهر</strong>.",
+        ]
+        cta_text = "إعادة تفعيل باقة تليجرام VIP (100 ج.م)"
+        cta_url = f"{APP_URL}/pricing?plan=vip_only"
+    else:
+        if is_eligible_50:
+            subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - مهلة 72 ساعة لتثبيت السعر بـ 50 ج.م"
+            perk = "💡 <strong>مهلة سماح 72 ساعة (حماية المؤسسين):</strong> لأنك من المشتركين المؤهلين لسعر المؤسسين، أمامك مهلة 72 ساعة لإعادة تفعيل الباقة الشاملة والاحتفاظ بسعر <strong>50 ج.م شهرياً مدى الحياة</strong> (بدلاً من 150 ج.م، مع توفر 6 شهور بـ 250 ج.م والسنوية بـ 450 ج.م)."
+            cta_text = "إعادة التفعيل خلال مهلة السماح (50 ج.م)"
+        elif is_eligible_100:
+            subject = "⚠️ تنبيه: انتهت صلاحية اشتراكك في EGX BOTS Pro - مهلة 72 ساعة لتثبيت السعر بـ 100 ج.م"
+            perk = "💡 <strong>مهلة سماح 72 ساعة (حماية المؤسسين):</strong> لأنك من المشتركين المؤهلين لسعر المؤسسين، يمكنك إعادة تفعيل الباقة الشاملة والاحتفاظ بسعر <strong>100 ج.م شهرياً مدى الحياة</strong> (بدلاً من 150 ج.م، مع توفر 6 شهور بـ 500 ج.م والسنوية بـ 900 ج.م)."
+            cta_text = "إعادة التفعيل خلال مهلة السماح (100 ج.م)"
+        else:
+            subject = "⚠️ انتهت صلاحية اشتراكك في EGX BOTS Pro — باقات تبدأ من 100 ج.م/شهر"
+            perk = _build_tiers_summary_html(pro_price, None)
+            cta_text = f"إعادة التفعيل عبر EasyKash ({pro_price} ج.م/شهر)"
+
+        paragraphs = [
+            f"نحيطك علماً بأن اشتراكك في <strong>الباقة الشاملة EGX BOTS PRO</strong> قد انتهى مؤخراً <strong>(بتاريخ {end_date[:10]})</strong>.",
+            "لقد توقفت صلاحيات الوصول إلى <strong>مساعد الشات بوت الذكي (ARTORO)، مؤشرات ونماذج السوينج الفنية اللحظية، مستويات المراقبة، وقنوات التنبيهات الفنية VIP على تليجرام</strong>.",
+            perk,
+        ]
+        cta_url = f"{APP_URL}/pricing?plan=pro"
 
     html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, user_id, email)
     send_meta: Dict[str, Any] = {}
@@ -97,7 +178,7 @@ def send_expired_reactivation_email(user_id: str, email: str, display_name: str,
             user_id,
             email,
             "expired_reactivation",
-            {"end_date": end_date},
+            {"end_date": end_date, "plan_id": norm_plan},
             provider_message_id=send_meta.get("provider_message_id")
         )
         return True
@@ -109,16 +190,17 @@ def send_trial_onboarding_email(user_id: str, email: str, display_name: str, inv
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "trial_onboarding", cooldown_days=2):
         return False
 
+    pro_price = _safe_pro_price()
     subject = "🚀 تفعيل باقتك: رابط قناة VIP الخاصة بك وجرب الشات بوت الذكي الآن | EGX BOTS"
     greeting = f"أهلاً {display_name} 👋"
     paragraphs = [
-        f"لاحظنا أنك قمت بتفعيل <strong>تجربة باقة Pro المجانية</strong> لمدة 3 أيام، ونود التأكد من حصولك على أقصى استفادة قبل انتهاء فترة التجربة <strong>(بتاريخ {end_date[:10]})</strong>.",
+        f"لاحظنا أنك قمت بتفعيل <strong>تجربة الباقة الشاملة Pro المجانية</strong> لمدة 3 أيام، ونود التأكد من حصولك على أقصى استفادة قبل انتهاء فترة التجربة <strong>(بتاريخ {end_date[:10]})</strong>.",
         f"1️⃣ <strong>رابط قناة التنبيهات الفنية VIP على تليجرام:</strong><br/>"
         f"انضم الآن لقناة التنبيهات اللحظية عبر الرابط المخصص لحسابك:<br/>"
         f"<a href='{invite_link}' style='color:#10b981;font-weight:bold;'>{invite_link}</a>",
         "2️⃣ <strong>جرب الشات بوت الذكي الآن:</strong><br/>"
-        "اسأل الشات بوت عن أي سهم في محفظتك بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.",
-        "💡 <strong>عرض المؤسسين (100 ج.م شهرياً مدى الحياة):</strong> يمكنك تثبيت اشتراكك بسعر عرض المؤسسين <strong>(100 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط! يثبت هذا السعر لحسابك دائماً طول ما بتجدد.",
+        "اسأل الشات بوت عن أي سهم في محفظتك بالبورصة المصرية أو السعودية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.",
+        _build_tiers_summary_html(pro_price, None),
     ]
     cta_text = "بدء استخدام الشات بوت وفحص الأسهم"
     cta_url = f"{APP_URL}/ai-chat"
@@ -138,19 +220,20 @@ def send_trial_onboarding_email(user_id: str, email: str, display_name: str, inv
 
 
 def send_founders_offer_email(user_id: str, email: str, display_name: str) -> bool:
-    """Sends the high-converting 3-Day Pro Trial & Founders scarcity email to active free users."""
+    """Sends the 3-Day Pro Trial & split-pricing invitation email to active free users."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, "founders_offer", cooldown_days=7):
         return False
 
-    subject = "🎁 هديتك من EGX BOTS: تفعيل باقة Pro مجاناً لمدة 3 أيام (بدون دفع وبدون بطاقة)"
+    pro_price = _safe_pro_price()
+    subject = "🎁 هديتك من EGX BOTS: تفعيل باقة Pro الشاملة مجاناً لمدة 3 أيام (بدون بطاقة)"
     greeting = f"أهلاً {display_name} 👋"
     paragraphs = [
-        "يسعدنا تواجدك معنا في منصة <strong>EGX BOTS</strong>. ولأننا نؤمن أن التجربة العملية هي أفضل برهان للمتداول، يسعدنا أن نهديك <strong>تفعيل باقة Pro مجاناً بالكامل لمدة 3 أيام</strong> بضغطة زر واحدة — بدون أي دفع مسبق وبدون طلب بطاقة بنكية.",
+        "يسعدنا تواجدك معنا في منصة <strong>EGX BOTS</strong>. ولأننا نؤمن أن التجربة العملية هي أفضل برهان للباحث في السوق، يسعدنا أن نهديك <strong>تفعيل الباقة الشاملة Pro مجاناً بالكامل لمدة 3 أيام</strong> بضغطة زر واحدة — بدون أي دفع مسبق وبدون طلب بطاقة بنكية.",
         "🚀 <strong>ما الذي يمكنك تجربته واستكشافه فوراً خلال الـ 3 أيام؟</strong><br/>"
-        "• <strong>فحص أي سهم مصري عبر الشات بوت الذكي:</strong> اسأل الشات بوت عن أي سهم بالبورصة المصرية ليحلل لك مستويات السيولة، نقاط الدعم والمقاومة، والاتجاه الفني لحظياً.<br/>"
-        "• <strong>ماسح السيولة الذكية والنماذج الفنية:</strong> رصد رقمي ومؤتمت لمستويات المراقبة الفنية والأهداف السعرية الاسترشادية وحركة التجميع بالبورصة المصرية.<br/>"
-        "• <strong>قناة التنبيهات الفنية VIP على تليجرام:</strong> إشعارات رقمية مباشرة لاكتمال النماذج الفنية لحظياً عبر تليجرام.",
-        "💡 <strong>عرض المؤسسين (100 ج.م شهرياً مدى الحياة):</strong> إذا نالت أدوات ومزايا Pro إعجابك خلال فترة التجربة، يمكنك الاشتراك بسعر باقة المؤسسين <strong>(100 ج.م فقط شهرياً مدى الحياة بدلاً من 200 ج.م)</strong> والمتاح لمدة 15 يوماً فقط! يثبت هذا السعر لحسابك دائماً طول ما بتجدد مع مهلة سماح 72 ساعة لتثبيت السعر عند كل تجديد.",
+        "• <strong>فحص أي سهم عبر الشات بوت الذكي ARTORO:</strong> تحليل رقمي لمستويات السيولة، نقاط الدعم والمقاومة، والقيمة العادلة للأسهم المصرية والسعودية.<br/>"
+        "• <strong>ماسح السيولة الذكية والنماذج الفنية:</strong> رصد رقمي ومؤتمت لمستويات المراقبة الفنية والأهداف الاسترشادية وحركة التجميع.<br/>"
+        "• <strong>قنوات التنبيهات الفنية VIP على تليجرام (EGX + TASI):</strong> إشعارات رقمية مباشرة لاكتمال النماذج الفنية لحظياً عبر تليجرام.",
+        _build_tiers_summary_html(pro_price, None),
     ]
     cta_text = "⚡ تفعيل باقة Pro المجانية الآن (0 ج.م)"
     cta_url = f"{APP_URL}/pricing?plan=pro&trial=true"
@@ -253,7 +336,9 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
                 results["renewals_sent"] += 1
                 sent_this_run += 1
             else:
-                ok = send_renewal_reminder_email(uid, email, dname, days_left, end_str)
+                ok = send_renewal_reminder_email(
+                    uid, email, dname, days_left, end_str, plan_id=sub.get("plan_id") or "pro"
+                )
                 if ok:
                     results["renewals_sent"] += 1
                     sent_this_run += 1
@@ -342,7 +427,9 @@ def dispatch_campaign_emails(max_emails: int = 40, dry_run: bool = True) -> Dict
                 results["expired_sent"] += 1
                 sent_this_run += 1
             else:
-                ok = send_expired_reactivation_email(uid, email, dname, end_str)
+                ok = send_expired_reactivation_email(
+                    uid, email, dname, end_str, plan_id=sub.get("plan_id") or "pro"
+                )
                 if ok:
                     results["expired_sent"] += 1
                     sent_this_run += 1

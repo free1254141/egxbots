@@ -262,13 +262,16 @@ def _is_user_pro(user_id: str) -> bool:
 
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
 
-    # 3. Check active or trialing subscriptions
+    # 3. Check active or trialing subscriptions (AI Chat Pro or Full Pro — excludes vip_only)
     subs = _supabase_request(
-        f"subscriptions?user_id=eq.{user_id}&status=in.(active,trialing)&select=plan_id,current_period_end&order=current_period_end.desc&limit=1"
+        f"subscriptions?user_id=eq.{user_id}&status=in.(active,trialing)&select=plan_id,current_period_end&order=current_period_end.desc&limit=5"
     ) or []
-    if subs and isinstance(subs, list) and len(subs) > 0:
-        end_str = str(subs[0].get("current_period_end") or "")
-        plan_id = str(subs[0].get("plan_id") or "").lower()
+    chat_pro_plans = {"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only"}
+    for sub_row in (subs if isinstance(subs, list) else []):
+        end_str = str(sub_row.get("current_period_end") or "")
+        plan_id = str(sub_row.get("plan_id") or "").strip().lower()
+        if plan_id not in chat_pro_plans:
+            continue
         if not end_str or "lifetime" in plan_id or "2126" in end_str or end_str > now_iso:
             return True
 

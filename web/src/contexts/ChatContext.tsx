@@ -524,7 +524,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         if (typeof window !== "undefined") {
 
-            return localStorage.getItem("egx_pro_active") === "true";
+            return localStorage.getItem("egx_chat_pro_active") === "true";
 
         }
 
@@ -1200,7 +1200,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
                     if (typeof window !== "undefined") {
 
-                        localStorage.setItem("egx_pro_active", data.is_pro ? "true" : "false");
+                        localStorage.setItem("egx_chat_pro_active", data.is_pro ? "true" : "false");
 
                     }
 
@@ -1270,11 +1270,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         const onStorage = (event: StorageEvent) => {
 
-            if (event.key === "egx_entitlements_timestamp" || event.key === "egx_pro_active") {
+            if (event.key === "egx_entitlements_timestamp" || event.key === "egx_chat_pro_active") {
 
                 if (typeof window !== "undefined") {
 
-                    const stored = localStorage.getItem("egx_pro_active") === "true";
+                    const stored = localStorage.getItem("egx_chat_pro_active") === "true";
 
                     setIsPro(stored);
 
@@ -1539,7 +1539,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 
 
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
 
         if (!activePro && imagesList.length > 0) {
 
@@ -2132,6 +2132,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                                 receivedDone = true;
 
                                 publishChartActions(parsed.chart_actions, requestChartContext, requestChartOwner, requestChartGeneration);
+
+                                if (
+                                    typeof window !== "undefined" &&
+                                    Array.isArray(parsed.usage?.tools_used) &&
+                                    parsed.usage.tools_used.includes("manage_portfolio")
+                                ) {
+                                    window.dispatchEvent(new Event("portfolio-updated"));
+                                }
 
                                 if (parsed.enable_autonomous_recs === true) {
 

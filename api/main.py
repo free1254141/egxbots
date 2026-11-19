@@ -2482,90 +2482,24 @@ def symbols_synced(
 
 
 @app.get("/symbols/search")
-
-def symbols_search(
-
+async def symbols_search(
+    request: Request,
     q: str = Query(default="", max_length=64),
-
     country: str | None = Query(default=None, max_length=64),
-
     exchange: str | None = Query(default=None, max_length=24),
-
     limit: int = Query(default=25, ge=1, le=100000),
-
     source: str = Query(default="supabase"),
-
 ):
+    from api.routers.offload import api_symbols_search
 
-    try:
-
-        if source == "local":
-
-            results = search_symbols(
-
-                q=q, country=country, exchange=exchange, limit=limit
-
-            )
-
-            return {"results": results}
-
-
-
-        # Supabase search
-
-        from api.stock_ai import get_supabase_symbols
-
-
-
-        all_sb = get_supabase_symbols(country=country)
-
-
-
-        q_low = q.lower().strip()
-
-        results = []
-
-        for s in all_sb:
-
-            s_name = str(s.get("name") or "")
-
-            s_symbol = str(s.get("symbol") or "")
-
-            if not q_low or q_low in s_symbol.lower() or q_low in s_name.lower():
-
-                # Apply exchange filter if provided
-
-                s_exchange = str(s.get("exchange") or "")
-
-                if exchange and s_exchange.lower() != exchange.lower():
-
-                    continue
-
-                results.append(s)
-
-                if len(results) >= limit:
-
-                    break
-
-
-
-        # If supabase has no results, maybe fallback to local or return empty
-
-        # but user specifically asked to use supabase for the app.
-
-        return {"results": results}
-
-    except FileNotFoundError as e:
-
-        raise HTTPException(status_code=404, detail=str(e))
-
-    except ValueError as e:
-
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-
-        raise HTTPException(status_code=500, detail=str(e))
+    return await api_symbols_search(
+        request=request,
+        q=q,
+        country=country,
+        exchange=exchange,
+        limit=limit,
+        source=source,
+    )
 
 
 

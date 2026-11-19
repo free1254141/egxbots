@@ -13,15 +13,19 @@ from jobs.founders_campaign import (
 def test_build_founders_announcement_text():
     text_named = build_founders_announcement_text("أحمد")
     assert "أحمد" in text_named
-    assert "50 ج.م" in text_named
-    assert "عرض الـ 100 مؤسس الأوائل" in text_named
+    assert "100 ج.م" in text_named
+    assert "150 ج.م" in text_named
+    assert "25%" in text_named
+    assert "EasyKash" in text_named
+    assert "200 ج.م" not in text_named
+    assert "انستاباي" not in text_named and "إنستاباي" not in text_named
     assert "مساعد الشات بوت الذكي" in text_named
     assert "إشارات ونماذج السوينج الفنية" in text_named
     assert "الهيئة العامة للرقابة المالية" in text_named
 
     text_default = build_founders_announcement_text(None)
     assert "صديقنا العزيز" in text_default
-    assert "50 ج.م" in text_default
+    assert "100 ج.م" in text_default
 
 
 def test_get_founders_inline_keyboard():
@@ -30,7 +34,8 @@ def test_get_founders_inline_keyboard():
     buttons = markup["inline_keyboard"]
     assert len(buttons) == 2
     assert "plan=pro" in buttons[0][0]["url"]
-    assert "50 ج.م" in buttons[0][0]["text"]
+    assert "100 ج.م" in buttons[0][0]["text"]
+    assert "25%" in buttons[0][0]["text"]
     assert "التجربة المجانية" in buttons[1][0]["text"]
 
 

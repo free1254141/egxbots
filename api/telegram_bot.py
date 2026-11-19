@@ -878,15 +878,18 @@ class TelegramBot:
                     except Exception as e:
                         self._log(f"Could not sync subscription telegram_chat_id: {e}")
 
-                    # Check if user has active Pro subscription
+                    # Check if user has active paid/trial subscription (Full Pro, Chat Only, or VIP Only)
                     is_pro = False
+                    has_vip = False
+                    has_chat = False
                     sub_end = None
+                    active_plan_id = ""
                     try:
                         sub_res = (
                             supabase.table("subscriptions")
                             .select("plan_id, status, current_period_end")
                             .eq("user_id", uid)
-                            .in_("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
+                            .in_("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"])
                             .in_("status", ["active", "trialing"])
                             .order("current_period_end", desc=True)
                             .limit(1)
@@ -894,14 +897,25 @@ class TelegramBot:
                             .execute()
                         )
                         if sub_res and sub_res.data:
-                            from api.perf_utils import has_active_pro_subscription
+                            from api.perf_utils import (
+                                has_active_chat_pro,
+                                has_active_pro_subscription,
+                                has_active_vip_telegram,
+                            )
                             if has_active_pro_subscription([sub_res.data]):
                                 sub_end = sub_res.data.get("current_period_end")
+                                active_plan_id = str(sub_res.data.get("plan_id") or "").lower()
                                 is_pro = True
+                                has_vip = has_active_vip_telegram([sub_res.data])
+                                has_chat = has_active_chat_pro([sub_res.data])
                     except Exception as e:
                         self._log(f"Error checking user subscription: {e}")
 
-                    plan_label = "Pro"
+                    plan_label = (
+                        "الشات الذكي (AI Chat)"
+                        if active_plan_id == "chat_only"
+                        else ("رادار تليجرام VIP" if active_plan_id == "vip_only" else "Pro")
+                    )
                     # Auto-activate 3-day Pro trial upon Telegram link if user is eligible and hasn't used a trial/paid plan before
                     if not is_pro and not prior_tg_uid:
                         try:
@@ -933,6 +947,8 @@ class TelegramBot:
                                                 rpc_data = arg1
                                 if isinstance(rpc_data, dict) and rpc_data.get("success"):
                                     is_pro = True
+                                    has_vip = True
+                                    has_chat = True
                                     sub_end = rpc_data.get("expires_at")
                                     plan_label = "تجربة Pro المجانية (3 أيام)"
                                     try:
@@ -954,8 +970,9 @@ class TelegramBot:
                                 user_id=uid,
                                 plan_name=plan_label,
                                 subscription_end=str(sub_end) if sub_end else "",
+                                include_vip_invite=has_vip,
                             )
-                            if sent:
+                            if sent and has_vip:
                                 try:
                                     recent_order = supabase.table("local_payment_orders").select("id, customer_note").eq("user_id", uid).eq("status", "approved").order("created_at", desc=True).limit(1).maybe_single().execute()
                                     if recent_order and recent_order.data:
@@ -966,14 +983,23 @@ class TelegramBot:
                                 except Exception as mark_err:
                                     self._log(f"Could not record tg_welcomed on order: {mark_err}")
                             if not sent:
+                                vip_hint = (
+                                    "تابع قناة VIP لمشاهدة التنبيهات الفنية وتصفح الموقع من هنا:\n"
+                                    if has_vip
+                                    else "استخدم المساعد الذكي هنا أو تصفح حسابك من هنا:\n"
+                                )
                                 self._reply(
                                     chat_id,
                                     f"🎉 *أهلاً وسهلاً، {display_name}\\!*\n\n"
                                     "✅ *تم ربط حسابك في تليجرام بنجاح\\!*\n"
-                                    "⭐ *اشتراكك في باقة Pro مفعّل ونشط الآن* 🚀\n\n"
-                                    "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي\\!\n\n"
-                                    "تابع قناة VIP لمشاهدة إشارات التداول وتصفح الموقع من هنا:\n"
-                                    "https://egxbots\\.com/profile",
+                                    f"⭐ *باقة {plan_label} مفعّلة ونشطة الآن* 🚀\n\n"
+                                    + (
+                                        "🎁 *هدية ربط الحساب:* تمت إضافة *\\+10 رسائل إضافية* لرصيدك في مساعد الذكاء الاصطناعي\\!\n\n"
+                                        if not has_chat
+                                        else ""
+                                    )
+                                    + vip_hint
+                                    + "https://egxbots\\.com/profile",
                                 )
                         except Exception as e:
                             self._log(f"Error in pro welcome dispatch: {e}")

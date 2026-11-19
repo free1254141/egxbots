@@ -26,7 +26,7 @@ from api.agentic_chat.auth_guard import (
     sanitize_user_input,
 )
 from api.stock_ai import _init_supabase, supabase
-from api.plan_limits import is_pro_user
+from api.plan_limits import has_chat_pro_user, is_pro_user
 
 logger = logging.getLogger("agentic_chat")
 router = APIRouter(prefix="", tags=["agentic_chat"])
@@ -165,7 +165,7 @@ async def get_chat_root(
 
     auth_user = get_authenticated_user(request)
     user_id = auth_user.get("id") if auth_user else None
-    user_is_pro = is_pro_user(user_id, supabase) if user_id else False
+    user_is_pro = has_chat_pro_user(user_id, supabase) if user_id else False
 
     if action == "sessions":
         sessions_list = []
@@ -389,7 +389,20 @@ async def chat_stream_endpoint(
         user_is_pro = True
     else:
         _init_supabase()
-        user_is_pro = is_pro_user(verified_user_id, supabase) if verified_user_id else False
+        user_is_pro = has_chat_pro_user(verified_user_id, supabase) if verified_user_id else False
+
+    has_attached_images = any(
+        isinstance(img, str) and bool(img.strip())
+        for img in (body.images or [])
+    )
+    if has_attached_images and not user_is_pro:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "PRO_REQUIRED",
+                "detail": "تحليل صور المحفظة والشارت (Vision AI) متاح لمشتركي باقة الشات الذكي (100 ج.م) أو الباقة الشاملة Pro (150 ج.م).",
+            },
+        )
 
     # Check and consume quota
     allowed, remaining_quota, quota_limit, quota_err = check_and_consume_quota(

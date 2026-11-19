@@ -33,7 +33,7 @@ async function fetchSnapshotBundleFromHf(
         snapshot?: PublicStockSnapshotData;
         related?: { basis?: 'sector' | 'directory'; stocks?: Array<{ symbol: string; name: string }> };
     }>(`/api/public/stock-page-data?symbol=${encodeURIComponent(symbol)}&market=${market}`, 604800);
-    if (!payload?.snapshot) return null;
+    if (!payload?.snapshot || (!payload.snapshot.fundamentals && !payload.snapshot.latestPrice)) return null;
     return {
         snapshot: payload.snapshot,
         related: payload.related?.stocks
@@ -64,10 +64,79 @@ const getPublicEgxStockSnapshot = cache(unstable_cache(async (symbol: string): P
     if (fund.error) throw new Error('Unable to load public stock fundamentals');
     if (price.error) throw new Error('Unable to verify public stock existence');
     if (tech.error || history.error || scan.error) throw new Error('Unable to load a complete public stock snapshot');
-    return { fundamentals: fund.data?.[0] || null, latestPrice: price.data?.[0] || null,
+    const egxLatestPrice = price.data?.[0] || null;
+    const egxFund = fund.data?.[0] || null;
+    if (!egxFund && !egxLatestPrice) {
+        const gccSnap = await getPublicGccMetalsStockSnapshot(symbol).catch(() => null);
+        if (gccSnap) return gccSnap;
+    }
+
+    return { fundamentals: egxFund, latestPrice: egxLatestPrice,
         latestTech: tech.data?.[0] || null, latestScan: scan.data?.[0] || null,
         historicalPrices: [...(history.data || [])].reverse() };
-}, ['public-egx-stock-snapshot-v2'], { revalidate: 604800 }));
+}, ['public-egx-stock-snapshot-v3'], { revalidate: 604800 }));
+
+const GCC_METALS_EXCHANGES = ['DFM', 'ADX', 'QSE', 'COMMODITIES'] as const;
+
+async function getPublicGccMetalsStockSnapshot(symbol: string): Promise<PublicStockSnapshotData | null> {
+    const cleanSymbol = symbol.toUpperCase().trim();
+    const client = getMarketSupabaseClient('tasi');
+    const [stockRes, priceRes, techRes, histRes] = await Promise.all([
+        client
+            .from('stocks')
+            .select('symbol,exchange,country,currency,name,name_ar,sector,updated_at')
+            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .eq('symbol', cleanSymbol)
+            .limit(1),
+        client
+            .from('stock_prices')
+            .select('symbol,exchange,date,open,high,low,close,volume,updated_at')
+            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .eq('symbol', cleanSymbol)
+            .order('date', { ascending: false })
+            .limit(1),
+        client
+            .from('stock_technical_indicators')
+            .select('symbol,exchange,date,close,change_pct,adx_14,rsi_14,macd,macd_signal,ema_50,ema_200,sma_50,sma_200,calculated_at')
+            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .eq('symbol', cleanSymbol)
+            .order('date', { ascending: false })
+            .limit(1),
+        client
+            .from('stock_prices')
+            .select('date,open,high,low,close,volume')
+            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .eq('symbol', cleanSymbol)
+            .order('date', { ascending: false })
+            .limit(30),
+    ]);
+
+    const stockRow = stockRes.data?.[0] as any;
+    const latestPrice = priceRes.data?.[0] || null;
+    if (!stockRow && !latestPrice) return null;
+
+    const exchange = String(stockRow?.exchange || latestPrice?.exchange || 'DFM');
+    return {
+        fundamentals: {
+            symbol: cleanSymbol,
+            exchange,
+            updated_at: stockRow?.updated_at || latestPrice?.updated_at || null,
+            data: {
+                country: stockRow?.country || (exchange === 'QSE' ? 'Qatar' : exchange === 'COMMODITIES' ? 'Global' : 'UAE'),
+                currency: stockRow?.currency || (exchange === 'QSE' ? 'QAR' : exchange === 'COMMODITIES' ? 'USD' : 'AED'),
+                exchange,
+                name: stockRow?.name || cleanSymbol,
+                Name: stockRow?.name || cleanSymbol,
+                name_ar: stockRow?.name_ar || cleanSymbol,
+                sector: stockRow?.sector || '',
+            },
+        },
+        latestPrice,
+        latestTech: techRes.error ? null : (techRes.data?.[0] || null),
+        latestScan: null,
+        historicalPrices: histRes.error ? [] : [...(histRes.data || [])].reverse(),
+    };
+}
 
 const getPublicTasiStockSnapshot = cache(unstable_cache(async (symbol: string): Promise<PublicStockSnapshotData> => {
     const hf = await fetchSnapshotBundleFromHf(symbol, 'tasi');
@@ -155,7 +224,7 @@ const getCachedStockPageBundle = cache(unstable_cache(async (symbol: string, mar
         ? await getPublicTasiStockSnapshot(symbol)
         : await getPublicEgxStockSnapshot(symbol);
     return { snapshot, related: null };
-}, ['public-stock-page-bundle-v1'], { revalidate: 604800 }));
+}, ['public-stock-page-bundle-v3'], { revalidate: 604800 }));
 
 export async function getPublicStockSnapshot(symbol: string, market: MarketMode = 'egx') {
     if (market === 'tasi') {

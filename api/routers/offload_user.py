@@ -36,6 +36,7 @@ from api.perf_utils import (
     get_market_exchange,
     get_market_supabase,
     get_primary_supabase,
+    has_active_chat_pro,
     has_active_pro_subscription,
     is_unlimited_chat_user,
     resolve_request_market,
@@ -839,8 +840,8 @@ def _portfolio_limit_for_user(sb: Any, user_id: str) -> Tuple[bool, int]:
     if not is_payments_enabled():
         return True, int(os.getenv("PRO_PORTFOLIO_STOCKS", "15"))
     res = sb.table("subscriptions").select("plan_id,status,current_period_end").eq("user_id", user_id).limit(10).execute()
-    pro = has_active_pro_subscription(getattr(res, "data", None) or [])
-    return pro, int(plan_limits("pro" if pro else "free")["portfolio_stocks"])
+    chat_pro = has_active_chat_pro(getattr(res, "data", None) or [])
+    return chat_pro, int(plan_limits("chat_only" if chat_pro else "free")["portfolio_stocks"])
 
 
 def _can_add_portfolio_positions(sb: Any, user_id: str, additional: int) -> Tuple[bool, str]:
@@ -865,37 +866,117 @@ def _build_portfolio_snapshot(sb: Any, user_id: str) -> Dict[str, Any]:
 
     latest_prices: Dict[str, Optional[float]] = {}
     price_dates: Dict[str, Optional[str]] = {}
+    pos_exchange_map: Dict[str, str] = {}
+    non_egx_groups: Dict[str, List[Tuple[str, str]]] = {}
+    get_market_config: Any = None
     if positions or watch_positions:
         symbols = list({p["symbol"] for p in all_positions if p.get("symbol")})
+        egx_symbols: List[str] = []
         try:
-            d_res = sb.table("stock_prices").select("date").eq("exchange", "EGX").order("date", desc=True).limit(1).execute()
-            latest_date = (getattr(d_res, "data", None) or [{}])[0].get("date")
-            if latest_date and symbols:
-                p_res = (
-                    sb.table("stock_prices")
-                    .select("symbol,close")
-                    .eq("exchange", "EGX")
-                    .eq("date", latest_date)
-                    .in_("symbol", symbols)
-                    .limit(len(symbols) + 10)
-                    .execute()
-                )
-                for row in getattr(p_res, "data", None) or []:
-                    sym_u = str(row.get("symbol") or "").upper()
-                    if sym_u and sym_u not in latest_prices:
-                        latest_prices[sym_u] = _finite_float(row.get("close"))
-                        price_dates[sym_u] = latest_date
+            from api.agentic_chat.tools_execution import _resolve_symbol_and_market
+            from api.agentic_chat.market_registry import get_supabase_for_exchange, get_market_config as _gmc
+            get_market_config = _gmc
         except Exception:
-            pass
-        for pos in positions:
-            if pos["symbol"] not in latest_prices:
+            _resolve_symbol_and_market = None  # type: ignore[assignment]
+            get_supabase_for_exchange = None  # type: ignore[assignment]
+            get_market_config = None
+
+        for raw_sym in symbols:
+            if _resolve_symbol_and_market is not None:
                 try:
-                    fb = sb.table("stock_prices").select("close,date").eq("symbol", pos["symbol"]).eq("exchange", "EGX").order("date", desc=True).limit(1).execute()
-                    row = (getattr(fb, "data", None) or [{}])[0]
-                    latest_prices[pos["symbol"]] = _finite_float(row.get("close"))
-                    price_dates[pos["symbol"]] = row.get("date")
+                    norm_s, exch = _resolve_symbol_and_market(raw_sym)
                 except Exception:
-                    latest_prices[pos["symbol"]] = None
+                    norm_s, exch = raw_sym, "EGX"
+            else:
+                norm_s, exch = raw_sym, "EGX"
+            pos_exchange_map[raw_sym] = exch
+            if exch == "EGX":
+                egx_symbols.append(raw_sym)
+            else:
+                non_egx_groups.setdefault(exch, []).append((raw_sym, norm_s))
+
+        if egx_symbols:
+            try:
+                d_res = sb.table("stock_prices").select("date").eq("exchange", "EGX").order("date", desc=True).limit(1).execute()
+                latest_date = (getattr(d_res, "data", None) or [{}])[0].get("date")
+                if latest_date:
+                    p_res = (
+                        sb.table("stock_prices")
+                        .select("symbol,close")
+                        .eq("exchange", "EGX")
+                        .eq("date", latest_date)
+                        .in_("symbol", egx_symbols)
+                        .limit(len(egx_symbols) + 10)
+                        .execute()
+                    )
+                    for row in getattr(p_res, "data", None) or []:
+                        sym_u = str(row.get("symbol") or "").upper()
+                        if sym_u and sym_u not in latest_prices:
+                            latest_prices[sym_u] = _finite_float(row.get("close"))
+                            price_dates[sym_u] = latest_date
+            except Exception:
+                pass
+            for pos in positions:
+                if pos["symbol"] in egx_symbols and pos["symbol"] not in latest_prices:
+                    try:
+                        fb = sb.table("stock_prices").select("close,date").eq("symbol", pos["symbol"]).eq("exchange", "EGX").order("date", desc=True).limit(1).execute()
+                        row = (getattr(fb, "data", None) or [{}])[0]
+                        latest_prices[pos["symbol"]] = _finite_float(row.get("close"))
+                        price_dates[pos["symbol"]] = row.get("date")
+                    except Exception:
+                        latest_prices[pos["symbol"]] = None
+
+        for exch_code, sym_pairs in non_egx_groups.items():
+            if get_supabase_for_exchange is None:
+                continue
+            try:
+                sb_exch = get_supabase_for_exchange(exch_code, primary_sb=sb)
+            except Exception:
+                sb_exch = None
+            if sb_exch is None:
+                continue
+            norm_list = list({ns for _, ns in sym_pairs})
+            norm_prices: Dict[str, Optional[float]] = {}
+            norm_dates: Dict[str, Optional[str]] = {}
+            try:
+                d_res = sb_exch.table("stock_prices").select("date").eq("exchange", exch_code).order("date", desc=True).limit(1).execute()
+                latest_date = (getattr(d_res, "data", None) or [{}])[0].get("date")
+                if latest_date and norm_list:
+                    p_res = (
+                        sb_exch.table("stock_prices")
+                        .select("symbol,close")
+                        .eq("exchange", exch_code)
+                        .eq("date", latest_date)
+                        .in_("symbol", norm_list)
+                        .limit(len(norm_list) + 10)
+                        .execute()
+                    )
+                    for row in getattr(p_res, "data", None) or []:
+                        sym_u = str(row.get("symbol") or "").upper()
+                        if sym_u and sym_u not in norm_prices:
+                            norm_prices[sym_u] = _finite_float(row.get("close"))
+                            norm_dates[sym_u] = latest_date
+            except Exception:
+                pass
+            for raw_sym, norm_s in sym_pairs:
+                if norm_s not in norm_prices:
+                    try:
+                        fb = (
+                            sb_exch.table("stock_prices")
+                            .select("close,date")
+                            .eq("symbol", norm_s)
+                            .eq("exchange", exch_code)
+                            .order("date", desc=True)
+                            .limit(1)
+                            .execute()
+                        )
+                        row = (getattr(fb, "data", None) or [{}])[0]
+                        norm_prices[norm_s] = _finite_float(row.get("close"))
+                        norm_dates[norm_s] = row.get("date")
+                    except Exception:
+                        norm_prices[norm_s] = None
+                latest_prices[raw_sym] = norm_prices.get(norm_s)
+                price_dates[raw_sym] = norm_dates.get(norm_s)
 
     enriched: List[Dict[str, Any]] = []
     for pos in positions:
@@ -907,9 +988,15 @@ def _build_portfolio_snapshot(sb: Any, user_id: str) -> Dict[str, Any]:
         market_value = qty * last_price if qty is not None and last_price is not None else None
         profit_value = (market_value - cost_basis) if cost_basis is not None and market_value is not None else None
         profit_pct = (profit_value / cost_basis * 100.0) if cost_basis and cost_basis > 0 and profit_value is not None else None
+        exch = pos_exchange_map.get(pos["symbol"], "EGX")
+        mkt_meta: Dict[str, Any] = {}
+        if exch != "EGX" and get_market_config is not None:
+            cfg = get_market_config(exch)
+            mkt_meta = {"exchange": cfg.exchange, "market": cfg.ui_code, "currency": cfg.currency_ar}
         enriched.append(
             {
                 **pos,
+                **mkt_meta,
                 "last_price": last_price,
                 "market_value": market_value,
                 "cost_basis": cost_basis,
@@ -942,7 +1029,28 @@ def _build_portfolio_snapshot(sb: Any, user_id: str) -> Dict[str, Any]:
     if 0 < len(enriched) < 3:
         suggestions.append("عدد المراكز قليل؛ التنويع بين أكثر من سهم وقطاع قد يقلل أثر هبوط سهم واحد.")
 
-    return {
+    totals_by_market: Dict[str, Dict[str, Any]] = {}
+    if non_egx_groups:
+        seen_mkts: Dict[str, str] = {}
+        for x in enriched:
+            m_lbl = str(x.get("market") or "EGX")
+            if m_lbl not in seen_mkts:
+                seen_mkts[m_lbl] = str(x.get("currency") or "ج.م")
+        for m_lbl, curr_lbl in seen_mkts.items():
+            sub = [x for x in enriched if str(x.get("market") or "EGX") == m_lbl]
+            if sub:
+                sub_cost = sum(x["cost_basis"] or 0.0 for x in sub) if all(x["cost_basis"] is not None for x in sub) else None
+                sub_val = sum(x["market_value"] or 0.0 for x in sub) if all(x["market_value"] is not None for x in sub) else None
+                sub_pnl = (sub_val - sub_cost) if (sub_val is not None and sub_cost is not None) else None
+                totals_by_market[m_lbl] = {
+                    "currency": curr_lbl,
+                    "positions_count": len(sub),
+                    "cost_basis": round(sub_cost, 2) if sub_cost is not None else None,
+                    "market_value": round(sub_val, 2) if sub_val is not None else None,
+                    "profit_value": round(sub_pnl, 2) if sub_pnl is not None else None,
+                }
+
+    snapshot_out: Dict[str, Any] = {
         "ok": True,
         "message": "محفظتك فاضية حالياً. ابعتلي صورة محفظتك أو قولي الأسهم اللي معاك وهضيفها فوراً." if not positions else f"محفظتك فيها {len(positions)} سهم.",
         "positions": enriched,
@@ -964,6 +1072,9 @@ def _build_portfolio_snapshot(sb: Any, user_id: str) -> Dict[str, Any]:
             "suggestions": suggestions,
         },
     }
+    if totals_by_market:
+        snapshot_out["totals_by_market"] = totals_by_market
+    return snapshot_out
 
 
 def _portfolio_add(sb: Any, user_id: str, symbol: str, quantity: float, entry_price: Optional[float]) -> Dict[str, Any]:
@@ -1724,8 +1835,13 @@ def post_portfolio_rebalance(request: Request):
 
         is_unlimited = is_unlimited_chat_user(uid, email, email_confirmed=email_confirmed)
         q_win = resolve_subscription_quota_window(getattr(sub_res, "data", None) or [])
-        user_is_pro = q_win["is_pro"] or is_unlimited
-        plan_name = ("lifetime" if ((q_win["active_sub"] or {}).get("plan_id") == "lifetime" or is_unlimited) else "pro") if user_is_pro else "free"
+        user_is_pro = bool(q_win.get("has_chat_pro", q_win["is_pro"])) or is_unlimited
+        active_pid = str((q_win["active_sub"] or {}).get("plan_id") or "").strip().lower()
+        plan_name = (
+            "lifetime"
+            if (active_pid in {"lifetime", "pro_lifetime"} or is_unlimited)
+            else ("chat_only" if active_pid == "chat_only" else "pro")
+        ) if user_is_pro else "free"
         monthly_cap = int(plan_limits(plan_name)["chat_messages_per_month"])
         month_start_str = q_win["effective_month_start_str"] if user_is_pro else cal_month_start
         usage_rows = getattr(usage_res, "data", None) or []
@@ -2021,7 +2137,7 @@ def get_profile_telegram_pro(request: Request, refresh: str = Query(default="0")
             sb.table("subscriptions")
             .select("plan_id,status,current_period_end")
             .eq("user_id", uid)
-            .in_("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
+            .in_("plan_id", ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "vip_only"])
             .in_("status", ["active", "trialing"])
             .order("current_period_end", desc=True)
         )
@@ -2152,7 +2268,7 @@ def list_automations(request: Request):
         return JSONResponse({"error": "Database unavailable"}, status_code=503, headers=_PRIVATE_NO_STORE)
 
     uid = viewer["user_id"]
-    pro = bool(viewer.get("pro")) or is_allowed_admin_email(viewer.get("email"))
+    pro = bool(viewer.get("has_chat_pro", viewer.get("pro"))) or is_allowed_admin_email(viewer.get("email"))
     try:
         p_row = _select_one(sb.table("profiles").select("telegram_chat_id").eq("id", uid)) or {}
         a_res = (
@@ -2190,10 +2306,10 @@ async def create_automation(request: Request):
         return JSONResponse({"error": "Database unavailable"}, status_code=503, headers=_PRIVATE_NO_STORE)
 
     uid = viewer["user_id"]
-    pro = bool(viewer.get("pro")) or is_allowed_admin_email(viewer.get("email"))
+    pro = bool(viewer.get("has_chat_pro", viewer.get("pro"))) or is_allowed_admin_email(viewer.get("email"))
     if not pro:
         return JSONResponse(
-            {"error": "هذه الميزة متاحة فقط لمشتركي باقة Pro. يرجى ترقية حسابك للاستفادة من أتمتة الذكاء الاصطناعي."},
+            {"error": "هذه الميزة متاحة فقط لمشتركي باقة الشات الذكي أو الباقة الشاملة Pro. يرجى ترقية حسابك للاستفادة من أتمتة الذكاء الاصطناعي."},
             status_code=403,
             headers=_PRIVATE_NO_STORE,
         )
@@ -3273,7 +3389,7 @@ def get_subscription_trial(request: Request):
                 headers=_PRIVATE_NO_STORE,
             )
 
-        subs = getattr(sb.table("subscriptions").select("id,plan_id,status,current_period_end").eq("user_id", uid).eq("status", "active").in_("plan_id", ["pro", "lifetime", "pro_lifetime"]).limit(1).execute(), "data", None) or []
+        subs = getattr(sb.table("subscriptions").select("id,plan_id,status,current_period_end").eq("user_id", uid).eq("status", "active").in_("plan_id", ["pro", "lifetime", "pro_lifetime", "chat_only", "vip_only"]).limit(1).execute(), "data", None) or []
         if any((_parse_dt(s.get("current_period_end")) is None or _parse_dt(s.get("current_period_end")) > now_dt) for s in subs):
             return JSONResponse({"ok": True, "eligible": False, "has_used_trial": False, "reason": "لديك بالفعل اشتراك Pro نشط"}, headers=_PRIVATE_NO_STORE)
 
@@ -3581,7 +3697,7 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
     end_dt = _parse_dt(ends_at)
     not_expired = end_dt is None or end_dt > datetime.now(timezone.utc)
     is_open = bool(offer.get("is_open") and not_expired)
-    reg_price = int(round(float(offer.get("regular_price_egp") or 200)))
+    reg_price = int(round(float(offer.get("regular_price_egp") or 150)))
     fnd_price = int(round(float(offer.get("price_egp") or 100)))
     eff_price = 50 if is_gf50 else (100 if is_gf100 else (fnd_price if is_open else reg_price))
     has_special = is_gf50 or is_gf100 or is_open
@@ -3620,8 +3736,8 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
                 }
             )
         elif pid == "pro_6m":
-            b6 = int(p["amount_egp"]) if p.get("amount_egp") is not None else 1000
-            orig6 = int((p.get("discount") or {}).get("original_amount_egp") or (b6 if b6 > 500 else 1000))
+            b6 = int(p["amount_egp"]) if p.get("amount_egp") is not None else 750
+            orig6 = int((p.get("discount") or {}).get("original_amount_egp") or (b6 if b6 > 500 else 750))
             new_plans.append(
                 {
                     **p,
@@ -3631,8 +3747,8 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
                         {
                             "active": True,
                             "kind": "founders",
-                            "label_ar": "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                            "label_en": "Founders Offer 50% OFF (500 instead of 1,000 EGP + locks 100 EGP/mo for life) 🔥",
+                            "label_ar": f"عرض المؤسسين (500 بدل {orig6:,} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
+                            "label_en": f"Founders Offer (500 instead of {orig6:,} EGP + locks 100 EGP/mo for life) 🔥",
                             "original_amount_egp": orig6,
                             "ends_at": ends_at if is_open else None,
                         }
@@ -3642,8 +3758,8 @@ def _apply_founders_offer(config: Dict[str, Any], offer: Optional[Dict[str, Any]
                 }
             )
         elif pid == "pro_1y":
-            b1y = int(p["amount_egp"]) if p.get("amount_egp") is not None else 1800
-            orig1y = int((p.get("discount") or {}).get("original_amount_egp") or (b1y if b1y > 1000 else 1800))
+            b1y = int(p["amount_egp"]) if p.get("amount_egp") is not None else 1350
+            orig1y = int((p.get("discount") or {}).get("original_amount_egp") or (b1y if b1y > 1000 else 1350))
             new_plans.append(
                 {
                     **p,
@@ -3781,9 +3897,22 @@ async def create_easykash_order(request: Request):
     if not is_eg and not is_intl:
         return JSONResponse({"detail": "أدخل رقم موبايل صحيح (مصري 01XXXXXXXXX أو دولي بمفتاح الدولة مثل +9665XXXXXXXX)"}, status_code=400, headers=_PRIVATE_NO_STORE)
 
+    from api.easykash_payments import _normalize_checkout_market, create_checkout
+
     promo_code = body.get("promo_code").strip().upper()[:32] if isinstance(body.get("promo_code"), str) else ""
-    market = "tasi" if str(body.get("market") or "").strip().lower() == "tasi" else "egx"
+    market = _normalize_checkout_market(body.get("market"))
     plan_id = body.get("plan_id") if isinstance(body.get("plan_id"), str) else "pro"
+    raw_duration_months = body.get("duration_months")
+    duration_months: Optional[int] = None
+    if raw_duration_months is not None and raw_duration_months != "":
+        if isinstance(raw_duration_months, bool):
+            return JSONResponse({"detail": "اختر مدة اشتراك صحيحة بين 1 و 12 شهراً"}, status_code=400, headers=_PRIVATE_NO_STORE)
+        try:
+            duration_months = int(raw_duration_months)
+            if isinstance(raw_duration_months, float) and raw_duration_months != float(duration_months):
+                raise ValueError("non-integer")
+        except Exception:
+            return JSONResponse({"detail": "اختر مدة اشتراك صحيحة بين 1 و 12 شهراً"}, status_code=400, headers=_PRIVATE_NO_STORE)
 
     sb = get_primary_supabase()
     if sb is not None:
@@ -3795,8 +3924,16 @@ async def create_easykash_order(request: Request):
     meta = _get_user_meta(extract_jwt_token(request), uid)
     display_name = (meta.get("name") or "EGX Bots user")[:100]
     try:
-        from api.easykash_payments import create_checkout
-        res = create_checkout(uid, plan_id, viewer.get("email") or "", display_name, mobile, promo_code=promo_code, market=market)
+        res = create_checkout(
+            uid,
+            plan_id,
+            viewer.get("email") or "",
+            display_name,
+            mobile,
+            promo_code=promo_code,
+            market=market,
+            duration_months=duration_months,
+        )
         return JSONResponse(res, headers=_PRIVATE_NO_STORE)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400, headers=_PRIVATE_NO_STORE)
@@ -3827,7 +3964,7 @@ def get_easykash_status(request: Request, order_id: str = Query(default="")):
     try:
         order_row = _select_one(
             sb.table("local_payment_orders")
-            .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
+            .select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
             .eq("id", order_id)
             .eq("user_id", uid)
         )
@@ -3852,7 +3989,7 @@ def get_easykash_status(request: Request, order_id: str = Query(default="")):
                                 ek_reconcile(order_id, uid)
                             except Exception:
                                 pass
-                            ref_row = _select_one(sb.table("local_payment_orders").select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id))
+                            ref_row = _select_one(sb.table("local_payment_orders").select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id))
                             if ref_row:
                                 order.update(ref_row)
                         elif ek_status in ("FAILED", "FAIL", "REJECTED"):
@@ -3879,15 +4016,24 @@ def get_easykash_status(request: Request, order_id: str = Query(default="")):
                 end_str = lic_row.get("expires_at")
                 b2b_url = "/b2b/dashboard"
             else:
-                sub_row = _select_one(sb.table("subscriptions").select("current_period_end").eq("user_id", uid).in_("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"]).eq("status", "active").order("current_period_end", desc=True)) or {}
+                order_plan = str(order.get("plan_id") or "pro").strip().lower()
+                include_vip = order_plan != "chat_only"
+                plan_display_name = (
+                    "الشات الذكي (AI Chat)"
+                    if order_plan == "chat_only"
+                    else ("رادار تليجرام VIP" if order_plan == "vip_only" else "Pro")
+                )
+                sub_row = _select_one(sb.table("subscriptions").select("current_period_end").eq("user_id", uid).in_("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"]).eq("status", "active").order("current_period_end", desc=True)) or {}
                 end_str = sub_row.get("current_period_end")
-                if not invite_link:
+                if include_vip and not invite_link:
                     inv_row = _select_one(sb.table("pro_telegram_invites").select("invite_link").eq("user_id", uid)) or {}
                     invite_link = inv_row.get("invite_link") or ""
+                if not include_vip:
+                    invite_link = ""
                 cust_note = str(order.get("customer_note") or "")
                 if "tg_welcomed" not in cust_note:
                     from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
-                    if send_pro_welcome_to_user_telegram(uid, invite_link=invite_link, plan_name="Pro", subscription_end=end_str or ""):
+                    if send_pro_welcome_to_user_telegram(uid, invite_link=invite_link, plan_name=plan_display_name, subscription_end=end_str or "", include_vip_invite=include_vip):
                         sb.table("local_payment_orders").update({"customer_note": f"{cust_note} | tg_welcomed".strip()}).eq("id", order_id).execute()
 
         result = {**order, "subscription": {"current_period_end": end_str} if end_str else None, "telegram_pro_url": invite_link, "b2b_dashboard_url": b2b_url}

@@ -24,7 +24,11 @@ from api.payment_common import is_payments_enabled
 import api.stock_ai as stock_ai
 
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
-PRO_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"})
+FULL_PRO_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"})
+CHAT_PRO_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"chat_only"})
+VIP_TELEGRAM_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"vip_only"})
+ALL_PAID_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"chat_only", "vip_only"})
+PRO_PLAN_IDS = ALL_PAID_PLAN_IDS
 SAUDI_SYMBOL_QUERY_RE = re.compile(r"^\d{4}(\.(sr|sa|tadawul))?$", re.IGNORECASE)
 _DEFAULT_UNLIMITED_CHAT_EMAILS = frozenset({
     "user@gmail.com",
@@ -258,19 +262,37 @@ def _parse_iso(ts: Any) -> Optional[datetime]:
         return None
 
 
-def has_active_pro_subscription(rows: Iterable[Dict[str, Any]], now: Optional[datetime] = None) -> bool:
-    """Strict paid Pro subscription check matching frontend hasActiveProSubscription."""
+def _has_active_plan_in_set(
+    rows: Iterable[Dict[str, Any]],
+    allowed_plans: frozenset[str],
+    now: Optional[datetime] = None,
+) -> bool:
     now_dt = now or datetime.now(timezone.utc)
     for row in rows or ():
         plan = str(row.get("plan_id") or "").lower()
         status = str(row.get("status") or "").lower()
-        if plan not in PRO_PLAN_IDS or status not in ("active", "trialing"):
+        if plan not in allowed_plans or status not in ("active", "trialing"):
             continue
         end_dt = _parse_iso(row.get("current_period_end"))
         if end_dt is not None and end_dt <= now_dt:
             continue
         return True
     return False
+
+
+def has_active_pro_subscription(rows: Iterable[Dict[str, Any]], now: Optional[datetime] = None) -> bool:
+    """Strict paid subscription check across Full Pro, Chat Only, and VIP Only plans."""
+    return _has_active_plan_in_set(rows, ALL_PAID_PLAN_IDS, now)
+
+
+def has_active_chat_pro(rows: Iterable[Dict[str, Any]], now: Optional[datetime] = None) -> bool:
+    """True when user holds an active Full Pro or AI-Chat-Only subscription."""
+    return _has_active_plan_in_set(rows, CHAT_PRO_PLAN_IDS, now)
+
+
+def has_active_vip_telegram(rows: Iterable[Dict[str, Any]], now: Optional[datetime] = None) -> bool:
+    """True when user holds an active Full Pro or VIP-Telegram-Only subscription."""
+    return _has_active_plan_in_set(rows, VIP_TELEGRAM_PLAN_IDS, now)
 
 
 def is_unlimited_chat_user(
@@ -300,16 +322,18 @@ def resolve_subscription_quota_window(
     rows: Optional[List[Dict[str, Any]]],
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Single source of truth for subscription Pro state and monthly quota boundary."""
+    """Single source of truth for subscription capabilities and monthly quota boundary."""
     now_dt = now or datetime.now(timezone.utc)
     items = rows if isinstance(rows, list) else []
     pro = has_active_pro_subscription(items, now_dt)
+    chat_pro = has_active_chat_pro(items, now_dt)
+    vip_access = has_active_vip_telegram(items, now_dt)
 
     active_sub = None
     for row in items:
         plan = str(row.get("plan_id") or "").lower()
         status = str(row.get("status") or "").lower()
-        if plan not in PRO_PLAN_IDS or status not in ("active", "trialing"):
+        if plan not in ALL_PAID_PLAN_IDS or status not in ("active", "trialing"):
             continue
         end_dt = _parse_iso(row.get("current_period_end"))
         if end_dt is not None and end_dt <= now_dt:
@@ -323,7 +347,7 @@ def resolve_subscription_quota_window(
     cal_month_start_str = f"{today_str[:7]}-01"
     effective_month_start_str = cal_month_start_str
 
-    if pro and active_sub and active_sub.get("current_period_start"):
+    if chat_pro and active_sub and active_sub.get("current_period_start"):
         parsed = _parse_iso(active_sub.get("current_period_start"))
         if parsed is not None:
             sub_start_str = parsed.astimezone(timezone.utc).strftime("%Y-%m-%d")
@@ -332,6 +356,8 @@ def resolve_subscription_quota_window(
 
     return {
         "is_pro": pro,
+        "has_chat_pro": chat_pro,
+        "has_vip_access": vip_access,
         "active_sub": active_sub,
         "today_str": today_str,
         "cal_month_start_str": cal_month_start_str,
@@ -372,20 +398,27 @@ def _verify_token_cached(token: str) -> Optional[Dict[str, Any]]:
     return user_info
 
 
-def _get_user_pro_flag(user_id: str, email: str, email_confirmed: bool = False) -> bool:
+def _get_user_plan_flags(user_id: str, email: str, email_confirmed: bool = False) -> Dict[str, bool]:
     if is_unlimited_chat_user(user_id, email, email_confirmed=email_confirmed):
-        return True
+        return {"pro": True, "has_chat_pro": True, "has_vip_access": True}
     if not is_payments_enabled():
-        return True
+        return {"pro": True, "has_chat_pro": True, "has_vip_access": True}
 
     found, cached = _VIEWER_PLAN_CACHE.get(user_id)
     if found:
-        return bool(cached)
+        if isinstance(cached, dict):
+            return {
+                "pro": bool(cached.get("pro")),
+                "has_chat_pro": bool(cached.get("has_chat_pro", cached.get("pro"))),
+                "has_vip_access": bool(cached.get("has_vip_access", cached.get("pro"))),
+            }
+        b = bool(cached)
+        return {"pro": b, "has_chat_pro": b, "has_vip_access": b}
 
-    def _load() -> Tuple[bool, bool]:
+    def _load() -> Tuple[bool, Dict[str, bool]]:
         sb = get_primary_supabase()
         if sb is None:
-            return False, False
+            return False, {"pro": False, "has_chat_pro": False, "has_vip_access": False}
         try:
             res = (
                 sb.table("subscriptions")
@@ -396,31 +429,64 @@ def _get_user_pro_flag(user_id: str, email: str, email_confirmed: bool = False) 
                 .limit(5)
                 .execute()
             )
-            return True, has_active_pro_subscription(getattr(res, "data", None) or [])
+            rows = getattr(res, "data", None) or []
+            return True, {
+                "pro": has_active_pro_subscription(rows),
+                "has_chat_pro": has_active_chat_pro(rows),
+                "has_vip_access": has_active_vip_telegram(rows),
+            }
         except Exception:
-            return False, False
+            return False, {"pro": False, "has_chat_pro": False, "has_vip_access": False}
 
-    cacheable, pro = _VIEWER_PLAN_SF.do(user_id, _load)
+    cacheable, flags = _VIEWER_PLAN_SF.do(user_id, _load)
     if cacheable:
-        _VIEWER_PLAN_CACHE.set(user_id, pro, ttl=45.0)
-    return pro
+        _VIEWER_PLAN_CACHE.set(user_id, flags, ttl=45.0)
+    return flags
+
+
+def _get_user_pro_flag(user_id: str, email: str, email_confirmed: bool = False) -> bool:
+    return bool(_get_user_plan_flags(user_id, email, email_confirmed=email_confirmed).get("pro"))
 
 
 def resolve_verified_viewer(request: Request) -> Dict[str, Any]:
     """Authenticate caller from Bearer JWT or @supabase/ssr cookies and resolve Pro status."""
     token = extract_jwt_token(request)
     if not token:
-        return {"authenticated": False, "pro": False, "user_id": None, "email": "", "email_confirmed": False}
+        return {
+            "authenticated": False,
+            "pro": False,
+            "has_chat_pro": False,
+            "has_vip_access": False,
+            "user_id": None,
+            "email": "",
+            "email_confirmed": False,
+        }
 
     user_info = _verify_token_cached(token)
     if not user_info or not user_info.get("id"):
-        return {"authenticated": False, "pro": False, "user_id": None, "email": "", "email_confirmed": False}
+        return {
+            "authenticated": False,
+            "pro": False,
+            "has_chat_pro": False,
+            "has_vip_access": False,
+            "user_id": None,
+            "email": "",
+            "email_confirmed": False,
+        }
 
     uid = user_info["id"]
     email = user_info.get("email", "")
     email_confirmed = bool(user_info.get("email_confirmed", False))
-    pro = _get_user_pro_flag(uid, email, email_confirmed=email_confirmed)
-    return {"authenticated": True, "pro": pro, "user_id": uid, "email": email, "email_confirmed": email_confirmed}
+    flags = _get_user_plan_flags(uid, email, email_confirmed=email_confirmed)
+    return {
+        "authenticated": True,
+        "pro": flags["pro"],
+        "has_chat_pro": flags["has_chat_pro"],
+        "has_vip_access": flags["has_vip_access"],
+        "user_id": uid,
+        "email": email,
+        "email_confirmed": email_confirmed,
+    }
 
 
 def get_all_cache_stats() -> Dict[str, Any]:

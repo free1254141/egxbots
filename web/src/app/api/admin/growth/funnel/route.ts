@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "fra1";
 
-const PAID_PLANS = new Set(["pro", "lifetime", "pro_lifetime"]);
+const PAID_PLANS = new Set(["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"]);
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin(req);

@@ -254,6 +254,8 @@ def test_resolve_verified_viewer_caches_token_and_checks_active_subscription():
     assert v1 == {
         "authenticated": True,
         "pro": True,
+        "has_chat_pro": True,
+        "has_vip_access": True,
         "user_id": "user-pro-1",
         "email": "pro@example.com",
         "email_confirmed": True,

@@ -1022,7 +1022,7 @@ def test_otc_constraint_efih_alias_slash_command_and_market_scan_cache():
     assert build_analysis_cache_key("رشح لي اسهم شرعية اليوم") is None
     assert build_analysis_cache_key("/value RACC") is None
 
-    # 2. Combined get_market + get_technical_scan(momentum_and_volume) collapses cleanly to vip_tech_screener
+    # 2. Combined get_market + get_technical_scan(momentum_and_volume) maps to dedicated vip_market_and_screener
     assert (
         resolve_tool_calls_to_cache_key(
             [
@@ -1035,7 +1035,7 @@ def test_otc_constraint_efih_alias_slash_command_and_market_scan_cache():
                 },
             ]
         )
-        == "vip_tech_screener"
+        == "vip_market_and_screener"
     )
     assert (
         resolve_tool_calls_to_cache_key(

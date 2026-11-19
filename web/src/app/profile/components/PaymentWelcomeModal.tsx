@@ -48,7 +48,8 @@ export default function PaymentWelcomeModal({
   onRefreshInvite,
   onRefreshProfile,
 }: Props) {
-  const { isSaudi } = useMarket();
+  const { isSaudi, isGccChatOnly, currencyLabel } = useMarket();
+  const isGulfMarket = isSaudi || isGccChatOnly;
   const [copied, setCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [orderData, setOrderData] = useState<{
@@ -139,7 +140,10 @@ export default function PaymentWelcomeModal({
   const isApproved = orderData?.status === "approved";
   const isFailed = orderData?.status === "failed" || orderData?.status === "expired";
   const isVerifying = !isApproved && !isFailed;
-  const isB2BOrder = Boolean(orderData?.plan_id?.startsWith("b2b_"));
+  const orderPlanId = String(orderData?.plan_id || "").trim().toLowerCase();
+  const isB2BOrder = orderPlanId.startsWith("b2b_");
+  const isChatOnlyOrder = orderPlanId === "chat_only";
+  const isVipOnlyOrder = orderPlanId === "vip_only";
   const b2bDashboardUrl = orderData?.b2b_dashboard_url || "/b2b/dashboard";
 
   const vipLink =
@@ -292,10 +296,10 @@ export default function PaymentWelcomeModal({
                   <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>{isAr ? "💡 طرق دفع وحلول مضمونة:" : "💡 Recommended payment solutions:"}</span>
                 </h4>
-                {isSaudi ? (
+                {isGulfMarket ? (
                   <ul className="text-xs text-zinc-700 dark:text-zinc-300 space-y-1.5 font-bold list-disc list-inside">
-                    <li>{isAr ? "بطاقة فيزا أو ماستركارد مفعّلة للشراء الدولي أونلاين (تُخصم بالريال تلقائياً)." : "Visa or Mastercard enabled for international online purchases."}</li>
-                    <li>{isAr ? "تأكد من تفعيل استقبال رمز التحقق (3D Secure / OTP) في تطبيق البنك أو استخدم بطاقة رقمية (مثل STC Pay / urpay Visa)." : "Ensure international 3D Secure (OTP) is enabled in your bank app or use a virtual Visa card."}</li>
+                    <li>{isAr ? `بطاقة فيزا أو ماستركارد مفعّلة للشراء الدولي أونلاين (تُخصم تلقائياً بعملة بطاقتك، ما يعادل السعر بـ${currencyLabel}).` : "Visa or Mastercard enabled for international online purchases."}</li>
+                    <li>{isAr ? "تأكد من تفعيل استقبال رمز التحقق (3D Secure / OTP) في تطبيق البنك أو استخدم بطاقة رقمية/ائتمانية دولية." : "Ensure international 3D Secure (OTP) is enabled in your bank app or use an international card."}</li>
                     <li>{isAr ? "تواصل معنا مباشرة على واتساب +201024359109 لتسهيل التفعيل الفوري." : "Message our WhatsApp support (+201024359109) for instant checkout assistance."}</li>
                   </ul>
                 ) : (
@@ -357,7 +361,11 @@ export default function PaymentWelcomeModal({
                       <span className="text-sm font-black text-zinc-900 dark:text-white">
                         {isB2BOrder
                           ? (isAr ? "رخصة بوت القنوات والمجموعات (B2B)" : "Channel Bot License (B2B)")
-                          : (isAr ? "باقة Pro المتقدمة" : "Pro Plan")}
+                          : isChatOnlyOrder
+                          ? (isAr ? "باقة الشات الذكي فقط (AI Chat Pro)" : "AI Chat Pro Only")
+                          : isVipOnlyOrder
+                          ? (isAr ? "باقة رادار وقنوات تليجرام VIP فقط" : "VIP Telegram Radar Only")
+                          : (isAr ? "الباقة الشاملة Pro (الشات + تليجرام VIP)" : "Pro Full Bundle")}
                       </span>
                     </div>
                   </div>
@@ -406,7 +414,34 @@ export default function PaymentWelcomeModal({
                 </div>
               ) : (
                 <>
-              {/* Section 1: Telegram VIP Channel */}
+              {/* Section 1: AI Chat Pro OR Telegram VIP Channel */}
+              {isChatOnlyOrder ? (
+                <div className="p-4 bg-sky-50 dark:bg-sky-950/35 border-2 border-sky-600 dark:border-sky-500 shadow-[3px_3px_0px_#0284c7] space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 bg-sky-600 text-white flex items-center justify-center shrink-0 border border-black shadow-[1px_1px_0px_#000]">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-sm text-sky-950 dark:text-sky-200">
+                        {isAr ? "🤖 باقة الشات الذكي (AI Chat Pro) مفعّلة الآن" : "🤖 AI Chat Pro Activated"}
+                      </h3>
+                      <p className="text-xs text-sky-900 dark:text-sky-300 font-bold mt-0.5 leading-relaxed">
+                        {isAr
+                          ? "حسابك مفعّل الآن بـ 350 استفساراً تحليلياً شهرياً، تحليل صور المحفظة والشارت (Vision AI)، 5 أتمتات يومية، ومتابعة 15 سهماً مع إزالة تأخير الـ 15 يوماً (هذه الباقة لا تشمل قناة VIP)."
+                          : "Your account now includes 350 monthly analytical queries, Vision AI chart/portfolio uploads, 5 daily automations, 15 portfolio slots, and zero site delay (excludes VIP Telegram channel)."}
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href="/chat"
+                    onClick={onClose}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs sm:text-sm border-2 border-black shadow-[3px_3px_0px_#000] transition-all"
+                  >
+                    <span>{isAr ? "افتح الشات الذكي الآن (350 استفسار/شهر) ←" : "Open AI Chat Now (350/mo) →"}</span>
+                    <ArrowRight className="w-4 h-4 rtl:rotate-180" />
+                  </Link>
+                </div>
+              ) : (
               <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-600 dark:border-emerald-500 shadow-[3px_3px_0px_#059669]">
                 <div className="flex items-start gap-2.5 mb-2.5">
                   <div className="w-7 h-7 bg-emerald-600 text-white flex items-center justify-center shrink-0 border border-black shadow-[1px_1px_0px_#000]">
@@ -414,12 +449,12 @@ export default function PaymentWelcomeModal({
                   </div>
                   <div>
                     <h3 className="font-black text-sm text-emerald-950 dark:text-emerald-200">
-                      {isAr ? "💎 قناة التوصيات والإشارات الخاصة (VIP)" : "💎 VIP Signals & Trading Channel"}
+                      {isAr ? "💎 قناة تليجرام VIP للتنبيهات الفنية والرادار" : "💎 Private VIP Technical Radar Channel"}
                     </h3>
                     <p className="text-xs text-emerald-800 dark:text-emerald-300 font-bold mt-0.5 leading-relaxed">
                       {isAr
-                        ? "انضم الآن لقناة تليجرام الخاصة بالمشتركين لمتابعة إشارات الدخول والأهداف السعرية وتنبيهات السوق لحظة بلحظة."
-                        : "Join the private VIP channel to receive real-time buy signals, price targets, and market alerts."}
+                        ? "انضم الآن لقناة تليجرام VIP الخاصة لمتابعة تنبيهات السيولة والمؤشرات الفنية والرادار لحظة بلحظة."
+                        : "Join the private VIP channel for instant quantitative radar alerts and technical level notifications."}
                     </p>
                   </div>
                 </div>
@@ -499,6 +534,7 @@ export default function PaymentWelcomeModal({
                   </div>
                 )}
               </div>
+              )}
 
               {/* Section 2: Telegram Bot Activation Status */}
               {isBotActive ? (
@@ -514,9 +550,11 @@ export default function PaymentWelcomeModal({
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                         </h4>
                         <p className="text-[11px] text-zinc-600 dark:text-zinc-400 font-bold mt-0.5">
-                          {isAr
-                            ? "تم إرسال رسالة ترحيبية وتفاصيل اشتراكك ورابط الـ VIP إلى تليجرام."
-                            : "Welcome message & VIP invite were dispatched to your Telegram."}
+                          {isChatOnlyOrder
+                            ? (isAr ? "تم إرسال رسالة الترحيب الخاصة بباقة الشات الذكي إلى حسابك على تليجرام." : "AI Chat Pro welcome message sent to your Telegram.")
+                            : (isAr
+                              ? "تم إرسال رسالة ترحيبية وتفاصيل اشتراكك ورابط الـ VIP إلى تليجرام."
+                              : "Welcome message & VIP invite were dispatched to your Telegram.")}
                         </p>
                       </div>
                     </div>
@@ -604,6 +642,15 @@ export default function PaymentWelcomeModal({
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
             >
               <span>{isAr ? "إدارة رخصة البوت (B2B)" : "Manage B2B License"}</span>
+              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+            </Link>
+          ) : isChatOnlyOrder ? (
+            <Link
+              href="/chat"
+              onClick={onClose}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs border-2 border-black shadow-[2px_2px_0px_#000] transition-all"
+            >
+              <span>{isAr ? "بدء استخدام الشات الذكي" : "Start AI Chat"}</span>
               <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
             </Link>
           ) : (

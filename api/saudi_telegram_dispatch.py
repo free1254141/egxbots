@@ -539,7 +539,7 @@ def compose_saudi_market_outlook(
     above_sma50_pct = breadth.get("above_sma50_pct")
 
     tasi_parts = []
-    if tasi_close is not None:
+    if tasi_close is not None and float(tasi_close) >= 8000:
         tasi_parts.append(f"{float(tasi_close):,.2f} نقطة")
     if ret_1d is not None:
         r1 = float(ret_1d)
@@ -671,6 +671,230 @@ def dispatch_saudi_market_outlook_vip(
     if res.get("ok") and not dry_run:
         dates = list(dict.fromkeys([*(state.get("dates") or []), target_date]))[-14:]
         _write_market_cache(client, "telegram_saudi_market_outlook_sent", {"dates": dates, "last_date": target_date})
+    return res
+
+
+def _format_saudi_symbol_label(symbol: str, company_name: Optional[str] = None) -> str:
+    import html as _html
+    from api.saudi_stock_aliases import SAUDI_STOCK_NAMES_AR
+
+    sym = str(symbol or "").replace(".SR", "").strip()
+    ar_name = str(SAUDI_STOCK_NAMES_AR.get(sym) or company_name or "").strip()
+    if ar_name:
+        return f"<b>{_html.escape(ar_name, quote=False)}</b> ({_html.escape(sym, quote=False)})"
+    return f"<b>{_html.escape(sym, quote=False)}</b>"
+
+
+def compose_saudi_daily_vip_report(
+    market_date: str,
+    ind_rows: List[Dict[str, Any]],
+    sb: Client,
+) -> str:
+    """Compose the Saudi VIP exclusive daily session report (traps, accumulation, disclosures, gainers)."""
+    import html as _html
+
+    safe_date = _html.escape(str(market_date or ""), quote=False)
+    lines: List[str] = [
+        f"👑 <b>تقرير VIP الحصري للسوق السعودي | {safe_date}</b> 🇸🇦",
+        "",
+    ]
+
+    # 1. Top Gainers from session indicators
+    gainers: List[Dict[str, Any]] = []
+    for row in ind_rows or []:
+        sym = str(row.get("symbol") or "").replace(".SR", "").strip()
+        if not sym:
+            continue
+        try:
+            ch = float(row.get("change_pct") or 0)
+        except Exception:
+            ch = 0.0
+        if ch > 0:
+            gainers.append({**row, "_sym": sym, "_ch": ch})
+    gainers.sort(key=lambda r: r["_ch"], reverse=True)
+    if gainers:
+        lines.append("🚀 <b>نجوم الجلسة الصاعدة:</b>")
+        for g in gainers[:4]:
+            label = _format_saudi_symbol_label(g["_sym"])
+            close_s = _fmt_price(g.get("close"))
+            lines.append(f"• {label} | {close_s} ر.س (<b>+{g['_ch']:.2f}%</b>)")
+        lines.append("")
+
+    # 2. Trap Detector (Bear Traps = Spring setups, Bull Traps = Upthrust warning)
+    traps_payload = _read_market_cache(sb, "daily_traps_snapshot")
+    if not traps_payload:
+        traps_payload = _read_market_cache(sb, "scanner_traps_TADAWUL")
+    bear_traps = list(traps_payload.get("bearTraps") or []) if isinstance(traps_payload, dict) else []
+    bull_traps = list(traps_payload.get("bullTraps") or []) if isinstance(traps_payload, dict) else []
+    total_bear = int(traps_payload.get("totalBearTraps") or len(bear_traps)) if isinstance(traps_payload, dict) else 0
+    total_bull = int(traps_payload.get("totalBullTraps") or len(bull_traps)) if isinstance(traps_payload, dict) else 0
+
+    lines.append("🪤 <b>كاشف المصائد للجلسة القادمة:</b>")
+    if bear_traps:
+        lines.append(f"🟢 <b>{total_bear} نموذج ارتداد تجميعي (Spring):</b>")
+        for trap in bear_traps[:4]:
+            sym = str(trap.get("symbol") or "").replace(".SR", "").strip()
+            label = _format_saudi_symbol_label(sym)
+            close_s = _fmt_price(trap.get("close"))
+            key_s = _fmt_price(trap.get("keyLevel"))
+            try:
+                conv = int(float(trap.get("conviction") or 0))
+            except Exception:
+                conv = 0
+            try:
+                rvol = float(trap.get("relativeVolume") or 0)
+            except Exception:
+                rvol = 0.0
+            lines.append(
+                f"• {label} | إغلاق {close_s} ر.س | ارتداد فوق {key_s} ر.س | قناعة {conv}% (حجم {rvol:.1f}x)"
+            )
+    else:
+        lines.append("• لا توجد مصائد ارتداد (Spring) عالية القناعة اليوم.")
+    lines.append(f"🔴 <b>{total_bull} مصيدة قمة (Upthrust)</b> — تجنب مطاردة الاختراقات الوهمية.")
+    lines.append("")
+
+    # 3. Smart Money Accumulation (stock_scans_summary)
+    _ACC_SIGNAL_AR = {
+        "strong_accumulation": "تجميع مؤسسي قوي",
+        "accumulation": "تجميع مؤسسي",
+        "mild_accumulation": "تجميع مبكر",
+        "neutral": "توازن سيولة",
+        "mild_distribution": "تصريف خفيف",
+        "distribution": "تصريف",
+        "strong_distribution": "تصريف حاد",
+    }
+    acc_rows: List[Dict[str, Any]] = []
+    try:
+        scan_res = (
+            sb.table("stock_scans_summary")
+            .select("symbol, scan_date, signal, wyckoff_phase, acc_score, dist_score, vol_ratio, consecutive_acc_days, rsi_14, change_pct")
+            .order("scan_date", desc=True)
+            .order("acc_score", desc=True)
+            .limit(20)
+            .execute()
+        )
+        raw_scans = list(getattr(scan_res, "data", None) or [])
+        seen_syms: set[str] = set()
+        for r in raw_scans:
+            sym = str(r.get("symbol") or "").replace(".SR", "").strip()
+            if not sym or sym in seen_syms:
+                continue
+            try:
+                acc = float(r.get("acc_score") or 0)
+            except Exception:
+                acc = 0.0
+            if acc <= 0:
+                continue
+            seen_syms.add(sym)
+            acc_rows.append({**r, "_sym": sym, "_acc": acc})
+        acc_rows.sort(key=lambda r: r["_acc"], reverse=True)
+    except Exception as exc:
+        print(f"[SAUDI_TG_DISPATCH] stock_scans_summary fetch warn: {exc}")
+
+    lines.append("🏦 <b>رادار التجميع المؤسسي (Smart Money):</b>")
+    if acc_rows:
+        for r in acc_rows[:4]:
+            label = _format_saudi_symbol_label(r["_sym"])
+            raw_sig = str(r.get("signal") or "").strip()
+            sig_ar = _ACC_SIGNAL_AR.get(raw_sig.lower()) or raw_sig or "تجميع"
+            sig_txt = _html.escape(sig_ar, quote=False)
+            days = int(r.get("consecutive_acc_days") or 0)
+            try:
+                v_ratio = float(r.get("vol_ratio") or 0)
+            except Exception:
+                v_ratio = 0.0
+            lines.append(
+                f"• {label} | تجميع <b>{int(round(r['_acc']))}</b> ({sig_txt}) | {days} أيام متتالية | سيولة {v_ratio:.1f}x"
+            )
+    else:
+        lines.append("• لا توجد قراءات تجميع مؤسسي بارزة في آخر مسح.")
+    lines.append("")
+
+    # 4. Latest Saudi Disclosures (egx_disclosures)
+    disc_rows: List[Dict[str, Any]] = []
+    try:
+        disc_res = (
+            sb.table("egx_disclosures")
+            .select("symbol, company_name, disclosure_type, disclosure_date, title, sentiment")
+            .order("disclosure_date", desc=True)
+            .limit(4)
+            .execute()
+        )
+        disc_rows = list(getattr(disc_res, "data", None) or [])
+    except Exception as exc:
+        print(f"[SAUDI_TG_DISPATCH] egx_disclosures fetch warn: {exc}")
+
+    lines.append("📑 <b>أحدث الإفصاحات والبيانات الجوهرية (تداول):</b>")
+    if disc_rows:
+        for d in disc_rows[:4]:
+            sym = str(d.get("symbol") or "").replace(".SR", "").strip()
+            comp = str(d.get("company_name") or "").strip()
+            label = _format_saudi_symbol_label(sym, comp) if sym else f"<b>{_html.escape(comp or 'إفصاح', quote=False)}</b>"
+            raw_title = str(d.get("title") or "").strip()
+            if len(raw_title) > 95:
+                raw_title = raw_title[:92].rstrip() + "..."
+            safe_title = _html.escape(raw_title, quote=False)
+            d_date = _html.escape(str(d.get("disclosure_date") or "")[:10], quote=False)
+            lines.append(f"• {label} ({d_date}): {safe_title}")
+    else:
+        lines.append("• لا توجد إفصاحات مسجلة حتى الآن.")
+
+    web_origin = get_web_origin().rstrip("/")
+    report_url = _html.escape(f"{web_origin}/scanner/backtests?market=sa", quote=True)
+    lines.extend([
+        "",
+        f"🌐 <a href=\"{report_url}\">لوحة تاسي VIP — EGX BOTS</a>",
+        "⚠️ <i>تحليل كمي حصري لمشتركي VIP — إدارة المخاطر أولاً.</i>",
+    ])
+    return "\n".join(lines)[:4000]
+
+
+def dispatch_saudi_daily_vip_report(
+    market_date: Optional[str] = None,
+    ind_rows: Optional[List[Dict[str, Any]]] = None,
+    chat_id: Optional[str] = None,
+    sb: Optional[Client] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    client = sb or get_saudi_supabase()
+    rows = list(ind_rows) if ind_rows is not None else []
+    target_date = str(market_date or "").strip()[:10]
+
+    state = _read_market_cache(client, "telegram_saudi_daily_vip_report_sent")
+    sent_dates = set(state.get("dates") or [])
+    if target_date and target_date in sent_dates:
+        return {"ok": True, "skipped": True, "reason": "already_sent_today", "date": target_date}
+
+    if not rows:
+        try:
+            q = (
+                client.table("stock_technical_indicators")
+                .select("symbol, date, close, change_pct, volume, r_vol")
+                .eq("exchange", "TADAWUL")
+                .order("date", desc=True)
+            )
+            if target_date:
+                q = q.eq("date", target_date)
+            ind_res = q.limit(350).execute()
+            rows = list(getattr(ind_res, "data", None) or [])
+        except Exception as exc:
+            print(f"[SAUDI_TG_DISPATCH] stock_technical_indicators fallback warn: {exc}")
+
+    if not target_date:
+        if rows and rows[0].get("date"):
+            target_date = str(rows[0].get("date"))[:10]
+        else:
+            target_date = datetime.now(RIYADH_TZ).date().isoformat()
+        if target_date in sent_dates:
+            return {"ok": True, "skipped": True, "reason": "already_sent_today", "date": target_date}
+
+    text = compose_saudi_daily_vip_report(target_date, rows, client)
+    res = _send_telegram_message(text=text, chat_id=chat_id, parse_mode="HTML", dry_run=dry_run)
+    res["date"] = target_date
+
+    if res.get("ok") and not dry_run:
+        dates = list(dict.fromkeys([*(state.get("dates") or []), target_date]))[-14:]
+        _write_market_cache(client, "telegram_saudi_daily_vip_report_sent", {"dates": dates, "last_date": target_date})
     return res
 
 

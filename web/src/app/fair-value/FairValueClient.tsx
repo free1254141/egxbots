@@ -93,7 +93,7 @@ export default function FairValueClient({
         }
         setError(null);
         const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(
-          market,
+          isSaudi ? "tasi" : "egx",
           controller.signal,
           hasMatchingInitial ? { forceRefresh: true } : undefined,
         );

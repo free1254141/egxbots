@@ -442,10 +442,13 @@ def evaluate_scanner_candidates(
         if is_saudi:
             candle_range = high_p - low_p
             close_pos = (close - low_p) / candle_range if candle_range > 0 else 1.0
+            min_saudi_turnover = 3_000_000.0 if is_market_healthy else 5_000_000.0
+            min_vol_rvol = 1.8 if is_market_healthy else 2.0
+            min_bo_rvol = 1.6 if is_market_healthy else 1.8
             # TADAWUL institutional quality gate: >= 10 SAR, green strong-close candle, rising EMA20/EMA50 alignment.
             if (
                 close < 10.0
-                or turnover < 15_000_000.0
+                or turnover < min_saudi_turnover
                 or vol < 50_000
                 or (open_p > 0 and close <= open_p)
                 or (candle_range > 0 and close_pos < 0.70)
@@ -453,10 +456,10 @@ def evaluate_scanner_candidates(
                 continue
             is_uptrend = (ema_20 <= 0 or close > ema_20) and (ema_50 <= 0 or close > ema_50)
             if (
-                r_vol >= 2.2
-                and 4.0 <= ch_pct <= 6.5
+                r_vol >= min_vol_rvol
+                and 2.0 <= ch_pct <= 7.5
                 and is_uptrend
-                and 35.0 <= rsi <= 68.0
+                and 35.0 <= rsi <= 70.0
             ):
                 volume_matches.append({
                     "symbol": sym,
@@ -469,10 +472,10 @@ def evaluate_scanner_candidates(
             bb_ok = (bb_upper > 0 and close >= bb_upper * 0.998) if has_bb_upper else True
             if (
                 bb_ok
-                and r_vol >= 2.0
-                and 2.5 <= ch_pct <= 6.5
+                and r_vol >= min_bo_rvol
+                and 2.0 <= ch_pct <= 7.5
                 and is_uptrend
-                and rsi <= 68.0
+                and rsi <= 72.0
             ):
                 breakout_matches.append({
                     "symbol": sym,

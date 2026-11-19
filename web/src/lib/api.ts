@@ -63,6 +63,17 @@ function resolveStoredBrowserMarket(): "egx" | "tasi" {
   }
 }
 
+function resolveStoredSearchMarket(): "egx" | "tasi" | "uae" | "qatar" {
+  if (typeof window === "undefined") return "egx";
+  try {
+    const val = (window.localStorage.getItem("egxbots_market") || "").trim().toLowerCase();
+    if (val === "tasi" || val === "uae" || val === "qatar") return val;
+    return "egx";
+  } catch {
+    return "egx";
+  }
+}
+
 export async function fetchUnusualActivity(
   signal?: AbortSignal,
   market?: "egx" | "tasi",
@@ -694,7 +705,7 @@ export async function searchSymbols(
   if (exchange) params.set("exchange", exchange);
 
   if (!country && !exchange) {
-    params.set("market", resolveStoredBrowserMarket());
+    params.set("market", resolveStoredSearchMarket());
   }
 
 
@@ -711,9 +722,9 @@ export async function searchSymbols(
 
   try {
 
-    const endpoint = `/symbols/search?${params.toString()}`;
+    const endpoint = `/api/symbols/search?${params.toString()}`;
 
-    res = baseUrl ? await doFetch(`${baseUrl}${endpoint}`) : await doFetch(`/api${endpoint}`);
+    res = baseUrl ? await doFetch(`${baseUrl}${endpoint}`) : await doFetch(endpoint);
 
   } catch (e) {
 

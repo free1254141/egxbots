@@ -7,19 +7,26 @@ Respects unsubscribe, daily cap, and never emails a user twice for this campaign
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-ROOT_DIR = r"C:/Users/MR__CODER__/Desktop/stokscan_AI"
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 sys.stdout.reconfigure(encoding="utf-8")
 
 from api.stock_ai import supabase
+try:
+    from api.perf_utils import ALL_PAID_PLAN_IDS
+except Exception:  # pragma: no cover
+    ALL_PAID_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"})
 from api.marketing_lifecycle import (
     APP_URL,
     MARKETING_DAILY_EMAIL_CAP,
     _build_email_html,
+    _build_tiers_summary_html,
+    _resolve_user_pro_offer,
     get_daily_sent_count,
     get_user_email,
     has_recent_message,
@@ -60,7 +67,7 @@ def target_users(since: str, limit: int):
             supabase.table("subscriptions").select("user_id,plan_id,status")
             .eq("status", "active").execute().data or []
         )
-        if str(row.get("plan_id")) in {"pro", "lifetime", "pro_lifetime"}
+        if str(row.get("plan_id") or "").lower() in ALL_PAID_PLAN_IDS
     }
 
     targets = []
@@ -89,16 +96,17 @@ def target_users(since: str, limit: int):
 
 
 def build_email(user_id: str, email: str, name: str) -> tuple[str, str]:
-    subject = "أهلاً بيك في EGX BOTS 👋 — خطوتك الأولى لتحليل أول سهم"
+    pro_price, founder_tier = _resolve_user_pro_offer(user_id)
+    subject = "أهلاً بيك في EGX BOTS 👋 — خطوتك الأولى لتحليل أسهم EGX وتاسي بالذكاء الاصطناعي"
     greeting = f"أهلاً {name} 🚀"
     paragraphs = [
-        "حسابك في <strong>EGX BOTS</strong> جاهز. إحنا منصة تحليل فني وكمي للبورصة المصرية: شات بوت ذكاء اصطناعي يفهم أسهمك، توصيات مبنية على نماذج فنية، ومتابعة لمحفظتك في مكان واحد.",
+        "حسابك في <strong>EGX BOTS</strong> جاهز. المنصة تقدم أدوات برمجية للتحليل الفني والكمي للبورصة المصرية (EGX) والسوق السعودي (TASI): شات بوت ذكاء اصطناعي يفهم أسهمك، رادار نماذج فنية، ومتابعة لمحفظتك في مكان واحد.",
         "<strong>ابدأ في 3 خطوات بسيطة:</strong><br/>"
-        "1️⃣ افتح شات ARTORO واسأل سؤال مباشر: «رشّح لي 3 أسهم عليها فرصة النهارده» أو «حلّل سهم COMI وقولّي مناطق الدخول والخروج».<br/>"
+        "1️⃣ افتح شات التحليل الفني ARTORO واسأل سؤالاً مباشراً: «اعرض لي أبرز 3 أسهم عليها زخم فني اليوم» أو «حلّل سهم COMI وحدّد مستويات الدعم والمقاومة».<br/>"
         "2️⃣ اربط حسابك بتيليجرام وخذ <strong>10 رسائل إضافية مجاناً</strong> وتابع من الموبايل.<br/>"
-        "3️⃣ تابع صفحة التوصيات والمحفظة لتعرف مستويات الدخول والوقف والأهداف أولاً بأول.",
-        "<strong>إيه اللي بيميز التحليل عندنا؟</strong> كل إجابة بتوصلك بمستويات تنفيذ واضحة: سعر دخول، وقف خسارة، هدف، ونسبة عائد إلى مخاطرة — مع تحقق من حداثة البيانات قبل أي قرار.",
-        "ولو حابب تفتح كل المزايا: <strong>باقة EGX BOTS Pro متاحة الآن بـ 200 ج.م شهرياً</strong> وتشمل 350 رسالة شات شهرياً، الصفقات القصيرة اللحظية، كاشف المصائد وقناة VIP.",
+        "3️⃣ تابع الماسح الفني ومحفظتك لمعرفة مستويات المراقبة وإشارات السيولة أولاً بأول.",
+        "<strong>إيه اللي بيميز التحليل عندنا؟</strong> كل قراءة فنية بتوصلك بمؤشرات رقمية واضحة: مستويات الدعم والمقاومة، القيمة العادلة، والتوافق الشرعي — مع تحقق فوري من حداثة البيانات.",
+        _build_tiers_summary_html(pro_price, founder_tier),
     ]
     html = _build_email_html(
         subject,

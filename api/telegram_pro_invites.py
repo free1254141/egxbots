@@ -10,7 +10,7 @@ import requests
 from api.stock_ai import _init_supabase, supabase
 
 
-ACTIVE_PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime"]
+ACTIVE_PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime", "vip_only"]
 SAUDI_VIP_TELEGRAM_WEB_URL = "https://web.telegram.org/a/#-1004397045436"
 
 
@@ -509,9 +509,10 @@ def send_pro_welcome_to_user_telegram(
     user_id: str,
     invite_link: str = "",
     plan_name: str = "Pro",
-    subscription_end: str = ""
+    subscription_end: str = "",
+    include_vip_invite: bool = True,
 ) -> bool:
-    """Send the rich VIP Pro welcome message directly to the user's Telegram if they have linked their account."""
+    """Send a compliant Pro/plan welcome message directly to the user's Telegram if linked."""
     from api.stock_ai import _init_supabase, supabase
     _init_supabase()
     if not supabase:
@@ -538,37 +539,58 @@ def send_pro_welcome_to_user_telegram(
         raw_name = profile.data.get("display_name") or profile.data.get("username") or "المستثمر"
         display_name = html.escape(str(raw_name))
 
-        if not invite_link:
+        if include_vip_invite and not invite_link:
             invite = ensure_pro_invite(user_id, subscription_end or datetime.now(timezone.utc).isoformat())
             invite_link = str((invite or {}).get("invite_link") or "").strip()
 
         buttons = []
-        if invite_link:
+        if include_vip_invite and invite_link:
             buttons.append([{"text": "💎 الانضمام لقناة VIP", "url": invite_link}])
         buttons.append([{"text": "🌐 فتح حسابك والتقارير", "url": "https://egxbots.com/reports"}])
 
         msg = (
             f"🎉 <b>أهلاً وسهلاً بك يا {display_name}!</b>\n\n"
-            f"✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة {plan_name} بنجاح!</b> 🚀\n\n"
+            f"✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة {html.escape(plan_name)} بنجاح!</b> 🚀\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
         )
-        if invite_link:
+        if include_vip_invite and invite_link:
             msg += (
-                "💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n"
+                "💎 <b>رابط انضمامك الخاص لقناة التنبيهات الفنية الآلية VIP:</b>\n"
                 f"{invite_link}\n"
                 "<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n"
             )
-        msg += (
-            "📊 <b>مزايا باقتك المفعّلة الآن:</b>\n"
-            "• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n"
-            "• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n"
-            "• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 <b>كيف تبدأ؟</b>\n"
-            "1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n"
-            "2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n"
-            "نتمنى لك تداولات موفقة ومربحة دائماً! 📈"
-        )
+        if include_vip_invite and "رادار" in plan_name:
+            msg += (
+                "📊 <b>مزايا باقتك المفعّلة الآن:</b>\n"
+                "• تنبيهات فنية وخوارزمية للمؤشرات والسيولة لحظياً على قناة VIP\n"
+                "• إزالة تأخير الإشارات داخل الماسح الفني على الموقع\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 <b>كيف تبدأ؟</b>\n"
+                "اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة التنبيهات الفنية أولاً بأول.\n\n"
+                "تنويه: المؤشرات والتنبيهات آلية لأغراض البحث والمتابعة ولا تمثل توصية استثمارية."
+            )
+        elif not include_vip_invite:
+            msg += (
+                "🤖 <b>مزايا باقة الشات الذكي المفعّلة الآن:</b>\n"
+                "• 350 استفساراً تحليلياً بالذكاء الاصطناعي شهرياً عبر الموقع وبوت تليجرام الخاص\n"
+                "• تحليل صور المحفظة والشارت (Vision AI) + 15 سهماً في المحفظة\n"
+                "• أتمتة التنبيهات والاستفسارات التحليلية المجدولة يومياً\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 <b>كيف تبدأ؟</b>\n"
+                "اسألني هنا مباشرة عن أي سهم (مثل: <code>COMI</code> أو <code>TMGH</code>) أو افتح الماسح الذكي على الموقع."
+            )
+        else:
+            msg += (
+                "📊 <b>مزايا باقتك المفعّلة الآن:</b>\n"
+                "• تنبيهات فنية وخوارزمية للمؤشرات والسيولة لحظياً على قناة VIP\n"
+                "• وصول كامل لمساعد الذكاء الاصطناعي ARTORO (350 استفساراً شهرياً) والماسح الفني\n"
+                "• مؤشرات وتحليلات فنية رقمية لأي سهم تريده عبر هذا الشات\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 <b>كيف تبدأ؟</b>\n"
+                "1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة التنبيهات أولاً بأول.\n"
+                "2. اسألني هنا عن أي سهم (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n"
+                "تنويه: جميع المؤشرات والتحليلات رقمية لأغراض البحث والمتابعة الفنية فقط."
+            )
 
         token = os.getenv("ARTORO_AI_BOT") or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SUPPORT_BOT_TOKEN")
         if not token:

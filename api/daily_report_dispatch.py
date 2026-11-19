@@ -171,18 +171,16 @@ def _offer_html() -> str:
     from api.payment_common import current_pro_offer_copy
 
     price, is_open = current_pro_offer_copy()
-    headline = (
-        f"👑 <b>عرض المؤسسين: باقة Pro بـ {price} ج.م شهرياً مدى الحياة!</b>\n"
-        if is_open
-        else f"👑 <b>اشترك في باقة Pro بـ {price} ج.م شهرياً!</b>\n"
-    )
+    if is_open:
+        headline = f"👑 <b>عرض المؤسسين: الباقة الشاملة Pro بـ {price} ج.م شهرياً (وتبدأ الباقات المنفصلة من 100 ج.م)!</b>\n"
+    else:
+        headline = "👑 <b>باقات EGX BOTS تبدأ من 100 ج.م شهرياً!</b>\n"
     return (
         headline
-        + "✅ إشارات الرادار اللحظية والماسح الفني\n"
-        "✅ كاشف المصائد اليومي + قناة VIP الفورية\n"
-        "✅ رادار إفصاحات الشركات ومستندات الـ PDF\n"
-        "✅ مساعدك الذكي ARTORO بدون قيود\n"
-        "💳 <i>فودافون كاش / انستاباي / فوري / بطاقات بنكية وميزة</i>"
+        + "🤖 <b>الشات الذكي فقط:</b> 100 ج.م/شهر (350 رسالة تحليلية + Vision AI + محفظة 15 سهماً)\n"
+        + "📡 <b>تليجرام VIP فقط:</b> 100 ج.م/شهر (تنبيهات EGX + TASI اللحظية)\n"
+        + f"👑 <b>الباقة الشاملة Pro:</b> {price} ج.م/شهر (الشات الذكي + قنوات VIP معاً بتوفير 50 ج.م)\n"
+        + "💳 <i>الدفع عبر بوابة EasyKash المعتمدة (بطاقات بنكية محلية ودولية / محافظ إلكترونية / فوري)</i>"
     )
 
 
@@ -245,9 +243,9 @@ def build_email_html(s: Dict[str, Any], unsub_url: str, app_url: str) -> str:
 
     price, is_open = current_pro_offer_copy()
     email_offer_title = (
-        f"ثبّت باقة Pro بـ {price} ج.م شهرياً مدى الحياة"
+        f"عرض المؤسسين: الباقة الشاملة Pro بـ {price} ج.م/شهر (أو باقات منفصلة من 100 ج.م)"
         if is_open
-        else f"اشترك في باقة Pro بـ {price} ج.م شهرياً"
+        else f"باقات EGX BOTS: 100 ج.م للشات أو VIP — والباقة الشاملة بـ {price} ج.م"
     )
 
     def br(text: str) -> str:
@@ -268,9 +266,13 @@ def build_email_html(s: Dict[str, Any], unsub_url: str, app_url: str) -> str:
 🔴 {len(s['bull'])} مصيدة قمة (Upthrust) — تجنب الشراء عند القمم.<br><br>
 <strong style="color:#10b981;">📑 إفصاحات وتعاملات الداخليين اليوم:</strong><br>{br(_disclosures_lines(s, 4))}</div>
 <div style="background:rgba(16,185,129,.12);border:2px solid #10b981;border-radius:16px;padding:22px;text-align:center;margin:18px 0;">
-<div style="font-size:19px;font-weight:900;color:#fff;margin-bottom:8px;">{email_offer_title}</div>
-<div style="font-size:13px;color:#d1d5db;margin-bottom:14px;">إشارات لحظية + كاشف المصائد + رادار الإفصاحات + قناة VIP + ARTORO بدون قيود<br>💳 فودافون كاش / انستاباي / فوري / بطاقات بنكية وميزة</div>
-<a href="{LINK_PRICING}" style="display:inline-block;background:#10b981;color:#000;font-weight:900;font-size:15px;padding:14px 30px;border-radius:12px;text-decoration:none;">⚡ تفعيل باقة Pro الآن ↗</a></div>
+<div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:10px;">{email_offer_title}</div>
+<div style="font-size:13px;color:#d1d5db;margin-bottom:14px;line-height:1.8;">
+🤖 <strong>الشات الذكي فقط:</strong> 100 ج.م/شهر (350 رسالة تحليلية + Vision AI + محفظة 15 سهماً)<br>
+📡 <strong>تليجرام VIP فقط:</strong> 100 ج.م/شهر (تنبيهات EGX + TASI اللحظية + إشارات فورية)<br>
+👑 <strong>الباقة الشاملة Pro:</strong> {price} ج.م/شهر (أو 750 ج.م/6 شهور • 1,350 ج.م/سنة — مع حفظ 50 / 100 ج.م للمؤسسين)<br>
+💳 الدفع الآمن عبر بوابة EasyKash (بطاقات بنكية محلية ودولية مع 3D Secure / محافظ إلكترونية / فوري)</div>
+<a href="{LINK_PRICING}" style="display:inline-block;background:#10b981;color:#000;font-weight:900;font-size:15px;padding:14px 30px;border-radius:12px;text-decoration:none;">⚡ استعراض الباقات والتفعيل عبر EasyKash ↗</a></div>
 <div style="text-align:center;font-size:13px;">
 <a href="{LINK_DISCLOSURES}" style="color:#10b981;margin:0 6px;">رادار الإفصاحات</a> |
 <a href="{LINK_TECHNICAL}" style="color:#10b981;margin:0 6px;">الماسح الفني</a> |
@@ -473,7 +475,7 @@ def run_daily_report_dispatch(client, dry_run: bool = False) -> Dict[str, Any]:
 
     pro_price, _ = current_pro_offer_copy()
     free_buttons = [
-        [{"text": f"⚡ اشترك في Pro بـ {pro_price} ج.م ↗", "url": LINK_PRICING}],
+        [{"text": f"⚡ الباقات تبدأ من 100 ج.م (والشاملة {pro_price} ج.م) ↗", "url": LINK_PRICING}],
         [
             {"text": "📑 رادار الإفصاحات ↗", "url": LINK_DISCLOSURES},
             {"text": "🔍 كاشف المصائد ↗", "url": LINK_TECHNICAL},

@@ -82,3 +82,7 @@
 | **Resend & ImprovMX** | إرسال الإيميلات الموثقة (DKIM/SPF) واستقبال الردود | سحابي |
 
 للتفاصيل التشغيلية وسجل التحسينات القياسي راجع: [resource-usage-review-2026-10-05.md](file:///c:/Users/MR__CODER__/Desktop/stokscan_AI/docs/resource-usage-review-2026-10-05.md).
+
+## المراجع المعمارية المكملة
+- [VERCEL_ZERO_CPU_ARCHITECTURE.md](VERCEL_ZERO_CPU_ARCHITECTURE.md): معمارية تصفير استهلاك Vercel (إعادة التوجيه الطرفي، ISR أسبوعي، وإبطال التاجات).
+- [PRICING_AND_ENTITLEMENTS_ARCHITECTURE.md](PRICING_AND_ENTITLEMENTS_ARCHITECTURE.md): معمارية الباقات الثلاث (`chat_only`، `vip_only`، `pro`)، حماية المؤسسين `50`/`100`، عزل الصلاحيات، وضوابط EasyKash وFRA.

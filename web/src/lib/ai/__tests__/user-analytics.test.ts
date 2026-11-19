@@ -98,8 +98,8 @@ describe("admin user analytics", () => {
       ],
     };
     const rows = buildDailyActiveUsage(input);
-    expect(rows).toHaveLength(90);
-    expect(rows[0].fullDate).toBe("2026-07-14");
+    expect(rows).toHaveLength(180);
+    expect(rows[0].fullDate).toBe("2026-04-15");
     expect(rows.at(-1)).toMatchObject({ fullDate: "2026-10-11", activeUsers: 2, newActiveUsers: 1, returningActiveUsers: 1, unknownSignupUsers: 0 });
     expect(rows.at(-2)).toMatchObject({ fullDate: "2026-10-10", activeUsers: 1, newActiveUsers: 1, returningActiveUsers: 0 });
     expect(rows.at(-3)?.activeUsers).toBe(0);

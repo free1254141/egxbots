@@ -209,14 +209,14 @@ def test_compute_scanner_signals_kpis_excludes_flat_breakeven_from_losses():
 
 
 def test_saudi_evaluate_scanner_candidates_filters_and_caps():
-    """TADAWUL scanner enforces >=10 SAR, >=15M SAR, close_pos>=0.70, EMA50 trend, ch<=6.5%, RSI<=68, no RSI oversold, max 1/cat."""
+    """TADAWUL scanner enforces >=10 SAR, breadth-adaptive >=3M/5M SAR, close_pos>=0.70, EMA50 trend, 2<=ch<=7.5%, RSI<=70/72, no RSI oversold, max 1/cat."""
     rows = {
         "SUB10": {"open": 9.1, "high": 9.6, "low": 9.0, "close": 9.5, "change_pct": 4.8, "volume": 3_000_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 9.0, "ema_50": 8.8, "bb_upper": 9.6},
-        "LOWSAR": {"open": 19.0, "high": 20.0, "low": 18.9, "close": 20.0, "change_pct": 4.8, "volume": 500_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 19.0, "ema_50": 18.5, "bb_upper": 20.5},
+        "LOWSAR": {"open": 19.0, "high": 20.0, "low": 18.9, "close": 20.0, "change_pct": 4.8, "volume": 100_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 19.0, "ema_50": 18.5, "bb_upper": 20.5},
         "WICKY": {"open": 48.0, "high": 52.0, "low": 48.0, "close": 50.0, "change_pct": 4.8, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 51.0},
         "DOWN50": {"open": 48.0, "high": 50.0, "low": 47.9, "close": 50.0, "change_pct": 4.8, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 48.0, "ema_50": 52.0, "bb_upper": 51.0},
-        "CHASE": {"open": 46.5, "high": 50.0, "low": 46.5, "close": 50.0, "change_pct": 7.2, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 46.0, "ema_50": 44.0, "bb_upper": 49.0},
-        "HOTRSI": {"open": 47.8, "high": 50.0, "low": 47.7, "close": 50.0, "change_pct": 4.5, "volume": 600_000, "r_vol": 3.5, "rsi_14": 71.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 51.0},
+        "CHASE": {"open": 46.5, "high": 50.0, "low": 46.5, "close": 50.0, "change_pct": 7.8, "volume": 600_000, "r_vol": 3.5, "rsi_14": 60.0, "ema_20": 46.0, "ema_50": 44.0, "bb_upper": 49.0},
+        "HOTRSI": {"open": 47.8, "high": 50.0, "low": 47.7, "close": 50.0, "change_pct": 4.5, "volume": 600_000, "r_vol": 3.5, "rsi_14": 73.0, "ema_20": 47.0, "ema_50": 45.0, "bb_upper": 51.0},
         "OVERSOLD": {"open": 31.0, "high": 31.5, "low": 30.0, "close": 30.5, "change_pct": -1.5, "volume": 800_000, "r_vol": 2.5, "rsi_14": 25.0, "ema_20": 33.0, "ema_50": 35.0, "bb_upper": 34.0},
         "VALID1": {"open": 47.8, "high": 50.0, "low": 47.7, "close": 50.0, "change_pct": 4.6, "volume": 600_000, "r_vol": 3.2, "rsi_14": 62.0, "ema_20": 47.5, "ema_50": 45.0, "bb_upper": 51.0},
         "VALID2": {"open": 28.7, "high": 30.0, "low": 28.6, "close": 30.0, "change_pct": 4.4, "volume": 800_000, "r_vol": 2.6, "rsi_14": 60.0, "ema_20": 28.5, "ema_50": 27.0, "bb_upper": 31.0},
@@ -226,6 +226,22 @@ def test_saudi_evaluate_scanner_candidates_filters_and_caps():
     assert [s["symbol"] for s in res["final_vol"]] == ["VALID1"]
     assert [s["symbol"] for s in res["final_bo"]] == ["VALIDBO"]
     assert res["final_os"] == []
+
+
+def test_saudi_evaluate_scanner_candidates_weak_breadth_raises_gates():
+    """Weak breadth (is_market_healthy=False) raises TADAWUL turnover to >=5M SAR and vol r_vol to >=2.0."""
+    rows = {
+        f"WEAK{i}": {"open": 20.5, "high": 20.6, "low": 19.5, "close": 19.8, "change_pct": -2.5, "volume": 300_000, "r_vol": 1.1, "rsi_14": 38.0, "ema_20": 21.0, "ema_50": 22.0}
+        for i in range(1, 10)
+    }
+    rows.update({
+        "SUB5M": {"open": 19.2, "high": 20.1, "low": 19.1, "close": 20.0, "change_pct": 4.2, "volume": 200_000, "r_vol": 2.8, "rsi_14": 60.0, "ema_20": 19.0, "ema_50": 18.0, "bb_upper": 20.5},
+        "LOWRVOL": {"open": 28.8, "high": 30.0, "low": 28.7, "close": 30.0, "change_pct": 4.2, "volume": 200_000, "r_vol": 1.9, "rsi_14": 60.0, "ema_20": 28.5, "ema_50": 27.0, "bb_upper": 31.0},
+        "GOOD6M": {"open": 28.8, "high": 30.0, "low": 28.7, "close": 30.0, "change_pct": 4.2, "volume": 220_000, "r_vol": 2.1, "rsi_14": 60.0, "ema_20": 28.5, "ema_50": 27.0, "bb_upper": 31.0},
+    })
+    res = evaluate_scanner_candidates(rows, force=True, limit_per_category=3, exchange="TADAWUL")
+    assert res["is_market_healthy"] is False
+    assert [s["symbol"] for s in res["final_vol"]] == ["GOOD6M"]
 
 
 def test_saudi_scanner_lifecycle_be_lock_and_six_session_expiry():

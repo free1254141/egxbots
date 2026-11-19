@@ -70,7 +70,7 @@ export default function UnusualActivity() {
     setExpanded(false);
 
     const requests: Promise<unknown>[] = [
-      fetchUnusualActivity(controller.signal, market)
+      fetchUnusualActivity(controller.signal, isSaudi ? "tasi" : "egx")
         .then(setSnapshot)
         .catch((cause) => {
           if (cause?.name !== "AbortError") setError(true);

@@ -196,7 +196,7 @@ def execute_saudi_scanner_alerts_native(
 
     market_status = _read_cache(sb, f"market_status_{SAUDI_COUNTRY}")
     regime = str(market_status.get("regime") or "neutral").lower()
-    regime_blocked = bool(market_status.get("reject_buys")) or regime in {"panic", "bear"}
+    regime_blocked = regime == "panic"
     has_today_indicators = as_of_date == riyadh["date_str"]
     allow_new_entries = bool((force or (has_today_indicators and riyadh["time_str"] < "14:50")) and (force or not regime_blocked))
     eval_res = evaluate_scanner_candidates(

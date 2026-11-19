@@ -30,6 +30,28 @@ def free_limits() -> Dict[str, Any]:
     }
 
 
+def chat_only_limits() -> Dict[str, Any]:
+    return {
+        "name": "chat_only",
+        "signal_delay_days": 0,
+        "chat_messages_daily": int(os.getenv("PRO_CHAT_DAILY_MESSAGES", "350")),
+        "chat_messages_per_month": int(os.getenv("PRO_CHAT_MESSAGES", "350")),
+        "portfolio_stocks": int(os.getenv("PRO_PORTFOLIO_STOCKS", "15")),
+        "price_egp": int(plan_amount_egp("chat_only")),
+    }
+
+
+def vip_only_limits() -> Dict[str, Any]:
+    return {
+        "name": "vip_only",
+        "signal_delay_days": 0,
+        "chat_messages_daily": 10,
+        "chat_messages_per_month": 10,
+        "portfolio_stocks": int(os.getenv("FREE_PORTFOLIO_STOCKS", "5")),
+        "price_egp": int(plan_amount_egp("vip_only")),
+    }
+
+
 def pro_limits() -> Dict[str, Any]:
     return {
         "name": "pro",
@@ -41,11 +63,20 @@ def pro_limits() -> Dict[str, Any]:
     }
 
 
-PRO_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"})
+FULL_PRO_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"})
+CHAT_PRO_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"chat_only"})
+VIP_TELEGRAM_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"vip_only"})
+ALL_PAID_PLAN_IDS = FULL_PRO_PLAN_IDS | frozenset({"chat_only", "vip_only"})
+PRO_PLAN_IDS = ALL_PAID_PLAN_IDS
 
 
 def plan_limits(plan_id: str) -> Dict[str, Any]:
-    if (plan_id or "").strip().lower() in PRO_PLAN_IDS:
+    clean = (plan_id or "").strip().lower()
+    if clean == "chat_only":
+        return chat_only_limits()
+    if clean == "vip_only":
+        return vip_only_limits()
+    if clean in FULL_PRO_PLAN_IDS:
         return pro_limits()
     return free_limits()
 
@@ -71,10 +102,9 @@ def effective_limits(plan_id: str) -> Dict[str, Any]:
     return limits
 
 
-def is_pro_user(user_id: str, supabase) -> bool:
-    """True when the user holds an active Pro subscription (payments on)."""
+def _user_has_plan_in_set(user_id: str, supabase, allowed_plans: frozenset[str]) -> bool:
     if not is_payments_enabled():
-        return True  # site is free; everyone gets everything
+        return True
     from dateutil import parser as date_parser
     from datetime import datetime, timezone
 
@@ -91,7 +121,7 @@ def is_pro_user(user_id: str, supabase) -> bool:
         now = datetime.now(timezone.utc)
         for row in res.data or []:
             plan = str(row.get("plan_id", "")).lower()
-            if plan not in PRO_PLAN_IDS:
+            if plan not in allowed_plans:
                 continue
             end = row.get("current_period_end")
             if end:
@@ -104,6 +134,21 @@ def is_pro_user(user_id: str, supabase) -> bool:
         return False
     except Exception:
         return False
+
+
+def is_pro_user(user_id: str, supabase) -> bool:
+    """True when the user holds any active paid/trial subscription (Pro, Chat Only, or VIP Only)."""
+    return _user_has_plan_in_set(user_id, supabase, ALL_PAID_PLAN_IDS)
+
+
+def has_chat_pro_user(user_id: str, supabase) -> bool:
+    """True when the user holds an active Full Pro or AI Chat Only subscription."""
+    return _user_has_plan_in_set(user_id, supabase, CHAT_PRO_PLAN_IDS)
+
+
+def has_vip_telegram_user(user_id: str, supabase) -> bool:
+    """True when the user holds an active Full Pro or VIP Telegram Only subscription."""
+    return _user_has_plan_in_set(user_id, supabase, VIP_TELEGRAM_PLAN_IDS)
 
 
 def user_is_pro(user_id: str, supabase) -> bool:

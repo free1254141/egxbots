@@ -17,9 +17,9 @@ export async function GET() {
         const { getPortfolioSnapshot } = await import("@/lib/ai/portfolio-tools");
         const snapshot = await getPortfolioSnapshot(supabase, user.id);
         const { data: planRows } = await supabase.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", user.id).limit(10);
-        const { hasActiveProSubscription, planLimits } = await import("@/lib/ai/plan-gate");
-        const pro = hasActiveProSubscription(planRows || []);
-        const portfolioLimit = planLimits(pro ? "pro" : "free").portfolio_stocks;
+        const { hasActiveChatPro, planLimits } = await import("@/lib/ai/plan-gate");
+        const pro = hasActiveChatPro(planRows || []);
+        const portfolioLimit = planLimits(pro ? "chat_only" : "free").portfolio_stocks;
 
         // Real EGX symbols for the profile-page autocomplete selector (cached in memory)
         let marketSymbols: Array<{ symbol: string; name: string | null }> = [];
@@ -132,9 +132,9 @@ export async function POST(req: NextRequest) {
                     .select("plan_id,status,current_period_end")
                     .eq("user_id", user.id)
                     .limit(10);
-                const { isPro, planLimits } = await import("@/lib/ai/plan-gate");
-                const pro = isPro(planRows || []);
-                const limit = planLimits(pro ? "pro" : "free").portfolio_stocks;
+                const { hasActiveChatPro, planLimits } = await import("@/lib/ai/plan-gate");
+                const pro = hasActiveChatPro(planRows || []);
+                const limit = planLimits(pro ? "chat_only" : "free").portfolio_stocks;
 
                 const { data: existingRows } = await supabase
                     .from("positions")
@@ -178,9 +178,9 @@ export async function POST(req: NextRequest) {
                 {
                     const { data: rows } = await supabase.from("positions").select("symbol").eq("user_id", user.id).eq("status", "open");
                     const { data: planRows } = await supabase.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", user.id).limit(10);
-                    const { isPro, planLimits } = await import("@/lib/ai/plan-gate");
-                    const pro = isPro(planRows || []);
-                    const limit = planLimits(pro ? "pro" : "free").portfolio_stocks;
+                    const { hasActiveChatPro, planLimits } = await import("@/lib/ai/plan-gate");
+                    const pro = hasActiveChatPro(planRows || []);
+                    const limit = planLimits(pro ? "chat_only" : "free").portfolio_stocks;
                     const currentSymbols = new Set((rows || []).map((row: any) => String(row.symbol || "").toUpperCase()));
                     if (!currentSymbols.has(symbol) && currentSymbols.size >= limit) return NextResponse.json({ ok: false, isQuotaReached: true, limit, message: `وصلت للحد الأقصى ${limit} أسهم مختلفة في المحفظة. احذف مركزاً أو قم بالترقية لإضافة سهم آخر.` }, { status: 403 });
                 }

@@ -40,7 +40,13 @@ from api.payment_common import (
 
     billing_settings,
 
+    duration_days_for_months,
+
+    duration_pricing_schedule,
+
     is_payments_enabled,
+
+    normalize_duration_months,
 
     plan_amount_egp,
 
@@ -102,17 +108,37 @@ _EASYKASH_INSTALLMENT_OPTIONS = [
 
 ]
 
-_PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}
+_PLANS = {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "chat_only": 30, "vip_only": 30, "lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}
 
 _ACTIVE_PRO_PLAN_IDS = list(_PLANS)
+_VIP_ELIGIBLE_PLAN_IDS = frozenset({"pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "vip_only"})
 
 _EGP_PER_SAR = Decimal("12.75")
+_GULF_MARKET_CONFIG: Dict[str, Dict[str, Any]] = {
+    "tasi": {"currency": "SAR", "egp_rate": _EGP_PER_SAR, "label": "TASI"},
+    "uae": {"currency": "AED", "egp_rate": Decimal("13.00"), "label": "UAE"},
+    "qatar": {"currency": "QAR", "egp_rate": Decimal("13.15"), "label": "QATAR"},
+}
+
+
+def _normalize_checkout_market(raw_market: str | None) -> str:
+    clean = str(raw_market or "").strip().lower()
+    if clean in {"tasi", "sa", "sar", "saudi", "saudi arabia", "tadawul", "ksa"}:
+        return "tasi"
+    if clean in {"uae", "ae", "aed", "dfm", "adx", "dubai", "abudhabi", "abu dhabi", "emirates"}:
+        return "uae"
+    if clean in {"qatar", "qa", "qar", "qse", "qe", "qsi", "doha"}:
+        return "qatar"
+    return "egx"
 _SAUDI_SAR_EXCHANGE_MAP = {
     50: 5,
     100: 10,
+    150: 15,
     200: 20,
     500: 50,
+    750: 75,
     1000: 100,
+    1350: 135,
     1500: 150,
     1800: 180,
     1850: 185,
@@ -122,10 +148,10 @@ _SAUDI_SAR_EXCHANGE_MAP = {
 
 
 def _saudi_sar_amount(amount_egp: Decimal | float) -> int:
-    rounded = int(round(float(amount_egp)))
+    rounded = int(Decimal(str(amount_egp)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     if rounded in _SAUDI_SAR_EXCHANGE_MAP:
         return _SAUDI_SAR_EXCHANGE_MAP[rounded]
-    return max(1, int(round(float(amount_egp) / 10.0)))
+    return max(1, int((Decimal(str(rounded)) / Decimal("10")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
 
 
 
@@ -206,14 +232,20 @@ _LIFETIME_COUNT_TTL_SECONDS = 60
 
 def payment_config(user_id: str | None = None) -> Dict[str, Any]:
 
-    from api.plan_limits import free_limits, pro_limits
+    from api.plan_limits import chat_only_limits, free_limits, pro_limits, vip_only_limits
 
     with eligibility_scope():
 
-        return _build_payment_config(user_id=user_id, free_limits=free_limits, pro_limits=pro_limits)
+        return _build_payment_config(
+            user_id=user_id,
+            free_limits=free_limits,
+            pro_limits=pro_limits,
+            chat_only_limits=chat_only_limits,
+            vip_only_limits=vip_only_limits,
+        )
 
 
-def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Dict[str, Any]:
+def _build_payment_config(*, user_id: str | None, free_limits, pro_limits, chat_only_limits=None, vip_only_limits=None) -> Dict[str, Any]:
 
     enabled = is_payments_enabled() and is_easykash_ready()
 
@@ -287,23 +319,25 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Di
 
     if _founders_is_open or is_eligible_50 or is_eligible_100:
 
+        base_6m_orig = int(round(float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else float(os.getenv("PRO_6M_PRICE_EGP", "750"))))
+
         plan_6m["discount"] = {
 
             "active": True,
 
             "kind": "founders",
 
-            "label_ar": "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م) 🔥",
+            "label_ar": f"عرض المؤسسين (500 بدل {base_6m_orig:,} ج.م) 🔥",
 
-            "label_en": "Founders Offer 50% OFF (500 instead of 1,000 EGP) 🔥",
+            "label_en": f"Founders Offer (500 instead of {base_6m_orig:,} EGP) 🔥",
 
-            "original_amount_egp": 1000,
+            "original_amount_egp": base_6m_orig,
 
             "ends_at": _founders_ends_at_str,
 
         }
 
-        base_1y_orig = int(round(float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else float(os.getenv("PRO_1Y_PRICE_EGP", "1800"))))
+        base_1y_orig = int(round(float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else float(os.getenv("PRO_1Y_PRICE_EGP", "1350"))))
 
         plan_1y["discount"] = {
 
@@ -344,6 +378,34 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Di
             "days": 36500,
 
             "badge": "حصري لـ 20 مقعداً 🔥",
+
+        },
+
+        {
+
+            "id": "chat_only",
+
+            "name_ar": "الشات الذكي فقط",
+
+            "name_en": "AI Chat Only",
+
+            "amount_egp": int(plan_amount_egp("chat_only")),
+
+            "days": 30,
+
+        },
+
+        {
+
+            "id": "vip_only",
+
+            "name_ar": "رادار تليجرام VIP فقط",
+
+            "name_en": "VIP Telegram Radar Only",
+
+            "amount_egp": int(plan_amount_egp("vip_only")),
+
+            "days": 30,
 
         },
 
@@ -422,6 +484,8 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Di
         "currency": "EGP",
 
         "plans": plans,
+
+        "duration_discounts": duration_pricing_schedule(),
         "b2b_plans": [
             {
                 "id": "b2b_starter",
@@ -477,7 +541,12 @@ def _build_payment_config(*, user_id: str | None, free_limits, pro_limits) -> Di
             },
         ],
 
-        "limits": {"free": free_limits(), "pro": pro_limits()},
+        "limits": {
+            "free": free_limits(),
+            "pro": pro_limits(),
+            **({"chat_only": chat_only_limits()} if chat_only_limits else {}),
+            **({"vip_only": vip_only_limits()} if vip_only_limits else {}),
+        },
 
         "founders": {
 
@@ -709,7 +778,7 @@ def validate_affiliate_code(code: str, track_click: bool = False) -> Dict[str, A
 
 
 
-def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "", market: str = "egx") -> Dict[str, Any]:
+def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: str, promo_code: str = "", market: str = "egx", duration_months: int | None = None) -> Dict[str, Any]:
 
     if not is_payments_enabled():
 
@@ -725,7 +794,10 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
         raise ValueError("Unsupported Pro plan")
 
-    clean_market = "tasi" if str(market or "").strip().lower() in {"tasi", "sa", "sar", "saudi"} else "egx"
+    resolved_months = normalize_duration_months(plan_id, duration_months)
+    resolved_days = duration_days_for_months(resolved_months) if resolved_months is not None else _PLANS[plan_id]
+
+    clean_market = _normalize_checkout_market(market)
 
     mobile = "".join(ch for ch in str(mobile or "") if ch.isdigit() or ch == "+")
 
@@ -779,7 +851,13 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
     if plan_id in ("pro", "pro_renewal"):
 
-        if is_user_eligible_for_50_egp_renewal(user_id):
+        if resolved_months is not None and resolved_months > 1:
+
+            actual_plan_id = "pro"
+
+            amount = Decimal(str(plan_amount_egp("pro", user_id=user_id, duration_months=resolved_months))).quantize(Decimal("0.01"))
+
+        elif is_user_eligible_for_50_egp_renewal(user_id):
 
             actual_plan_id = "pro_renewal"
 
@@ -797,14 +875,23 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
             amount = Decimal(str(plan_amount_egp("pro", user_id=user_id))).quantize(Decimal("0.01"))
 
+    elif plan_id in ("chat_only", "vip_only"):
+
+        amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id, duration_months=resolved_months))).quantize(Decimal("0.01"))
+
     else:
 
         amount = Decimal(str(plan_amount_egp(plan_id, user_id=user_id))).quantize(Decimal("0.01"))
 
-    display_sar: int | None = None
-    if clean_market == "tasi":
-        display_sar = _saudi_sar_amount(amount)
-        amount = (Decimal(str(display_sar)) * _EGP_PER_SAR).quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
+    display_gulf: int | None = None
+    gulf_cfg = _GULF_MARKET_CONFIG.get(clean_market)
+    if gulf_cfg:
+        display_gulf = _saudi_sar_amount(amount)
+        amount = (
+            (Decimal(str(display_gulf)) * gulf_cfg["egp_rate"])
+            .quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            .quantize(Decimal("0.01"))
+        )
 
 
 
@@ -864,6 +951,8 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
         "amount_egp": float(amount),
 
+        "duration_days": resolved_days,
+
         "provider": "easykash",
 
         "status": "pending",
@@ -872,9 +961,9 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
     }
 
-    if clean_market == "tasi":
+    if gulf_cfg:
 
-        row["customer_note"] = f"Market: tasi (~{display_sar} SAR)"
+        row["customer_note"] = f"Market: {clean_market} (~{display_gulf} {gulf_cfg['currency']})"
 
     if affiliate_info:
 
@@ -942,11 +1031,23 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
                 if admin_chat:
 
-                    plan_days = _PLANS.get(plan_id, 30)
+                    plan_days = resolved_days
 
-                    market_label = f"TASI (~{display_sar} SAR)" if clean_market == "tasi" else "EGX"
+                    market_label = f"{gulf_cfg['label']} (~{display_gulf} {gulf_cfg['currency']})" if gulf_cfg else "EGX"
 
-                    plan_label = f"{plan_id.upper()} ({plan_days} يوم)" if plan_id.startswith("b2b_") else f"Pro ({plan_days} يوم)"
+                    plan_label = (
+                        f"{plan_id.upper()} ({plan_days} يوم)"
+                        if plan_id.startswith("b2b_")
+                        else (
+                            f"AI Chat Only ({plan_days} يوم)"
+                            if plan_id == "chat_only"
+                            else (
+                                f"VIP Telegram Only ({plan_days} يوم)"
+                                if plan_id == "vip_only"
+                                else f"Pro ({plan_days} يوم)"
+                            )
+                        )
+                    )
 
                     msg = (
 
@@ -986,9 +1087,14 @@ def create_checkout(user_id: str, plan_id: str, email: str, name: str, mobile: s
 
             "amount_egp": float(amount),
 
+            "duration_days": resolved_days,
+
+            **({"duration_months": resolved_months} if resolved_months is not None else {}),
+
             "market": clean_market,
 
-            **({"display_amount_sar": display_sar} if display_sar is not None else {}),
+            **({"display_amount_sar": display_gulf} if clean_market == "tasi" and display_gulf is not None else {}),
+            **({"display_amount": display_gulf, "display_currency": gulf_cfg["currency"]} if gulf_cfg and display_gulf is not None else {}),
 
             "url": redirect_url,
 
@@ -1103,7 +1209,7 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         return {"ok": False, "status_code": 503, "code": "database_unavailable"}
 
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,commission_status,discount_amount_egp").eq("id", order_id).maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,updated_at,affiliate_id,affiliate_code,commission_amount_egp,commission_status,discount_amount_egp").eq("id", order_id).maybe_single().execute()
 
     order = result.data if result else None
 
@@ -1213,7 +1319,13 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
 
-        activate_subscription(order["user_id"], order.get("plan_id") or "pro", provider="easykash", payment_order_id=order_id)
+        activate_subscription(
+            order["user_id"],
+            order.get("plan_id") or "pro",
+            provider="easykash",
+            payment_order_id=order_id,
+            duration_days=order.get("duration_days"),
+        )
 
         update_payload = {
 
@@ -1265,15 +1377,24 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
 
+            order_plan = str(order.get("plan_id") or "pro").strip().lower()
+            include_vip = order_plan in _VIP_ELIGIBLE_PLAN_IDS
+            plan_display_name = (
+                "الشات الذكي (AI Chat)"
+                if order_plan == "chat_only"
+                else ("رادار تليجرام VIP" if order_plan == "vip_only" else "Pro")
+            )
+
             sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", order["user_id"]).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
 
             subscription_end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
 
             if subscription_end:
 
-                invite = ensure_pro_invite(order["user_id"], str(subscription_end))
-
-                invite_link = str((invite or {}).get("invite_link") or "").strip()
+                invite_link = ""
+                if include_vip:
+                    invite = ensure_pro_invite(order["user_id"], str(subscription_end))
+                    invite_link = str((invite or {}).get("invite_link") or "").strip()
 
                 try:
 
@@ -1285,9 +1406,11 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                         invite_link=invite_link,
 
-                        plan_name="Pro",
+                        plan_name=plan_display_name,
 
                         subscription_end=str(subscription_end),
+
+                        include_vip_invite=include_vip,
 
                     )
 
@@ -1325,19 +1448,19 @@ def process_callback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 plan_id = order.get("plan_id", "pro")
 
-                plan_days = _PLANS.get(plan_id, 30)
+                plan_days = int(order.get("duration_days") or _PLANS.get(plan_id, 30))
 
                 easykash_ref = str(payload.get("easykashRef") or "—")
 
-                activation_title = f"تم تأكيد الدفع وتفعيل رخصة {str(plan_id).upper()} بنجاح!" if is_b2b_order else "تم تأكيد الدفع وتفعيل Pro بنجاح!"
+                activation_title = f"تم تأكيد الدفع وتفعيل رخصة {str(plan_id).upper()} بنجاح!" if is_b2b_order else f"تم تأكيد الدفع وتفعيل {str(plan_id).upper()} بنجاح!"
 
-                activation_footer = "✅ تم تفعيل رخصة القنوات (B2B) تلقائياً." if is_b2b_order else "✅ تم تفعيل الاشتراك تلقائياً ورابط VIP متاح للمشترك."
+                activation_footer = "✅ تم تفعيل رخصة القنوات (B2B) تلقائياً." if is_b2b_order else ("✅ تم تفعيل باقة الشات الذكي تلقائياً." if str(plan_id).lower() == "chat_only" else "✅ تم تفعيل الاشتراك تلقائياً ورابط VIP متاح للمشترك.")
 
                 msg = (
 
                     f"🎉 <b>{activation_title}</b>\n\n"
 
-                    f"<b>الخطة:</b> {str(plan_id).upper() if is_b2b_order else 'Pro'} ({plan_days} يوم)\n"
+                    f"<b>الخطة:</b> {str(plan_id).upper()} ({plan_days} يوم)\n"
 
                     f"<b>المبلغ المدفوع:</b> {float(expected_amount):,.0f} ج.م\n"
 
@@ -1394,7 +1517,13 @@ def sync_easykash_order_status(order: Dict[str, Any]) -> Dict[str, Any]:
 
             if ek_status == "PAID":
                 try:
-                    activate_subscription(order["user_id"], order.get("plan_id") or "pro", provider="easykash", payment_order_id=order_id)
+                    activate_subscription(
+                        order["user_id"],
+                        order.get("plan_id") or "pro",
+                        provider="easykash",
+                        payment_order_id=order_id,
+                        duration_days=order.get("duration_days"),
+                    )
                     update_data = {
                         "status": "approved",
                         "payment_review_status": "reviewed",
@@ -1438,7 +1567,7 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
     _init_supabase()
 
-    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
+    result = supabase.table("local_payment_orders").select("id,user_id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status").eq("id", order_id).eq("user_id", user_id).eq("provider", "easykash").maybe_single().execute()
 
     order = result.data if result else None
 
@@ -1469,15 +1598,23 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
         else:
 
+            order_plan = str(order.get("plan_id") or "pro").strip().lower()
+            include_vip = order_plan in _VIP_ELIGIBLE_PLAN_IDS
+            plan_display_name = (
+                "الشات الذكي (AI Chat)"
+                if order_plan == "chat_only"
+                else ("رادار تليجرام VIP" if order_plan == "vip_only" else "Pro")
+            )
+
             sub = supabase.table("subscriptions").select("current_period_end").eq("user_id", user_id).in_("plan_id", _ACTIVE_PRO_PLAN_IDS).eq("status", "active").order("current_period_end", desc=True).limit(1).maybe_single().execute()
 
             end = (sub.data or {}).get("current_period_end") if sub and sub.data else None
 
             if end:
 
-                invite = ensure_pro_invite(user_id, str(end))
-
-                invite_link = str(invite.get("invite_link") or "")
+                if include_vip:
+                    invite = ensure_pro_invite(user_id, str(end))
+                    invite_link = str(invite.get("invite_link") or "")
 
                 note = str(order.get("customer_note") or "")
 
@@ -1487,7 +1624,13 @@ def order_status(order_id: str, user_id: str) -> Dict[str, Any]:
 
                         from api.telegram_pro_invites import send_pro_welcome_to_user_telegram
 
-                        sent = send_pro_welcome_to_user_telegram(user_id, invite_link=invite_link, subscription_end=str(end))
+                        sent = send_pro_welcome_to_user_telegram(
+                            user_id,
+                            invite_link=invite_link,
+                            plan_name=plan_display_name,
+                            subscription_end=str(end),
+                            include_vip_invite=include_vip,
+                        )
 
                         if sent:
 

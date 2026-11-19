@@ -53,7 +53,7 @@ SAUDI_BREADTH_MIN_TURNOVER = 2_000_000.0
 SAUDI_ENTRY_AVG_TURNOVER = 25_000_000.0
 SAUDI_ENTRY_MEDIAN_TURNOVER = 12_500_000.0
 SAUDI_ENTRY_CURRENT_TURNOVER = 6_250_000.0
-SAUDI_MIN_BREADTH = 0.65
+SAUDI_MIN_BREADTH = 0.45
 SAUDI_START_DATE = "2021-01-01"
 
 # Causal stop, profit-lock, and take-profit parameters (validated across 2024-2026 EGX)
@@ -876,7 +876,17 @@ def compute_short_swings(
             & (df["close"] > df["open"])
             & (close_pos >= 0.75)
         )
-        sig_rs_leader = pd.Series(False, index=df.index)
+        sig_rs_leader = (
+            (~mkt_ok)
+            & (df["breadth"] >= 0.22)
+            & trend_aligned
+            & saudi_quality
+            & (df["close"] >= df["high20"])
+            & (df["volume"] >= df["vol_ma20"] * 1.5)
+            & (df["close"] > df["open"])
+            & (close_pos >= 0.70)
+            & (df["ret20"] >= 0.06)
+        )
         sig_defensive_pb = pd.Series(False, index=df.index)
     else:
         # Disable EGX Power Pullback & Defensive Pullback (1.29 / 0.56 PF in choppy regimes).

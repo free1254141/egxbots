@@ -169,6 +169,10 @@ class _FakeQuery:
         rows = self.db.tables.setdefault(self.table_name, [])
 
         if self.op == "insert":
+            if isinstance(self.payload, list):
+                items = [{"id": f"new-{len(rows) + idx + 1}", **dict(r)} for idx, r in enumerate(self.payload)]
+                rows.extend(items)
+                return SimpleNamespace(data=items)
             item = {"id": f"new-{len(rows) + 1}", **dict(self.payload)}
             rows.append(item)
             return SimpleNamespace(data=[item])

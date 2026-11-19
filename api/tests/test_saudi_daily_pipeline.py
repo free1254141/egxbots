@@ -464,7 +464,7 @@ def test_saudi_scanner_alerts_engine_vip_only_and_scheduler_hours(monkeypatch):
     assert all(c["chat_id"] != "-1009999999999" for c in sent_calls)
 
 
-def test_saudi_scanner_blocks_new_entries_in_bear_regime(monkeypatch):
+def test_saudi_scanner_blocks_new_entries_in_panic_regime(monkeypatch):
     from api import saudi_scanner_alerts_engine
 
     monkeypatch.setenv("SAUDI_TELEGRAM_PRO_CHAT_ID", "-1004397045436")
@@ -481,7 +481,7 @@ def test_saudi_scanner_blocks_new_entries_in_bear_regime(monkeypatch):
                 {
                     "cache_key": "market_status_Saudi Arabia",
                     "country": "Saudi Arabia",
-                    "payload": {"regime": "bear", "reject_buys": True},
+                    "payload": {"regime": "panic", "reject_buys": True},
                 }
             ],
             "stock_technical_indicators": [
@@ -664,3 +664,239 @@ def test_market_outlook_includes_index_levels_and_percentages(monkeypatch):
         recommendations_count=1,
     )
     assert "11,250.50" in sa_msg and "+1.10%" in sa_msg and "+2.40%" in sa_msg
+
+    # Synthetic equal-weight base-4000 index (< 8000) must NOT display fake TASI 'نقطة' points
+    sa_synth = sa_disp.compose_saudi_market_outlook(
+        "2026-11-18",
+        {
+            "regime": "bear",
+            "reject_buys": True,
+            "breadth": {"advancers": 47, "decliners": 209, "unchanged": 8, "above_sma50_pct": 23.9},
+            "tasi_metrics": {"close": 3831.88, "return_1d_pct": -1.17, "return_5d_pct": -3.67},
+        },
+        ind_rows=[{"symbol": "2110", "close": 199.3, "change_pct": 4.9}],
+        recommendations_count=1,
+    )
+    assert "3,831.88" not in sa_synth
+    assert "نقطة" not in sa_synth
+    assert "-1.17%" in sa_synth and "-3.67%" in sa_synth
+
+
+def test_saudi_scanner_allows_bear_sniper_entries(monkeypatch):
+    from api import saudi_scanner_alerts_engine
+
+    monkeypatch.setattr(
+        saudi_scanner_alerts_engine,
+        "get_riyadh_now",
+        lambda: {"date_str": "2026-11-18", "time_str": "11:30", "is_trading_day": True, "is_trading_hours": True},
+    )
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [
+                {
+                    "cache_key": "market_status_Saudi Arabia",
+                    "country": "Saudi Arabia",
+                    "payload": {"regime": "bear", "reject_buys": True},
+                },
+            ],
+            "stock_technical_indicators": [
+                {
+                    "symbol": "1150",
+                    "exchange": "TADAWUL",
+                    "date": "2026-11-18",
+                    "open": 19.2,
+                    "high": 20.1,
+                    "low": 19.1,
+                    "close": 20.0,
+                    "change_pct": 4.2,
+                    "volume": 200_000,  # 4M SAR turnover (>= 3M healthy sniper gate)
+                    "vol_sma20": 80_000,
+                    "r_vol": 2.5,
+                    "rsi_14": 60.0,
+                    "ema_20": 18.8,
+                    "ema_50": 18.0,
+                    "bb_upper": 19.8,
+                },
+            ],
+            "stock_prices": [
+                {
+                    "symbol": "1150",
+                    "exchange": "TADAWUL",
+                    "date": "2026-11-18",
+                    "open": 19.2,
+                    "high": 20.1,
+                    "low": 19.1,
+                    "close": 20.0,
+                    "volume": 200_000,
+                },
+            ],
+        }
+    )
+
+    out = saudi_scanner_alerts_engine.execute_saudi_scanner_alerts_native(
+        force=False, refresh_prices=False, dry_run=True, sb=fake_sb
+    )
+    assert out["ok"] is True
+    assert out["new_signals"] >= 1
+
+
+def test_saudi_daily_vip_report_compose_and_dispatch(monkeypatch):
+    sent_messages = []
+
+    def _fake_send(text, chat_id=None, parse_mode="HTML", dry_run=False):
+        sent_messages.append({"text": text, "chat_id": chat_id, "parse_mode": parse_mode, "dry_run": dry_run})
+        return {"ok": True, "message_id": 9001}
+
+    monkeypatch.setattr(saudi_telegram_dispatch, "_send_telegram_message", _fake_send)
+
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [
+                {
+                    "cache_key": "daily_traps_snapshot",
+                    "country": "Saudi Arabia",
+                    "payload": {
+                        "asOf": "2026-11-18",
+                        "totalBearTraps": 11,
+                        "totalBullTraps": 14,
+                        "bearTraps": [
+                            {"symbol": "1120", "close": 92.5, "keyLevel": 90.0, "conviction": 82, "relativeVolume": 1.9}
+                        ],
+                        "bullTraps": [{"symbol": "2010", "close": 70.0, "keyLevel": 72.0}],
+                    },
+                }
+            ],
+            "stock_scans_summary": [
+                {
+                    "symbol": "2222",
+                    "scan_date": "2026-11-18",
+                    "signal": "strong_accumulation",
+                    "acc_score": 88,
+                    "dist_score": 10,
+                    "vol_ratio": 2.1,
+                    "consecutive_acc_days": 4,
+                    "rsi_14": 54.0,
+                    "change_pct": 1.8,
+                }
+            ],
+            "egx_disclosures": [
+                {
+                    "symbol": "1211",
+                    "company_name": "معادن",
+                    "disclosure_type": "financial",
+                    "disclosure_date": "2026-11-18",
+                    "title": "نتائج الربع الثالث <نمو> & أرباح قوية",
+                    "sentiment": "positive",
+                }
+            ],
+            "stock_technical_indicators": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-18", "close": 92.5, "change_pct": 3.4, "volume": 1_200_000, "r_vol": 2.1},
+            ],
+        }
+    )
+
+    first = saudi_telegram_dispatch.dispatch_saudi_daily_vip_report(market_date="2026-11-18", sb=fake_sb)
+    assert first["ok"] is True
+    assert first["message_id"] == 9001
+    assert len(sent_messages) == 1
+    body = sent_messages[0]["text"]
+    assert "تقرير VIP الحصري" in body
+    assert "1120" in body
+    assert "2222" in body
+    assert "1211" in body
+    assert "11 نموذج ارتداد تجميعي" in body
+    assert "14 مصيدة قمة" in body
+    assert "تجميع مؤسسي قوي" in body
+    assert "strong_accumulation" not in body
+    assert "/scanner/backtests?market=sa" in body
+    assert "/tasi\"" not in body
+    assert "&lt;نمو&gt; &amp; أرباح قوية" in body
+
+    second = saudi_telegram_dispatch.dispatch_saudi_daily_vip_report(market_date="2026-11-18", sb=fake_sb)
+    assert second["ok"] is True
+    assert second.get("skipped") is True
+    assert len(sent_messages) == 1
+
+
+def test_saudi_runner_close_dispatches_vip_report(monkeypatch):
+    from api import saudi_daily_runner
+
+    fake_sb = _FakeSaudiSupabase(
+        {
+            "market_cache": [
+                {"cache_key": "market_status_Saudi Arabia", "country": "Saudi Arabia", "payload": {"regime": "bear", "reject_buys": True}},
+            ],
+            "stock_technical_indicators": [
+                {"symbol": "1120", "exchange": "TADAWUL", "date": "2026-11-18", "close": 92.5, "change_pct": 3.4},
+            ],
+            "scan_results": [
+                {"symbol": "8200", "status": "open"},
+            ],
+        }
+    )
+    monkeypatch.setattr("api.saudi_price_sync.sync_saudi_daily_prices", lambda **_kw: {"success": True, "synced": 264, "total": 264, "latest_date": "2026-11-18"})
+    monkeypatch.setattr("scripts.saudi_pipeline_bootstrap.main", lambda **_kw: 0)
+    monkeypatch.setattr(
+        "scripts.saudi_backtest_and_systems.main",
+        lambda *_a, **_kw: {"short_swings": {"as_of_date": "2026-11-18", "active_trades": [], "new_entries": [], "new_exits": []}},
+    )
+    monkeypatch.setattr("api.saudi_news_sync.run_saudi_news_sync", lambda **_kw: {"ok": True, "rows_saved": 5, "total_headlines": 10})
+    monkeypatch.setattr("api.saudi_disclosures_sync.run_saudi_disclosures_sync", lambda **_kw: {"ok": True, "saved": 1, "fetched": 2})
+    monkeypatch.setattr("api.cache_invalidation.invalidate_cache_tags", lambda tags: {"invalidated": list(tags), "skipped": False, "status": 200})
+
+    called_report = []
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_short_swings_vip", lambda *_a, **_kw: {"entries_sent": 0, "exits_sent": 0, "updates_sent": 0, "errors": []})
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_open_recommendations", lambda **_kw: {"ok": True, "skipped": True})
+    monkeypatch.setattr(saudi_telegram_dispatch, "dispatch_saudi_market_outlook_vip", lambda **_kw: {"ok": True, "message_id": 101})
+    monkeypatch.setattr(
+        saudi_telegram_dispatch,
+        "dispatch_saudi_daily_vip_report",
+        lambda **kw: (called_report.append(kw.get("market_date")) or {"ok": True, "message_id": 102}),
+    )
+
+    out = saudi_daily_runner.run_saudi_daily_job(phase="close", trigger="manual", dry_run=True, main_sb=fake_sb, saudi_sb=fake_sb)
+    step_by_name = {s["step"]: s for s in out["steps"]}
+    assert called_report == ["2026-11-18"]
+    assert "report_vip(ok=True, skipped=False)" in step_by_name["saudi_telegram_vip"]["details"]
+
+
+def test_saudi_short_swings_rs_leader_fires_between_022_and_045_breadth(monkeypatch, tmp_path):
+    import pandas as pd
+    from api import short_swings_engine as ss_engine
+
+    dates = pd.bdate_range(end="2026-11-18", periods=90)
+    rows = []
+    for sym in ["1120", "2010", "4001"]:
+        for i, d in enumerate(dates):
+            if sym == "1120":
+                c = 80.0 + i * 0.6
+                rows.append({
+                    "symbol": sym, "exchange": "TADAWUL", "date": d,
+                    "open": c - 0.5, "high": c + 0.1, "low": c - 0.7, "close": c,
+                    "volume": 900_000 if i == len(dates) - 2 else 400_000,
+                })
+            else:
+                c = 150.0 - i * 0.5
+                rows.append({
+                    "symbol": sym, "exchange": "TADAWUL", "date": d,
+                    "open": c + 0.2, "high": c + 0.5, "low": c - 0.5, "close": c,
+                    "volume": 100_000,
+                })
+
+    monkeypatch.setattr(ss_engine, "SAUDI_CACHE_PATHS", [tmp_path / "saudi_swings.json"])
+    monkeypatch.setattr(ss_engine, "_persist_saudi_snapshot", lambda *_: True)
+    monkeypatch.setattr(ss_engine, "_restore_saudi_snapshot", lambda *_: None)
+    monkeypatch.setattr(ss_engine, "_get_saudi_supabase_client", lambda: None)
+
+    res = ss_engine.compute_short_swings(
+        phase="close",
+        exchange="TADAWUL",
+        preloaded_df=pd.DataFrame(rows),
+        preloaded_meta={"1120": {"name_ar": "الراجحي", "name_en": "Al Rajhi", "sector": "البنوك"}},
+    )
+    active = next((t for t in res["active_trades"] if t["symbol"] == "1120"), None)
+    assert active is not None
+    assert "RS Leader" in str(active.get("trigger_type") or "")
+    audit_sig = next((a for a in res["signal_audit"] if a["symbol"] == "1120" and a["date"] == dates[-2].date().isoformat()), None)
+    assert audit_sig is not None
+    assert 0.22 <= audit_sig["breadth"] < 0.45

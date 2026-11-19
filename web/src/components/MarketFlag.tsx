@@ -62,3 +62,40 @@ export function SaudiFlag({ className = "w-5 h-3.5" }: FlagProps) {
     </svg>
   );
 }
+
+/** Crisp inline SVG flag of United Arab Emirates (DFM & ADX). */
+export function UaeFlag({ className = "w-5 h-3.5" }: FlagProps) {
+  return (
+    <svg
+      viewBox="0 0 36 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      className={`inline-block shrink-0 rounded-[3px] border border-black/20 dark:border-white/25 shadow-xs ${className}`}
+    >
+      <rect width="27" height="8" x="9" y="0" fill="#00732F" />
+      <rect width="27" height="8" x="9" y="8" fill="#FFFFFF" />
+      <rect width="27" height="8" x="9" y="16" fill="#000000" />
+      <rect width="9" height="24" x="0" y="0" fill="#FF0000" />
+    </svg>
+  );
+}
+
+/** Crisp inline SVG flag of Qatar (QSE). */
+export function QatarFlag({ className = "w-5 h-3.5" }: FlagProps) {
+  return (
+    <svg
+      viewBox="0 0 36 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      className={`inline-block shrink-0 rounded-[3px] border border-black/20 dark:border-white/25 shadow-xs ${className}`}
+    >
+      <rect width="36" height="24" fill="#8D1B3D" />
+      <path
+        d="M0 0 H10.5 L13 1.33 L10.5 2.67 L13 4 L10.5 5.33 L13 6.67 L10.5 8 L13 9.33 L10.5 10.67 L13 12 L10.5 13.33 L13 14.67 L10.5 16 L13 17.33 L10.5 18.67 L13 20 L10.5 21.33 L13 22.67 L10.5 24 H0 Z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}

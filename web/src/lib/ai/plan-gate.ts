@@ -40,8 +40,21 @@ const PRO: PlanLimits = {
   chat_messages_daily: Number(process.env.PRO_CHAT_DAILY_MESSAGES || "350"),
   chat_messages_per_month: Number(process.env.PRO_CHAT_MESSAGES || "350"),
   portfolio_stocks: Number(process.env.PRO_PORTFOLIO_STOCKS || "15"),
-  price_egp: Number(process.env.NEXT_PUBLIC_PRO_PRICE_EGP || process.env.PRO_PRICE_EGP || "200"),
+  price_egp: Number(process.env.NEXT_PUBLIC_PRO_PRICE_EGP || process.env.PRO_PRICE_EGP || "150"),
   billing: "enabled",
+};
+
+const CHAT_ONLY: PlanLimits = {
+  ...PRO,
+  name: "chat_only",
+  price_egp: 100,
+};
+
+const VIP_ONLY: PlanLimits = {
+  ...FREE,
+  name: "vip_only",
+  signal_delay_days: 0,
+  price_egp: 100,
 };
 
 const UNLIMITED: PlanLimits = {
@@ -53,14 +66,20 @@ const UNLIMITED: PlanLimits = {
   billing: "disabled",
 };
 
-export const PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"] as const;
+export const FULL_PRO_PLAN_IDS = ["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"] as const;
+export const CHAT_PRO_PLAN_IDS = [...FULL_PRO_PLAN_IDS, "chat_only"] as const;
+export const VIP_TELEGRAM_PLAN_IDS = [...FULL_PRO_PLAN_IDS, "vip_only"] as const;
+export const ALL_PAID_PLAN_IDS = [...FULL_PRO_PLAN_IDS, "chat_only", "vip_only"] as const;
+export const PRO_PLAN_IDS = ALL_PAID_PLAN_IDS;
 
 export function planLimits(planId?: string | null): PlanLimits {
   if (!paymentsEnabled()) {
     return { ...UNLIMITED };
   }
   const p = (planId || "").toLowerCase();
-  return (PRO_PLAN_IDS as readonly string[]).includes(p) ? { ...PRO, name: planId || "pro" } : { ...FREE };
+  if (p === "chat_only") return { ...CHAT_ONLY };
+  if (p === "vip_only") return { ...VIP_ONLY };
+  return (FULL_PRO_PLAN_IDS as readonly string[]).includes(p) ? { ...PRO, name: planId || "pro" } : { ...FREE };
 }
 
 export function isPro(rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>): boolean {
@@ -84,20 +103,44 @@ export function isPro(rows: Array<{ plan_id?: unknown; status?: unknown; current
   return false;
 }
 
-/** Strict entitlement check for paid-only features, regardless of billing mode. */
-export function hasActiveProSubscription(
+function hasActivePlanInSet(
   rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>,
+  allowedPlans: readonly string[],
   now: Date | number = Date.now()
 ): boolean {
   const nowMs = typeof now === "number" ? now : now.getTime();
   return (rows || []).some((row) => {
     const plan = String(row.plan_id || "").toLowerCase();
-    if (!(PRO_PLAN_IDS as readonly string[]).includes(plan)) return false;
+    if (!allowedPlans.includes(plan)) return false;
     if (!["active", "trialing"].includes(String(row.status || "").toLowerCase())) return false;
     if (!row.current_period_end) return true;
     const end = new Date(String(row.current_period_end)).getTime();
     return Number.isFinite(end) && end > nowMs;
   });
+}
+
+/** Strict entitlement check for any paid-only tier, regardless of billing mode. */
+export function hasActiveProSubscription(
+  rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>,
+  now: Date | number = Date.now()
+): boolean {
+  return hasActivePlanInSet(rows, ALL_PAID_PLAN_IDS, now);
+}
+
+/** True when user holds Full Pro or AI Chat Only subscription. */
+export function hasActiveChatPro(
+  rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>,
+  now: Date | number = Date.now()
+): boolean {
+  return hasActivePlanInSet(rows, CHAT_PRO_PLAN_IDS, now);
+}
+
+/** True when user holds Full Pro or VIP Telegram Only subscription. */
+export function hasActiveVipAccess(
+  rows: Array<{ plan_id?: unknown; status?: unknown; current_period_end?: unknown | null }>,
+  now: Date | number = Date.now()
+): boolean {
+  return hasActivePlanInSet(rows, VIP_TELEGRAM_PLAN_IDS, now);
 }
 
 /** Returns YYYY-MM-DD in Africa/Cairo timezone so Website and Telegram always share the exact same day/month boundary. */
@@ -121,6 +164,8 @@ export function getCairoDateString(now: Date = new Date()): string {
 
 export interface SubscriptionQuotaWindow {
   isPro: boolean;
+  hasChatPro: boolean;
+  hasVipAccess: boolean;
   activeSub: Record<string, any> | null;
   todayStr: string;
   calMonthStartStr: string;
@@ -138,12 +183,14 @@ export function resolveSubscriptionQuotaWindow(
 ): SubscriptionQuotaWindow {
   const list = Array.isArray(rows) ? rows : [];
   const pro = hasActiveProSubscription(list, now);
+  const hasChatPro = hasActiveChatPro(list, now);
+  const hasVipAccess = hasActiveVipAccess(list, now);
   const nowMs = now.getTime();
   const activeSub =
     list.find((row) => {
       const plan = String(row?.plan_id || "").toLowerCase();
       const status = String(row?.status || "").toLowerCase();
-      if (!(PRO_PLAN_IDS as readonly string[]).includes(plan)) return false;
+      if (!(ALL_PAID_PLAN_IDS as readonly string[]).includes(plan)) return false;
       if (!["active", "trialing"].includes(status)) return false;
       if (!row?.current_period_end) return true;
       const end = new Date(String(row.current_period_end)).getTime();
@@ -157,7 +204,7 @@ export function resolveSubscriptionQuotaWindow(
   let effectiveMonthStartStr = calMonthStartStr;
   let effectiveStartDate = new Date(`${calMonthStartStr}T00:00:00.000Z`);
 
-  if (pro && activeSub?.current_period_start) {
+  if (hasChatPro && activeSub?.current_period_start) {
     const parsed = new Date(String(activeSub.current_period_start));
     if (!Number.isNaN(parsed.getTime())) {
       const subStartStr = parsed.toISOString().split("T")[0];
@@ -175,6 +222,8 @@ export function resolveSubscriptionQuotaWindow(
 
   return {
     isPro: pro,
+    hasChatPro,
+    hasVipAccess,
     activeSub,
     todayStr,
     calMonthStartStr,

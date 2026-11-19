@@ -69,7 +69,8 @@ async function hasActiveProPlan(supabase: any, userId: string): Promise<boolean>
     if (!paymentsEnabled()) return true; // site free until PAYMENTS_ENABLED=true
     try {
         const { data } = await supabase.from("subscriptions").select("plan_id,status,current_period_end").eq("user_id", userId).limit(10);
-        return isPro(data || []);
+        const { hasActiveChatPro } = await import("./plan-gate");
+        return hasActiveChatPro(data || []);
     } catch {
         return false;
     }

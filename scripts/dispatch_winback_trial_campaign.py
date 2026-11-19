@@ -100,7 +100,7 @@ if not batch:
     sys.exit(0)
 
 # Email Template
-subject = "🎁 تم فتح رادار وتوصيات Pro لحسابك مجاناً لمدة 3 أيام (بدون بطاقة بنكية)"
+subject = "🎁 تم فتح أدوات التحليل وقنوات Pro VIP لحسابك مجاناً لمدة 3 أيام (بدون بطاقة بنكية)"
 
 html_template = """
 <!DOCTYPE html>
@@ -116,24 +116,31 @@ html_template = """
     <tr>
       <td style="padding: 28px 24px; text-align: center; background-color: #18181b; border-bottom: 2px solid #27272a;">
         <span style="display: inline-block; padding: 5px 14px; background-color: #10b981; color: #000000; font-weight: 900; font-size: 11px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em;">هدية ترحيبية خاصة 🎁</span>
-        <h1 style="color: #ffffff; font-size: 22px; font-weight: 900; margin: 14px 0 0 0; line-height: 1.4;">تم فتح رادار وتوصيات PRO لحسابك مجاناً 🚀</h1>
-        <p style="color: #a1a1aa; font-size: 13px; margin: 6px 0 0 0; font-weight: 600;">3 أيام كاملة بدون أي بطاقة بنكية أو شروط</p>
+        <h1 style="color: #ffffff; font-size: 22px; font-weight: 900; margin: 14px 0 0 0; line-height: 1.4;">تم فتح رادار التحليل الفني والـ VIP لحسابك مجاناً 🚀</h1>
+        <p style="color: #a1a1aa; font-size: 13px; margin: 6px 0 0 0; font-weight: 600;">3 أيام كاملة بدون أي بطاقة بنكية أو التزام</p>
       </td>
     </tr>
 
     <!-- Content -->
     <tr>
       <td style="padding: 26px 24px; line-height: 1.8; font-size: 14px; color: #d4d4d8;">
-        <p style="margin-top: 0; font-size: 15px;">أهلاً بك صديقنا المستثمر،</p>
-        <p>نود إبلاغك أن حسابك على منصة <strong>EGX BOTS</strong> أصبح مؤهلاً رسمياً لفتح <strong>باقة المحترفين (PRO) بالكامل لمدة 3 أيام مجاناً</strong> كهدية ترحيبية لتجربة القوة الحقيقية لتحليلات البورصة بالذكاء الاصطناعي.</p>
+        <p style="margin-top: 0; font-size: 15px;">أهلاً بك صديقنا،</p>
+        <p>نود إبلاغك أن حسابك على منصة <strong>EGX BOTS</strong> أصبح مؤهلاً رسمياً لفتح <strong>الباقة الشاملة (PRO) بالكامل لمدة 3 أيام مجاناً</strong> لتجربة أدوات التحليل الفني والإحصائي بالذكاء الاصطناعي في السوق المصري (EGX) والسعودي (TASI).</p>
         
         <div style="background-color: #18181b; border-right: 4px solid #10b981; padding: 16px 20px; border-radius: 10px; margin: 22px 0;">
           <h3 style="color: #ffffff; margin: 0 0 8px 0; font-size: 15px; font-weight: 900;">ماذا ستحصل عليه فور التفعيل؟</h3>
           <ul style="padding-right: 20px; margin: 0; color: #e4e4e7; font-size: 13px;">
-            <li style="margin-bottom: 8px;"><strong>⚡ صفقات وتوصيات فورية:</strong> دخول قناة VIP على تليجرام واستلام تنبيهات الشراء والأهداف والوقف لحظة بلحظة.</li>
-            <li style="margin-bottom: 8px;"><strong>🎯 رادار الأسهم والسيولة الذكية:</strong> رصد اختراقات الأسهم وتجميع وايكوف ومصائد صانع السوق فور حدوثها.</li>
-            <li style="margin-bottom: 8px;"><strong>🤖 شات بوت المستشار المالي ARTORO:</strong> 350 استشارة شهرياً لتحليل أي سهم، وقراءة محفظتك من صورة (Vision AI).</li>
+            <li style="margin-bottom: 8px;"><strong>📡 قنوات التنبيهات الفنية VIP على تليجرام (EGX + TASI):</strong> متابعة لحظية لإشارات السيولة ونماذج الانعكاس ومستويات المراقبة.</li>
+            <li style="margin-bottom: 8px;"><strong>🎯 رادار الأسهم وكاشف المصائد:</strong> رصد رقمي لاختراقات الأسهم وتجميع وايكوف ومصائد القمم فور تشكلها.</li>
+            <li style="margin-bottom: 8px;"><strong>🤖 مساعد التحليل الفني ARTORO:</strong> 350 رسالة تحليلية شهرياً لتحليل أي سهم، وقراءة محفظتك والشارت من صورة (Vision AI)، مع محفظة 15 سهماً و5 مهام مجدولة.</li>
           </ul>
+        </div>
+
+        <div style="background-color: #18181b; border: 1px solid #27272a; padding: 14px 18px; border-radius: 10px; margin: 18px 0; font-size: 13px; color: #d4d4d8;">
+          <strong style="color: #10b981;">💡 بعد انتهاء التجربة — باقات مرنة تناسب احتياجك:</strong><br/>
+          • <strong>باقة الشات الذكي فقط:</strong> 100 ج.م/شهر (10 ر.س)<br/>
+          • <strong>باقة تليجرام VIP فقط:</strong> 100 ج.م/شهر (10 ر.س)<br/>
+          • <strong>الباقة الشاملة Pro:</strong> 150 ج.م/شهر (15 ر.س) تجمع الاثنين معاً بتوفير 50 ج.م — عبر بوابة <strong>EasyKash</strong> المعتمدة لمصر والدول العربية (مع 3D Secure).
         </div>
 
         <!-- Primary CTA Button -->
@@ -144,9 +151,16 @@ html_template = """
 
         <!-- Telegram CTA Step -->
         <div style="background-color: #18181b; border: 1px solid #3f3f46; padding: 16px; border-radius: 10px; margin-top: 24px; text-align: center;">
-          <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: bold; color: #ffffff;">📲 الخطوة التالية: لتصلك إشارات جلسة اليوم على هاتفك</p>
+          <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: bold; color: #ffffff;">📲 الخطوة التالية: لتصلك تنبيهات الجلسة على هاتفك</p>
           <a href="https://t.me/egxbots_bot" style="display: inline-block; background-color: #22c55e; color: #000000; font-weight: 800; font-size: 13px; padding: 10px 22px; border-radius: 8px; text-decoration: none;">ربط التليجرام واستلام إشارات الجلسة 💬</a>
         </div>
+      </td>
+    </tr>
+
+    <!-- FRA Disclaimer -->
+    <tr>
+      <td style="padding: 12px 24px; background-color: #18181b; border-top: 1px solid #27272a; font-size: 11px; color: #a1a1aa; text-align: justify; line-height: 1.6;">
+        ⚠️ <strong>تنبيه قانوني وإخلاء مسؤولية (FRA):</strong> المنصة وأدواتها البرمجية (SaaS) توفر مؤشرات وقراءات فنية وإحصائية لأغراض البحث الشخصي والتعليم فقط، ولا تقدم توصية استثمارية أو استشارة مالية أو إدارة محافظ. قرار التداول مسؤوليتك الشخصية.
       </td>
     </tr>
 

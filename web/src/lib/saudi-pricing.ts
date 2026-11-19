@@ -9,15 +9,32 @@
  */
 
 export const EGP_PER_SAR = 12.75;
+export const EGP_PER_AED = 13.0;
+export const EGP_PER_QAR = 13.15;
+
+export type CheckoutMarket = "egx" | "tasi" | "uae" | "qatar";
+
+/** Return the EGP conversion multiplier for a Gulf market (or null for domestic EGX). */
+export function getGulfEgpRate(marketOrIsSaudi: boolean | CheckoutMarket): number | null {
+  if (marketOrIsSaudi === false || marketOrIsSaudi === "egx") return null;
+  if (marketOrIsSaudi === "uae") return EGP_PER_AED;
+  if (marketOrIsSaudi === "qatar") return EGP_PER_QAR;
+  return EGP_PER_SAR;
+}
 
 /** Canonical EGP tier prices -> Saudi SAR display prices (20 SAR base = EGP / 10). */
 export const SAUDI_SAR_EXCHANGE_MAP: Record<number, number> = {
   50: 5,
   83: 8,
   100: 10,
+  113: 11,
+  125: 13,
+  150: 15,
   200: 20,
   500: 50,
+  750: 75,
   1000: 100,
+  1350: 135,
   1500: 150,
   1800: 180,
   1850: 185,
@@ -27,9 +44,12 @@ export const SAUDI_SAR_EXCHANGE_MAP: Record<number, number> = {
   40000: 4000,
 };
 
-/** Convert an internal EGP price to the active market's display currency (SAR for TASI, EGP for EGX). */
-export function toDisplayAmount(amountEgp: number, isSaudi: boolean): number {
-  if (!isSaudi) return amountEgp;
+/** Convert an internal EGP price to the active market's display currency (SAR/AED/QAR for Gulf, EGP for EGX). */
+export function toDisplayAmount(
+  amountEgp: number,
+  marketOrIsSaudi: boolean | CheckoutMarket,
+): number {
+  if (getGulfEgpRate(marketOrIsSaudi) === null) return amountEgp;
   if (!Number.isFinite(amountEgp) || amountEgp <= 0) return 0;
   const rounded = Math.round(amountEgp);
   if (SAUDI_SAR_EXCHANGE_MAP[rounded] !== undefined) {
@@ -39,11 +59,15 @@ export function toDisplayAmount(amountEgp: number, isSaudi: boolean): number {
 }
 
 /** Compute the base EasyKash EGP invoice amount corresponding to the displayed price. */
-export function toCheckoutChargeEgp(baseEgp: number, isSaudi: boolean): number {
+export function toCheckoutChargeEgp(
+  baseEgp: number,
+  marketOrIsSaudi: boolean | CheckoutMarket,
+): number {
   if (!Number.isFinite(baseEgp) || baseEgp <= 0) return 0;
-  if (!isSaudi) return Math.round(baseEgp);
-  const sarAmount = toDisplayAmount(baseEgp, true);
-  return Math.round(sarAmount * EGP_PER_SAR);
+  const rate = getGulfEgpRate(marketOrIsSaudi);
+  if (rate === null) return Math.round(baseEgp);
+  const gulfAmount = toDisplayAmount(baseEgp, marketOrIsSaudi);
+  return Math.round(gulfAmount * rate);
 }
 
 /**
@@ -53,15 +77,16 @@ export function toCheckoutChargeEgp(baseEgp: number, isSaudi: boolean): number {
 export function computeCheckoutPricing(
   baseEgp: number,
   discountPercent: number,
-  isSaudi: boolean,
+  marketOrIsSaudi: boolean | CheckoutMarket,
 ): {
   baseDisplay: number;
   finalDisplay: number;
   discountDisplay: number;
   chargeEgp: number;
 } {
-  const baseDisplay = toDisplayAmount(baseEgp, isSaudi);
-  const chargeBaseEgp = toCheckoutChargeEgp(baseEgp, isSaudi);
+  const rate = getGulfEgpRate(marketOrIsSaudi);
+  const baseDisplay = toDisplayAmount(baseEgp, marketOrIsSaudi);
+  const chargeBaseEgp = toCheckoutChargeEgp(baseEgp, marketOrIsSaudi);
   if (!Number.isFinite(discountPercent) || discountPercent <= 0) {
     return {
       baseDisplay,
@@ -75,9 +100,10 @@ export function computeCheckoutPricing(
     Math.round((chargeBaseEgp * discountPercent) / 100),
   );
   const chargeEgp = Math.max(20, chargeBaseEgp - discountChargeEgp);
-  const finalDisplay = isSaudi
-    ? Math.max(2, Math.round(chargeEgp / EGP_PER_SAR))
-    : chargeEgp;
+  const finalDisplay =
+    rate !== null
+      ? Math.max(2, Math.round(chargeEgp / rate))
+      : chargeEgp;
   return {
     baseDisplay,
     finalDisplay,

@@ -6,6 +6,7 @@ import {
   getPublicStockDirectory,
   getPublicStockDirectoryWeekly,
   getPublicTasiStockDirectoryWeekly,
+  getPublicGccMetalsDirectoryWeekly,
 } from "@/lib/seo/stock-directory";
 import { selectStockLinks } from "@/lib/seo/sitemap-entries";
 import { getCanonicalStockName } from "@/lib/ai/stock-names";
@@ -31,9 +32,10 @@ const ALL_FALLBACK_EGX_SYMBOLS = [
 
 export async function generateStaticParams() {
   const symbolSet = new Set<string>();
-  const [egxResult, tasiResult] = await Promise.allSettled([
+  const [egxResult, tasiResult, gccResult] = await Promise.allSettled([
     getPublicStockDirectoryWeekly(),
     getPublicTasiStockDirectoryWeekly(),
+    getPublicGccMetalsDirectoryWeekly(),
   ]);
 
   if (egxResult.status === "fulfilled" && Array.isArray(egxResult.value)) {
@@ -54,6 +56,14 @@ export async function generateStaticParams() {
     }
   } else if (tasiResult.status === "rejected") {
     console.warn("[stocks] Failed to load TASI directory for static params:", tasiResult.reason);
+  }
+
+  if (gccResult.status === "fulfilled" && Array.isArray(gccResult.value)) {
+    for (const stock of gccResult.value) {
+      if (stock.symbol) {
+        symbolSet.add(stock.symbol.toLowerCase());
+      }
+    }
   }
 
   // Ensure 100% catalog coverage even if live directory query failed or was incomplete
@@ -109,12 +119,21 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const fundRow = snapshot.fundamentals;
   const fund = fundRow?.data || {};
 
+  const actualExchange = String(
+    fund.exchange || fundRow?.exchange || (snapshot.latestPrice as any)?.exchange || (isSaudi ? "TADAWUL" : "EGX")
+  ).toUpperCase();
+  const isCommodities = actualExchange === "COMMODITIES";
+  const isUae = actualExchange === "DFM" || actualExchange === "ADX";
+  const isQatar = actualExchange === "QSE";
+
   // Resolve official Arabic and English company names for high-CTR searches
-  const canonical = isSaudi ? { name_ar: symbol, name_en: symbol, sector: "" } : getCanonicalStockName(symbol);
-  const nameAr = isSaudi
+  const canonical = isSaudi || isUae || isQatar || isCommodities
+    ? { name_ar: symbol, name_en: symbol, sector: "" }
+    : getCanonicalStockName(symbol);
+  const nameAr = isSaudi || isUae || isQatar || isCommodities
     ? (fund.name_ar || SAUDI_STOCK_NAMES_AR[symbol] || fund.name || fund.Name || symbol)
     : (canonical.name_ar || fund.name || fund.Name || symbol);
-  const nameEn = isSaudi
+  const nameEn = isSaudi || isUae || isQatar || isCommodities
     ? String(fund.name || fund.Name || SAUDI_STOCK_NAMES_AR[symbol] || symbol)
     : (canonical.name_en && canonical.name_en !== symbol
       ? canonical.name_en
@@ -126,21 +145,47 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     .trim();
 
   const title = shortAr && shortAr !== symbol
-    ? (isSaudi
-      ? `سعر سهم ${shortAr} (${symbol}) اليوم في تاسي | تحليل فني ودعم ومقاومة`
-      : `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`)
-    : `سعر وتحليل سهم ${symbol} اليوم | نقاط الدعم والمقاومة`;
+    ? (isCommodities
+      ? `سعر ${shortAr} (${symbol}) اليوم | التحليل الفني ومستويات الدعم والمقاومة`
+      : isSaudi
+        ? `سعر سهم ${shortAr} (${symbol}) اليوم في تاسي | تحليل فني ودعم ومقاومة`
+        : isUae
+          ? `سعر سهم ${shortAr} (${symbol}) اليوم في سوق ${actualExchange === "DFM" ? "دبي" : "أبوظبي"} | تحليل فني`
+          : isQatar
+            ? `سعر سهم ${shortAr} (${symbol}) اليوم في بورصة قطر | تحليل فني ودعم ومقاومة`
+            : `سعر سهم ${shortAr} (${symbol}) اليوم | تحليل فني ودعم ومقاومة`)
+    : `سعر وتحليل ${symbol} اليوم | نقاط الدعم والمقاومة`;
 
   const latest = (snapshot.latestPrice || null) as { close?: number | string; date?: string } | null;
   const lastClose = Number(latest?.close ?? 0);
   const lastDate = String(latest?.date ?? "").slice(0, 10);
-  const currencyAr = isSaudi ? "ر.س" : "ج.م";
-  const marketAr = isSaudi ? "السوق السعودي (تداول / تاسي)" : "البورصة المصرية";
+  const currencyAr = isCommodities
+    ? "دولار"
+    : isUae
+      ? "د.إ"
+      : isQatar
+        ? "ر.ق"
+        : isSaudi
+          ? "ر.س"
+          : "ج.م";
+  const marketAr = isCommodities
+    ? "الأسواق العالمية (الذهب والفضة)"
+    : actualExchange === "DFM"
+      ? "سوق دبي المالي (DFM)"
+      : actualExchange === "ADX"
+        ? "سوق أبوظبي للأوراق المالية (ADX)"
+        : isQatar
+          ? "بورصة قطر (QSE)"
+          : isSaudi
+            ? "السوق السعودي (تداول / تاسي)"
+            : "البورصة المصرية";
   const pricePart =
     Number.isFinite(lastClose) && lastClose > 0
       ? `آخر سعر إغلاق ${lastClose.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currencyAr}${lastDate ? ` (${lastDate})` : ""}. `
       : "";
-  const description = `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في ${marketAr}: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
+  const description = isCommodities
+    ? `${pricePart}تابع سعر ${nameAr} (${symbol}) اليوم: التحليل الفني اللحظي، مؤشر القوة النسبية RSI، ومستويات الدعم والمقاومة بالذكاء الاصطناعي.`
+    : `${pricePart}تعرف على سعر سهم ${nameAr} (${symbol}${nameEn !== symbol ? ` - ${nameEn}` : ""}) اليوم في ${marketAr}: مستويات الدعم والمقاومة، السعر العادل، ومؤشر الذكاء الاصطناعي AI Score.`;
 
   return {
     title,
@@ -149,18 +194,16 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       symbol,
       nameAr,
       nameEn,
-      `سعر سهم ${nameAr}`,
-      `سهم ${nameAr}`,
-      `تحليل سهم ${nameAr}`,
-      `توقعات سهم ${nameAr}`,
-      `سعر سهم ${symbol}`,
-      `تحليل سهم ${symbol}`,
-      `${symbol} stock price`,
-      isSaudi ? "تحليل الأسهم السعودية بالذكاء الاصطناعي" : "تحليل الأسهم المصرية بالذكاء الاصطناعي",
+      isCommodities ? `سعر ${nameAr} اليوم` : `سعر سهم ${nameAr}`,
+      isCommodities ? `تحليل ${nameAr}` : `سهم ${nameAr}`,
+      `تحليل ${isCommodities ? nameAr : `سهم ${nameAr}`}`,
+      `توقعات ${isCommodities ? nameAr : `سهم ${nameAr}`}`,
+      `سعر ${symbol}`,
+      `${symbol} price`,
+      marketAr,
       "EGX BOTS",
       "egxbots",
-      isSaudi ? "السوق السعودي تاسي" : "البورصة المصرية",
-      isSaudi ? "TASI" : "EGX"
+      actualExchange,
     ],
     alternates: {
       canonical: `https://egxbots.com/stocks/${symbol.toLowerCase()}`,
@@ -204,24 +247,45 @@ export default async function StockDetailPage({ params }: PageProps) {
   const snapshot = bundle.snapshot;
   const { fundamentals: fundRow, latestPrice, latestTech, historicalPrices, latestScan } = snapshot;
   if (!fundRow && !latestPrice) notFound();
-  const exchange = isSaudi ? "TADAWUL" : "EGX";
-  const currencyCode = isSaudi ? "SAR" : "EGP";
-  const currencyNameAr = isSaudi ? "ريال سعودي" : "جنيه مصري";
-  const marketLabelAr = isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية";
+  const snapshotExchange = String(
+    (fundRow as any)?.data?.exchange || (fundRow as any)?.exchange || (latestPrice as any)?.exchange || ""
+  ).toUpperCase();
+  const isGccPage = !isSaudi && ["DFM", "ADX", "QSE", "COMMODITIES"].includes(snapshotExchange);
+  const gccCurrencyNameAr = snapshotExchange === "QSE" ? "ريال قطري" : snapshotExchange === "COMMODITIES" ? "دولار" : "درهم إماراتي";
+  const gccMarketLabelAr =
+    snapshotExchange === "DFM"
+      ? "سوق دبي المالي (DFM)"
+      : snapshotExchange === "ADX"
+        ? "سوق أبوظبي للأوراق المالية (ADX)"
+        : snapshotExchange === "QSE"
+          ? "بورصة قطر (QSE)"
+          : "الأسواق العالمية (الذهب والفضة)";
+  const gccDirectoryHref =
+    snapshotExchange === "QSE" ? "/markets/qatar" : snapshotExchange === "COMMODITIES" ? "/markets/gold-silver" : "/markets/uae";
+  const gccDirectoryNameAr =
+    snapshotExchange === "QSE" ? "دليل أسهم بورصة قطر" : snapshotExchange === "COMMODITIES" ? "الذهب والفضة" : "دليل أسهم الإمارات";
+  const exchange = isGccPage ? snapshotExchange : isSaudi ? "TADAWUL" : "EGX";
+  const currencyCode = isGccPage
+    ? String((fundRow as any)?.data?.currency || (snapshotExchange === "QSE" ? "QAR" : snapshotExchange === "COMMODITIES" ? "USD" : "AED"))
+    : isSaudi ? "SAR" : "EGP";
+  const currencyNameAr = isGccPage ? gccCurrencyNameAr : isSaudi ? "ريال سعودي" : "جنيه مصري";
+  const marketLabelAr = isGccPage ? gccMarketLabelAr : isSaudi ? "السوق السعودي (تاسي)" : "البورصة المصرية";
 
   const fund = fundRow?.data || {};
-  const canonical = isSaudi ? { name_ar: symbol, name_en: symbol, sector: "" } : getCanonicalStockName(symbol);
-  const nameAr = isSaudi
+  const canonical = isSaudi || isGccPage ? { name_ar: symbol, name_en: symbol, sector: "" } : getCanonicalStockName(symbol);
+  const nameAr = isSaudi || isGccPage
     ? (fund.name_ar || SAUDI_STOCK_NAMES_AR[symbol] || fund.name || fund.Name || symbol)
     : (canonical.name_ar || fund.name || fund.Name || symbol);
-  const nameEn = isSaudi
+  const nameEn = isSaudi || isGccPage
     ? String(fund.name || fund.Name || SAUDI_STOCK_NAMES_AR[symbol] || symbol)
     : (canonical.name_en && canonical.name_en !== symbol
       ? canonical.name_en
       : String(fund.name || fund.Name || symbol));
 
   const related = bundle.related ?? selectStockLinks(
-    isSaudi && typeof getPublicTasiStockDirectoryWeekly === "function"
+    isGccPage
+      ? await getPublicGccMetalsDirectoryWeekly().catch(() => [])
+      : isSaudi && typeof getPublicTasiStockDirectoryWeekly === "function"
       ? await getPublicTasiStockDirectoryWeekly().catch(() => [])
       : typeof getPublicStockDirectoryWeekly === "function"
       ? await getPublicStockDirectoryWeekly()
@@ -244,8 +308,8 @@ export default async function StockDetailPage({ params }: PageProps) {
           {
             "@type": "ListItem",
             "position": 2,
-            "name": isSaudi ? "دليل الأسهم السعودية" : "دليل الأسهم المصرية",
-            "item": isSaudi ? "https://egxbots.com/stocks?market=tasi" : "https://egxbots.com/stocks"
+            "name": isGccPage ? gccDirectoryNameAr : isSaudi ? "دليل الأسهم السعودية" : "دليل الأسهم المصرية",
+            "item": isGccPage ? `https://egxbots.com${gccDirectoryHref}` : isSaudi ? "https://egxbots.com/stocks?market=tasi" : "https://egxbots.com/stocks"
           },
           { "@type": "ListItem", "position": 3, "name": `سهم ${nameAr} (${symbol})`, "item": `https://egxbots.com/stocks/${symbol.toLowerCase()}` }
         ]

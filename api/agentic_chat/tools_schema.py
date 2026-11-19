@@ -7,8 +7,10 @@ from typing import List, Dict, Any
 
 _MARKET_PARAM_SCHEMA: Dict[str, Any] = {
     "type": "string",
-    "enum": ["EGX", "TASI"],
-    "description": "السوق المطلوب: 'EGX' للبورصة المصرية أو 'TASI' للسوق السعودي (تداول). اتركه فارغاً لاستخدام السوق النشط أو التوجيه التلقائي حسب الرموز.",
+    "description": (
+        "كود البورصة/السوق المطلوب: مثل 'EGX' (مصر)، 'TASI' (السعودية)، 'QSE' (قطر)، 'DFM' (دبي)، 'ADX' (أبوظبي)، 'KSE' (الكويت) "
+        "أو أي بورصة مضافة في قاعدة البيانات. اتركه فارغاً لاستخدام السوق النشط أو التوجيه التلقائي حسب الرموز."
+    ),
 }
 
 _FOLLOWUP_PARAM_SCHEMA: Dict[str, Any] = {
@@ -38,6 +40,7 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "items": {"type": "string"},
                         "description": "قائمة بأكواد أو أسماء الأسهم مثل ['FWRY', 'COMI', '2222', '1120'] أو ['أرامكو', 'الراجحي', 'فوري']",
                     },
+                    "market": dict(_MARKET_PARAM_SCHEMA),
                     "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
                 "required": ["symbols", "is_contextual_followup"],
@@ -61,6 +64,7 @@ AGENTIC_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                         "items": {"type": "string"},
                         "description": "قائمة بأكواد الأسهم مثل ['FWRY', 'COMI', '2222', '1120']",
                     },
+                    "market": dict(_MARKET_PARAM_SCHEMA),
                     "is_contextual_followup": dict(_FOLLOWUP_PARAM_SCHEMA),
                 },
                 "required": ["symbols", "is_contextual_followup"],

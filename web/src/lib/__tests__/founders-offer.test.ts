@@ -112,3 +112,26 @@ it("refuses to invent pricing on a failed authoritative read", async () => {
   (getSupabaseServiceClient as jest.Mock).mockReturnValue({ rpc: jest.fn().mockResolvedValue({ error: { message: "offline" } }) });
   await expect(withFoundersOffer(config)).rejects.toThrow("Founders pricing unavailable");
 });
+
+it("keeps chat_only and vip_only at 100 EGP untouched when founders offer is open or closed", () => {
+  const splitConfig = {
+    enabled: true,
+    plans: [
+      { id: "pro", amount_egp: 150 },
+      { id: "pro_6m", amount_egp: 750 },
+      { id: "pro_1y", amount_egp: 1350 },
+      { id: "chat_only", amount_egp: 100 },
+      { id: "vip_only", amount_egp: 100 },
+      { id: "lifetime", amount_egp: 2250 },
+    ],
+    founders: { count: 0 },
+  };
+  const closedRes = applyFoundersOffer(splitConfig, { ...offer, is_open: false, price_egp: 150, regular_price_egp: 150 });
+  expect(closedRes.plans.find((p: any) => p.id === "chat_only")).toEqual({ id: "chat_only", amount_egp: 100 });
+  expect(closedRes.plans.find((p: any) => p.id === "vip_only")).toEqual({ id: "vip_only", amount_egp: 100 });
+  expect(closedRes.plans.find((p: any) => p.id === "pro")).toMatchObject({ amount_egp: 150 });
+
+  const openRes = applyFoundersOffer(splitConfig, { ...offer, is_open: true, price_egp: 100, regular_price_egp: 150 });
+  expect(openRes.plans.find((p: any) => p.id === "chat_only")).toEqual({ id: "chat_only", amount_egp: 100 });
+  expect(openRes.plans.find((p: any) => p.id === "vip_only")).toEqual({ id: "vip_only", amount_egp: 100 });
+});

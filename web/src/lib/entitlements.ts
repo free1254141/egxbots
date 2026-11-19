@@ -3,11 +3,13 @@
  * Ensures all open tabs, modals, profile, and scanner cards react
  * instantly when a user activates a Pro trial or completes payment.
  */
-export function broadcastEntitlements(isPro: boolean) {
+export function broadcastEntitlements(isPro: boolean, hasChatPro?: boolean) {
   if (typeof window === "undefined") return;
+  const chatPro = hasChatPro ?? isPro;
   try {
     localStorage.removeItem("egx_scanner_alerts_cache_v2");
     localStorage.setItem("egx_pro_active", isPro ? "true" : "false");
+    localStorage.setItem("egx_chat_pro_active", chatPro ? "true" : "false");
     localStorage.setItem("egx_entitlements_timestamp", String(Date.now()));
     const clearStorage = (storage: Storage) => {
       for (let i = storage.length - 1; i >= 0; i--) {
@@ -30,6 +32,6 @@ export function broadcastEntitlements(isPro: boolean) {
     };
     clearStorage(sessionStorage);
     clearStorage(localStorage);
-    window.dispatchEvent(new CustomEvent("egx:entitlements-updated", { detail: { is_pro: isPro } }));
+    window.dispatchEvent(new CustomEvent("egx:entitlements-updated", { detail: { is_pro: isPro, has_chat_pro: chatPro } }));
   } catch {}
 }

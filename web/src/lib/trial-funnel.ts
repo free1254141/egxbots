@@ -33,7 +33,7 @@ export type TrialEventRow = {
   metadata?: Record<string, unknown> | null;
 };
 
-const PAID_PLANS = new Set(["pro", "lifetime", "pro_lifetime"]);
+const PAID_PLANS = new Set(["pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"]);
 
 function time(value?: string | null): number {
   if (!value) return NaN;

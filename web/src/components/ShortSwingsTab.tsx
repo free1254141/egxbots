@@ -248,7 +248,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
 
-      const response = await requestShortSwings(viewerKey, isRefresh, market);
+      const response = await requestShortSwings(viewerKey, isRefresh, isSaudi ? "tasi" : "egx");
       if (version !== requestVersion.current) return;
       const json = { ...response, active_trades: (response.active_trades || []).map((trade: ShortSwingTrade) => {
         if (trade.is_pending_entry) return trade;
@@ -278,7 +278,7 @@ export default function ShortSwingsTab({ isPro = false, viewerKey = "anonymous",
       if (entitlementRefresh.current) return;
       entitlementRefresh.current = true;
       setData(null);
-      invalidateShortSwingsRequest(viewerKey, market);
+      invalidateShortSwingsRequest(viewerKey, isSaudi ? "tasi" : "egx");
       void loadData().finally(() => { entitlementRefresh.current = false; });
     };
     const handleStorage = (event: StorageEvent) => {

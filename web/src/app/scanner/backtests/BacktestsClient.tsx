@@ -22,6 +22,7 @@ import { useNotification } from "@/contexts/NotificationContext";
 import { useMarket, EgxOnlyGuard } from "@/contexts/MarketContext";
 import { useTelegramPro } from "@/contexts/TelegramProContext";
 import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
+import { hasActiveProSubscription } from "@/lib/ai/plan-gate";
 import { 
     ResponsiveContainer, 
     LineChart as RechartsLineChart, 
@@ -412,7 +413,7 @@ export default function AIScannerPage() {
     // Start the selected short-trades request alongside page initialization.
     useEffect(() => {
         if (tabParam === "short_swings" && !authLoading) {
-            void requestShortSwings(user?.id || "anonymous", false, market).catch(() => {});
+            void requestShortSwings(user?.id || "anonymous", false, isSaudi ? "tasi" : "egx").catch(() => {});
         }
     }, [tabParam, authLoading, user?.id, market]);
 
@@ -430,14 +431,12 @@ export default function AIScannerPage() {
             try {
                 const { data: sub } = await supabase
                     .from("subscriptions")
-                    .select("plan_id, status")
+                    .select("plan_id, status, current_period_end")
                     .eq("user_id", user.id)
                     .maybeSingle();
                 
                 if (active && sub) {
-                    const planId = (sub.plan_id || "").toLowerCase();
-                    const status = (sub.status || "").toLowerCase();
-                    if (planId === "pro" && (status === "active" || status === "trialing")) {
+                    if (hasActiveProSubscription([sub])) {
                         setIsPro(true);
                         return;
                     }

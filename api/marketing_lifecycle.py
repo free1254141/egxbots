@@ -28,6 +28,11 @@ from typing import Dict, Any, List, Optional
 
 from api.stock_ai import supabase
 
+try:
+    from api.perf_utils import ALL_PAID_PLAN_IDS
+except Exception:  # pragma: no cover - standalone fallback
+    ALL_PAID_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"})
+
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 MARKETING_EMAIL_FROM = (
     os.getenv("MARKETING_EMAIL_FROM")
@@ -257,7 +262,7 @@ def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str
           <tr>
             <td style="padding: 24px; background-color: #000000; color: #FFE600; text-align: center; border-bottom: 3px solid #000000;">
               <h1 style="margin: 0; font-size: 24px; font-weight: 900; letter-spacing: 1px;">EGX BOTS ⚡</h1>
-              <span style="font-size: 11px; font-weight: bold; color: #ffffff; display: block; margin-top: 4px;">الذكاء الاصطناعي الأقوى للبورصة المصرية</span>
+              <span style="font-size: 11px; font-weight: bold; color: #ffffff; display: block; margin-top: 4px;">أدوات التحليل الفني بالذكاء الاصطناعي للبورصة المصرية والسعودية</span>
             </td>
           </tr>
 
@@ -306,10 +311,67 @@ def _build_email_html(headline: str, greeting: str, content_paragraphs: List[str
 </html>"""
 
 
+def _resolve_user_pro_offer(user_id: Optional[str] = None) -> tuple[int, Optional[int]]:
+    """Return ``(effective_pro_price_egp, founder_tier)`` respecting 50/100 EGP Founders lock."""
+    if user_id:
+        try:
+            from api.payment_common import (
+                is_user_eligible_for_50_egp_renewal,
+                is_user_eligible_for_100_egp_renewal,
+            )
+
+            if is_user_eligible_for_50_egp_renewal(user_id):
+                return 50, 50
+            if is_user_eligible_for_100_egp_renewal(user_id):
+                return 100, 100
+        except Exception:
+            pass
+
+    try:
+        from api.payment_common import current_pro_offer_copy
+
+        pro_price, _ = current_pro_offer_copy()
+        return int(round(float(pro_price))), None
+    except Exception:
+        return 150, None
+
+
+def _build_tiers_summary_html(pro_price: int, founder_tier: Optional[int] = None) -> str:
+    """Build FRA-compliant HTML block summarizing the 3-tier split or Founder Full Bundle lock."""
+    duration_line = (
+        "⏱️ <strong>خصم المدة التصاعدي:</strong> اختر أي مدة من شهر حتى 12 شهراً لأي باقة "
+        "(فردية أو شاملة) بخصم تصاعدي يصل إلى <strong>25%</strong>.<br>"
+    )
+    payment_line = (
+        "💳 <em>الدفع فوري وآمن عبر بوابة EasyKash المعتمدة "
+        "(بطاقات بنكية محلية ودولية مع 3D Secure، محافظ إلكترونية، أو فوري).</em>"
+    )
+    if founder_tier in (50, 100):
+        six_m = 250 if founder_tier == 50 else 500
+        one_y = 450 if founder_tier == 50 else 900
+        return (
+            f"<strong>🔒 سعرك محفوظ كمؤسس في الباقة الشاملة ({founder_tier} ج.م/شهر بدلاً من 150 ج.م):</strong><br>"
+            f"• <strong>الباقة الشاملة Pro:</strong> {founder_tier} ج.م/شهر — أو باقة 6 شهور بـ <strong>{six_m:,} ج.م</strong> / السنوية بـ <strong>{one_y:,} ج.م</strong>.<br>"
+            "• <strong>تشمل كل شيء معاً:</strong> 350 رسالة تحليلية شهرياً مع ARTORO + تحليل صور الشارت والمحفظة (Vision AI) + محفظة 15 سهماً + 5 مهام مجدولة يومياً + قنوات تليجرام VIP (EGX + TASI).<br>"
+            "• كما يمكنك اختيار <strong>باقة الشات الذكي فقط (100 ج.م/شهر)</strong> أو <strong>باقة تليجرام VIP فقط (100 ج.م/شهر)</strong>.<br>"
+            f"{duration_line}"
+            f"{payment_line}"
+        )
+
+    return (
+        "<strong>اختر الباقة المناسبة لاستخدامك الآن:</strong><br>"
+        "• 🤖 <strong>باقة الشات الذكي فقط: 100 ج.م/شهر</strong> — 350 رسالة تحليلية شهرياً مع ARTORO + تحليل صور الشارت والمحفظة (Vision AI) + محفظة 15 سهماً + 5 مهام مجدولة يومياً.<br>"
+        "• 📡 <strong>باقة تليجرام VIP فقط: 100 ج.م/شهر</strong> — قنوات التنبيهات الفنية الفورية للبورصة المصرية (EGX) والسوق السعودي (TASI) + بيانات الموقع بدون تأخير.<br>"
+        f"• 👑 <strong>الباقة الشاملة Pro (الأفضل قيمة): {pro_price} ج.م/شهر</strong> — تجمع الشات الذكي + قنوات تليجرام VIP معاً بتوفير 50 ج.م (ومتاح أيضاً باقة 6 شهور بـ <strong>750 ج.م</strong> والسنوية بـ <strong>1,350 ج.م</strong>).<br>"
+        f"{duration_line}"
+        f"{payment_line}"
+    )
+
+
 def process_abandoned_checkouts() -> int:
     """
     Finds users with pending/submitted orders between 2h and 72h old who haven't completed payment.
-    Sends them an urgent Founders scarcity recovery email.
+    Sends a plan-aware recovery email aligned with EasyKash-only & FRA compliance.
     """
     if not supabase:
         return 0
@@ -338,13 +400,13 @@ def process_abandoned_checkouts() -> int:
                 if not uid:
                     continue
 
-                # Check if user already has an active Pro subscription
+                # Check if user already has an active paid subscription across any paid tier
                 sub_res = (
                     supabase.table("subscriptions")
                     .select("id")
                     .eq("user_id", uid)
                     .eq("status", "active")
-                    .in_("plan_id", ["pro", "lifetime", "pro_lifetime"])
+                    .in_("plan_id", list(ALL_PAID_PLAN_IDS))
                     .limit(1)
                     .execute()
                 )
@@ -374,31 +436,48 @@ def process_abandoned_checkouts() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                try:
-                    from api.payment_common import current_pro_offer_copy
-                    pro_price, _ = current_pro_offer_copy()
-                except Exception:
-                    pro_price = 200
+                order_plan = str(order.get("plan_id") or "pro").strip().lower()
+                pro_price, founder_tier = _resolve_user_pro_offer(uid)
 
-                subject = f"⏳ تذكير: استكمل اشتراكك في باقة EGX BOTS Pro ({pro_price} ج.م/شهر) | EGX BOTS"
+                if order_plan == "chat_only":
+                    subject = "⏳ تذكير: استكمل اشتراكك في باقة الشات الذكي (100 ج.م/شهر) | EGX BOTS"
+                    paragraphs = [
+                        "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة الشات الذكي (100 ج.م/شهر)</strong> ولم تستكمل عملية الدفع عبر EasyKash بعد.",
+                        "<strong>ما تشمله باقة الشات الذكي (100 ج.م شهرياً):</strong><br>"
+                        "• <strong>350 رسالة تحليلية شهرياً</strong> مع مساعد التحليل الفني ARTORO + تحليل صور الشارت والمحفظة (Vision AI).<br>"
+                        "• <strong>متابعة محفظة حتى 15 سهماً</strong> + <strong>5 مهام مجدولة يومياً</strong> + إعادة توازن المحفظة + بيانات الموقع بدون تأخير.<br>"
+                        f"• <em>ملاحظة:</em> يمكنك أيضاً اختيار <strong>الباقة الشاملة Pro ({pro_price} ج.م/شهر)</strong> لضم قنوات تليجرام VIP (EGX + TASI) مع الشات الذكي بتوفير 50 ج.م.",
+                        "💳 لإتمام الاشتراك بأمان، ادخل على صفحة التسعير وأكمل الدفع عبر بوابة <strong>EasyKash</strong> (بطاقات بنكية محلية ودولية مع 3D Secure، محافظ إلكترونية، أو فوري).",
+                    ]
+                    cta_text = "استكمال اشتراك الشات الذكي (100 ج.م/شهر)"
+                    cta_url = f"{APP_URL}/pricing?plan=chat_only"
+                elif order_plan == "vip_only":
+                    subject = "⏳ تذكير: استكمل اشتراكك في باقة تليجرام VIP (100 ج.م/شهر) | EGX BOTS"
+                    paragraphs = [
+                        "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة تليجرام VIP (100 ج.م/شهر)</strong> ولم تستكمل عملية الدفع عبر EasyKash بعد.",
+                        "<strong>ما تشمله باقة تليجرام VIP (100 ج.م شهرياً):</strong><br>"
+                        "• <strong>رابط دخول خاص لقنوات تليجرام VIP</strong> للبورصة المصرية (EGX) والسوق السعودي (TASI) بمتابعة فورية للمؤشرات والاختراقات.<br>"
+                        "• <strong>إلغاء تأخير بيانات الموقع</strong> لمتابعة شاشات الفحص الفني وكاشف المصائد والقيمة العادلة لحظياً.<br>"
+                        f"• <em>ملاحظة:</em> يمكنك أيضاً الترقية إلى <strong>الباقة الشاملة Pro ({pro_price} ج.م/شهر)</strong> لضم الشات الذكي (350 رسالة تحليلية + Vision AI + محفظة 15 سهماً) مع قنوات VIP.",
+                        "💳 لإتمام الاشتراك بأمان، ادخل على صفحة التسعير وأكمل الدفع عبر بوابة <strong>EasyKash</strong> (بطاقات بنكية محلية ودولية مع 3D Secure، محافظ إلكترونية، أو فوري).",
+                    ]
+                    cta_text = "استكمال اشتراك تليجرام VIP (100 ج.م/شهر)"
+                    cta_url = f"{APP_URL}/pricing?plan=vip_only"
+                else:
+                    subject = f"⏳ تذكير: استكمل اشتراكك في الباقة الشاملة Pro ({pro_price} ج.م/شهر) | EGX BOTS"
+                    paragraphs = [
+                        "لاحظنا أنك بدأت خطوات الاشتراك في <strong>الباقة الشاملة EGX BOTS Pro</strong> ولم تستكمل عملية الدفع عبر EasyKash بعد.",
+                        _build_tiers_summary_html(pro_price, founder_tier),
+                    ]
+                    cta_text = f"استكمال الاشتراك الآن ({pro_price} ج.م/شهر)"
+                    cta_url = f"{APP_URL}/pricing?plan=pro"
+
                 greeting = f"أهلاً {display_name} 👋"
-                paragraphs = [
-                    "لاحظنا أنك بدأت خطوات الاشتراك في <strong>باقة EGX BOTS Pro</strong> ولم تستكمل عملية الدفع بعد.",
-                    f"<strong>باقة EGX BOTS Pro متاحة الآن بـ {pro_price} ج.م شهرياً فقط</strong> وتشمل كل المميزات المتقدمة:<br>"
-                    "• <strong>350 رسالة ذكاء اصطناعي شهرياً</strong> مع ARTORO + تحليل صور المحفظة والشارت<br>"
-                    "• <strong>الصفقات القصيرة ⚡ PRO</strong> والتوصيات اللحظية بوقف صارم 4% بدون تأخير<br>"
-                    "• <strong>رادار السيولة وكاشف المصائد</strong> + <strong>قناة VIP الفورية على تليجرام</strong><br>"
-                    "• <strong>متابعة محفظة حتى 15 سهماً</strong> + أتمتة تليجرام اليومية",
-                    "إذا واجهت أي عقبة في خطوة الدفع، يمكنك الإكمال عبر فودافون كاش أو انستاباي أو فوري أو البطاقة البنكية في ثوانٍ.",
-                ]
-                cta_text = f"استكمال الاشتراك في باقة Pro ({pro_price} ج.م/شهر)"
-                cta_url = f"{APP_URL}/pricing?plan=pro"
-
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email, "abandoned_checkout", message_id)
                 send_info: dict = {}
                 if send_resend_email(user_email, subject, html, send_info):
-                    record_marketing_message(uid, user_email, "abandoned_checkout", {"order_id": order.get("id")}, message_id, send_info.get("provider_message_id"))
+                    record_marketing_message(uid, user_email, "abandoned_checkout", {"order_id": order.get("id"), "plan_id": order_plan}, message_id, send_info.get("provider_message_id"))
                     sent_count += 1
             except Exception as user_err:
                 print(f"[MARKETING] Error processing order {order.get('id')}: {user_err}")
@@ -413,7 +492,7 @@ def process_abandoned_checkouts() -> int:
 def process_trial_expiring() -> int:
     """
     Finds users whose 3-day Pro trial is expiring within 24 hours.
-    Sends them an urgent upgrade discount reminder.
+    Sends them a clear 3-tier / Founders-aware renewal reminder.
     """
     if not supabase:
         return 0
@@ -440,13 +519,13 @@ def process_trial_expiring() -> int:
                 if not uid:
                     continue
 
-                # Check if already upgraded to paid Pro
+                # Check if already upgraded to any paid tier
                 sub_res = (
                     supabase.table("subscriptions")
                     .select("id")
                     .eq("user_id", uid)
                     .eq("status", "active")
-                    .in_("plan_id", ["pro", "lifetime", "pro_lifetime"])
+                    .in_("plan_id", list(ALL_PAID_PLAN_IDS))
                     .limit(1)
                     .execute()
                 )
@@ -473,24 +552,22 @@ def process_trial_expiring() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                try:
-                    from api.payment_common import current_pro_offer_copy
-                    pro_price, _ = current_pro_offer_copy()
-                except Exception:
-                    pro_price = 200
+                pro_price, founder_tier = _resolve_user_pro_offer(uid)
 
-                subject = f"⏳ فترتك التجريبية في EGX BOTS Pro تنتهي قريباً — اشترك الآن بـ {pro_price} ج.م/شهر"
+                if founder_tier in (50, 100):
+                    subject = f"⏳ فترتك التجريبية تنتهي قريباً — سعرك كمؤسس محفوظ ({pro_price} ج.م/شهر) | EGX BOTS"
+                    cta_text = f"تفعيل الباقة الشاملة بسعر المؤسسين ({pro_price} ج.م/شهر)"
+                else:
+                    subject = f"⏳ فترتك التجريبية تنتهي قريباً — باقات تبدأ من 100 ج.م/شهر (والشاملة {pro_price} ج.م) | EGX BOTS"
+                    cta_text = "استعراض الباقات وتفعيل الاشتراك الآن"
+
                 greeting = f"أهلاً {display_name} ⚡"
                 paragraphs = [
-                    "نود إعلامك أن <strong>تجربتك المجانية لباقة Pro ستنتهي خلال الساعات القادمة</strong>.",
-                    "نتمنى أن تكون قد استفدت من شات بوت الذكاء الاصطناعي ARTORO وصفقات الزخم والإشارات الفورية خلال الأيام الماضية.",
-                    f"لتستمر في استخدام الشات بوت (<strong>350 رسالة شهرياً</strong>) واستلام إشعارات النماذج الفنية والتوصيات اللحظية بدون انقطاع، فعّل اشتراكك الآن في <strong>باقة EGX BOTS Pro بـ {pro_price} ج.م شهرياً</strong>:<br>"
-                    f"• <strong>اشتراك شهري:</strong> {pro_price} ج.م/شهر<br>"
-                    "• <strong>تشمل أيضاً:</strong> رفع صور المحفظة والشارت (Vision AI)، قناة VIP على تليجرام، ومتابعة محفظة حتى 15 سهماً.<br>"
-                    "💳 متاح الدفع بسهولة عبر فودافون كاش، انستاباي، فوري، أو البطاقة البنكية.",
+                    "نود إعلامك أن <strong>تجربتك المجانية لأدوات EGX BOTS ستنتهي خلال الساعات القادمة</strong>.",
+                    "نتمنى أن تكون قد استفدت من أدوات التحليل الفني ومساعد ARTORO ومؤشرات السيولة الفورية وكاشف المصائد خلال الأيام الماضية.",
+                    _build_tiers_summary_html(pro_price, founder_tier),
                 ]
-                cta_text = f"تفعيل اشتراك Pro الآن ({pro_price} ج.م/شهر)"
-                cta_url = f"{APP_URL}/pricing?plan=pro"
+                cta_url = f"{APP_URL}/pricing"
 
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(subject, greeting, paragraphs, cta_text, cta_url, uid, user_email, "trial_expiring", message_id)
@@ -532,7 +609,7 @@ def _trial_already_paid(uid: str) -> bool:
             .select("id")
             .eq("user_id", uid)
             .eq("status", "active")
-            .in_("plan_id", ["pro", "lifetime", "pro_lifetime"])
+            .in_("plan_id", list(ALL_PAID_PLAN_IDS))
             .limit(1)
             .execute()
         )
@@ -545,7 +622,7 @@ def process_trial_welcome() -> int:
     """Day-0 activation email: the trial started but the first question did not.
 
     A trial that never opens the assistant converts at 0%, so this email hands
-    the user the exact first question instead of another price reminder.
+    the user the exact first analytical prompt instead of another price reminder.
     """
     if not supabase:
         return 0
@@ -582,13 +659,13 @@ def process_trial_welcome() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "⚡ تجربتك في EGX BOTS Pro بدأت — اسأل أول سؤال دلوقتي"
+                subject = "⚡ تجربتك في EGX BOTS Pro بدأت — اسأل أول سؤال تحليلي دلوقتي"
                 greeting = f"أهلاً {display_name} 🚀"
                 paragraphs = [
-                    "تم تفعيل <strong>تجربة Pro المجانية لمدة 3 أيام</strong> على حسابك، وكل مزايا VIP مفتوحة الآن.",
-                    "أسرع طريقة تشوف القيمة: افتح شات الذكاء الاصطناعي واسأل سؤال مباشر، مثل <strong>«رشّح لي 3 أسهم عليها فرصة النهارده»</strong> أو <strong>«حلّل سهم COMI وقولّي مناطق الدخول والخروج»</strong>.",
-                    "كل تحليل بيرجعلك بمستويات دخول ووقف خسارة وأهداف، بالإضافة إلى التوصيات المفتوحة ومتابعة المحفظة — استخدم التجربة قبل ما تنتهي.",
-                    "ولو ربطت حسابك بتيليجرام، هتاخد <strong>10 رسائل إضافية مجاناً</strong> وتقدر تتابع من الموبايل.",
+                    "تم تفعيل <strong>تجربة Pro الشاملة المجانية لمدة 3 أيام</strong> على حسابك، وتفتح لك حالياً الشات الذكي وقنوات تليجرام VIP (EGX + TASI) معاً.",
+                    "أسرع طريقة تشوف القيمة: افتح شات التحليل الذكي واسأل سؤالاً مباشراً، مثل <strong>«اعرض لي أبرز 3 أسهم عليها زخم فني اليوم»</strong> أو <strong>«حلّل سهم COMI وقولّي مستويات الدعم والمقاومة»</strong>.",
+                    "كل قراءة فنية ترجع لك بالمؤشرات الكمية ومستويات الدعم والمقاومة وإحصاءات السيولة، بالإضافة إلى قراءات المؤشرات الفنية المفتوحة ومتابعة المحفظة.",
+                    "ولو ربطت حسابك بتيليجرام، تحصل على <strong>10 رسائل إضافية مجاناً</strong> وتقدر تتابع من الموبايل بسهولة.",
                 ]
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(
@@ -648,12 +725,12 @@ def process_trial_day1() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                subject = "3 أسئلة تفتح لك قيمة Pro قبل نهاية تجربتك"
+                subject = "3 أسئلة تحليلية تفتح لك قيمة EGX BOTS قبل نهاية تجربتك"
                 greeting = f"كيف حالك {display_name}؟"
                 paragraphs = [
-                    "فاضل أقل من يومين على نهاية تجربتك، وأفضل استغلال ليها هو أسئلة مباشرة على أسهمك.",
-                    "<strong>جرّب واحد من دول الآن:</strong><br>• «رشّح لي 3 أسهم عليها فرصة شراء النهارده»<br>• «حلّل سهم في محفظتي وقولّي مناطق الدخول والخروج»<br>• «إيه أقوى القطاعات سيولة هذا الأسبوع؟»",
-                    "كل إجابة بتوصلك بمستويات تنفيذ واضحة، ومقدرة تتابع توصياتك ومحفظتك من نفس المكان.",
+                    "فاضل أقل من يومين على نهاية تجربتك، وأفضل استغلال ليها هو أسئلة تحليلية مباشرة على أسهمك.",
+                    "<strong>جرّب واحداً من هذه الأسئلة الآن:</strong><br>• «اعرض لي أبرز 3 أسهم عليها إشارة فنية إيجابية اليوم»<br>• «حلّل سهماً في محفظتي وحدّد مناطق الدعم والمقاومة»<br>• «إيه أقوى القطاعات سيولة هذا الأسبوع؟»",
+                    "كل إجابة بتوصلك بمؤشرات فنية رقمية واضحة، مع متابعة تنبيهاتك الفنية ومحفظتك من مكان واحد.",
                 ]
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(
@@ -675,10 +752,8 @@ def process_trial_day1() -> int:
     return sent_count
 
 
-
-
 def process_trial_day2() -> int:
-    """Day-2 momentum case study & proof for trials nearing their final day."""
+    """Day-2 analytical case study & split-tier summary for trials nearing their final day."""
     if not supabase:
         return 0
 
@@ -715,28 +790,23 @@ def process_trial_day2() -> int:
                 if is_user_unsubscribed(uid, user_email):
                     continue
 
-                try:
-                    from api.payment_common import current_pro_offer_copy
-                    pro_price, _ = current_pro_offer_copy()
-                except Exception:
-                    pro_price = 200
+                pro_price, founder_tier = _resolve_user_pro_offer(uid)
 
-                subject = "📊 دراسة حالة سريعة: إزاي الإسكانر بيلتقط صفقات الزخم قبل ما تتحرك؟ | EGX BOTS"
+                subject = "📊 كيف يلتقط رادار السيولة الاختراقات الفنية ومصائد السوق مبكراً؟ | EGX BOTS"
                 greeting = f"أهلاً {display_name} 🎯"
                 paragraphs = [
-                    "تجربتك في <strong>EGX BOTS Pro</strong> قربت على الانتهاء (أقل من 24 ساعة متبقية)، وحبينا نشاركك كيف تستفيد عملياً من ميزات Pro.",
-                    "<strong>إزاي بتشتغل الصفقات القصيرة ⚡ PRO؟</strong><br>"
-                    "1️⃣ <strong>رادار السيولة الذكية:</strong> بيفحص تدفقات السيولة غير الطبيعية والاختراقات الفنية اللحظية مع افتتاح الجلسة.<br>"
-                    "2️⃣ <strong>إدارة مخاطر صارمة:</strong> كل صفقة بتدخل بوقف خسارة صارم 4% لحماية رأس المال، وتتبع أرباح آلي عبر متوسط EMA10 لركوب الاتجاه الصاعد لأقصى مدى.<br>"
-                    "3️⃣ <strong>مساعدك الذكي ARTORO:</strong> بيوضحلك فوراً مناطق التجميع والتصريف ومصائد السيولة (Spring & Upthrust) لأي سهم تطلبه.",
-                    f"<strong>باقة EGX BOTS Pro متاحة الآن بـ {pro_price} ج.م شهرياً:</strong><br>"
-                    "تشمل <strong>350 رسالة شات ذكي شهرياً</strong>، التوصيات اللحظية المفتوحة، قناة VIP على تليجرام، ورفع صور المحفظة والشارت.",
+                    "تجربتك في <strong>EGX BOTS Pro</strong> قربت على الانتهاء (أقل من 24 ساعة متبقية)، وحبينا نوضح لك عملياً كيف تعمل أدوات التحليل الفني في المنصة.",
+                    "<strong>كيف يعمل نظام الرصد الكمي والفني؟</strong><br>"
+                    "1️⃣ <strong>رادار السيولة الذكية:</strong> يرصد تدفقات السيولة غير الاعتيادية والاختراقات السعرية اللحظية بالبورصة المصرية والسعودية.<br>"
+                    "2️⃣ <strong>كاشف المصائد والقمم:</strong> يميّز رقمياً بين نماذج الارتداد التجميعي (Spring) ومصائد القمم (Upthrust) مع تحديد مستويات المراقبة.<br>"
+                    "3️⃣ <strong>مساعد التحليل الفني ARTORO:</strong> يقرأ الشارت وصور المحافظ (Vision AI) ويحسب القيمة العادلة والتوافق الشرعي لأي سهم.",
+                    _build_tiers_summary_html(pro_price, founder_tier),
                 ]
                 message_id = str(uuid.uuid4())
                 html = _build_email_html(
                     subject, greeting, paragraphs,
-                    f"تفعيل باقة Pro الآن ({pro_price} ج.م/شهر)",
-                    f"{APP_URL}/pricing?plan=pro",
+                    "استعراض الباقات والاشتراك الآن",
+                    f"{APP_URL}/pricing",
                     uid, user_email, "trial_day2", message_id,
                 )
                 send_info: dict = {}

@@ -217,7 +217,7 @@ export function buildUserAnalytics(input: {
   const activeProIds = new Set([...unique(
     (input.subscriptions || [])
       .filter((sub) => {
-        if (!["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y"].includes(String(sub.plan_id || "").toLowerCase())) return false;
+        if (!["pro", "lifetime", "pro_lifetime", "pro_6m", "pro_1y", "chat_only", "vip_only"].includes(String(sub.plan_id || "").toLowerCase())) return false;
         if (String(sub.status || "").toLowerCase() !== "active") return false;
         if (excludedIds.has(String(sub.user_id))) return false;
         if (sub.current_period_end) {

@@ -131,10 +131,13 @@ export async function POST(req: NextRequest) {
     // 2. Enforce & deduct 1 AI chat quota message atomically
     const isUnlimited = isUnlimitedChatUser(user);
     const quotaWin = resolveSubscriptionQuotaWindow(subRes.data || [], now);
-    const userIsPro = quotaWin.isPro || isUnlimited;
+    const userIsPro = quotaWin.hasChatPro || isUnlimited;
+    const activePid = String(quotaWin.activeSub?.plan_id || "").toLowerCase();
     const planName = userIsPro
-      ? quotaWin.activeSub?.plan_id === "lifetime" || isUnlimited
+      ? activePid === "lifetime" || activePid === "pro_lifetime" || isUnlimited
         ? "lifetime"
+        : activePid === "chat_only"
+        ? "chat_only"
         : "pro"
       : "free";
     const limits = planLimits(planName);

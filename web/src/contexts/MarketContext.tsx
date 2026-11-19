@@ -19,7 +19,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-export type MarketMode = "egx" | "tasi";
+export type MarketMode = "egx" | "tasi" | "uae" | "qatar";
 
 export const MARKET_STORAGE_KEY = "egxbots_market";
 export const MARKET_COOKIE_NAME = "egxbots_market";
@@ -31,11 +31,14 @@ export interface MarketContextValue {
   toggleMarket: () => void;
   hasChosenMarket: boolean;
   isSaudi: boolean;
-  country: "Egypt" | "Saudi Arabia";
-  exchange: "EGX" | "TADAWUL";
+  isUae: boolean;
+  isQatar: boolean;
+  isGccChatOnly: boolean;
+  country: "Egypt" | "Saudi Arabia" | "UAE" | "Qatar";
+  exchange: "EGX" | "TADAWUL" | "DFM" | "QSE";
   currencyLabel: string;
-  currencyCode: "EGP" | "SAR";
-  indexLabel: "EGX30" | "TASI";
+  currencyCode: "EGP" | "SAR" | "AED" | "QAR";
+  indexLabel: "EGX30" | "TASI" | "DFMGI" | "QSI";
 }
 
 const DEFAULT_MARKET_CONTEXT: MarketContextValue = {
@@ -44,6 +47,9 @@ const DEFAULT_MARKET_CONTEXT: MarketContextValue = {
   toggleMarket: () => {},
   hasChosenMarket: true,
   isSaudi: false,
+  isUae: false,
+  isQatar: false,
+  isGccChatOnly: false,
   country: "Egypt",
   exchange: "EGX",
   currencyLabel: "ج.م",
@@ -54,12 +60,16 @@ const DEFAULT_MARKET_CONTEXT: MarketContextValue = {
 const MarketContext = createContext<MarketContextValue | undefined>(undefined);
 
 const SAUDI_VALUES = new Set(["tasi", "tadawul", "saudi", "saudi arabia", "ksa", "sa"]);
+const UAE_VALUES = new Set(["uae", "dfm", "adx", "dubai", "abudhabi", "abu dhabi", "ae", "emirates"]);
+const QATAR_VALUES = new Set(["qatar", "qse", "qe", "qsi", "qa", "doha"]);
 const EGX_VALUES = new Set(["egx", "egypt", "eg"]);
 
 function normalizeMarket(value: string | null | undefined): MarketMode | null {
   if (!value) return null;
   const clean = value.trim().toLowerCase();
   if (SAUDI_VALUES.has(clean)) return "tasi";
+  if (UAE_VALUES.has(clean)) return "uae";
+  if (QATAR_VALUES.has(clean)) return "qatar";
   if (EGX_VALUES.has(clean)) return "egx";
   return null;
 }
@@ -157,7 +167,7 @@ export function MarketProvider({ children }: { children: ReactNode }) {
 
   const commitMarket = useCallback(
     (next: MarketMode, options: { syncUrl?: boolean; forceDispatch?: boolean } = {}) => {
-      const normalized: MarketMode = next === "tasi" ? "tasi" : "egx";
+      const normalized: MarketMode = normalizeMarket(next) ?? "egx";
       const changed = marketRef.current !== normalized;
       marketRef.current = normalized;
       setMarketState(normalized);
@@ -256,18 +266,60 @@ export function MarketProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<MarketContextValue>(() => {
     const isSaudi = market === "tasi";
+    const isUae = market === "uae";
+    const isQatar = market === "qatar";
+    const isGccChatOnly = isUae || isQatar;
     const isArabic = language === "ar";
+    const country: MarketContextValue["country"] = isSaudi
+      ? "Saudi Arabia"
+      : isUae
+      ? "UAE"
+      : isQatar
+      ? "Qatar"
+      : "Egypt";
+    const exchange: MarketContextValue["exchange"] = isSaudi
+      ? "TADAWUL"
+      : isUae
+      ? "DFM"
+      : isQatar
+      ? "QSE"
+      : "EGX";
+    const currencyCode: MarketContextValue["currencyCode"] = isSaudi
+      ? "SAR"
+      : isUae
+      ? "AED"
+      : isQatar
+      ? "QAR"
+      : "EGP";
+    const currencyLabel = isSaudi
+      ? (isArabic ? "ر.س" : "SAR")
+      : isUae
+      ? (isArabic ? "د.إ" : "AED")
+      : isQatar
+      ? (isArabic ? "ر.ق" : "QAR")
+      : (isArabic ? "ج.م" : "EGP");
+    const indexLabel: MarketContextValue["indexLabel"] = isSaudi
+      ? "TASI"
+      : isUae
+      ? "DFMGI"
+      : isQatar
+      ? "QSI"
+      : "EGX30";
+
     return {
       market,
       setMarket,
       toggleMarket,
       hasChosenMarket,
       isSaudi,
-      country: isSaudi ? "Saudi Arabia" : "Egypt",
-      exchange: isSaudi ? "TADAWUL" : "EGX",
-      currencyLabel: isSaudi ? (isArabic ? "ر.س" : "SAR") : isArabic ? "ج.م" : "EGP",
-      currencyCode: isSaudi ? "SAR" : "EGP",
-      indexLabel: isSaudi ? "TASI" : "EGX30",
+      isUae,
+      isQatar,
+      isGccChatOnly,
+      country,
+      exchange,
+      currencyLabel,
+      currencyCode,
+      indexLabel,
     };
   }, [hasChosenMarket, language, market, setMarket, toggleMarket]);
 

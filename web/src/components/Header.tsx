@@ -13,10 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMarket, type MarketMode } from "@/contexts/MarketContext";
 import { POPULAR_TASI_STOCKS, SAUDI_STOCK_NAMES_AR, isSaudiSymbol } from "@/lib/saudi-stocks";
+import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
 import { searchSymbols } from "@/lib/api";
 import PortfolioHeaderChip from "@/components/PortfolioHeaderChip";
 import QuickProfitGuideModal from "@/components/QuickProfitGuideModal";
-import { EgyptFlag, SaudiFlag } from "@/components/MarketFlag";
+import { EgyptFlag, SaudiFlag, UaeFlag, QatarFlag } from "@/components/MarketFlag";
 
 type SearchResult = {
     symbol: string;
@@ -33,6 +34,22 @@ const POPULAR_EGX_STOCKS: SearchResult[] = [
     { symbol: "AALR", name: "General Co. for Land Reclamation", name_ar: "العامة لاستصلاح الأراضي", exchange: "EGX" },
 ];
 
+const POPULAR_UAE_STOCKS: SearchResult[] = [
+    { symbol: "EMAAR", name: "Emaar Properties", name_ar: "إعمار العقارية", exchange: "DFM" },
+    { symbol: "ALDAR", name: "Aldar Properties", name_ar: "الدار العقارية", exchange: "ADX" },
+    { symbol: "IHC", name: "International Holding Company", name_ar: "العالمية القابضة", exchange: "ADX" },
+    { symbol: "ADNOCGAS", name: "ADNOC Gas", name_ar: "أدنوك للغاز", exchange: "ADX" },
+    { symbol: "DEWA", name: "Dubai Electricity & Water Authority", name_ar: "ديوا", exchange: "DFM" },
+];
+
+const POPULAR_QATAR_STOCKS: SearchResult[] = [
+    { symbol: "QNBK", name: "Qatar National Bank", name_ar: "بنك قطر الوطني", exchange: "QSE" },
+    { symbol: "QIBK", name: "Qatar Islamic Bank", name_ar: "مصرف قطر الإسلامي", exchange: "QSE" },
+    { symbol: "IQCD", name: "Industries Qatar", name_ar: "صناعات قطر", exchange: "QSE" },
+    { symbol: "QGTS", name: "Qatar Gas Transport (Nakilat)", name_ar: "ناقلات", exchange: "QSE" },
+    { symbol: "ORDS", name: "Ooredoo", name_ar: "أوريدو", exchange: "QSE" },
+];
+
 function StockSearchRow({
     result,
     language,
@@ -46,15 +63,20 @@ function StockSearchRow({
 }) {
     const baseSym = String(result.symbol || "").split(".")[0].toUpperCase();
     const exUpper = (result.exchange || "").toUpperCase();
+    const isExplicitOtherEx = exUpper === "EGX" || exUpper === "DFM" || exUpper === "ADX" || exUpper === "QSE";
     const isTasiItem =
-        exUpper === "TADAWUL" ||
-        exUpper === "TASI" ||
-        isSaudi ||
-        isSaudiSymbol(result.symbol);
+        !isExplicitOtherEx && (
+            exUpper === "TADAWUL" ||
+            exUpper === "TASI" ||
+            isSaudi ||
+            isSaudiSymbol(result.symbol)
+        );
     const badgeLabel = isTasiItem ? "TASI" : exUpper || "EGX";
     const displayName =
         language === "ar"
-            ? result.name_ar || (isTasiItem ? SAUDI_STOCK_NAMES_AR[baseSym] : undefined) || result.name
+            ? result.name_ar ||
+              (isTasiItem ? SAUDI_STOCK_NAMES_AR[baseSym] : CANONICAL_STOCK_NAMES[baseSym]?.name_ar) ||
+              result.name
             : result.name;
 
     return (
@@ -72,7 +94,7 @@ function StockSearchRow({
             </div>
             <span
                 className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-none text-black border-2 border-black shrink-0 ${
-                    isTasiItem ? "bg-emerald-400" : "bg-[#00FF66]"
+                    isTasiItem ? "bg-emerald-400" : exUpper === "DFM" || exUpper === "ADX" ? "bg-sky-400" : exUpper === "QSE" ? "bg-rose-400" : "bg-[#00FF66]"
                 }`}
             >
                 {badgeLabel}
@@ -80,6 +102,60 @@ function StockSearchRow({
         </button>
     );
 }
+
+const MARKET_MENU_ITEMS: Array<{
+    id: MarketMode;
+    code: string;
+    labelAr: string;
+    labelEn: string;
+    subAr: string;
+    subEn: string;
+    activeClass: string;
+    beta?: boolean;
+    renderFlag: (cls: string) => React.ReactNode;
+}> = [
+    {
+        id: "egx",
+        code: "EGX",
+        labelAr: "مصر EGX",
+        labelEn: "Egypt EGX",
+        subAr: "البورصة المصرية (ج.م)",
+        subEn: "Egyptian Exchange (EGP)",
+        activeClass: "bg-[#FFE600] text-black",
+        renderFlag: (cls) => <EgyptFlag className={cls} />,
+    },
+    {
+        id: "tasi",
+        code: "TASI",
+        labelAr: "السعودية TASI",
+        labelEn: "Saudi TASI",
+        subAr: "تداول السعودية (ر.س)",
+        subEn: "Saudi Tadawul (SAR)",
+        activeClass: "bg-emerald-400 text-black",
+        beta: true,
+        renderFlag: (cls) => <SaudiFlag className={cls} />,
+    },
+    {
+        id: "uae",
+        code: "UAE",
+        labelAr: "الإمارات",
+        labelEn: "UAE (DFM/ADX)",
+        subAr: "دبي وأبوظبي (د.إ)",
+        subEn: "Dubai & Abu Dhabi (AED)",
+        activeClass: "bg-sky-400 text-black",
+        renderFlag: (cls) => <UaeFlag className={cls} />,
+    },
+    {
+        id: "qatar",
+        code: "QSE",
+        labelAr: "قطر QSE",
+        labelEn: "Qatar QSE",
+        subAr: "بورصة قطر (ر.ق)",
+        subEn: "Qatar Exchange (QAR)",
+        activeClass: "bg-rose-400 text-black",
+        renderFlag: (cls) => <QatarFlag className={cls} />,
+    },
+];
 
 function MarketSwitcher({
     market,
@@ -92,7 +168,28 @@ function MarketSwitcher({
     language: string;
     variant?: "bar" | "drawer";
 }) {
-    const isSaudi = market === "tasi";
+    const [open, setOpen] = useState(false);
+    const wrapRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const onClick = (e: MouseEvent) => {
+            if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setOpen(false);
+        };
+        window.addEventListener("mousedown", onClick);
+        window.addEventListener("keydown", onKey);
+        return () => {
+            window.removeEventListener("mousedown", onClick);
+            window.removeEventListener("keydown", onKey);
+        };
+    }, [open]);
+
+    const currentItem = MARKET_MENU_ITEMS.find((m) => m.id === market) || MARKET_MENU_ITEMS[0];
 
     if (variant === "drawer") {
         return (
@@ -105,89 +202,103 @@ function MarketSwitcher({
                     aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
                     className="grid grid-cols-2 gap-1.5 p-1 rounded-xl border-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.2)]"
                 >
-                    <button
-                        type="button"
-                        onClick={() => setMarket("egx")}
-                        aria-pressed={!isSaudi}
-                        className={`flex items-center justify-center gap-2 py-2.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                            !isSaudi
-                                ? "bg-[#FFE600] text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ring-2 ring-[#FFE600]/45"
-                                : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
-                        }`}
-                    >
-                        <EgyptFlag className="w-5 h-3.5" />
-                        <span>{language === "ar" ? "مصر EGX" : "Egypt EGX"}</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setMarket("tasi")}
-                        aria-pressed={isSaudi}
-                        className={`flex items-center justify-center gap-2 py-2.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
-                            isSaudi
-                                ? "bg-emerald-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ring-2 ring-emerald-400/45"
-                                : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
-                        }`}
-                    >
-                        <SaudiFlag className="w-5 h-3.5" />
-                        <span>{language === "ar" ? "السعودية TASI" : "Saudi TASI"}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-black text-[#FFE600] text-[9px] font-black leading-none uppercase tracking-wider">
-                            BETA
-                        </span>
-                    </button>
+                    {MARKET_MENU_ITEMS.map((item) => {
+                        const active = item.id === market;
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => setMarket(item.id)}
+                                aria-pressed={active}
+                                className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                    active
+                                        ? `${item.activeClass} border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]`
+                                        : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
+                                }`}
+                            >
+                                {item.renderFlag("w-5 h-3.5")}
+                                <span className="truncate">{language === "ar" ? item.labelAr : item.labelEn}</span>
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
         );
     }
 
     return (
-        <div
-            role="group"
-            aria-label={language === "ar" ? "تبديل السوق" : "Switch Market"}
-            className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.3)] shrink-0"
-        >
+        <div ref={wrapRef} className="relative shrink-0">
             <button
                 type="button"
-                onClick={() => setMarket("egx")}
-                aria-pressed={!isSaudi}
-                title={language === "ar" ? "السوق المصري (EGX)" : "Egyptian Market (EGX)"}
-                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11px] font-black tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-                    !isSaudi
-                        ? "bg-[#FFE600] text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] ring-2 ring-[#FFE600]/45"
-                        : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
-                }`}
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                aria-haspopup="listbox"
+                aria-label={language === "ar" ? "اختيار السوق" : "Select Market"}
+                className={`flex items-center gap-1.5 h-9 px-2.5 rounded-xl text-[11px] font-black tracking-tight transition-all cursor-pointer whitespace-nowrap border-3 border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] dark:shadow-[2px_2px_0px_0px_rgba(255,255,255,0.3)] ${currentItem.activeClass}`}
             >
-                <EgyptFlag className="w-4 h-3" />
-                <span className="hidden xl:inline">
-                    {language === "ar" ? "مصر EGX" : "Egypt EGX"}
+                {currentItem.renderFlag("w-4 h-3")}
+                <span className="hidden sm:inline">
+                    {language === "ar" ? currentItem.labelAr : currentItem.labelEn}
                 </span>
-                <span className="xl:hidden">EGX</span>
+                <span className="sm:hidden">{currentItem.code}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
             </button>
-            <button
-                type="button"
-                onClick={() => setMarket("tasi")}
-                aria-pressed={isSaudi}
-                title={language === "ar" ? "السوق السعودي (تاسي TASI)" : "Saudi Market (Tadawul TASI)"}
-                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11px] font-black tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-                    isSaudi
-                        ? "bg-emerald-400 text-black border-2 border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] ring-2 ring-emerald-400/45"
-                        : "text-zinc-700 dark:text-zinc-300 border-2 border-transparent hover:bg-zinc-200/70 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white"
-                }`}
-            >
-                <SaudiFlag className="w-4 h-3" />
-                <span className="hidden xl:inline">
-                    {language === "ar" ? "السعودية TASI" : "Saudi TASI"}
-                </span>
-                <span className="xl:hidden">TASI</span>
-                <span className="px-1 py-0.5 rounded bg-black text-[#FFE600] text-[8px] font-black leading-none uppercase tracking-wider">
-                    BETA
-                </span>
-            </button>
+
+            {open && (
+                <div
+                    role="listbox"
+                    dir={language === "ar" ? "rtl" : "ltr"}
+                    className="fixed inset-x-3 top-[var(--header-offset,64px)] mx-auto w-auto max-w-[15rem] sm:absolute sm:inset-x-auto sm:top-full sm:mx-0 sm:right-0 sm:left-auto sm:w-60 sm:max-w-none mt-0 sm:mt-2 rounded-xl border-3 border-black dark:border-white bg-white dark:bg-zinc-950 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] dark:shadow-[5px_5px_0px_0px_rgba(255,255,255,0.3)] overflow-hidden z-[120] p-1.5 space-y-1"
+                >
+                    <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        {language === "ar" ? "اختر السوق النشط" : "Select Active Market"}
+                    </div>
+                    {MARKET_MENU_ITEMS.map((item) => {
+                        const active = item.id === market;
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                role="option"
+                                aria-selected={active}
+                                onClick={() => {
+                                    setMarket(item.id);
+                                    setOpen(false);
+                                }}
+                                className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-start transition-colors cursor-pointer ${
+                                    active
+                                        ? `${item.activeClass} border-2 border-black shadow-[2px_2px_0px_#000]`
+                                        : "text-black dark:text-white border-2 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    {item.renderFlag("w-5 h-3.5")}
+                                    <div className="min-w-0">
+                                        <div className="text-xs font-black truncate">
+                                            {language === "ar" ? item.labelAr : item.labelEn}
+                                        </div>
+                                        <div className={`text-[10px] font-bold truncate ${active ? "text-black/75" : "text-zinc-500 dark:text-zinc-400"}`}>
+                                            {language === "ar" ? item.subAr : item.subEn}
+                                        </div>
+                                    </div>
+                                </div>
+                                {item.beta && (
+                                    <span className="px-1.5 py-0.5 rounded bg-black text-[#FFE600] text-[8px] font-black uppercase shrink-0">
+                                        BETA
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
 
 function SearchDropdown({
     language,
+    market,
     isSaudi,
     searchQuery,
     searching,
@@ -195,6 +306,7 @@ function SearchDropdown({
     onSelect,
 }: {
     language: string;
+    market: MarketMode;
     isSaudi: boolean;
     searchQuery: string;
     searching: boolean;
@@ -202,11 +314,25 @@ function SearchDropdown({
     onSelect: (symbol: string) => void;
 }) {
     if (!searchQuery.trim()) {
-        const popularStocks = isSaudi ? POPULAR_TASI_STOCKS : POPULAR_EGX_STOCKS;
+        const popularStocks = isSaudi
+            ? POPULAR_TASI_STOCKS
+            : market === "uae"
+            ? POPULAR_UAE_STOCKS
+            : market === "qatar"
+            ? POPULAR_QATAR_STOCKS
+            : POPULAR_EGX_STOCKS;
         const popularHeading = isSaudi
             ? language === "ar"
                 ? "الأسهم السعودية الأكثر شعبية"
                 : "Popular TASI Stocks"
+            : market === "uae"
+            ? language === "ar"
+                ? "أبرز أسهم الإمارات (دبي وأبوظبي)"
+                : "Popular UAE Stocks"
+            : market === "qatar"
+            ? language === "ar"
+                ? "أبرز أسهم بورصة قطر"
+                : "Popular Qatar Stocks"
             : language === "ar"
               ? "الأسهم المصرية الأكثر شعبية"
               : "Popular EGX Stocks";
@@ -263,7 +389,7 @@ function SearchDropdown({
 
 export default function Header() {
     const { language, setLanguage, t } = useLanguage();
-    const { market, setMarket, isSaudi, country, exchange } = useMarket();
+    const { market, setMarket, isSaudi, isUae, isGccChatOnly, country, exchange } = useMarket();
     const { theme, toggleTheme } = useTheme();
     const { user, signOut } = useAuth();
     const pathname = usePathname();
@@ -345,7 +471,7 @@ export default function Header() {
                     50,
                     controller.signal,
                     undefined,
-                    exchange
+                    isUae ? undefined : exchange
                 );
                 setSearchResults(results);
             } catch (err: any) {
@@ -390,18 +516,45 @@ export default function Header() {
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, []);
 
-    const navItems = [
-        { href: "/scanner/backtests?tab=bots", label: t("nav.scanner.ai_trading"), icon: <Brain className="w-4 h-4 shrink-0" />, activePath: "/scanner/backtests" },
-        { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
-        { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
-        { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
-        { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
-        { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
-    ];
+    const navItems = isGccChatOnly
+        ? [
+              { href: "/chat", label: language === "ar" ? "الشات الذكي AI" : "AI Chat", icon: <Bot className="w-4 h-4 shrink-0" />, activePath: "/chat", badge: "AI" },
+              {
+                  href: isUae ? "/markets/uae" : "/markets/qatar",
+                  label: language === "ar" ? (isUae ? "أسهم الإمارات" : "أسهم قطر") : (isUae ? "UAE Stocks" : "Qatar Stocks"),
+                  icon: <TrendingUp className="w-4 h-4 shrink-0" />,
+                  activePath: isUae ? "/markets/uae" : "/markets/qatar",
+              },
+              { href: "/markets/gold-silver", label: language === "ar" ? "الذهب والفضة" : "Gold & Silver", icon: <Sparkles className="w-4 h-4 shrink-0" />, activePath: "/markets/gold-silver" },
+              { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
+          ]
+        : [
+              { href: "/scanner/backtests?tab=bots", label: t("nav.scanner.ai_trading"), icon: <Brain className="w-4 h-4 shrink-0" />, activePath: "/scanner/backtests" },
+              { href: "/disclosures", label: language === "ar" ? "الإفصاحات" : "Disclosures", icon: <FileText className="w-4 h-4 shrink-0" />, activePath: "/disclosures", badge: "AI" },
+              { href: "/news", label: t("nav.scanner.news"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/news", badge: "NEW" },
+              { href: "/scanner/technical", label: t("nav.scanner.tech"), icon: <Activity className="w-4 h-4 shrink-0" />, activePath: "/scanner/technical" },
+              { href: "/scanner/market", label: t("nav.scanner.market"), icon: <Globe className="w-4 h-4 shrink-0" />, activePath: "/scanner/market" },
+              { href: "/pricing", label: t("nav.pricing"), icon: <BadgeDollarSign className="w-4 h-4 shrink-0" />, activePath: "/pricing", badge: language === "ar" ? "بريميوم" : "PRO" },
+          ];
 
-    // Auto-redirect away from EGX-only routes when Saudi (TASI) market is selected
+    // Auto-redirect away from unavailable routes when Saudi or UAE/Qatar market is active
     useEffect(() => {
-        if (!isSaudi || !pathname) return;
+        if (!pathname) return;
+        if (isGccChatOnly) {
+            const unavailableForGcc =
+                pathname.startsWith("/scanner") ||
+                pathname.startsWith("/disclosures") ||
+                pathname.startsWith("/news") ||
+                pathname.startsWith("/reports") ||
+                pathname.startsWith("/fair-value") ||
+                pathname.startsWith("/sharia") ||
+                pathname.startsWith("/b2b");
+            if (unavailableForGcc) {
+                router.replace(isUae ? "/markets/uae" : "/markets/qatar");
+            }
+            return;
+        }
+        if (!isSaudi) return;
         const isEgxOnlyRoute =
             pathname === "/reports" ||
             pathname.startsWith("/reports/") ||
@@ -409,7 +562,7 @@ export default function Header() {
         if (isEgxOnlyRoute) {
             router.replace("/scanner/backtests?tab=bots");
         }
-    }, [isSaudi, pathname, currentTab, router]);
+    }, [isGccChatOnly, isUae, isSaudi, pathname, currentTab, router]);
 
     const checkActive = (href: string, activePath: string | null) => {
         if (href.includes("?tab=backtests")) {
@@ -546,6 +699,7 @@ export default function Header() {
                             </kbd>
                         </button>
 
+                        {!isGccChatOnly && (
                         <button
                             type="button"
                             onClick={() => setProfitGuideOpen(true)}
@@ -555,6 +709,7 @@ export default function Header() {
                             <Sparkles className="h-3.5 w-3.5 fill-black shrink-0" />
                             <span>{language === "ar" ? "كيف أربح؟" : "How to Profit?"}</span>
                         </button>
+                        )}
 
                         <button
                             onClick={toggleTheme}
@@ -603,10 +758,12 @@ export default function Header() {
                                             <Wallet className="h-4 w-4 text-emerald-400" />
                                             {language === "ar" ? "المحفظة الاستثمارية" : "My Portfolio"}
                                         </Link>
+                                        {!isGccChatOnly && (
                                         <Link href="/b2b/dashboard" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-emerald-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
                                             <Bot className="h-4 w-4 text-emerald-400" />
                                             {language === "ar" ? "لوحة ترخيص البوت (B2B)" : "B2B Bot Dashboard"}
                                         </Link>
+                                        )}
                                         <button
                                             onClick={() => { setAccountMenuOpen(false); void signOut(); }}
                                             className="flex w-full items-center gap-2 px-3 py-2.5 text-sm font-medium text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
@@ -660,10 +817,18 @@ export default function Header() {
                                 {language === "ar"
                                     ? isSaudi
                                         ? "البحث السريع في أسهم تداول السعودي"
-                                        : "البحث السريع في أسهم البورصة المصرية"
+                                        : market === "uae"
+                                          ? "البحث السريع في أسهم الإمارات (دبي وأبوظبي)"
+                                          : market === "qatar"
+                                            ? "البحث السريع في أسهم بورصة قطر"
+                                            : "البحث السريع في أسهم البورصة المصرية"
                                     : isSaudi
                                       ? "Quick Search • TASI"
-                                      : "Quick Search • EGX"}
+                                      : market === "uae"
+                                        ? "Quick Search • UAE (DFM & ADX)"
+                                        : market === "qatar"
+                                          ? "Quick Search • Qatar (QSE)"
+                                          : "Quick Search • EGX"}
                             </span>
                             <button
                                 type="button"
@@ -685,10 +850,18 @@ export default function Header() {
                                         language === "ar"
                                             ? isSaudi
                                                 ? "اكتب اسم الشركة أو رمز السهم السعودي (مثل 2222 أو الراجحي)..."
-                                                : "اكتب اسم الشركة أو كود السهم المصري (مثل COMI أو فوري)..."
+                                                : market === "uae"
+                                                  ? "اكتب اسم الشركة أو الرمز الإماراتي (مثل EMAAR أو إعمار أو ALDAR)..."
+                                                  : market === "qatar"
+                                                    ? "اكتب اسم الشركة أو الرمز القطري (مثل QNBK أو قطر الوطني)..."
+                                                    : "اكتب اسم الشركة أو كود السهم المصري (مثل COMI أو فوري)..."
                                             : isSaudi
                                               ? "Type TASI symbol or company name (e.g. 2222)..."
-                                              : "Type EGX symbol or company name (e.g. COMI, FWRY)..."
+                                              : market === "uae"
+                                                ? "Type UAE symbol or company name (e.g. EMAAR, ALDAR)..."
+                                                : market === "qatar"
+                                                  ? "Type Qatar symbol or company name (e.g. QNBK, IQCD)..."
+                                                  : "Type EGX symbol or company name (e.g. COMI, FWRY)..."
                                     }
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -709,6 +882,7 @@ export default function Header() {
                             <div className="mt-3 max-h-[55vh] overflow-y-auto custom-scrollbar border border-black/15 dark:border-white/15">
                                 <SearchDropdown
                                     language={language}
+                                    market={market}
                                     isSaudi={isSaudi}
                                     searchQuery={searchQuery}
                                     searching={searching}
@@ -729,7 +903,10 @@ export default function Header() {
                             onClick={() => setMobileMenuOpen(false)}
                             aria-hidden="true"
                         />
-                        <div className="md:hidden fixed top-0 left-0 right-0 z-[101] bg-white dark:bg-zinc-950 border-b-4 border-black dark:border-white animate-in slide-in-from-top-2 duration-200 overflow-hidden max-h-[85vh] overflow-y-auto">
+                        <div
+                            dir={language === "ar" ? "rtl" : "ltr"}
+                            className="md:hidden fixed top-0 left-0 right-0 z-[101] bg-white dark:bg-zinc-950 border-b-4 border-black dark:border-white animate-in slide-in-from-top-2 duration-200 overflow-hidden max-h-[85vh] overflow-y-auto"
+                        >
                             {/* Mobile menu header */}
                             <div className="flex items-center justify-between px-4 py-3 border-b-2 border-zinc-200 dark:border-zinc-800">
                                 <span className="text-sm font-black uppercase tracking-wider text-black dark:text-white">Menu</span>
@@ -751,6 +928,7 @@ export default function Header() {
 
                             {/* Nav links */}
                             <div className="px-3 py-2 flex flex-col gap-1">
+                                {!isGccChatOnly && (
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -762,6 +940,7 @@ export default function Header() {
                                     <Sparkles className="w-4 h-4 fill-black shrink-0" />
                                     <span>{language === "ar" ? "كيف أربح؟ (دليل 60 ثانية)" : "How to Profit? (60s Guide)"}</span>
                                 </button>
+                                )}
                                 {navItems.map((item) => {
                                     const isActive = checkActive(item.href, item.activePath);
                                     return (

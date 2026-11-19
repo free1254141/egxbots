@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+from decimal import Decimal, ROUND_HALF_UP
 import os
 import time
 from datetime import datetime, timezone, timedelta
@@ -267,14 +268,106 @@ def is_user_eligible_for_100_egp_renewal(user_id: str | None) -> bool:
     return result
 
 
-def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
+DURATION_SLIDER_PLANS = frozenset({"pro", "chat_only", "vip_only"})
+
+# Canonical 1..12 month duration slider schedule: months -> (days, billed_months, discount_pct)
+DURATION_SLIDER_SCHEDULE: dict[int, tuple[int, Decimal, int]] = {
+    1: (30, Decimal("1.0"), 0),
+    2: (60, Decimal("1.9"), 5),
+    3: (90, Decimal("2.7"), 10),
+    4: (120, Decimal("3.5"), 13),
+    5: (150, Decimal("4.3"), 14),
+    6: (180, Decimal("5.0"), 17),
+    7: (210, Decimal("5.7"), 19),
+    8: (240, Decimal("6.4"), 20),
+    9: (270, Decimal("7.1"), 21),
+    10: (300, Decimal("7.8"), 22),
+    11: (330, Decimal("8.4"), 24),
+    12: (365, Decimal("9.0"), 25),
+}
+
+
+def normalize_duration_months(plan_id: str, duration_months: int | None = None) -> int | None:
+    """Validate and resolve duration months for slider-enabled retail plans."""
     plan = (plan_id or "").strip().lower()
+    if plan == "pro_6m":
+        return 6
+    if plan == "pro_1y":
+        return 12
+    if plan not in DURATION_SLIDER_PLANS:
+        return None
+    if duration_months is None:
+        return 1
+    if isinstance(duration_months, bool):
+        raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+    try:
+        months_int = int(duration_months)
+        if isinstance(duration_months, float) and duration_months != float(months_int):
+            raise ValueError("non-integer")
+    except (TypeError, ValueError):
+        raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+    if months_int not in DURATION_SLIDER_SCHEDULE:
+        raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+    return months_int
+
+
+def duration_days_for_months(months: int) -> int:
+    """Return subscription duration in days for a validated month count (1..12)."""
+    if months not in DURATION_SLIDER_SCHEDULE:
+        raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+    return DURATION_SLIDER_SCHEDULE[months][0]
+
+
+def duration_discount_pct(months: int) -> int:
+    """Return display discount percentage for a validated month count (1..12)."""
+    if months not in DURATION_SLIDER_SCHEDULE:
+        raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+    return DURATION_SLIDER_SCHEDULE[months][2]
+
+
+def duration_pricing_schedule() -> list[dict[str, float | int]]:
+    """Return JSON-serializable 1..12 month progressive discount schedule."""
+    return [
+        {
+            "months": months,
+            "days": days,
+            "billed_months": float(billed_months),
+            "discount_pct": discount_pct,
+        }
+        for months, (days, billed_months, discount_pct) in DURATION_SLIDER_SCHEDULE.items()
+    ]
+
+
+def plan_amount_egp(plan_id: str, user_id: str | None = None, duration_months: int | None = None) -> float:
+    plan = (plan_id or "").strip().lower()
+    if duration_months is not None:
+        if isinstance(duration_months, bool):
+            raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+        try:
+            months_int = int(duration_months)
+            if isinstance(duration_months, float) and duration_months != float(months_int):
+                raise ValueError("non-integer")
+        except (TypeError, ValueError):
+            raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+        if months_int not in DURATION_SLIDER_SCHEDULE:
+            raise ValueError("اختر مدة اشتراك صحيحة بين 1 و 12 شهراً")
+        if plan not in {"pro", "pro_renewal", "chat_only", "vip_only"}:
+            raise ValueError("Unsupported duration pricing for this plan")
+        base_plan = "pro" if plan == "pro_renewal" else plan
+        base_monthly = Decimal(str(plan_amount_egp(base_plan, user_id=user_id, duration_months=None)))
+        _, billed_months, _ = DURATION_SLIDER_SCHEDULE[months_int]
+        total = (base_monthly * billed_months).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        return float(total)
     if plan == "b2b_starter":
         return 1000.0
     if plan == "b2b_pro":
         return 1500.0
     if plan == "b2b_enterprise":
         return 2500.0
+    if plan == "chat_only":
+        return _env_price("CHAT_ONLY_PRICE_EGP", 100.0)
+    if plan == "vip_only":
+        return _env_price("VIP_ONLY_PRICE_EGP", 100.0)
     if plan == "pro_renewal":
         return 50.0
     if plan == "pro":
@@ -290,20 +383,20 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
         if settings.get("founders_offer_enabled"):
             if founders_offer_is_open():
                 return float(settings.get("founders_price_egp") or settings.get("pro_price_egp") or 100.0)
-            return float(settings.get("founders_regular_price_egp") or 200.0)
+            return float(settings.get("founders_regular_price_egp") or 150.0)
         if settings.get("pro_price_egp") is not None:
             return float(settings["pro_price_egp"])
-        return _env_price("PRO_PRICE_EGP", 200.0)
+        return _env_price("PRO_PRICE_EGP", 150.0)
     if plan == "pro_6m":
         settings = billing_settings()
-        base_6m = float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else _env_price("PRO_6M_PRICE_EGP", 1000)
+        base_6m = float(settings["pro_6m_price_egp"]) if settings.get("pro_6m_price_egp") is not None else _env_price("PRO_6M_PRICE_EGP", 750)
         is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
         if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
-            return float(round(base_6m * 0.5))
+            return 500.0
         return base_6m
     if plan == "pro_1y":
         settings = billing_settings()
-        base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1800)
+        base_1y = float(settings["pro_1y_price_egp"]) if settings.get("pro_1y_price_egp") is not None else _env_price("PRO_1Y_PRICE_EGP", 1350)
         is_founder_user = bool(user_id and (is_user_eligible_for_50_egp_renewal(user_id) or is_user_eligible_for_100_egp_renewal(user_id)))
         if (settings.get("founders_offer_enabled") and founders_offer_is_open()) or is_founder_user:
             return 1000.0
@@ -313,7 +406,7 @@ def plan_amount_egp(plan_id: str, user_id: str | None = None) -> float:
         if settings.get("lifetime_price_egp") is not None:
             return float(settings["lifetime_price_egp"])
         return _env_price("LIFETIME_PRICE_EGP", 2250)
-    return _env_price("PRO_PRICE_EGP", 100.0)
+    return _env_price("PRO_PRICE_EGP", 150.0)
 
 
 def pro_regular_amount_egp() -> float:
@@ -323,17 +416,17 @@ def pro_regular_amount_egp() -> float:
         return float(settings["founders_regular_price_egp"])
     if settings.get("pro_price_egp") is not None:
         return float(settings["pro_price_egp"])
-    return _env_price("PRO_REGULAR_PRICE_EGP", _env_price("PRO_PRICE_EGP", 200.0))
+    return _env_price("PRO_REGULAR_PRICE_EGP", _env_price("PRO_PRICE_EGP", 150.0))
 
 
 def current_pro_offer_copy() -> tuple[int, bool]:
-    """Return (current_pro_price_egp, founders_is_open), failing closed to (200, False)."""
+    """Return (current_pro_price_egp, founders_is_open), failing closed to (150, False)."""
     try:
         is_open = bool(founders_offer_is_open())
         price = int(round(plan_amount_egp("pro")))
         return price, is_open
     except Exception:
-        return 200, False
+        return 150, False
 
 
 def format_pro_cta_sentence(is_html: bool = True) -> str:
@@ -342,21 +435,33 @@ def format_pro_cta_sentence(is_html: bool = True) -> str:
     if is_open:
         if is_html:
             return (
-                f"🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ {price} ج.م فقط شهرياً</b> "
+                f"🔥 لا تفوّت تنبيهات الجلسة القادمة — اشترك الآن في <b>عرض المؤسسين بـ {price} ج.م فقط شهرياً</b> "
                 f"بدلاً من {int(round(pro_regular_amount_egp()))} ج.م (لفترة محدودة)!"
             )
         return (
             f"⚡ اشترك في باقة المؤسسين بـ {price} ج.م شهرياً (لفترة محدودة) "
-            "واستقبل صفقات السوينج أولاً بأول:"
+            "واستقبل تنبيهات الرادار الفني أولاً بأول:"
         )
     if is_html:
-        return f"🔥 لا تفوّت إشارات الجلسة القادمة — اشترك الآن في <b>باقة Pro بـ {price} ج.م شهرياً</b> واحصل على الإشارات لحظة بلحظة!"
-    return f"⚡ اشترك الآن في باقة Pro بـ {price} ج.م شهرياً واستقبل صفقات السوينج أولاً بأول:"
+        return f"🔥 لا تفوّت تنبيهات الجلسة القادمة — اشترك الآن في <b>الباقة الشاملة Pro بـ {price} ج.م شهرياً</b> واستقبل تنبيهات الرادار الفني لحظة بلحظة!"
+    return f"⚡ اشترك الآن في الباقة الشاملة Pro بـ {price} ج.م شهرياً واستقبل تنبيهات الرادار الفني أولاً بأول:"
 
 
 def subscription_days(plan_id: str) -> int:
     plan = (plan_id or "").strip().lower()
-    return {"pro": 30, "pro_renewal": 30, "pro_6m": 180, "pro_1y": 365, "lifetime": 36500, "pro_lifetime": 36500, "b2b_starter": 30, "b2b_pro": 30, "b2b_enterprise": 30}.get(plan, 30)
+    return {
+        "pro": 30,
+        "pro_renewal": 30,
+        "pro_6m": 180,
+        "pro_1y": 365,
+        "chat_only": 30,
+        "vip_only": 30,
+        "lifetime": 36500,
+        "pro_lifetime": 36500,
+        "b2b_starter": 30,
+        "b2b_pro": 30,
+        "b2b_enterprise": 30,
+    }.get(plan, 30)
 
 
 def activate_subscription(user_id: str, plan_id: str, provider: str = "easykash", payment_order_id: str | None = None, duration_days: int | None = None) -> None:

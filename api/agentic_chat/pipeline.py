@@ -11,7 +11,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import AsyncGenerator, Dict, Any, List, Optional
+from typing import AsyncGenerator, Dict, Any, List, Optional, Tuple
 import httpx
 import pytz
 
@@ -44,9 +44,17 @@ from api.agentic_chat.vision import (
     format_vision_context_for_prompt,
 )
 from api.stock_ai import _init_supabase, supabase
+from api.agentic_chat.market_registry import (
+    currency_for_market,
+    detect_market_from_text,
+    get_market_config,
+    normalize_exchange_code,
+    ui_market_label,
+)
 from api.agentic_chat.analysis_cache import (
     get_vip_analysis_cache,
     is_recommendation_cache_key,
+    is_uncacheable_error_reply,
     set_vip_analysis_cache,
     build_analysis_cache_key,
     inspect_tool_calls_followup_flags,
@@ -175,14 +183,22 @@ def _collect_structured_outputs(
             ],
         }
 
-    # 2. Market Breadth Visual (EGX & TASI)
+    # 2. Market Breadth Visual (All Exchanges: EGX, TASI, QSE, DFM, ADX, KSE, ...)
     breadth = result.get("breadth")
     if isinstance(breadth, dict) and breadth.get("total_stocks"):
+        idx_close = next(
+            (result.get(k) for k in ("index_close", "egx30_close", "tasi_close") if result.get(k) is not None),
+            None,
+        )
+        idx_chg = next(
+            (result.get(k) for k in ("index_change_pct", "egx30_change_pct", "tasi_change_pct") if result.get(k) is not None),
+            None,
+        )
         visuals_data["market_breadth"] = {
             "market": result.get("market"),
             "index_name": result.get("index_name"),
-            "index_close": result.get("egx30_close") or result.get("tasi_close"),
-            "index_change_pct": result.get("egx30_change_pct") or result.get("tasi_change_pct"),
+            "index_close": idx_close,
+            "index_change_pct": idx_chg,
             "currency": result.get("currency") or "ج.م",
             "date": result.get("date"),
             "advancing": breadth.get("advancing") or 0,
@@ -453,8 +469,9 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
                 seen_symbols.add(s_upper)
                 hints.append({"name": sa_name, "symbols": [s_upper], "market": "TASI"})
 
-    # 2. Match known EGX Latin tickers (ignore slash commands such as /value RACC and arbitrary English words)
-    latin_matches = re.findall(r"(?<!/)\b[A-Za-z]{2,6}\b", message)
+    # 2. Match known EGX Latin tickers (ignore slash commands, suffixes like .AD/.QA/.DU, and suffixed tickers like ADIB.AD)
+    latin_scan_msg = re.sub(r"\.(?:CA|EGX)\b", "", message, flags=re.IGNORECASE)
+    latin_matches = re.findall(r"(?<![/.])\b([A-Za-z]{2,6})\b(?!\.[A-Za-z0-9])", latin_scan_msg)
     stopwords = {
         "EGX", "TASI", "KSA", "BUY", "SELL", "HOLD", "THE", "AND", "FOR",
         "RSI", "MACD", "EMA", "SMA", "VIP", "PRO", "API", "NOW", "TODAY",
@@ -503,32 +520,119 @@ def known_symbol_hints(message: str) -> List[Dict[str, Any]]:
     return hints[:10]
 
 
+def _resolve_query_market(
+    message: str,
+    active_market: Optional[str] = None,
+    hints: Optional[List[Dict[str, Any]]] = None,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[str, bool]:
+    """
+    Resolve `(canonical_exchange, is_cross_market)` for ANY exchange (EGX, TADAWUL, QSE, DFM, ADX, ...).
+    Enables the exact same VIP cache, Fast-Track, and history-stripping path across all exchanges.
+    """
+    detected: List[str] = []
+
+    base_active = normalize_exchange_code(active_market)
+    tok_outer = set_active_market_context(base_active)
+    try:
+        for tc in (tool_calls or []):
+            try:
+                args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+            except Exception:
+                args = {}
+            arg_mkt = normalize_exchange_code(args.get("market")) if args.get("market") else None
+            if arg_mkt and arg_mkt not in detected:
+                detected.append(arg_mkt)
+            syms = args.get("symbols") or ([args["symbol"]] if args.get("symbol") else [])
+            tok_inner = set_active_market_context(arg_mkt) if arg_mkt else None
+            try:
+                for s in syms:
+                    _, m = _resolve_symbol_and_market(s, explicit_market=args.get("market"))
+                    if m and m not in detected:
+                        detected.append(m)
+            finally:
+                if tok_inner is not None:
+                    reset_active_market_context(tok_inner)
+    finally:
+        reset_active_market_context(tok_outer)
+
+    if not detected:
+        for h in (hints or []):
+            if isinstance(h, dict) and h.get("market"):
+                m = normalize_exchange_code(h.get("market"))
+                if m not in detected:
+                    detected.append(m)
+
+    msg_str = str(message or "")
+    if not tool_calls:
+        text_mkt = detect_market_from_text(msg_str)
+        if text_mkt and text_mkt not in detected:
+            detected.append(text_mkt)
+        # Detect 4-digit Tadawul stock codes with strict guards against years, cash amounts, and index points
+        _NON_TICKER_NUM_NEIGHBOR_RE = re.compile(
+            r"^\s*(?:جنيه|ج\.م|ريال|ر\.س|درهم|دينار|دولار|سهم|أسهم|اسهم|نقطة|نقطه|ألف|الف|مليون|مليار|EGP|SAR|USD|AED|QAR|KWD|%)",
+            re.IGNORECASE,
+        )
+        _STOCK_PREFIX_RE = re.compile(r"(?:سهم|كود|رمز|شركة|تداول)\s*$", re.IGNORECASE)
+        for m_num in re.finditer(r"(?<!\d)([1-9]\d{3})(?!\d)", msg_str):
+            num_tok = m_num.group(1)
+            num_val = int(num_tok)
+            if 1990 <= num_val <= 2035:
+                continue
+            after_ctx = msg_str[m_num.end() : m_num.end() + 20]
+            before_ctx = msg_str[max(0, m_num.start() - 16) : m_num.start()]
+            if _NON_TICKER_NUM_NEIGHBOR_RE.match(after_ctx):
+                continue
+            if num_val % 500 == 0 and not _STOCK_PREFIX_RE.search(before_ctx):
+                continue
+            if "TADAWUL" not in detected:
+                detected.append("TADAWUL")
+                break
+        # Detect cross-market queries combining a non-EGX exchange with an explicit EGX ticker/keyword
+        if detected and "EGX" not in detected:
+            msg_up = msg_str.upper()
+            has_egx_kw = any(kw in msg_up for kw in ("EGX", ".CA", "البورصة المصرية", "السوق المصري", "مصر"))
+            if not has_egx_kw:
+                try:
+                    from api.stock_aliases import _KNOWN_SYMBOLS as _EGX_KNOWN_SYMS
+                    # Strip any non-EGX suffixed tickers (e.g. QNBK.QA, EMAAR.DU, ALDAR.AD, 2222.SR) first
+                    stripped_up = re.sub(
+                        r"\b[A-Z0-9]{2,12}\.(?:SR|SA|TADAWUL|QA|QE|QSE|DU|DFM|AE|AD|ADX|KW|KSE)\b",
+                        " ",
+                        msg_up,
+                    )
+                    for tok in re.findall(r"\b([A-Z]{3,6})\b", stripped_up):
+                        if tok in _EGX_KNOWN_SYMS:
+                            has_egx_kw = True
+                            break
+                except Exception:
+                    pass
+            if has_egx_kw:
+                detected.append("EGX")
+
+    if len(detected) > 1:
+        return (detected[0], True)
+    if len(detected) == 1:
+        return (detected[0], False)
+    return (normalize_exchange_code(active_market), False)
+
+
 def _is_saudi_related_query(
     message: str,
     active_market: Optional[str] = None,
     hints: Optional[List[Dict[str, Any]]] = None,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
-    """Bypass EGX-only analysis_cache whenever Saudi TASI context or tickers are involved."""
-    if _normalize_market_code(active_market) == "TADAWUL":
+    """Backward-compatible helper returning True when query targets TADAWUL/TASI."""
+    exch, is_cross = _resolve_query_market(
+        message, active_market=active_market, hints=hints, tool_calls=tool_calls
+    )
+    if exch == "TADAWUL":
         return True
-    if any(h.get("market") == "TASI" for h in (hints or []) if isinstance(h, dict)):
-        return True
-    msg_up = (message or "").upper()
-    if any(kw in msg_up for kw in ("TASI", "TADAWUL", ".SR", ".SA", "SAR", "تاسي", "تداول", "السعود")):
-        return True
-    for tc in (tool_calls or []):
-        try:
-            args = json.loads(tc.get("function", {}).get("arguments", "{}"))
-        except Exception:
-            args = {}
-        if _normalize_market_code(args.get("market")) == "TADAWUL":
+    if is_cross:
+        msg_up = (message or "").upper()
+        if any(kw in msg_up for kw in ("TASI", "TADAWUL", ".SR", ".SA", "SAR", "تاسي", "تداول", "السعود")):
             return True
-        syms = args.get("symbols") or ([args["symbol"]] if args.get("symbol") else [])
-        for s in syms:
-            _, m = _resolve_symbol_and_market(s)
-            if m == "TADAWUL":
-                return True
     return False
 
 
@@ -670,10 +774,11 @@ async def _run_agentic_chat_stream_impl(
         yield "data: [DONE]\n\n"
         return
 
-    # Yield initial thinking status
+    # Yield initial thinking status (data-driven across all registered exchanges)
+    active_cfg = get_market_config(ui_exch)
     thinking_msg = (
-        "جاري تحليل استفسارك في السوق السعودي (تداول) والبورصة المصرية..."
-        if ui_label == "TASI"
+        f"جاري تحليل استفسارك في {active_cfg.name_ar} ({active_cfg.ui_code})..."
+        if ui_exch != "EGX"
         else "جاري تحليل استفسارك عبر EGX BOTS..."
     )
     yield f"data: {json.dumps({'type': 'status', 'status': 'thinking', 'message': thinking_msg}, ensure_ascii=False)}\n\n"
@@ -684,11 +789,7 @@ async def _run_agentic_chat_stream_impl(
     # Inject dynamic Cairo & Riyadh timestamps plus active UI market tie-breaker hint
     now_cairo = datetime.now(CAIRO_TZ)
     now_riyadh = datetime.now(RIYADH_TZ)
-    active_mkt_desc = (
-        "السوق السعودي (تداول TASI — ر.س)"
-        if ui_label == "TASI"
-        else "البورصة المصرية (EGX — ج.م)"
-    )
+    active_mkt_desc = f"{active_cfg.name_ar} ({active_cfg.ui_code} — {active_cfg.currency_ar})"
     if is_b2b:
         telegram_channel_guidance = (
             "سياق مجموعة شريك (B2B): يُمنع منعاً باتاً الترويج أو ذكر روابط قنوات EGX BOTS (مثل t.me/egxbots أو /profile#telegram أو @egxbots_support أو /pricing) داخل رد المجموعة. "
@@ -700,19 +801,26 @@ async def _run_agentic_chat_stream_impl(
                 "يُمنع منعاً باتاً إعطاء توصيات شراء/بيع مفتوحة أو ترشيح أسهم للعضو، واقتصر على التحليل الفني، الدعوم والمقاومات، المؤشرات، القيمة العادلة، المقارنات، وكاشف المصائد فقط."
             )
     else:
-        telegram_channel_guidance = (
-            "السوق النشط الآن هو السعودي TASI: عند الإشارة لقناة تليجرام اذكر قناة VIP السعودية فقط "
-            "(https://web.telegram.org/a/#-1004397045436 ورابطها في /profile#telegram) ولا تذكر القناة المصرية المجانية (t.me/egxbots) لأن السوق السعودي لا يملك قناة مجانية."
-            if ui_label == "TASI"
-            else "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
-        )
+        if ui_label == "TASI":
+            telegram_channel_guidance = (
+                "السوق النشط الآن هو السعودي TASI: عند الإشارة لقناة تليجرام اذكر قناة VIP السعودية فقط "
+                "(https://web.telegram.org/a/#-1004397045436 ورابطها في /profile#telegram) ولا تذكر القناة المصرية المجانية (t.me/egxbots) لأن السوق السعودي لا يملك قناة مجانية."
+            )
+        elif ui_exch == "EGX":
+            telegram_channel_guidance = (
+                "السوق النشط الآن هو المصري EGX: عند الإشارة لقناة تليجرام تتوفر قناة VIP للمشتركين (/profile#telegram) والقناة العامة المجانية (https://t.me/egxbots)."
+            )
+        else:
+            telegram_channel_guidance = (
+                f"السوق النشط الآن هو {active_cfg.name_ar} ({active_cfg.ui_code} — {active_cfg.currency_ar}): التزم بعملة السوق ({active_cfg.currency_ar}) دون خلط العملات."
+            )
     date_context = (
         f"📅 التوقيت الحالي: القاهرة {now_cairo.strftime('%Y-%m-%d %H:00')} | "
         f"الرياض {now_riyadh.strftime('%Y-%m-%d %H:00')}. "
         f"تبويب السوق النشط حالياً في الواجهة: {active_mkt_desc} "
-        "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة أسهم واستفسارات EGX و TASI معاً). "
+        "(يُستخدم فقط كخيار افتراضي للأسئلة العامة غير المحددة، ويمكنك دائماً خدمة جميع الأسواق المتاحة في قاعدة البيانات معاً). "
         f"{telegram_channel_guidance} "
-        "التزم بدقة بالعملة: ج.م (EGP) للأسهم المصرية و ر.س (SAR) للأسهم السعودية. "
+        "التزم دائماً بالعملة الراجعة في كل أداة (`currency`) دون خلط العملات بين الأسواق. "
         f"وضع التوصيات الحرة: {'مفعل' if (autonomous_recommendations and allow_recommendations) else 'غير مفعل'}."
     )
     formatted_messages.append({"role": "system", "content": date_context})
@@ -867,18 +975,17 @@ async def _run_agentic_chat_stream_impl(
     candidate_cache_key: Optional[str] = None
     has_followup_flag = False
     model_confirmed_standalone = False
-    is_saudi_flow = _is_saudi_related_query(message, active_market=ui_exch, hints=hints)
+    effective_market, is_cross_market = _resolve_query_market(message, active_market=ui_exch, hints=hints)
 
-    # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (Zero-Token, Zero-Latency)
-    # Bypass EGX-only analysis_cache whenever Saudi TASI context/tickers, multi-turn history, custom user rules, or images are involved.
+    # 0. Check Two-Tier Analysis Cache for Direct Repeatable Canonical Queries (ALL Markets: EGX, TASI, QSE, DFM, ADX, ...)
     if (
-        not is_saudi_flow
+        not is_cross_market
         and not has_conversation_history
         and not has_user_rules
         and not vision_data
         and (not images or len(images) == 0)
     ):
-        early_key = build_analysis_cache_key(message)
+        early_key = build_analysis_cache_key(message, market=effective_market)
         if not allow_recommendations and is_recommendation_cache_key(early_key):
             early_key = None
         if early_key:
@@ -889,6 +996,7 @@ async def _run_agentic_chat_stream_impl(
                 telegram_user_id=telegram_user_id,
                 is_b2b=is_b2b,
                 allow_recommendations=allow_recommendations,
+                market=effective_market,
             )
             if cached_hit:
                 origin_label = "قاعدة البيانات السحابية" if cached_hit.get("origin") == "supabase_market_cache" else "الذاكرة اللحظية"
@@ -926,15 +1034,14 @@ async def _run_agentic_chat_stream_impl(
     max_rounds = 3
     round_count = 0
 
-    # Single-Stock Fast-Track: when single-turn uncached query maps canonically to vip_stock_<SYM>,
-    # pre-fetch the 5 enriched single-stock tools in parallel in Python so DeepSeek only needs 1 synthesis call.
+    # Single-Stock Fast-Track: works identically across ALL registered exchanges (EGX, TASI, QSE, DFM, ADX, ...).
     fast_stock_match = (
-        re.fullmatch(r"vip_stock_([A-Z0-9]{2,8})", candidate_cache_key)
+        re.fullmatch(r"vip_stock_([A-Z0-9]{2,12})", candidate_cache_key)
         if (
             candidate_cache_key
             and not has_conversation_history
             and not has_user_rules
-            and not is_saudi_flow
+            and not is_cross_market
             and not vision_data
             and (not images or len(images) == 0)
         )
@@ -942,18 +1049,19 @@ async def _run_agentic_chat_stream_impl(
     )
     if fast_stock_match:
         fast_sym = fast_stock_match.group(1)
+        fast_mkt_ui = ui_market_label(effective_market)
         fast_tool_specs = [
-            ("get_stock", {"symbols": [fast_sym]}),
-            ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks"}),
-            ("get_news", {"symbols": [fast_sym]}),
-            ("get_disclosures", {"symbol": fast_sym}),
-            ("get_price_traps", {"symbol": fast_sym}),
+            ("get_stock", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+            ("get_fair_value", {"symbols": [fast_sym], "mode": "specific_stocks", "market": fast_mkt_ui}),
+            ("get_news", {"symbols": [fast_sym], "market": fast_mkt_ui}),
+            ("get_disclosures", {"symbol": fast_sym, "market": fast_mkt_ui}),
+            ("get_price_traps", {"symbol": fast_sym, "market": fast_mkt_ui}),
         ]
         yield f"data: {json.dumps({'type': 'status', 'status': 'executing_tools', 'message': f'جاري جلب أحدث بيانات السوق ({len(fast_tool_specs)} مصادر)...'}, ensure_ascii=False)}\n\n"
         t_tools_start = time.time()
         fast_results = await asyncio.gather(
             *[
-                dispatch_tool(t_name, t_args, user_id=user_id, user_prompt=message, default_market=ui_exch)
+                dispatch_tool(t_name, t_args, user_id=user_id, user_prompt=message, default_market=effective_market)
                 for t_name, t_args in fast_tool_specs
             ],
             return_exceptions=True,
@@ -1082,15 +1190,15 @@ async def _run_agentic_chat_stream_impl(
                     break
 
                 # -------------------------------------------------------------------
-                # Dynamic Model-Driven Cache Check (Zero-Regex Intent Resolution)
-                # Works in both single-turn AND multi-turn conversations without Regex:
-                # DeepSeek decides the tool call AND sets is_contextual_followup.
+                # Dynamic Model-Driven Cache Check (Zero-Regex Intent Resolution, All Markets)
+                # Works in both single-turn AND multi-turn conversations across EGX, TASI, QSE, DFM, ADX, ...
                 # -------------------------------------------------------------------
-                saudi_tool_call = is_saudi_flow or _is_saudi_related_query(
-                    message, active_market=ui_exch, hints=hints, tool_calls=tool_calls
+                tc_market, tc_cross = _resolve_query_market(
+                    message, active_market=effective_market, hints=hints, tool_calls=tool_calls
                 )
-                if saudi_tool_call:
-                    is_saudi_flow = True
+                effective_market = tc_market
+                if tc_cross:
+                    is_cross_market = True
 
                 batch_followup_true, batch_explicit_standalone = inspect_tool_calls_followup_flags(tool_calls)
                 if batch_followup_true:
@@ -1110,7 +1218,7 @@ async def _run_agentic_chat_stream_impl(
                 )
 
                 if (
-                    not saudi_tool_call
+                    not is_cross_market
                     and not has_user_rules
                     and cache_allowed_for_turn
                     and round_count == 1
@@ -1150,6 +1258,7 @@ async def _run_agentic_chat_stream_impl(
                                 telegram_user_id=telegram_user_id,
                                 is_b2b=is_b2b,
                                 allow_recommendations=allow_recommendations,
+                                market=effective_market,
                             )
                             if lookup_key
                             else None
@@ -1197,10 +1306,11 @@ async def _run_agentic_chat_stream_impl(
                 # Append assistant tool-call intent to message history
                 formatted_messages.append(assistant_msg)
 
-                # Execute all tools concurrently with asyncio.gather
+                # Execute tools: serialize mutating manage_portfolio calls before any portfolio view
+                # to prevent read-after-write races (e.g., add_cash + view in the same round).
                 t_tools_start = time.time()
-                tool_tasks = []
-                for tc in tool_calls:
+                prepared_calls: List[Tuple[int, str, Dict[str, Any]]] = []
+                for idx, tc in enumerate(tool_calls):
                     fn_name = tc.get("function", {}).get("name", "")
                     try:
                         fn_args = json.loads(tc.get("function", {}).get("arguments", "{}"))
@@ -1208,21 +1318,55 @@ async def _run_agentic_chat_stream_impl(
                         fn_args = {}
                     if isinstance(fn_args, dict):
                         fn_args.pop("is_contextual_followup", None)
+                    else:
+                        fn_args = {}
                     if has_user_rules:
                         from api.agentic_chat.user_preferences import apply_user_rules_to_tool_args
                         fn_args = apply_user_rules_to_tool_args(fn_name, fn_args, user_rules)
-                    # Pass verified user_id, user_prompt, and active UI default_market tie-breaker
-                    tool_tasks.append(
-                        dispatch_tool(
-                            fn_name,
-                            fn_args,
-                            user_id=user_id,
-                            user_prompt=message,
-                            default_market=ui_exch,
-                        )
-                    )
+                    prepared_calls.append((idx, fn_name, fn_args))
 
-                tool_results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+                pf_calls = [c for c in prepared_calls if c[1] == "manage_portfolio"]
+                if len(pf_calls) > 1:
+                    # Run mutating manage_portfolio ops sequentially first, then read-only/view ops
+                    pf_writes = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() not in ("view", "get")]
+                    tool_default_mkt = effective_market if not is_cross_market else ui_exch
+                    pf_reads = [c for c in pf_calls if str(c[2].get("operation") or "view").strip().lower() in ("view", "get")]
+                    other_calls = [c for c in prepared_calls if c[1] != "manage_portfolio"]
+                    results_by_idx: Dict[int, Any] = {}
+                    for idx, fn_name, fn_args in pf_writes:
+                        try:
+                            results_by_idx[idx] = await dispatch_tool(
+                                fn_name, fn_args, user_id=user_id, user_prompt=message, default_market=tool_default_mkt
+                            )
+                        except Exception as exc:
+                            results_by_idx[idx] = exc
+                    parallel_calls = pf_reads + other_calls
+                    if parallel_calls:
+                        par_res = await asyncio.gather(
+                            *[
+                                dispatch_tool(fn_name, fn_args, user_id=user_id, user_prompt=message, default_market=tool_default_mkt)
+                                for _, fn_name, fn_args in parallel_calls
+                            ],
+                            return_exceptions=True,
+                        )
+                        for (idx, _, _), res_item in zip(parallel_calls, par_res):
+                            results_by_idx[idx] = res_item
+                    tool_results = [results_by_idx[i] for i in range(len(prepared_calls))]
+                else:
+                    tool_default_mkt = effective_market if not is_cross_market else ui_exch
+                    tool_results = await asyncio.gather(
+                        *[
+                            dispatch_tool(
+                                fn_name,
+                                fn_args,
+                                user_id=user_id,
+                                user_prompt=message,
+                                default_market=tool_default_mkt,
+                            )
+                            for _, fn_name, fn_args in prepared_calls
+                        ],
+                        return_exceptions=True,
+                    )
                 t_tools = time.time() - t_tools_start
                 logger.info(f"[agentic_chat] Phase timing: Turn{round_count}={t_turn1:.2f}s, Tools({len(tool_calls)})={t_tools:.2f}s")
 
@@ -1236,7 +1380,7 @@ async def _run_agentic_chat_stream_impl(
                     and model_confirmed_standalone
                     and candidate_cache_key
                     and not has_user_rules
-                    and not is_saudi_flow
+                    and not is_cross_market
                     and history_end_idx > history_start_idx
                 ):
                     formatted_messages = (
@@ -1249,7 +1393,7 @@ async def _run_agentic_chat_stream_impl(
                 if (
                     round_count == 1
                     and candidate_cache_key
-                    and re.fullmatch(r"vip_stock_[A-Z0-9]{2,8}", candidate_cache_key)
+                    and re.fullmatch(r"vip_stock_[A-Z0-9]{2,12}", candidate_cache_key)
                     and "get_stock" in called_names
                 ):
                     break
@@ -1309,6 +1453,7 @@ async def _run_agentic_chat_stream_impl(
                             dsml_extra_calls = parse_dsml_tool_calls(synth_content)
                             if dsml_extra_calls:
                                 logger.warning(f"[agentic_chat] Synthesis emitted DSML fallback ({len(dsml_extra_calls)} calls); executing cleanly")
+                                extra_default_mkt = effective_market if not is_cross_market else ui_exch
                                 extra_results = await asyncio.gather(
                                     *[
                                         dispatch_tool(
@@ -1316,7 +1461,7 @@ async def _run_agentic_chat_stream_impl(
                                             json.loads(tc.get("function", {}).get("arguments", "{}") or "{}"),
                                             user_id=user_id,
                                             user_prompt=message,
-                                            default_market=ui_exch,
+                                            default_market=extra_default_mkt,
                                         )
                                         for tc in dsml_extra_calls
                                     ],
@@ -1392,8 +1537,8 @@ async def _run_agentic_chat_stream_impl(
         if c:
             return str(c)
         mkt = item.get("market") or item.get("exchange")
-        if mkt and _normalize_market_code(mkt) == "TADAWUL":
-            return "ر.س"
+        if mkt:
+            return currency_for_market(mkt)
         if re.fullmatch(r"\d{4}", str(item.get("symbol") or "").strip()):
             return "ر.س"
         return "ج.م"
@@ -1550,7 +1695,7 @@ async def _run_agentic_chat_stream_impl(
         or (has_conversation_history and model_confirmed_standalone and tools_executed_count > 0)
     )
     if (
-        not is_saudi_flow
+        not is_cross_market
         and can_save_for_history
         and not has_user_rules
         and not visuals_data.get("portfolio")
@@ -1561,9 +1706,13 @@ async def _run_agentic_chat_stream_impl(
         effective_key = (
             candidate_cache_key
             if (tools_executed_count > 0 or has_conversation_history)
-            else (candidate_cache_key or build_analysis_cache_key(message))
+            else (candidate_cache_key or build_analysis_cache_key(message, market=effective_market))
         )
-        if effective_key and not (not allow_recommendations and is_recommendation_cache_key(effective_key)):
+        if (
+            effective_key
+            and not is_uncacheable_error_reply(accumulated_reply)
+            and not (not allow_recommendations and is_recommendation_cache_key(effective_key))
+        ):
             saved_cache_key = effective_key
             try:
                 set_vip_analysis_cache(
@@ -1573,8 +1722,9 @@ async def _run_agentic_chat_stream_impl(
                     recommendations=recommendations_data,
                     is_b2b=is_b2b,
                     allow_recommendations=allow_recommendations,
+                    market=effective_market,
                 )
-                logger.info(f"[agentic_chat] Saved to Two-Tier Cache: {effective_key}")
+                logger.info(f"[agentic_chat] Saved to Two-Tier Cache ({effective_market}): {effective_key}")
             except Exception as cache_err:
                 logger.warning(f"[agentic_chat] Cache set warning: {cache_err}")
 

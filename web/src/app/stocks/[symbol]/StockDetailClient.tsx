@@ -195,6 +195,10 @@ export default function StockDetailClient({
     [symbol]
   );
   const isSaudiStock = market === "tasi" || exchange === "TADAWUL" || isSaudiSymbol(cleanSymbol);
+  const isGccStock = !isSaudiStock && ["DFM", "ADX", "QSE", "COMMODITIES"].includes(String(exchange || "").toUpperCase());
+  const gccDirectoryHref = exchange === "QSE" ? "/markets/qatar" : exchange === "COMMODITIES" ? "/markets/gold-silver" : "/markets/uae";
+  const gccMarketNameAr = exchange === "DFM" ? "سوق دبي المالي" : exchange === "ADX" ? "سوق أبوظبي" : exchange === "QSE" ? "بورصة قطر" : "الأسواق العالمية";
+  const gccMarketNameEn = exchange === "DFM" ? "Dubai Financial Market (DFM)" : exchange === "ADX" ? "Abu Dhabi Securities Exchange (ADX)" : exchange === "QSE" ? "Qatar Stock Exchange (QSE)" : "Global Markets";
   const resolvedExchange = isSaudiStock ? "TADAWUL" : (exchange || "EGX");
 
   // Non-blocking browser hydration from HF backend (0ms Vercel CPU) so weekly-cached
@@ -211,6 +215,7 @@ export default function StockDetailClient({
 
   useEffect(() => {
     setLivePageData(null);
+    if (isGccStock) return; // HF has no snapshot for UAE/Qatar/metals; ISR data is already complete
     const controller = new AbortController();
     const targetMarket = isSaudiStock ? "tasi" : "egx";
     fetch(
@@ -235,7 +240,7 @@ export default function StockDetailClient({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [cleanSymbol, isSaudiStock]);
+  }, [cleanSymbol, isSaudiStock, isGccStock]);
 
   const fundamentals = livePageData?.fundamentals ?? initialFundamentals;
   const latestPrice = livePageData?.latestPrice ?? initialLatestPrice;
@@ -278,15 +283,15 @@ export default function StockDetailClient({
     });
   }, [symbol, latestPrice, latestTech, fundData]);
   const canonicalInfo = useMemo(
-    () => (isSaudiStock ? { name_ar: cleanSymbol, name_en: cleanSymbol, sector: "" } : getCanonicalStockName(symbol)),
-    [isSaudiStock, cleanSymbol, symbol]
+    () => (isSaudiStock || isGccStock ? { name_ar: cleanSymbol, name_en: cleanSymbol, sector: "" } : getCanonicalStockName(symbol)),
+    [isSaudiStock, isGccStock, cleanSymbol, symbol]
   );
-  const nameAr = isSaudiStock
+  const nameAr = isSaudiStock || isGccStock
     ? (fundData.name_ar || SAUDI_STOCK_NAMES_AR[cleanSymbol] || fundData.name || fundData.Name || cleanSymbol)
     : (canonicalInfo.name_ar && canonicalInfo.name_ar !== symbol
       ? canonicalInfo.name_ar
       : (fundData.name || fundData.Name || symbol));
-  const nameEn = isSaudiStock
+  const nameEn = isSaudiStock || isGccStock
     ? (fundData.name || fundData.Name || SAUDI_STOCK_NAMES_AR[cleanSymbol] || cleanSymbol)
     : (canonicalInfo.name_en && canonicalInfo.name_en !== symbol
       ? canonicalInfo.name_en
@@ -299,7 +304,7 @@ export default function StockDetailClient({
   const country = fundData.country || fundData.CountryName || (isSaudiStock ? "Saudi Arabia" : resolvedExchange === "EGX" ? "Egypt" : "US");
   const currency = fundData.currency || fundData.CurrencyCode || (isSaudiStock ? "SAR" : resolvedExchange === "EGX" ? "EGP" : "USD");
   const currencyLabel = language === "ar"
-    ? (currency === "SAR" ? "ر.س" : currency === "EGP" ? "ج.م" : currency)
+    ? (currency === "SAR" ? "ر.س" : currency === "EGP" ? "ج.م" : currency === "AED" ? "د.إ" : currency === "QAR" ? "ر.ق" : currency === "USD" ? "دولار" : currency)
     : currency;
 
   const formattedMarketCap = useMemo(() => {
@@ -551,7 +556,7 @@ export default function StockDetailClient({
       {/* Back button + Action buttons */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <Link
-          href={isSaudiStock ? "/scanner/technical?market=tasi" : "/scanner/technical"}
+          href={isGccStock ? gccDirectoryHref : isSaudiStock ? "/scanner/technical?market=tasi" : "/scanner/technical"}
           className="neobrutal-btn inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-all"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -1265,7 +1270,9 @@ export default function StockDetailClient({
               >
                 <span className="font-extrabold text-base tracking-wide">{stock.symbol}</span>
                 <span className="text-[10px] text-zinc-600 dark:text-zinc-400 font-sans font-bold truncate w-full">
-                  {isSaudiStock
+                  {isGccStock
+                    ? stock.name
+                    : isSaudiStock
                     ? (language === "ar" ? (SAUDI_STOCK_NAMES_AR[stock.symbol.toUpperCase()] || stock.name) : stock.name)
                     : (language === "ar" ? getCanonicalStockName(stock.symbol).name_ar : (getCanonicalStockName(stock.symbol).name_en || stock.name))}
                 </span>
@@ -1279,7 +1286,7 @@ export default function StockDetailClient({
       <div dir={language === "ar" ? "rtl" : "ltr"} className="app-panel p-6 sm:p-8 bg-white dark:bg-zinc-900 rounded-none border-2 border-black dark:border-white shadow-[4px_4px_0px_0px_#000] dark:shadow-[4px_4px_0px_0px_#fff]">
         <h2 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white mb-6">
           {language === "ar"
-            ? `أسئلة شائعة وتحليل سهم ${nameAr} (${symbol}) في ${isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"}`
+            ? `أسئلة شائعة وتحليل سهم ${nameAr} (${symbol}) في ${isGccStock ? gccMarketNameAr : isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"}`
             : `Frequently Asked Questions: ${nameEn} (${symbol}) Stock Analysis`}
         </h2>
 
@@ -1287,13 +1294,13 @@ export default function StockDetailClient({
           <div className="p-4 border-2 border-black dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/80">
             <h3 className="font-black text-sm sm:text-base text-zinc-950 dark:text-white">
               {language === "ar"
-                ? `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في ${isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"}؟`
-                : `What is the latest closing price of ${nameEn} (${symbol}) on ${isSaudiStock ? "TASI (Tadawul)" : "EGX"}?`}
+                ? `ما هو سعر سهم ${nameAr} (${symbol}) اليوم في ${isGccStock ? gccMarketNameAr : isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"}؟`
+                : `What is the latest closing price of ${nameEn} (${symbol}) on ${isGccStock ? gccMarketNameEn : isSaudiStock ? "TASI (Tadawul)" : "EGX"}?`}
             </h3>
             <p className="mt-2 text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
               {language === "ar"
-                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol} - ${nameEn}) في ${isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"} نحو ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} ${currencyLabel}${latestPrice?.date ? ` بتاريخ ${String(latestPrice.date).slice(0, 10)}` : ""}. يتم تحديث بيانات الإغلاق والمؤشرات الفنية يومياً بعد انتهاء جلسة التداول.`
-                : `The latest recorded closing price for ${nameEn} (${symbol} - ${nameAr}) on the ${isSaudiStock ? "Saudi Exchange (Tadawul / TASI)" : "Egyptian Exchange (EGX)"} is ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} ${currency}${latestPrice?.date ? ` as of ${String(latestPrice.date).slice(0, 10)}` : ""}. Closing data and technical indicators are updated daily after the trading session.`}
+                ? `بلغ آخر سعر إغلاق مسجل لسهم ${nameAr} (${symbol} - ${nameEn}) في ${isGccStock ? gccMarketNameAr : isSaudiStock ? "السوق السعودي (تاسي)" : "البورصة المصرية"} نحو ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} ${currencyLabel}${latestPrice?.date ? ` بتاريخ ${String(latestPrice.date).slice(0, 10)}` : ""}. يتم تحديث بيانات الإغلاق والمؤشرات الفنية يومياً بعد انتهاء جلسة التداول.`
+                : `The latest recorded closing price for ${nameEn} (${symbol} - ${nameAr}) on the ${isGccStock ? gccMarketNameEn : isSaudiStock ? "Saudi Exchange (Tadawul / TASI)" : "Egyptian Exchange (EGX)"} is ${Number(latestPrice?.close ?? latestTech?.close ?? 0).toFixed(2)} ${currency}${latestPrice?.date ? ` as of ${String(latestPrice.date).slice(0, 10)}` : ""}. Closing data and technical indicators are updated daily after the trading session.`}
             </p>
           </div>
 
@@ -1321,13 +1328,19 @@ export default function StockDetailClient({
                 : `Additional Quantitative Tools for ${nameEn} (${symbol})`}
             </h3>
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-black">
-              <Link href={isSaudiStock ? "/scanner/ai?market=tasi" : "/scanner/ai"} className="px-3 py-1.5 border-2 border-black bg-[#FFE600] text-black hover:underline">
-                {language === "ar" ? "محلل الأسهم بالذكاء الاصطناعي" : (isSaudiStock ? "TASI AI Stock Analyzer" : "EGX AI Stock Analyzer")}
+              <Link href={isGccStock ? "/chat" : isSaudiStock ? "/scanner/ai?market=tasi" : "/scanner/ai"} className="px-3 py-1.5 border-2 border-black bg-[#FFE600] text-black hover:underline">
+                {language === "ar" ? (isGccStock ? "اسأل الشات الذكي عن السهم" : "محلل الأسهم بالذكاء الاصطناعي") : (isGccStock ? "Ask the AI Chat" : isSaudiStock ? "TASI AI Stock Analyzer" : "EGX AI Stock Analyzer")}
               </Link>
+              {isGccStock ? (
+                <Link href={gccDirectoryHref} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
+                  {language === "ar" ? `دليل أسهم ${gccMarketNameAr}` : `${gccMarketNameEn} Directory`}
+                </Link>
+              ) : (
               <Link href={isSaudiStock ? "/fair-value?market=tasi" : "/fair-value"} className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
                 {language === "ar" ? "حاسبة السعر العادل ومؤشر الرخص" : (isSaudiStock ? "TASI Fair Value Screener" : "EGX Fair Value Screener")}
               </Link>
-              {!isSaudiStock && (
+              )}
+              {!isSaudiStock && !isGccStock && (
                 <>
                   <Link href="/sharia" className="px-3 py-1.5 border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white hover:underline">
                     {language === "ar" ? "فحص التوافق الشرعي EGX33" : "EGX33 Sharia Compliance"}

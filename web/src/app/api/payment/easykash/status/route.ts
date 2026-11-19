@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     const service = getSupabaseServiceClient();
     const { data: order, error } = await service
       .from("local_payment_orders")
-      .select("id,plan_id,amount_egp,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
+      .select("id,plan_id,amount_egp,duration_days,status,provider,telegram_invite_link,telegram_invite_expires_at,customer_note,affiliate_id,affiliate_code,commission_amount_egp,commission_status")
       .eq("id", orderId)
       .eq("user_id", user.id)
       .maybeSingle();
@@ -144,11 +144,20 @@ export async function GET(req: NextRequest) {
         end = lic?.expires_at || null;
         b2bDashboardUrl = "/b2b/dashboard";
       } else {
+        const orderPlan = String(order.plan_id || "pro").trim().toLowerCase();
+        const includeVip = orderPlan !== "chat_only";
+        const planTitleAr =
+          orderPlan === "chat_only"
+            ? "الشات الذكي (AI Chat Pro)"
+            : orderPlan === "vip_only"
+            ? "رادار وقنوات تليجرام VIP"
+            : "الباقة الشاملة Pro";
+
         const { data: sub } = await service
           .from("subscriptions")
           .select("current_period_end")
           .eq("user_id", user.id)
-          .in("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime"])
+          .in("plan_id", ["pro", "pro_renewal", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"])
           .eq("status", "active")
           .order("current_period_end", { ascending: false })
           .limit(1)
@@ -156,7 +165,9 @@ export async function GET(req: NextRequest) {
 
         end = sub?.current_period_end || null;
 
-        if (!inviteLink) {
+        if (!includeVip) {
+          inviteLink = "";
+        } else if (!inviteLink) {
           const { data: invite } = await service
             .from("pro_telegram_invites")
             .select("invite_link")
@@ -181,24 +192,31 @@ export async function GET(req: NextRequest) {
               const rawDisplayName = profile?.display_name || profile?.username || "المستثمر";
               const displayName = rawDisplayName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
               const buttons: { text: string; url: string }[][] = [];
-              if (inviteLink) {
+              if (includeVip && inviteLink) {
                 buttons.push([{ text: "💎 الانضمام لقناة VIP", url: inviteLink }]);
               }
               buttons.push([{ text: "🌐 فتح حسابك والتقارير", url: "https://egxbots.com/reports" }]);
 
+              const benefitsBlock =
+                orderPlan === "chat_only"
+                  ? `• 350 استفساراً تحليلياً بالذكاء الاصطناعي شهرياً عبر الموقع وبوت تليجرام\n• تحليل صور المحفظة والشارت (Vision AI) + 5 أتمتات يومية\n• إزالة تأخير الـ 15 يوماً في الموقع`
+                  : orderPlan === "vip_only"
+                  ? `• تنبيهات الرادار والمؤشرات الفنية الفورية على قناة تليجرام VIP (EGX & TASI)\n• إزالة تأخير الـ 15 يوماً من الماسح الفني في الموقع\n• ملاحظة: استخدام الشات الذكي يظل حسب رصيد الباقة المجانية`
+                  : `• تنبيهات الرادار والمؤشرات الفنية الفورية على قناة VIP (EGX & TASI)\n• وصول كامل لمساعد الذكاء الاصطناعي ARTORO (350 استفساراً/شهر + Vision AI + 5 أتمتات)\n• إزالة تأخير الـ 15 يوماً بالكامل في الموقع`;
+
               const welcomeMsg = `🎉 <b>أهلاً وسهلاً بك يا ${displayName}!</b>\n\n` +
-                `✅ <b>تم تأكيد دفع اشتراكك وتفعيل باقة Pro بنجاح!</b> 🚀\n\n` +
+                `✅ <b>تم تأكيد دفع اشتراكك وتفعيل ${planTitleAr} بنجاح!</b> 🚀\n\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
-                (inviteLink ? `💎 <b>رابط انضمامك الخاص لقناة التوصيات VIP:</b>\n${inviteLink}\n<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n` : "") +
+                (includeVip && inviteLink ? `💎 <b>رابط انضمامك الخاص لقناة تليجرام VIP:</b>\n${inviteLink}\n<i>(هذا الرابط شخصي وخاص بحسابك للدخول المباشر)</i>\n\n` : "") +
                 `📊 <b>مزايا باقتك المفعّلة الآن:</b>\n` +
-                `• إشارات دخول وتنبيهات الأهداف ووقف الخسارة لحظياً على قناة VIP\n` +
-                `• وصول كامل لكافة تقارير البورصة المصرية ومساعد الذكاء الاصطناعي ARTORO\n` +
-                `• استشارات وتحليلات ذكية لأي سهم تريده عبر هذا الشات\n\n` +
+                `${benefitsBlock}\n\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `💡 <b>كيف تبدأ؟</b>\n` +
-                `1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة الإشارات أولاً بأول.\n` +
-                `2. اسألني هنا عن أي سهم في البورصة المصرية (مثلاً: اكتب رمز السهم مثل <code>COMI</code> أو <code>TMGH</code>).\n\n` +
-                `نتمنى لك تداولات موفقة ومربحة دائماً! 📈`;
+                (includeVip
+                  ? `1. اضغط زر <b>الانضمام لقناة VIP</b> أدناه لمتابعة تنبيهات الرادار أولاً بأول.\n`
+                  : `1. افتح الشات الذكي الآن أو اكتب رمز أي سهم هنا في تليجرام لتحليله فوراً.\n`) +
+                `2. تصفح أدوات السوق والتقارير اليومية عبر الموقع في أي وقت.\n\n` +
+                `<i>تنويه: مخرجات المنصة أدوات تحليل فني وكمي مؤتمتة لأغراض البحث والمتابعة ولا تمثل توصية استثمارية.</i>`;
 
               try {
                 const tgResp = await fetch(`${relayUrl}/bot${botToken}/sendMessage`, {

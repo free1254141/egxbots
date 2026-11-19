@@ -36,7 +36,8 @@ from api.perf_utils import (
     resolve_verified_viewer,
 )
 from api.plan_limits import effective_limits
-from api.saudi_stock_aliases import is_saudi_symbol
+from api.saudi_stock_aliases import SAUDI_STOCK_NAMES_AR, is_saudi_symbol
+from api.stock_aliases import ARABIC_STOCK_MAPPINGS
 from api.symbols_local import list_countries, search_symbols
 
 router = APIRouter()
@@ -51,7 +52,18 @@ _META_KEY_RE = re.compile(r"^[a-zA-Z0-9_:-]{1,50}$")
 _FUND_TICKER_RE = re.compile(r"^[A-Z0-9_-]{1,24}(?:\.[A-Z0-9_-]{1,12})?$")
 _DISCLOSURE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_REMOVED_EXCHANGES = frozenset({"binance", "crypto", "forex", "lse"})
+_REMOVED_EXCHANGES = frozenset({"binance", "crypto", "forex", "lse", "indx", "index", "indices"})
+_INDEX_SYMBOLS = frozenset({
+    "EGX30", "EGX70", "EGX100", "EGX30CAPPED", "EGX33", "TAMAYUZ",
+    "TASI", "NOMU", "MT30", "DFMGI", "FADX15", "FADGI", "QSI", "GNRI",
+})
+_MARKET_ALLOWED_EXCHANGES = {
+    "egx": frozenset({"egx"}),
+    "tasi": frozenset({"tadawul"}),
+    "uae": frozenset({"dfm", "adx"}),
+    "qatar": frozenset({"qse"}),
+}
+_ARABIC_LETTER_RE = re.compile(r"[\u0600-\u06FF]")
 _ALLOWED_EVENTS = frozenset({"page_view", "feature_use"})
 
 _RUN_TO_RUN_TTL = 86400.0
@@ -212,6 +224,30 @@ def _normalize_exchange(raw: Optional[str]) -> Optional[str]:
     return val
 
 
+def _build_egx_arabic_lookups() -> Tuple[Dict[str, str], Dict[str, Tuple[str, ...]]]:
+    primary: Dict[str, str] = {}
+    aliases_by_sym: Dict[str, List[str]] = {}
+    for phrase, sym in ARABIC_STOCK_MAPPINGS.items():
+        if not sym or not _ARABIC_LETTER_RE.search(phrase):
+            continue
+        sym_up = sym.strip().upper()
+        norm_p = _normalize_arabic(phrase)
+        if norm_p:
+            bucket = aliases_by_sym.setdefault(sym_up, [])
+            if norm_p not in bucket:
+                bucket.append(norm_p)
+        clean_disp = phrase.strip()
+        if clean_disp.startswith("سهم ") or clean_disp.startswith("شركة "):
+            continue
+        prev = primary.get(sym_up, "")
+        if len(clean_disp) > len(prev):
+            primary[sym_up] = clean_disp
+    return primary, {sym: tuple(vals) for sym, vals in aliases_by_sym.items()}
+
+
+_EGX_PRIMARY_NAME_AR, _EGX_ARABIC_ALIASES = _build_egx_arabic_lookups()
+
+
 def _daily_cdn_headers(tag: str) -> Dict[str, str]:
     return {
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
@@ -241,6 +277,39 @@ def _safe_exec(fn, default=None):
 # 1. Symbols Search & Countries
 # ---------------------------------------------------------------------------
 
+_UAE_SEARCH_HINTS = {"uae", "dfm", "adx", "united arab emirates", "ae", "dubai", "abudhabi", "abu dhabi", "emirates"}
+_QATAR_SEARCH_HINTS = {"qatar", "qse", "qe", "qa", "doha", "qsi"}
+
+
+def _resolve_gcc_search_market(request: Request, country: Optional[str], exchange: Optional[str]) -> Optional[str]:
+    """Detect UAE (DFM/ADX) or Qatar (QSE) search scope. Explicit query params win over headers/cookies."""
+    explicit = (request.query_params.get("market"), country, exchange)
+    for raw in explicit:
+        val = (raw or "").strip().lower()
+        if not val:
+            continue
+        if val in _UAE_SEARCH_HINTS:
+            return "uae"
+        if val in _QATAR_SEARCH_HINTS:
+            return "qatar"
+        if normalize_market_hint(val) is not None or val == "tadawul":
+            return None
+    for raw in (
+        request.headers.get("x-egxbots-market"),
+        request.headers.get("x-market"),
+        request.cookies.get("egxbots_market"),
+        request.cookies.get("egx_market"),
+    ):
+        val = (raw or "").strip().lower()
+        if not val:
+            continue
+        if val in _UAE_SEARCH_HINTS:
+            return "uae"
+        if val in _QATAR_SEARCH_HINTS:
+            return "qatar"
+    return None
+
+
 def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: Optional[str]) -> List[Dict[str, Any]]:
     cache_key = f"{market}:{country or ''}:{exchange or ''}"
     found, cached = _SYMBOLS_CACHE.get(cache_key)
@@ -248,6 +317,50 @@ def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: 
         return cached
 
     def _fetch() -> List[Dict[str, Any]]:
+        if market in ("uae", "qatar"):
+            sb = get_market_supabase("tasi")
+            if sb is None:
+                return []
+            if market == "uae":
+                exchanges_filter = [exchange.upper()] if exchange in ("dfm", "adx") else ["DFM", "ADX"]
+                default_country = "UAE"
+                default_currency = "AED"
+            else:
+                exchanges_filter = ["QSE"]
+                default_country = "Qatar"
+                default_currency = "QAR"
+            target_exchange = exchanges_filter[0]
+            for cols in (
+                "symbol, exchange, name, name_ar, country, currency",
+                "symbol, exchange, name, name_ar, country",
+                "symbol, exchange, name, country",
+            ):
+                try:
+                    res = (
+                        sb.table("stocks")
+                        .select(cols)
+                        .eq("is_active", True)
+                        .in_("exchange", exchanges_filter)
+                        .limit(5000)
+                        .execute()
+                    )
+                    rows = getattr(res, "data", None) or []
+                    return [
+                        {
+                            "Symbol": r.get("symbol"),
+                            "Exchange": r.get("exchange") or target_exchange,
+                            "Name": r.get("name"),
+                            "NameAr": r.get("name_ar") or "",
+                            "Country": r.get("country") or default_country,
+                            "Type": "Common Stock",
+                            "Currency": r.get("currency") or default_currency,
+                        }
+                        for r in rows
+                    ]
+                except Exception:
+                    continue
+            return []
+
         sb = get_market_supabase(market)
         if sb is None:
             return []
@@ -282,7 +395,7 @@ def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: 
             )
             rows = getattr(res, "data", None) or []
             if rows and isinstance(rows[0].get("payload"), list):
-                return rows[0]["payload"]
+                return _enrich_and_filter_symbol_items(rows[0]["payload"], market)
 
         for cols in (
             "symbol, exchange, name, name_ar, country, currency",
@@ -300,7 +413,7 @@ def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: 
                         q_builder = q_builder.ilike("exchange", exchange)
                 res = q_builder.execute()
                 rows = getattr(res, "data", None) or []
-                return [
+                mapped = [
                     {
                         "Symbol": r.get("symbol"),
                         "Exchange": r.get("exchange") or target_exchange,
@@ -312,6 +425,7 @@ def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: 
                     }
                     for r in rows
                 ]
+                return _enrich_and_filter_symbol_items(mapped, market)
             except Exception:
                 continue
         return []
@@ -320,6 +434,36 @@ def _load_market_symbols_dataset(market: str, country: Optional[str], exchange: 
     if items:
         _SYMBOLS_CACHE.set(cache_key, items)
     return items
+
+
+def _enrich_and_filter_symbol_items(raw_items: List[Dict[str, Any]], market: str) -> List[Dict[str, Any]]:
+    allowed_exs = _MARKET_ALLOWED_EXCHANGES.get(market)
+    clean_items: List[Dict[str, Any]] = []
+    for raw_item in raw_items:
+        item = dict(raw_item)
+        raw_sym = str(item.get("Symbol") or item.get("symbol") or item.get("Code") or "").strip()
+        if not raw_sym:
+            continue
+        sym_base = re.sub(r"\.(sr|sa|tadawul|ca)$", "", raw_sym.lower()).upper()
+        raw_name = str(item.get("Name") or item.get("name") or "")
+        if sym_base in _INDEX_SYMBOLS or raw_name.startswith("Unknown ("):
+            continue
+        raw_ex = str(item.get("Exchange") or item.get("exchange") or "")
+        ex = _normalize_exchange(raw_ex) or ""
+        if ex in _REMOVED_EXCHANGES:
+            continue
+        if allowed_exs and ex and ex not in allowed_exs:
+            continue
+        raw_name_ar = str(item.get("NameAr") or item.get("name_ar") or item.get("arabic_name") or "").strip()
+        if not raw_name_ar:
+            if market == "egx":
+                raw_name_ar = _EGX_PRIMARY_NAME_AR.get(sym_base, "")
+            elif market == "tasi":
+                raw_name_ar = SAUDI_STOCK_NAMES_AR.get(sym_base, "")
+            if raw_name_ar:
+                item["NameAr"] = raw_name_ar
+        clean_items.append(item)
+    return clean_items
 
 
 @router.get("/api/symbols/search")
@@ -331,17 +475,26 @@ async def api_symbols_search(
     limit: int = Query(default=25, ge=1, le=100000),
     source: str = Query(default="supabase"),
 ):
-    """Unified EGX + TASI symbols search backed by bounded LRU cache."""
+    """Unified EGX + TASI + UAE + Qatar symbols search backed by bounded LRU cache."""
     q_raw = q.strip()
     q_low = q_raw.lower()
     q_norm = _normalize_arabic(q_raw)
     norm_ex = _normalize_exchange(exchange)
 
-    looks_saudi = bool(_SAUDI_TICKER_RE.match(q_raw))
+    gcc_market = _resolve_gcc_search_market(request, country, norm_ex)
+    looks_saudi = bool(_SAUDI_TICKER_RE.match(q_raw)) and not gcc_market
     explicit_egypt = bool(country and "egypt" in country.lower())
     hint = request.query_params.get("market") or country or exchange
-    market = "tasi" if (looks_saudi and not explicit_egypt and norm_ex != "egx") else resolve_request_market(request, hint)
-    explicit_in_url = _has_explicit_market_param(request) or looks_saudi
+    if gcc_market:
+        market = gcc_market
+    elif looks_saudi and not explicit_egypt and norm_ex != "egx":
+        market = "tasi"
+    else:
+        market = resolve_request_market(request, hint)
+    explicit_gcc_in_url = bool(
+        gcc_market and any(request.query_params.get(k) for k in ("market", "country", "exchange"))
+    )
+    explicit_in_url = _has_explicit_market_param(request) or looks_saudi or explicit_gcc_in_url
     resp_headers = (
         {
             "Cache-Control": "public, max-age=30",
@@ -365,10 +518,29 @@ async def api_symbols_search(
         results = search_symbols(q=q_raw, country=country, exchange=exchange, limit=limit)
         return JSONResponse({"results": results}, headers=resp_headers)
 
-    target_exchange = get_market_exchange(market)
-    default_country = "Saudi Arabia" if market == "tasi" else "Egypt"
-    default_currency = "SAR" if market == "tasi" else "EGP"
+    target_exchange = (
+        "DFM" if market == "uae" else "QSE" if market == "qatar" else get_market_exchange(market)
+    )
+    default_country = (
+        "UAE"
+        if market == "uae"
+        else "Qatar"
+        if market == "qatar"
+        else "Saudi Arabia"
+        if market == "tasi"
+        else "Egypt"
+    )
+    default_currency = (
+        "AED"
+        if market == "uae"
+        else "QAR"
+        if market == "qatar"
+        else "SAR"
+        if market == "tasi"
+        else "EGP"
+    )
     q_clean = re.sub(r"\.(sr|sa|tadawul|ca)$", "", q_low)
+    allowed_exs = _MARKET_ALLOWED_EXCHANGES.get(market)
 
     ranked: List[Tuple[int, str, Dict[str, Any]]] = []
     for item in all_items:
@@ -377,16 +549,26 @@ async def api_symbols_search(
             continue
         sym = raw_sym.lower()
         sym_clean = re.sub(r"\.(sr|sa|tadawul|ca)$", "", sym)
+        sym_base_up = sym_clean.upper()
         raw_name = str(item.get("Name") or item.get("name") or "")
+        if sym_base_up in _INDEX_SYMBOLS or raw_name.startswith("Unknown ("):
+            continue
         name = raw_name.lower()
         raw_name_ar = str(item.get("NameAr") or item.get("name_ar") or item.get("arabic_name") or "")
+        if not raw_name_ar and market == "egx":
+            raw_name_ar = _EGX_PRIMARY_NAME_AR.get(sym_base_up, "")
+        elif not raw_name_ar and market == "tasi":
+            raw_name_ar = SAUDI_STOCK_NAMES_AR.get(sym_base_up, "")
         name_ar_norm = _normalize_arabic(raw_name_ar)
         name_norm = _normalize_arabic(raw_name)
+        aliases_ar = _EGX_ARABIC_ALIASES.get(sym_base_up, ()) if market == "egx" else ()
         raw_ex = str(item.get("Exchange") or item.get("exchange") or target_exchange)
         ex = _normalize_exchange(raw_ex) or ""
         if ex in _REMOVED_EXCHANGES:
             continue
-        if norm_ex and ex != norm_ex:
+        if allowed_exs and ex not in allowed_exs:
+            continue
+        if norm_ex and norm_ex not in ("uae", "qatar") and ex != norm_ex:
             continue
 
         matches = (
@@ -394,7 +576,7 @@ async def api_symbols_search(
             or q_low in sym
             or (q_clean and q_clean in sym_clean)
             or q_low in name
-            or (q_norm and (q_norm in name_norm or q_norm in name_ar_norm))
+            or (q_norm and (q_norm in name_norm or q_norm in name_ar_norm or any(q_norm in alias for alias in aliases_ar)))
         )
         if not matches:
             continue
@@ -1278,13 +1460,26 @@ async def api_user_quota(request: Request):
         )
         quota_win = resolve_subscription_quota_window(sub_rows)
         pro = quota_win["is_pro"] or is_unlimited
+        has_chat_pro = quota_win.get("has_chat_pro", pro) or is_unlimited
+        has_vip_access = quota_win.get("has_vip_access", pro) or is_unlimited
         if not is_payments_enabled():
             pro = True
+            has_chat_pro = True
+            has_vip_access = True
         active_sub = quota_win["active_sub"]
         month_start = quota_win["effective_month_start_str"]
 
-        plan_id = str(active_sub.get("plan_id") or "") if active_sub else ""
-        plan_name = ("lifetime" if (plan_id in ("lifetime", "pro_lifetime") or is_unlimited) else "pro") if pro else "free"
+        plan_id = str(active_sub.get("plan_id") or "").lower() if active_sub else ""
+        if not pro:
+            plan_name = "free"
+        elif is_unlimited or plan_id in ("lifetime", "pro_lifetime"):
+            plan_name = "lifetime"
+        elif plan_id == "chat_only":
+            plan_name = "chat_only"
+        elif plan_id == "vip_only":
+            plan_name = "vip_only"
+        else:
+            plan_name = "pro"
         limits = effective_limits(plan_name)
 
         chat_used = (
@@ -1293,10 +1488,10 @@ async def api_user_quota(request: Request):
                 for r in limit_rows
                 if str(r.get("date") or "") >= month_start
             )
-            if pro
+            if has_chat_pro
             else sum(int(r.get("chat_count") or 0) for r in limit_rows)
         )
-        quota_period = "monthly" if pro else "lifetime"
+        quota_period = "monthly" if has_chat_pro else "lifetime"
         chat_limit = int(limits["chat_messages_per_month"])
         unique_syms = {str(p.get("symbol") or "").strip().upper() for p in pos_rows if p.get("symbol")}
         portfolio_count = len(unique_syms)
@@ -1322,15 +1517,35 @@ async def api_user_quota(request: Request):
         has_paid_before = bool(orders_rows or founder_rows)
         trial_eligible = (trial_row is None) and (not pro) and (not has_paid_before)
 
+        plan_label = (
+            "مدى الحياة VIP"
+            if is_lifetime
+            else (
+                "تجربة Pro مجانية"
+                if is_trial
+                else (
+                    "الشات الذكي (AI Chat)"
+                    if plan_name == "chat_only"
+                    else (
+                        "رادار تليجرام VIP"
+                        if plan_name == "vip_only"
+                        else ("الباقة الشاملة Pro" if pro else "مجاني")
+                    )
+                )
+            )
+        )
+
         return {
             "ok": True,
             "plan": {
                 "id": plan_name,
-                "label": "مدى الحياة (Lifetime)" if is_lifetime else ("تجربة Pro مجانية" if is_trial else ("Pro" if pro else "مجاني")),
+                "label": plan_label,
                 "is_trial": is_trial,
                 "trial_eligible": trial_eligible,
                 "trial_expires_at": trial_row.get("expires_at") if trial_row else None,
                 "is_pro": pro,
+                "has_chat_pro": has_chat_pro,
+                "has_vip_access": has_vip_access,
                 "is_lifetime": is_lifetime,
                 "status": (active_sub.get("status") or "active") if (pro and active_sub) else ("active" if pro else ("canceled" if active_sub else "none")),
                 "current_period_end": active_sub.get("current_period_end") if active_sub else None,
@@ -1345,7 +1560,7 @@ async def api_user_quota(request: Request):
                     "used": chat_used,
                     "limit": chat_limit,
                     "bonus_credits": bonus_balance,
-                    "remaining": max(0, chat_limit - chat_used) + (0 if pro else bonus_balance),
+                    "remaining": max(0, chat_limit - chat_used) + (0 if has_chat_pro else bonus_balance),
                     "percent": min(100, round((chat_used / max(1, chat_limit)) * 100)),
                     "period": quota_period,
                 },

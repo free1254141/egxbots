@@ -4,6 +4,8 @@ import {
   getMarketExchange,
   getMarketSupabaseClient,
 } from "@/lib/supabase/route-data";
+import { CANONICAL_STOCK_NAMES } from "@/lib/ai/stock-names";
+import { SAUDI_STOCK_NAMES_AR } from "@/lib/saudi-stocks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +39,41 @@ function normalizeExchangeParam(raw?: string | null): string | null {
   return val;
 }
 
+const UAE_SEARCH_HINTS = new Set([
+  "uae",
+  "dfm",
+  "adx",
+  "united arab emirates",
+  "ae",
+  "dubai",
+  "abudhabi",
+  "abu dhabi",
+  "emirates",
+]);
+const QATAR_SEARCH_HINTS = new Set(["qatar", "qse", "qe", "qa", "doha", "qsi"]);
+
+function resolveGccSearchScope(
+  explicit: Array<string | null | undefined>,
+  implicit: Array<string | null | undefined>
+): "uae" | "qatar" | null {
+  for (const raw of explicit) {
+    const val = (raw || "").trim().toLowerCase();
+    if (!val) continue;
+    if (UAE_SEARCH_HINTS.has(val)) return "uae";
+    if (QATAR_SEARCH_HINTS.has(val)) return "qatar";
+    if (["egx", "eg", "egp", "egypt", "ca", "cairo", "tasi", "tadawul", "sa", "sar", "saudi", "saudi arabia", "sr", "ksa"].includes(val)) {
+      return null;
+    }
+  }
+  for (const raw of implicit) {
+    const val = (raw || "").trim().toLowerCase();
+    if (!val) continue;
+    if (UAE_SEARCH_HINTS.has(val)) return "uae";
+    if (QATAR_SEARCH_HINTS.has(val)) return "qatar";
+  }
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const qRaw = (url.searchParams.get("q") || "").trim();
@@ -47,7 +84,11 @@ export async function GET(req: NextRequest) {
   const exchange = normalizeExchangeParam(rawExchange);
   const limit = Math.min(Number(url.searchParams.get("limit") || 25), 100000);
 
-  const looksLikeSaudiTicker = /^\d{4}(\.(sr|sa|tadawul))?$/i.test(qRaw);
+  const gccScope = resolveGccSearchScope(
+    [url.searchParams.get("market"), country, rawExchange],
+    [req.headers.get("x-egxbots-market"), req.cookies.get("egxbots_market")?.value]
+  );
+  const looksLikeSaudiTicker = !gccScope && /^\d{4}(\.(sr|sa|tadawul))?$/i.test(qRaw);
   const explicitCountryIsEgypt = Boolean(country && country.toLowerCase().includes("egypt"));
   const explicitMarketHint =
     url.searchParams.get("market") || country || rawExchange || null;
@@ -55,9 +96,9 @@ export async function GET(req: NextRequest) {
     looksLikeSaudiTicker && !explicitCountryIsEgypt && exchange !== "egx"
       ? "tasi"
       : resolveRequestMarket(req, explicitMarketHint);
-  const targetExchange = getMarketExchange(market);
-  const defaultCurrency = market === "tasi" ? "SAR" : "EGP";
-  const defaultCountry = market === "tasi" ? "Saudi Arabia" : "Egypt";
+  const targetExchange = gccScope === "uae" ? "DFM" : gccScope === "qatar" ? "QSE" : getMarketExchange(market);
+  const defaultCurrency = gccScope === "uae" ? "AED" : gccScope === "qatar" ? "QAR" : market === "tasi" ? "SAR" : "EGP";
+  const defaultCountry = gccScope === "uae" ? "UAE" : gccScope === "qatar" ? "Qatar" : market === "tasi" ? "Saudi Arabia" : "Egypt";
 
   const explicitMarketInUrl =
     url.searchParams.has("market") ||
@@ -79,10 +120,10 @@ export async function GET(req: NextRequest) {
   // 1. Prefer the Python backend for EGX. It honors source=local (local symbols
   //    inventory), the full limit (the admin Data Manager requests 100000),
   //    and performs its own multi-tier symbol resolution.
-  //    Skip Python for TASI because the Python local symbols index is EGX-only.
-  if (market === "egx") {
+  //    Skip Python for TASI/UAE/Qatar because the Python local symbols index is EGX-only.
+  if (!gccScope && market === "egx") {
     try {
-      const backendUrl = new URL("/symbols/search", getBackendBaseUrl());
+      const backendUrl = new URL("/api/symbols/search", getBackendBaseUrl());
       url.searchParams.forEach((value, key) => {
         backendUrl.searchParams.set(key, value);
       });
@@ -106,15 +147,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 2. Supabase lookups (EGX primary or SAUDI_SUPABASE for TASI).
+  // 2. Supabase lookups (EGX primary or SAUDI_SUPABASE for TASI/UAE/Qatar).
   try {
-    const supabase = getMarketSupabaseClient(market);
-    const removedExchanges = new Set(["binance", "crypto", "forex", "lse"]);
+    const supabase = getMarketSupabaseClient(gccScope ? "tasi" : market);
+    const removedExchanges = new Set(["binance", "crypto", "forex", "lse", "indx", "index", "indices"]);
+    const indexSymbols = new Set([
+      "EGX30", "EGX70", "EGX100", "EGX30CAPPED", "EGX33", "TAMAYUZ",
+      "TASI", "NOMU", "MT30", "DFMGI", "FADX15", "FADGI", "QSI", "GNRI",
+    ]);
 
     // market_cache keys are stored with canonical casing (e.g. symbols_Egypt, symbols_Saudi Arabia);
     // the incoming country may be any casing, so try the common variants.
-    const cacheKeyCandidates =
-      market === "tasi"
+    const cacheKeyCandidates = gccScope
+      ? []
+      : market === "tasi"
         ? [
             ...new Set([
               ...(country
@@ -157,7 +203,9 @@ export async function GET(req: NextRequest) {
     if (allSymbols.length === 0) {
       // Fallback to the canonical stocks table (case-insensitive matches —
       // stocks.country stores "Egypt" / "Saudi Arabia", requests may carry lowercase).
-      console.warn(`Cache miss for ${cacheKeyCandidates.join(", ")} — falling back to stocks table`);
+      if (!gccScope) {
+        console.warn(`Cache miss for ${cacheKeyCandidates.join(", ")} — falling back to stocks table`);
+      }
       const selectAttempts = [
         "symbol, exchange, name, name_ar, country, currency",
         "symbol, exchange, name, name_ar, country",
@@ -172,7 +220,15 @@ export async function GET(req: NextRequest) {
           .eq("is_active", true)
           .limit(5000);
 
-        if (market === "tasi") {
+        if (gccScope) {
+          const gccExchanges =
+            gccScope === "uae" && (exchange === "dfm" || exchange === "adx")
+              ? [exchange.toUpperCase()]
+              : gccScope === "uae"
+                ? ["DFM", "ADX"]
+                : ["QSE"];
+          symbolQuery = symbolQuery.in("exchange", gccExchanges);
+        } else if (market === "tasi") {
           symbolQuery = symbolQuery.eq("exchange", targetExchange);
         } else {
           if (country) symbolQuery = symbolQuery.ilike("country", country);
@@ -211,13 +267,31 @@ export async function GET(req: NextRequest) {
     const qClean = q.replace(/\.(sr|sa|tadawul|ca)$/i, "");
     const rankedMatches: Array<{ rank: number; item: any }> = [];
 
+    const allowedExchanges =
+      gccScope === "uae"
+        ? new Set(["dfm", "adx"])
+        : gccScope === "qatar"
+          ? new Set(["qse"])
+          : market === "tasi"
+            ? new Set(["tadawul"])
+            : new Set(["egx"]);
+
     for (const item of allSymbols) {
       const rawSym = String(item.Symbol || item.symbol || item.Code || "");
       const sym = rawSym.toLowerCase();
       const symClean = sym.replace(/\.(sr|sa|tadawul|ca)$/i, "");
+      const symCleanUpper = symClean.toUpperCase();
       const rawName = String(item.Name || item.name || "");
+      if (indexSymbols.has(symCleanUpper) || rawName.startsWith("Unknown (")) continue;
       const name = rawName.toLowerCase();
-      const rawNameAr = String(item.NameAr || item.name_ar || item.arabic_name || "");
+      let rawNameAr = String(item.NameAr || item.name_ar || item.arabic_name || "");
+      if (!rawNameAr) {
+        if (!gccScope && market === "tasi") {
+          rawNameAr = SAUDI_STOCK_NAMES_AR[symCleanUpper] || "";
+        } else if (!gccScope && market === "egx") {
+          rawNameAr = CANONICAL_STOCK_NAMES[symCleanUpper]?.name_ar || "";
+        }
+      }
       const nameArNorm = normalizeArabicSearch(rawNameAr);
       const nameNorm = normalizeArabicSearch(rawName);
       const rawEx = String(item.Exchange || item.exchange || targetExchange);
@@ -227,7 +301,8 @@ export async function GET(req: NextRequest) {
 
       // Apply exchange filter
       if (removedExchanges.has(ex)) continue;
-      if (exchange && ex !== exchange) continue;
+      if (!allowedExchanges.has(ex)) continue;
+      if (exchange && exchange !== "uae" && exchange !== "qatar" && ex !== exchange) continue;
 
       // Apply query filter (matches symbol, English name, or Arabic name)
       const matches =

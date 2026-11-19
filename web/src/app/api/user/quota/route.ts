@@ -115,15 +115,26 @@ export async function GET(req: NextRequest) {
     const isUnlimited = isUnlimitedChatUser(user);
     const quotaWin = resolveSubscriptionQuotaWindow(subRows || [], now);
     const pro = quotaWin.isPro || isUnlimited;
+    const hasChatPro = quotaWin.hasChatPro || isUnlimited;
+    const hasVipAccess = quotaWin.hasVipAccess || isUnlimited;
     const activeSub = quotaWin.activeSub;
     const monthStartStr = quotaWin.effectiveMonthStartStr;
 
-    const planName = pro ? (activeSub?.plan_id === "lifetime" || isUnlimited ? "lifetime" : "pro") : "free";
+    const rawPlanId = String(activeSub?.plan_id || "").toLowerCase();
+    const planName = !pro
+      ? "free"
+      : isUnlimited || rawPlanId === "lifetime" || rawPlanId === "pro_lifetime"
+      ? "lifetime"
+      : rawPlanId === "chat_only"
+      ? "chat_only"
+      : rawPlanId === "vip_only"
+      ? "vip_only"
+      : "pro";
     const limits = planLimits(planName);
 
-    // Derive chat quota (Pro = monthly subscription window; Free = 10 once per account lifetime)
+    // Derive chat quota (Chat Pro = monthly subscription window; Free / VIP-only = 10 once per account lifetime)
     const today = quotaWin.todayStr;
-    const effectiveLimitRows = pro
+    const effectiveLimitRows = hasChatPro
       ? (limitRowsRes.data || []).filter((r: any) => String(r.date || "") >= monthStartStr)
       : (limitRowsRes.data || []);
     const todayLimitRow = effectiveLimitRows.find((r: any) => r.date === today);
@@ -134,7 +145,7 @@ export async function GET(req: NextRequest) {
     );
     const chatUsed = monthlyLimitsCount;
     const chatLimit = limits.chat_messages_per_month;
-    const quotaPeriod = pro ? "monthly" : "lifetime";
+    const quotaPeriod = hasChatPro ? "monthly" : "lifetime";
 
     // Derive portfolio count
     const positionRows = posResult.data;
@@ -172,15 +183,29 @@ export async function GET(req: NextRequest) {
     );
     const trialEligible = !hasUsedTrial && !pro && !hasPaidBefore;
 
+    const planLabel = isLifetime
+      ? "مدى الحياة VIP"
+      : isTrial
+      ? "تجربة Pro مجانية"
+      : planName === "chat_only"
+      ? "الشات الذكي (AI Chat)"
+      : planName === "vip_only"
+      ? "رادار تليجرام VIP"
+      : pro
+      ? "الباقة الشاملة Pro"
+      : "مجاني";
+
     return NextResponse.json({
       ok: true,
       plan: {
         id: planName,
-        label: isLifetime ? "مدى الحياة (Lifetime)" : (isTrial ? "تجربة Pro مجانية" : (pro ? "Pro" : "مجاني")),
+        label: planLabel,
         is_trial: isTrial,
         trial_eligible: trialEligible,
         trial_expires_at: trialRes.data?.expires_at || null,
         is_pro: pro,
+        has_chat_pro: hasChatPro,
+        has_vip_access: hasVipAccess,
         is_lifetime: isLifetime,
         status: pro ? (activeSub?.status || "active") : (activeSub ? "canceled" : "none"),
         current_period_end: activeSub?.current_period_end || null,
@@ -195,7 +220,7 @@ export async function GET(req: NextRequest) {
           used: chatUsed,
           limit: chatLimit,
           bonus_credits: bonusBalance,
-          remaining: Math.max(0, chatLimit - chatUsed) + (pro ? 0 : bonusBalance),
+          remaining: Math.max(0, chatLimit - chatUsed) + (hasChatPro ? 0 : bonusBalance),
           percent: Math.min(100, Math.round((chatUsed / Math.max(1, chatLimit)) * 100)),
           period: quotaPeriod,
         },

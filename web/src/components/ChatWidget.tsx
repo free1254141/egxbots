@@ -108,7 +108,7 @@ export default function ChatWidget() {
     const [showAutonomousModal, setShowAutonomousModal] = useState<boolean>(false);
 
     const handleToggleAutonomousRecs = () => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
         if (!activePro && !autonomousRecommendations) {
             toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
             setShowUpgradeModal(true);
@@ -123,7 +123,7 @@ export default function ChatWidget() {
     };
 
     const handleConfirmAutonomousRecs = () => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
         if (!activePro) {
             toast.error(language === "ar" ? "وضع التوصيات الحرة متاح لمشتركي باقة Pro فقط 👑" : "Autonomous recommendations are for Pro members only 👑");
             setShowUpgradeModal(true);
@@ -136,7 +136,7 @@ export default function ChatWidget() {
 
     // Auto-disable autonomous recs ONLY after server access check is ready and confirms user is not Pro
     useEffect(() => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
         if (isAccessReady && !activePro && autonomousRecommendations) {
             setAutonomousRecommendations(false);
         }
@@ -640,7 +640,7 @@ export default function ChatWidget() {
     }
 
     const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
         if (!activePro) {
             toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
             setShowUpgradeModal(true);
@@ -852,7 +852,7 @@ export default function ChatWidget() {
                                                             <span className="text-xs font-bold text-zinc-900 dark:text-white">
                                                                 {language === "ar" ? "توصيات حرة" : "Autonomous Recs"}
                                                             </span>
-                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) && (
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true")) && (
                                                                 <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-black text-amber-600 dark:text-amber-400 border border-amber-500/40">
                                                                     PRO 👑
                                                                 </span>
@@ -864,7 +864,7 @@ export default function ChatWidget() {
                                                             )}
                                                         </div>
                                                         <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true"))
+                                                            {!(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true"))
                                                                 ? (language === "ar" ? "ميزة حصرية لمشتركي Pro" : "Exclusive to Pro members")
                                                                 : autonomousRecommendations
                                                                     ? (language === "ar" ? "توليد فرص برؤية مستقلة" : "Independent setups active")
@@ -1102,7 +1102,7 @@ export default function ChatWidget() {
                                     {/* Portfolio Image Upload Hero Card */}
                                     <div 
                                         onClick={() => {
-                                            const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                            const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
                                             if (!activePro) {
                                                 toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
                                                 setShowUpgradeModal(true);
@@ -1116,7 +1116,7 @@ export default function ChatWidget() {
                                             <div className="space-y-1 flex-1">
                                                 <div className="flex items-center gap-2">
                                                     <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-bold rounded-md uppercase">
-                                                        {(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true")) ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
+                                                        {(isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true")) ? "جديد وحصري 📸" : "حصري لـ Pro 📸👑"}
                                                     </span>
                                                     <h4 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
                                                         حلل محفظتك الاستثمارية من صورة
@@ -1466,7 +1466,7 @@ export default function ChatWidget() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_pro_active") === "true");
+                                        const activePro = isPro || (typeof window !== "undefined" && localStorage.getItem("egx_chat_pro_active") === "true");
                                         if (!activePro) {
                                             toast.error(language === "ar" ? "رفع وتحليل صور المحفظة والشارت متاح لمشتركي باقة Pro فقط 📸👑" : "Portfolio image analysis is a Pro feature 📸👑");
                                             setShowUpgradeModal(true);

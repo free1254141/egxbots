@@ -74,6 +74,7 @@ export default function ShariaCleanserClient({
   const { language } = useLanguage();
   const isAr = language === "ar";
   const { market, isSaudi, currencyLabel, currencyCode } = useMarket();
+  const shariaMarket: "egx" | "tasi" = isSaudi ? "tasi" : "egx";
   const curr = isAr ? currencyLabel : currencyCode;
   const popularShariaSymbols = isSaudi ? TASI_POPULAR_SHARIA_SYMBOLS : EGX_POPULAR_SHARIA_SYMBOLS;
 
@@ -87,7 +88,7 @@ export default function ShariaCleanserClient({
   const [sharesCount, setSharesCount] = useState<string>("1000");
   const [couponPerShare, setCouponPerShare] = useState<string>("5.00");
   const [purificationRate, setPurificationRate] = useState<string>(() => {
-    const meta = getStockPurificationMeta(defaultSymbol, market);
+    const meta = getStockPurificationMeta(defaultSymbol, shariaMarket);
     return meta ? meta.purificationRatePct.toString() : "0.9";
   });
   const [calcMode, setCalcMode] = useState<"dividend" | "zakat">("dividend");
@@ -97,7 +98,7 @@ export default function ShariaCleanserClient({
     const nextSym = isSaudi ? "1120" : "ABUK";
     setSelectedSymbol(nextSym);
     setSearch("");
-    const meta = getStockPurificationMeta(nextSym, market);
+    const meta = getStockPurificationMeta(nextSym, shariaMarket);
     setPurificationRate(meta ? meta.purificationRatePct.toString() : isSaudi ? "0.0" : "0.9");
   }, [isSaudi, market]);
 
@@ -117,7 +118,7 @@ export default function ShariaCleanserClient({
           setLoading(true);
         }
         const data: FairValueReport = await fetchFairValueReportCached<FairValueReport>(
-          market,
+          shariaMarket,
           controller.signal,
           hasMatchingInitial ? { forceRefresh: true } : undefined,
         );
@@ -245,18 +246,18 @@ export default function ShariaCleanserClient({
       currentPrice: 0,
       fairValue: 0,
       upsidePct: 0,
-      isSharia: isShariaCompliant(selectedSymbol, market),
+      isSharia: isShariaCompliant(selectedSymbol, shariaMarket),
     };
   }, [allStocks, selectedSymbol, isSaudi, isAr, market]);
 
   const currentMeta = useMemo(() => {
-    return getStockPurificationMeta(selectedSymbol, market);
+    return getStockPurificationMeta(selectedSymbol, shariaMarket);
   }, [selectedSymbol, market]);
 
   // When selected symbol changes, update default purification rate
   const onSelectStock = (sym: string) => {
     setSelectedSymbol(sym);
-    const meta = getStockPurificationMeta(sym, market);
+    const meta = getStockPurificationMeta(sym, shariaMarket);
     if (meta) {
       setPurificationRate(meta.purificationRatePct.toString());
     } else {
@@ -702,7 +703,7 @@ export default function ShariaCleanserClient({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {filteredStocks.map((stock) => {
               const isSelected = selectedSymbol === stock.symbol;
-              const meta = getStockPurificationMeta(stock.symbol, market);
+              const meta = getStockPurificationMeta(stock.symbol, shariaMarket);
               const rate = meta ? meta.purificationRatePct : getDefaultPurificationRate(stock.sectorAr);
               return (
                 <div

@@ -33,14 +33,8 @@ async function isUserPro(supabase: ReturnType<typeof getSupabaseAdminClient>, us
     .order("current_period_end", { ascending: false })
     .limit(1);
 
-  if (subs && subs.length > 0) {
-    const endStr = String(subs[0].current_period_end || "");
-    if (endStr.includes("2126") || new Date(endStr).getTime() > Date.now()) {
-      return true;
-    }
-  }
-
-  return false;
+  const { hasActiveChatPro } = await import("@/lib/ai/plan-gate");
+  return hasActiveChatPro(subs || []);
 }
 
 // GET /api/automations — List user's automations

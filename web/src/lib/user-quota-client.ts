@@ -73,7 +73,7 @@ function bindInvalidationListeners(): void {
   window.addEventListener("egx:entitlements-updated", clearAll);
   window.addEventListener(TRIAL_AUTOSTART_EVENT, clearAll);
   window.addEventListener("storage", (e: StorageEvent) => {
-    if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active") {
+    if (e.key === "egx_entitlements_timestamp" || e.key === "egx_pro_active" || e.key === "egx_chat_pro_active") {
       clearAll();
     }
   });
@@ -154,6 +154,7 @@ export async function fetchUserQuotaCached(
           try {
             window.localStorage.setItem(`${QUOTA_CACHE_PREFIX}${userId}`, serialized);
             window.localStorage.setItem("egx_pro_active", data?.plan?.is_pro === true ? "true" : "false");
+            window.localStorage.setItem("egx_chat_pro_active", (data?.plan?.has_chat_pro ?? data?.plan?.is_pro) === true ? "true" : "false");
           } catch {
             // ignore localStorage quota errors
           }

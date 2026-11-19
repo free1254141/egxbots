@@ -264,8 +264,18 @@ def get_active_market_context() -> str:
     return _ACTIVE_MARKET_CTX.get()
 
 
+from api.agentic_chat.market_registry import (
+    currency_for_market as _reg_currency_for_market,
+    detect_exchange_from_suffix as _reg_detect_exchange_from_suffix,
+    get_market_config as _reg_get_market_config,
+    get_supabase_for_exchange as _reg_get_supabase_for_exchange,
+    normalize_exchange_code as _reg_normalize_exchange_code,
+    ui_market_label as _reg_ui_market_label,
+)
+
+
 def _normalize_market_code(market: Optional[str]) -> str:
-    """Normalize arbitrary market/country label to 'TADAWUL' or 'EGX'."""
+    """Normalize arbitrary market/country label to its canonical DB exchange code (EGX, TADAWUL, QSE, DFM, ADX, ...)."""
     if not market:
         return "EGX"
     raw = str(market).strip()
@@ -275,20 +285,15 @@ def _normalize_market_code(market: Optional[str]) -> str:
     ar_clean = re.sub(r"[()\[\]{}._/-]+", " ", _normalize_arabic_text(raw)).strip().upper()
     if upper_clean in _TASI_MARKET_TOKENS or ar_clean in _TASI_MARKET_TOKENS:
         return "TADAWUL"
-    if any(
-        tok in upper_clean
-        for tok in ("TADAWUL", "TASI", "SAUDI", "KSA")
-    ) or any(tok in ar_clean for tok in ("تاسي", "تداول", "السعود")):
-        return "TADAWUL"
-    return "EGX"
+    return _reg_normalize_exchange_code(ar_clean or upper_clean)
 
 
 def _ui_market_label(market_code: Optional[str]) -> str:
-    return "TASI" if _normalize_market_code(market_code) == "TADAWUL" else "EGX"
+    return _reg_ui_market_label(_normalize_market_code(market_code))
 
 
 def _currency_for_market(market_code: Optional[str]) -> str:
-    return "ر.س" if _normalize_market_code(market_code) == "TADAWUL" else "ج.م"
+    return _reg_currency_for_market(_normalize_market_code(market_code))
 
 
 def _ensure_env_loaded() -> None:
@@ -382,23 +387,40 @@ def _get_saudi_sb():
 
 
 def _get_sb_for_market(market: Optional[str] = "EGX"):
-    """Route to Saudi Supabase when market is TADAWUL, else Primary EGX Supabase."""
-    if _normalize_market_code(market) == "TADAWUL":
+    """Route any exchange to its dedicated Supabase (if configured), shared SAUDI_SUPABASE (GCC/Metals), or Primary Supabase."""
+    exch = _normalize_market_code(market)
+    if exch == "TADAWUL":
         return _get_saudi_sb()
-    return _get_sb()
+    cfg = _reg_get_market_config(exch)
+    if exch != "EGX" and cfg.supabase_env_prefix == "SAUDI":
+        # Check optional exchange-specific DB override (e.g. QSE_SUPABASE_URL) first, then reuse singleton _get_saudi_sb()
+        from api.agentic_chat.market_registry import get_dedicated_supabase_client
+        exch_override = get_dedicated_supabase_client(exch)
+        if exch_override is not None:
+            return exch_override
+        sa_sb = _get_saudi_sb()
+        if sa_sb is not None:
+            return sa_sb
+        return _get_sb()
+    return _reg_get_supabase_for_exchange(exch, _get_sb)
 
 
-def _saudi_unconfigured_error(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _market_unconfigured_error(market: Optional[str] = "TADAWUL", extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cfg = _reg_get_market_config(market)
     payload: Dict[str, Any] = {
         "status": "error",
-        "market": "TASI",
-        "exchange": "TADAWUL",
-        "currency": "ر.س",
-        "message": "قاعدة بيانات السوق السعودي (تداول TASI) غير مهيأة أو غير متاحة حالياً.",
+        "market": cfg.ui_code,
+        "exchange": cfg.exchange,
+        "currency": cfg.currency_ar or cfg.currency_code,
+        "message": f"قاعدة بيانات {cfg.name_ar} ({cfg.ui_code}) غير مهيأة أو غير متاحة حالياً.",
     }
     if extra:
         payload.update(extra)
     return payload
+
+
+def _saudi_unconfigured_error(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    return _market_unconfigured_error("TADAWUL", extra=extra)
 
 
 _DATE_STR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
@@ -441,50 +463,64 @@ def _resolve_saudi_alias_local(raw: str) -> Optional[str]:
 
 
 def _lookup_symbol_in_db(raw_text: str, market: str = "EGX") -> Optional[str]:
-    """Fallback company-name lookup against Supabase `stocks` when static aliases miss."""
+    """Lookup exact ticker (non-EGX) or company name against Supabase `stocks` for a given exchange."""
     clean_q = " ".join(str(raw_text or "").strip().split())
-    if len(clean_q) < 3:
+    if len(clean_q) < 2:
         return None
     norm_mkt = _normalize_market_code(market)
     cache_k = f"{norm_mkt}:{clean_q.lower()}"
     if cache_k in _DB_SYMBOL_CACHE:
         return _DB_SYMBOL_CACHE[cache_k]
-    # Skip obvious single-token tickers (already handled as clean symbols)
-    if re.fullmatch(r"[A-Za-z]{2,8}", clean_q) or _SAUDI_TICKER_RE.fullmatch(clean_q):
+    is_ascii_ticker = bool(re.fullmatch(r"[A-Za-z0-9]{2,12}", clean_q))
+    # For EGX, skip obvious single-token tickers (already handled as clean symbols)
+    if norm_mkt == "EGX" and (re.fullmatch(r"[A-Za-z]{2,8}", clean_q) or _SAUDI_TICKER_RE.fullmatch(clean_q)):
         return None
     found: Optional[str] = None
     try:
         sb = _get_sb_for_market(norm_mkt)
         if sb is None:
             return None
-        safe_q = clean_q.replace("%", "").replace(",", " ").strip()
-        res = (
-            sb.from_("stocks")
-            .select("symbol,name,name_ar")
-            .eq("exchange", norm_mkt)
-            .or_(f"name_ar.ilike.%{safe_q}%,name.ilike.%{safe_q}%")
-            .limit(3)
-            .execute()
-        )
-        rows = [r for r in (res.data or []) if isinstance(r, dict) and r.get("symbol")]
-        if rows:
-            found = str(rows[0]["symbol"]).upper().strip()
-        elif " " in safe_q:
-            # Try matching longest meaningful word when full Arabic phrase differs slightly
-            words = sorted([w for w in safe_q.split() if len(w) >= 4], key=len, reverse=True)
-            for word in words[:2]:
-                res_w = (
-                    sb.from_("stocks")
-                    .select("symbol")
-                    .eq("exchange", norm_mkt)
-                    .or_(f"name_ar.ilike.%{word}%,name.ilike.%{word}%")
-                    .limit(3)
-                    .execute()
-                )
-                w_rows = [r for r in (res_w.data or []) if isinstance(r, dict) and r.get("symbol")]
-                if len(w_rows) == 1:
-                    found = str(w_rows[0]["symbol"]).upper().strip()
-                    break
+        if norm_mkt != "EGX" and is_ascii_ticker:
+            res_exact = (
+                sb.from_("stocks")
+                .select("symbol")
+                .eq("exchange", norm_mkt)
+                .eq("symbol", clean_q.upper())
+                .limit(1)
+                .execute()
+            )
+            exact_rows = [r for r in (res_exact.data or []) if isinstance(r, dict) and r.get("symbol")]
+            if exact_rows:
+                found = str(exact_rows[0]["symbol"]).upper().strip()
+        if found is None and len(clean_q) >= 3:
+            safe_q = clean_q.replace("%", "").replace(",", " ").strip()
+            res = (
+                sb.from_("stocks")
+                .select("symbol,name,name_ar")
+                .eq("exchange", norm_mkt)
+                .or_(f"name_ar.ilike.%{safe_q}%,name.ilike.%{safe_q}%")
+                .limit(3)
+                .execute()
+            )
+            rows = [r for r in (res.data or []) if isinstance(r, dict) and r.get("symbol")]
+            if rows:
+                found = str(rows[0]["symbol"]).upper().strip()
+            elif " " in safe_q:
+                # Try matching longest meaningful word when full Arabic phrase differs slightly
+                words = sorted([w for w in safe_q.split() if len(w) >= 4], key=len, reverse=True)
+                for word in words[:2]:
+                    res_w = (
+                        sb.from_("stocks")
+                        .select("symbol")
+                        .eq("exchange", norm_mkt)
+                        .or_(f"name_ar.ilike.%{word}%,name.ilike.%{word}%")
+                        .limit(3)
+                        .execute()
+                    )
+                    w_rows = [r for r in (res_w.data or []) if isinstance(r, dict) and r.get("symbol")]
+                    if len(w_rows) == 1:
+                        found = str(w_rows[0]["symbol"]).upper().strip()
+                        break
     except Exception:
         pass
     if len(_DB_SYMBOL_CACHE) < 300:
@@ -492,8 +528,77 @@ def _lookup_symbol_in_db(raw_text: str, market: str = "EGX") -> Optional[str]:
     return found
 
 
-def _resolve_symbol_and_market(sym: Any) -> Tuple[str, str]:
-    """Resolve raw ticker or Arabic/English name to (normalized_symbol, 'EGX'|'TADAWUL')."""
+_METALS_ALIAS_MAP: Dict[str, Tuple[str, str]] = {
+    "XAUUSD": ("XAUUSD", "COMMODITIES"),
+    "XAU": ("XAUUSD", "COMMODITIES"),
+    "GC=F": ("XAUUSD", "COMMODITIES"),
+    "GOLD": ("XAUUSD", "COMMODITIES"),
+    "الذهب": ("XAUUSD", "COMMODITIES"),
+    "الدهب": ("XAUUSD", "COMMODITIES"),
+    "اونصة الذهب": ("XAUUSD", "COMMODITIES"),
+    "أونصة الذهب": ("XAUUSD", "COMMODITIES"),
+    "سعر الذهب": ("XAUUSD", "COMMODITIES"),
+    "XAGUSD": ("XAGUSD", "COMMODITIES"),
+    "XAG": ("XAGUSD", "COMMODITIES"),
+    "SI=F": ("XAGUSD", "COMMODITIES"),
+    "SILVER": ("XAGUSD", "COMMODITIES"),
+    "الفضة": ("XAGUSD", "COMMODITIES"),
+    "الفضه": ("XAGUSD", "COMMODITIES"),
+    "اونصة الفضة": ("XAGUSD", "COMMODITIES"),
+    "أونصة الفضة": ("XAGUSD", "COMMODITIES"),
+    "سعر الفضة": ("XAGUSD", "COMMODITIES"),
+}
+_GCC_EXCHANGES_IN_SAUDI_DB = ("DFM", "ADX", "QSE", "COMMODITIES")
+_GCC_SYMBOL_CACHE: Dict[str, Optional[Tuple[str, str]]] = {}
+
+
+def _lookup_symbol_in_gcc_and_metals(raw_text: str) -> Optional[Tuple[str, str]]:
+    """Lookup ticker or Arabic/English company name across DFM, ADX, QSE, COMMODITIES in SAUDI_SUPABASE."""
+    clean_q = " ".join(str(raw_text or "").strip().split())
+    if len(clean_q) < 2:
+        return None
+    cache_k = clean_q.lower()
+    if cache_k in _GCC_SYMBOL_CACHE:
+        return _GCC_SYMBOL_CACHE[cache_k]
+    found: Optional[Tuple[str, str]] = None
+    try:
+        sb_sa = _get_saudi_sb()
+        if sb_sa is not None:
+            up = clean_q.upper()
+            if re.fullmatch(r"[A-Z0-9]{2,12}", up):
+                res = (
+                    sb_sa.from_("stocks")
+                    .select("symbol,exchange")
+                    .in_("exchange", list(_GCC_EXCHANGES_IN_SAUDI_DB))
+                    .eq("symbol", up)
+                    .limit(1)
+                    .execute()
+                )
+                rows = [r for r in (res.data or []) if isinstance(r, dict) and r.get("symbol")]
+                if rows:
+                    found = (str(rows[0]["symbol"]).upper().strip(), str(rows[0]["exchange"]).upper().strip())
+            if found is None and len(clean_q) >= 3:
+                safe_q = clean_q.replace("%", "").replace(",", " ").strip()
+                res = (
+                    sb_sa.from_("stocks")
+                    .select("symbol,exchange")
+                    .in_("exchange", list(_GCC_EXCHANGES_IN_SAUDI_DB))
+                    .or_(f"name_ar.ilike.%{safe_q}%,name.ilike.%{safe_q}%")
+                    .limit(2)
+                    .execute()
+                )
+                rows = [r for r in (res.data or []) if isinstance(r, dict) and r.get("symbol")]
+                if rows:
+                    found = (str(rows[0]["symbol"]).upper().strip(), str(rows[0]["exchange"]).upper().strip())
+    except Exception:
+        pass
+    if len(_GCC_SYMBOL_CACHE) < 300:
+        _GCC_SYMBOL_CACHE[cache_k] = found
+    return found
+
+
+def _resolve_symbol_and_market(sym: Any, explicit_market: Optional[str] = None) -> Tuple[str, str]:
+    """Resolve raw ticker or Arabic/English name to (normalized_symbol, exchange_code)."""
     if not sym:
         return ("", "EGX")
     raw = str(sym).strip()
@@ -501,43 +606,83 @@ def _resolve_symbol_and_market(sym: Any) -> Tuple[str, str]:
         return ("", "EGX")
     clean = raw.upper()
 
-    # 1. Explicit exchange suffixes take top priority
-    if clean.endswith(".CA"):
-        core = clean[:-3].strip()
-        resolved = resolve_stock_symbol(core) or resolve_stock_symbol(raw[:-3].strip())
-        if resolved:
-            return (resolved, "EGX")
-        resolved_db = _lookup_symbol_in_db(raw[:-3].strip(), market="EGX")
-        return (resolved_db or core, "EGX")
+    # 0. Gold & Silver / Commodities aliases
+    if clean in _METALS_ALIAS_MAP:
+        return _METALS_ALIAS_MAP[clean]
+    if raw in _METALS_ALIAS_MAP:
+        return _METALS_ALIAS_MAP[raw]
 
-    for s_suf in (".TADAWUL", ".SR", ".SA"):
-        if clean.endswith(s_suf):
-            core_raw = raw[: -len(s_suf)].strip()
-            core_up = core_raw.upper()
-            saudi_hit = _resolve_saudi_alias_local(core_raw) or _lookup_symbol_in_db(
-                core_raw, market="TADAWUL"
-            )
-            return (saudi_hit or core_up, "TADAWUL")
+    # 1. Explicit exchange suffixes take top priority (.CA, .SR, .SA, .TADAWUL, .QA, .QE, .DU, .AD, .AE, ...)
+    suf_match = _reg_detect_exchange_from_suffix(raw)
+    if suf_match:
+        core_sym, exch = suf_match
+        if exch == "EGX":
+            resolved = resolve_stock_symbol(core_sym) or _lookup_symbol_in_db(core_sym, market="EGX")
+            return (resolved or core_sym, "EGX")
+        if exch == "TADAWUL":
+            saudi_hit = _resolve_saudi_alias_local(core_sym) or _lookup_symbol_in_db(core_sym, market="TADAWUL")
+            return (saudi_hit or core_sym, "TADAWUL")
+        db_hit = _lookup_symbol_in_db(core_sym, market=exch)
+        return (db_hit or core_sym, exch)
 
-    # 2. Direct Saudi static alias or 4-digit Tadawul numeric ticker
+    # 1b. When caller explicitly specifies a non-EGX market parameter (e.g. get_stock(symbols=["ADIB"], market="ADX")),
+    # resolve within that exchange first and do NOT fall back to EGX aliases/tickers for clean ticker symbols.
+    if explicit_market:
+        exp_mkt = _normalize_market_code(explicit_market)
+        if exp_mkt != "EGX":
+            if exp_mkt == "TADAWUL":
+                saudi_hit = _resolve_saudi_alias_local(raw) or _lookup_symbol_in_db(raw, market="TADAWUL")
+                if saudi_hit:
+                    return (saudi_hit, "TADAWUL")
+            exp_db = _lookup_symbol_in_db(raw, market=exp_mkt)
+            if exp_db:
+                return (exp_db, exp_mkt)
+            if re.fullmatch(r"[A-Za-z0-9]{2,12}", clean):
+                return (clean, exp_mkt)
+
+    # 2. Active non-EGX market DB lookup takes priority before EGX static aliases
+    active_mkt = get_active_market_context()
+    if active_mkt != "EGX":
+        active_db = _lookup_symbol_in_db(raw, market=active_mkt)
+        if active_db:
+            return (active_db, active_mkt)
+        if active_mkt in _GCC_EXCHANGES_IN_SAUDI_DB:
+            gcc_act = _lookup_symbol_in_gcc_and_metals(raw)
+            if gcc_act:
+                return gcc_act
+
+    # 3. Direct Saudi static alias or 4-digit Tadawul numeric ticker, and GCC/Metals exact DB lookup
+    _egx_known_tickers = set(ARABIC_STOCK_MAPPINGS.values())
+    gcc_exact = _lookup_symbol_in_gcc_and_metals(raw)
+    if gcc_exact and (len(raw) >= 5 or clean == gcc_exact[0]):
+        if clean not in _egx_known_tickers or active_mkt in _GCC_EXCHANGES_IN_SAUDI_DB:
+            return gcc_exact
+
     saudi_hit = _resolve_saudi_alias_local(raw)
     if saudi_hit:
         return (saudi_hit, "TADAWUL")
 
-    # 3. Direct EGX static alias
-    resolved_egx = resolve_stock_symbol(clean) or resolve_stock_symbol(raw)
-    if resolved_egx:
-        return (resolved_egx, "EGX")
+    # 4. Exact EGX ticker in ARABIC_STOCK_MAPPINGS before fuzzy EGX resolution
+    if clean in _egx_known_tickers:
+        return (clean, "EGX")
 
-    # 4. DB company-name lookup (prioritize active market context when un-suffixed)
-    active_mkt = get_active_market_context()
-    if active_mkt == "TADAWUL":
-        saudi_db = _lookup_symbol_in_db(raw, market="TADAWUL")
-        if saudi_db:
-            return (saudi_db, "TADAWUL")
+    if gcc_exact:
+        return gcc_exact
+
+    # 5. EGX alias resolution ONLY for non-ASCII (Arabic) names or exact keys in ARABIC_STOCK_MAPPINGS
+    # (NEVER let resolve_stock_symbol's blind len>=3 ASCII fallback or substring match mangle GCC/future tickers like QNBK/AIRARABIA/EMAAR!)
+    has_non_ascii = any(ord(ch) > 127 for ch in raw)
+    if has_non_ascii or clean in ARABIC_STOCK_MAPPINGS or raw in ARABIC_STOCK_MAPPINGS:
+        resolved_egx = resolve_stock_symbol(raw) if has_non_ascii else (ARABIC_STOCK_MAPPINGS.get(clean) or ARABIC_STOCK_MAPPINGS.get(raw))
+        if resolved_egx:
+            return (resolved_egx, "EGX")
+
+    # 6. DB company-name / ticker fallback (prioritize active market context when un-suffixed)
+    if active_mkt != "EGX":
         egx_db = _lookup_symbol_in_db(raw, market="EGX")
         if egx_db:
             return (egx_db, "EGX")
+        return (clean, active_mkt)
     else:
         egx_db = _lookup_symbol_in_db(raw, market="EGX")
         if egx_db:
@@ -652,60 +797,98 @@ def _resolve_effective_market(
             if s and str(s).strip():
                 _, m = _resolve_symbol_and_market(s)
                 resolved_mkts.append(m)
-        if any(m == "TADAWUL" for m in resolved_mkts):
-            return "TADAWUL"
+        non_egx = [m for m in resolved_mkts if m != "EGX"]
+        if non_egx:
+            return non_egx[0]
         if resolved_mkts:
             return "EGX"
     return get_active_market_context()
 
 
+def _group_symbols_by_exchange(
+    symbols: Optional[List[str]],
+    market: Optional[str] = None,
+) -> Dict[str, List[str]]:
+    """Resolve and group symbols by canonical exchange code (EGX, TADAWUL, QSE, DFM, ADX, ...)."""
+    grouped: Dict[str, List[str]] = {}
+    seen_per_exch: Dict[str, set] = {}
+    tok = set_active_market_context(market) if market else None
+    try:
+        for raw in symbols or []:
+            if not raw:
+                continue
+            sym, mkt = _resolve_symbol_and_market(raw, explicit_market=market)
+            if not sym:
+                continue
+            exch = _normalize_market_code(mkt)
+            seen = seen_per_exch.setdefault(exch, set())
+            if sym not in seen and len(seen) < 25:
+                seen.add(sym)
+                grouped.setdefault(exch, []).append(sym)
+    finally:
+        if tok is not None:
+            reset_active_market_context(tok)
+    return grouped
+
+
 def _split_symbols_by_market(symbols: Optional[List[str]]) -> Tuple[List[str], List[str]]:
-    """Resolve and group symbols into (egx_symbols, tasi_symbols) preserving uniqueness."""
-    egx_syms: List[str] = []
-    tasi_syms: List[str] = []
-    seen_egx = set()
-    seen_tasi = set()
-    for raw in symbols or []:
-        if not raw:
-            continue
-        sym, mkt = _resolve_symbol_and_market(raw)
-        if not sym:
-            continue
-        if mkt == "TADAWUL":
-            if sym not in seen_tasi:
-                seen_tasi.add(sym)
-                tasi_syms.append(sym)
-        else:
-            if sym not in seen_egx:
-                seen_egx.add(sym)
-                egx_syms.append(sym)
-    return (egx_syms[:25], tasi_syms[:25])
+    """Backward-compatible wrapper returning (egx_symbols, tasi_symbols)."""
+    grouped = _group_symbols_by_exchange(symbols)
+    return (grouped.get("EGX", []), grouped.get("TADAWUL", []))
 
 
 def _is_real_saudi_sb(sb: Any) -> bool:
-    """True only when operating on the live singleton Saudi Supabase client (not a mock)."""
-    return sb is not None and _SAUDI_SB_CLIENT is not None and sb is _SAUDI_SB_CLIENT
+    """True only when operating on a live (non-mock) Supabase client instance."""
+    if sb is None:
+        return False
+    if _SAUDI_SB_CLIENT is not None and sb is _SAUDI_SB_CLIENT:
+        return True
+    if supabase is not None and sb is supabase:
+        return True
+    url = getattr(sb, "supabase_url", None)
+    key = getattr(sb, "supabase_key", None)
+    return isinstance(url, str) and url.startswith(("http://", "https://")) and isinstance(key, str) and bool(key)
+
+
+def _extract_sb_url_and_key(sb: Any) -> Tuple[str, str]:
+    """Extract (url, key) from any live Supabase client (Primary, Saudi, or future dedicated DB)."""
+    url = getattr(sb, "supabase_url", None)
+    key = getattr(sb, "supabase_key", None)
+    if isinstance(url, str) and url.startswith(("http://", "https://")) and isinstance(key, str) and key:
+        return (url.strip().rstrip("/"), key.strip())
+    _ensure_env_loaded()
+    if _SAUDI_SB_CLIENT is not None and sb is _SAUDI_SB_CLIENT:
+        sa_url = (os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or "").strip().rstrip("/")
+        sa_key = (
+            os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
+            or os.getenv("SAUDI_SUPABASE_ANON_KEY")
+            or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
+            or ""
+        ).strip()
+        return (sa_url, sa_key)
+    if supabase is not None and sb is supabase:
+        p_url = (os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or "").strip().rstrip("/")
+        p_key = (
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            or os.getenv("SUPABASE_KEY")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            or ""
+        ).strip()
+        return (p_url, p_key)
+    return ("", "")
 
 
 def _get_saudi_openapi_schema(sb: Any) -> Dict[str, set]:
-    """Fetch and cache PostgREST OpenAPI table->columns map for live SAUDI_SUPABASE."""
+    """Fetch and cache PostgREST OpenAPI table->columns map for any live Supabase client."""
     if not _is_real_saudi_sb(sb):
         return {}
-    cached = _get_tool_cached("saudi_openapi_cols")
-    if isinstance(cached, dict):
-        return cached
-    _ensure_env_loaded()
-    url = (
-        os.getenv("SAUDI_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_URL") or ""
-    ).strip().rstrip("/")
-    key = (
-        os.getenv("SAUDI_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SAUDI_SUPABASE_ANON_KEY")
-        or os.getenv("NEXT_PUBLIC_SAUDI_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
+    url, key = _extract_sb_url_and_key(sb)
     if not url or not key:
         return {}
+    cache_key = f"openapi_cols:{url}"
+    cached = _get_tool_cached(cache_key)
+    if isinstance(cached, dict):
+        return cached
     try:
         req = urllib.request.Request(
             f"{url}/rest/v1/",
@@ -724,14 +907,14 @@ def _get_saudi_openapi_schema(sb: Any) -> Dict[str, set]:
             if isinstance(props, dict):
                 table_cols[tbl_name] = set(props.keys())
         if table_cols:
-            _set_tool_cached("saudi_openapi_cols", table_cols)
+            _set_tool_cached(cache_key, table_cols)
         return table_cols
     except Exception:
         return {}
 
 
 def _get_saudi_table_columns(table_name: str, sb: Any) -> Optional[set]:
-    """Return actual column set for a Saudi table if inspectable, else None."""
+    """Return actual column set for a table on any live Supabase client if inspectable, else None."""
     schema = _get_saudi_openapi_schema(sb)
     if table_name in schema:
         return schema[table_name]
@@ -782,15 +965,40 @@ _SAUDI_TI_BASE_SAFE_COLS = {
     "cmf_20",
 }
 
+_PRIMARY_TI_BASE_SAFE_COLS = {
+    "symbol",
+    "date",
+    "close",
+    "change_pct",
+    "volume",
+    "vol_sma20",
+    "r_vol",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "macd_histogram",
+    "bb_upper",
+    "bb_lower",
+    "ema_20",
+    "ema_50",
+    "ema_200",
+    "vwap_20",
+    "cmf_20",
+    "king_ai_score",
+}
+
 
 def _saudi_ti_select_and_order(sb: Any) -> Tuple[str, str]:
-    """Build schema-safe SELECT projection and order column for Saudi stock_technical_indicators."""
+    """Build schema-safe SELECT projection and order column for stock_technical_indicators."""
     cols = _get_saudi_table_columns("stock_technical_indicators", sb)
     if cols:
         chosen = [c for c in _SAUDI_TI_DESIRED_COLS if c in cols]
         order_col = "date" if "date" in cols else ("updated_at" if "updated_at" in cols else "symbol")
         if chosen:
             return (",".join(chosen), order_col)
+    if supabase is not None and sb is supabase:
+        chosen = [c for c in _SAUDI_TI_DESIRED_COLS if c in _PRIMARY_TI_BASE_SAFE_COLS]
+        return (",".join(chosen), "date")
     chosen = [c for c in _SAUDI_TI_DESIRED_COLS if c in _SAUDI_TI_BASE_SAFE_COLS]
     return (",".join(chosen), "updated_at")
 
@@ -975,9 +1183,9 @@ def _compute_indicators_from_price_rows(rows_desc: List[Dict[str, Any]]) -> Dict
 
 
 def _fetch_saudi_ohlcv_for_symbols(
-    sb: Any, syms: List[str], limit_per_sym: int = 120
+    sb: Any, syms: List[str], limit_per_sym: int = 120, exchange: str = "TADAWUL"
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """Fetch bounded OHLCV bars from Saudi `stock_prices` grouped newest-first by symbol."""
+    """Fetch bounded OHLCV bars from `stock_prices` for any exchange grouped newest-first by symbol."""
     if not syms or sb is None:
         return {}
     per_sym = min(220, max(45, 950 // max(len(syms), 1))) if len(syms) > 3 else min(limit_per_sym, 220)
@@ -986,7 +1194,7 @@ def _fetch_saudi_ohlcv_for_symbols(
         res = (
             sb.from_("stock_prices")
             .select("symbol,date,open,high,low,close,volume")
-            .eq("exchange", "TADAWUL")
+            .eq("exchange", exchange)
             .in_("symbol", syms)
             .order("date", desc=True)
             .limit(total_limit)
@@ -1002,9 +1210,9 @@ def _fetch_saudi_ohlcv_for_symbols(
         return {}
 
 
-def _fetch_saudi_recent_dates(sb: Any, count: int = 25) -> List[str]:
-    """Return latest trading dates from Saudi `market_index` (tiny 25-row read)."""
-    cache_key = f"saudi_recent_dates:{count}"
+def _fetch_saudi_recent_dates(sb: Any, count: int = 25, exchange: str = "TADAWUL") -> List[str]:
+    """Return latest trading dates from `market_index` (fallback `stock_prices`) for any exchange."""
+    cache_key = f"recent_dates:{exchange}:{count}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
         return cached
@@ -1012,7 +1220,7 @@ def _fetch_saudi_recent_dates(sb: Any, count: int = 25) -> List[str]:
         res = (
             sb.from_("market_index")
             .select("date")
-            .eq("exchange", "TADAWUL")
+            .eq("exchange", exchange)
             .order("date", desc=True)
             .limit(min(count * 2, 60))
             .execute()
@@ -1033,18 +1241,20 @@ def _fetch_saudi_recent_dates(sb: Any, count: int = 25) -> List[str]:
         return []
 
 
-def _get_saudi_computed_market_indicators(sb: Any, lookback_days: int = 22) -> List[Dict[str, Any]]:
+def _get_saudi_computed_market_indicators(
+    sb: Any, lookback_days: int = 22, exchange: str = "TADAWUL"
+) -> List[Dict[str, Any]]:
     """
-    Compute per-stock Saudi indicators from recent OHLCV bars when
-    `SAUDI_SUPABASE.stock_technical_indicators` has not been populated yet.
+    Compute per-stock indicators from recent OHLCV bars for any exchange when
+    `stock_technical_indicators` has not been populated yet.
     Cached 5 minutes in-memory to keep DB reads minimal.
     """
-    cache_key = f"saudi_computed_mkt_ti:{lookback_days}"
+    cache_key = f"computed_mkt_ti:{exchange}:{lookback_days}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
         return cached
 
-    dates = _fetch_saudi_recent_dates(sb, count=lookback_days)
+    dates = _fetch_saudi_recent_dates(sb, count=lookback_days, exchange=exchange)
     if not dates:
         return []
     start_date = dates[-1]
@@ -1054,7 +1264,7 @@ def _get_saudi_computed_market_indicators(sb: Any, lookback_days: int = 22) -> L
             res = (
                 sb.from_("stock_prices")
                 .select("symbol,date,open,high,low,close,volume")
-                .eq("exchange", "TADAWUL")
+                .eq("exchange", exchange)
                 .in_("date", dates)
                 .limit(700)
                 .execute()
@@ -1069,7 +1279,7 @@ def _get_saudi_computed_market_indicators(sb: Any, lookback_days: int = 22) -> L
                 res = (
                     sb.from_("stock_prices")
                     .select("symbol,date,open,high,low,close,volume")
-                    .eq("exchange", "TADAWUL")
+                    .eq("exchange", exchange)
                     .gte("date", start_date)
                     .order("date", desc=True)
                     .range(start_idx, end_idx)
@@ -1100,8 +1310,8 @@ def _get_saudi_computed_market_indicators(sb: Any, lookback_days: int = 22) -> L
     return computed
 
 
-def _fetch_saudi_names_map(sb: Any, syms: List[str]) -> Dict[str, Dict[str, str]]:
-    """Fetch name / name_ar / sector for Saudi symbols cleanly."""
+def _fetch_saudi_names_map(sb: Any, syms: List[str], exchange: str = "TADAWUL") -> Dict[str, Dict[str, str]]:
+    """Fetch name / name_ar / sector for symbols on any exchange cleanly."""
     if not syms or sb is None:
         return {}
     out: Dict[str, Dict[str, str]] = {}
@@ -1109,7 +1319,7 @@ def _fetch_saudi_names_map(sb: Any, syms: List[str]) -> Dict[str, Dict[str, str]
         res = (
             sb.from_("stocks")
             .select("symbol,name,name_ar,sector")
-            .eq("exchange", "TADAWUL")
+            .eq("exchange", exchange)
             .in_("symbol", syms[:50])
             .limit(50)
             .execute()
@@ -1303,13 +1513,18 @@ def _enrich_rec_distances(rec_item: Dict[str, Any]) -> None:
         rec_item["dist_to_stop_pct"] = round(((sl - lc) / lc) * 100.0, 2)
 
 
-def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
-    egx_syms, tasi_syms = _split_symbols_by_market(symbols)
-    if not egx_syms and not tasi_syms:
+def _sync_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[str, Any]:
+    grouped_syms = _group_symbols_by_exchange(symbols, market=market)
+    if not grouped_syms:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
 
+    egx_syms = grouped_syms.get("EGX", [])
+    non_egx_groups = {exch: syms for exch, syms in grouped_syms.items() if exch != "EGX" and syms}
+
     allow_recs = _ALLOW_RECOMMENDATIONS_CTX.get()
-    cache_parts = [f"EGX:{s}" for s in sorted(egx_syms)] + [f"TADAWUL:{s}" for s in sorted(tasi_syms)]
+    cache_parts = []
+    for exch_k in sorted(grouped_syms.keys()):
+        cache_parts.extend(f"{exch_k}:{s}" for s in sorted(grouped_syms[exch_k]))
     cache_key = f"get_stock:{','.join(cache_parts)}:rec={1 if allow_recs else 0}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
@@ -1587,25 +1802,27 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 egx_item["_ui_chart"] = ui_chart
             stocks_data.append(egx_item)
 
-    # ── 2. Saudi TASI symbols (SAUDI_SUPABASE) ───────────────────────────────
-    if tasi_syms:
-        sb_sa = _get_sb_for_market("TADAWUL")
+    # ── 2. Unified Non-EGX Exchanges (TADAWUL/TASI, QSE, DFM, ADX, KSE, and any future exchange) ─
+    for exch_code, exch_syms in non_egx_groups.items():
+        cfg = _reg_get_market_config(exch_code)
+        sb_sa = _get_sb_for_market(exch_code)
         if sb_sa is None:
-            if not egx_syms:
-                return _saudi_unconfigured_error()
-            errors.append("بيانات السوق السعودي (تداول TASI) غير مهيأة حالياً.")
+            if not egx_syms and len(non_egx_groups) == 1:
+                return _market_unconfigured_error(exch_code)
+            errors.append(f"بيانات {cfg.name_ar} ({cfg.ui_code}) غير مهيأة حالياً.")
         else:
             sa_meta_map: Dict[str, Dict[str, Any]] = {}
-            equity_syms = [s for s in tasi_syms if s != "TASI"]
+            idx_code = cfg.index_name.upper()
+            equity_syms = [s for s in exch_syms if s.upper() != idx_code]
 
-            # Handle TASI index if explicitly asked via get_stock
-            if "TASI" in tasi_syms:
+            # Handle benchmark index if explicitly asked via get_stock (e.g. TASI, QSI, DFMGI)
+            if any(s.upper() == idx_code for s in exch_syms):
                 try:
                     c0 = chg_idx = m_idx_date = idx_source = None
                     res_idx = (
                         sb_sa.from_("market_index")
                         .select("date,close,ret,source")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", exch_code)
                         .order("date", desc=True)
                         .limit(2)
                         .execute()
@@ -1622,20 +1839,19 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                             if c1 and c0:
                                 chg_idx = round((c0 - c1) / c1 * 100, 2)
 
-                    # Optionally check market_cache ('market_status_Saudi Arabia') if present
-                    if c0 is None and (_get_saudi_table_columns("market_cache", sb_sa) is not None or not _is_real_saudi_sb(sb_sa)):
+                    if c0 is None and cfg.market_cache_key and (_get_saudi_table_columns("market_cache", sb_sa) is not None or not _is_real_saudi_sb(sb_sa)):
                         try:
                             res_mc = (
                                 sb_sa.from_("market_cache")
                                 .select("payload")
-                                .eq("cache_key", "market_status_Saudi Arabia")
+                                .eq("cache_key", cfg.market_cache_key)
                                 .limit(1)
                                 .execute()
                             )
                             if res_mc.data and isinstance(res_mc.data[0].get("payload"), dict):
                                 pl = res_mc.data[0]["payload"]
-                                c0 = _safe_float(pl.get("tasi_close") or pl.get("close"))
-                                chg_idx = _safe_float(pl.get("tasi_change_pct") or pl.get("change_pct"))
+                                c0 = _safe_float(pl.get("tasi_close") or pl.get("index_close") or pl.get("close"))
+                                chg_idx = _safe_float(pl.get("tasi_change_pct") or pl.get("index_change_pct") or pl.get("change_pct"))
                                 m_idx_date = pl.get("date") or m_idx_date
                                 idx_source = pl.get("source") or "market_cache"
                         except Exception:
@@ -1643,23 +1859,23 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
 
                     if c0 is not None:
                         tasi_entry: Dict[str, Any] = {
-                            "symbol": "TASI",
-                            "market": "TASI",
-                            "exchange": "TADAWUL",
+                            "symbol": cfg.index_name,
+                            "market": cfg.ui_code,
+                            "exchange": exch_code,
                             "currency": "نقطة",
-                            "name_ar": "مؤشر السوق السعودي (تاسي)",
-                            "name": "Tadawul All Share Index (TASI)",
+                            "name_ar": f"مؤشر {cfg.name_ar} ({cfg.index_name})",
+                            "name": f"{cfg.name_en} Index ({cfg.index_name})",
                             "is_sharia_compliant": None,
                             "sharia_index": None,
                             "date": m_idx_date,
                             "close": c0,
                             "change_pct": chg_idx,
                             "index_source": idx_source,
-                            "verdict": "🟡 مؤشر السوق العام — استخدم get_market('TASI') لمزيد من التفاصيل",
+                            "verdict": f"🟡 مؤشر السوق العام — استخدم get_market('{cfg.ui_code}') لمزيد من التفاصيل",
                         }
                         if idx_source == "equal_weight":
                             tasi_entry["index_type"] = "equal_weight_composite"
-                            tasi_entry["index_note"] = "مؤشر السوق السعودي المركب متساوي الأوزان (سنة الأساس = 1000)"
+                            tasi_entry["index_note"] = f"مؤشر {cfg.name_ar} المركب متساوي الأوزان (سنة الأساس = 1000)"
                         stocks_data.append(tasi_entry)
                 except Exception:
                     pass
@@ -1669,7 +1885,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     res_st = (
                         sb_sa.from_("stocks")
                         .select("symbol,name,name_ar,sector,industry,currency")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", exch_code)
                         .in_("symbol", equity_syms)
                         .limit(len(equity_syms))
                         .execute()
@@ -1685,7 +1901,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     res_sf = (
                         sb_sa.from_("stock_fundamentals")
                         .select("symbol,data,fund_score")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", exch_code)
                         .in_("symbol", equity_syms)
                         .limit(len(equity_syms))
                         .execute()
@@ -1702,7 +1918,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     res_sti = (
                         sb_sa.from_("stock_technical_indicators")
                         .select(ti_cols)
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", exch_code)
                         .in_("symbol", equity_syms)
                         .order(order_col, desc=True)
                         .limit(len(equity_syms) * 2)
@@ -1715,14 +1931,35 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                 except Exception:
                     pass
 
-                sa_ohlcv_map = _fetch_saudi_ohlcv_for_symbols(sb_sa, equity_syms)
+                mkt_rec_by_sym: Dict[str, Dict[str, Any]] = {}
+                if allow_recs:
+                    try:
+                        res_mrec = (
+                            sb_sa.from_("scan_results")
+                            .select("symbol,signal,entry_price,target_price,stop_loss,status,created_at")
+                            .eq("exchange", exch_code)
+                            .in_("symbol", equity_syms)
+                            .in_("status", ["open", "active"])
+                            .order("created_at", desc=True)
+                            .limit(max(len(equity_syms) * 2, 10))
+                            .execute()
+                        )
+                        for row in (res_mrec.data or []):
+                            if isinstance(row, dict) and row.get("symbol"):
+                                s_k = str(row["symbol"]).upper()
+                                if s_k not in mkt_rec_by_sym:
+                                    mkt_rec_by_sym[s_k] = row
+                    except Exception:
+                        pass
+
+                sa_ohlcv_map = _fetch_saudi_ohlcv_for_symbols(sb_sa, equity_syms, exchange=exch_code)
 
                 for sym in equity_syms:
                     meta = sa_meta_map.get(sym, {})
                     raw_fund = sa_fund_map.get(sym, {})
                     fd = raw_fund.get("data") if isinstance(raw_fund.get("data"), dict) else {}
 
-                    stock_name_ar = meta.get("name_ar") or _alias_name_for_symbol(sym, market="TADAWUL")
+                    stock_name_ar = meta.get("name_ar") or _alias_name_for_symbol(sym, market=exch_code)
                     if stock_name_ar:
                         stock_name_ar = str(stock_name_ar).split(",")[0].strip()
                     stock_name_en = meta.get("name") or (str(fd.get("name")).split(",")[0].strip() if fd.get("name") else sym)
@@ -1761,6 +1998,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     ema_20 = _safe_price(db_ti.get("ema_20")) or calc_ti.get("ema_20")
                     ema_50 = _safe_price(db_ti.get("ema_50")) or calc_ti.get("ema_50")
                     ema_200 = _safe_price(db_ti.get("ema_200")) or calc_ti.get("ema_200")
+                    vwap_20 = _safe_price(db_ti.get("vwap_20")) or calc_ti.get("vwap_20")
                     bb_low = _safe_price(db_ti.get("bb_lower")) or calc_ti.get("bb_lower")
                     bb_up = _safe_price(db_ti.get("bb_upper")) or calc_ti.get("bb_upper")
 
@@ -1797,7 +2035,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         close=close_price,
                         ema_50=ema_50,
                         ema_200=ema_200,
-                        vwap_20=_safe_price(db_ti.get("vwap_20")),
+                        vwap_20=vwap_20,
                         support_1=support_1,
                         resistance_1=resistance_1,
                         stop_loss=stop_loss,
@@ -1807,16 +2045,18 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                     if sharia_sa is not None:
                         sharia_sa = bool(sharia_sa)
 
+                    sym_u = str(sym).upper()
+                    item_currency = cfg.currency_ar or meta.get("currency") or cfg.currency_code
                     sa_item: Dict[str, Any] = {
                         "symbol": sym,
-                        "market": "TASI",
-                        "exchange": "TADAWUL",
-                        "currency": "ر.س",
+                        "market": cfg.ui_code,
+                        "exchange": exch_code,
+                        "currency": item_currency,
                         "name_ar": stock_name_ar or stock_name_en or sym,
                         "name": stock_name_en,
                         "sector": meta.get("sector") or fd.get("sector"),
                         "is_sharia_compliant": sharia_sa,
-                        "sharia_index": "TASI Sharia" if sharia_sa else None,
+                        "sharia_index": cfg.sharia_index if sharia_sa else None,
                         "date": ti_date,
                         "close": close_price,
                         "change_pct": change_pct,
@@ -1827,6 +2067,7 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         "ema_20": ema_20,
                         "ema_50": ema_50,
                         "ema_200": ema_200,
+                        "vwap_20": vwap_20,
                         "bb_upper": bb_up,
                         "bb_lower": bb_low,
                         "r_vol": r_vol,
@@ -1844,6 +2085,20 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
                         "market_cap": fd.get("market_cap"),
                         "fund_score": _safe_float(raw_fund.get("fund_score")),
                         "verdict": verdict,
+                        "has_active_recommendation": sym_u in mkt_rec_by_sym,
+                        **(
+                            {
+                                "active_recommendation": {
+                                    "signal": mkt_rec_by_sym[sym_u].get("signal"),
+                                    "entry_price": _safe_price(mkt_rec_by_sym[sym_u].get("entry_price")),
+                                    "target_price": _safe_price(mkt_rec_by_sym[sym_u].get("target_price")),
+                                    "stop_loss": _safe_price(mkt_rec_by_sym[sym_u].get("stop_loss")),
+                                    "signal_date": str(mkt_rec_by_sym[sym_u].get("created_at") or "")[:10],
+                                }
+                            }
+                            if sym_u in mkt_rec_by_sym
+                            else {}
+                        ),
                         **ctx_metrics_sa,
                     }
                     ui_chart_sa = _build_ui_chart_payload(
@@ -1863,8 +2118,8 @@ def _sync_get_stock(symbols: List[str]) -> Dict[str, Any]:
     return res
 
 
-async def execute_get_stock(symbols: List[str]) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_get_stock, symbols)
+async def execute_get_stock(symbols: List[str], market: Optional[str] = None) -> Dict[str, Any]:
+    return await asyncio.to_thread(_sync_get_stock, symbols, market)
 
 
 # ---------------------------------------------------------------------------
@@ -1991,44 +2246,45 @@ def _sync_get_stock_levels_for_market(
 
 
 def _sync_get_stock_levels(
-    symbols: List[str], allow_recommendations: Optional[bool] = None
+    symbols: List[str],
+    allow_recommendations: Optional[bool] = None,
+    market: Optional[str] = None,
 ) -> Dict[str, Any]:
-    egx_syms, tasi_syms = _split_symbols_by_market(symbols)
-    if not egx_syms and not tasi_syms:
+    grouped_syms = _group_symbols_by_exchange(symbols, market=market)
+    if not grouped_syms:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة"}
 
     eff_allow_recs = _ALLOW_RECOMMENDATIONS_CTX.get() if allow_recommendations is None else bool(allow_recommendations)
-    cache_parts = [f"EGX:{s}" for s in sorted(egx_syms)] + [f"TADAWUL:{s}" for s in sorted(tasi_syms)]
+    cache_parts = []
+    for exch_k in sorted(grouped_syms.keys()):
+        cache_parts.extend(f"{exch_k}:{s}" for s in sorted(grouped_syms[exch_k]))
     cache_key = f"get_stock_levels:{','.join(cache_parts)}:rec={1 if eff_allow_recs else 0}"
     cached = _get_tool_cached(cache_key)
     if cached is not None:
         return cached
 
     levels: List[Dict[str, Any]] = []
-    if egx_syms:
-        levels.extend(
-            _sync_get_stock_levels_for_market(
-                _get_sb(), egx_syms, "EGX", allow_recommendations=eff_allow_recs
-            )
-        )
-    if tasi_syms:
-        sb_sa = _get_sb_for_market("TADAWUL")
-        if sb_sa is None:
-            if not egx_syms:
-                return _saudi_unconfigured_error()
-            for s in tasi_syms:
+    for exch_code, exch_syms in grouped_syms.items():
+        if not exch_syms:
+            continue
+        sb_exch = _get_sb() if exch_code == "EGX" else _get_sb_for_market(exch_code)
+        if sb_exch is None:
+            if len(grouped_syms) == 1:
+                return _market_unconfigured_error(exch_code)
+            cfg = _reg_get_market_config(exch_code)
+            for s in exch_syms:
                 levels.append({
                     "symbol": s,
-                    "market": "TASI",
-                    "exchange": "TADAWUL",
-                    "currency": "ر.س",
+                    "market": cfg.ui_code,
+                    "exchange": exch_code,
+                    "currency": cfg.currency_ar or cfg.currency_code,
                     "status": "missing",
-                    "message": "قاعدة بيانات السوق السعودي غير متاحة حالياً.",
+                    "message": f"قاعدة بيانات {cfg.name_ar} غير متاحة حالياً.",
                 })
         else:
             levels.extend(
                 _sync_get_stock_levels_for_market(
-                    sb_sa, tasi_syms, "TADAWUL", allow_recommendations=eff_allow_recs
+                    sb_exch, exch_syms, exch_code, allow_recommendations=eff_allow_recs
                 )
             )
 
@@ -2038,9 +2294,11 @@ def _sync_get_stock_levels(
 
 
 async def execute_get_stock_levels(
-    symbols: List[str], allow_recommendations: Optional[bool] = None
+    symbols: List[str],
+    allow_recommendations: Optional[bool] = None,
+    market: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_get_stock_levels, symbols, allow_recommendations)
+    return await asyncio.to_thread(_sync_get_stock_levels, symbols, allow_recommendations, market)
 
 
 # ---------------------------------------------------------------------------
@@ -2053,18 +2311,19 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
     if cached is not None:
         return cached
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
         sa_payload: Dict[str, Any] = {}
-        if _get_saudi_table_columns("market_cache", sb_sa) is not None or not _is_real_saudi_sb(sb_sa):
+        if cfg.market_cache_key and (_get_saudi_table_columns("market_cache", sb_sa) is not None or not _is_real_saudi_sb(sb_sa)):
             try:
                 res_mc = (
                     sb_sa.from_("market_cache")
                     .select("payload")
-                    .eq("cache_key", "market_status_Saudi Arabia")
+                    .eq("cache_key", cfg.market_cache_key)
                     .limit(1)
                     .execute()
                 )
@@ -2073,15 +2332,15 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
             except Exception:
                 pass
 
-        tasi_close = _safe_float(sa_payload.get("tasi_close") or sa_payload.get("close"))
-        tasi_change_pct = _safe_float(sa_payload.get("tasi_change_pct") or sa_payload.get("change_pct"))
+        tasi_close = _safe_float(sa_payload.get("tasi_close") or sa_payload.get("index_close") or sa_payload.get("close"))
+        tasi_change_pct = _safe_float(sa_payload.get("tasi_change_pct") or sa_payload.get("index_change_pct") or sa_payload.get("change_pct"))
         m_date = sa_payload.get("date")
         idx_source = sa_payload.get("source")
         try:
             res_idx = (
                 sb_sa.from_("market_index")
                 .select("date,close,ret,source")
-                .eq("exchange", "TADAWUL")
+                .eq("exchange", eff_mkt)
                 .order("date", desc=True)
                 .limit(2)
                 .execute()
@@ -2114,7 +2373,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                 nm = names_lookup.get(sym, {})
                 clean_nm = (
                     nm.get("name_ar")
-                    or _alias_name_for_symbol(sym, "TADAWUL")
+                    or _alias_name_for_symbol(sym, eff_mkt)
                     or nm.get("name")
                     or r.get("name")
                     or sym
@@ -2124,7 +2383,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                     "name": clean_nm,
                     "close": _safe_price(r.get("close")),
                     "change_pct": _safe_float(r.get("change_pct")),
-                    "currency": "ر.س",
+                    "currency": cfg.currency_ar or cfg.currency_code,
                 })
             return formatted
 
@@ -2134,7 +2393,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                 ti_cols_str, _ = _saudi_ti_select_and_order(sb_sa)
                 ti_cols = set(ti_cols_str.split(","))
                 latest_ti_date = (
-                    _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", "TADAWUL")
+                    _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", eff_mkt)
                     if "date" in ti_cols
                     else None
                 )
@@ -2142,7 +2401,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                     res_ti_all = (
                         sb_sa.from_("stock_technical_indicators")
                         .select("symbol,close,change_pct")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", eff_mkt)
                         .eq("date", latest_ti_date)
                         .not_.is_("change_pct", "null")
                         .order("change_pct", desc=True)
@@ -2167,14 +2426,14 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                         g_raw = valid_ti[:5]
                         l_raw = sorted(valid_ti[-5:], key=lambda x: float(x["change_pct"]))
                         movers_syms = [r["symbol"] for r in (g_raw + l_raw) if r.get("symbol")]
-                        names_map = _fetch_saudi_names_map(sb_sa, movers_syms)
+                        names_map = _fetch_saudi_names_map(sb_sa, movers_syms, exchange=eff_mkt)
                         top_gainers = _format_sa_movers(g_raw, names_map)
                         top_losers = _format_sa_movers(l_raw, names_map)
                 else:
                     res_g = (
                         sb_sa.from_("stock_technical_indicators")
                         .select("symbol,close,change_pct")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", eff_mkt)
                         .not_.is_("change_pct", "null")
                         .order("change_pct", desc=True)
                         .limit(5)
@@ -2183,7 +2442,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                     res_l = (
                         sb_sa.from_("stock_technical_indicators")
                         .select("symbol,close,change_pct")
-                        .eq("exchange", "TADAWUL")
+                        .eq("exchange", eff_mkt)
                         .not_.is_("change_pct", "null")
                         .order("change_pct", desc=False)
                         .limit(5)
@@ -2193,7 +2452,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
                     l_raw = [r for r in (res_l.data or []) if isinstance(r, dict) and r.get("change_pct") is not None]
                     if g_raw or l_raw:
                         movers_syms = [r["symbol"] for r in (g_raw + l_raw) if r.get("symbol")]
-                        names_map = _fetch_saudi_names_map(sb_sa, movers_syms)
+                        names_map = _fetch_saudi_names_map(sb_sa, movers_syms, exchange=eff_mkt)
                         top_gainers = _format_sa_movers(g_raw, names_map)
                         top_losers = _format_sa_movers(l_raw, names_map)
             except Exception:
@@ -2201,7 +2460,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
 
         # Fallback cleanly to 2-day OHLCV snapshot when stock_technical_indicators is empty
         if not top_gainers and not top_losers:
-            snap_rows = _get_saudi_computed_market_indicators(sb_sa, lookback_days=2)
+            snap_rows = _get_saudi_computed_market_indicators(sb_sa, lookback_days=2, exchange=eff_mkt)
             valid_snap = [r for r in snap_rows if r.get("change_pct") is not None]
             valid_snap.sort(key=lambda r: float(r["change_pct"]), reverse=True)
             adv = sum(1 for r in valid_snap if float(r["change_pct"]) > 0)
@@ -2216,19 +2475,21 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
             g_raw = valid_snap[:5]
             l_raw = sorted(valid_snap[-5:], key=lambda x: float(x["change_pct"]))
             movers_syms = [r["symbol"] for r in (g_raw + l_raw) if r.get("symbol")]
-            names_map = _fetch_saudi_names_map(sb_sa, movers_syms)
+            names_map = _fetch_saudi_names_map(sb_sa, movers_syms, exchange=eff_mkt)
             top_gainers = _format_sa_movers(g_raw, names_map)
             top_losers = _format_sa_movers(l_raw, names_map)
 
         res: Dict[str, Any] = {
             "status": "success",
-            "market": "TASI",
-            "market_display": "TASI (السوق السعودي - تداول)",
-            "market_code": "TADAWUL",
-            "index_name": "TASI",
-            "currency": "ر.س",
-            "tasi_close": tasi_close,
-            "tasi_change_pct": tasi_change_pct,
+            "market": cfg.ui_code,
+            "market_display": f"{cfg.ui_code} ({cfg.name_ar})",
+            "market_code": eff_mkt,
+            "exchange": eff_mkt,
+            "index_name": cfg.index_name,
+            "currency": cfg.currency_ar or cfg.currency_code,
+            "index_close": tasi_close,
+            "index_change_pct": tasi_change_pct,
+            **({"tasi_close": tasi_close, "tasi_change_pct": tasi_change_pct} if eff_mkt == "TADAWUL" else {}),
             "index_source": idx_source,
             "date": m_date,
             "breadth": breadth or None,
@@ -2238,7 +2499,7 @@ def _sync_get_market(market: Optional[str] = None) -> Dict[str, Any]:
         }
         if idx_source == "equal_weight":
             res["index_type"] = "equal_weight_composite"
-            res["index_note"] = "مؤشر السوق السعودي المركب متساوي الأوزان (سنة الأساس = 1000)"
+            res["index_note"] = f"مؤشر {cfg.name_ar} المركب متساوي الأوزان (سنة الأساس = 1000)"
         _set_tool_cached(cache_key, res)
         return res
 
@@ -2345,10 +2606,11 @@ def _sync_get_recommendations(
     currency = _currency_for_market(eff_mkt)
     ui_mkt = _ui_market_label(eff_mkt)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
         desired_rec_cols = [
             "id", "symbol", "name", "signal", "entry_price", "target_price",
@@ -2360,7 +2622,7 @@ def _sync_get_recommendations(
             "last_close,precision,status,created_at,model_name"
         )
         rows: List[Dict[str, Any]] = []
-        _, sa_syms = _split_symbols_by_market(symbols) if symbols else ([], [])
+        mkt_syms = _group_symbols_by_exchange(symbols).get(eff_mkt, []) if symbols else []
 
         for tbl_name in ("scan_results", "current_public_recommendations"):
             tbl_cols = _get_saudi_table_columns(tbl_name, sb_sa)
@@ -2371,18 +2633,23 @@ def _sync_get_recommendations(
                 sel_cols = safe_rec_fallback
                 has_exchange_col = True
 
-            filter_modes = (True, False) if has_exchange_col else (False,)
+            # NEVER drop exchange filter or query exchange-less tables for GCC/Metals/future exchanges
+            # sharing SAUDI_SUPABASE or Primary Supabase!
+            allow_unfiltered = eff_mkt == "TADAWUL" and sb_sa is not _get_sb()
+            if not has_exchange_col and not allow_unfiltered:
+                continue
+            filter_modes = (True, False) if (has_exchange_col and allow_unfiltered) else ((True,) if has_exchange_col else (False,))
             for use_exchange_filter in filter_modes:
                 try:
                     q = sb_sa.from_(tbl_name).select(sel_cols)
                     if use_exchange_filter:
-                        q = q.eq("exchange", "TADAWUL")
+                        q = q.eq("exchange", eff_mkt)
                     if status == "open":
                         q = q.in_("status", ["open", "active"])
                     elif status == "closed":
                         q = q.in_("status", ["closed", "win", "loss"])
-                    if sa_syms:
-                        q = q.in_("symbol", sa_syms)
+                    if mkt_syms:
+                        q = q.in_("symbol", mkt_syms)
                     res = q.order("created_at", desc=True).limit(min(limit or 20, 30)).execute()
                     rows = res.data or []
                     if rows:
@@ -2393,19 +2660,19 @@ def _sync_get_recommendations(
                 break
 
         rec_syms = [r.get("symbol") for r in rows if r.get("symbol")]
-        names_map = _fetch_saudi_names_map(sb_sa, rec_syms)
+        names_map = _fetch_saudi_names_map(sb_sa, rec_syms, exchange=eff_mkt)
 
         recs = []
         for r in rows:
             sym = r.get("symbol")
             nm = names_map.get(sym, {})
-            stock_name_ar = nm.get("name_ar") or _alias_name_for_symbol(sym, market="TADAWUL")
+            stock_name_ar = nm.get("name_ar") or _alias_name_for_symbol(sym, market=eff_mkt)
             clean_name = (stock_name_ar or nm.get("name") or r.get("name") or sym).split(",")[0].strip()
             rec_item: Dict[str, Any] = {
                 "symbol": sym,
-                "market": "TASI",
-                "exchange": "TADAWUL",
-                "currency": "ر.س",
+                "market": ui_mkt,
+                "exchange": eff_mkt,
+                "currency": currency,
                 "name": clean_name,
                 "name_ar": clean_name,
                 "signal": r.get("signal", "BUY"),
@@ -2430,7 +2697,7 @@ def _sync_get_recommendations(
         out: Dict[str, Any] = {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "count": len(recs),
             "filter_status": status,
@@ -2439,8 +2706,8 @@ def _sync_get_recommendations(
         }
         if not recs:
             out["note"] = (
-                "لا توجد توصيات منشورة حالياً في جدول توصيات السوق السعودي (TASI). "
-                "يمكنك طلب فحص فني فوري عبر get_technical_scan(market='TASI') أو تحليل سهم سعودي بالرقم (مثل 2222 أو 1120)."
+                f"لا توجد توصيات منشورة حالياً في جدول توصيات {cfg.name_ar} ({ui_mkt}). "
+                f"يمكنك طلب فحص فني فوري عبر get_technical_scan(market='{ui_mkt}') أو تحليل سهم محدد برمزه."
             )
         return out
 
@@ -2554,10 +2821,11 @@ def _sync_get_technical_scan(
     ui_mkt = _ui_market_label(eff_mkt)
     currency = _currency_for_market(eff_mkt)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
         rows: List[Dict[str, Any]] = []
         used_computed = False
@@ -2567,10 +2835,10 @@ def _sync_get_technical_scan(
             q = (
                 sb_sa.from_("stock_technical_indicators")
                 .select(ti_cols_str)
-                .eq("exchange", "TADAWUL")
+                .eq("exchange", eff_mkt)
             )
             if "date" in ti_cols:
-                latest_sa_date = _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", "TADAWUL")
+                latest_sa_date = _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", eff_mkt)
                 if latest_sa_date:
                     q = q.eq("date", latest_sa_date)
             if preset == "rsi_oversold" and "rsi_14" in ti_cols:
@@ -2610,7 +2878,9 @@ def _sync_get_technical_scan(
         if not rows:
             used_computed = True
             snap = _get_saudi_computed_market_indicators(
-                sb_sa, lookback_days=2 if preset in ("top_gainers", "top_losers", "high_volume") else 22
+                sb_sa,
+                lookback_days=2 if preset in ("top_gainers", "top_losers", "high_volume") else 22,
+                exchange=eff_mkt,
             )
             if preset == "rsi_oversold":
                 rows = sorted(
@@ -2644,7 +2914,7 @@ def _sync_get_technical_scan(
                 rows = sorted(snap, key=lambda r: float(r.get("volume") or 0), reverse=True)[:20]
 
         syms_for_names = [r.get("symbol") for r in rows[:15] if r.get("symbol")]
-        names_map = _fetch_saudi_names_map(sb_sa, syms_for_names)
+        names_map = _fetch_saudi_names_map(sb_sa, syms_for_names, exchange=eff_mkt)
 
         results = []
         seen = set()
@@ -2675,14 +2945,14 @@ def _sync_get_technical_scan(
                 verdict = "🟡 حيادي للمراقبة"
 
             nm_meta = names_map.get(sym, {})
-            stock_name_ar = nm_meta.get("name_ar") or _alias_name_for_symbol(sym, market="TADAWUL")
+            stock_name_ar = nm_meta.get("name_ar") or _alias_name_for_symbol(sym, market=eff_mkt)
             clean_name = (stock_name_ar or nm_meta.get("name") or sym).split(",")[0].strip()
 
             results.append({
                 "symbol": sym,
-                "market": "TASI",
-                "exchange": "TADAWUL",
-                "currency": "ر.س",
+                "market": ui_mkt,
+                "exchange": eff_mkt,
+                "currency": currency,
                 "name": clean_name,
                 "name_ar": clean_name,
                 "close": close,
@@ -2707,7 +2977,7 @@ def _sync_get_technical_scan(
         out: Dict[str, Any] = {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "preset": preset,
             "stocks": results,
@@ -2715,7 +2985,7 @@ def _sync_get_technical_scan(
         if used_computed:
             out["data_source"] = "computed_from_ohlcv"
         if sharia_only:
-            out["sharia_note"] = "تصنيف الشريعة لأسهم السوق السعودي قيد الإضافة، وتُعرض نتائج المسح الفني العامة حالياً."
+            out["sharia_note"] = f"تصنيف الشريعة لأسهم {cfg.name_ar} قيد الإضافة، وتُعرض نتائج المسح الفني العامة حالياً."
         return out
 
     # ── EGX (preserved existing query) ───────────────────────────────────────
@@ -2831,14 +3101,22 @@ def _sync_get_accumulation_stocks(
     ui_mkt = _ui_market_label(eff_mkt)
     currency = _currency_for_market(eff_mkt)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
-        # 1. Prefer SAUDI_SUPABASE.stock_scans_summary when available and populated
+        # 1. Prefer stock_scans_summary ONLY when it has an `exchange` column (preventing TADAWUL/EGX bleed into GCC/Metals),
+        #    for TADAWUL on dedicated SAUDI_SUPABASE, or in non-live mock unit tests.
         summary_cols = _get_saudi_table_columns("stock_scans_summary", sb_sa)
-        if summary_cols is not None or not _is_real_saudi_sb(sb_sa):
+        has_summary_exchange = bool(summary_cols and "exchange" in summary_cols)
+        can_query_summary = (
+            has_summary_exchange
+            or not _is_real_saudi_sb(sb_sa)
+            or (eff_mkt == "TADAWUL" and summary_cols is not None and sb_sa is not _get_sb())
+        )
+        if can_query_summary:
             try:
                 desired_sum = [
                     "symbol", "scan_date", "acc_score", "dist_score",
@@ -2849,7 +3127,11 @@ def _sync_get_accumulation_stocks(
                     if summary_cols is not None
                     else ",".join(desired_sum)
                 )
-                exch_filter = "TADAWUL" if (summary_cols is None or "exchange" in summary_cols) else None
+                exch_filter = (
+                    eff_mkt
+                    if (eff_mkt != "TADAWUL" or has_summary_exchange or not _is_real_saudi_sb(sb_sa))
+                    else None
+                )
                 latest_sa_scan = _get_latest_table_date(
                     sb_sa, "stock_scans_summary", "scan_date", exchange=exch_filter
                 )
@@ -2881,9 +3163,9 @@ def _sync_get_accumulation_stocks(
                     seen_sum.add(sym)
                     stocks_sum.append({
                         "symbol": sym,
-                        "market": "TASI",
-                        "exchange": "TADAWUL",
-                        "currency": "ر.س",
+                        "market": ui_mkt,
+                        "exchange": eff_mkt,
+                        "currency": currency,
                         "accumulation_score": acc_val,
                         "distribution_score": dist_val,
                         "wyckoff_phase": r.get("wyckoff_phase") or "تجميع مؤسسي (Accumulation)",
@@ -2896,14 +3178,14 @@ def _sync_get_accumulation_stocks(
 
                 if stocks_sum:
                     acc_syms = [s["symbol"] for s in stocks_sum]
-                    names_map = _fetch_saudi_names_map(sb_sa, acc_syms)
+                    names_map = _fetch_saudi_names_map(sb_sa, acc_syms, exchange=eff_mkt)
                     ti_map: Dict[str, Dict[str, Any]] = {}
                     try:
                         ti_cols_str, order_col = _saudi_ti_select_and_order(sb_sa)
                         res_ti = (
                             sb_sa.from_("stock_technical_indicators")
                             .select(ti_cols_str)
-                            .eq("exchange", "TADAWUL")
+                            .eq("exchange", eff_mkt)
                             .in_("symbol", acc_syms)
                             .order(order_col, desc=True)
                             .limit(len(acc_syms) * 3)
@@ -2936,7 +3218,7 @@ def _sync_get_accumulation_stocks(
                         nm = names_map.get(s_sym, {})
                         clean_name = (
                             nm.get("name_ar")
-                            or _alias_name_for_symbol(s_sym, "TADAWUL")
+                            or _alias_name_for_symbol(s_sym, eff_mkt)
                             or nm.get("name")
                             or s_sym
                         ).split(",")[0].strip()
@@ -2957,20 +3239,20 @@ def _sync_get_accumulation_stocks(
                     out_sum: Dict[str, Any] = {
                         "status": "success",
                         "market": ui_mkt,
-                        "exchange": "TADAWUL",
+                        "exchange": eff_mkt,
                         "currency": currency,
                         "accumulation_stocks": stocks_sum,
                         "stocks": stocks_sum,
                         "data_source": "stock_scans_summary",
                     }
                     if sharia_only:
-                        out_sum["sharia_note"] = "تصنيف الشريعة لأسهم تداول قيد الإضافة؛ تم عرض أعلى أسهم التجميع المتاحة."
+                        out_sum["sharia_note"] = f"تصنيف الشريعة لأسهم {cfg.name_ar} قيد الإضافة؛ تم عرض أعلى أسهم التجميع المتاحة."
                     return out_sum
             except Exception:
                 pass
 
         # 2. Fallback to computed CMF & relative volume accumulation from OHLCV bars
-        snap = _get_saudi_computed_market_indicators(sb_sa, lookback_days=22)
+        snap = _get_saudi_computed_market_indicators(sb_sa, lookback_days=22, exchange=eff_mkt)
         acc_candidates = []
         for r in snap:
             cmf = float(r.get("cmf_20") or 0.0)
@@ -2984,12 +3266,12 @@ def _sync_get_accumulation_stocks(
 
         acc_candidates.sort(key=lambda item: item[0], reverse=True)
         top_items = acc_candidates[:10]
-        names_map = _fetch_saudi_names_map(sb_sa, [r["symbol"] for _, r in top_items])
+        names_map = _fetch_saudi_names_map(sb_sa, [r["symbol"] for _, r in top_items], exchange=eff_mkt)
         stocks = []
         for acc_score, r in top_items:
             sym = r["symbol"]
             nm = names_map.get(sym, {})
-            clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, "TADAWUL") or nm.get("name") or sym).split(",")[0].strip()
+            clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, eff_mkt) or nm.get("name") or sym).split(",")[0].strip()
             close = r.get("close")
             chg = r.get("change_pct")
             rsi = r.get("rsi_14")
@@ -3000,9 +3282,9 @@ def _sync_get_accumulation_stocks(
             )
             stocks.append({
                 "symbol": sym,
-                "market": "TASI",
-                "exchange": "TADAWUL",
-                "currency": "ر.س",
+                "market": ui_mkt,
+                "exchange": eff_mkt,
+                "currency": currency,
                 "name": clean_name,
                 "name_ar": clean_name,
                 "accumulation_score": acc_score,
@@ -3026,7 +3308,7 @@ def _sync_get_accumulation_stocks(
         return {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "accumulation_stocks": stocks,
             "stocks": stocks,
@@ -3163,37 +3445,60 @@ def _sync_get_news(
     ui_mkt = _ui_market_label(eff_mkt)
     currency = _currency_for_market(eff_mkt)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
-        # Check whether news/disclosures tables exist on SAUDI_SUPABASE before querying
-        cols_news = _get_saudi_table_columns("market_news", sb_sa) or _get_saudi_table_columns("stock_news_sentiment", sb_sa)
+            return _market_unconfigured_error(eff_mkt)
+        # Check whether news/disclosures tables exist before querying (avoid SELECT *)
+        desired_news_cols = [
+            "symbol", "company_name", "title", "summary", "ai_summary",
+            "sentiment", "sentiment_score", "news_count", "headlines", "sources",
+            "date", "disclosure_date", "published_at", "source_url", "exchange",
+        ]
+        news_tbl = None
+        news_tbl_cols = None
+        for cand_tbl in ("market_news", "stock_news_sentiment"):
+            cset = _get_saudi_table_columns(cand_tbl, sb_sa)
+            if cset is not None:
+                news_tbl = cand_tbl
+                news_tbl_cols = cset
+                break
         news_items: List[Dict[str, Any]] = []
-        if cols_news is not None:
+        if news_tbl and news_tbl_cols:
             try:
-                tbl = "market_news" if _get_saudi_table_columns("market_news", sb_sa) else "stock_news_sentiment"
-                q = sb_sa.from_(tbl).select("*").limit(10)
+                sel_cols = ",".join([c for c in desired_news_cols if c in news_tbl_cols]) or "symbol,date"
+                q = sb_sa.from_(news_tbl).select(sel_cols)
+                if "exchange" in news_tbl_cols:
+                    q = q.eq("exchange", eff_mkt)
                 if symbols:
-                    _, sa_syms = _split_symbols_by_market(symbols)
-                    if sa_syms:
-                        q = q.in_("symbol", sa_syms)
-                res = q.execute()
+                    mkt_syms = _group_symbols_by_exchange(symbols).get(eff_mkt, [])
+                    if mkt_syms:
+                        q = q.in_("symbol", mkt_syms[:10])
+                order_field = (
+                    "published_at" if "published_at" in news_tbl_cols
+                    else ("disclosure_date" if "disclosure_date" in news_tbl_cols
+                          else ("date" if "date" in news_tbl_cols else None))
+                )
+                if order_field:
+                    q = q.order(order_field, desc=True)
+                res = q.limit(10).execute()
                 news_items = res.data or []
             except Exception:
                 news_items = []
         out: Dict[str, Any] = {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "count": len(news_items),
             "news": news_items,
         }
         if not news_items:
+            site_hint = f" عبر {cfg.official_site}" if cfg.official_site else ""
             out["note"] = (
-                "أخبار وإفصاحات السوق السعودي (تداول TASI) غير مخزنة حالياً في قاعدة البيانات. "
-                "يمكن للمستخدم متابعة الإفصاحات الرسمية على saudiexchange.sa بينما نواصل تغطية التحليل الفني والأسعار للسوق السعودي."
+                f"أخبار وإفصاحات {cfg.name_ar} ({ui_mkt}) غير مخزنة حالياً في قاعدة البيانات. "
+                f"يمكن للمستخدم متابعة الإفصاحات الرسمية{site_hint} بينما نواصل تغطية التحليل الفني والأسعار لـ{cfg.name_ar}."
             )
         return out
 
@@ -3272,27 +3577,27 @@ async def execute_get_news(
 # Tool: get_comparison
 # ---------------------------------------------------------------------------
 def _sync_get_comparison(symbols: List[str]) -> Dict[str, Any]:
-    egx_syms, tasi_syms = _split_symbols_by_market(symbols)
-    clean_syms = egx_syms + tasi_syms
-    if not clean_syms:
+    grouped = _group_symbols_by_exchange(symbols)
+    if not grouped:
         return {"status": "error", "message": "لم يتم تحديد رموز أسهم صالحة للمقارنة"}
 
     stock_res = _sync_get_stock(symbols)
     stocks = stock_res.get("stocks", [])
     try:
         fv_map: Dict[Tuple[str, Any], Dict[str, Any]] = {}
-        for mkt_syms, mkt_code in ((egx_syms, "EGX"), (tasi_syms, "TASI")):
+        for exch_code, mkt_syms in grouped.items():
             if not mkt_syms:
                 continue
+            ui_code = _ui_market_label(exch_code)
             fv_res = _sync_get_fair_value(
                 symbols=mkt_syms,
                 mode="specific_stocks",
                 limit=len(mkt_syms) + 2,
-                market=mkt_code,
+                market=ui_code,
             )
             for it in (fv_res.get("fair_value_stocks") or []):
                 if isinstance(it, dict) and it.get("symbol"):
-                    fv_map[(str(it["symbol"]).upper(), it.get("market") or mkt_code)] = it
+                    fv_map[(str(it["symbol"]).upper(), it.get("market") or ui_code)] = it
 
         for s in stocks:
             fv_it = fv_map.get((str(s.get("symbol") or "").upper(), s.get("market")))
@@ -3337,25 +3642,26 @@ def _sync_get_fair_value(
     ui_mkt = _ui_market_label(eff_mkt)
     currency = _currency_for_market(eff_mkt)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
         rows: List[Dict[str, Any]] = []
-        _, sa_syms = _split_symbols_by_market(symbols)
+        mkt_syms = _group_symbols_by_exchange(symbols).get(eff_mkt, []) if symbols else []
         try:
             ti_cols_str, order_col = _saudi_ti_select_and_order(sb_sa)
             ti_cols = set(ti_cols_str.split(","))
             q = (
                 sb_sa.from_("stock_technical_indicators")
                 .select(ti_cols_str)
-                .eq("exchange", "TADAWUL")
+                .eq("exchange", eff_mkt)
             )
-            if sa_syms:
-                q = q.in_("symbol", sa_syms)
+            if mkt_syms:
+                q = q.in_("symbol", mkt_syms)
             elif "date" in ti_cols:
-                ld = _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", "TADAWUL")
+                ld = _get_latest_table_date(sb_sa, "stock_technical_indicators", "date", eff_mkt)
                 if ld:
                     q = q.eq("date", ld)
             res = q.order(order_col, desc=True).limit(50).execute()
@@ -3364,17 +3670,17 @@ def _sync_get_fair_value(
             rows = []
 
         if not rows:
-            if sa_syms:
-                ohlcv_map = _fetch_saudi_ohlcv_for_symbols(sb_sa, sa_syms, limit_per_sym=60)
-                for s_sym in sa_syms:
+            if mkt_syms:
+                ohlcv_map = _fetch_saudi_ohlcv_for_symbols(sb_sa, mkt_syms, limit_per_sym=60, exchange=eff_mkt)
+                for s_sym in mkt_syms:
                     calc = _compute_indicators_from_price_rows(ohlcv_map.get(s_sym, []))
                     if calc:
                         calc["symbol"] = s_sym
                         rows.append(calc)
             else:
-                rows = _get_saudi_computed_market_indicators(sb_sa, lookback_days=22)
+                rows = _get_saudi_computed_market_indicators(sb_sa, lookback_days=22, exchange=eff_mkt)
 
-        names_map = _fetch_saudi_names_map(sb_sa, [r.get("symbol") for r in rows[:40] if r.get("symbol")])
+        names_map = _fetch_saudi_names_map(sb_sa, [r.get("symbol") for r in rows[:40] if r.get("symbol")], exchange=eff_mkt)
         items = []
         seen = set()
         for r in rows:
@@ -3392,14 +3698,14 @@ def _sync_get_fair_value(
             fair_value = _safe_price((vwap * 0.6) + (ema * 0.4))
             upside = round(((fair_value - close) / close) * 100, 2)
             nm = names_map.get(sym, {})
-            clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, "TADAWUL") or nm.get("name") or sym).split(",")[0].strip()
+            clean_name = (nm.get("name_ar") or _alias_name_for_symbol(sym, eff_mkt) or nm.get("name") or sym).split(",")[0].strip()
 
             items.append({
                 "symbol": sym,
                 "name": clean_name,
-                "market": "TASI",
-                "exchange": "TADAWUL",
-                "currency": "ر.س",
+                "market": ui_mkt,
+                "exchange": eff_mkt,
+                "currency": currency,
                 "current_price": close,
                 "fair_value": fair_value,
                 "upside_pct": upside,
@@ -3417,12 +3723,12 @@ def _sync_get_fair_value(
         out: Dict[str, Any] = {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "fair_value_stocks": items[:limit],
         }
         if sharia_only:
-            out["sharia_note"] = "تصنيف الشريعة لأسهم تداول قيد الإضافة؛ تم حساب السعر العادل لجميع الأسهم المتاحة."
+            out["sharia_note"] = f"تصنيف الشريعة لأسهم {cfg.name_ar} قيد الإضافة؛ تم حساب السعر العادل لجميع الأسهم المتاحة."
         return out
 
     # ── EGX (preserved existing logic) ───────────────────────────────────────
@@ -3521,15 +3827,16 @@ def _sync_get_sharia_cleanser(
     purification_amount = round(total_coupon * (rate / 100.0), 2)
     zakat_amount = round(total_coupon * 0.025, 2)
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
-        sharia_sa: Optional[bool] = None
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
+        sharia_mkt: Optional[bool] = None
         if sb_sa is not None and clean_sym:
             try:
                 res_sf = (
                     sb_sa.from_("stock_fundamentals")
                     .select("data")
-                    .eq("exchange", "TADAWUL")
+                    .eq("exchange", eff_mkt)
                     .eq("symbol", clean_sym)
                     .limit(1)
                     .execute()
@@ -3537,37 +3844,42 @@ def _sync_get_sharia_cleanser(
                 if res_sf.data and isinstance(res_sf.data[0].get("data"), dict):
                     val = res_sf.data[0]["data"].get("is_sharia_compliant")
                     if val is not None:
-                        sharia_sa = bool(val)
+                        sharia_mkt = bool(val)
             except Exception:
                 pass
-        if sharia_sa is True:
-            verdict_ar = "السهم مصنف كمتوافق مع الضوابط الشرعية في السوق السعودي"
-            idx_lbl = "TASI Shariah"
-        elif sharia_sa is False:
+        if sharia_mkt is True:
+            verdict_ar = f"السهم مصنف كمتوافق مع الضوابط الشرعية في {cfg.name_ar}"
+            idx_lbl = cfg.sharia_index
+        elif sharia_mkt is False:
             verdict_ar = "السهم غير مصنف ضمن قائمة الأسهم الشرعية المعتمدة"
             idx_lbl = "غير متوافق"
         else:
-            verdict_ar = "تصنيف الشريعة الرسمي للسهم في تداول غير متوفر حالياً في القاعدة؛ تم حساب التطهير والزكاة الاسترشادية بالريال السعودي"
-            idx_lbl = "قيد المراجعة الشرعية (TASI)"
+            verdict_ar = (
+                f"تصنيف الشريعة الرسمي للسهم في {cfg.name_ar} غير متوفر حالياً في القاعدة؛ "
+                f"تم حساب التطهير والزكاة الاسترشادية بعملة السوق ({cfg.currency_ar})"
+            )
+            idx_lbl = f"قيد المراجعة الشرعية ({cfg.ui_code})"
 
-        return {
+        out_sharia: Dict[str, Any] = {
             "status": "success",
-            "market": "TASI",
-            "exchange": "TADAWUL",
-            "currency": "ر.س",
+            "market": cfg.ui_code,
+            "exchange": eff_mkt,
+            "currency": cfg.currency_ar,
             "symbol": clean_sym,
-            "is_sharia_compliant": sharia_sa,
+            "is_sharia_compliant": sharia_mkt,
             "sharia_index": idx_lbl,
             "shares_count": shares_count,
             "coupon_per_share": coupon,
             "total_dividends": total_coupon,
             "purification_rate_pct": rate,
             "purification_amount": purification_amount,
-            "purification_amount_sar": purification_amount,
             "zakat_amount": zakat_amount,
-            "zakat_amount_sar": zakat_amount,
             "verdict_ar": verdict_ar,
         }
+        if eff_mkt == "TADAWUL":
+            out_sharia["purification_amount_sar"] = purification_amount
+            out_sharia["zakat_amount_sar"] = zakat_amount
+        return out_sharia
 
     sharia = is_sharia_compliant(clean_sym)
     return {
@@ -3616,16 +3928,16 @@ def _sync_calculate_position(
     currency = _currency_for_market(sym_mkt)
 
     close = 1.0
-    if sym_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if sym_mkt != "EGX":
+        sb_sa = _get_sb_for_market(sym_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error({"symbol": clean_sym})
+            return _market_unconfigured_error(sym_mkt, {"symbol": clean_sym})
         try:
             _, order_col = _saudi_ti_select_and_order(sb_sa)
             res = (
                 sb_sa.from_("stock_technical_indicators")
                 .select(f"close,{order_col}")
-                .eq("exchange", "TADAWUL")
+                .eq("exchange", sym_mkt)
                 .eq("symbol", clean_sym)
                 .order(order_col, desc=True)
                 .limit(1)
@@ -3637,7 +3949,7 @@ def _sync_calculate_position(
                 res_p = (
                     sb_sa.from_("stock_prices")
                     .select("close,date")
-                    .eq("exchange", "TADAWUL")
+                    .eq("exchange", sym_mkt)
                     .eq("symbol", clean_sym)
                     .order("date", desc=True)
                     .limit(1)
@@ -3686,7 +3998,7 @@ def _sync_calculate_position(
     }
     if sym_mkt == "TADAWUL":
         out["profit_loss_sar"] = profit_loss
-    else:
+    elif sym_mkt == "EGX":
         out["profit_loss_egp"] = profit_loss
     return out
 
@@ -3715,15 +4027,15 @@ def _sync_get_price_traps(
     currency = _currency_for_market(eff_mkt)
     clean_sym = _resolve_symbol_and_market(symbol)[0] if symbol else None
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
+            return _market_unconfigured_error(eff_mkt)
 
         bars_by_sym: Dict[str, List[Dict[str, Any]]] = {}
         indicators: List[Dict[str, Any]] = []
         if clean_sym:
-            ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_sa, [clean_sym], limit_per_sym=60)
+            ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_sa, [clean_sym], limit_per_sym=60, exchange=eff_mkt)
             bars = ohlcv.get(clean_sym, [])
             bars_by_sym[clean_sym] = sorted(bars, key=lambda r: str(r.get("date") or ""))
             calc = _compute_indicators_from_price_rows(bars)
@@ -3731,8 +4043,8 @@ def _sync_get_price_traps(
                 calc["symbol"] = clean_sym
                 indicators.append(calc)
         else:
-            # Top active Saudi stocks from 5-day OHLCV window for trap detection
-            dates = _fetch_saudi_recent_dates(sb_sa, count=5)
+            # Top active stocks in this exchange from 5-day OHLCV window for trap detection
+            dates = _fetch_saudi_recent_dates(sb_sa, count=5, exchange=eff_mkt)
             if dates:
                 try:
                     page_rows: List[Dict[str, Any]] = []
@@ -3741,7 +4053,7 @@ def _sync_get_price_traps(
                         res_p = (
                             sb_sa.from_("stock_prices")
                             .select("symbol,date,open,high,low,close,volume")
-                            .eq("exchange", "TADAWUL")
+                            .eq("exchange", eff_mkt)
                             .gte("date", start_d)
                             .order("date", desc=True)
                             .range(pg * 1000, pg * 1000 + 999)
@@ -3769,7 +4081,7 @@ def _sync_get_price_traps(
         return {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "symbol": clean_sym,
             **detected,
@@ -3875,20 +4187,45 @@ def _sync_get_disclosures(
     currency = _currency_for_market(eff_mkt)
     clean_sym = _resolve_symbol_and_market(symbol)[0] if symbol else None
 
-    if eff_mkt == "TADAWUL":
-        sb_sa = _get_sb_for_market("TADAWUL")
+    if eff_mkt != "EGX":
+        cfg = _reg_get_market_config(eff_mkt)
+        sb_sa = _get_sb_for_market(eff_mkt)
         if sb_sa is None:
-            return _saudi_unconfigured_error()
-        # Only query if disclosure table exists in SAUDI_SUPABASE OpenAPI schema
+            return _market_unconfigured_error(eff_mkt)
+        # Only query if disclosure table exists in schema
         disc_tbl = None
-        for cand in ("disclosures", "tasi_disclosures", "egx_disclosures"):
-            if _get_saudi_table_columns(cand, sb_sa) is not None:
+        disc_cols = None
+        cand_tables = [
+            "disclosures",
+            f"{eff_mkt.lower()}_disclosures",
+            f"{cfg.ui_code.lower()}_disclosures",
+        ]
+        # SAUDI_SUPABASE stores TADAWUL disclosures in `egx_disclosures`; NEVER let non-TADAWUL markets bleed from it!
+        if eff_mkt == "TADAWUL" and sb_sa is not _get_sb():
+            cand_tables.append("egx_disclosures")
+        for cand in cand_tables:
+            cset = _get_saudi_table_columns(cand, sb_sa)
+            if cset is not None:
+                # On shared DBs, non-TADAWUL generic `disclosures` table MUST have an `exchange` column
+                if cand == "disclosures" and eff_mkt != "TADAWUL" and "exchange" not in cset:
+                    continue
                 disc_tbl = cand
+                disc_cols = cset
                 break
         items: List[Dict[str, Any]] = []
         if disc_tbl:
             try:
-                q = sb_sa.from_(disc_tbl).select("symbol,title,ai_summary,sentiment,disclosure_type,disclosure_date,source_url").limit(min(limit or 10, 20))
+                desired_disc = [
+                    "symbol", "title", "ai_summary", "sentiment",
+                    "disclosure_type", "disclosure_date", "source_url",
+                ]
+                sel_disc = (
+                    ",".join([c for c in desired_disc if c in disc_cols])
+                    if disc_cols else ",".join(desired_disc)
+                )
+                q = sb_sa.from_(disc_tbl).select(sel_disc).limit(min(limit or 10, 20))
+                if disc_cols and "exchange" in disc_cols:
+                    q = q.eq("exchange", eff_mkt)
                 if clean_sym:
                     q = q.eq("symbol", clean_sym)
                 if disclosure_type:
@@ -3900,15 +4237,16 @@ def _sync_get_disclosures(
         out: Dict[str, Any] = {
             "status": "success",
             "market": ui_mkt,
-            "exchange": "TADAWUL",
+            "exchange": eff_mkt,
             "currency": currency,
             "count": len(items),
             "disclosures": items,
         }
         if not items:
+            site_hint = f" عبر {cfg.official_site}" if cfg.official_site else ""
             out["note"] = (
-                "إفصاحات السوق السعودي (تداول) غير متوفرة حالياً في قاعدة البيانات؛ "
-                "يمكنك متابعة إعلانات الشركات مباشرة عبر saudiexchange.sa، وسأساعدك في التحليل الفني والأساسي لأي سهم سعودي فوراً."
+                f"إفصاحات {cfg.name_ar} ({ui_mkt}) غير متوفرة حالياً في قاعدة البيانات؛ "
+                f"يمكنك متابعة إعلانات الشركات مباشرة{site_hint}، وسأساعدك في التحليل الفني والأساسي لأي سهم فوراً."
             )
         return out
 
@@ -3957,7 +4295,14 @@ def _resolve_stock_display_name(clean_sym: str, sym_mkt: str) -> str:
     try:
         sb_lookup = _get_sb_for_market(sym_mkt)
         if sb_lookup is not None:
-            s_res = sb_lookup.from_("stocks").select("name_ar, name").eq("symbol", clean_sym).limit(1).execute()
+            s_res = (
+                sb_lookup.from_("stocks")
+                .select("name_ar, name")
+                .eq("exchange", sym_mkt)
+                .eq("symbol", clean_sym)
+                .limit(1)
+                .execute()
+            )
             if s_res.data and isinstance(s_res.data[0], dict):
                 stock_name = s_res.data[0].get("name_ar") or s_res.data[0].get("name") or clean_sym
     except Exception:
@@ -4004,35 +4349,40 @@ def _build_portfolio_view_payload(
 
     symbols = list({str(p.get("symbol", "")).upper() for p in holdings if p.get("symbol")})
     egx_syms: List[str] = []
-    sa_syms: List[str] = []
+    non_egx_by_mkt: Dict[str, List[str]] = {}
     for s in symbols:
         norm_s, mkt = _resolve_symbol_and_market(s)
-        if mkt == "TADAWUL":
-            sa_syms.append(norm_s)
-        else:
+        if mkt == "EGX":
             egx_syms.append(s)
+        else:
+            non_egx_by_mkt.setdefault(mkt, []).append(norm_s)
 
-    price_map: Dict[str, Optional[float]] = {}
-    change_map: Dict[str, Optional[float]] = {}
-    tech_map: Dict[str, Dict[str, Any]] = {}
-    wyckoff_map: Dict[str, Dict[str, Any]] = {}
+    # Key quote maps by (exchange, symbol) so overlapping tickers (e.g. EGX ADIB vs ADX ADIB.AD) never collide!
+    price_map: Dict[Tuple[str, str], Optional[float]] = {}
+    change_map: Dict[Tuple[str, str], Optional[float]] = {}
+    tech_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    wyckoff_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     if egx_syms:
         try:
             tech_res = (
                 sb.from_("stock_technical_indicators")
-                .select("symbol, close, change_pct, date, rsi_14, ema_50, ema_200, macd_histogram, bb_lower, bb_upper, king_ai_score")
+                .select("symbol, exchange, close, change_pct, date, rsi_14, ema_50, ema_200, macd_histogram, bb_lower, bb_upper, king_ai_score")
                 .in_("symbol", egx_syms)
                 .order("date", desc=True)
                 .limit(max(len(egx_syms) * 5, 30))
                 .execute()
             )
             for row in tech_res.data or []:
+                row_exch = str(row.get("exchange") or "EGX").upper()
+                if row_exch != "EGX":
+                    continue
                 s = str(row.get("symbol", "")).upper()
-                if s and s not in price_map:
-                    price_map[s] = _safe_price(row.get("close"))
-                    change_map[s] = _safe_float(row.get("change_pct"))
-                    tech_map[s] = row
+                k = ("EGX", s)
+                if s and k not in price_map:
+                    price_map[k] = _safe_price(row.get("close"))
+                    change_map[k] = _safe_float(row.get("change_pct"))
+                    tech_map[k] = row
         except Exception:
             pass
 
@@ -4047,17 +4397,19 @@ def _build_portfolio_view_payload(
             )
             for row in wyck_res.data or []:
                 s = str(row.get("symbol", "")).upper()
-                if s and s not in wyckoff_map:
-                    wyckoff_map[s] = row
+                k = ("EGX", s)
+                if s and k not in wyckoff_map:
+                    wyckoff_map[k] = row
         except Exception:
             pass
 
-        missing_egx = [s for s in egx_syms if s not in price_map]
+        missing_egx = [s for s in egx_syms if ("EGX", s) not in price_map]
         if missing_egx:
             try:
                 sp_res = (
                     sb.from_("stock_prices")
                     .select("symbol, close, change_pct, date")
+                    .eq("exchange", "EGX")
                     .in_("symbol", missing_egx)
                     .order("date", desc=True)
                     .limit(max(len(missing_egx) * 5, 30))
@@ -4065,24 +4417,50 @@ def _build_portfolio_view_payload(
                 )
                 for row in sp_res.data or []:
                     s = str(row.get("symbol", "")).upper()
-                    if s and s not in price_map:
-                        price_map[s] = _safe_price(row.get("close"))
-                        change_map[s] = _safe_float(row.get("change_pct"))
+                    k = ("EGX", s)
+                    if s and k not in price_map:
+                        price_map[k] = _safe_price(row.get("close"))
+                        change_map[k] = _safe_float(row.get("change_pct"))
             except Exception:
                 pass
 
-    if sa_syms:
-        sb_sa = _get_sb_for_market("TADAWUL")
-        if sb_sa is not None:
-            sa_ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_sa, sa_syms, limit_per_sym=5)
-            for s_norm, bars in sa_ohlcv.items():
+    for exch_code, exch_syms in non_egx_by_mkt.items():
+        sb_exch = _get_sb_for_market(exch_code)
+        if sb_exch is None:
+            continue
+        try:
+            ti_cols_str, order_col = _saudi_ti_select_and_order(sb_exch)
+            tech_res = (
+                sb_exch.from_("stock_technical_indicators")
+                .select(ti_cols_str)
+                .eq("exchange", exch_code)
+                .in_("symbol", exch_syms)
+                .order(order_col, desc=True)
+                .limit(max(len(exch_syms) * 5, 30))
+                .execute()
+            )
+            for row in tech_res.data or []:
+                s_norm = str(row.get("symbol", "")).upper()
+                k = (exch_code, s_norm)
+                if s_norm and k not in price_map:
+                    price_map[k] = _safe_price(row.get("close"))
+                    change_map[k] = _safe_float(row.get("change_pct"))
+                    tech_map[k] = row
+        except Exception:
+            pass
+
+        missing_exch = [s for s in exch_syms if (exch_code, s) not in price_map]
+        if missing_exch:
+            exch_ohlcv = _fetch_saudi_ohlcv_for_symbols(sb_exch, missing_exch, limit_per_sym=5, exchange=exch_code)
+            for s_norm, bars in exch_ohlcv.items():
                 if bars:
+                    k = (exch_code, s_norm)
                     c0 = _safe_price(bars[0].get("close"))
-                    price_map[s_norm] = c0
+                    price_map[k] = c0
                     if len(bars) >= 2:
                         c1 = _safe_price(bars[1].get("close"))
                         if c1 and c0:
-                            change_map[s_norm] = _safe_float(((c0 - c1) / c1) * 100.0)
+                            change_map[k] = _safe_float(((c0 - c1) / c1) * 100.0)
 
     enriched = []
     for p in holdings:
@@ -4091,8 +4469,8 @@ def _build_portfolio_view_payload(
         curr = _currency_for_market(mkt)
         qty = _safe_float(p.get("quantity"), 4)
         entry = _safe_price(p.get("entry_price"))
-        last_price = price_map.get(s) if s in price_map else price_map.get(norm_s)
-        change_pct = change_map.get(s) if s in change_map else change_map.get(norm_s)
+        last_price = price_map.get((mkt, s)) if (mkt, s) in price_map else price_map.get((mkt, norm_s))
+        change_pct = change_map.get((mkt, s)) if (mkt, s) in change_map else change_map.get((mkt, norm_s))
 
         valid_entry = entry is not None and entry > 0
         cost_basis = (qty * entry) if (qty is not None and valid_entry) else None
@@ -4100,8 +4478,8 @@ def _build_portfolio_view_payload(
         profit_value = (market_value - cost_basis) if (cost_basis is not None and market_value is not None) else None
         profit_pct = ((profit_value / cost_basis) * 100) if (cost_basis and cost_basis > 0 and profit_value is not None) else None
 
-        t_row = tech_map.get(s) or tech_map.get(norm_s) or {}
-        w_row = wyckoff_map.get(s) or wyckoff_map.get(norm_s) or {}
+        t_row = tech_map.get((mkt, s)) or tech_map.get((mkt, norm_s)) or {}
+        w_row = wyckoff_map.get((mkt, s)) or wyckoff_map.get((mkt, norm_s)) or {}
         enriched.append({
             "id": p.get("id"),
             "symbol": s,
@@ -4138,8 +4516,13 @@ def _build_portfolio_view_payload(
     equity = (total_value + cash) if total_value is not None else cash
 
     totals_by_market: Dict[str, Dict[str, Any]] = {}
-    if sa_syms:
-        for m_lbl, curr_lbl in (("EGX", "ج.م"), ("TASI", "ر.س")):
+    if non_egx_by_mkt:
+        seen_mkts: Dict[str, str] = {}
+        for x in enriched:
+            m_lbl = str(x.get("market") or "EGX")
+            if m_lbl not in seen_mkts:
+                seen_mkts[m_lbl] = str(x.get("currency") or "ج.م")
+        for m_lbl, curr_lbl in seen_mkts.items():
             sub = [x for x in enriched if x.get("market") == m_lbl]
             if sub:
                 sub_cost = sum(x["cost_basis"] or 0 for x in sub) if all(x["cost_basis"] is not None for x in sub) else None
@@ -4781,25 +5164,19 @@ def _sync_manage_automations(
         except Exception as e:
             return {"status": "error", "message": f"تعذر جلب المهام المجدولة: {str(e)}"}
 
-    # Verify Pro subscription & Telegram link for write operations
+    # Verify Chat Pro subscription (Full Pro or AI Chat Only — excludes vip_only) & Telegram link
     is_pro = False
     try:
-        sub_res = (
-            sb.from_("subscriptions")
-            .select("status")
-            .eq("user_id", user_id)
-            .eq("status", "active")
-            .limit(1)
-            .execute()
-        )
-        is_pro = bool(sub_res.data)
+        from api.plan_limits import has_chat_pro_user
+
+        is_pro = has_chat_pro_user(user_id, sb)
     except Exception:
         is_pro = False
 
     if not is_pro:
         return {
             "status": "pro_required",
-            "message": "ميزة الأتمتة اليومية المجدولة متاحة لمشتركي باقة Pro فقط. يمكنك الترقية عبر https://egxbots.com/pricing",
+            "message": "ميزة الأتمتة اليومية المجدولة متاحة لمشتركي باقة الشات الذكي (100 ج.م) أو الباقة الشاملة Pro (150 ج.م). يمكنك الترقية عبر https://egxbots.com/pricing",
         }
 
     tg_chat_id: Optional[str] = None
@@ -5306,15 +5683,16 @@ async def dispatch_tool(
             return BENCHMARK_FIXTURES[tool_name]
         return {"status": "success", "data": "Benchmark mode active."}
 
-    ctx_token = set_active_market_context(default_market) if default_market else None
+    eff_default_mkt = arguments.get("market") or default_market
+    ctx_token = set_active_market_context(eff_default_mkt) if eff_default_mkt else None
     try:
         if tool_name == "get_stock":
             symbols = arguments.get("symbols") or ([arguments["symbol"]] if "symbol" in arguments else [])
-            return await execute_get_stock(symbols)
+            return await execute_get_stock(symbols, market=arguments.get("market"))
 
         elif tool_name == "get_stock_levels":
             symbols = arguments.get("symbols") or ([arguments["symbol"]] if "symbol" in arguments else [])
-            return await execute_get_stock_levels(symbols)
+            return await execute_get_stock_levels(symbols, market=arguments.get("market"))
 
         elif tool_name == "get_market":
             return await execute_get_market(market=arguments.get("market"))

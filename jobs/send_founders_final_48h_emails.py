@@ -25,6 +25,10 @@ except Exception:
 
 from api.stock_ai import _init_supabase, supabase
 from api.payment_common import founders_offer_ends_at
+try:
+    from api.perf_utils import ALL_PAID_PLAN_IDS
+except Exception:  # pragma: no cover
+    ALL_PAID_PLAN_IDS = frozenset({"pro", "pro_6m", "pro_1y", "lifetime", "pro_lifetime", "chat_only", "vip_only"})
 from api.marketing_lifecycle import (
     APP_URL,
     MARKETING_DAILY_EMAIL_CAP,
@@ -61,34 +65,34 @@ def send_founders_final_48h_email(
     hours_left: int,
     is_trial_or_warm: bool = False,
 ) -> bool:
-    """Sends the final 48-hour scarcity email before monthly Pro returns from 100 EGP to 200 EGP."""
+    """Sends the final 48-hour scarcity email before monthly Full Bundle Pro returns from 100 EGP to 150 EGP."""
     if is_user_unsubscribed(user_id, email) or has_recent_message(user_id, MESSAGE_TYPE, cooldown_days=14):
         return False
 
     hrs_display = max(1, min(48, int(round(hours_left))))
     time_badge = "أقل من 24 ساعة" if hrs_display <= 24 else f"{hrs_display} ساعة فقط"
-    subject = f"⏳ باقي {time_badge}: آخر فرصة لتثبيت اشتراك EGX BOTS Pro بـ 100 ج.م قبل العودة لـ 200 ج.م"
+    subject = f"⏳ باقي {time_badge}: آخر فرصة لتثبيت الباقة الشاملة EGX BOTS Pro بـ 100 ج.م بدلاً من 150 ج.م"
     greeting = f"أهلاً {display_name} 👋"
 
     intro = (
-        "نود تذكيرك بأنك قمت بتجربة منصة <strong>EGX BOTS</strong> مؤخراً، وأمامك الآن <strong>الفرصة الأخيرة</strong> لتثبيت سعر المؤسسين المخفض على حسابك قبل إغلاق العرض نهائياً."
+        "نود تذكيرك بأنك قمت بتجربة منصة <strong>EGX BOTS</strong> مؤخراً، وأمامك الآن <strong>الفرصة الأخيرة</strong> لتثبيت سعر المؤسسين المخفض على <strong>الباقة الشاملة Pro</strong> قبل انتهاء العرض."
         if is_trial_or_warm
-        else "تنبيه هام قبل إغلاق باب عرض المؤسسين الأوائل على منصة <strong>EGX BOTS</strong> وعودة التسعير الرسمي."
+        else "تنبيه هام قبل إغلاق عرض المؤسسين الأوائل على <strong>الباقة الشاملة Pro</strong> في منصة <strong>EGX BOTS</strong>."
     )
 
     paragraphs = [
         intro,
-        f"⏰ <strong>يتبقى {time_badge} فقط (حتى يوم 14 نوفمبر):</strong><br/>"
-        "ينتهي عرض الـ <strong>100 ج.م شهرياً</strong> ويعود سعر الاشتراك الشهري تلقائياً إلى السعر الرسمي <strong>(200 ج.م شهرياً)</strong> لأي مشترك جديد.",
+        f"⏰ <strong>يتبقى {time_badge} فقط:</strong><br/>"
+        "ينتهي تثبيت <strong>الباقة الشاملة Pro بـ 100 ج.م شهرياً</strong> وتستمر الباقة الشاملة بالسعر الرسمي <strong>(150 ج.م شهرياً)</strong>، بينما تتاح باقة الشات الذكي فقط بـ <strong>100 ج.م</strong> وباقة تليجرام VIP فقط بـ <strong>100 ج.م</strong>.",
         "🔒 <strong>ميزة تثبيت السعر مدى الحياة (Grandfather Lock):</strong><br/>"
-        "كل من يفعّل اشتراكه قبل انتهاء العداد يحتفظ بسعر <strong>100 ج.م شهرياً مدى الحياة</strong> عند التجديد (بدلاً من 200 ج.م)، بالإضافة إلى فتح كافة المزايا فوراً:<br/>"
-        "• <strong>إشارات المدى القصير والمتوسط واللحظي (Short & Medium Swings)</strong> بدون حجب أو تأخير.<br/>"
-        "• <strong>قناة تليجرام VIP الفورية</strong> ورادار السيولة الذكية والاختراقات لحظة بلحظة.<br/>"
-        "• <strong>350 رسالة ذكاء اصطناعي شهرياً</strong> لتحليل الأسهم، مستويات الدخول، ورفع لقطات المحفظة والشارت (Vision AI).",
-        "💡 <em>تفعيل فوري بضغطة زر عبر فودافون كاش أو انستاباي أو البطاقات البنكية عبر بوابة EasyKash المعتمدة.</em>",
+        "كل من يفعّل <strong>الباقة الشاملة Pro</strong> ضمن العرض يحتفظ بسعر <strong>100 ج.م شهرياً مدى الحياة</strong> عند التجديد (بدلاً من 150 ج.م)، مع كافة المزايا معاً:<br/>"
+        "• <strong>قراءات المدى القصير والمتوسط واللحظي (Short & Medium Swings)</strong> بدون حجب أو تأخير.<br/>"
+        "• <strong>قنوات تليجرام VIP الفورية (EGX + TASI)</strong> ورادار السيولة الذكية والاختراقات لحظة بلحظة.<br/>"
+        "• <strong>350 رسالة تحليلية شهرياً</strong> مع ARTORO، ومستويات الدعم والمقاومة، ورفع لقطات المحفظة والشارت (Vision AI) مع محفظة 15 سهماً.",
+        "💡 <em>تفعيل فوري وآمن عبر بوابة EasyKash المعتمدة (بطاقات بنكية محلية ودولية مع 3D Secure، محافظ إلكترونية، أو فوري).</em>",
     ]
 
-    cta_text = f"🔥 ثبّت اشتراكك بـ 100 ج.م الآن (قبل العودة لـ 200 ج.م)"
+    cta_text = "🔥 ثبّت الباقة الشاملة بـ 100 ج.م الآن (بدلاً من 150 ج.م)"
     cta_url = f"{APP_URL}/pricing?plan=pro&from=final_48h"
     message_id = str(uuid.uuid4())
 
@@ -182,12 +186,12 @@ def dispatch_final_48h_campaign(
     except Exception as exc:
         print(f"[FINAL-48H] Warning: bulk email prefetch fallback: {exc}")
 
-    # Exclude active Pro/Lifetime subscribers
+    # Exclude active paid subscribers across all paid plans
     paid_subs = (
         supabase.table("subscriptions")
         .select("user_id")
         .eq("status", "active")
-        .in_("plan_id", ["pro", "lifetime", "pro_lifetime"])
+        .in_("plan_id", list(ALL_PAID_PLAN_IDS))
         .execute()
         .data
         or []

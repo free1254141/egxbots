@@ -111,3 +111,12 @@ To stay comfortably inside Vercel Hobby limits (Fluid Active CPU, Fast Origin Tr
 - **Timing-Safe Secrets & Input Sanitization:** Compare internal keys (`x-admin-key`) with `hmac.compare_digest` (failing closed when unset), verify webhook signatures (`svix` HMAC on Resend webhooks), and validate ticker/exchange/metadata keys with strict regex allowlists.
 - **Per-User Isolation:** Never mix user-specific quota, portfolio, or unlocked PRO fields into shared public cache keys.
 
+## 💳 Subscription Tiers, Capability Isolation & Payment/FRA Architecture
+
+- **Canonical Reference:** Always follow `docs/PRICING_AND_ENTITLEMENTS_ARCHITECTURE.md` before changing plans, pricing UI, quotas, checkout triggers, or Telegram VIP access.
+- **3-Tier Retail Split:** `chat_only` (100 EGP / 10 SAR), `vip_only` (100 EGP / 10 SAR), and `pro` Full Bundle Hero (150 EGP/mo, 750 EGP/6m, 1,350 EGP/1y; 15 / 75 / 135 SAR; EasyKash `tasi` billing mapped via `_SAUDI_SAR_EXCHANGE_MAP`), plus `lifetime` (2,250 EGP / 225 SAR).
+- **Founders 50 & 100 EGP Protection:** Applies strictly to the Full Bundle (`pro`, `pro_6m`, `pro_1y`); never grant Founders status or discounted Full Bundle rates from `chat_only` or `vip_only`. Preserve the `COALESCE(new.customer_note, '') NOT ILIKE 'Market: tasi%'` bypass in `public.check_founders_checkout_amount()`.
+- **Strict Capability Isolation:** Gate AI Chat (`350`/mo), Vision AI uploads (`403 PRO_REQUIRED`), `15`-stock portfolio (`record_portfolio_transaction`), portfolio rebalance, and scheduled automations strictly on `has_chat_pro` / `egx_chat_pro_active`. Gate VIP Telegram channel invites strictly on `has_vip_access`. Reserve `is_pro` / `egx_pro_active` solely for shared zero-delay site signals and paid backtests.
+- **EasyKash-Only & FRA Compliance:** EasyKash (`DirectPayV1/pay`) is the sole approved payment gateway — never promote InstaPay or manual external wallets. Keep all copy strictly SaaS analytical tooling for personal research/education per `docs/fra-submission-dossier/` (no advisory/recommendation claims or profit guarantees).
+
+

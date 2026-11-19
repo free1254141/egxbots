@@ -40,6 +40,7 @@ import {
   Award,
   BellRing,
   Bot,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -52,6 +53,13 @@ import {
   lifetimeBreakevenMonths,
   toDisplayAmount,
 } from "@/lib/saudi-pricing";
+import {
+  DURATION_SLIDER_PLANS,
+  DURATION_SLIDER_SCHEDULE,
+  computeDurationPlanPricing,
+  formatDurationLabel,
+  getDurationScheduleEntry,
+} from "@/lib/duration-pricing";
 import { SAUDI_VIP_TELEGRAM_WEB_URL } from "@/lib/telegramProInvite";
 import { getTrialDeviceFingerprint, notifyTrialActivationError } from "@/lib/device-fingerprint";
 export { broadcastEntitlements };
@@ -75,9 +83,10 @@ function stripDialPrefix(digits: string, dialCode: string): string {
 export default function PricingClient() {
   const { language } = useLanguage();
   const isAr = language === "ar";
-  const { market, isSaudi, currencyLabel, currencyCode } = useMarket();
-  const brandName = isSaudi ? "TASI BOTS" : "EGX BOTS";
-  const displayAmount = (egp: number) => toDisplayAmount(egp, isSaudi);
+  const { market, isSaudi, isUae, isQatar, isGccChatOnly, currencyLabel, currencyCode } = useMarket();
+  const isGulfPricing = isSaudi || isGccChatOnly;
+  const brandName = isSaudi ? "TASI BOTS" : isUae ? "UAE BOTS" : isQatar ? "QSE BOTS" : "EGX BOTS";
+  const displayAmount = (egp: number) => toDisplayAmount(egp, market);
   const formatPrice = (egp: number) => `${displayAmount(egp).toLocaleString()} ${currencyLabel}`;
   const { user } = useAuth();
   const router = useRouter();
@@ -137,13 +146,14 @@ export default function PricingClient() {
     }
   };
   const [orderStatus, setOrderStatus] = useState<string>("submitted");
+  const [orderDurationDays, setOrderDurationDays] = useState<number | null>(null);
   const [subscriptionEnd, setSubscriptionEnd] = useState<string | null>(null);
   const [telegramProUrl, setTelegramProUrl] = useState("");
   const [telegramSaudiProUrl, setTelegramSaudiProUrl] = useState("");
   const [b2bDashboardUrl, setB2bDashboardUrl] = useState("");
   const [isPro, setIsPro] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState("pro");
-  const [activeProDuration, setActiveProDuration] = useState<"pro" | "pro_6m" | "pro_1y">("pro");
+  const [selectedMonths, setSelectedMonths] = useState<number>(1);
   const proCardRef = useRef<HTMLDivElement>(null);
   const [promoInput, setPromoInput] = useState("");
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; name: string; discount_percent: number } | null>(null);
@@ -201,26 +211,49 @@ export default function PricingClient() {
       if (modeParam === "b2b" || modeParam === "channels" || modeParam === "business") {
         setPricingCategory("b2b");
       }
+      const monthsParam = Number(params.get("months"));
+      if (Number.isInteger(monthsParam) && monthsParam >= 1 && monthsParam <= 12) {
+        setSelectedMonths(monthsParam);
+      }
       const planParam = params.get("plan");
-      if (planParam && ["pro", "pro_6m", "pro_1y", "lifetime", "b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
-        setSelectedPlan(planParam);
-        if (["pro", "pro_6m", "pro_1y"].includes(planParam)) {
-          setActiveProDuration(planParam as "pro" | "pro_6m" | "pro_1y");
+      if (planParam && ["pro", "pro_6m", "pro_1y", "lifetime", "chat_only", "vip_only", "b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
+        if (planParam === "pro_6m") {
+          setSelectedPlan("pro");
+          setSelectedMonths(6);
           setPricingCategory("retail");
-        }
-        if (["b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
-          setPricingCategory("b2b");
+        } else if (planParam === "pro_1y") {
+          setSelectedPlan("pro");
+          setSelectedMonths(12);
+          setPricingCategory("retail");
+        } else {
+          setSelectedPlan(planParam);
+          if (["pro", "chat_only", "vip_only", "lifetime"].includes(planParam)) {
+            setPricingCategory("retail");
+          }
+          if (["b2b_starter", "b2b_pro", "b2b_enterprise"].includes(planParam)) {
+            setPricingCategory("b2b");
+          }
         }
       }
     }
   }, []);
 
-  // Default dial code to Saudi Arabia (+966) when TASI market is active and phone is empty
+  // Force retail category & clear vip_only/b2b when UAE/Qatar (chat-only markets without Telegram)
+  useEffect(() => {
+    if (isGccChatOnly) {
+      setPricingCategory("retail");
+      if (selectedPlan === "vip_only" || selectedPlan.startsWith("b2b_")) {
+        setSelectedPlan("chat_only");
+      }
+    }
+  }, [isGccChatOnly, selectedPlan]);
+
+  // Default dial code to Saudi (+966), UAE (+971), Qatar (+974), or Egypt (+20) when phone is empty
   useEffect(() => {
     if (!userPickedDialCodeRef.current && !customerMobile.trim()) {
-      setSelectedDialCode(isSaudi ? "+966" : "+20");
+      setSelectedDialCode(isSaudi ? "+966" : isUae ? "+971" : isQatar ? "+974" : "+20");
     }
-  }, [isSaudi, customerMobile]);
+  }, [isSaudi, isUae, isQatar, customerMobile]);
 
   // Pre-fill customer mobile from their saved profile if available
   useEffect(() => {
@@ -373,7 +406,7 @@ export default function PricingClient() {
         setOrderStatus("approved");
         broadcastEntitlements(true);
         // Fetch the invite link if we don't have it yet
-        if (!telegramProUrl || (isSaudi && !telegramSaudiProUrl)) {
+        if (selectedPlan !== "chat_only" && !selectedPlan.startsWith("b2b_") && (!telegramProUrl || (isGulfPricing && !telegramSaudiProUrl))) {
           const vip = await fetch("/api/profile/telegram-pro", { cache: "no-store", signal: AbortSignal.timeout(12_000) })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);
@@ -398,18 +431,21 @@ export default function PricingClient() {
         if (settledStatus === "failed") {
           fetch("/api/payment/failed-recovery", { method: "POST" }).catch(() => {});
         }
+        const resolvedPlan = String(data.plan_id || selectedPlan || "");
         if (settledStatus === "approved") {
           setIsPro(true);
-          broadcastEntitlements(true);
+          broadcastEntitlements(true, resolvedPlan !== "vip_only");
         }
         if (data.plan_id) setSelectedPlan(data.plan_id);
+        if (typeof data.duration_days === "number" && data.duration_days > 0) {
+          setOrderDurationDays(data.duration_days);
+        }
         setSubscriptionEnd(data.subscription?.current_period_end || null);
         setTelegramProUrl(data.telegram_pro_url || "");
         if (data.telegram_saudi_pro_url) setTelegramSaudiProUrl(data.telegram_saudi_pro_url);
         setB2bDashboardUrl(String(data.b2b_dashboard_url || "").replace(/^https?:\/\/[^/]+/, ""));
-        const resolvedPlan = String(data.plan_id || selectedPlan || "");
         const isB2bResolved = resolvedPlan.startsWith("b2b_");
-        if (settledStatus === "approved" && !isB2bResolved && (!data.telegram_pro_url || (isSaudi && !data.telegram_saudi_pro_url))) {
+        if (settledStatus === "approved" && !isB2bResolved && resolvedPlan !== "chat_only" && (!data.telegram_pro_url || (isGulfPricing && !data.telegram_saudi_pro_url))) {
           const vip = await fetch("/api/profile/telegram-pro", { cache: "no-store", signal: AbortSignal.timeout(12_000) })
             .then((response) => (response.ok ? response.json() : null))
             .catch(() => null);
@@ -443,7 +479,7 @@ export default function PricingClient() {
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [step, localOrder, pollRestart, isPro, isSaudi, telegramProUrl, telegramSaudiProUrl]);
+  }, [step, localOrder, pollRestart, isPro, isSaudi, isGulfPricing, telegramProUrl, telegramSaudiProUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -516,7 +552,7 @@ export default function PricingClient() {
           if (data?.plan?.trial_expires_at) setTrialExpiresAt(data.plan.trial_expires_at);
         }
         if (proActive && lastKnownPro === false) {
-          broadcastEntitlements(true);
+          broadcastEntitlements(true, data?.plan?.has_chat_pro ?? data?.plan?.id !== "vip_only");
         }
         lastKnownPro = proActive;
       } catch {
@@ -574,9 +610,9 @@ export default function PricingClient() {
     });
   };
 
-  const handleDurationSelect = (id: "pro" | "pro_6m" | "pro_1y", shouldScroll = false) => {
-    setActiveProDuration(id);
-    setSelectedPlan(id);
+  const handleDurationSliderChange = (months: number, shouldScroll = false) => {
+    const safe = Math.min(12, Math.max(1, Math.round(Number(months) || 1)));
+    setSelectedMonths(safe);
     if (shouldScroll) {
       setTimeout(() => {
         scrollToProCard();
@@ -589,6 +625,7 @@ export default function PricingClient() {
   // the bottom of the shorter payment page.
   const openPaymentStep = (planId: string) => {
     setSelectedPlan(planId);
+    setOrderDurationDays(null);
     window.scrollTo({ top: 0, behavior: "auto" });
     setStep("payment");
   };
@@ -677,20 +714,31 @@ export default function PricingClient() {
       return;
     }
     setBusy(true);
+    const resolvedPlanId =
+      planId === "pro_6m" || planId === "pro_1y" ? "pro" : planId;
+    const includeSliderDuration = DURATION_SLIDER_PLANS.has(resolvedPlanId);
+    const resolvedMonths =
+      planId === "pro_6m" ? 6 : planId === "pro_1y" ? 12 : selectedMonths;
     try {
       const res = await fetch("/api/payment/easykash/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          plan_id: planId,
+          plan_id: resolvedPlanId,
           mobile: normalizedMobile,
           promo_code: appliedPromo?.code || "",
-          market: isSaudi ? "tasi" : "egx",
+          market,
+          ...(includeSliderDuration ? { duration_months: resolvedMonths } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || (isAr ? "تعذر إنشاء طلب الدفع" : "Could not start checkout"));
       setLocalOrder(data.order_id);
+      if (typeof data.duration_days === "number" && data.duration_days > 0) {
+        setOrderDurationDays(data.duration_days);
+      } else if (includeSliderDuration) {
+        setOrderDurationDays(selectedEntry.days);
+      }
       const checkoutUrl = new URL(String(data.url || ""));
       const checkoutPath = checkoutUrl.pathname.split("/").filter(Boolean);
       if (
@@ -782,11 +830,29 @@ export default function PricingClient() {
   }
 
   const monthlyDiscount = localConfig?.plans?.find((item: any) => item.id === "pro")?.discount || null;
-  const monthlyPrice = Number(monthlyDiscount?.original_amount_egp ?? localConfig?.plans?.find((item: any) => item.id === "pro")?.amount_egp ?? 200);
+  const monthlyPrice = Number(monthlyDiscount?.original_amount_egp ?? localConfig?.plans?.find((item: any) => item.id === "pro")?.amount_egp ?? 150);
   const paidPlans = [
-    { id: "pro", name_ar: "شهر واحد", name_en: "1 Month", days: 30, amount_egp: 200, badge: null, isLifetime: false },
-    { id: "pro_6m", name_ar: "6 شهور", name_en: "6 Months", days: 180, amount_egp: 1000, badge: isAr ? "الأكثر طلباً ⭐" : "Most Popular ⭐", isLifetime: false },
-    { id: "pro_1y", name_ar: "سنة كاملة", name_en: "1 Year", days: 365, amount_egp: 1800, badge: isAr ? "أكبر توفير 💎" : "Max Value 💎", isLifetime: false },
+    { id: "pro", name_ar: "شهر واحد", name_en: "1 Month", days: 30, amount_egp: 150, badge: null, isLifetime: false },
+    { id: "pro_6m", name_ar: "6 شهور", name_en: "6 Months", days: 180, amount_egp: 750, badge: isAr ? "الأكثر طلباً ⭐" : "Most Popular ⭐", isLifetime: false },
+    { id: "pro_1y", name_ar: "سنة كاملة", name_en: "1 Year", days: 365, amount_egp: 1350, badge: isAr ? "أكبر توفير 💎" : "Max Value 💎", isLifetime: false },
+    {
+      id: "chat_only",
+      name_ar: "الشات الذكي فقط",
+      name_en: "AI Chat Only",
+      days: 30,
+      amount_egp: 100,
+      badge: null,
+      isLifetime: false,
+    },
+    {
+      id: "vip_only",
+      name_ar: "رادار تليجرام VIP فقط",
+      name_en: "VIP Telegram Radar Only",
+      days: 30,
+      amount_egp: 100,
+      badge: null,
+      isLifetime: false,
+    },
     {
       id: "lifetime",
       name_ar: "مدى الحياة (VIP)",
@@ -809,30 +875,30 @@ export default function PricingClient() {
       if (plan.id === "pro") {
         if (isGrandfathered) {
           amount = 50;
-          originalAmount = monthlyPrice || 200;
+          originalAmount = monthlyPrice || 150;
         } else if (isGrandfathered100) {
           amount = 100;
-          originalAmount = monthlyPrice || 200;
+          originalAmount = monthlyPrice || 150;
         } else if (!foundersIsOpen) {
-          amount = monthlyPrice || 200;
+          amount = monthlyPrice || 150;
           originalAmount = null;
         } else {
           amount = 100;
-          originalAmount = monthlyPrice || 200;
+          originalAmount = monthlyPrice || 150;
         }
       } else if (plan.id === "pro_6m") {
         const hasFounder6m = foundersIsOpen || isGrandfathered || isGrandfathered100;
-        amount = hasFounder6m ? 500 : 1000;
-        originalAmount = hasFounder6m ? 1000 : null;
+        amount = hasFounder6m ? 500 : 750;
+        originalAmount = hasFounder6m ? 750 : null;
       } else if (plan.id === "pro_1y") {
         const hasFounder1y = foundersIsOpen || isGrandfathered || isGrandfathered100;
-        amount = hasFounder1y ? 1000 : 1800;
-        originalAmount = hasFounder1y ? 1800 : null;
+        amount = hasFounder1y ? 1000 : 1350;
+        originalAmount = hasFounder1y ? 1350 : null;
       }
     }
     const days = Number(configured?.days ?? plan.days);
     const monthlyEquivalent = plan.isLifetime ? null : Math.round((amount / days) * 30);
-    const unbundledBase = (days / 30) * (monthlyPrice || 200);
+    const unbundledBase = (days / 30) * (monthlyPrice || 150);
     const savingsPct = plan.isLifetime
       ? 95
       : originalAmount && originalAmount > amount
@@ -853,14 +919,11 @@ export default function PricingClient() {
 
   const annualPlan = paidPlans.find((p) => p.id === "pro_1y");
   const regular1yEgp = Number(
-    annualPlan?.original_amount_egp ?? (annualPlan?.amount_egp && annualPlan.amount_egp > 1200 ? annualPlan.amount_egp : 1800)
+    annualPlan?.original_amount_egp ?? (annualPlan?.amount_egp && annualPlan.amount_egp > 1000 ? annualPlan.amount_egp : 1350)
   );
-  const breakevenMonths = lifetimeBreakevenMonths(2250, monthlyPrice || 200);
-  const annualCostEgp = annualPlan?.amount_egp ?? 1800;
-  const roiPortfolioEgp = annualCostEgp > 1200 ? 40000 : 25000;
-  const roiTradeProfitEgp = Math.round(roiPortfolioEgp * 0.05);
-  const roiNetGainEgp = roiTradeProfitEgp - annualCostEgp;
-  const roiNetGainDisplay = displayAmount(roiTradeProfitEgp) - displayAmount(annualCostEgp);
+  const chatOnlyPlan = paidPlans.find((p) => p.id === "chat_only")!;
+  const vipOnlyPlan = paidPlans.find((p) => p.id === "vip_only")!;
+  const breakevenMonths = lifetimeBreakevenMonths(2250, monthlyPrice || 150);
 
   const b2bPlans = [
     {
@@ -960,8 +1023,39 @@ export default function PricingClient() {
   });
 
   const allAvailablePlans = [...paidPlans, ...b2bPlans];
-  const selectedPlanDetails = allAvailablePlans.find((plan: any) => plan.id === selectedPlan) || paidPlans[0];
-  const activeProDetails = paidPlans.find((plan: any) => plan.id === activeProDuration) || paidPlans[0];
+  const proMonthlyPlan = paidPlans[0];
+  const regularProMonthly = monthlyPrice || 150;
+  const proMonthlyBase = proMonthlyPlan?.amount_egp || regularProMonthly;
+  const selectedEntry = getDurationScheduleEntry(selectedMonths);
+  const chatDurationPricing = computeDurationPlanPricing(chatOnlyPlan.amount_egp, selectedMonths);
+  const vipDurationPricing = computeDurationPlanPricing(vipOnlyPlan.amount_egp, selectedMonths);
+  const proDurationPricing = computeDurationPlanPricing(proMonthlyBase, selectedMonths);
+  const proRegularDurationPricing = computeDurationPlanPricing(regularProMonthly, selectedMonths);
+  const isChatHeroForGcc = isGccChatOnly && !(isGrandfathered || isGrandfathered100 || foundersIsOpen);
+
+  const normalizedSelectedPlanId =
+    selectedPlan === "pro_6m" || selectedPlan === "pro_1y" ? "pro" : selectedPlan;
+  const rawSelectedPlanDetails =
+    allAvailablePlans.find((plan: any) => plan.id === normalizedSelectedPlanId) || proMonthlyPlan;
+  const selectedPlanDetails = DURATION_SLIDER_PLANS.has(rawSelectedPlanDetails.id)
+    ? (() => {
+        const dp =
+          rawSelectedPlanDetails.id === "chat_only"
+            ? chatDurationPricing
+            : rawSelectedPlanDetails.id === "vip_only"
+            ? vipDurationPricing
+            : proDurationPricing;
+        return {
+          ...rawSelectedPlanDetails,
+          name_ar: formatDurationLabel(dp.months, true),
+          name_en: formatDurationLabel(dp.months, false),
+          amount_egp: dp.totalEgp,
+          days: dp.days,
+          monthlyEquivalent: dp.effectiveMonthlyEgp,
+          savingsPct: dp.discountPct,
+        };
+      })()
+    : rawSelectedPlanDetails;
   const promoPriceForPlan = (baseEgp: number) => {
     if (!appliedPromo || appliedPromo.discount_percent <= 0) {
       return { discountEgp: 0, finalEgp: baseEgp };
@@ -975,128 +1069,221 @@ export default function PricingClient() {
 
   const baseProPrice = selectedPlanDetails?.amount_egp ?? (paidPlans[0]?.amount_egp || 100);
   const { discountEgp: promoDiscountAmount, finalEgp: proPrice } = promoPriceForPlan(baseProPrice);
-  const checkoutPricing = computeCheckoutPricing(baseProPrice, appliedPromo?.discount_percent || 0, isSaudi);
+  const checkoutPricing = computeCheckoutPricing(baseProPrice, appliedPromo?.discount_percent || 0, market);
   const proDisplayAmount = checkoutPricing.finalDisplay;
   const promoDiscountDisplay = checkoutPricing.discountDisplay;
   const easyKashChargeEgp = checkoutPricing.chargeEgp;
   const freeLimits = localConfig.limits?.free || { signal_delay_days: 15, chat_messages_per_month: 10, portfolio_stocks: 5 };
   const proLimits = localConfig.limits?.pro || { chat_messages_per_month: 350, portfolio_stocks: 15 };
   const freeFeatures = [
-    { icon: <Zap className="w-4 h-4" />, text: isAr ? `تأخير الإشارات والتوصيات ${freeLimits.signal_delay_days} يوماً (أرشيف تاريخي فقط)` : `Trading signals delayed ${freeLimits.signal_delay_days} days (historical archive only)`, included: true },
-    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 استشارات شات بوت مجانية (مرة واحدة لكل إيميل — لا تتجدد شهرياً)" : "10 free AI chatbot consultations (one-time per email — non-renewing)", included: true },
+    ...(isGccChatOnly
+      ? []
+      : [
+          { icon: <Zap className="w-4 h-4" />, text: isAr ? `تأخير الإشارات والمؤشرات ${freeLimits.signal_delay_days} يوماً (أرشيف تاريخي فقط)` : `Technical signals delayed ${freeLimits.signal_delay_days} days (historical archive only)`, included: true },
+        ]),
+    { icon: <MessageSquare className="w-4 h-4" />, text: isAr ? "10 استفسارات تحليلية مجانية بالشات (مرة واحدة لكل إيميل — لا تتجدد شهرياً)" : "10 free AI analytical queries (one-time per email — non-renewing)", included: true },
     { icon: <BarChart3 className="w-4 h-4" />, text: isAr ? `حفظ حتى ${freeLimits.portfolio_stocks} أسهم في محفظتك المتابعة` : `Up to ${freeLimits.portfolio_stocks} tracked portfolio stocks`, included: true },
-    { icon: <Zap className="w-4 h-4" />, text: isAr ? "التوصيات اللحظية والصفقات القصيرة الحية 🔒 PRO" : "Live Short Swings & Real-Time Signals 🔒 PRO", included: false },
-    { icon: <BellRing className="w-4 h-4" />, text: isAr ? "تنبيهات ورادار تليجرام الفوري على هاتفك 🔒 PRO" : "Instant Mobile Telegram Scanner Alerts 🔒 PRO", included: false },
-    { icon: <Sparkles className="w-4 h-4" />, text: isAr ? "تحليل صور المحفظة والشارت بالذكاء الاصطناعي (Vision AI) 📸 PRO" : "Vision AI Portfolio Screenshot Analysis 📸 PRO", included: false },
+    ...(isGccChatOnly
+      ? []
+      : [
+          { icon: <Zap className="w-4 h-4" />, text: isAr ? "الماسح الفني والمؤشرات اللحظية 🔒 PRO" : "Live Technical Scanner & Signals 🔒 PRO", included: false },
+          { icon: <BellRing className="w-4 h-4" />, text: isAr ? "تنبيهات ورادار تليجرام VIP الفوري 🔒 PRO" : "Instant Mobile Telegram VIP Radar 🔒 PRO", included: false },
+        ]),
+    { icon: <Sparkles className="w-4 h-4" />, text: isAr ? "تحليل صور المحفظة والشارت (Vision AI) 📸 PRO" : "Vision AI Portfolio Screenshot Analysis 📸 PRO", included: false },
   ];
 
-  const proFeatures = [
-    {
-      icon: <Zap className="w-4 h-4 text-emerald-500" />,
-      text: isAr
-        ? isSaudi
-          ? "إشارات أنظمة التداول الثلاثة والتوصيات اللحظية ⚡ PRO — صفقات زخم للسوق السعودي، وقف صارم، وتتبع أرباح بدون تشفير"
-          : "الصفقات القصيرة والتوصيات اللحظية ⚡ PRO — صفقات زخم، وقف صارم 4%، وتتبع أرباح بدون تشفير"
-        : isSaudi
-        ? "3-Trading-Systems Signals & Real-time Swings — Saudi TASI momentum runners, tight stop-loss, and live profit trailing"
-        : "Real-time Short Swings & Entry Signals — momentum runners, tight 4% stop, and live profit trailing",
-      included: true,
-    },
-    {
-      icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />,
-      text: isAr
-        ? isSaudi
-          ? "قناة التليجرام VIP للسوق السعودي ورادار السيولة — تنبيهات اختراقات السيولة، تجميع كبار الملاك، وإفصاحات تداول لحظة بلحظة"
-          : "رادار وقناة تليجرام الفورية — تنبيهات اختراقات السيولة، تجميع كبار الملاك والحيتان، وإفصاحات السوق لحظة بلحظة"
-        : isSaudi
-        ? "Saudi TASI VIP Telegram Channel & Alerts — volume breakouts, smart money accumulation, and Tadawul disclosures"
-        : "Live Telegram VIP Channel & Alerts — volume breakouts, smart money accumulation, and real-time disclosures",
-      included: true,
-    },
+  const chatOnlyFeatures = [
     {
       icon: <MessageSquare className="w-4 h-4 text-sky-500" />,
-      text: isAr
-        ? isSaudi
-          ? "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم سعودي في تداول (TASI) على مدار 24/7"
-          : "350 استشارة ذكاء اصطناعي شهرياً — تحليل رقمي وفني فوري لأي سهم مصري على مدار 24/7"
-        : isSaudi
-        ? "350 AI consultations / month — 24/7 comprehensive quantitative & technical analysis for any Saudi TASI stock"
-        : "350 AI consultations / month — 24/7 comprehensive quantitative & technical stock analyses",
+      text: isGccChatOnly
+        ? (isAr ? "350 استفساراً تحليلياً بالذكاء الاصطناعي شهرياً عبر شات الموقع (الإمارات، قطر، السعودية، مصر، الذهب والفضة)" : "350 AI analytical queries / month via web chat (UAE, Qatar, Saudi, Egypt, Gold & Silver)")
+        : (isAr ? "350 استفساراً تحليلياً بالذكاء الاصطناعي شهرياً عبر الموقع وبوت تليجرام الخاص" : "350 AI analytical queries / month across web & private Telegram bot"),
       included: true,
     },
-    {
-      icon: <Sparkles className="w-4 h-4 text-amber-500" />,
-      text: isAr
-        ? isSaudi
-          ? "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من وسيطك واعرف المخاطر والدعوم فوراً"
-          : "تحليل سكرين شوت المحفظة والشارت (Vision AI) 📸 — ارفع صورة محفظتك من ثندر أو وسيطك واعرف المخاطر والدعوم فوراً"
-        : isSaudi
-        ? "Vision AI Portfolio Analysis 📸 — upload your broker screenshots for instant asset & risk breakdown"
-        : "Vision AI Portfolio Analysis 📸 — upload broker/Thndr screenshots for instant asset & risk breakdown",
-      included: true,
-    },
-    { icon: <Clock className="w-4 h-4 text-indigo-500" />, text: isAr ? "أتمتة استشاراتك اليومية على تليجرام — حتى 5 استشارات مجدولة يومياً تُرسل لهاتفك في المواعيد التي تختارها" : "Daily Scheduled Telegram AI Automations — up to 5 scheduled alerts delivered daily at your chosen times", included: true },
-    { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? `محفظة تداول موسعة حتى ${proLimits.portfolio_stocks} سهماً نشطاً مع متابعة الأهداف والوقف` : `Expanded portfolio tracker up to ${proLimits.portfolio_stocks} active stocks with target & stop tracking`, included: true },
+    { icon: <Sparkles className="w-4 h-4 text-amber-500" />, text: isAr ? "تحليل صور المحفظة والشارت (Vision AI) 📸 لقراءة الدعوم والمقاومات" : "Vision AI Screenshot Analysis 📸 for support & resistance levels", included: true },
+    ...(isGccChatOnly
+      ? [
+          { icon: <Clock className="w-4 h-4 text-indigo-500" />, text: isAr ? `متابعة يومية للمؤشرات الفنية والدعوم والمقاومات لأسهم ${isUae ? "دبي وأبوظبي" : "بورصة قطر"} والذهب والفضة` : `Daily updated technical indicators & key levels for ${isUae ? "UAE (DFM & ADX)" : "Qatar (QSE)"}, Gold & Silver`, included: true },
+          { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? `متابعة حتى ${proLimits.portfolio_stocks} سهماً في محفظتك وتحليلها بالذكاء الاصطناعي` : `Track up to ${proLimits.portfolio_stocks} stocks in your AI portfolio`, included: true },
+          { icon: <X className="w-4 h-4 text-zinc-400" />, text: isAr ? "لا تشمل قنوات تليجرام VIP للسوق السعودي (TASI) والمصري (EGX)" : "Excludes Saudi TASI & Egypt EGX VIP Telegram channels", included: false },
+        ]
+      : [
+          { icon: <Clock className="w-4 h-4 text-indigo-500" />, text: isAr ? "أتمتة حتى 5 استفسارات فنية مجدولة يومياً على تليجرام" : "Up to 5 daily scheduled AI analyses on Telegram", included: true },
+          { icon: <BarChart3 className="w-4 h-4 text-emerald-500" />, text: isAr ? `متابعة حتى ${proLimits.portfolio_stocks} سهماً في محفظتك + إزالة تأخير أدوات الموقع` : `Track up to ${proLimits.portfolio_stocks} stocks + zero site delay`, included: true },
+          { icon: <X className="w-4 h-4 text-zinc-400" />, text: isAr ? "لا تشمل دخول قناة رادار تليجرام VIP (متوفرة في الشاملة)" : "Excludes VIP Telegram Radar channel (included in Full Bundle)", included: false },
+        ]),
   ];
 
-  const lifetimeFeatures = [
-    { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (never expires, zero recurring renewals)", included: true },
-    {
-      icon: <Zap className="w-4 h-4 text-emerald-500" />,
-      text: isAr
-        ? isSaudi
-          ? "كافة توصيات أنظمة التداول الثلاثة ورادار السوق السعودي الفوري للأبد"
-          : "كافة توصيات الصفقات القصيرة ورادار الإسكانر الفوري للأبد"
-        : isSaudi
-        ? "Full 3-Trading-Systems & Live TASI Scanner Signals forever"
-        : "Full Short Swings & Live Scanner Signals forever",
-      included: true,
-    },
-    {
-      icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />,
-      text: isAr
-        ? isSaudi
-          ? "قناة التليجرام VIP للسوق السعودي ورادار التداول الفوري للأبد"
-          : "قناة ورادار تليجرام الفوري بكافة مراحله للأبد"
-        : isSaudi
-        ? "Saudi TASI VIP Telegram Channel & Alerts forever"
-        : "Live Telegram Channel & Alerts forever",
-      included: true,
-    },
-    { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? "350 استشارة شات بوت شهرياً تتجدد تلقائياً للأبد" : "350 AI chat messages refreshed monthly for life", included: true },
-    { icon: <Sparkles className="w-4 h-4 text-emerald-500" />, text: isAr ? "تحليل صور المحفظة والشارت (Vision AI) 📸 + أتمتة تليجرام اليومية للأبد" : "Vision AI Screenshot Analysis 📸 + Scheduled Telegram Automations for life", included: true },
-    { icon: <Sparkles className="w-4 h-4 text-yellow-500" />, text: isAr ? "أولوية قصوى ودخول مجاني لكافة التحديثات والميزات المستقبلية" : "VIP priority for all future updates and releases", included: true },
+  const vipOnlyFeatures = [
+    { icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />, text: isAr ? "دخول فوري لقناة تليجرام VIP الخاصة للتنبيهات الفنية الآلية" : "Instant access to Private VIP Telegram Technical Radar Channel", included: true },
+    { icon: <Activity className="w-4 h-4 text-emerald-500" />, text: isAr ? "رصد آلي لاختراقات السيولة غير الطبيعية ونماذج التجميع الكمي" : "Automated liquidity breakouts & quantitative accumulation radar", included: true },
+    { icon: <Zap className="w-4 h-4 text-emerald-500" />, text: isAr ? (isSaudi ? "يدعم السوق السعودي (تداول TASI) والبورصة المصرية (EGX)" : "يدعم البورصة المصرية (EGX) والسوق السعودي (TASI)") : "Covers both EGX (Egypt) & TASI (Saudi) VIP radar channels", included: true },
+    { icon: <ShieldCheck className="w-4 h-4 text-emerald-500" />, text: isAr ? "تنبيهات الإفصاحات الرسمية والمؤشرات الفنية في الماسح بدون تأخير 15 يوماً" : "Real-time disclosures & unmasked scanner signals (no 15-day delay)", included: true },
+    { icon: <X className="w-4 h-4 text-zinc-400" />, text: isAr ? "لا تشمل كوتة 350 رسالة للشات الذكي (متوفرة في الشاملة)" : "Excludes 350/mo AI Chat quota (included in Full Bundle)", included: false },
   ];
+
+  const proFeatures = isGccChatOnly
+    ? [
+        {
+          icon: <MessageSquare className="w-4 h-4 text-sky-500" />,
+          text: isAr
+            ? `كل مزايا باقة ${brandName} AI Pro (${formatPrice(100)}/ش) بالكامل: 350 استفساراً + Vision AI + محفظة ${proLimits.portfolio_stocks} سهماً`
+            : `Full ${brandName} AI Pro perks (${formatPrice(100)}/mo): 350 queries + Vision AI + ${proLimits.portfolio_stocks}-stock portfolio`,
+          included: true,
+        },
+        {
+          icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />,
+          text: isAr
+            ? "دخول فوري لقنوات تليجرام VIP الخاصة بالسوق السعودي (تداول TASI) والبورصة المصرية (EGX)"
+            : "Instant access to Private VIP Telegram Channels for Saudi (TASI) & Egypt (EGX)",
+          included: true,
+        },
+        {
+          icon: <Zap className="w-4 h-4 text-emerald-500" />,
+          text: isAr
+            ? "رادار السيولة والاختراقات اللحظي وإزالة تأخير 15 يوماً لماسح السعودية ومصر"
+            : "Real-time liquidity radar & zero 15-day delay on Saudi TASI & Egypt EGX scanners",
+          included: true,
+        },
+        {
+          icon: <Clock className="w-4 h-4 text-indigo-500" />,
+          text: isAr
+            ? "أتمتة حتى 5 تحليلات فنية مجدولة يومياً عبر بوت تليجرام الخاص"
+            : "Up to 5 daily scheduled technical analyses via private Telegram bot",
+          included: true,
+        },
+      ]
+    : [
+        {
+          icon: <MessageSquare className="w-4 h-4 text-sky-500" />,
+          text: isAr
+            ? "تشمل باقة الشات الذكي بالكامل: 350 استفساراً تحليلياً/شهر + تحليل الصور Vision AI + 5 أتمتات يومية"
+            : "Full AI Chat included: 350 analytical queries/mo + Vision AI + 5 daily automations",
+          included: true,
+        },
+        {
+          icon: <BellRing className="w-4 h-4 text-amber-500 fill-amber-500" />,
+          text: isAr
+            ? isSaudi
+              ? "تشمل قناة تليجرام VIP للسوق السعودي (TASI) ورادار السيولة اللحظي بالكامل"
+              : "تشمل قناة تليجرام VIP الفورية ورادار السيولة والاختراقات بالكامل"
+            : isSaudi
+            ? "Full Saudi TASI VIP Telegram Channel & real-time liquidity radar included"
+            : "Full VIP Telegram Channel & real-time liquidity radar included",
+          included: true,
+        },
+        {
+          icon: <Zap className="w-4 h-4 text-emerald-500" />,
+          text: isAr
+            ? isSaudi
+              ? "إزالة تأخير الـ 15 يوماً: كافة إشارات الأنظمة الثلاثة والماسح الفني للسوق السعودي بدون تشفير"
+              : "إزالة تأخير الـ 15 يوماً: كافة الإشارات الفنية السريعة ومؤشرات الزخم بدون تشفير"
+            : "Zero 15-day delay: all real-time technical scanner models & momentum signals unmasked",
+          included: true,
+        },
+        {
+          icon: <BarChart3 className="w-4 h-4 text-emerald-500" />,
+          text: isAr
+            ? `محفظة تداول موسعة حتى ${proLimits.portfolio_stocks} سهماً نشطاً مع متابعة المستويات الفنية`
+            : `Expanded portfolio tracker up to ${proLimits.portfolio_stocks} active stocks`,
+          included: true,
+        },
+        {
+          icon: <ShieldCheck className="w-4 h-4 text-emerald-500" />,
+          text: isAr
+            ? `توفير فوري ${formatPrice(50)} شهرياً مقارنة بشراء الباقتين منفصلتين`
+            : "Save instantly vs buying AI Chat & VIP Radar separately",
+          included: true,
+        },
+      ];
+
+  const lifetimeFeatures = isGccChatOnly
+    ? [
+        { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (36,500 days, zero recurring renewals)", included: true },
+        { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? "350 استفساراً بالشات شهرياً + Vision AI تتجدد تلقائياً للأبد لكل الأسواق والذهب والفضة" : "350 AI chat queries/mo + Vision AI renewed monthly forever across all markets & Gold/Silver", included: true },
+        { icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />, text: isAr ? "تشمل قنوات تليجرام VIP للسوق السعودي (TASI) والمصري (EGX) وأتمتة تليجرام للأبد" : "Includes Saudi TASI & Egypt EGX VIP Telegram channels + Telegram automations forever", included: true },
+      ]
+    : [
+        { icon: <Crown className="w-4 h-4 text-purple-600 dark:text-yellow-400" />, text: isAr ? "صلاحية كاملة مدى الحياة للأبد (36,500 يوم بدون أي تجديد أو اشتراك متكرر)" : "Permanent lifetime access (never expires, zero recurring renewals)", included: true },
+        {
+          icon: <Zap className="w-4 h-4 text-emerald-500" />,
+          text: isAr
+            ? isSaudi
+              ? "كافة مؤشرات أنظمة التداول الثلاثة والماسح الفني للسوق السعودي للأبد"
+              : "كافة مؤشرات المسح الكمي والإشارات الفنية اللحظية للأبد"
+            : isSaudi
+            ? "Full 3-Trading-Systems & Live TASI Scanner Signals forever"
+            : "Full Live Technical Scanner Signals forever",
+          included: true,
+        },
+        {
+          icon: <BellRing className="w-4 h-4 text-emerald-500 fill-emerald-500" />,
+          text: isAr
+            ? isSaudi
+              ? "قناة التليجرام VIP للسوق السعودي ورادار السيولة الفوري للأبد"
+              : "قناة ورادار تليجرام VIP الفوري بكافة مراحله للأبد"
+            : isSaudi
+            ? "Saudi TASI VIP Telegram Channel & Alerts forever"
+            : "Live Telegram VIP Channel & Alerts forever",
+          included: true,
+        },
+        { icon: <MessageSquare className="w-4 h-4 text-emerald-500" />, text: isAr ? "350 استفساراً تحليلياً بالشات شهرياً تتجدد تلقائياً للأبد" : "350 AI analytical queries refreshed monthly for life", included: true },
+        { icon: <Sparkles className="w-4 h-4 text-emerald-500" />, text: isAr ? "تحليل صور المحفظة والشارت (Vision AI) 📸 + أتمتة تليجرام اليومية للأبد" : "Vision AI Screenshot Analysis 📸 + Scheduled Telegram Automations for life", included: true },
+        { icon: <Sparkles className="w-4 h-4 text-yellow-500" />, text: isAr ? "أولوية قصوى ودخول مجاني لكافة التحديثات والميزات المستقبلية" : "VIP priority for all future updates and releases", included: true },
+      ];
 
   // ── STEP 3: SUBMITTED / PAYMENT RESULT ─────────────────────────────────────
   if (step === "submitted") {
     const isB2bSubmitted = Boolean(selectedPlanDetails?.id?.startsWith("b2b_"));
     const isLifetimeSubmitted = selectedPlanDetails?.id === "lifetime";
+    const isChatOnlySubmitted = selectedPlanDetails?.id === "chat_only";
+    const isVipOnlySubmitted = selectedPlanDetails?.id === "vip_only";
     const approvedBadgeText = isB2bSubmitted
       ? (isAr ? "تم تفعيل رخصة القنوات (B2B) 💼" : "B2B License Activated 💼")
       : isLifetimeSubmitted
       ? (isAr ? "تم تفعيل باقة مدى الحياة (LIFETIME VIP) 👑" : "Lifetime VIP Activated 👑")
+      : isChatOnlySubmitted
+      ? (isAr ? "تم تفعيل باقة الشات الذكي 🤖" : "AI Chat Activated 🤖")
+      : isVipOnlySubmitted
+      ? (isAr ? "تم تفعيل رادار تليجرام VIP 📡" : "VIP Radar Activated 📡")
       : (isAr ? "تم التفعيل بنجاح" : "Pro Activated");
     const approvedTitleText = isB2bSubmitted
       ? (isAr ? `أهلاً بك في شركاء ${brandName} (B2B)! 💼🎉` : `Welcome to ${brandName} B2B Partners! 💼🎉`)
       : isLifetimeSubmitted
       ? (isAr ? `أهلاً بك في نخبة ${brandName} مدى الحياة! 👑🎉` : `Welcome to ${brandName} Lifetime VIP! 👑🎉`)
+      : isChatOnlySubmitted
+      ? (isAr ? `أهلاً بك في باقة الشات الذكي على ${brandName}! 🤖🎉` : `Welcome to ${brandName} AI Chat! 🤖🎉`)
+      : isVipOnlySubmitted
+      ? (isAr ? `أهلاً بك في رادار تليجرام VIP على ${brandName}! 📡🎉` : `Welcome to ${brandName} VIP Radar! 📡🎉`)
       : (isAr ? `أهلاً بك في ${brandName} Pro! 🎉` : `Welcome to ${brandName} Pro! 🎉`);
+    const approvedDays = Number(orderDurationDays || selectedPlanDetails?.days || 30);
     const approvedDescText = isB2bSubmitted
       ? (isAr
-          ? `تم تفعيل باقة القنوات (${selectedPlanDetails?.name_ar || selectedPlanDetails?.id}) بنجاح لمدة ${selectedPlanDetails?.days || 30} يوماً! يمكنك الآن ربط البوت بجروب التليجرام وتخصيص التوقيع فوراً من لوحة تحكم القنوات.`
-          : `Your ${selectedPlanDetails?.name_en || selectedPlanDetails?.id} license is active for ${selectedPlanDetails?.days || 30} days! Connect your Telegram group and configure your custom signature from the B2B dashboard.`)
+          ? `تم تفعيل باقة القنوات (${selectedPlanDetails?.name_ar || selectedPlanDetails?.id}) بنجاح لمدة ${approvedDays} يوماً! يمكنك الآن ربط البوت بجروب التليجرام وتخصيص التوقيع فوراً من لوحة تحكم القنوات.`
+          : `Your ${selectedPlanDetails?.name_en || selectedPlanDetails?.id} license is active for ${approvedDays} days! Connect your Telegram group and configure your custom signature from the B2B dashboard.`)
       : isLifetimeSubmitted
       ? (isAr
           ? "تم تفعيل اشتراكك الدائم في باقة مدى الحياة (Lifetime VIP) بنجاح للأبد! حسابك نشط الآن بكامل الصلاحيات مدى الحياة وبدون أي تجديدات شهرية."
           : "Your Lifetime VIP subscription is now active forever! Full access granted for life with zero recurring renewals.")
+      : isChatOnlySubmitted
+      ? (isGccChatOnly
+          ? (isAr
+              ? `تم تفعيل باقة الشات الذكي (350 استفساراً تحليلياً/شهر + تحليل صور المحفظة Vision AI + محفظة متابعة موسعة) بنجاح لمدة ${approvedDays} يوماً.`
+              : `Your AI Chat plan (350 consultations/mo + Vision AI + expanded portfolio tracker) is now active for ${approvedDays} days.`)
+          : (isAr
+              ? `تم تفعيل باقة الشات الذكي (350 استفساراً تحليلياً/شهر + تحليل صور المحفظة Vision AI + أتمتة تليجرام) بنجاح لمدة ${approvedDays} يوماً.`
+              : `Your AI Chat plan (350 consultations/mo + Vision AI + Telegram automations) is now active for ${approvedDays} days.`))
+      : isVipOnlySubmitted
+      ? (isAr
+          ? `تم تفعيل باقة رادار تليجرام VIP الخاصة لمدة ${approvedDays} يوماً! استخدم الرابط بالأسفل للدخول إلى قناة التنبيهات الفنية الفورية.`
+          : `Your VIP Telegram Radar plan is active for ${approvedDays} days! Use the button below to join your private VIP channel.`)
       : (isAr
-          ? `تم تأكيد اشتراكك في باقة Pro لمدة ${selectedPlanDetails?.days || 30} يوماً بنجاح. حسابك نشط الآن بكامل الصلاحيات!`
-          : `Your Pro plan is now active for ${selectedPlanDetails?.days || 30} days with full benefits!`);
+          ? `تم تأكيد اشتراكك في الباقة الشاملة Pro لمدة ${approvedDays} يوماً بنجاح. حسابك نشط الآن بكامل الصلاحيات!`
+          : `Your Pro plan is now active for ${approvedDays} days with full benefits!`);
     const waFailureMsg = encodeURIComponent(
-      isSaudi
-        ? `مرحباً، واجهت مشكلة في الدفع على ${brandName} وأريد المساعدة في إتمام الاشتراك`
-        : "مرحباً، واجهت مشكلة في الدفع على EGX BOTS وأريد المساعدة والدفع بالمحفظة"
+      isGulfPricing || selectedDialCode !== "+20"
+        ? `مرحباً، واجهت مشكلة في الدفع الدولي على ${brandName} وأريد المساعدة في إتمام الاشتراك`
+        : "مرحباً، واجهت مشكلة في الدفع عبر EasyKash على EGX BOTS وأريد المساعدة"
     );
 
     return (
@@ -1206,7 +1393,15 @@ export default function PricingClient() {
                   <ExternalLink className="w-4 h-4" />
                   {isAr ? "فتح لوحة تحكم القنوات (B2B) وتفعيل البوت" : "Open B2B Dashboard & Connect Bot"}
                 </Link>
-              ) : isSaudi ? (
+              ) : isChatOnlySubmitted ? (
+                <Link
+                  href="/chat"
+                  className="flex items-center justify-center gap-2 border-4 border-black dark:border-white bg-sky-500 hover:bg-sky-400 text-black font-black py-3.5 px-6 uppercase tracking-wider shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-sm"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  {isAr ? "ابدأ استخدام الشات الذكي الآن (350 استفساراً/شهر)" : "Start Using AI Chat Now (350/mo)"}
+                </Link>
+              ) : (isSaudi || isGccChatOnly) ? (
                 <div className="space-y-2">
                   <a
                     href={telegramSaudiProUrl || SAUDI_VIP_TELEGRAM_WEB_URL}
@@ -1227,6 +1422,15 @@ export default function PricingClient() {
                       <ExternalLink className="w-3.5 h-3.5" />
                       {isAr ? "قناة VIP العامة والمصرية" : "Main & EGX VIP Channel"}
                     </a>
+                  )}
+                  {isGccChatOnly && (
+                    <Link
+                      href="/chat"
+                      className="flex items-center justify-center gap-2 border-2 border-black dark:border-white bg-sky-500 hover:bg-sky-400 text-black font-black py-2.5 px-4 uppercase tracking-wider text-xs"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      {isAr ? "افتح الشات الذكي الآن (350 استفساراً/شهر)" : "Open AI Chat Now (350/mo)"}
+                    </Link>
                   )}
                 </div>
               ) : telegramProUrl ? (
@@ -1265,13 +1469,13 @@ export default function PricingClient() {
                   <span>{isAr ? "واجهتك مشكلة أثناء الدفع؟ احكيلنا ونساعدك فوراً 💬" : "Had an issue during checkout? Talk to us 💬"}</span>
                 </div>
                 <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                  {isSaudi
+                  {isGulfPricing || selectedDialCode !== "+20"
                     ? isAr
-                      ? "تأكد من تفعيل الشراء الدولي/الإنترنت على بطاقة Visa أو Mastercard (أو استخدم البطاقة الرقمية/Apple Pay عبر البطاقة البنكية) وإدخال رمز التحقق (3D Secure / OTP). كما يمكنك مراسلتنا لتفعيل الاشتراك يدوياً خلال دقائق."
-                      : "Ensure international/online payments are enabled on your Visa or Mastercard (including digital bank cards) and complete the 3D Secure OTP step, or message us for fast manual activation."
+                      ? "تأكد من تفعيل الشراء الدولي/الإنترنت على بطاقة Visa أو Mastercard وإدخال رمز التحقق (3D Secure / OTP) ثم أعد المحاولة عبر EasyKash. لو استمرت المشكلة تواصل معنا فوراً."
+                      : "Ensure international/online payments are enabled on your Visa or Mastercard and complete the 3D Secure OTP step on EasyKash, or message our team for immediate help."
                     : isAr
-                    ? "إذا رفض البنك المعاملة أو تأخر كود التأكيد (OTP) أو لا تتوفر معك بطاقة فيزا، يمكنك أيضاً التحويل المباشر عبر أي محفظة إلكترونية أو إنستاباي والتفعيل الفوري لحسابك بدون أي انتظار."
-                    : "If your bank declined the transaction or OTP was delayed, you can also pay directly via mobile wallet / InstaPay for instant activation."}
+                    ? "تأكد من رصيد البطاقة أو المحفظة الإلكترونية وإدخال رمز التأكيد (OTP) ثم أعد المحاولة عبر بوابة EasyKash الرسمية، أو تواصل معنا لمساعدتك فوراً."
+                    : "Ensure sufficient balance and complete the OTP verification step on EasyKash, or message our support team for immediate assistance."}
                 </p>
                 <div className="pt-2 flex flex-col sm:flex-row gap-2">
                   <a
@@ -1283,6 +1487,7 @@ export default function PricingClient() {
                     <MessageSquare className="w-4 h-4" />
                     {isAr ? "تواصل معنا عبر واتساب للمساعدة الفورية" : "Chat on WhatsApp"}
                   </a>
+                  {!isGccChatOnly && (
                   <a
                     href="https://t.me/SharksZone_support_bot"
                     target="_blank"
@@ -1292,6 +1497,7 @@ export default function PricingClient() {
                     <ExternalLink className="w-4 h-4" />
                     {isAr ? "الدعم الفني على تليجرام" : "Telegram Support"}
                   </a>
+                  )}
                 </div>
               </div>
 
@@ -1354,6 +1560,7 @@ export default function PricingClient() {
               onClick={() => {
                 setStep("plans");
                 setLocalOrder(null);
+                setOrderDurationDays(null);
               }}
               className="inline-flex items-center justify-center gap-2 border-2 border-black dark:border-white bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-4 py-2 text-xs font-black text-zinc-950 dark:text-white shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-transform active:translate-y-0.5 self-start sm:self-auto"
             >
@@ -1565,11 +1772,15 @@ export default function PricingClient() {
                     </>
                   )}
                 </button>
-                {isSaudi && (
+                {(selectedDialCode !== "+20" || isGulfPricing) && (
                   <p className="text-[11px] font-bold text-center text-zinc-600 dark:text-zinc-400">
-                    {isAr
-                      ? `يُعادل ${proDisplayAmount.toLocaleString()} ر.س — تُعالج الفاتورة على بوابة EasyKash بقيمة ${easyKashChargeEgp.toLocaleString()} ج.م ويتم التحويل تلقائياً من بطاقتك`
-                      : `Approx. ${proDisplayAmount.toLocaleString()} SAR — EasyKash charges ${easyKashChargeEgp.toLocaleString()} EGP with automatic card conversion`}
+                    {isGulfPricing
+                      ? isAr
+                        ? `يُعادل ${proDisplayAmount.toLocaleString()} ${currencyLabel} — تُعالج الفاتورة على بوابة EasyKash بقيمة ${easyKashChargeEgp.toLocaleString()} ج.م وتُخصم تلقائياً من بطاقتك الدولية (Visa / Mastercard عبر 3D Secure)`
+                        : `Approx. ${proDisplayAmount.toLocaleString()} ${currencyCode} — EasyKash charges ${easyKashChargeEgp.toLocaleString()} EGP with automatic card conversion (Visa / Mastercard 3DS)`
+                      : isAr
+                      ? `للدفع الدولي من خارج مصر: تُعالج الفاتورة عبر EasyKash بقيمة ${easyKashChargeEgp.toLocaleString()} ج.م وتتحول تلقائياً بعملة بطاقتك (Visa / Mastercard عبر 3D Secure)`
+                      : `International card checkout: EasyKash processes ${easyKashChargeEgp.toLocaleString()} EGP with automatic conversion to your card currency (Visa / Mastercard 3DS)`}
                   </p>
                 )}
                 <div className="flex items-center justify-center gap-3 text-[11px] font-bold text-zinc-500">
@@ -1602,7 +1813,13 @@ export default function PricingClient() {
                     ? (isAr ? `${brandName} B2B للـ Telegram` : `${brandName} B2B License`)
                     : selectedPlanDetails.isLifetime
                     ? `${brandName} Lifetime VIP`
-                    : `${brandName} Pro`}
+                    : selectedPlanDetails.id === "chat_only"
+                    ? (isGccChatOnly ? `${brandName} AI Pro` : `${brandName} AI Chat Pro`)
+                    : selectedPlanDetails.id === "vip_only"
+                    ? `${brandName} VIP Radar`
+                    : isGccChatOnly
+                    ? (isAr ? "باقة كل الأسواق الشاملة (+ تليجرام VIP)" : "All-Markets Pro (+ VIP Telegram)")
+                    : `${brandName} Pro Bundle`}
                 </h3>
                 <p className="text-xs font-semibold text-zinc-400 mt-1">
                   {isAr ? selectedPlanDetails.name_ar : selectedPlanDetails.name_en}
@@ -1618,7 +1835,13 @@ export default function PricingClient() {
                       ? (b2bSelected?.tag || "B2B VIP")
                       : selectedPlanDetails.isLifetime
                       ? (isAr ? "مدى الحياة (Lifetime VIP)" : "Lifetime VIP")
-                      : "Pro VIP"}
+                      : selectedPlanDetails.id === "chat_only"
+                      ? (isGccChatOnly ? `${brandName} AI Pro` : (isAr ? "شات بوت الذكاء الاصطناعي فقط" : "AI Chat Pro"))
+                      : selectedPlanDetails.id === "vip_only"
+                      ? (isAr ? "رادار وقنوات VIP فقط" : "VIP Radar Only")
+                      : isGccChatOnly
+                      ? (isAr ? "باقة كل الأسواق (+ تليجرام VIP)" : "All-Markets Pro (+ VIP Telegram)")
+                      : (isAr ? "الباقة الشاملة (Pro Bundle)" : "Pro Full Bundle")}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1669,11 +1892,11 @@ export default function PricingClient() {
                     <span className="text-xs font-bold text-zinc-400 ms-1">{currencyLabel}</span>
                   </div>
                 </div>
-                {isSaudi && (
+                {isGulfPricing && (
                   <p className="text-[11px] font-semibold text-amber-300/90 leading-relaxed pt-1">
                     {isAr
-                      ? `يُعادل ${proDisplayAmount.toLocaleString()} ر.س — قيمة الفاتورة الفعلية على بوابة EasyKash هي ${easyKashChargeEgp.toLocaleString()} ج.م (تحويل تلقائي بالبطاقة)`
-                      : `Approx. ${proDisplayAmount.toLocaleString()} SAR — EasyKash processes ${easyKashChargeEgp.toLocaleString()} EGP (auto-converted by your card)`}
+                      ? `يُعادل ${proDisplayAmount.toLocaleString()} ${currencyLabel} — قيمة الفاتورة الفعلية على بوابة EasyKash هي ${easyKashChargeEgp.toLocaleString()} ج.م (تحويل تلقائي بالبطاقة)`
+                      : `Approx. ${proDisplayAmount.toLocaleString()} ${currencyCode} — EasyKash processes ${easyKashChargeEgp.toLocaleString()} EGP (auto-converted by your card)`}
                   </p>
                 )}
               </div>
@@ -1697,55 +1920,152 @@ export default function PricingClient() {
                     ))}
                   </>
                 ) : selectedPlanDetails.isLifetime ? (
-                  <>
-                    <div className="flex items-center gap-2 text-yellow-300 font-black">
-                      <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
-                      <span>{isAr ? "صلاحية مدى الحياة للأبد بدون تجديد" : "Permanent lifetime access, zero renewals"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "قناة VIP على تليجرام فورية للأبد" : "VIP Telegram Channel for life"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "الصفقات القصيرة ⚡ PRO ومتابعة الأرباح" : "Short Swings ⚡ PRO unmasked"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة ذكاء اصطناعي تتجدد شهرياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages renewed monthly for life`}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام للأبد" : "Live Telegram Scanner Alerts lifetime"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? `محفظة حتى ${proLimits.portfolio_stocks} أسهم + كشف السيولة غير الطبيعية` : `Up to ${proLimits.portfolio_stocks} portfolio stocks + volume spikes`}</span>
-                    </div>
-                  </>
+                  isGccChatOnly ? (
+                    <>
+                      <div className="flex items-center gap-2 text-yellow-300 font-black">
+                        <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                        <span>{isAr ? "صلاحية مدى الحياة للأبد بدون تجديد" : "Permanent lifetime access, zero renewals"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة ذكاء اصطناعي تتجدد شهرياً للأبد لجميع الأسواق والذهب والفضة` : `${proLimits.chat_messages_per_month} AI chat messages renewed monthly for life across all markets & Gold/Silver`}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "تحليل صور المحفظة والشارت (Vision AI) واستخراج الدعوم والمقاومات للأبد" : "Vision AI chart & portfolio analysis with key levels for life"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "تشمل قنوات تليجرام VIP للسوق السعودي (TASI) والمصري (EGX) وأتمتة تليجرام للأبد" : "Includes Saudi TASI & Egypt EGX VIP Telegram channels + Telegram automations forever"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `محفظة ذكية حتى ${proLimits.portfolio_stocks} سهماً + أولوية التحديثات المستقبلية` : `Up to ${proLimits.portfolio_stocks} portfolio stocks + priority future updates`}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 text-yellow-300 font-black">
+                        <Crown className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                        <span>{isAr ? "صلاحية مدى الحياة للأبد بدون تجديد" : "Permanent lifetime access, zero renewals"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "قناة VIP على تليجرام فورية للأبد" : "VIP Telegram Channel for life"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "إشارات الزخم قصيرة المدى ⚡ PRO بدون حجب" : "Short Momentum ⚡ PRO unmasked"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة ذكاء اصطناعي تتجدد شهرياً للأبد` : `${proLimits.chat_messages_per_month} AI chat messages renewed monthly for life`}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام للأبد" : "Live Telegram Scanner Alerts lifetime"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `محفظة حتى ${proLimits.portfolio_stocks} أسهم + كشف السيولة غير الطبيعية` : `Up to ${proLimits.portfolio_stocks} portfolio stocks + volume spikes`}</span>
+                      </div>
+                    </>
+                  )
                 ) : (
-                  <>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "قناة تليجرام الفورية (تنبيهات فنية وخوارزمية فورية بدون تأخير)" : "Instant Telegram Channel (daily signals without delay)"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات وإفصاحات)" : "Live Telegram Scanner Alerts (volume, breakouts & filings)"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? "الصفقات القصيرة ⚡ PRO (إشارات الزخم السريعة والوقف المتحرك بدون تشفير)" : "Short Swings ⚡ PRO (instant momentum runners unmasked)"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة ذكاء اصطناعي شهرياً` : `${proLimits.chat_messages_per_month} monthly AI chat messages`}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300">
-                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{isAr ? `محفظة تداول حتى ${proLimits.portfolio_stocks} أسهم` : `${proLimits.portfolio_stocks} active portfolio stock slots`}</span>
-                    </div>
-                  </>
+                  selectedPlanDetails.id === "chat_only" ? (
+                    isGccChatOnly ? (
+                      <>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة شات ذكاء اصطناعي شهرياً (الإمارات وقطر والذهب والفضة)` : `${proLimits.chat_messages_per_month} monthly AI chat messages (UAE, Qatar, Gold & Silver)`}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? "تحليل الشارتات بالصور (Vision AI) والبحث المتعمق" : "Vision AI chart analysis & deep screening"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? `محفظة ذكية حتى ${proLimits.portfolio_stocks} سهماً مع متابعة المستويات الفنية` : `${proLimits.portfolio_stocks} smart portfolio slots with technical levels`}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? "مؤشرات فنية محدثة يومياً للأسهم والذهب والفضة" : "Daily updated technical indicators for stocks, Gold & Silver"}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة شات ذكاء اصطناعي شهرياً (EGX & TASI)` : `${proLimits.chat_messages_per_month} monthly AI chat messages (EGX & TASI)`}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? "تحليل الشارتات بالصور (Vision AI) والبحث المتعمق" : "Vision AI chart analysis & deep screening"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? `محفظة ذكية حتى ${proLimits.portfolio_stocks} أسهم + 5 أتمتة يومية` : `${proLimits.portfolio_stocks} smart portfolio slots + 5 daily automations`}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-300">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{isAr ? "تحديث بيانات الموقع بدون تأخير زمني" : "Real-time site market metrics without delay"}</span>
+                        </div>
+                      </>
+                    )
+                  ) : selectedPlanDetails.id === "vip_only" ? (
+                    <>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "قناة تليجرام VIP الفورية (السوق المصري والسعودي)" : "Instant VIP Telegram Channel (EGX & Saudi TASI)"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات وإفصاحات)" : "Live Telegram Scanner Alerts (volume, breakouts & filings)"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "مؤشرات الزخم قصيرة المدى ⚡ PRO بدون حجب + صفر تأخير بالموقع" : "Short Momentum ⚡ PRO unmasked + zero site delay"}</span>
+                      </div>
+                    </>
+                  ) : isGccChatOnly ? (
+                    <>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة شات ذكاء اصطناعي شهرياً + Vision AI (كل الأسواق والذهب والفضة)` : `${proLimits.chat_messages_per_month} monthly AI chat messages + Vision AI (All Markets, Gold & Silver)`}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "دخول فوري لقنوات تليجرام VIP للسوق السعودي (TASI) والمصري (EGX) + 5 أتمتات يومية" : "Instant VIP Telegram channels for Saudi (TASI) & Egypt (EGX) + 5 daily automations"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `محفظة ذكية حتى ${proLimits.portfolio_stocks} سهماً + إزالة تأخير ماسح السعودية ومصر` : `${proLimits.portfolio_stocks} smart portfolio slots + zero delay on Saudi & Egypt scanners`}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "قناة تليجرام VIP الفورية (تنبيهات فنية وخوارزمية بدون تأخير)" : "Instant VIP Telegram Channel (technical alerts without delay)"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "رادار وتنبيهات الإسكانر الفورية على تليجرام (سيولة واختراقات وإفصاحات)" : "Live Telegram Scanner Alerts (volume, breakouts & filings)"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? "مؤشرات الزخم قصيرة المدى ⚡ PRO ومستويات الوقف بدون حجب" : "Short Momentum ⚡ PRO indicators & trailing zones unmasked"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `${proLimits.chat_messages_per_month} رسالة شات ذكاء اصطناعي شهرياً + Vision AI` : `${proLimits.chat_messages_per_month} monthly AI chat messages + Vision AI`}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{isAr ? `محفظة ذكية حتى ${proLimits.portfolio_stocks} أسهم + 5 أتمتة يومية` : `${proLimits.portfolio_stocks} smart portfolio slots + 5 daily automations`}</span>
+                      </div>
+                    </>
+                  )
                 )}
               </div>
                   </>
@@ -1774,7 +2094,11 @@ export default function PricingClient() {
           <span className="inline-block border-2 border-black dark:border-white bg-amber-300 px-3 py-1 text-xs font-black uppercase tracking-widest text-black shadow-[3px_3px_0px_rgba(0,0,0,1)]">
             {isSaudi
               ? (isAr ? "TASI BOTS PRO · باقات السوق السعودي (تداول TASI)" : "TASI BOTS PRO · SAUDI TADAWUL PLANS")
-              : "EGX BOTS PRO · خطط واشتراكات"}
+              : isUae
+                ? (isAr ? "UAE BOTS PRO · باقات سوق الإمارات (دبي وأبوظبي)" : "UAE BOTS PRO · DFM & ADX PLANS")
+                : isQatar
+                  ? (isAr ? "QSE BOTS PRO · باقات بورصة قطر" : "QSE BOTS PRO · QATAR PLANS")
+                  : "EGX BOTS PRO · خطط واشتراكات"}
           </span>
           <h1 className="text-3xl sm:text-5xl font-black text-zinc-950 dark:text-white tracking-tight">
             {isAr ? "اختر باقة الاشتراك البرمجي" : "Choose Your Software Plan"}
@@ -1783,10 +2107,18 @@ export default function PricingClient() {
             {isAr
               ? isSaudi
                 ? "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة السوق السعودي (تداول TASI)."
-                : "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة البورصة المصرية."
+                : isUae
+                  ? "شات بوت ذكي مدعوم بالذكاء الاصطناعي ومؤشرات فنية محدثة يومياً لأسهم سوق دبي (DFM) وسوق أبوظبي (ADX) والذهب والفضة."
+                  : isQatar
+                    ? "شات بوت ذكي مدعوم بالذكاء الاصطناعي ومؤشرات فنية محدثة يومياً لأسهم بورصة قطر (QSE) والذهب والفضة."
+                    : "تحليلات كمية، ونماذج فنية مدعومة بالذكاء الاصطناعي، وقناة تنبيهات فورية لمتابعة البورصة المصرية."
               : isSaudi
-              ? "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Saudi Stock Exchange (Tadawul / TASI)."
-              : "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Egyptian Stock Exchange."}
+                ? "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Saudi Stock Exchange (Tadawul / TASI)."
+                : isUae
+                  ? "AI-powered chatbot & daily technical analysis for UAE (DFM & ADX) stocks plus Gold & Silver."
+                  : isQatar
+                    ? "AI-powered chatbot & daily technical analysis for Qatar Stock Exchange (QSE) plus Gold & Silver."
+                    : "Quantitative analysis, AI-driven stock indicators, and instant technical alerts for the Egyptian Stock Exchange."}
           </p>
         </div>
 
@@ -1822,7 +2154,8 @@ export default function PricingClient() {
           </div>
         )}
 
-        {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B ── */}
+        {/* ── PRICING CATEGORY SWITCHER: RETAIL VS B2B (hidden for UAE/Qatar where Telegram B2B is off) ── */}
+        {!isGccChatOnly && (
         <div className="flex justify-center mb-6">
           <div className="inline-flex p-1.5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm gap-2 max-w-full flex-wrap justify-center">
             <button
@@ -1854,6 +2187,7 @@ export default function PricingClient() {
             </button>
           </div>
         </div>
+        )}
 
         {pricingCategory === "retail" ? (
           <>
@@ -1869,9 +2203,13 @@ export default function PricingClient() {
                     {isAr ? `🎁 جرّب منصة ${brandName} PRO بالكامل مجاناً لمدة 3 أيام` : `🎁 Try ${brandName} PRO Free for 3 Full Days`}
                   </h2>
                   <p className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 max-w-2xl leading-relaxed">
-                    {isAr
-                      ? "افتح توصيات الخوارزميات، ورادار التجميع الذكي، وتنبيهات الإسكانر الفورية على تليجرام، وشات الذكاء الاصطناعي بدون أي قيود لمدة 3 أيام كاملة."
-                      : "Unlock quantitative swing signals, smart money accumulation scans, live Telegram alerts, and unlimited AI analysis for 3 days."}
+                    {isGccChatOnly
+                      ? (isAr
+                          ? "افتح شات الذكاء الاصطناعي ARTORO وتحليل صور المحفظة والشارت (Vision AI) ومؤشرات أسهم الإمارات وقطر والذهب والفضة لمدة 3 أيام كاملة."
+                          : "Unlock ARTORO AI Chat, Vision AI chart analysis, and daily indicators for UAE, Qatar, Gold & Silver for 3 days.")
+                      : (isAr
+                          ? "افتح مؤشرات الخوارزميات التحليلية، ورادار التجميع الذكي، وتنبيهات الإسكانر الفورية على تليجرام، وشات الذكاء الاصطناعي بدون أي قيود لمدة 3 أيام كاملة."
+                          : "Unlock quantitative analytical indicators, smart money accumulation scans, live Telegram alerts, and AI chart analysis for 3 days.")}
                   </p>
                 </div>
                 <button
@@ -1890,74 +2228,142 @@ export default function PricingClient() {
               </div>
             )}
 
-        <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md transition-all space-y-2 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/80 dark:border-zinc-800/80">
-          <div className="text-center">
-            <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block mb-1">
-              {isAr ? `اختر مدة اشتراك باقة ${brandName} PRO:` : "SELECT PRO BILLING CYCLE:"}
-            </span>
-          </div>
+            {/* ── GRANDFATHERED FOUNDERS 50 / 100 EGP FULL-BUNDLE PROTECTION BANNER ── */}
+            {(isGrandfathered || isGrandfathered100) && (
+              <div className="rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/60 bg-gradient-to-r from-amber-50 via-emerald-50/60 to-white dark:from-amber-950/35 dark:via-emerald-950/20 dark:to-zinc-900 p-4 sm:p-5 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-black uppercase">
+                    <Crown className="w-3 h-3 fill-black" />
+                    <span>
+                      {isGrandfathered
+                        ? (isAr ? "عضو مؤسس · تسعير 50 ج.م محفوظ مدى الحياة" : "Founding Member · 50 EGP Locked for Life")
+                        : (isAr ? "عضو مؤسس · تسعير 100 ج.م محفوظ مدى الحياة" : "Founding Member · 100 EGP Locked for Life")}
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-zinc-950 dark:text-white">
+                    {isAr
+                      ? `سعرك في الباقة الشاملة (${brandName} Pro Bundle) محفوظ لك بالكامل بـ ${formatPrice(isGrandfathered ? 50 : 100)} / شهرياً`
+                      : `Your Full Pro Bundle rate is grandfathered at ${formatPrice(isGrandfathered ? 50 : 100)}/mo`}
+                  </h3>
+                  <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                    {isGccChatOnly
+                      ? (isAr
+                          ? `بصفتك من المؤسسين الأوائل، تحصل على باقة الشات الذكي وأدوات المحفظة بسعر ${formatPrice(isGrandfathered ? 50 : 100)}/شهر (${formatPrice(isGrandfathered ? 250 : 500)} للـ 6 شهور / ${formatPrice(isGrandfathered ? 450 : 900)} للسنة) مع خصم تصاعدي حتى 25% عبر سلايدر المدة.`
+                          : `As an early founder, you keep AI Chat Pro & portfolio tools at ${formatPrice(isGrandfathered ? 50 : 100)}/mo (${formatPrice(isGrandfathered ? 250 : 500)}/6m, ${formatPrice(isGrandfathered ? 450 : 900)}/1y) plus up to 25% slider discounts.`)
+                      : (isAr
+                          ? `بصفتك من المؤسسين الأوائل، تحصل على الشات بوت الذكي + قناة تليجرام VIP معاً بسعر ${formatPrice(isGrandfathered ? 50 : 100)}/شهر (${formatPrice(isGrandfathered ? 250 : 500)} للـ 6 شهور / ${formatPrice(isGrandfathered ? 450 : 900)} للسنة) — مع خصم تصاعدي على أي مدة حتى سنة.`
+                          : `As an early founder, you keep BOTH AI Chat Pro + VIP Telegram Radar together at ${formatPrice(isGrandfathered ? 50 : 100)}/mo (${formatPrice(isGrandfathered ? 250 : 500)}/6m, ${formatPrice(isGrandfathered ? 450 : 900)}/1y) — plus progressive duration discounts up to 12 months.`)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openPaymentStep("pro")}
+                  className="shrink-0 w-full md:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider shadow-md cursor-pointer transition-all"
+                >
+                  <LockKeyhole className="w-3.5 h-3.5" />
+                  <span>
+                    {isAr
+                      ? `تجديد باقتك الشاملة (${formatDurationLabel(selectedMonths, true)})`
+                      : `Renew Founders Bundle (${formatDurationLabel(selectedMonths, false)})`}
+                  </span>
+                </button>
+              </div>
+            )}
 
-          <div className="flex justify-center">
-            <div className="inline-flex p-1.5 rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex-wrap justify-center gap-1.5 sm:gap-2 max-w-full">
-              {[
-                {
-                  id: "pro" as const,
-                  name_ar: "شهر واحد",
-                  name_en: "1 Month",
-                  badge_ar: isGrandfathered
-                    ? `${formatPrice(50)} (تجديد حصري مدى الحياة) ⚡`
-                    : isGrandfathered100 && !foundersIsOpen
-                    ? `${formatPrice(100)} (تجديد المؤسسين مدى الحياة) ⚡`
-                    : foundersIsOpen
-                    ? (foundersCountdown ? `${formatPrice(100)} ⏰ ${foundersCountdown} (تثبيت مدى الحياة)` : `${formatPrice(100)} مدى الحياة 🔥`)
-                    : `${formatPrice(monthlyPrice || 200)} / شهر`,
-                  badge_en: isGrandfathered
-                    ? `${formatPrice(50)} (Renewal for life) ⚡`
-                    : isGrandfathered100 && !foundersIsOpen
-                    ? `${formatPrice(100)} (Renewal for life) ⚡`
-                    : foundersIsOpen
-                    ? `${formatPrice(100)} (Locked for life) 🔥`
-                    : `${formatPrice(monthlyPrice || 200)} / mo`,
-                  badgeBg: "bg-amber-400 text-black",
-                },
-                {
-                  id: "pro_6m" as const,
-                  name_ar: "6 شهور",
-                  name_en: "6 Months",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(500).toLocaleString()} بدل ${formatPrice(1000)} ⭐ (تثبيت مدى الحياة)` : "الأكثر طلباً ⭐",
-                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(500)} (Locked for life) ⭐` : "Most Popular ⭐",
-                  badgeBg: "bg-emerald-400 text-black",
-                },
-                {
-                  id: "pro_1y" as const,
-                  name_ar: "سنة كاملة",
-                  name_en: "1 Year",
-                  badge_ar: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)} 💎 (تثبيت مدى الحياة)` : `توفير ${annualPlan?.savingsPct || 25}% 💎`,
-                  badge_en: (foundersIsOpen || isGrandfathered || isGrandfathered100) ? `${formatPrice(1000)} (Locked for life) 💎` : `Save ${annualPlan?.savingsPct || 25}% 💎`,
-                  badgeBg: "bg-sky-400 text-black",
-                },
-              ].map((tab) => {
-                const isSelected = activeProDuration === tab.id;
-                return (
+        <div id="pricing-duration-navbar" className="sticky top-[var(--header-h,72px)] z-30 py-3.5 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md transition-all space-y-2.5 -mx-4 px-4 sm:-mx-6 sm:px-6 border-y border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+          <div className="max-w-3xl mx-auto space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Clock className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="text-xs sm:text-sm font-black text-zinc-900 dark:text-white">
+                  {isAr ? "اختر المدة المناسبة لجميع الباقات:" : "Choose Plan Duration (1–12 Months):"}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-2.5 py-0.5 text-[11px] font-black">
+                  <span>{formatDurationLabel(selectedMonths, isAr)}</span>
+                  <span className="opacity-70">· {selectedEntry.days} {isAr ? "يوماً" : "days"}</span>
+                </span>
+              </div>
+
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black ${
+                selectedMonths === 12
+                  ? "bg-sky-400 text-black"
+                  : selectedMonths >= 2
+                  ? "bg-emerald-500 text-black"
+                  : "bg-amber-300/90 text-black"
+              }`}>
+                {selectedMonths === 1
+                  ? (isAr ? "شهر واحد · اسحب للزيادة ووفر حتى 25% 🔥" : "1 Month · Slide for up to 25% OFF 🔥")
+                  : selectedMonths === 6
+                  ? (isAr ? "خصم 17% ⭐ · ادفع 5 شهور واحصل على 6" : "Save 17% ⭐ · Pay 5 Months, Get 6")
+                  : selectedMonths === 12
+                  ? (isAr ? "أكبر خصم 25% 💎 · ادفع 9 شهور واحصل على سنة" : "Max 25% OFF 💎 · Pay 9 Months, Get 12")
+                  : (isAr ? `خصم المدة التصاعدي -${selectedEntry.discountPct}% 🔥` : `Duration Discount -${selectedEntry.discountPct}% 🔥`)}
+              </span>
+            </div>
+
+            {/* Keep range input and 1..12 ticks inside an explicit LTR box so values & ticks align identically in AR & EN */}
+            <div dir="ltr" className="space-y-1.5 rounded-xl bg-zinc-100/90 dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5">
+              <input
+                type="range"
+                min={1}
+                max={12}
+                step={1}
+                value={selectedMonths}
+                onChange={(e) => handleDurationSliderChange(Number(e.target.value), false)}
+                aria-label={isAr ? "اختر مدة الاشتراك من 1 إلى 12 شهراً" : "Select subscription duration from 1 to 12 months"}
+                style={{
+                  background: `linear-gradient(to right, #10b981 0%, #10b981 ${((selectedMonths - 1) / 11) * 100}%, #d4d4d8 ${((selectedMonths - 1) / 11) * 100}%, #d4d4d8 100%)`,
+                }}
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+              />
+              <div className="grid grid-cols-12 gap-0.5 text-center">
+                {DURATION_SLIDER_SCHEDULE.map((item) => {
+                  const active = selectedMonths === item.months;
+                  return (
+                    <button
+                      key={item.months}
+                      type="button"
+                      onClick={() => handleDurationSliderChange(item.months, false)}
+                      className={`py-1 rounded-md text-[10px] sm:text-xs font-black transition-all cursor-pointer ${
+                        active
+                          ? "bg-emerald-500 text-black shadow-sm scale-105"
+                          : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+                      }`}
+                    >
+                      {item.months}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                {isAr
+                  ? "ينطبق الخصم التصاعدي تلقائياً على الباقات الفردية والباقة الشاملة"
+                  : "Progressive discount applies automatically to standalone & full bundle plans"}
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { m: 1, ar: "شهر", en: "1M" },
+                  { m: 3, ar: "3 شهور (-10%)", en: "3M (-10%)" },
+                  { m: 6, ar: "6 شهور (-17%)", en: "6M (-17%)" },
+                  { m: 12, ar: "سنة (-25%)", en: "1Y (-25%)" },
+                ].map((preset) => (
                   <button
-                    key={tab.id}
+                    key={preset.m}
                     type="button"
-                    onClick={() => handleDurationSelect(tab.id, true)}
-                    className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl transition-all text-xs sm:text-sm font-black cursor-pointer ${
-                      isSelected
-                        ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20 font-black"
-                        : "bg-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400"
+                    onClick={() => handleDurationSliderChange(preset.m, true)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer border ${
+                      selectedMonths === preset.m
+                        ? "bg-emerald-500 text-black border-emerald-600 shadow-xs"
+                        : "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/60"
                     }`}
                   >
-                    <span>{isAr ? tab.name_ar : tab.name_en}</span>
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full whitespace-nowrap ${tab.badgeBg}`}
-                    >
-                      {isAr ? tab.badge_ar : tab.badge_en}
-                    </span>
+                    {isAr ? preset.ar : preset.en}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1997,159 +2403,242 @@ export default function PricingClient() {
           </div>
         )}
 
-        {/* ── 3 DISTINCT CARDS: FREE | PRO (WITH SWITCHER) | LIFETIME VIP ── */}
-        <div className="grid lg:grid-cols-3 gap-6 items-stretch">
-          {/* ── 01. Free Plan Card ── */}
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-sm hover:border-zinc-300 dark:hover:border-zinc-700 transition-all">
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white">
-                    {isAr ? "الخطة المجانية" : "Free Plan"}
-                  </h3>
-                  <span className="text-xs font-bold text-zinc-500 block mt-0.5">
-                    {isAr ? "استكشاف المنصة وتجربة التحليلات" : "Explore platform basics"}
-                  </span>
-                </div>
-                <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800/70 text-zinc-600 dark:text-zinc-400">
-                  {isPro ? (isAr ? "متاحة" : "Available") : isAr ? "الخطة الحالية" : "Current"}
-                </span>
-              </div>
-
-              <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-5xl font-black text-zinc-950 dark:text-white">0</span>
-                  <span className="text-sm font-bold text-zinc-500">{currencyLabel} / {isAr ? "للأبد" : "forever"}</span>
-                </div>
-                <p className="text-xs font-medium text-zinc-500 mt-1">
-                  {isAr ? "بدون أي بطاقة بنكية أو رسوم خفية" : "No credit card required"}
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-400 block">
-                  {isAr ? "الميزات المشمولة في المجاني:" : "INCLUDED IN FREE:"}
-                </span>
-                <ul className="space-y-3.5">
-                  {freeFeatures.map((f, i) => (
-                    <li
-                      key={i}
-                      className={`flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug ${
-                        f.included
-                          ? "text-zinc-800 dark:text-zinc-200"
-                          : "text-zinc-400 dark:text-zinc-400/80 line-through decoration-zinc-400 dark:decoration-zinc-500"
-                      }`}
-                    >
-                      <span className="shrink-0 mt-0.5">
-                        {f.included ? (
-                          <Check className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-                        )}
-                      </span>
-                      <span>{f.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            {trialEligible && !isPro ? (
-              <div className="space-y-2 mt-4">
-                <button
-                  type="button"
-                  onClick={handleStartTrial}
-                  disabled={trialLoading}
-                  className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white py-3.5 px-4 text-xs font-black uppercase tracking-wider shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  {trialLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 text-yellow-300" />
-                      <span>{isAr ? "جرّب Pro مجاناً لمدة 3 أيام ⚡" : "Try Pro Free for 3 Days ⚡"}</span>
-                    </>
-                  )}
-                </button>
-                <p className="text-[10px] text-center font-bold text-emerald-600 dark:text-emerald-400">
-                  {isAr ? "✨ تجربة كاملة وفورية بدون أي دفع أو بطاقة بنكية" : "Instant full access, no card required"}
-                </p>
-              </div>
-            ) : (
-              <button
-                type="button"
-                disabled
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 py-3.5 text-xs font-bold uppercase tracking-wider cursor-not-allowed mt-4"
-              >
-                {isPro ? (isAr ? "الخطة المجانية متاحة" : "Free plan available") : (isAr ? "خطتك الحالية" : "Current Plan")}
-              </button>
-            )}
-          </div>
-
-          {/* ── 02. Pro Plan Card (The Hero Tier) ── */}
+        {/* ── 3 CORE CARDS: AI CHAT ONLY | PRO BUNDLE | VIP RADAR (hidden for UAE/Qatar) ── */}
+        <div className={`grid gap-6 items-stretch ${isGccChatOnly ? "lg:grid-cols-2 max-w-4xl mx-auto" : "lg:grid-cols-3"}`}>
+          {/* ── 01. AI Chat Pro Only Card (100 EGP/mo * duration multiplier; Hero for UAE/Qatar) ── */}
           {(() => {
-            const isFeatured = activeProDuration === "pro_6m";
-            const isAnnual = activeProDuration === "pro_1y";
-            const isMonthly = activeProDuration === "pro";
+            const chatPricing = computeCheckoutPricing(chatDurationPricing.totalEgp, appliedPromo?.discount_percent || 0, market);
+            const chatHasPromo = chatPricing.discountDisplay > 0;
+            const durationText = formatDurationLabel(selectedMonths, isAr);
+            return (
+              <div
+                className={
+                  isChatHeroForGcc
+                    ? "rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/15 ring-1 ring-emerald-500/30 transition-all duration-300"
+                    : "rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-sm hover:border-sky-500/60 transition-all"
+                }
+              >
+                {isChatHeroForGcc && (
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                    <span className="rounded-full bg-emerald-500 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
+                      {selectedMonths === 1
+                        ? (isAr ? `⭐ الباقة الأنسب لسوق ${isUae ? "الإمارات" : "قطر"} · شات ومحفظة` : `⭐ Best for ${isUae ? "UAE" : "Qatar"} · AI & Portfolio`)
+                        : selectedMonths === 6
+                        ? (isAr ? `⭐ ${brandName} AI Pro · 6 شهور (خصم 17%)` : `⭐ ${brandName} AI Pro · 6 Months (-17%)`)
+                        : selectedMonths === 12
+                        ? (isAr ? `💎 ${brandName} AI Pro · سنة كاملة (خصم 25%)` : `💎 ${brandName} AI Pro · 1 Year (-25%)`)
+                        : (isAr ? `⭐ ${brandName} AI Pro · ${durationText} (خصم ${chatDurationPricing.discountPct}%)` : `⭐ ${brandName} AI Pro · ${durationText} (-${chatDurationPricing.discountPct}%)`)}
+                    </span>
+                  </div>
+                )}
+
+                <div className={`space-y-5${isChatHeroForGcc ? " pt-1" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
+                        <Bot className={`w-5 h-5 shrink-0 ${isChatHeroForGcc ? "text-emerald-500" : "text-sky-500"}`} />
+                        <span>{isChatHeroForGcc ? `${brandName} AI Pro` : (isAr ? "شات الذكاء الاصطناعي فقط" : "AI Chat Pro Only")}</span>
+                      </h3>
+                      <span className="text-xs font-bold text-zinc-500 block mt-0.5">
+                        {isChatHeroForGcc
+                          ? (isAr ? `الشات الذكي + Vision AI + المحفظة · ${durationText} (${chatDurationPricing.days} يوماً)` : `AI Chat + Vision AI + Portfolio · ${durationText} (${chatDurationPricing.days} days)`)
+                          : (isAr ? `تحليل فوري بالشات · ${durationText} (${chatDurationPricing.days} يوماً)` : `Pure AI chat · ${durationText} (${chatDurationPricing.days} days)`)}
+                      </span>
+                    </div>
+                    <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg border shrink-0 ${
+                      isChatHeroForGcc
+                        ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                    }`}>
+                      {isChatHeroForGcc ? "AI PRO" : "CHAT PRO"}
+                    </span>
+                  </div>
+
+                  <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
+                        {chatPricing.finalDisplay.toLocaleString()}
+                      </span>
+                      <span className="text-sm font-bold text-zinc-500">{currencyLabel} / {durationText}</span>
+                      {(chatHasPromo || selectedMonths > 1) && (
+                        <span className="ms-2 text-lg font-black text-zinc-400 line-through decoration-red-500/80 decoration-2">
+                          {formatPrice(chatHasPromo ? chatDurationPricing.totalEgp : chatDurationPricing.undiscountedEgp)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                        {isAr
+                          ? `ما يعادل ${formatPrice(chatDurationPricing.effectiveMonthlyEgp)} / شهر`
+                          : `${formatPrice(chatDurationPricing.effectiveMonthlyEgp)}/mo effective`}
+                      </span>
+                      {chatDurationPricing.discountPct > 0 && (
+                        <span className={`rounded-md border px-2 py-0.5 text-xs font-black ${
+                          isChatHeroForGcc
+                            ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "border-sky-500/30 bg-sky-500/15 text-sky-700 dark:text-sky-300"
+                        }`}>
+                          {isAr ? `وفر ${chatDurationPricing.discountPct}%` : `Save ${chatDurationPricing.discountPct}%`}
+                        </span>
+                      )}
+                    </div>
+                    {chatHasPromo && appliedPromo && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span>
+                          {isAr
+                            ? `🎁 خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
+                            : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}%`}
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-xs font-semibold text-zinc-500 mt-2">
+                      {isChatHeroForGcc
+                        ? (isAr ? `مصممة لمستثمري ${isUae ? "الإمارات" : "قطر"} الباحثين عن الشات الذكي وتحليل المحفظة` : `Tailored for ${isUae ? "UAE" : "Qatar"} investors focused on AI Chat & portfolio analysis`)
+                        : (isAr ? "أنسب خطة لمن يعتمد على التحليل الكمي والشات بالموقع" : "Best if you only need site AI analysis & portfolio tools")}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-zinc-400 block">
+                      {isAr ? "ما تشمله باقة الشات:" : "INCLUDED IN AI CHAT PRO:"}
+                    </span>
+                    <ul className="space-y-3.5">
+                      {chatOnlyFeatures.map((f, i) => (
+                        <li
+                          key={i}
+                          className={`flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug ${
+                            f.included
+                              ? "text-zinc-800 dark:text-zinc-200"
+                              : "text-zinc-400 dark:text-zinc-500 line-through decoration-zinc-400/70"
+                          }`}
+                        >
+                          <span className="shrink-0 mt-0.5">
+                            {f.included ? (
+                              <Check className={`w-4 h-4 ${isChatHeroForGcc ? "text-emerald-500" : "text-sky-500"}`} />
+                            ) : (
+                              <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
+                            )}
+                          </span>
+                          <span>{f.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="pt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => openPaymentStep("chat_only")}
+                    className={
+                      isChatHeroForGcc
+                        ? "w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
+                        : "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-sky-500/40 bg-sky-500/10 hover:bg-sky-500 hover:text-black text-sky-700 dark:text-sky-300 transition-all cursor-pointer"
+                    }
+                  >
+                    <Bot className="w-4 h-4" />
+                    <span>
+                      {isChatHeroForGcc
+                        ? (isAr
+                            ? `اشترك في ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                            : `Get ${brandName} AI Pro — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                        : (isAr
+                            ? `اشترك في الشات — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                            : `Get AI Chat — ${durationText} (${chatPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
+                    </span>
+                  </button>
+                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-zinc-500">
+                    <ShieldCheck className={`w-3.5 h-3.5 ${isChatHeroForGcc ? "text-emerald-500" : "text-sky-500"}`} />
+                    <span>{isAr ? "تفعيل فوري عبر EasyKash" : "Instant activation via EasyKash"}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── 02. Pro Full Bundle Card (The Hero Tier for EGX/Saudi/Founders; Secondary All-Markets + VIP for UAE/Qatar) ── */}
+          {(() => {
+            const isFeatured = selectedMonths === 6;
+            const isAnnual = selectedMonths === 12;
+            const isMonthly = selectedMonths === 1;
+            const hasFounderRate = isGrandfathered || isGrandfathered100 || foundersIsOpen;
             const proCardPricing = computeCheckoutPricing(
-              activeProDetails.amount_egp,
+              proDurationPricing.totalEgp,
               appliedPromo?.discount_percent || 0,
-              isSaudi,
+              market,
             );
             const proCardHasPromo = proCardPricing.discountDisplay > 0;
-            const planDiscount =
-              isMonthly && monthlyDiscount?.active && (foundersIsOpen || isGrandfathered || isGrandfathered100)
-                ? monthlyDiscount
-                : (!isMonthly && foundersIsOpen && activeProDetails.original_amount_egp)
-                ? {
-                    active: true,
-                    original_amount_egp: activeProDetails.original_amount_egp,
-                    label_ar: isFeatured
-                      ? `عرض المؤسسين خصم 50% (${displayAmount(500).toLocaleString()} بدل ${formatPrice(1000)}) ⭐`
-                      : `عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)}) 💎`,
-                  }
-                : null;
+            const founderTierRate = isGrandfathered ? 50 : 100;
+            const durationText = formatDurationLabel(selectedMonths, isAr);
+            const showBundleCompare = !isGccChatOnly && isMonthly && !hasFounderRate && !proCardHasPromo && proMonthlyBase < 200;
+            const strikeOriginalEgp = proCardHasPromo
+              ? proDurationPricing.totalEgp
+              : hasFounderRate
+              ? proRegularDurationPricing.totalEgp
+              : selectedMonths > 1
+              ? proDurationPricing.undiscountedEgp
+              : showBundleCompare
+              ? 200
+              : null;
 
             return (
               <div
                 id="pro-plan-card"
                 ref={proCardRef}
-                className="scroll-mt-48 rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/10 ring-1 ring-emerald-500/30 transition-all duration-300"
+                className={
+                  isChatHeroForGcc
+                    ? "scroll-mt-48 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-sm hover:border-emerald-500/60 transition-all"
+                    : "scroll-mt-48 rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between relative shadow-2xl shadow-emerald-500/15 ring-1 ring-emerald-500/30 transition-all duration-300"
+                }
               >
                 {/* Floating Top Badge */}
-                <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                  <span className="rounded-full bg-emerald-500 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
-                    {isMonthly && planDiscount ? (
-                      foundersCountdown
-                        ? `عرض المؤسسين ${formatPrice(100)} شهرياً (ينتهي خلال ⏰ ${foundersCountdown})`
-                        : (!isSaudi && planDiscount.label_ar ? planDiscount.label_ar : `عرض المؤسسين (${formatPrice(100)} شهرياً مدى الحياة) 🔥`)
-                    ) : isMonthly ? (
-                      isAr ? "⚡ باقة التداول الاحترافي" : "⚡ Monthly Pro Plan"
-                    ) : isFeatured ? (
-                      foundersIsOpen
-                        ? (isAr ? "⭐ الأكثر طلباً · خصم المؤسسين 50%" : "⭐ Most Popular · 50% OFF")
-                        : (isAr ? "⭐ الخطة الأكثر طلباً" : "⭐ Most Popular")
-                    ) : (
-                      foundersIsOpen
-                        ? (isAr ? `💎 أكبر توفير · عرض المؤسسين (${displayAmount(1000).toLocaleString()} بدل ${formatPrice(regular1yEgp)})` : "💎 Max Value · Founders Offer")
-                        : (isAr ? "💎 أكبر توفير وقيمة سنوية" : "💎 Max Value")
-                    )}
-                  </span>
-                </div>
+                {!isChatHeroForGcc && (
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                    <span className="rounded-full bg-emerald-500 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
+                      {hasFounderRate ? (
+                        foundersCountdown && !isGrandfathered && isMonthly
+                          ? `عرض المؤسسين ${formatPrice(100)} (ينتهي خلال ⏰ ${foundersCountdown})`
+                          : isAr
+                          ? `🔒 سعر المؤسسين (${formatPrice(founderTierRate)}/ش${proDurationPricing.discountPct > 0 ? ` · خصم ${proDurationPricing.discountPct}%` : ""})`
+                          : `🔒 Founders (${formatPrice(founderTierRate)}/mo${proDurationPricing.discountPct > 0 ? ` · -${proDurationPricing.discountPct}%` : ""})`
+                      ) : isMonthly ? (
+                        isGccChatOnly
+                          ? (isAr ? "⭐ الباقة الأكثر طلباً · شات ومؤشرات ومحفظة" : "⭐ Most Popular · AI Chat & Portfolio")
+                          : (isAr ? `⭐ الباقة الشاملة · الأفضل قيمة (وفر ${formatPrice(50)})` : "⭐ Full Bundle · Best Value (Save 25%)")
+                      ) : isFeatured ? (
+                        (isAr ? "⭐ الباقة الشاملة · 6 شهور (خصم 17%)" : "⭐ Full Bundle · 6 Months (-17%)")
+                      ) : isAnnual ? (
+                        (isAr ? "💎 الباقة الشاملة · سنة كاملة (أكبر توفير 25%)" : "💎 Full Bundle · 1 Year (-25%)")
+                      ) : (
+                        (isAr ? `⭐ الباقة الشاملة · ${durationText} (خصم ${proDurationPricing.discountPct}%)` : `⭐ Full Bundle · ${durationText} (-${proDurationPricing.discountPct}%)`)
+                      )}
+                    </span>
+                  </div>
+                )}
 
-                <div className="space-y-5 pt-1">
+                <div className={`space-y-5${!isChatHeroForGcc ? " pt-1" : ""}`}>
                   {/* Header & Tag */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
                       <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
-                        {brandName} Pro
+                        <Crown className="w-5 h-5 text-emerald-500 shrink-0" />
+                        <span>
+                          {isChatHeroForGcc
+                            ? (isAr ? "باقة كل الأسواق الشاملة (+ تليجرام VIP)" : "All-Markets Pro (+ VIP Telegram)")
+                            : (isAr ? `${brandName} Pro الشاملة` : `${brandName} Pro Bundle`)}
+                        </span>
                       </h3>
                       <span className="text-xs font-bold text-zinc-500 block mt-0.5">
-                        {isAr ? activeProDetails.name_ar : activeProDetails.name_en} · {activeProDetails.days} {isAr ? "يوماً" : "days"}
+                        {isChatHeroForGcc
+                          ? (isAr ? `كل مزايا الشات + قنوات VIP للسعودية ومصر · ${durationText} (${proDurationPricing.days} يوماً)` : `Full AI Chat + Saudi TASI & Egypt EGX VIP Channels · ${durationText} (${proDurationPricing.days} days)`)
+                          : isGccChatOnly
+                          ? (isAr ? `الشات الذكي + Vision AI + المحفظة + VIP · ${durationText} (${proDurationPricing.days} يوماً)` : `AI Chat + Vision AI + Portfolio + VIP · ${durationText} (${proDurationPricing.days} days)`)
+                          : (isAr ? `الشات الذكي + تليجرام VIP معاً · ${durationText} (${proDurationPricing.days} يوماً)` : `AI Chat + VIP Telegram together · ${durationText} (${proDurationPricing.days} days)`)}
                       </span>
                     </div>
-                    <span className="text-xs font-black rounded-lg border border-emerald-500/30 px-2.5 py-1 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                      PRO
+                    <span className="text-xs font-black rounded-lg border border-emerald-500/30 px-2.5 py-1 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
+                      {isChatHeroForGcc ? "ALL MARKETS + VIP" : "BUNDLE PRO"}
                     </span>
                   </div>
 
@@ -2159,13 +2648,11 @@ export default function PricingClient() {
                       <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
                         {proCardPricing.finalDisplay.toLocaleString()}
                       </span>
-                      <span className="text-sm font-bold text-zinc-500">{currencyLabel}</span>
-                      {(proCardHasPromo || planDiscount) && (
+                      <span className="text-sm font-bold text-zinc-500">{currencyLabel} / {durationText}</span>
+                      {strikeOriginalEgp !== null && (
                         <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
                           {isAr ? "بدل " : "was "}
-                          {proCardHasPromo
-                            ? formatPrice(activeProDetails.amount_egp)
-                            : formatPrice(Number(planDiscount?.original_amount_egp))}
+                          {formatPrice(strikeOriginalEgp)}
                         </span>
                       )}
                     </div>
@@ -2184,15 +2671,26 @@ export default function PricingClient() {
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
                         {isAr
-                          ? `ما يعادل ${formatPrice(activeProDetails.monthlyEquivalent ?? 0)} / شهر`
-                          : `${currencyCode} ${displayAmount(activeProDetails.monthlyEquivalent ?? 0).toLocaleString()}/mo`}
+                          ? `ما يعادل ${formatPrice(proDurationPricing.effectiveMonthlyEgp)} / شهر`
+                          : `${currencyCode} ${displayAmount(proDurationPricing.effectiveMonthlyEgp).toLocaleString()}/mo`}
                       </span>
-                      {activeProDetails.savingsPct > 0 && (
-                        <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
-                          {isAr ? `توفير ${activeProDetails.savingsPct}%` : `${activeProDetails.savingsPct}% OFF`}
+                      {showBundleCompare ? (
+                        <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
+                          {isAr ? `وفر ${formatPrice(50)} (25%)` : "Save 25% vs Split"}
                         </span>
-                      )}
+                      ) : proDurationPricing.discountPct > 0 ? (
+                        <span className="rounded-md border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-xs font-black">
+                          {isAr ? `توفير ${proDurationPricing.discountPct}%` : `${proDurationPricing.discountPct}% OFF`}
+                        </span>
+                      ) : null}
                     </div>
+                    {isChatHeroForGcc && (
+                      <p className="text-xs font-semibold text-zinc-500 mt-2">
+                        {isAr
+                          ? `مخصصة لمن يتابع السوق السعودي (تداول TASI) أو المصري (EGX) بجانب ${isUae ? "الإمارات" : "قطر"}`
+                          : `Built for investors tracking Saudi (TASI) or Egypt (EGX) alongside ${isUae ? "UAE" : "Qatar"}`}
+                      </p>
+                    )}
                   </div>
 
                   {/* Founding perk callout across all Pro durations */}
@@ -2203,25 +2701,25 @@ export default function PricingClient() {
                         <span>{isAr ? "🔒 ميزة المؤسسين الأوائل (تثبيت السعر مدى الحياة):" : "🔒 Founding Member Lifetime Price Lock:"}</span>
                       </div>
                       <p className="text-[11px] font-semibold leading-relaxed text-zinc-800 dark:text-zinc-300">
-                        {isFeatured
+                        {isGccChatOnly
                           ? (isAr
-                            ? `باشتراكك في باقة الـ 6 شهور (${formatPrice(500)} بدلاً من ${formatPrice(1000)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(500)} للـ 6 شهور) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
-                            : `Subscribing to the 6-Month plan (${formatPrice(500)} instead of ${formatPrice(1000)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(500)}/6m) rate upon renewal!`)
-                          : isAnnual
+                            ? `بصفتك من المؤسسين الأوائل، تحصل على باقة الشات الذكي وأدوات المحفظة + قنوات تليجرام VIP للسعودية ومصر مدى الحياة بسعر المؤسسين المحفوظ.`
+                            : `As an early founder, you lock your Founding Member rate for AI Chat Pro, portfolio tools & Saudi TASI / Egypt EGX VIP Telegram channels for life.`)
+                          : selectedMonths > 1
                           ? (isAr
-                            ? `باشتراكك في باقة السنة الكاملة (${formatPrice(1000)} بدلاً من ${formatPrice(regular1yEgp)} — أي ${formatPrice(83)}/شهر) يتثبّت حسابك كمؤسس مدى الحياة! عند التجديد مستقبلاً يظل سعر الشهر ${formatPrice(100)} (أو ${formatPrice(1000)} للسنة) للأبد حتى بعد عودة السعر الأساسي إلى ${formatPrice(200)}.`
-                            : `Subscribing to the 1-Year plan (${formatPrice(1000)} instead of ${formatPrice(regular1yEgp)} — ${formatPrice(83)}/mo) locks your Founding Member status for life at the ${formatPrice(100)}/mo (or ${formatPrice(1000)}/yr) rate upon renewal!`)
+                            ? `باشتراكك لمدة ${durationText} (${formatPrice(proDurationPricing.totalEgp)} بدلاً من ${formatPrice(proRegularDurationPricing.totalEgp)}) يظل حسابك مثبتاً على تسعير المؤسسين الشامل للباقتين معاً.`
+                            : `Subscribing for ${durationText} (${formatPrice(proDurationPricing.totalEgp)} instead of ${formatPrice(proRegularDurationPricing.totalEgp)}) preserves your Founding Member status across both AI Chat + VIP Radar.`)
                           : isGrandfathered
                           ? (isAr
-                            ? `${formatPrice(50)} شهرياً (سعر المؤسسين المستمر لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة).`
-                            : `${formatPrice(50)}/mo grandfathered founders rate active for your account as long as renewed.`)
+                            ? `${formatPrice(50)} شهرياً (سعر المؤسسين المستمر للباقة الشاملة ما دمت مجدداً أو خلال مهلة الـ 72 ساعة).`
+                            : `${formatPrice(50)}/mo grandfathered Full Bundle rate active for your account as long as renewed.`)
                           : isGrandfathered100 && !foundersIsOpen
                           ? (isAr
-                            ? `${formatPrice(100)} شهرياً (سعر المؤسسين المثبت لحسابك مدى الحياة ما دمت مجدداً لاشتراكك أو خلال مهلة الـ 72 ساعة).`
-                            : `${formatPrice(100)}/mo grandfathered founders rate active for your account as long as renewed.`)
+                            ? `${formatPrice(100)} شهرياً (سعر المؤسسين المثبت للباقة الشاملة ما دمت مجدداً أو خلال مهلة الـ 72 ساعة).`
+                            : `${formatPrice(100)}/mo grandfathered Full Bundle rate active for your account as long as renewed.`)
                           : (isAr
-                            ? `${formatPrice(100)} شهرياً عرض باقة المؤسسين (بدلاً من ${formatPrice(200)}) — يثبّت سعرك بـ ${formatPrice(100)} مدى الحياة طول ما بتجدد (أو ${formatPrice(500)} للـ 6 شهور / ${formatPrice(1000)} للسنة)، مع مهلة سماح 72 ساعة عند كل تجديد.`
-                            : `${formatPrice(100)}/mo limited founders offer (instead of ${formatPrice(200)}) — locks your ${formatPrice(100)}/mo rate for life as long as renewed, with 72h renewal grace period.`)}
+                            ? `${formatPrice(100)} شهرياً عرض باقة المؤسسين الشاملة — يثبّت سعرك بـ ${formatPrice(100)} مدى الحياة مع مهلة سماح 72 ساعة عند كل تجديد.`
+                            : `${formatPrice(100)}/mo founders offer — locks your ${formatPrice(100)}/mo Full Bundle rate for life with 72h renewal grace period.`)}
                       </p>
                     </div>
                   )}
@@ -2229,7 +2727,11 @@ export default function PricingClient() {
                   {/* Features List */}
                   <div className="space-y-3">
                     <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
-                      {isAr ? "الميزات المشمولة في باقة Pro:" : "INCLUDED IN PRO:"}
+                      {isChatHeroForGcc
+                        ? (isAr ? "مزايا الشات + قنوات تليجرام VIP:" : "AI CHAT + VIP TELEGRAM INCLUDED:")
+                        : isGccChatOnly
+                        ? (isAr ? "مزايا الباقة الشاملة:" : "INCLUDED IN PRO:")
+                        : (isAr ? "كل ما في الشات + تليجرام VIP معاً:" : "BOTH AI CHAT + VIP RADAR INCLUDED:")}
                     </span>
                     <ul className="space-y-3.5">
                       {proFeatures.map((f, i) => (
@@ -2246,248 +2748,273 @@ export default function PricingClient() {
                 <div className="pt-4 space-y-2">
                   <button
                     type="button"
-                    onClick={() => openPaymentStep(activeProDetails.id)}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
+                    onClick={() => openPaymentStep("pro")}
+                    className={
+                      isChatHeroForGcc
+                        ? "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500 hover:text-black text-emerald-700 dark:text-emerald-300 transition-all cursor-pointer"
+                        : "w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5 active:translate-y-0 transition-all cursor-pointer bg-emerald-500 hover:bg-emerald-400 text-black"
+                    }
                   >
                     <LockKeyhole className="w-3.5 h-3.5" />
                     {isPro
-                      ? (isAr ? `تجديد باقة Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Renew Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
-                      : (isAr ? `اشترك في Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Subscribe to Pro (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
+                      ? (isAr ? `تجديد الباقة الشاملة — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Renew Bundle — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                      : (isAr ? `اشترك في الباقة الشاملة — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Get Full Bundle — ${durationText} (${proCardPricing.finalDisplay.toLocaleString()} ${currencyLabel})`)}
                   </button>
                   <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>{isAr ? "دفع رسمي مشفر · تفعيل تلقائي" : "Encrypted checkout · Instant unlock"}</span>
+                    <span>{isAr ? "دفع رسمي مشفر عبر EasyKash · تفعيل فوري" : "Encrypted checkout via EasyKash · Instant unlock"}</span>
                   </div>
                 </div>
               </div>
             );
           })()}
 
-          {/* ── 03. Lifetime VIP Card ── */}
-          {(() => {
-            const lifetimePricing = computeCheckoutPricing(2250, appliedPromo?.discount_percent || 0, isSaudi);
-            const lifetimeHasPromo = lifetimePricing.discountDisplay > 0;
+          {/* ── 03. VIP Telegram Radar Only Card (100 EGP/mo * duration multiplier; hidden for UAE/Qatar) ── */}
+          {!isGccChatOnly && (() => {
+            const vipPricing = computeCheckoutPricing(vipDurationPricing.totalEgp, appliedPromo?.discount_percent || 0, market);
+            const vipHasPromo = vipPricing.discountDisplay > 0;
+            const durationText = formatDurationLabel(selectedMonths, isAr);
             return (
-          <div className="relative rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-b from-amber-50/90 via-white to-amber-50/40 dark:from-amber-950/30 dark:via-zinc-900/95 dark:to-zinc-900/95 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-xl shadow-amber-500/10 dark:shadow-amber-500/5 transition-all">
-            {/* Floating Top Badge */}
-            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-              <span className="rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 text-black text-xs font-black uppercase px-4 py-1 tracking-wider shadow-md shadow-amber-500/20 whitespace-nowrap flex items-center gap-1.5">
-                <Crown className="w-3.5 h-3.5 fill-black" />
-                {lifetimeIsOpen
-                  ? (isAr ? `حصري · متبقي ${lifetimeRemaining} مقعداً فقط` : `${lifetimeRemaining} Spots Left`)
-                  : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
-              </span>
-            </div>
-
-            <div className="space-y-5 pt-1">
-              {/* Header & Tag */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
-                    <Crown className="w-6 h-6 text-amber-500 dark:text-amber-400 shrink-0" />
-                    <span>{isAr ? "مدى الحياة VIP" : "Lifetime VIP"}</span>
-                  </h3>
-                  <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 block mt-0.5">
-                    {isAr ? "صلاحية دائمة للأبد (36,500 يوم)" : "Permanent access for life"}
-                  </span>
-                </div>
-                <span className="text-xs font-black rounded-lg border border-amber-300 dark:border-amber-500/30 px-2.5 py-1 bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-400">
-                  VIP 20
-                </span>
-              </div>
-
-              {/* Price Section */}
-              <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">{lifetimePricing.finalDisplay.toLocaleString()}</span>
-                  <span className="text-sm font-bold text-zinc-600 dark:text-zinc-400">{currencyLabel}</span>
-                  {lifetimeHasPromo && (
-                    <span className="ms-2 text-lg sm:text-xl font-black text-zinc-400 dark:text-zinc-500 line-through decoration-red-500/80 decoration-2">
-                      {isAr ? "بدل " : "was "}
-                      {formatPrice(2250)}
-                    </span>
-                  )}
-                </div>
-                {lifetimeHasPromo && appliedPromo && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
-                    <Sparkles className="w-3 h-3 shrink-0" />
-                    <span>
-                      {isAr
-                        ? `🎁 مطبق خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
-                        : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}% applied`}
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-6 sm:p-7 space-y-6 flex flex-col justify-between shadow-sm hover:border-teal-500/60 transition-all">
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
+                        <Send className="w-5 h-5 text-teal-500 shrink-0" />
+                        <span>{isAr ? "قنوات تليجرام VIP فقط" : "VIP Telegram Only"}</span>
+                      </h3>
+                      <span className="text-xs font-bold text-zinc-500 block mt-0.5">
+                        {isAr ? `تنبيهات الرادار والقنوات الفورية · ${durationText} (${vipDurationPricing.days} يوماً)` : `Live Telegram radar · ${durationText} (${vipDurationPricing.days} days)`}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg border border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 shrink-0">
+                      VIP RADAR
                     </span>
                   </div>
-                )}
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1 bg-amber-100/90 dark:bg-amber-500/10 border border-amber-300/80 dark:border-amber-500/20 rounded-md px-2 py-0.5">
-                    <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                    {isAr ? "دفعة واحدة للأبد · بدون أي تجديد" : "One-time payment · Zero renewals"}
-                  </span>
-                  <span className="rounded-md border border-amber-300 dark:border-amber-500/30 bg-amber-200/60 dark:bg-amber-500/15 text-amber-900 dark:text-amber-300 px-2 py-0.5 text-xs font-black">
-                    {isAr ? "وفر للأبد 👑" : "Save Forever 👑"}
-                  </span>
+
+                  <div className="border-b border-zinc-200 dark:border-zinc-800/80 pb-5">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-4xl sm:text-5xl font-black text-zinc-950 dark:text-white">
+                        {vipPricing.finalDisplay.toLocaleString()}
+                      </span>
+                      <span className="text-sm font-bold text-zinc-500">{currencyLabel} / {durationText}</span>
+                      {(vipHasPromo || selectedMonths > 1) && (
+                        <span className="ms-2 text-lg font-black text-zinc-400 line-through decoration-red-500/80 decoration-2">
+                          {formatPrice(vipHasPromo ? vipDurationPricing.totalEgp : vipDurationPricing.undiscountedEgp)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                        {isAr
+                          ? `ما يعادل ${formatPrice(vipDurationPricing.effectiveMonthlyEgp)} / شهر`
+                          : `${formatPrice(vipDurationPricing.effectiveMonthlyEgp)}/mo effective`}
+                      </span>
+                      {vipDurationPricing.discountPct > 0 && (
+                        <span className="rounded-md border border-teal-500/30 bg-teal-500/15 text-teal-700 dark:text-teal-300 px-2 py-0.5 text-xs font-black">
+                          {isAr ? `وفر ${vipDurationPricing.discountPct}%` : `Save ${vipDurationPricing.discountPct}%`}
+                        </span>
+                      )}
+                    </div>
+                    {vipHasPromo && appliedPromo && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
+                        <Sparkles className="w-3 h-3 shrink-0" />
+                        <span>
+                          {isAr
+                            ? `🎁 خصم كود (${appliedPromo.code}) -${appliedPromo.discount_percent}%`
+                            : `🎁 Promo (${appliedPromo.code}) -${appliedPromo.discount_percent}%`}
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-xs font-semibold text-zinc-500 mt-2">
+                      {isAr ? "أنسب خطة لمن يتابع تنبيهات السيولة والزخم على تليجرام فقط" : "Best if you only want real-time Telegram radar alerts"}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-zinc-400 block">
+                      {isAr ? "ما تشمله باقة تليجرام VIP:" : "INCLUDED IN VIP RADAR:"}
+                    </span>
+                    <ul className="space-y-3.5">
+                      {vipOnlyFeatures.map((f, i) => (
+                        <li
+                          key={i}
+                          className={`flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug ${
+                            f.included
+                              ? "text-zinc-800 dark:text-zinc-200"
+                              : "text-zinc-400 dark:text-zinc-500 line-through decoration-zinc-400/70"
+                          }`}
+                        >
+                          <span className="shrink-0 mt-0.5">
+                            {f.included ? (
+                              <Check className="w-4 h-4 text-teal-500" />
+                            ) : (
+                              <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
+                            )}
+                          </span>
+                          <span>{f.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="pt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => openPaymentStep("vip_only")}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-xs sm:text-sm font-black uppercase tracking-wider border-2 border-teal-500/40 bg-teal-500/10 hover:bg-teal-500 hover:text-black text-teal-700 dark:text-teal-300 transition-all cursor-pointer"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>
+                      {isAr
+                        ? `اشترك في تليجرام VIP — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`
+                        : `Get VIP Radar — ${durationText} (${vipPricing.finalDisplay.toLocaleString()} ${currencyLabel})`}
+                    </span>
+                  </button>
+                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-zinc-500">
+                    <ShieldCheck className="w-3.5 h-3.5 text-teal-500" />
+                    <span>{isAr ? "رابط دعوة شخصي فوري لمرة واحدة" : "Instant single-use Telegram VIP invite"}</span>
+                  </div>
                 </div>
               </div>
-
-              {/* Breakeven Value Analysis Box */}
-              <div className="rounded-xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-300/80 dark:border-amber-500/25 p-3.5 space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 dark:text-amber-400">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>{isAr ? "💡 حساب نقطة التعادل والقيمة:" : "💡 Breakeven Value Analysis:"}</span>
-                </div>
-                <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                  {isAr
-                    ? `سعر الباقة (${formatPrice(2250)}) تعود قيمته خلال ${breakevenMonths} شهر فقط من باقة Pro — أي ${breakevenMonths <= 12 ? "في أقل من سنة واحدة" : "خلال أقل من عامين"} تصبح كافة تحليلات وتنبيهات المنصة مجانية بالكامل لحسابك مدى الحياة للأبد!`
-                    : `At ${formatPrice(2250)}, this breaks even in just ${breakevenMonths} months of Pro — ${breakevenMonths <= 12 ? "under 1 year" : "under 2 years"} — after which all platform AI models, alerts, and updates are 100% free forever!`}
-                </p>
-              </div>
-
-              {/* Spots Tracker Box */}
-              <div className="rounded-xl bg-amber-50/60 dark:bg-zinc-950/80 border border-amber-200/90 dark:border-zinc-800 p-3.5 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-amber-800 dark:text-amber-400 flex items-center gap-1">
-                    <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    {isAr ? "المقاعد المتبقية:" : "Remaining Spots:"}
-                  </span>
-                  <span className="font-mono text-zinc-800 dark:text-zinc-300 text-[11px] font-bold">
-                    {lifetimeIsOpen
-                      ? (isAr ? `${lifetimeRemaining} من ${lifetimeLimit} مقعداً` : `${lifetimeRemaining}/${lifetimeLimit}`)
-                      : (isAr ? "اكتملت (20/20) ❌" : "Sold Out ❌")}
-                  </span>
-                </div>
-                <div className="w-full rounded-full bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700/60 h-2 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-amber-400 to-yellow-400 transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(5, (lifetimeCount / lifetimeLimit) * 100))}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Features List */}
-              <div className="space-y-3">
-                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
-                  {isAr ? "الميزات المشمولة مدى الحياة:" : "INCLUDED FOR LIFE:"}
-                </span>
-                <ul className="space-y-3.5">
-                  {lifetimeFeatures.map((f, i) => (
-                    <li key={i} className="flex items-start gap-2.5 text-xs sm:text-[13px] font-medium leading-snug text-zinc-800 dark:text-zinc-200">
-                      <span className="shrink-0 mt-0.5 text-amber-500 dark:text-amber-400">{f.icon || <Check className="w-3.5 h-3.5" />}</span>
-                      <span>{f.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            {/* Button */}
-            <div className="pt-4 space-y-2">
-              <button
-                type="button"
-                disabled={!lifetimeIsOpen}
-                onClick={() => {
-                  setSelectedPlan("lifetime");
-                  setStep("payment");
-                }}
-                className={`w-full flex items-center justify-center gap-2 rounded-xl py-4 px-4 text-xs sm:text-sm font-black uppercase tracking-wider shadow-lg transition-all ${
-                  lifetimeIsOpen
-                    ? "bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black shadow-amber-500/20 hover:shadow-amber-500/30 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
-                    : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                }`}
-              >
-                <Crown className="w-4 h-4 fill-current" />
-                {lifetimeIsOpen
-                  ? isPro
-                    ? (isAr ? `ترقية لحساب مدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Upgrade to Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
-                    : (isAr ? `احجز مقعدك مدى الحياة الآن (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑` : `Get Lifetime Deal (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑`)
-                  : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
-              </button>
-              <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-                <span>{isAr ? "صلاحية 36,500 يوم · بدون أي تجديد" : "36,500 days · Zero renewals"}</span>
-              </div>
-            </div>
-          </div>
             );
           })()}
         </div>
 
-        {/* ── ROI & INVESTMENT VALUE EQUATION ── */}
-        <div className="rounded-3xl border-3 border-emerald-500 bg-white dark:bg-zinc-950 p-6 sm:p-10 shadow-[8px_8px_0px_#10b981] relative overflow-hidden transition-all">
-          {/* Decorative ambient backdrop */}
-          <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 -mb-8 -ml-8 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+        {/* ── COMPACT HORIZONTAL LIFETIME VIP DEAL STRIP ── */}
+        {(() => {
+          const lifetimePricing = computeCheckoutPricing(2250, appliedPromo?.discount_percent || 0, market);
+          const lifetimeHasPromo = lifetimePricing.discountDisplay > 0;
+          return (
+            <div className="rounded-2xl border-2 border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-r from-amber-50/90 via-white to-amber-50/40 dark:from-amber-950/25 dark:via-zinc-900/95 dark:to-zinc-900 p-5 sm:p-6 shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="space-y-2.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-400 text-black text-[11px] font-black uppercase">
+                    <Crown className="w-3.5 h-3.5 fill-black" />
+                    {lifetimeIsOpen
+                      ? (isAr ? `العضوية الدائمة · متبقي ${lifetimeRemaining} من ${lifetimeLimit} مقعداً` : `Lifetime VIP · ${lifetimeRemaining}/${lifetimeLimit} Spots Left`)
+                      : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
+                  </span>
+                  <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                    {isAr ? "دفعة واحدة لـ 36,500 يوم · بدون أي تجديد مستقبلي" : "One-time payment · 36,500 days · Zero renewals"}
+                  </span>
+                </div>
 
-          <div className="max-w-4xl mx-auto space-y-6 relative">
-            {/* Header Badge */}
-            <div className="text-center space-y-2">
-              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500 text-black text-xs sm:text-sm font-black uppercase tracking-wider shadow-sm">
-                <Zap className="w-4 h-4 fill-black" />
-                {isAr ? "معادلة العائد على الاستثمار (ROI)" : "The Investment Equation (ROI)"}
+                <div className="flex flex-wrap items-baseline gap-3">
+                  <h3 className="text-xl sm:text-2xl font-black text-zinc-950 dark:text-white flex items-center gap-2">
+                    <Crown className="w-5 h-5 text-amber-500 shrink-0" />
+                    <span>{isAr ? `${brandName} Lifetime VIP الشاملة مدى الحياة` : `${brandName} Lifetime VIP Bundle`}</span>
+                  </h3>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-2xl sm:text-3xl font-black text-amber-700 dark:text-amber-300">
+                      {lifetimePricing.finalDisplay.toLocaleString()}
+                    </span>
+                    <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{currencyLabel}</span>
+                    {lifetimeHasPromo && (
+                      <span className="text-sm font-black text-zinc-400 line-through">
+                        {formatPrice(2250)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                  {lifetimeFeatures.slice(0, 3).map((f, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                      <span className="shrink-0 mt-0.5 text-amber-500">{f.icon || <Check className="w-3.5 h-3.5" />}</span>
+                      <span>{f.text}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
+                  {isGccChatOnly
+                    ? (isAr
+                        ? `نقطة التعادل خلال ${breakevenMonths} شهر فقط من الباقة الشهرية — وبعدها يبقى الشات الذكي وأدوات المحفظة مفعلة للأبد.`
+                        : `Breaks even in ~${breakevenMonths} months — then AI Chat & portfolio tools stay unlocked permanently.`)
+                    : (isAr
+                        ? `نقطة التعادل خلال ${breakevenMonths} شهر فقط من الباقة الشاملة — وبعدها تبقى كامل أدوات المنصة وقنوات VIP مفعلة للأبد.`
+                        : `Breaks even in ~${breakevenMonths} months of the Full Pro Bundle — then all tools & VIP channels stay unlocked permanently.`)}
+                </p>
+              </div>
+
+              <div className="w-full lg:w-auto shrink-0 space-y-2 lg:min-w-[240px]">
+                <button
+                  type="button"
+                  disabled={!lifetimeIsOpen}
+                  onClick={() => openPaymentStep("lifetime")}
+                  className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-5 text-xs sm:text-sm font-black uppercase tracking-wider shadow-md transition-all ${
+                    lifetimeIsOpen
+                      ? "bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black cursor-pointer"
+                      : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                  }`}
+                >
+                  <Crown className="w-4 h-4 fill-current" />
+                  <span>
+                    {lifetimeIsOpen
+                      ? isPro
+                        ? (isAr ? `ترقية لمدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})` : `Upgrade Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel})`)
+                        : (isAr ? `احجز مدى الحياة (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑` : `Get Lifetime (${lifetimePricing.finalDisplay.toLocaleString()} ${currencyLabel}) 👑`)
+                      : (isAr ? "اكتملت المقاعد (Sold Out)" : "Sold Out (20/20)")}
+                  </span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── COMPACT FREE PLAN COMPARISON BAR (NO UNCLUTTERED NOISE) ── */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-2 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-base font-black text-zinc-950 dark:text-white">
+                {isAr ? "الخطة المجانية (0 " + currencyLabel + ")" : `Free Plan (0 ${currencyLabel})`}
               </span>
-              <h3 className="text-2xl sm:text-4xl font-black text-zinc-950 dark:text-white tracking-tight pt-2">
-                {isAr
-                  ? "صفقة ناجحة واحدة بنسبة +5% تغطي اشتراكك السنوي بالكامل وزيادة!"
-                  : "A single +5% trade covers your entire annual subscription & more!"}
-              </h3>
+              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400">
+                {isPro ? (isAr ? "متاحة" : "Available") : (isAr ? "الخطة الحالية" : "Current")}
+              </span>
             </div>
-
-            {/* 3 Metric Comparison Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div className="rounded-2xl border-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 p-4 sm:p-5 text-center space-y-1">
-                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
-                  {isAr ? "محفظة تداول متوسطة" : "Example Portfolio"}
-                </span>
-                <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  {displayAmount(roiPortfolioEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{currencyLabel}</span>
+            <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+              {freeFeatures.filter((f) => f.included).map((f, i) => (
+                <div key={i} className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>{f.text}</span>
                 </div>
-                <p className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                  {isAr ? "رأس مال تجريبي للاحتساب" : "Baseline portfolio size"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 p-4 sm:p-5 text-center space-y-1 shadow-sm">
-                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                  {isAr ? "ربح صفقة سوينج (+5%)" : "One +5% Swing Trade"}
-                </span>
-                <div className="text-2xl sm:text-3xl font-black text-emerald-800 dark:text-emerald-300 font-mono">
-                  +{displayAmount(roiTradeProfitEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">{currencyLabel} {isAr ? "صافي" : "net"}</span>
-                </div>
-                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
-                  {isAr ? "إشارة ذكاء اصطناعي واحدة" : "From single AI breakout signal"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 p-4 sm:p-5 text-center space-y-1">
-                <span className="text-[11px] font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
-                  {isAr ? "تكلفة اشتراك السنة كلها" : "Full Annual Pro Cost"}
-                </span>
-                <div className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white font-mono">
-                  {displayAmount(annualCostEgp).toLocaleString("en-US")} <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{currencyLabel} / {isAr ? "سنة" : "yr"}</span>
-                </div>
-                <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 font-bold">
-                  {isAr
-                    ? `أنت رابح ${roiNetGainDisplay.toLocaleString()} ${currencyLabel} من أول صفقة!`
-                    : `Instant +${roiNetGainDisplay.toLocaleString()} ${currencyLabel} ROI on trade #1`}
-                </p>
-              </div>
-            </div>
-
-            {/* Value bullets */}
-            <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs sm:text-sm font-bold">
-              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span>{isAr ? "حماية رأس المال بوقف خسارة صارم (4%)" : "Strict 4% Stop-Loss Protection"}</span>
-              </div>
-              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span>{isAr ? "اقتناص الاختراقات وتجميع الحيتان مبكراً" : "Early Smart Money Breakouts"}</span>
-              </div>
-              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                <span>{isAr ? "تنبيهات فورية على تليجرام في ثوانٍ" : "Instant Mobile Telegram Alerts"}</span>
-              </div>
+              ))}
             </div>
           </div>
+
+          <div className="w-full md:w-auto shrink-0 md:min-w-[210px]">
+            {trialEligible && !isPro ? (
+              <button
+                type="button"
+                onClick={handleStartTrial}
+                disabled={trialLoading}
+                className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black py-3 px-4 text-xs font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {trialLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <span>{isAr ? "جرّب Pro مجاناً 3 أيام ⚡" : "Try Pro Free for 3 Days ⚡"}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 py-3 px-4 text-xs font-bold uppercase tracking-wider cursor-not-allowed"
+              >
+                {isPro ? (isAr ? "الخطة المجانية متاحة" : "Free plan available") : (isAr ? "خطتك الحالية" : "Current Plan")}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── FRA REGULATORY & EASYKASH DISCLOSURE NOTE ── */}
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/30 px-4 py-3 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 leading-relaxed flex items-start gap-2.5">
+          <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+          <p>
+            {isAr
+              ? "إفصاح تنظيمي: الاشتراكات هي مقابل برمجيات وأدوات تحليل فني وكمي مؤتمتة (SaaS) لأغراض البحث والتعليم الشخصي فقط؛ لا تقدم المنصة استشارات مالية أو توصيات استثمارية مرخصة ولا تضمن أي عوائد. تتم جميع المدفوعات حصراً عبر بوابة EasyKash المعتمدة."
+              : "Regulatory Notice: Subscriptions provide access solely to automated technical and quantitative SaaS software tools for personal research and analysis; the platform does not provide licensed financial advice, investment recommendations, or return guarantees. All payments are processed exclusively through EasyKash."}
+          </p>
         </div>
 
           </>
@@ -2498,7 +3025,7 @@ export default function PricingClient() {
             <div className="border-4 border-purple-600 dark:border-purple-400 bg-gradient-to-r from-purple-900 via-indigo-950 to-zinc-950 p-6 sm:p-8 text-white shadow-[8px_8px_0px_#a855f7] space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 border-2 border-yellow-400 bg-purple-900/80 text-yellow-300 text-xs font-black uppercase">
                 <Crown className="w-4 h-4 text-yellow-300" />
-                <span>{isAr ? "حلول الذكاء الاصطناعي للمجتمعات وقنوات التوصيات (B2B)" : "Enterprise AI for Trading Channels & Communities"}</span>
+                <span>{isAr ? "حلول الذكاء الاصطناعي للقنوات التحليلية والمجتمعات (B2B)" : "Enterprise AI for Analytical Channels & Communities (B2B)"}</span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
                 {isAr ? "🤖 إيجار بوت التليجرام الذكي لقناتك أو مجموعتك المدفوعة" : `License ${brandName} Inside Your Telegram Group`}
@@ -2752,10 +3279,10 @@ export default function PricingClient() {
               </h4>
               <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
                 {isAr
-                  ? isSaudi
+                  ? isGulfPricing
                     ? "عبر بوابة EasyKash المشفرة — تدعم بطاقات Visa / Mastercard الدولية في السعودية والخليج"
                     : "عبر بوابة EasyKash المشفرة برخصة البنك المركزي المصري"
-                  : isSaudi
+                  : isGulfPricing
                   ? "Encrypted 256-bit checkout via EasyKash — supports international Visa & Mastercard in Saudi & GCC"
                   : "Licensed 256-bit encrypted checkout via Central Bank of Egypt"}
               </p>
@@ -2769,7 +3296,9 @@ export default function PricingClient() {
                 {isAr ? "تفعيل تلقائي ولحظي" : "Instant Activation"}
               </h4>
               <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                {isAr ? "يتم فتح الصلاحيات وتوليد رابط VIP فور اكتمال الدفع آلياً" : "Pro perks unlock instantly upon automated payment"}
+                {isGccChatOnly
+                  ? (isAr ? "يتم فتح صلاحيات الشات الذكي فوراً بعد إتمام الدفع آلياً" : "AI Chat perks unlock instantly upon automated payment")
+                  : (isAr ? "يتم فتح الصلاحيات وتوليد رابط VIP فور اكتمال الدفع آلياً" : "Pro perks unlock instantly upon automated payment")}
               </p>
             </div>
 
@@ -2798,17 +3327,27 @@ export default function PricingClient() {
                 {isAr
                   ? isSaudi
                     ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في السوق السعودي (تداول)"
+                    : isUae
+                    ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في سوق الإمارات (دبي وأبوظبي)"
+                    : isQatar
+                    ? "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في بورصة قطر"
                     : "اربح 25% كاش شهرياً أو أعلن أمام آلاف المتداولين في البورصة المصرية"
                   : isSaudi
                   ? "Earn 25% Recurring Cash or Advertise to Thousands of Active Saudi TASI Traders"
+                  : isUae
+                  ? "Earn 25% Recurring Cash or Advertise to Thousands of Active UAE (DFM & ADX) Investors"
+                  : isQatar
+                  ? "Earn 25% Recurring Cash or Advertise to Thousands of Active Qatar (QSE) Investors"
                   : "Earn 25% Recurring Cash or Advertise to Thousands of Active EGX Traders"}
               </h3>
               <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed">
                 {isAr
-                  ? "هل تدير قناة تليجرام، صفحة فيسبوك، أو منصة استثمارية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر، أو احجز مساحات رعاية إعلانية ذكية في تقاريرنا اليومية ورادار الأسهم."
+                  ? (isGccChatOnly
+                      ? "هل تدير مجتمعاً استثمارياً أو صفحة مالية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر."
+                      : "هل تدير قناة تليجرام، صفحة فيسبوك، أو منصة استثمارية؟ انضم لبرنامج التسويق بالعمولة واربح 25% كاش شهرياً عن كل مشترك مستمر، أو احجز مساحات رعاية إعلانية ذكية في تقاريرنا اليومية ورادار الأسهم.")
                   : isSaudi
                   ? "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Saudi TASI investors."
-                  : "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active Egyptian market investors."}
+                  : "Manage a trading group, media channel, or financial community? Join our 25% recurring affiliate program or sponsor our daily market outlook reports reaching active investors."}
               </p>
             </div>
             <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-auto shrink-0">

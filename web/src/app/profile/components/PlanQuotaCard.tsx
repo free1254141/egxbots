@@ -226,7 +226,19 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                     : "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
                 }`}
               >
-                {data?.plan?.is_lifetime ? "LIFETIME VIP 👑" : data?.plan?.is_trial ? (isAr ? "تجربة PRO مجانية ⚡" : "PRO TRIAL ⚡") : isPro ? "PRO" : isAr ? "مجاني" : "FREE"}
+                {data?.plan?.is_lifetime
+                  ? "LIFETIME VIP 👑"
+                  : data?.plan?.is_trial
+                  ? (isAr ? "تجربة PRO مجانية ⚡" : "PRO TRIAL ⚡")
+                  : data?.plan?.id === "chat_only"
+                  ? "AI CHAT PRO"
+                  : data?.plan?.id === "vip_only"
+                  ? "VIP RADAR"
+                  : isPro
+                  ? "PRO"
+                  : isAr
+                  ? "مجاني"
+                  : "FREE"}
               </span>
               {data?.plan?.is_founding_member && (
                 <span className="text-[10px] font-black uppercase px-2 py-0.5 border-2 border-black bg-gradient-to-r from-amber-400 to-[#FFE600] text-black shadow-[2px_2px_0px_rgba(0,0,0,1)] flex items-center gap-1">
@@ -249,10 +261,18 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                   ? isAr
                     ? `فترة تجريبية مجانية لـ Pro نشطة حتى ${data?.plan?.current_period_end ? formatDate(data.plan.current_period_end) : "3 أيام"} (كامل ميزات VIP والشات والإسكانر)`
                     : `Active Pro trial until ${data?.plan?.current_period_end ? formatDate(data.plan.current_period_end) : "3 days"} (all VIP features unlocked)`
+                  : data?.plan?.id === "chat_only"
+                  ? isAr
+                    ? "اشتراك الشات الذكي فقط (350 استفساراً + Vision AI + المحفظة والأتمتة، بدون قناة VIP)"
+                    : "Active AI Chat Pro subscription (350 queries + Vision AI + automations, excludes VIP channel)"
+                  : data?.plan?.id === "vip_only"
+                  ? isAr
+                    ? "اشتراك رادار تليجرام VIP فقط (قناة التنبيهات اللحظية وإزالة تأخير الموقع)"
+                    : "Active VIP Radar subscription (instant Telegram alerts & zero site delay)"
                   : isPro
                   ? isAr
-                    ? "اشتراك Pro نشط مع كامل الصلاحيات"
-                    : "Active Pro subscription with full access"
+                    ? "اشتراك الباقة الشاملة Pro نشط مع كامل الصلاحيات"
+                    : "Active Pro Full Bundle subscription with full access"
                   : isAr
                   ? "خطة مجانية بميزات واستخدام محدد"
                   : "Free plan with limited usage"}
@@ -566,8 +586,8 @@ export default function PlanQuotaCard({ refreshTrigger = 0, onQuotaLoaded }: Pro
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span>
                   {isAr 
-                    ? "مهلة تجديد المؤسسين: تمنح 72 ساعة سماح (3 أيام) بعد تاريخ الانتهاء لتجديد اشتراكك بسعر المؤسسين المخفض مدى الحياة قبل تحويل الحساب للسعر الرسمي (200 ج.م)."
-                    : "Founding member grace period: 72 hours window after expiry to renew at your locked founders rate for life before regular 200 EGP pricing applies."}
+                    ? "مهلة تجديد المؤسسين: تمنح 72 ساعة سماح (3 أيام) بعد تاريخ الانتهاء لتجديد اشتراكك بسعر المؤسسين المخفض مدى الحياة قبل تحويل الحساب للسعر الرسمي (150 ج.م)."
+                    : "Founding member grace period: 72 hours window after expiry to renew at your locked founders rate for life before regular 150 EGP pricing applies."}
                 </span>
               </span>
               <Link 

@@ -153,6 +153,94 @@ export const getPublicTasiStockDirectoryWeekly = unstable_cache(
     { revalidate: 604800 }
 );
 
+const GCC_METALS_EXCHANGES = ['DFM', 'ADX', 'QSE', 'COMMODITIES'] as const;
+
+async function fetchGccMetalsDirectoryUncached(): Promise<TasiStockDirectoryEntry[]> {
+    try {
+        const client = getMarketSupabaseClient('tasi');
+        const { data, error } = await client
+            .from('stocks')
+            .select('symbol,exchange,name,name_ar,sector,currency,updated_at')
+            .in('exchange', [...GCC_METALS_EXCHANGES])
+            .eq('is_active', true)
+            .order('symbol', { ascending: true })
+            .limit(500);
+        if (error || !Array.isArray(data)) return [];
+        const bySym = new Map<string, TasiStockDirectoryEntry>();
+        for (const row of data) {
+            const sym = String(row?.symbol ?? '').trim().toUpperCase();
+            if (!sym) continue;
+            bySym.set(sym, {
+                symbol: sym,
+                name: String(row?.name || sym).trim(),
+                nameAr: row?.name_ar ? String(row.name_ar).trim() : undefined,
+                sector: String(row?.sector || '').trim(),
+                marketCap: null,
+                ...(row?.updated_at ? { updatedAt: String(row.updated_at) } : {}),
+                exchange: String(row?.exchange || '').trim(),
+                currency: String(row?.currency || 'USD').trim(),
+            });
+        }
+        return [...bySym.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+    } catch {
+        return [];
+    }
+}
+
+export const getPublicGccMetalsDirectory = unstable_cache(
+    () => fetchGccMetalsDirectoryUncached(),
+    ['public-gcc-metals-directory-v1'],
+    { revalidate: 604800, tags: [DAILY_CACHE_TAGS.symbols] }
+);
+
+export const getPublicGccMetalsDirectoryWeekly = unstable_cache(
+    () => fetchGccMetalsDirectoryUncached(),
+    ['public-gcc-metals-directory-weekly-v1'],
+    { revalidate: 604800 }
+);
+
+export interface GccMarketStockRow extends TasiStockDirectoryEntry {
+    close?: number | null;
+    changePct?: number | null;
+    rsi14?: number | null;
+    priceDate?: string | null;
+}
+
+export const getPublicGccMetalsDirectoryWithPrices = unstable_cache(
+    async (): Promise<GccMarketStockRow[]> => {
+        try {
+            const client = getMarketSupabaseClient('tasi');
+            const [stocks, indRes] = await Promise.all([
+                fetchGccMetalsDirectoryUncached(),
+                client
+                    .from('stock_technical_indicators')
+                    .select('symbol,exchange,close,change_pct,rsi_14,date')
+                    .in('exchange', [...GCC_METALS_EXCHANGES])
+                    .limit(500),
+            ]);
+            const indMap = new Map<string, any>();
+            for (const row of indRes.data || []) {
+                const k = `${String(row?.exchange || '').toUpperCase()}:${String(row?.symbol || '').toUpperCase()}`;
+                indMap.set(k, row);
+            }
+            return stocks.map((st) => {
+                const ind = indMap.get(`${String(st.exchange || '').toUpperCase()}:${st.symbol.toUpperCase()}`);
+                return {
+                    ...st,
+                    close: ind?.close != null ? Number(ind.close) : null,
+                    changePct: ind?.change_pct != null ? Number(ind.change_pct) : null,
+                    rsi14: ind?.rsi_14 != null ? Number(ind.rsi_14) : null,
+                    priceDate: ind?.date ? String(ind.date).slice(0, 10) : null,
+                };
+            });
+        } catch {
+            return [];
+        }
+    },
+    ['public-gcc-metals-with-prices-v1'],
+    { revalidate: 604800, tags: [DAILY_CACHE_TAGS.symbols] }
+);
+
 export async function getPublicStockDirectoryByMarket(market: MarketMode = 'egx') {
     return market === 'tasi' ? getPublicTasiStockDirectory() : getPublicStockDirectory();
 }

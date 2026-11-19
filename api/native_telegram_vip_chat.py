@@ -122,11 +122,36 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
     for r in profile_rows:
         if r.get("id") and r["id"] not in candidate_ids:
             candidate_ids.append(r["id"])
+
+    # Secondary candidates (invite links / cached state) must NOT hijack a website account
+    # that is already explicitly bound to a different telegram_chat_id in `profiles`.
+    secondary_ids = []
     for r in invite_rows:
-        if r.get("user_id") and r["user_id"] not in candidate_ids:
-            candidate_ids.append(r["user_id"])
-    if state_row and state_row.get("linked_user_id") and state_row["linked_user_id"] not in candidate_ids:
-        candidate_ids.append(state_row["linked_user_id"])
+        if r.get("user_id") and r["user_id"] not in candidate_ids and r["user_id"] not in secondary_ids:
+            secondary_ids.append(r["user_id"])
+    if state_row and state_row.get("linked_user_id"):
+        sid = state_row["linked_user_id"]
+        if sid not in candidate_ids and sid not in secondary_ids:
+            secondary_ids.append(sid)
+
+    if secondary_ids:
+        sec_filter = ",".join(str(s) for s in secondary_ids)
+        sec_profiles = _supabase_request(
+            f"profiles?id=in.({sec_filter})&select=id,telegram_chat_id&limit={len(secondary_ids) + 5}"
+        ) or []
+        bound_other = {
+            str(p.get("id"))
+            for p in sec_profiles
+            if p.get("id") and p.get("telegram_chat_id") and str(p.get("telegram_chat_id")).strip() != tg_id_str
+        }
+        for sid in secondary_ids:
+            if str(sid) in bound_other:
+                logger.warning(
+                    f"[NATIVE_VIP_CHAT] Blocked cross-account link: tg_user_id={tg_id_str} "
+                    f"attempted to bind to user_id={sid} which already belongs to another telegram_chat_id"
+                )
+                continue
+            candidate_ids.append(sid)
 
     linked_user_id = candidate_ids[0] if candidate_ids else None
     display_name = telegram_username or "المستثمر"
@@ -140,9 +165,9 @@ def _resolve_telegram_user(telegram_user_id: int, telegram_username: str) -> Dic
         id_filter = ",".join(candidate_ids)
         sub_rows = _supabase_request(f"subscriptions?user_id=in.({id_filter})&status=in.(active,trialing)&select=user_id,plan_id,status,current_period_end&order=current_period_end.desc&limit=5") or []
         if sub_rows:
-            from api.perf_utils import has_active_pro_subscription
+            from api.perf_utils import has_active_chat_pro
             now_utc = datetime.now(timezone.utc)
-            active_pro_subs = [r for r in sub_rows if has_active_pro_subscription([r], now_utc)]
+            active_pro_subs = [r for r in sub_rows if has_active_chat_pro([r], now_utc)]
             if active_pro_subs:
                 active_sub = active_pro_subs[0]
                 linked_user_id = active_sub.get("user_id") or linked_user_id

@@ -391,7 +391,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         const changed = previousPlanRef.current !== null && previousPlanRef.current !== hasProAccess;
         previousPlanRef.current = hasProAccess;
         if (changed) {
-            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
+            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, isSaudi ? "tasi" : "egx");
             setCalendarRefreshToken(value => value + 1);
         }
     }, [user?.id, hasProAccess, isLandingPage, limit, loadRecommendations, market]);
@@ -402,7 +402,7 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
         }
         if (proRefreshViewerRef.current !== user.id) {
             proRefreshViewerRef.current = user.id;
-            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
+            void loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, isSaudi ? "tasi" : "egx");
         }
     }, [user?.id, hasProAccess, hasEncryptedRecommendations, isLandingPage, limit, loadRecommendations, market]);
 
@@ -538,11 +538,11 @@ function RecommendationsTableContent({ isLandingPage = false, limit = Infinity, 
     // 5-minute window plus visibility refresh, so opening a tab does not fire a
     // request on every switch.
     useEffect(() => {
-        loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined, market);
+        loadRecommendations(isLandingPage, false, limit !== Infinity ? limit : undefined, isSaudi ? "tasi" : "egx");
     }, [loadRecommendations, isLandingPage, limit, market]);
 
     const refreshRecommendationData = useCallback(async () => {
-        await loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, market);
+        await loadRecommendations(isLandingPage, true, limit !== Infinity ? limit : undefined, isSaudi ? "tasi" : "egx");
         setCalendarRefreshToken(value => value + 1);
     }, [loadRecommendations, isLandingPage, limit, market]);
 

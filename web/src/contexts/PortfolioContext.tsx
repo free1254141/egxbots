@@ -53,8 +53,9 @@ type PortfolioContextValue = {
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 const PORTFOLIO_CACHE_PREFIX = "egxbots_portfolio_snapshot_v1:";
 const PORTFOLIO_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PROFILE_REVALIDATE_AFTER_MS = 60 * 1000;
 
-function readCachedPortfolioSnapshot(cacheKey: string): PortfolioSnapshot | null {
+function readCachedPortfolioEntry(cacheKey: string): { ts: number; data: PortfolioSnapshot } | null {
   if (typeof window === "undefined") return null;
   for (const storage of [window.sessionStorage, window.localStorage]) {
     try {
@@ -62,7 +63,7 @@ function readCachedPortfolioSnapshot(cacheKey: string): PortfolioSnapshot | null
       if (raw) {
         const parsed = JSON.parse(raw) as { ts: number; data: PortfolioSnapshot };
         if (parsed?.ts && Date.now() - parsed.ts < PORTFOLIO_CACHE_TTL_MS && parsed.data?.ok) {
-          return parsed.data;
+          return parsed;
         }
       }
     } catch {
@@ -115,12 +116,20 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         return;
       }
       const cacheKey = `${PORTFOLIO_CACHE_PREFIX}${user.id}`;
+      let backgroundRevalidate = false;
       if (!force) {
-        const cached = readCachedPortfolioSnapshot(cacheKey);
-        if (cached) {
-          setStored({ owner: user.id, snapshot: cached });
-          setLoading(false);
-          return;
+        const cachedEntry = readCachedPortfolioEntry(cacheKey);
+        if (cachedEntry) {
+          setStored({ owner: user.id, snapshot: cachedEntry.data });
+          const isStaleOnProfile =
+            pathname !== null &&
+            pathname.startsWith("/profile") &&
+            Date.now() - cachedEntry.ts >= PROFILE_REVALIDATE_AFTER_MS;
+          if (!isStaleOnProfile) {
+            setLoading(false);
+            return;
+          }
+          backgroundRevalidate = true;
         }
         const shouldFetchRoute =
           pathname === null ||
@@ -133,9 +142,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       } else {
         removeCachedPortfolioSnapshot(cacheKey);
       }
-      setLoading(true);
+      if (!backgroundRevalidate) setLoading(true);
       try {
-        const response = await fetch("/api/portfolio", force ? { cache: "no-store" } : undefined);
+        const response = await fetch("/api/portfolio", (force || backgroundRevalidate) ? { cache: "no-store" } : undefined);
         if (response.ok) {
           const next = await response.json();
           if (generation.current === version) {

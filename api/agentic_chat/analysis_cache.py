@@ -35,6 +35,14 @@ from zoneinfo import ZoneInfo
 
 from api.stock_aliases import resolve_stock_symbol, ARABIC_STOCK_MAPPINGS, _KNOWN_SYMBOLS
 from api.egx_trading_calendar import is_egx_session
+from api.agentic_chat.market_registry import (
+    currency_for_market,
+    detect_exchange_from_suffix,
+    get_last_completed_session_ready_ts_for_market,
+    get_market_now,
+    is_market_live_session,
+    normalize_exchange_code,
+)
 
 # Canonical whitelist of known EGX tickers so arbitrary English words (e.g. "ANALYZE", "PRICE", "SWING")
 # are never mistaken for ticker symbols in string-based cache key detection.
@@ -150,13 +158,17 @@ def get_last_completed_session_ready_ts(now_cairo: dt.datetime) -> Optional[floa
     return None
 
 
-def resolve_cache_validity(computed_at_ts: float, now_ts: Optional[float] = None) -> bool:
+def resolve_cache_validity(
+    computed_at_ts: float,
+    now_ts: Optional[float] = None,
+    market: str = "EGX",
+) -> bool:
     """
-    Decide whether a cached entry may still be served:
+    Decide whether a cached entry may still be served for ANY registered exchange:
     - Always valid for the first 15 minutes.
-    - During live session (10:00–14:30 Sun–Thu): never valid beyond 15 minutes.
+    - During live session of `market`: never valid beyond 15 minutes.
     - Outside session: valid only if computed at or after the latest completed session's
-      post-close ready time (17:15 Cairo), so weekend/holiday checks never serve older sessions.
+      post-close ready time for `market`, so weekend/holiday checks never serve older sessions.
     """
     if now_ts is None:
         now_ts = time.time()
@@ -169,18 +181,23 @@ def resolve_cache_validity(computed_at_ts: float, now_ts: Optional[float] = None
     if age_seconds > MAX_OFF_HOURS_AGE_SECONDS:
         return False
 
-    now_cairo = dt.datetime.fromtimestamp(now_ts, tz=CAIRO_TZ) if now_ts else get_cairo_now()
+    exch = normalize_exchange_code(market)
+    local_dt = get_market_now(exch, now_ts=now_ts)
 
-    # If inside live trading session, never serve anything older than 15 minutes
-    if is_egx_live_session(now_cairo):
+    # If inside live trading session for this exchange, never serve anything older than 15 minutes
+    if is_market_live_session(exch, local_dt):
         return False
 
     try:
-        ready_ts = get_last_completed_session_ready_ts(now_cairo)
+        ready_ts = (
+            get_last_completed_session_ready_ts(local_dt)
+            if exch == "EGX"
+            else get_last_completed_session_ready_ts_for_market(exch, local_dt)
+        )
         if ready_ts is not None:
             return computed_at_ts >= ready_ts
     except Exception as e:
-        logger.warning(f"[analysis_cache] Freshness check warning: {e}")
+        logger.warning(f"[analysis_cache] Freshness check warning ({exch}): {e}")
 
     return age_seconds < (60 * 60)  # Default 1 hour fallback outside session
 
@@ -244,6 +261,7 @@ def personalize_cached_analysis(
     user_id: Optional[str],
     symbol: Optional[str],
     telegram_user_id: Optional[int] = None,
+    market: str = "EGX",
 ) -> str:
     """
     Re-inject the requesting user's real position into a cached stock analysis.
@@ -255,6 +273,7 @@ def personalize_cached_analysis(
         return base_reply
 
     user_portfolio_line = NEUTRAL_PORTFOLIO_LINE
+    curr_lbl = currency_for_market(market)
 
     if symbol and (telegram_user_id is not None or user_id):
         try:
@@ -305,7 +324,7 @@ def personalize_cached_analysis(
                     pnl_str = f" ({label}: {sign}{pnl_pct:.2f}%)"
 
                 user_portfolio_line = (
-                    f"📌 **حالة السهم في محفظتك:** مسجل لديك {qty} سهم بمتوسط شراء {entry:.2f} ج.م{pnl_str}."
+                    f"📌 **حالة السهم في محفظتك:** مسجل لديك {qty} سهم بمتوسط شراء {entry:.2f} {curr_lbl}{pnl_str}."
                 )
         except Exception as err:
             logger.warning(f"[analysis_cache] Error personalizing cached analysis: {err}")
@@ -317,26 +336,53 @@ def personalize_cached_analysis(
 # Model-Driven Tool Call Resolver (The Core Intelligence)
 # ---------------------------------------------------------------------------
 
-_TICKER_ALNUM_RE = re.compile(r"^[A-Z0-9]{2,8}$")
-_MARKET_KEYWORDS = frozenset({"EGX", "MARKET", "ALL", "TASI", "SAUDI"})
+_TICKER_ALNUM_RE = re.compile(r"^[A-Z0-9]{2,12}$")
+_MARKET_KEYWORDS = frozenset({"EGX", "MARKET", "ALL", "TASI", "SAUDI", "QSE", "DFM", "ADX", "KSE"})
+_NON_TICKER_CACHE_WORDS = frozenset({
+    "STOCKS", "STOCK", "PRICE", "PRICES", "CHART", "NEWS", "BUY", "SELL", "HOLD",
+    "SCAN", "TRAPS", "TOP", "BEST", "PRO", "VIP", "HELP", "START", "VALUE",
+})
+_UNCACHEABLE_ERROR_MARKERS = (
+    "لم يتم العثور على بيانات لسهم",
+    "لم يتم العثور على السهم",
+    "الرمز غير معروف",
+    "الرمز غير متاح",
+    "بدون أي بيانات سعر",
+    "تعذر الاتصال بمحرك الذكاء الاصطناعي",
+)
+
+
+def is_uncacheable_error_reply(reply: Optional[str]) -> bool:
+    """Return True if reply is a missing-symbol or transient-error message that must never enter shared cache."""
+    if not reply:
+        return True
+    head = reply[:350]
+    return any(marker in head for marker in _UNCACHEABLE_ERROR_MARKERS)
 
 
 def _normalize_ticker_for_cache(raw_sym: Any) -> Optional[str]:
-    """Normalize a symbol or Arabic/English company name to an ASCII uppercase EGX ticker."""
+    """Normalize a symbol or Arabic/English company name to an ASCII uppercase ticker (EGX, TASI, QSE, DFM, ADX, ...)."""
     if not isinstance(raw_sym, str) or not raw_sym.strip():
         return None
-    sym = raw_sym.strip().upper().replace(".CA", "")
-    if sym in _MARKET_KEYWORDS:
+    suf_hit = detect_exchange_from_suffix(raw_sym)
+    sym = suf_hit[0] if suf_hit else raw_sym.strip().upper().replace(".CA", "")
+    if sym in _MARKET_KEYWORDS or sym in _NON_TICKER_CACHE_WORDS:
         return None
+    # Explicit non-EGX suffix (e.g. QNBK.QA, EMAAR.DU, 2222.SR): NEVER pass through EGX alias mangling!
+    if suf_hit and suf_hit[1] != "EGX":
+        return sym if _TICKER_ALNUM_RE.fullmatch(sym) else None
     if _TICKER_ALNUM_RE.fullmatch(sym):
-        resolved = resolve_stock_symbol(sym)
-        if resolved and _TICKER_ALNUM_RE.fullmatch(resolved.strip().upper()):
-            return resolved.strip().upper()
+        if sym in _KNOWN_SYMBOLS:
+            return sym
+        # Exact EGX alias override (e.g. CIB -> COMI) without blind substring mangling of QNBK/AIRARABIA/EMAAR
+        exact_alias = ARABIC_STOCK_MAPPINGS.get(sym) or ARABIC_STOCK_MAPPINGS.get(raw_sym.strip())
+        if exact_alias and _TICKER_ALNUM_RE.fullmatch(exact_alias.strip().upper()):
+            return exact_alias.strip().upper()
         return sym
     resolved = resolve_stock_symbol(raw_sym)
     if resolved:
         clean = resolved.strip().upper().replace(".CA", "")
-        if clean not in _MARKET_KEYWORDS and _TICKER_ALNUM_RE.fullmatch(clean):
+        if clean not in _MARKET_KEYWORDS and clean not in _NON_TICKER_CACHE_WORDS and _TICKER_ALNUM_RE.fullmatch(clean):
             return clean
     return None
 
@@ -596,6 +642,8 @@ def resolve_tool_calls_to_cache_key(tool_calls: List[Dict[str, Any]]) -> Optiona
                     return acc_keys[0]
             scan_keys = [p[2] for p in parsed if p[0] in ("get_technical_scan", "screen_stocks")]
             if scan_keys and len(set(scan_keys)) == 1:
+                if "get_market" in names_set and scan_keys[0] == "vip_tech_screener":
+                    return "vip_market_and_screener"
                 return scan_keys[0]
 
     return None
@@ -646,9 +694,13 @@ _MARKET_CONSTRAINT_PHRASES = tuple(
 )
 
 
-def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> Optional[str]:
+def build_analysis_cache_key(
+    query: str,
+    images: Optional[List[str]] = None,
+    market: str = "EGX",
+) -> Optional[str]:
     """
-    String intent classifier matching Vercel analysis-cache.ts.
+    String intent classifier matching Vercel analysis-cache.ts (now Multi-Market aware).
     Returns canonical key or None if conversational / personal / multi-stock / custom calculation / image.
     """
     if not query or (images and len(images) > 0):
@@ -672,7 +724,17 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     if has_number and re.search(r"(?:زكاه|تطهير|حساب|احسب|احسبلي|مبلغ|كميه)", norm):
         return None
 
-    has_scope_constraint = any(phrase in norm for phrase in _MARKET_CONSTRAINT_PHRASES)
+    exch = normalize_exchange_code(market)
+    saudi_phrases = {
+        _normalize_ar_for_cache(p)
+        for p in (" سعود", " السعود", " تاسي", " سوق تداول", " في تداول", " tadawul ")
+    }
+    active_constraints = (
+        tuple(p for p in _MARKET_CONSTRAINT_PHRASES if p not in saudi_phrases)
+        if exch != "EGX"
+        else _MARKET_CONSTRAINT_PHRASES
+    )
+    has_scope_constraint = any(phrase in norm for phrase in active_constraints)
 
     # Canonical Market-Wide Buttons & Direct Queries (only when NOT narrowed by OTC/Sharia/Saudi/sector/price filters)
     if not has_scope_constraint:
@@ -715,6 +777,19 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
                 found_syms.append(sym_clean)
 
     # Also collect Arabic company aliases across the query (longest-first, masking matched span)
+    # Match explicit suffixed tickers (e.g. 2222.SR, QNBK.QA, EMAAR.DU, EMIRATESNBD.AE) and 4-digit Tadawul codes
+    for suf_tok in re.findall(r"\b[A-Za-z0-9]{2,12}\.(?:SR|SA|TADAWUL|QA|QE|QSE|DU|DFM|AD|ADX|AE|KW|KSE|CA)\b", query, re.IGNORECASE):
+        hit = detect_exchange_from_suffix(suf_tok)
+        if hit and hit[0] not in found_syms:
+            found_syms.append(hit[0])
+    if exch == "TADAWUL" or any(p in norm for p in saudi_phrases):
+        for m_num in re.finditer(r"(?<!\d)(\d{4})(?!\d)", query):
+            num_code = m_num.group(1)
+            n_val = int(num_code)
+            if 1010 <= n_val <= 9999 and not (2015 <= n_val <= 2035) and n_val % 1000 != 0:
+                if num_code not in found_syms:
+                    found_syms.append(num_code)
+
     ar_scan_norm = norm
     for ar_name, sym in sorted(ARABIC_STOCK_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True):
         ar_low = _normalize_ar_for_cache(ar_name)
@@ -744,7 +819,10 @@ def build_analysis_cache_key(query: str, images: Optional[List[str]] = None) -> 
     found_sym = found_syms[0] if found_syms else None
 
     # Reject numerical stock calculations (e.g. "500 سهم COMI", "10000 جنيه في COMI")
-    if found_sym and has_number and re.search(r"(?:سهم|اسهم|جنيه|زكاه|تطهير|حساب|احسب|مبلغ)", norm):
+    # Exclude the matched symbol itself if numeric (e.g. "حلل سهم 2222")
+    norm_without_sym = re.sub(rf"\b{re.escape(found_sym.lower())}\b", " ", norm) if found_sym else norm
+    has_non_sym_number = bool(re.search(r"\b\d+\b", norm_without_sym))
+    if found_sym and has_non_sym_number and re.search(r"(?:سهم|اسهم|جنيه|ريال|درهم|زكاه|تطهير|حساب|احسب|مبلغ)", norm):
         return None
 
     # Canonical recommendation prompts without a specific stock symbol (block if narrowed by constraints)
@@ -804,16 +882,18 @@ def resolve_scoped_cache_key(
     *,
     is_b2b: bool = False,
     allow_recommendations: bool = True,
+    market: str = "EGX",
 ) -> str:
     """
-    Isolate Two-Tier cache entries across contexts so Web/VIP replies (which may contain
-    open recommendations or t.me/egxbots promos) never contaminate B2B or recommendation-locked groups,
-    and vice versa.
+    Isolate Two-Tier cache entries across contexts AND exchanges so Web/VIP replies never
+    contaminate B2B/locked groups and EGX/TADAWUL/QSE/DFM/ADX caches never collide.
     """
+    exch = normalize_exchange_code(market)
+    market_key = cache_key if exch == "EGX" else f"mkt_{exch}__{cache_key}"
     if not is_b2b and allow_recommendations:
-        return cache_key
+        return market_key
     scope_prefix = f"{'b2b' if is_b2b else 'std'}_{'recs' if allow_recommendations else 'norecs'}"
-    return f"{scope_prefix}:{cache_key}"
+    return f"{scope_prefix}:{market_key}"
 
 
 def get_vip_analysis_cache(
@@ -823,6 +903,7 @@ def get_vip_analysis_cache(
     *,
     is_b2b: bool = False,
     allow_recommendations: bool = True,
+    market: str = "EGX",
 ) -> Optional[Dict[str, Any]]:
     """
     Query Two-Tier Cache:
@@ -836,9 +917,10 @@ def get_vip_analysis_cache(
         return None
 
     now_ts = time.time()
+    exch = normalize_exchange_code(market)
     min_length = get_minimum_required_length(cache_key)
     storage_key = resolve_scoped_cache_key(
-        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations, market=exch
     )
 
     # 1. Tier 1: In-Memory Check
@@ -846,12 +928,12 @@ def get_vip_analysis_cache(
         mem = _memory_cache.get(storage_key)
         if mem:
             computed_at = mem.get("computed_at", 0.0)
-            if resolve_cache_validity(computed_at, now_ts):
+            if resolve_cache_validity(computed_at, now_ts, market=exch):
                 reply = mem.get("reply", "")
                 if reply and len(reply) >= min_length:
                     logger.info(f"[analysis_cache] Tier 1 Memory Hit for key: {storage_key}")
                     target_sym = cache_key.replace("vip_stock_", "").split("_")[0] if cache_key.startswith("vip_stock_") else None
-                    personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id)
+                    personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id, market=exch)
                     return {
                         "reply": personalized,
                         "tables": mem.get("tables") or [],
@@ -886,7 +968,7 @@ def get_vip_analysis_cache(
                 computed_dt = dt.datetime.fromisoformat(computed_str.replace("Z", "+00:00"))
                 computed_at_ts = computed_dt.timestamp()
 
-                if resolve_cache_validity(computed_at_ts, now_ts):
+                if resolve_cache_validity(computed_at_ts, now_ts, market=exch):
                     reply = payload.get("reply", "")
                     if reply and len(reply) >= min_length:
                         logger.info(f"[analysis_cache] Tier 2 Supabase Hit for key: {storage_key}")
@@ -903,7 +985,7 @@ def get_vip_analysis_cache(
                             prune_memory_cache()
 
                         target_sym = cache_key.replace("vip_stock_", "").split("_")[0] if cache_key.startswith("vip_stock_") else None
-                        personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id)
+                        personalized = personalize_cached_analysis(reply, user_id, target_sym, telegram_user_id=telegram_user_id, market=exch)
                         return {
                             "reply": personalized,
                             "tables": entry["tables"],
@@ -927,13 +1009,14 @@ def set_vip_analysis_cache(
     *,
     is_b2b: bool = False,
     allow_recommendations: bool = True,
+    market: str = "EGX",
 ) -> None:
     """
     Persist an analysis to the Two-Tier shared cache:
     1. Tier 1: In-Memory RAM.
     2. Tier 2: Supabase `market_cache` table (persists permanently across restarts).
     """
-    if not cache_key or not reply:
+    if not cache_key or not reply or is_uncacheable_error_reply(reply):
         return
     if not allow_recommendations and is_recommendation_cache_key(cache_key):
         return
@@ -947,8 +1030,9 @@ def set_vip_analysis_cache(
     if len(sanitized_reply) < min_length:
         return
 
+    exch = normalize_exchange_code(market)
     storage_key = resolve_scoped_cache_key(
-        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations
+        cache_key, is_b2b=is_b2b, allow_recommendations=allow_recommendations, market=exch
     )
     now_ts = time.time()
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()

@@ -233,7 +233,7 @@ export default function RecommendationCalendar({
             return isSaudi ? rowIsSaudi : !rowIsSaudi;
         });
         if (shariaOnly) {
-            return usable.filter(r => isShariaCompliant(r.symbol, market));
+            return usable.filter(r => isShariaCompliant(r.symbol, isSaudi ? "tasi" : "egx"));
         }
         return usable;
     }, [recommendations, shariaOnly, isSaudi, market]);
@@ -241,7 +241,7 @@ export default function RecommendationCalendar({
     const filteredSentEvents = useMemo(
         () => {
             if (isSaudi) return [];
-            return shariaOnly ? sentEvents.filter(event => isShariaCompliant(event.symbol, market)) : sentEvents;
+            return shariaOnly ? sentEvents.filter(event => isShariaCompliant(event.symbol, isSaudi ? "tasi" : "egx")) : sentEvents;
         },
         [sentEvents, shariaOnly, isSaudi, market],
     );

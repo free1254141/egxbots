@@ -4,8 +4,9 @@ Reaches out to users who experienced failed or incomplete checkout attempts on E
 1. Via Telegram (if telegram_chat_id is available).
 2. Via Resend Email.
 
-Listens to their problems (bank decline, OTP issues, card errors) and provides the direct
-e-wallet / InstaPay alternative (01024359100) with instant support.
+Helps resolve bank declines / 3D Secure / card errors inside EasyKash-only payment flows,
+reminds of the 3-tier pricing options (chat_only 100 EGP, vip_only 100 EGP, Pro Full Bundle 150 EGP,
+with 50/100 EGP Founders protection), and adheres strictly to FRA SaaS compliance.
 """
 from __future__ import annotations
 
@@ -27,18 +28,16 @@ from api.marketing_lifecycle import (
     record_marketing_message,
     is_user_unsubscribed,
     has_recent_message,
+    _resolve_user_pro_offer,
     APP_URL,
 )
 
-DIRECT_WALLET_NUMBER = "01024359100"
-WHATSAPP_SUPPORT_URL = f"https://wa.me/20{DIRECT_WALLET_NUMBER[1:]}?text=" + requests.utils.quote(
-    "مرحبا، واجهت مشكلة في الدفع بالفيزا على EGX BOTS وأريد المساعدة / الدفع بالمحفظة الإلكترونية"
-)
-TELEGRAM_SUPPORT_URL = "https://t.me/SharksZone_support_bot"
+TELEGRAM_SUPPORT_URL = "https://t.me/egxbots_bot"
+PRICING_CHECKOUT_URL = f"{APP_URL}/pricing"
 
 
 def send_failed_payment_telegram(chat_id: str | int, display_name: str) -> bool:
-    """Sends a friendly support message to the user's Telegram."""
+    """Sends a friendly EasyKash-only recovery message to the user's Telegram."""
     token = os.getenv("ARTORO_AI_BOT") or os.getenv("SUPPORT_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         return False
@@ -48,20 +47,22 @@ def send_failed_payment_telegram(chat_id: str | int, display_name: str) -> bool:
 
     text = (
         f"أهلاً بك يا <b>{clean_name}</b> 👋\n\n"
-        "لاحظنا تعثر عملية الدفع الأخيرة لاشتراك <b>EGX BOTS PRO</b> على الموقع 💳\n\n"
-        "حابين نطمئن عليك ونعرف هل واجهتك أي مشكلة تقنية، أو رفض من البنك أو تأخر كود التأكيد؟ <b>احكيلنا ونساعدك فوراً!</b> 💬\n\n"
+        "لاحظنا أن محاولة الدفع الأخيرة عبر بوابة <b>EasyKash</b> على الموقع لم تكتمل 💳\n\n"
+        "لو واجهتك رسالة رفض من البنك أو تأخر كود التفعيل، جرب هذه الخطوات السريعة:\n"
+        "1️⃣ تأكد من تفعيل الشراء أونلاين و<b>3D Secure</b> على بطاقتك البنكية (خاصة البطاقات الدولية من السعودية والدول العربية).\n"
+        "2️⃣ أو اختر وسيلة دفع أخرى <b>داخل بوابة EasyKash نفسها</b> (المحافظ الإلكترونية أو كود فوري).\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 <b>حابين نوضحلك إنك تقدر تشترك بدون فيزا خالص:</b>\n"
-        "متاح الدفع والتحويل المباشر عبر <b>أي محفظة إلكترونية أو إنستاباي</b> (InstaPay / فودافون كاش / اتصالات / أورنج / وي) على رقمنا:\n"
-        f"📱 <code>{DIRECT_WALLET_NUMBER}</code>\n\n"
-        "بمجرد التحويل، راسلنا هنا أو على واتساب برقم العملية وهنفعل لك باقة PRO ونضيفك لقناة التوصيات VIP فوراً! 🚀\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "نسعد دائماً بخدمتك ونتمنى لك تداولات موفقة ومربحة! 📈"
+        "📌 <b>الباقات المتاحة الآن عبر الموقع:</b>\n"
+        "• 🤖 <b>الشات الذكي فقط:</b> 100 ج.م/شهر\n"
+        "• 📡 <b>تليجرام VIP فقط:</b> 100 ج.م/شهر\n"
+        "• 👑 <b>الباقة الشاملة Pro:</b> 150 ج.م/شهر (مع حفظ سعر <b>50 / 100 ج.م</b> تلقائياً للمؤسسين المؤهلين)\n\n"
+        "لو محتاج مساعدة فنية في إتمام العملية، راسلنا مباشرة عبر البوت وسنساعدك فوراً.\n"
+        "⚠️ <i>المنصة أدوات تحليل فني وإحصائي (SaaS) لأغراض البحث الشخصي فقط.</i>"
     )
 
     buttons = [
-        [{"text": "💬 تواصل معنا على واتساب", "url": WHATSAPP_SUPPORT_URL}],
-        [{"text": "🌐 العودة لصفحة الباقات", "url": f"{APP_URL}/pricing"}],
+        [{"text": "💳 إعادة المحاولة عبر بوابة EasyKash", "url": PRICING_CHECKOUT_URL}],
+        [{"text": "💬 تواصل مع الدعم الفني", "url": TELEGRAM_SUPPORT_URL}],
     ]
 
     try:
@@ -83,27 +84,35 @@ def send_failed_payment_telegram(chat_id: str | int, display_name: str) -> bool:
 
 
 def send_failed_payment_email(user_id: str, email: str, display_name: str) -> bool:
-    """Sends an empathetic outreach email via Resend."""
+    """Sends an empathetic EasyKash-only outreach email via Resend."""
     if is_user_unsubscribed(user_id, email):
         return False
 
+    pro_price, founder_tier = _resolve_user_pro_offer(user_id)
+    founder_note = (
+        f" (وسعرك المحفوظ كمؤسس هو <strong>{founder_tier} ج.م/شهر</strong> على الباقة الشاملة)"
+        if founder_tier in (50, 100)
+        else ""
+    )
+
     clean_name = display_name or "المستثمر"
-    subject = f"واجهت مشكلة في الدفع يا {clean_name}؟ احكيلنا ونساعدك فوراً 💬"
+    subject = f"واجهت مشكلة في الدفع عبر EasyKash يا {clean_name}؟ إليك الحل السريع 💳"
     greeting = f"أهلاً {clean_name} 👋"
 
     paragraphs = [
-        "لاحظنا أن محاولتك الأخيرة لتفعيل اشتراك <strong>EGX BOTS PRO</strong> لم تكتمل بنجاح.",
-        "نود الاطمئنان عليك.. <strong>هل واجهتك مشكلة أثناء الدفع؟</strong> مثل رفض المعاملة من البنك، أو عدم وصول كود التأكيد، أو عدم توفر بطاقة بنكية مناسبة؟ يهمنا جداً سماع تجربتك لنساعدك في حلها فوراً.",
-        f"💡 <strong>حابين نوضحلك إنه متاح الدفع بدون فيزا نهائياً:</strong><br/>"
-        f"يمكنك التحويل المباشر من <strong>أي محفظة إلكترونية أو إنستاباي</strong> (InstaPay / فودافون كاش / أورنج / اتصالات / وي / المحافظ البنكية) مباشرة إلى رقمنا:<br/>"
-        f"<div style='background:#f4f4f5;padding:12px;border-left:4px solid #10b981;font-size:18px;font-family:monospace;font-weight:bold;margin:10px 0;'>"
-        f"📱 {DIRECT_WALLET_NUMBER}</div>"
-        f"بمجرد التحويل، فقط أرسل لنا رسالة برقم العملية وسنقوم <strong>بتفعيل حسابك فوراً وإضافتك لقناة التوصيات VIP</strong> بدون أي انتظار!",
-        "فريق الدعم متاح معك خطوة بخطوة للرد على أي استفسار أو تفعيل حسابك مباشرة.",
+        "لاحظنا أن محاولتك الأخيرة لإتمام الاشتراك عبر بوابة <strong>EasyKash</strong> على منصة EGX BOTS لم تكتمل بنجاح.",
+        "لتفادي أي تعثر تقني عند إعادة المحاولة عبر <strong>EasyKash</strong>:<br/>"
+        "• تأكد من تفعيل خدمة الشراء أونلاين و<strong>3D Secure</strong> على البطاقة البنكية (وخاصة البطاقات الدولية في السعودية والإمارات والدول العربية).<br/>"
+        "• أو يمكنك اختيار وسيلة دفع أخرى <strong>داخل بوابة EasyKash نفسها</strong> مثل المحافظ الإلكترونية أو الدفع النقدي عبر فوري.",
+        "<strong>الباقات المتاحة الآن لاختيارك:</strong><br/>"
+        "• 🤖 <strong>باقة الشات الذكي فقط:</strong> 100 ج.م/شهر (350 رسالة تحليلية + Vision AI + محفظة 15 سهماً + 5 مهام مجدولة).<br/>"
+        "• 📡 <strong>باقة تليجرام VIP فقط:</strong> 100 ج.م/شهر (قنوات التنبيهات الفنية للبورصة المصرية EGX والسعودية TASI + بيانات الموقع الفورية).<br/>"
+        f"• 👑 <strong>الباقة الشاملة Pro:</strong> {pro_price} ج.م/شهر (تجمع الشات الذكي وقنوات VIP معاً{founder_note}؛ والأسعار العادية 150 ج.م شهرياً مع حفظ 50 / 100 ج.م للمؤسسين).",
+        f"إذا استمرت أي مشكلة، راسلنا فوراً عبر الدعم الفني على تليجرام (<a href='{TELEGRAM_SUPPORT_URL}' style='color:#2563eb;font-weight:bold;'>@egxbots_bot</a>) لمتابعة طلبك حتى يتم التفعيل.",
     ]
 
-    cta_text = "💬 تواصل معنا عبر واتساب للمساعدة الفورية"
-    cta_url = WHATSAPP_SUPPORT_URL
+    cta_text = "💳 إعادة المحاولة عبر بوابة EasyKash"
+    cta_url = PRICING_CHECKOUT_URL
 
     html_content = _build_email_html(
         headline=subject,
@@ -122,7 +131,7 @@ def send_failed_payment_email(user_id: str, email: str, display_name: str) -> bo
             user_id=user_id,
             email=email,
             message_type="failed_payment_recovery",
-            metadata={"channel": "email", "campaign": "failed_payment_support_direct_wallet"},
+            metadata={"channel": "email", "campaign": "failed_payment_support_easykash"},
             provider_message_id=send_meta.get("provider_message_id"),
         )
         return True

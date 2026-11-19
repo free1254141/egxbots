@@ -34,7 +34,7 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
 
   const notExpired = !configEndsAt || new Date(configEndsAt).getTime() > Date.now();
   const isOpen = Boolean(offer.is_open && notExpired);
-  const regularPrice = Number(offer.regular_price_egp || 200);
+  const regularPrice = Number(offer.regular_price_egp || 150);
   const foundersPrice = Number(offer.price_egp || 100);
 
   const effectivePrice = isGrandfathered50
@@ -89,8 +89,8 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
         };
       }
       if (plan.id === "pro_6m") {
-        const backend6m = plan.amount_egp != null ? Number(plan.amount_egp) : 1000;
-        const orig6m = Number(plan.discount?.original_amount_egp ?? (backend6m > 500 ? backend6m : 1000));
+        const backend6m = plan.amount_egp != null ? Number(plan.amount_egp) : 750;
+        const orig6m = Number(plan.discount?.original_amount_egp ?? (backend6m > 500 ? backend6m : 750));
         return {
           ...plan,
           amount_egp: hasSpecialRate ? 500 : backend6m,
@@ -99,8 +99,8 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
             ? {
                 active: true,
                 kind: "founders",
-                label_ar: "عرض المؤسسين خصم 50% (500 بدل 1,000 ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥",
-                label_en: "Founders Offer 50% OFF (500 instead of 1,000 EGP + locks 100 EGP/mo for life) 🔥",
+                label_ar: `عرض المؤسسين (500 بدل ${orig6m.toLocaleString()} ج.م + تثبيت 100 ج.م/شهر مدى الحياة) 🔥`,
+                label_en: `Founders Offer (500 instead of ${orig6m.toLocaleString()} EGP + locks 100 EGP/mo for life) 🔥`,
                 original_amount_egp: orig6m,
                 ends_at: isOpen ? configEndsAt : null,
               }
@@ -108,8 +108,8 @@ export function applyFoundersOffer(config: any, offer: Offer | null) {
         };
       }
       if (plan.id === "pro_1y") {
-        const backend1y = plan.amount_egp != null ? Number(plan.amount_egp) : 1800;
-        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1800));
+        const backend1y = plan.amount_egp != null ? Number(plan.amount_egp) : 1350;
+        const orig1y = Number(plan.discount?.original_amount_egp ?? (backend1y > 1000 ? backend1y : 1350));
         return {
           ...plan,
           amount_egp: hasSpecialRate ? 1000 : backend1y,

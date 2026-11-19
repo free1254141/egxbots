@@ -35,8 +35,9 @@ describe("instant pro activation", () => {
 
     expect(eventHandler).toHaveBeenCalledTimes(1);
     const customEvent = eventHandler.mock.calls[0][0] as CustomEvent;
-    expect(customEvent.detail).toEqual({ is_pro: true });
+    expect(customEvent.detail).toEqual({ is_pro: true, has_chat_pro: true });
     expect(localStorage.getItem("egx_pro_active")).toBe("true");
+    expect(localStorage.getItem("egx_chat_pro_active")).toBe("true");
     expect(localStorage.getItem("egx_entitlements_timestamp")).toBeTruthy();
 
     window.removeEventListener("egx:entitlements-updated", eventHandler);

@@ -35,9 +35,13 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
         with patch.object(worker, "_supabase_request", return_value=[{"telegram_chat_id": "5149631436", "role": "user"}]):
             self.assertTrue(worker._is_user_pro("any-user-with-admin-tg"))
 
-        # 1b. Profile role == pro
-        with patch.object(worker, "_supabase_request", return_value=[{"telegram_chat_id": "123", "role": "pro"}]):
-            self.assertTrue(worker._is_user_pro("profile-pro-user"))
+        # 1b. Subscription requires explicit chat-eligible plan_id (vip_only/missing excluded)
+        with patch.object(worker, "_supabase_request", side_effect=[
+            [{"telegram_chat_id": "123"}],
+            [{"plan_id": "vip_only", "current_period_end": None}],
+            [],
+        ]):
+            self.assertFalse(worker._is_user_pro("vip-only-user"))
 
         # 2. Expired subscription and no active trial
         past_date = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
@@ -79,7 +83,7 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
              patch.object(worker, "_resolve_user_telegram", return_value="123456"), \
              patch.object(worker, "_consume_user_quota", return_value=False), \
              patch.object(worker, "send_telegram_direct", return_value=True) as mock_tg, \
-             patch.object(worker, "_supabase_request", return_value=[]) as mock_db:
+             patch.object(worker, "_supabase_request", return_value=[{"id": fake_auto["id"]}]) as mock_db:
 
             res = worker.execute_single_automation(fake_auto)
             self.assertFalse(res["ok"])
@@ -161,7 +165,7 @@ class TestScheduledAutomationsWorker(unittest.TestCase):
             "scheduled_time": "10:00",
         }
         with patch.object(worker, "_is_user_pro", return_value=False), \
-             patch.object(worker, "_supabase_request", return_value=[]):
+             patch.object(worker, "_supabase_request", return_value=[{"id": fake_auto["id"]}]):
 
             res = worker.execute_single_automation(fake_auto)
             self.assertFalse(res["ok"])

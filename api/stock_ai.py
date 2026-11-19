@@ -1614,40 +1614,49 @@ def get_supabase_symbols(country: Optional[str] = None) -> List[Dict[str, Any]]:
         except Exception as fund_err:
             print(f"Fallback fundamentals query failed: {fund_err}")
 
-        # 3. Last fallback: stock_prices table (limited to 5000 records, paginated)
+        # 3. Last fallback: stock_prices table (bounded to mapped exchanges only; never dump indices)
         try:
-            # Map countries to exchanges for direct querying if we have the info
             country_to_ex = {
                 "Brazil": "SA",
                 "South Korea": "KQ",
                 "Egypt": "EGX",
                 "USA": "US"
             }
-            
+            _blocked_exchanges = {"INDX", "INDEX", "INDICES", "FOREX", "CRYPTO", "BINANCE", "LSE"}
+            _blocked_symbols = {
+                "EGX30", "EGX70", "EGX100", "EGX30CAPPED", "EGX33", "TAMAYUZ",
+                "TASI", "NOMU", "MT30", "DFMGI", "FADX15", "FADGI", "QSI", "GNRI",
+            }
             ex_filter = country_to_ex.get(country) if country else None
-            
-            page_size = 1000
-            offset = 0
-            for _ in range(5):
-                price_query = supabase.table("stock_prices").select("symbol, exchange")
-                if ex_filter:
-                    price_query = price_query.eq("exchange", ex_filter)
-                p_res = price_query.range(offset, offset + page_size - 1).execute()
-                if not p_res.data:
-                    break
-                for r in p_res.data:
-                    sym = r['symbol']
-                    if sym not in symbols_map:
-                        symbols_map[sym] = {
-                            "symbol": str(sym or ''),
-                            "exchange": str(r.get('exchange') or ''),
-                            "name": f"Unknown ({sym})",
-                            "country": str(country or 'Unknown'),
-                            "hasLocal": True
-                        }
-                if len(p_res.data) < page_size:
-                    break
-                offset += page_size
+            if ex_filter:
+                page_size = 1000
+                offset = 0
+                for _ in range(5):
+                    p_res = (
+                        supabase.table("stock_prices")
+                        .select("symbol, exchange")
+                        .eq("exchange", ex_filter)
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                    )
+                    if not p_res.data:
+                        break
+                    for r in p_res.data:
+                        sym = str(r.get("symbol") or "")
+                        ex = str(r.get("exchange") or "").upper()
+                        if not sym or ex in _blocked_exchanges or sym.upper() in _blocked_symbols:
+                            continue
+                        if sym not in symbols_map:
+                            symbols_map[sym] = {
+                                "symbol": sym,
+                                "exchange": ex,
+                                "name": sym,
+                                "country": str(country or "Unknown"),
+                                "hasLocal": True,
+                            }
+                    if len(p_res.data) < page_size:
+                        break
+                    offset += page_size
         except Exception as price_err:
             print(f"Fallback price query failed: {price_err}")
 

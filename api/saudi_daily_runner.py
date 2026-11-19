@@ -441,6 +441,7 @@ def run_saudi_daily_job(
     if not _step_done("saudi_telegram_vip"):
         try:
             from api.saudi_telegram_dispatch import (
+                dispatch_saudi_daily_vip_report,
                 dispatch_saudi_market_outlook_vip,
                 dispatch_saudi_open_recommendations,
                 dispatch_saudi_short_swings_vip,
@@ -525,6 +526,20 @@ def run_saudi_daily_job(
                     tg_details.append(f"outlook_vip(ok={outlook_tg.get('ok')}, skipped={bool(outlook_tg.get('skipped'))})")
                 except Exception as out_exc:
                     tg_errors.append(f"outlook_vip: {out_exc}")
+                try:
+                    vip_report_tg = dispatch_saudi_daily_vip_report(
+                        market_date=latest_date,
+                        ind_rows=ind_rows,
+                        sb=saudi_sb,
+                        dry_run=dry_run,
+                    )
+                    if vip_report_tg.get("ok") and not vip_report_tg.get("skipped"):
+                        tg_count += 1
+                    elif not vip_report_tg.get("ok"):
+                        tg_errors.append(f"report_vip: {vip_report_tg.get('error')}")
+                    tg_details.append(f"report_vip(ok={vip_report_tg.get('ok')}, skipped={bool(vip_report_tg.get('skipped'))})")
+                except Exception as rep_exc:
+                    tg_errors.append(f"report_vip: {rep_exc}")
 
             if tg_errors:
                 errors.extend(tg_errors)
@@ -569,6 +584,24 @@ def run_saudi_daily_job(
         except Exception as exc:
             _record_step(steps_log, "saudi_disclosures_sync", "failed", details=str(exc))
             errors.append(f"saudi_disclosures_sync: {exc}")
+
+    # 5b. Daily incremental sync for UAE (DFM & ADX), Qatar (QSE), and Gold & Silver (COMMODITIES)
+    if not _step_done("gcc_metals_sync"):
+        try:
+            from api.gcc_metals_sync import run_gcc_metals_sync
+            gcc_res = run_gcc_metals_sync(daily_only=True)
+            gcc_summary = gcc_res.get("summary") or {}
+            synced_total = sum(int((v or {}).get("symbols_synced") or 0) for v in gcc_summary.values())
+            _record_step(
+                steps_log,
+                "gcc_metals_sync",
+                "success" if gcc_res.get("ok") else "failed",
+                count=synced_total,
+                details=",".join(f"{k}:{v.get('symbols_synced', 0)}" for k, v in gcc_summary.items()),
+            )
+        except Exception as exc:
+            _record_step(steps_log, "gcc_metals_sync", "failed", details=str(exc))
+            errors.append(f"gcc_metals_sync: {exc}")
 
     # 6. Cache Revalidation
     if not _step_done("cache_revalidation"):

@@ -272,17 +272,18 @@ def check_and_consume_quota(
         if not allowed:
             if not is_pro:
                 if founders_offer_is_open():
-                    offer_line = "🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً (بدلاً من 200 ج.م) لفترة محدودة "
+                    offer_line = "🔥 عرض المؤسسين: اشترك الآن بـ 100 ج.م فقط شهرياً "
                 else:
+                    chat_egp = int(plan_amount_egp("chat_only"))
                     pro_egp = int(plan_amount_egp("pro"))
-                    offer_line = f"اشترك الآن في باقة Pro بـ {pro_egp} ج.م شهرياً "
+                    offer_line = f"اشترك الآن في باقة الشات الذكي بـ {chat_egp} ج.م أو الباقة الشاملة بـ {pro_egp} ج.م شهرياً "
                 msg = (
                     f"لقد استهلكت باقتك المجانية ({quota_limit}/{quota_limit} رسائل — الرصيد المجاني لمرة واحدة لكل حساب). "
                     + offer_line
-                    + "واحصل على 350 رسالة شهرياً، رفع صور المحفظة، التوصيات المفتوحة، وقناة توصيات VIP!"
+                    + "واحصل على 350 رسالة تحليلية شهرياً، رفع صور المحفظة، والمؤشرات الفنية اللحظية!"
                 )
             else:
-                msg = f"لقد استهلكت حد الرسائل الشهري لباقة Pro ({quota_limit} رسالة)."
+                msg = f"لقد استهلكت حد الرسائل الشهري لباقة الشات ({quota_limit} رسالة)."
             return False, 0, quota_limit, msg
 
         base_remaining = max(0, quota_limit - total_used)

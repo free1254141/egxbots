@@ -31,7 +31,20 @@ export async function POST(req: NextRequest) {
     );
   }
   const promoCode = typeof body?.promo_code === "string" ? body.promo_code.trim().toUpperCase().slice(0, 32) : "";
-  const market = String(body?.market || "").trim().toLowerCase() === "tasi" ? "tasi" : "egx";
+  const rawMarket = String(body?.market || "").trim().toLowerCase();
+  const market = rawMarket === "tasi" || rawMarket === "uae" || rawMarket === "qatar" ? rawMarket : "egx";
+  const rawDurationMonths = body?.duration_months;
+  let durationMonths: number | undefined;
+  if (rawDurationMonths !== undefined && rawDurationMonths !== null && rawDurationMonths !== "") {
+    const parsed = Number(rawDurationMonths);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 12) {
+      return NextResponse.json(
+        { detail: "اختر مدة اشتراك صحيحة بين 1 و 12 شهراً" },
+        { status: 400 }
+      );
+    }
+    durationMonths = parsed;
+  }
 
   // Save/update phone number in profiles so the user never has to enter it again
   try {
@@ -55,6 +68,7 @@ export async function POST(req: NextRequest) {
         mobile,
         promo_code: promoCode,
         market,
+        ...(durationMonths !== undefined ? { duration_months: durationMonths } : {}),
       }),
       cache: "no-store",
     });

@@ -62,4 +62,25 @@ describe("Saudi (TASI / SAR) pricing parity & EasyKash billing helpers", () => {
     expect(lifetimeBreakevenMonths(2250, 200)).toBe(11.3);
     expect(lifetimeBreakevenMonths(2250, 0)).toBe(11.3);
   });
+
+  test("maps split plans (100 EGP -> 10 SAR -> 128 EGP) and full bundle tiers (150/750/1350 EGP)", () => {
+    expect(SAUDI_SAR_EXCHANGE_MAP[100]).toBe(10);
+    expect(SAUDI_SAR_EXCHANGE_MAP[150]).toBe(15);
+    expect(SAUDI_SAR_EXCHANGE_MAP[750]).toBe(75);
+    expect(SAUDI_SAR_EXCHANGE_MAP[1350]).toBe(135);
+
+    expect(toDisplayAmount(100, true)).toBe(10);
+    expect(toDisplayAmount(150, true)).toBe(15);
+    expect(toDisplayAmount(750, true)).toBe(75);
+    expect(toDisplayAmount(1350, true)).toBe(135);
+
+    expect(toCheckoutChargeEgp(100, true)).toBe(128);
+    expect(toCheckoutChargeEgp(150, true)).toBe(191);
+    expect(toCheckoutChargeEgp(750, true)).toBe(956);
+    expect(toCheckoutChargeEgp(1350, true)).toBe(1721);
+
+    // Egypt retains exact EGP
+    expect(toCheckoutChargeEgp(100, false)).toBe(100);
+    expect(toCheckoutChargeEgp(150, false)).toBe(150);
+  });
 });
